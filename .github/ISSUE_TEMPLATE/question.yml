@@ -1,0 +1,45 @@
+name: Question or help
+description: Ask a public question about Ghost-ALICE OS usage, docs, or governance behavior
+title: "[question]: "
+labels:
+  - question
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for public questions. Do not include secrets, private prompts, customer data, local credential files, or vulnerability details.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Topic
+      options:
+        - Installation or update
+        - Documentation
+        - Skill behavior
+        - Hook or gate behavior
+        - Platform compatibility
+        - Contribution process
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to understand or decide?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include public, redacted context only.
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Public boundary
+      options:
+        - label: I removed secrets, private prompts, customer data, and local credential values.
+          required: true
+        - label: This is not a security vulnerability report. Security reports follow SECURITY.md.
+          required: true

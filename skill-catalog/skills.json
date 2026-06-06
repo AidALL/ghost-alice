@@ -1,0 +1,312 @@
+{
+  "version": "1.3.0",
+  "generated_at": "2026-06-05T10:58:14Z",
+  "source_root": ".",
+  "install_roots": [
+    "adversarial-verification",
+    "agent-security-scan",
+    "boundary-contract",
+    "coding-convention",
+    "compact-handoff",
+    "jailbreak-detector",
+    "merge-companion",
+    "necessity-gate",
+    "session-intent-analyzer",
+    "skill-evolution",
+    "task-router"
+  ],
+  "skills": [
+    {
+      "name": "adversarial-verification",
+      "path": "adversarial-verification/SKILL.md",
+      "description": "Use when claims or evidence need adversarial validation by 3-5 independent agents. Requires unanimous convergence. Triggers: patents, papers, grants, investor relations, legal docs, numeric claims, novelty, prior-art, and fact-checking.",
+      "family": "domain",
+      "governance_class": "verification-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "agent-security-scan",
+      "path": "agent-security-scan/SKILL.md",
+      "description": "Use for report-only static scans of settings, hooks, skills, Model Context Protocol config, credential surfaces, remote fetches, shell side effects, and broad exposure risks. Do not print raw secrets or apply automatic fixes.",
+      "family": "domain",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "boundary-contract",
+      "path": "boundary-contract/SKILL.md",
+      "description": "Use immediately after task-router routes boundary-contract: required. Before modification, implementation, or verification, declare objective, non-goals, allowed/prohibited surfaces, and stop conditions as a contract; do not execute the work.",
+      "family": "system",
+      "governance_class": "boundary-gate",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "brainstorming",
+      "path": "coding-convention/brainstorming/SKILL.md",
+      "description": "Turn vague ideas into concrete design specifications. Identify user intent, constraints, and success criteria, then propose a design for approval. Required before creative work such as feature additions, component builds, or behavior changes.",
+      "family": "coding-convention",
+      "governance_class": "coding-process",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ],
+      "calls_relation": [
+        {
+          "type": "hard",
+          "target": "writing-plans"
+        }
+      ]
+    },
+    {
+      "name": "compact-handoff",
+      "path": "compact-handoff/SKILL.md",
+      "description": "Use during long tasks when evidence, state, and next actions must survive context compaction. Handles compaction judgment and handoff records only; no automatic hook behavior.",
+      "family": "domain",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "dispatching-parallel-agents",
+      "path": "coding-convention/dispatching-parallel-agents/SKILL.md",
+      "description": "Use when two or more independent tasks can be handled in parallel. Each task must be able to proceed without shared state or sequential dependency.",
+      "family": "coding-convention",
+      "governance_class": "coding-process",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "executing-plans",
+      "path": "coding-convention/executing-plans/SKILL.md",
+      "description": "Use when an implementation plan already exists. Execute it in a separate session with review checkpoints.",
+      "family": "coding-convention",
+      "governance_class": "coding-process",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ],
+      "calls_relation": [
+        {
+          "type": "hard",
+          "target": "finishing-a-development-branch"
+        },
+        {
+          "type": "hard",
+          "target": "using-git-worktrees"
+        }
+      ]
+    },
+    {
+      "name": "finishing-a-development-branch",
+      "path": "coding-convention/finishing-a-development-branch/SKILL.md",
+      "description": "Use when implementation is complete, tests have passed, and the integration path must be chosen. Presents and executes structured options for finishing a development branch.",
+      "family": "coding-convention",
+      "governance_class": "completion-gate",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ],
+      "calls_relation": [
+        {
+          "type": "soft",
+          "target": "using-git-worktrees"
+        }
+      ]
+    },
+    {
+      "name": "jailbreak-detector",
+      "path": "jailbreak-detector/SKILL.md",
+      "description": "Compare the current intent from session-intent-analyzer with the current input summary to detect instruction override, credential reveal, and scope-drift signals, then decide allow, ask-confirm, or block.",
+      "family": "domain",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "merge-companion",
+      "path": "merge-companion/SKILL.md",
+      "description": "Use after skill updates to protect, classify, merge, discard, or defer local user changes. Handles undecided pending-merges manifest entries, install backups, a six-step UX, adversarial verification, and cross-platform decision propagation.",
+      "family": "domain",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "necessity-gate",
+      "path": "necessity-gate/SKILL.md",
+      "description": "Task-justification gate for new tasks, skills, files, audit cycles, or follow-ups. Compares problem evidence, regression risk, and recovery benefit; decides approve, reject, or modify. Blocks speculative work.",
+      "family": "domain",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "receiving-code-review",
+      "path": "coding-convention/receiving-code-review/SKILL.md",
+      "description": "Use when receiving code review feedback before implementing suggestions, especially when feedback is ambiguous or technically questionable. Enforces technical rigor and verification instead of performative agreement or blind implementation.",
+      "family": "coding-convention",
+      "governance_class": "verification-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "requesting-code-review",
+      "path": "coding-convention/requesting-code-review/SKILL.md",
+      "description": "Use after completing work, implementing major functionality, or before merge. Dispatches a code-reviewer subagent to verify the work against requirements. Review early and often.",
+      "family": "coding-convention",
+      "governance_class": "verification-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "session-intent-analyzer",
+      "path": "session-intent-analyzer/SKILL.md",
+      "description": "Update the per-session intent ledger for every user input and provide current intent as semantic context consumed by gates, skill-evolution, and jailbreak-detector. Keep intent summaries without storing raw prompts.",
+      "family": "system",
+      "governance_class": "intent-state-producer",
+      "compatibility": [
+        "Python 3.11+ standard library",
+        "hook-capable environments plus hookless/manual fallback"
+      ],
+      "calls_relation": [
+        {
+          "type": "soft",
+          "target": "jailbreak-detector"
+        },
+        {
+          "type": "soft",
+          "target": "skill-evolution"
+        }
+      ]
+    },
+    {
+      "name": "skill-evolution",
+      "path": "skill-evolution/SKILL.md",
+      "description": "Use when the user asks about skill upgrades, update recommendations, or an evolution backlog; analyze io-trace and conduct_feedback to produce report-only evolution candidates. No automatic edits.",
+      "family": "domain",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "subagent-driven-development",
+      "path": "coding-convention/subagent-driven-development/SKILL.md",
+      "description": "Use when executing an implementation plan composed of independent tasks in the current session. Dispatch a fresh subagent per task and run a two-stage review after each task: spec compliance, then code quality.",
+      "family": "coding-convention",
+      "governance_class": "coding-process",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "systematic-debugging",
+      "path": "coding-convention/systematic-debugging/SKILL.md",
+      "description": "Use when facing bugs, test failures, or unexpected behavior before proposing fixes. Enforces root-cause investigation, pattern analysis, hypothesis/verification, and correction. Symptom-only fixes are failures.",
+      "family": "coding-convention",
+      "governance_class": "verification-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "task-router",
+      "path": "task-router/SKILL.md",
+      "description": "Runs after session-intent-analyzer and jailbreak-detector/downstream gate as their consumer. Decomposes the request and routes output, verification, lifecycle, and boundary skills without owning intake, raw intent inference, or tool permission.",
+      "family": "system",
+      "governance_class": "core-gate",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ],
+      "calls_relation": [
+        {
+          "type": "meta",
+          "target": "*"
+        }
+      ]
+    },
+    {
+      "name": "test-driven-development",
+      "path": "coding-convention/test-driven-development/SKILL.md",
+      "description": "Use before starting feature implementation, bug fixes, or refactors. Requires a failing test before writing production code. Blocks code-first work, manual-only verification excuses, and implementation without observing failure.",
+      "family": "coding-convention",
+      "governance_class": "verification-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "using-coding-convention",
+      "path": "coding-convention/using-coding-convention/SKILL.md",
+      "description": "Use at the start of every coding or development conversation. Defines how to find and invoke coding-convention family skills. Requires relevant skills before any response, including clarification questions.",
+      "family": "coding-convention",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ],
+      "meta": true
+    },
+    {
+      "name": "using-git-worktrees",
+      "path": "coding-convention/using-git-worktrees/SKILL.md",
+      "description": "Use when starting feature work or before executing an implementation plan. Creates an isolated git worktree with smart directory selection and safety checks.",
+      "family": "coding-convention",
+      "governance_class": "coding-process",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "verification-before-completion",
+      "path": "coding-convention/verification-before-completion/SKILL.md",
+      "description": "Use before claiming completion, fixes, passes, commits, or PR creation. Requires running verification commands and reading their output before making success claims. Evidence always comes before claims.",
+      "family": "coding-convention",
+      "governance_class": "completion-gate",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    },
+    {
+      "name": "writing-plans",
+      "path": "coding-convention/writing-plans/SKILL.md",
+      "description": "Use when requirements for a multi-step task are known and before touching code. Documents everything as bite-sized tasks for an engineer with zero codebase context. Use for implementation plans, task decomposition, and planning before TDD.",
+      "family": "coding-convention",
+      "governance_class": "coding-process",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ],
+      "calls_relation": [
+        {
+          "type": "union",
+          "target": "subagent-driven-development",
+          "union_group": "plan-execution"
+        },
+        {
+          "type": "union",
+          "target": "executing-plans",
+          "union_group": "plan-execution"
+        }
+      ]
+    },
+    {
+      "name": "writing-skills",
+      "path": "coding-convention/writing-skills/SKILL.md",
+      "description": "Use when writing a new skill or modifying/verifying an existing skill. Confirms the skill works under pressure scenarios before distribution.",
+      "family": "coding-convention",
+      "governance_class": "governance-subskill",
+      "compatibility": [
+        "Python 3.11+ standard library"
+      ]
+    }
+  ]
+}

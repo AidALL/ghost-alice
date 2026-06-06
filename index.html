@@ -1,0 +1,1410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ghost-ALICE OS. Floor, not ceiling.</title>
+  <meta name="description" content="Ghost-ALICE OS makes AI agent work more inspectable by governing intent, scope, evidence, and runtime state across agent runtimes.">
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" href="icon.png" type="image/png">
+  <link rel="apple-touch-icon" href="icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    /* ─── Design tokens. Linear.app normalized (DESIGN.md) ─── */
+    :root {
+      --surface-0:    #08090a;
+      --surface-1:    #0f1011;
+      --surface-2:    #191a1b;
+      --surface-3:    #28282c;
+      --ink-primary:  #f7f8f8;
+      --ink-secondary:#d0d6e0;
+      --ink-muted:    #8a8f98;
+      --ink-subtle:   #62666d;
+      --accent:       #5e6ad2;
+      --accent-2:     #7170ff;
+      --accent-hover: #828fff;
+      --accent-muted: #7a7fad;
+      --positive:     #27a644;
+      --border:       rgba(255,255,255,0.08);
+      --border-subtle:rgba(255,255,255,0.05);
+      --radius-sm:    4px;
+      --radius-md:    6px;
+      --radius-card:  8px;
+      --radius-panel: 12px;
+      --radius-pill:  9999px;
+    }
+
+    /* ─── Reset ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--surface-0);
+      color: var(--ink-primary);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-feature-settings: "cv01", "ss03";
+      font-size: 16px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    /* ─── Layout ─── */
+    .wrap {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+    section { padding: 96px 0; }
+    section + section { border-top: 1px solid var(--border-subtle); }
+
+    /* ─── Nav ─── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      height: 56px;
+      background: rgba(8,9,10,0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 0 32px;
+    }
+    .nav-logo {
+      color: var(--ink-primary);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+    .nav-mark {
+      width: 30px;
+      height: 30px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    .wordmark-muted { color: rgba(247, 248, 248, 0.72); }
+    .wordmark-alice { color: var(--accent-2); }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 28px;
+      list-style: none;
+    }
+    .nav-links a {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-muted);
+    }
+    .btn-nav {
+      background: var(--accent);
+      color: var(--ink-primary);
+      border-radius: var(--radius-md);
+      padding: 6px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: inherit;
+      font-feature-settings: "cv01","ss03";
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* ─── Hero ─── */
+    .hero {
+      padding: 120px 32px 96px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: -120px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 900px;
+      height: 600px;
+      background: radial-gradient(ellipse at 50% 30%, rgba(94,106,210,0.18) 0%, rgba(113,112,255,0.06) 45%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-inner {
+      position: relative;
+      max-width: 1160px;
+      margin: 0 auto;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(94,106,210,0.1);
+      border: 1px solid rgba(94,106,210,0.28);
+      border-radius: var(--radius-pill);
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent-2);
+      margin-bottom: 28px;
+    }
+    .badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--positive);
+    }
+    .hero-h1 {
+      font-size: 76px;
+      font-weight: 600;
+      letter-spacing: -1.584px;
+      line-height: 1.04;
+      color: var(--ink-primary);
+      margin-bottom: 28px;
+    }
+    .hero-h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--accent-2) 0%, var(--accent-hover) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero-sub {
+      font-size: 20px;
+      font-weight: 400;
+      color: var(--ink-secondary);
+      max-width: 580px;
+      margin: 0 auto 44px;
+      line-height: 1.65;
+    }
+    .hero-ctas {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 36px;
+    }
+    .btn-primary {
+      background: var(--accent);
+      color: var(--ink-primary);
+      border-radius: var(--radius-md);
+      padding: 11px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      font-feature-settings: "cv01","ss03";
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-ghost {
+      background: rgba(255,255,255,0.02);
+      color: var(--ink-secondary);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      padding: 11px 24px;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: inherit;
+      font-feature-settings: "cv01","ss03";
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .platform-tags {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .platform-tag {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 400;
+      color: var(--ink-muted);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Hero gate mock */
+    .hero-gate-mock {
+      margin: 56px auto 0;
+      max-width: 680px;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-panel);
+      overflow: hidden;
+      text-align: left;
+    }
+    .gate-mock-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .gate-mock-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+    .gate-mock-title {
+      font-size: 11px;
+      color: var(--ink-subtle);
+      font-family: 'JetBrains Mono', monospace;
+      margin-left: 6px;
+    }
+    .gate-mock-body {
+      padding: 20px 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      line-height: 1.9;
+    }
+    .gate-key { color: var(--ink-muted); }
+    .gate-val-done { color: var(--positive); }
+    .gate-val-clean { color: var(--accent-2); }
+    .gate-val-na { color: var(--ink-subtle); }
+    .gate-section { color: var(--ink-subtle); margin-bottom: 4px; display: block; }
+    .gate-divider {
+      border: none;
+      border-top: 1px solid var(--border-subtle);
+      margin: 12px 0;
+    }
+
+    /* ─── Section label ─── */
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 16px;
+    }
+    .section-h2 {
+      font-size: 40px;
+      font-weight: 600;
+      letter-spacing: -0.704px;
+      line-height: 1.15;
+      color: var(--ink-primary);
+      margin-bottom: 16px;
+      max-width: 640px;
+    }
+    .section-lead {
+      font-size: 17px;
+      color: var(--ink-secondary);
+      max-width: 560px;
+      line-height: 1.7;
+      margin-bottom: 52px;
+    }
+
+    /* ─── Problem ─── */
+    .problem-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      overflow: hidden;
+      margin-bottom: 40px;
+    }
+    .problem-col {
+      background: var(--surface-2);
+      padding: 28px 24px;
+    }
+    .problem-col-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-primary);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .problem-col-icon {
+      width: 20px;
+      height: 20px;
+      border-radius: var(--radius-sm);
+      background: rgba(94,106,210,0.15);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+    }
+    .problem-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .problem-list li {
+      font-size: 13px;
+      color: var(--ink-muted);
+      line-height: 1.5;
+      padding-left: 14px;
+      position: relative;
+    }
+    .problem-list li::before {
+      content: '·';
+      position: absolute;
+      left: 0;
+      color: var(--ink-subtle);
+    }
+    .verdict {
+      border-left: 2px solid var(--accent);
+      background: rgba(94,106,210,0.07);
+      border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+      padding: 16px 20px;
+      font-size: 15px;
+      font-weight: 500;
+      color: var(--ink-secondary);
+      font-style: italic;
+      max-width: 640px;
+    }
+
+    /* ─── How it works ─── */
+    .mechanism-intro {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      margin-bottom: 52px;
+      align-items: end;
+    }
+    .loop-diagram {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-panel);
+      padding: 24px;
+    }
+    .loop-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-subtle);
+      margin-bottom: 16px;
+    }
+    .loop-steps {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .loop-step {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      font-size: 13px;
+      padding: 6px 0;
+    }
+    .loop-step-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--ink-subtle);
+      min-width: 16px;
+    }
+    .loop-step-text { color: var(--ink-secondary); line-height: 1.4; }
+    .loop-step-badge {
+      margin-left: auto;
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-2);
+      background: rgba(113,112,255,0.1);
+      border-radius: 3px;
+      padding: 2px 6px;
+      white-space: nowrap;
+    }
+    .layer-row {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .layer-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+    .layer-badge {
+      font-size: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-muted);
+      min-width: 42px;
+    }
+    .layer-desc { font-size: 13px; color: var(--ink-secondary); }
+    .gate-flow-diagram {
+      margin: 0 0 28px;
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 14px;
+    }
+    .gate-flow-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .gate-flow-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-subtle);
+    }
+    .gate-flow-note {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--accent-muted);
+      text-align: right;
+    }
+    .gate-flow-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .gate-flow-cell {
+      min-width: 0;
+      min-height: 104px;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: rgba(255,255,255,0.02);
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+    .gate-flow-cell--wide {
+      grid-column: 1 / -1;
+      min-height: 72px;
+    }
+    .gate-flow-kicker {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--accent-muted);
+      line-height: 1.2;
+    }
+    .gate-flow-cell-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink-primary);
+      line-height: 1.3;
+    }
+    .gate-flow-cell-desc {
+      font-size: 12px;
+      color: var(--ink-muted);
+      line-height: 1.4;
+    }
+    .gate-flow-edge {
+      margin-top: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--accent-2);
+      line-height: 1.25;
+    }
+    .support-section {
+      margin-top: 18px;
+    }
+    .support-heading {
+      margin: 0 0 10px;
+    }
+    .support-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--ink-subtle);
+    }
+    .support-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      overflow: hidden;
+    }
+    .support-card {
+      background: var(--surface-2);
+      padding: 24px 22px;
+    }
+    .support-name {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--accent-2);
+      margin-bottom: 10px;
+    }
+    .support-tagline {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--ink-primary);
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+    .support-details {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .support-details li {
+      font-size: 12px;
+      color: var(--ink-muted);
+      padding-left: 12px;
+      position: relative;
+      line-height: 1.4;
+    }
+    .support-details li::before {
+      content: '·';
+      position: absolute;
+      left: 0;
+      color: var(--ink-subtle);
+    }
+
+    /* ─── What's inside ─── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      overflow: hidden;
+      margin-bottom: 40px;
+    }
+    .stat-cell {
+      background: var(--surface-1);
+      padding: 24px 20px;
+      text-align: center;
+    }
+    .stat-num {
+      font-size: 36px;
+      font-weight: 600;
+      letter-spacing: -1px;
+      color: var(--ink-primary);
+      line-height: 1;
+      margin-bottom: 6px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--ink-muted);
+      line-height: 1.3;
+    }
+    .inside-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+    .inside-card {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 22px 20px;
+    }
+    .inside-card-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .inside-card-label {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-muted);
+      background: rgba(122,127,173,0.1);
+      border-radius: 3px;
+      padding: 2px 7px;
+    }
+    .inside-card-count {
+      font-size: 11px;
+      color: var(--ink-subtle);
+      margin-left: auto;
+    }
+    .inside-card-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink-primary);
+      margin-bottom: 6px;
+    }
+    .inside-card-desc {
+      font-size: 13px;
+      color: var(--ink-muted);
+      line-height: 1.55;
+    }
+    .skill-list {
+      list-style: none;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+    .skill-chip {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--ink-subtle);
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border-subtle);
+      border-radius: 3px;
+      padding: 2px 7px;
+    }
+
+    /* ─── Get started ─── */
+    .get-started-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 64px;
+      align-items: start;
+    }
+    .code-block {
+      background: var(--surface-1);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-panel);
+      overflow: hidden;
+    }
+    .code-block-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+    .code-block-bar span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--border);
+    }
+    .code-block-body {
+      padding: 20px 24px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 2;
+    }
+    .code-prompt { color: var(--ink-subtle); user-select: none; }
+    .code-cmd { color: var(--ink-secondary); }
+    .code-comment { color: var(--ink-subtle); font-size: 11px; }
+    .get-started-ctas {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* ─── Name callout ─── */
+    .name-callout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      overflow: hidden;
+      margin-top: 52px;
+    }
+    .name-half {
+      background: var(--surface-1);
+      padding: 28px 28px;
+    }
+    .name-half-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .name-half-title {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+      margin-bottom: 10px;
+    }
+    .name-half-desc {
+      font-size: 13px;
+      color: var(--ink-muted);
+      line-height: 1.65;
+    }
+
+    /* ─── Growth section ─── */
+    .growth-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+    .growth-card {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-card);
+      padding: 22px 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .growth-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+    .growth-card-label {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent-muted);
+      margin-bottom: 8px;
+    }
+    .growth-card-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--ink-primary);
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    .growth-card-desc {
+      font-size: 13px;
+      color: var(--ink-muted);
+      line-height: 1.6;
+    }
+
+    /* ─── Footer ─── */
+    footer {
+      border-top: 1px solid var(--border-subtle);
+      padding: 28px 0;
+    }
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .footer-left { font-size: 13px; color: var(--ink-subtle); }
+    .footer-right {
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--ink-subtle);
+    }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 1024px) {
+      .support-grid { grid-template-columns: repeat(2, 1fr); }
+      .inside-grid { grid-template-columns: repeat(2, 1fr); }
+      .stats-row { grid-template-columns: repeat(3, 1fr); }
+      .get-started-inner { grid-template-columns: 1fr; gap: 40px; }
+    }
+    @media (max-width: 900px) {
+      .gate-flow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .gate-flow-cell { min-height: 96px; }
+      .gate-flow-note { text-align: left; }
+    }
+    @media (max-width: 768px) {
+      .hero-h1 { font-size: 44px; letter-spacing: -0.704px; }
+      .hero { padding: 80px 20px 64px; }
+      .section-h2 { font-size: 30px; }
+      .problem-grid { grid-template-columns: 1fr !important; }
+      .support-grid { grid-template-columns: 1fr; }
+      .mechanism-intro { grid-template-columns: 1fr; gap: 32px; }
+      .inside-grid { grid-template-columns: 1fr; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .name-callout { grid-template-columns: 1fr; }
+      .growth-grid { grid-template-columns: 1fr; }
+      .wrap { padding: 0 20px; }
+      .nav-inner { padding: 0 20px; }
+      section { padding: 64px 0; }
+      .nav-links { display: none; }
+    }
+    @media (max-width: 600px) {
+      .hero-h1 { font-size: 36px; }
+      .stats-row { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 560px) {
+      .gate-flow-diagram { padding: 10px; }
+      .gate-flow-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+      .gate-flow-grid { grid-template-columns: 1fr; gap: 8px; }
+      .gate-flow-cell { min-height: 0; padding: 10px 12px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Navigation ── -->
+  <nav>
+    <div class="nav-inner">
+      <a href="#" class="nav-logo" style="display:flex;align-items:center;gap:10px;">
+        <img class="nav-mark" src="icon.png" alt="" aria-hidden="true">
+        <span aria-label="Ghost-ALICE OS"><span class="wordmark-muted">Ghost-</span><span class="wordmark-alice">ALICE</span><span class="wordmark-muted"> OS</span></span>
+      </a>
+      <ul class="nav-links">
+        <li><a href="#problem">Problem</a></li>
+        <li><a href="#how-it-works">How it works</a></li>
+        <li><a href="#whats-inside">What's inside</a></li>
+        <li><a href="#get-started">Get started</a></li>
+      </ul>
+      <a href="https://github.com/AidALL/ghost-alice" class="btn-nav" target="_blank" rel="noopener noreferrer">
+        GitHub
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 10L10 2M10 2H4M10 2V8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </a>
+    </div>
+  </nav>
+
+  <!-- ── Hero ── -->
+  <div class="hero">
+    <div class="hero-inner">
+      <div class="badge">
+        <span class="badge-dot"></span>
+        Agent Governance OS
+      </div>
+      <h1 class="hero-h1">Floor, <em>not ceiling.</em></h1>
+      <p class="hero-sub">Ghost-ALICE OS makes AI agent work more governable by making intent, scope, evidence, and runtime state inspectable.</p>
+      <p style="font-size:13px;color:var(--ink-subtle);margin-top:-20px;margin-bottom:44px;font-family:'JetBrains Mono',monospace;">Make the ghost governable.</p>
+      <div class="hero-ctas">
+        <a href="https://github.com/AidALL/ghost-alice" class="btn-primary" target="_blank" rel="noopener noreferrer">
+          View on GitHub
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 10L10 2M10 2H4M10 2V8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </a>
+        <a href="#how-it-works" class="btn-ghost">How it works</a>
+      </div>
+      <div class="platform-tags">
+        <span class="platform-tag">Claude Code</span>
+        <span class="platform-tag">Codex</span>
+        <span class="platform-tag">PowerShell 7.6 LTS</span>
+        <span class="platform-tag">language model agent runtimes</span>
+      </div>
+
+      <div class="hero-gate-mock">
+        <div class="gate-mock-bar">
+          <span class="gate-mock-dot"></span>
+          <span class="gate-mock-dot"></span>
+          <span class="gate-mock-dot"></span>
+          <span class="gate-mock-title">ghost-alice. Session gate output</span>
+        </div>
+        <div class="gate-mock-body">
+          <span class="gate-section"># Intent becomes state before routing or tool execution.</span>
+          <br>
+          <span class="gate-key">merge-companion-precheck  </span><span class="gate-val-clean">clean (hook-verified)</span><br>
+          <span class="gate-key">session-intent-analyzer   </span><span class="gate-val-done">done. Digest + criteria state logged</span><br>
+          <span class="gate-key">jailbreak-detector        </span><span class="gate-val-done">done. Model decision carried</span><br>
+          <span class="gate-key">routing consumer          </span><span class="gate-val-done">done. Consumes opened downstream gate</span><br>
+          <span class="gate-key">tool-checkpoint           </span><span class="gate-val-clean">armed. Boundary check + failure surface</span>
+          <hr class="gate-divider">
+          <span class="gate-section"># No completion claim ships until evidence is fresh.</span>
+          <span class="gate-key">completion-check          </span><span class="gate-val-done">done. Claims mapped to evidence</span><br>
+          <span class="gate-key">io-trace                  </span><span class="gate-val-clean">on. File and tool access auditable</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Name callout ── -->
+  <section style="padding: 0 0 80px;">
+    <div class="wrap">
+      <div class="name-callout">
+        <div class="name-half">
+          <div class="name-half-label" style="color:var(--ink-secondary);">Ghost</div>
+          <div class="name-half-title" style="color:var(--ink-secondary);">The autonomous process</div>
+          <div class="name-half-desc">Useful, fast, opaque. It is also capable of acting outside direct human attention. The part of an AI agent that moves without being watched.</div>
+        </div>
+        <div class="name-half" style="background:var(--surface-2);">
+          <div class="name-half-label" style="color:var(--accent-2);">ALICE</div>
+          <div class="name-half-title" style="color:var(--ink-primary);">The governance layer</div>
+          <div class="name-half-desc">Preserves intent. It maintains boundaries. Checks evidence. Turns autonomous behavior into inspectable, replayable execution.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Problem ── -->
+  <section id="problem">
+    <div class="wrap">
+      <div class="section-label">The problem</div>
+      <h2 class="section-h2">AI agents are capable enough that weak governance becomes visible.</h2>
+      <p class="section-lead">The failure modes are ordinary: skipped sources, drifting scope, early closure, and plausible output accepted before it survives comparison.</p>
+
+      <div class="problem-grid" style="grid-template-columns: repeat(2, 1fr);">
+        <div class="problem-col">
+          <div class="problem-col-title">
+            <span class="problem-col-icon">⚡</span>
+            Confident, but wrong
+          </div>
+          <ul class="problem-list">
+            <li>Hallucination passed off as confirmed fact</li>
+            <li>Official docs cited. Real runtime behavior ignored</li>
+            <li>Completion declared without running a single check</li>
+            <li>Evidence skipped when the model already "knows" the answer</li>
+          </ul>
+        </div>
+        <div class="problem-col">
+          <div class="problem-col-title">
+            <span class="problem-col-icon">⬡</span>
+            Expanding, out of control
+          </div>
+          <ul class="problem-list">
+            <li>Tasks silently grow beyond what was asked</li>
+            <li>Instructions overridden by new context mid-session</li>
+            <li>Unnecessary work created to appear productive</li>
+            <li>Forbidden surfaces touched because they weren't re-stated</li>
+          </ul>
+        </div>
+        <div class="problem-col">
+          <div class="problem-col-title">
+            <span class="problem-col-icon">◎</span>
+            Forgetting what you agreed to
+          </div>
+          <ul class="problem-list">
+            <li>Goals drift between turns as context grows</li>
+            <li>Constraints set three messages ago silently expire</li>
+            <li>Decisions made earlier reversed without notice</li>
+            <li>Every session starts from zero. Nothing carries forward</li>
+          </ul>
+        </div>
+        <div class="problem-col">
+          <div class="problem-col-title">
+            <span class="problem-col-icon">◈</span>
+            Acting without a trace
+          </div>
+          <ul class="problem-list">
+            <li>No record of which files were read or why</li>
+            <li>Tool calls made with no auditable justification</li>
+            <li>Impossible to replay or explain what happened</li>
+            <li>Trust collapses the first time something goes wrong</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="verdict">At scale, unverified autonomy creates more rework than slower, checkable execution.</p>
+    </div>
+  </section>
+
+  <!-- ── How it works ── -->
+  <section id="how-it-works">
+    <div class="wrap">
+      <div class="section-label">How it works</div>
+      <h2 class="section-h2">Eight-step loop. Four verification layers. No silent skips.</h2>
+      <p class="section-lead">Semantic atoms. Evidence loops. Dynamic focus.</p>
+      <p class="section-lead">Ghost-ALICE OS changes the operating structure of AI work by splitting work into semantic atoms, verifying each unit, and dynamically changing its focus aperture back and forth across micro, meso, macro, and meta.</p>
+
+      <div class="mechanism-intro">
+        <div class="loop-diagram">
+          <div class="loop-title">8-step operating loop</div>
+          <ol class="loop-steps">
+            <li class="loop-step">
+              <span class="loop-step-num">01</span>
+              <span class="loop-step-text">Split work by semantic verification burden</span>
+            </li>
+            <li class="loop-step">
+              <span class="loop-step-num">02</span>
+              <span class="loop-step-text">Tentative skill selection. Do not lock early</span>
+            </li>
+            <li class="loop-step">
+              <span class="loop-step-num">03</span>
+              <span class="loop-step-text">Choose a local start point from current state</span>
+            </li>
+            <li class="loop-step">
+              <span class="loop-step-num">04</span>
+              <span class="loop-step-text">Execute one semantic atom</span>
+              <span class="loop-step-badge">micro gate</span>
+            </li>
+            <li class="loop-step">
+              <span class="loop-step-num">05</span>
+              <span class="loop-step-text">Verify atom output against references</span>
+              <span class="loop-step-badge">meso gate</span>
+            </li>
+            <li class="loop-step">
+              <span class="loop-step-num">06</span>
+              <span class="loop-step-text">Combine and verify integrated output</span>
+              <span class="loop-step-badge">macro gate</span>
+            </li>
+            <li class="loop-step">
+              <span class="loop-step-num">07</span>
+              <span class="loop-step-text">Validate task necessity</span>
+              <span class="loop-step-badge">meta gate</span>
+            </li>
+            <li class="loop-step">
+              <span class="loop-step-num">08</span>
+              <span class="loop-step-text">Return to step 01. Loop until convergence</span>
+            </li>
+          </ol>
+        </div>
+        <div>
+          <div class="loop-title" style="margin-bottom:12px;">4 verification layers. Independent fallback at each</div>
+          <div class="layer-row">
+            <div class="layer-item">
+              <span class="layer-badge">micro</span>
+              <span class="layer-desc">Tool call exit code and format check</span>
+            </div>
+            <div class="layer-item">
+              <span class="layer-badge">meso</span>
+              <span class="layer-desc">Sub-task output verified by verification-before-completion</span>
+            </div>
+            <div class="layer-item">
+              <span class="layer-badge">macro</span>
+              <span class="layer-desc">Integrated output attacked by adversarial-verification</span>
+            </div>
+            <div class="layer-item">
+              <span class="layer-badge">meta</span>
+              <span class="layer-desc">Task existence justified by necessity-gate</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="gate-flow-diagram" aria-label="Gate interaction diagram">
+        <div class="gate-flow-header">
+          <div class="gate-flow-title">Gate interaction map</div>
+          <div class="gate-flow-note">intent ledger → downstream gate → scoped action → evidence closure</div>
+        </div>
+        <div class="gate-flow-grid">
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">01 input</div>
+            <div class="gate-flow-cell-title">User request</div>
+            <div class="gate-flow-cell-desc">A turn is evidence for intent change, not automatic permission to act.</div>
+            <div class="gate-flow-edge">starts intent delta</div>
+          </div>
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">02 producer</div>
+            <div class="gate-flow-cell-title">session-intent-analyzer</div>
+            <div class="gate-flow-cell-desc">Separates user intent from the agent plan, then extracts goals, constraints, decisions, and criteria.</div>
+            <div class="gate-flow-edge">writes compact state</div>
+          </div>
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">03 state</div>
+            <div class="gate-flow-cell-title">intent state cache</div>
+            <div class="gate-flow-cell-desc">Shared semantic cache for gates. Raw prompts, transcripts, tool output, and secrets stay out.</div>
+            <div class="gate-flow-edge">read by consumers</div>
+          </div>
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">04 consumers</div>
+            <div class="gate-flow-cell-title">governance consumers</div>
+            <div class="gate-flow-cell-desc">Security makes derived gate judgments from accumulated intent and records model_security_decision. Code carries the judgment; it does not invent blocks from keywords.</div>
+            <div class="gate-flow-edge">opens downstream gate</div>
+          </div>
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">05 routing + scope</div>
+            <div class="gate-flow-cell-title">routing consumer → boundary-contract</div>
+            <div class="gate-flow-cell-desc">After the downstream gate opens, routing decomposes accepted intent into atomic work and boundary-contract locks the allowed surface.</div>
+            <div class="gate-flow-edge">scope reopen point</div>
+          </div>
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">06 action</div>
+            <div class="gate-flow-cell-title">tool-checkpoint</div>
+            <div class="gate-flow-cell-desc">At tool stage, reads only downstream gate state for permission. Tool identity and payload shape stay audit context, not decision logic.</div>
+            <div class="gate-flow-edge">enforces one gate state</div>
+          </div>
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">07 surface</div>
+            <div class="gate-flow-cell-title">execution surface</div>
+            <div class="gate-flow-cell-desc">Files, shell, browser, Model Context Protocol, and external tools run inside the current boundary and return concrete evidence.</div>
+            <div class="gate-flow-edge">returns evidence</div>
+          </div>
+          <div class="gate-flow-cell">
+            <div class="gate-flow-kicker">08 closure</div>
+            <div class="gate-flow-cell-title">completion-check</div>
+            <div class="gate-flow-cell-desc">Maps every claim through claim-evidence-map; unverified criteria remain open instead of becoming done.</div>
+            <div class="gate-flow-edge">blocks overclaim</div>
+          </div>
+          <div class="gate-flow-cell gate-flow-cell--wide">
+            <div class="gate-flow-kicker">09 handoff</div>
+            <div class="gate-flow-cell-title">trace handoff</div>
+            <div class="gate-flow-cell-desc">io-trace records what happened; lifecycle support below can audit, challenge, evolve, or recover the loop after the turn.</div>
+            <div class="gate-flow-edge">support handoff</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="support-section">
+        <div class="support-heading">
+          <div class="support-title">Lifecycle support</div>
+        </div>
+        <div class="support-grid">
+          <div class="support-card">
+            <div class="support-name">io-trace audit trail</div>
+            <div class="support-tagline">Every loop leaves an inspectable trace.</div>
+            <ul class="support-details">
+              <li>Records files read and written, commands, web access, and loaded skills</li>
+              <li>Lets users audit whether evidence actually matched the claim</li>
+              <li>Feeds later review without exposing hidden reasoning</li>
+            </ul>
+          </div>
+          <div class="support-card">
+            <div class="support-name">skill-evolution candidates</div>
+            <div class="support-tagline">Repeated workflows become reviewable improvement proposals.</div>
+            <ul class="support-details">
+              <li>Reads io-trace patterns together with intent-state summaries</li>
+              <li>Produces candidate reports, not automatic skill promotion</li>
+              <li>Requires necessity and governance gates before durable changes</li>
+            </ul>
+          </div>
+          <div class="support-card">
+            <div class="support-name">pending-merge review</div>
+            <div class="support-tagline">User-local edits are protected during installs and updates.</div>
+            <ul class="support-details">
+              <li>Backs up changed managed targets before overwriting them</li>
+              <li>Tracks undecided entries in a platform-specific manifest</li>
+              <li>Surfaces unresolved cases through merge-companion before routing; explicit defer/skip can continue</li>
+            </ul>
+          </div>
+          <div class="support-card">
+            <div class="support-name">adversarial verification</div>
+            <div class="support-tagline">High-burden claims can be attacked after the normal loop.</div>
+            <ul class="support-details">
+              <li>Multiple reviewers cross-examine evidence and assumptions</li>
+              <li>Separates official specification claims from runtime reality claims</li>
+              <li>Escalates unresolved disagreement instead of forcing easy consensus</li>
+            </ul>
+          </div>
+          <div class="support-card">
+            <div class="support-name">jailbreak drift check</div>
+            <div class="support-tagline">Security decisions are semantic records, not keyword traps.</div>
+            <ul class="support-details">
+              <li>Looks for instruction override, credential reveal, and scope drift</li>
+              <li>Compares current intent against accumulated constraints and non-goals</li>
+              <li>Writes model_security_decision for current-lineage blocks, then downstream gate carry handles enforcement</li>
+            </ul>
+          </div>
+          <div class="support-card">
+            <div class="support-name">install-state doctor</div>
+            <div class="support-tagline">Runtime support files stay checkable after deployment.</div>
+            <ul class="support-details">
+              <li>Verifies managed skill targets, bootstrap files, hooks, and ownership markers</li>
+              <li>Reports visibility profile without weakening hook execution</li>
+              <li>Gives recovery evidence when local runtime state drifts</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Grows with your team ── -->
+  <section id="adapts">
+    <div class="wrap">
+      <div class="section-label">Adaptive layer</div>
+      <h2 class="section-h2">Improves through reviewed evidence.</h2>
+      <p class="section-lead">Ghost-ALICE OS is not a static ruleset. Corrections and repeated patterns can become reviewable improvement candidates instead of silent memory promotion.</p>
+
+      <div class="growth-grid">
+        <div class="growth-card">
+          <div class="growth-card-label">governed learning</div>
+          <div class="growth-card-title">Corrections become auditable improvement candidates.</div>
+          <div class="growth-card-desc">When you correct the agent's behavior, the signal is captured as session intent and audit evidence. Durable rules require explicit gates such as skill-evolution and necessity-gate. It is not silent memory promotion.</div>
+        </div>
+        <div class="growth-card">
+          <div class="growth-card-label">skill-evolution</div>
+          <div class="growth-card-title">Repeated patterns surface as evolution candidates.</div>
+          <div class="growth-card-desc">skill-evolution reads io-trace logs across sessions. Workflows that repeat with enough cross-session evidence become evolution candidates. They are proposals for permanent rules, gated by necessity-gate before any change is made.</div>
+        </div>
+        <div class="growth-card">
+          <div class="growth-card-label">session-intent-analyzer</div>
+          <div class="growth-card-title">Intent is preserved across turns.</div>
+          <div class="growth-card-desc">The intent ledger accumulates goals, constraints, locked decisions, non-goals, and open questions across turns. Earlier constraints remain available after context compaction instead of silently disappearing.</div>
+        </div>
+      </div>
+
+      <div style="border:1px solid var(--border);border-radius:var(--radius-card);padding:24px 28px;background:var(--surface-1);max-width:760px;">
+          <div style="font-size:11px;font-weight:600;letter-spacing:0.07em;text-transform:uppercase;color:var(--accent);margin-bottom:12px;">Core philosophy</div>
+          <div style="font-size:17px;font-weight:500;color:var(--ink-primary);line-height:1.5;letter-spacing:-0.2px;">Raise the floor first. Work-Impact, not raw verbosity, decides which hook values surface to the model or user.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── What's inside ── -->
+  <section id="whats-inside">
+    <div class="wrap">
+      <div class="section-label">What's inside</div>
+      <h2 class="section-h2">Core governance first. Capability packs second.</h2>
+      <p class="section-lead">This is the inventory layer: core governance checkpoints first, then workflow and domain packs that run on top.</p>
+
+      <div class="stats-row">
+        <div class="stat-cell">
+          <div class="stat-num">1</div>
+          <div class="stat-label">Core philosophy. Quality floor first</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num">8</div>
+          <div class="stat-label">Operating loop steps</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num">4</div>
+          <div class="stat-label">Verification layers</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num">7</div>
+          <div class="stat-label">Runtime governance checkpoints</div>
+        </div>
+        <div class="stat-cell">
+          <div class="stat-num">+</div>
+          <div class="stat-label">Supporting capability packs on top</div>
+        </div>
+      </div>
+
+      <p style="font-size:12px;color:var(--ink-subtle);margin-bottom:32px;font-family:'JetBrains Mono',monospace;">
+        macOS &nbsp;·&nbsp; Linux &nbsp;·&nbsp; Windows &nbsp;·&nbsp; WSL &nbsp;·&nbsp; Git Bash &nbsp;&nbsp;
+        <a href="https://github.com/AidALL/ghost-alice/blob/main/docs/policies/installer-platform-compatibility-matrix.md" style="color:var(--accent-muted);text-decoration:none;" target="_blank" rel="noopener noreferrer">full compatibility matrix →</a>
+      </p>
+      <div class="inside-grid">
+        <div class="inside-card">
+          <div class="inside-card-header">
+            <span class="inside-card-label">core governance</span>
+            <span class="inside-card-count">spine</span>
+          </div>
+          <div class="inside-card-title">Quality floor as root rule</div>
+          <div class="inside-card-desc">Every request enters through intent state, security gate, routing, and boundary scope before it can touch execution surfaces. Agent authority is a consequence of verified state, not forward momentum.</div>
+          <ul class="skill-list">
+            <li class="skill-chip">intent-analyzer</li>
+            <li class="skill-chip">work-routing</li>
+            <li class="skill-chip">boundary-contract</li>
+            <li class="skill-chip">jailbreak-detector</li>
+          </ul>
+        </div>
+        <div class="inside-card">
+          <div class="inside-card-header">
+            <span class="inside-card-label">verification</span>
+            <span class="inside-card-count">core</span>
+          </div>
+          <div class="inside-card-title">Proof before closure</div>
+          <div class="inside-card-desc">Completion claims require fresh evidence. High-burden claims are attacked through adversarial verification before they become trusted output.</div>
+          <ul class="skill-list">
+            <li class="skill-chip">completion-gate</li>
+            <li class="skill-chip">claim-attack</li>
+            <li class="skill-chip">web-evidence</li>
+            <li class="skill-chip">adversarial-review</li>
+          </ul>
+        </div>
+        <div class="inside-card">
+          <div class="inside-card-header">
+            <span class="inside-card-label">platform hooks</span>
+            <span class="inside-card-count">7 checkpoints</span>
+          </div>
+          <div class="inside-card-title">Rules enforced around the LLM runtime</div>
+          <div class="inside-card-desc">SessionStart, UserPromptSubmit, downstream gate derivation, PreToolUse tool-checkpoint, Stop/AfterAgent completion, and PostToolUse io-trace checkpoints enforce governance outside the model's private reasoning.</div>
+          <ul class="skill-list">
+            <li class="skill-chip">SessionStart</li>
+            <li class="skill-chip">UserPromptSubmit</li>
+            <li class="skill-chip">PreToolUse</li>
+            <li class="skill-chip">completion-check</li>
+            <li class="skill-chip">PostToolUse</li>
+          </ul>
+        </div>
+        <div class="inside-card">
+          <div class="inside-card-header">
+            <span class="inside-card-label">lifecycle + audit</span>
+            <span class="inside-card-count">lifecycle</span>
+          </div>
+          <div class="inside-card-title">State survives handoff</div>
+          <div class="inside-card-desc">Installation state, pending merges, compact handoffs, necessity checks, strict session logs, and io-trace records keep agent work explainable across sessions.</div>
+          <ul class="skill-list">
+            <li class="skill-chip">merge-companion</li>
+            <li class="skill-chip">necessity-gate</li>
+            <li class="skill-chip">compact-handoff</li>
+            <li class="skill-chip">io-trace</li>
+          </ul>
+        </div>
+        <div class="inside-card">
+          <div class="inside-card-header">
+            <span class="inside-card-label">supporting pack</span>
+            <span class="inside-card-count">coding</span>
+          </div>
+          <div class="inside-card-title">Development workflow, governed</div>
+          <div class="inside-card-desc">Coding-convention is a workflow pack that rides on the core OS model. It is useful, but it is not the identity of Ghost-ALICE OS.</div>
+          <ul class="skill-list">
+            <li class="skill-chip">brainstorming</li>
+            <li class="skill-chip">writing-plans</li>
+            <li class="skill-chip">test-driven-development</li>
+            <li class="skill-chip">code-review</li>
+          </ul>
+        </div>
+        <div class="inside-card">
+          <div class="inside-card-header">
+            <span class="inside-card-label">supporting packs</span>
+            <span class="inside-card-count">domain</span>
+          </div>
+          <div class="inside-card-title">Domain work on governed rails</div>
+          <div class="inside-card-desc">HWPX, design, document, proposal, machine learning, and product skills are capability packs. They demonstrate the governance layer; they do not define it.</div>
+          <ul class="skill-list">
+            <li class="skill-chip">hwpx</li>
+            <li class="skill-chip">design-library</li>
+            <li class="skill-chip">document-to-markdown</li>
+            <li class="skill-chip">gov-proposal</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Get started ── -->
+  <section id="get-started">
+    <div class="wrap">
+      <div class="section-label">Get started</div>
+      <div class="get-started-inner">
+        <div>
+          <h2 class="section-h2" style="margin-bottom:12px;">One install. Governance surfaces in place.</h2>
+          <p style="font-size:15px;color:var(--ink-muted);margin-bottom:18px;max-width:420px;line-height:1.65;">Clone the repository and run the installer. Ghost-ALICE OS is built for portable governance across multiple language model and agent runtimes.</p>
+          <p style="font-size:13px;color:var(--ink-subtle);margin-bottom:32px;max-width:440px;line-height:1.65;">Installers use dynamic target totals, one-line live counters on interactive terminals, log-safe fallback for redirected output, a <code>--visibility</code> agent visibility profile, and a Windows path designed around a PowerShell 7.6 LTS baseline without changing the default shell.</p>
+          <div class="get-started-ctas">
+            <a href="https://github.com/AidALL/ghost-alice" class="btn-primary" style="width:fit-content;" target="_blank" rel="noopener noreferrer">
+              View on GitHub
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 10L10 2M10 2H4M10 2V8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+            <a href="https://github.com/AidALL/ghost-alice/blob/main/README.md" class="btn-ghost" style="width:fit-content;" target="_blank" rel="noopener noreferrer">Read the docs</a>
+            <a href="https://github.com/AidALL/ghost-alice/blob/main/README_ko.md" class="btn-ghost" style="width:fit-content;" target="_blank" rel="noopener noreferrer">한국어 문서</a>
+          </div>
+        </div>
+        <div class="code-block">
+          <div class="code-block-bar">
+            <span></span><span></span><span></span>
+          </div>
+          <div class="code-block-body">
+            <span class="code-comment"># Clone the repository</span><br>
+            <span class="code-prompt">$ </span><span class="code-cmd">git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice</span><br>
+            <span class="code-prompt">$ </span><span class="code-cmd">cd ~/ghost-alice</span><br>
+            <br>
+            <span class="code-comment"># macOS / Linux / WSL / Git Bash</span><br>
+            <span class="code-prompt">$ </span><span class="code-cmd">bash install.sh</span><br>
+            <br>
+            <span class="code-comment"># Windows. PowerShell</span><br>
+            <span class="code-prompt">PS&gt; </span><span class="code-cmd">.\install.ps1</span><br>
+            <br>
+            <span class="code-comment"># Windows. Command Prompt</span><br>
+            <span class="code-prompt">&gt; </span><span class="code-cmd">install.cmd</span><br>
+            <br>
+            <span class="code-comment"># Check install status</span><br>
+            <span class="code-prompt">$ </span><span class="code-cmd">bash install.sh --status</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ── -->
+  <footer>
+    <div class="wrap">
+      <div class="footer-inner">
+        <span class="footer-left">Ghost-ALICE OS</span>
+        <span class="footer-right">agent governance operating layer · v2</span>
+      </div>
+    </div>
+  </footer>
+
+</body>
+</html>

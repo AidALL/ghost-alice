@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# post-merge. Re-run install.sh after `git pull` so:
+#  1. New top-level skills get symlinks/copies created
+#  2. Bootstrap (~/.codex/AGENTS.md) and hook configs refresh
+#  3. snapshot.json is updated for merge-companion
+#
+# Fires automatically after `git pull` (or any successful merge) and keeps
+# copy-mode skill installations in sync with the repository.
+#
+# Symlink / junction platforms (Claude Code) are already live
+# after the merge. Their installed entries point back at the repo, so a.
+# git pull updates them for free and this hook does nothing.
+#
+# Codex uses copy mode on every platform so user edits in ~/.agents/skills can
+# be protected by snapshot/diff before replacement. After a pull its on-disk
+# skill files are stale. This hook re-runs `install.sh --platform codex` when
+# Codex is installed.
+#
+# Design notes:
+# - No `set -e`. A hook failure must never mask a successful `git pull`.
+# - Sanity checks gate execution to the Ghost-ALICE repo only.
+# - Output goes to stdout/stderr so the user sees refresh status inline.
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+prefix="[ghost-alice post-merge]"
+
+# Match install.sh. Presence of ~/.codex is the canonical Codex marker.
+has_codex=0
+[ -d "$HOME/.codex" ] && has_codex=1
+
+if [ "$has_codex" -eq 0 ]; then
+    echo "$prefix symlink/junction platforms only; skills auto-updated, no re-install needed."
+    exit 0
+fi
+
+echo "$prefix Codex copy-mode install detected; refreshing copies via install.sh --platform codex..."
+if bash "$REPO_ROOT/install.sh" --platform codex; then
+    echo "$prefix Codex install refreshed."
+else
+    echo "$prefix install.sh exit non-zero (see above); git pull itself succeeded."
+fi

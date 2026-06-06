@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "always_first": [
+    "session-intent-analyzer"
+  ],
+  "agent_first_after_intake": [
+    "task-router"
+  ],
+  "user_input_graph": [
+    "merge-companion-precheck",
+    "session-intent-analyzer",
+    "skill-evolution:report-only-terminal-branch",
+    "jailbreak-detector",
+    "task-router",
+    "tool-checkpoint"
+  ],
+  "intent_consumers": {
+    "session-intent-analyzer": [
+      "skill-evolution",
+      "jailbreak-detector"
+    ],
+    "skill-evolution": [
+      "report-only-terminal-branch"
+    ],
+    "jailbreak-detector": [
+      "task-router"
+    ]
+  },
+  "conditional_gates": [
+    {
+      "id": "session-intent-analyzer",
+      "trigger": "every user input; hook records digest-only intake status and agent updates semantic intent delta only when intent materially changes",
+      "position": "after-merge-companion-precheck-before-skill-evolution-and-jailbreak-detector",
+      "state_path": ".tmp/session-intent/<platform>/<session-id>/intent-state.json",
+      "raw_prompt_policy": "do-not-persist"
+    },
+    {
+      "id": "boundary-contract",
+      "trigger": "task-router boundary-contract: required",
+      "position": "after-task-router-before-tool-call"
+    }
+  ],
+  "pre_routing_gates": [
+    {
+      "id": "merge-companion-precheck",
+      "rule": "AGENTS.md rule 0-A (pending-merge prose-rule layer)",
+      "skill": "merge-companion",
+      "trigger": "pending-merges manifest entries where decided=false",
+      "manifest_path": "~/.ghost-alice/pending-merges/<platform>/manifest.json",
+      "platforms": ["claude", "codex"],
+      "on_missing_or_empty": "silent-pass",
+      "priority": "before-task-router"
+    }
+  ],
+  "domain_routes": {
+    "development": [
+      "using-coding-convention"
+    ],
+    "bugfix": [
+      "systematic-debugging",
+      "test-driven-development"
+    ]
+  },
+  "before_completion": [
+    "verification-before-completion"
+  ],
+  "before_commit_push": [
+    "finishing-a-development-branch"
+  ],
+  "on_task_definition": [
+    "necessity-gate"
+  ]
+}

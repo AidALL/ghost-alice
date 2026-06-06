@@ -1,0 +1,49 @@
+name: Feature request
+description: Propose a public Ghost-ALICE OS improvement
+title: "[feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for public feature requests. Do not include private customer workflows or tenant-only skill content.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What public problem should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should change?
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Skill
+        - Installer
+        - Hook
+        - Documentation
+        - Platform adapter
+        - Validation script
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Public boundary
+      options:
+        - label: This request can be discussed publicly without private data.
+          required: true

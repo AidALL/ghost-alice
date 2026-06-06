@@ -1,0 +1,17 @@
+name: skill-gate-contract
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    name: skill-gate-contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/check_skill_gate_contract.py
+      - run: python -m unittest scripts.tests.test_check_skill_gate_contract scripts.tests.test_validate_entrypoints

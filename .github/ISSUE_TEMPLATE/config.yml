@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security reports
+    url: https://github.com/AidALL/ghost-alice/blob/main/SECURITY.md
+    about: Do not open public issues for vulnerabilities. Use private vulnerability reporting or the private contact listed in SECURITY.md.
+  - name: Installation docs
+    url: https://github.com/AidALL/ghost-alice/blob/main/docs/getting-started/installation.md
+    about: Start here for install and update guidance.
+  - name: Support guide
+    url: https://github.com/AidALL/ghost-alice/blob/main/SUPPORT.md
+    about: Use issue templates for public questions, bugs, and feature requests.

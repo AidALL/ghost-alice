@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validation:
+    name: Public validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Validate public surfaces
+        run: python3 scripts/validate_public_surfaces.py
+
+      - name: Validate session gate contract
+        run: python3 scripts/check_skill_gate_contract.py
+
+      - name: Run shared unit tests
+        run: python3 -m unittest discover -s _shared -p 'test_*.py'
+
+      - name: Install Codex skills for installed-copy terminology scan
+        env:
+          HOME: ${{ runner.temp }}/ghost-alice-ci-home
+        run: |
+          mkdir -p "$HOME"
+          bash ./install.sh --platform codex --skip-source-health
+
+      - name: Run script unit tests
+        env:
+          GHOST_ALICE_INSTALLED_SKILLS_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.agents/skills
+        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+
+      - name: Validate platform adapters
+        run: python3 scripts/validate_platform_adapters.py

@@ -1,0 +1,14 @@
+{
+  "addon_version": "0.1.0",
+  "addon_id": "noop",
+  "skills": [
+    {
+      "name": "noop",
+      "source": "skill",
+      "skill_dir": "skill"
+    }
+  ],
+  "platforms": ["claude", "codex"],
+  "depends_on_core": ["task-router", "verification-before-completion"],
+  "secrets": []
+}

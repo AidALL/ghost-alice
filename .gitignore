@@ -1,0 +1,68 @@
+# macOS (github/gitignore Global/macOS.gitignore)
+.DS_Store
+.localized
+__MACOSX/
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows (github/gitignore Global/Windows.gitignore)
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Local work notes
+TODO.md
+.tmp/
+
+# Local tool settings (track commands/ only)
+.claude/*
+!.claude/commands/
+.worktrees/
+
+# External reference projects (separate repos)
+psyco-neu-main/
+psyco-neu-vision-main/
+
+# Runtime auto-clone (created by convert_hwp.py when needed)
+hwpx/.hwp2hwpx-repo/
+
+# Sensitive company materials
+company-info-files/
+
+# Source PDF materials (6f558b9 policy extension)
+cardnews-automation/*.pdf

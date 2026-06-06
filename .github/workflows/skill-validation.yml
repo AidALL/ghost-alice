@@ -1,0 +1,79 @@
+name: Skill Validation
+
+# Ghost-ALICE OS skill catalog consistency validation CI
+# .github surfaces manage CI workflows and PR/issue templates.
+# Phase 1-5 validation + skill-catalog sync check + entrypoint smoke tests
+# Three escape hatches: [wip], [skill-draft], [skip-calls-check]
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: skill-validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Expose PR metadata environment variables
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          echo "GITHUB_PR_TITLE=$PR_TITLE" >> $GITHUB_ENV
+          echo "GITHUB_PR_LABELS=$PR_LABELS" >> $GITHUB_ENV
+          {
+            echo "GITHUB_PR_BODY<<EOF"
+            echo "$PR_BODY"
+            echo "EOF"
+          } >> $GITHUB_ENV
+
+      - name: Check skill-catalog synchronization
+        run: |
+          python3 scripts/build_catalog.py --check
+
+      - name: Validate skill consistency
+        run: |
+          python3 scripts/validate_skills.py
+
+      - name: Run entrypoint smoke tests
+        run: |
+          python3 scripts/validate_entrypoints.py
+
+      - name: Check public surface parity
+        run: |
+          python3 scripts/validate_public_surfaces.py
+
+      - name: installer compatibility matrix
+        run: |
+          python3 scripts/run_installer_compat_tests.py
+
+      - name: Summarize results
+        if: always()
+        run: |
+          echo "## Validation results" >> $GITHUB_STEP_SUMMARY
+          python3 scripts/validate_skills.py --json > /tmp/result.json || true
+          python3 -c "
+          import json
+          d = json.load(open('/tmp/result.json'))
+          print(f\"- Skill count: {d['skill_count']}\")
+          print(f\"- ERROR: {d['error_count']}\")
+          print(f\"- WARNING: {d['warning_count']}\")
+          if d['escape_hatches']:
+              print(f\"- Escape hatches active: {d['escape_hatches']}\")
+              print(f\"- ERROR -> WARNING demotions: {d['demoted_errors']}\")
+          " >> $GITHUB_STEP_SUMMARY

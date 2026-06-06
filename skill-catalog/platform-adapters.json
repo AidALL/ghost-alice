@@ -1,0 +1,40 @@
+{
+  "adapters": [
+    {
+      "id": "claude",
+      "state": "native",
+      "supported_assets": ["CLAUDE.md", "skills", "settings.json hooks"],
+      "unsupported_surfaces": [],
+      "install_or_onramp": "bash install.sh --platform claude",
+      "verification_commands": ["python3 scripts/validate_entrypoints.py --json"],
+      "risk_notes": ["Native hook support still requires installed settings verification"],
+      "last_verified_at": "2026-05-13",
+      "owner": "Ghost-ALICE",
+      "source_docs": ["docs/policies/installer-platform-compatibility-matrix.md"]
+    },
+    {
+      "id": "codex",
+      "state": "instruction-backed",
+      "supported_assets": ["AGENTS.md", "skills", "hooks.json + config.toml hooks feature"],
+      "unsupported_surfaces": ["visible Skill tool surface"],
+      "install_or_onramp": "bash install.sh --platform codex",
+      "verification_commands": ["python3 scripts/validate_entrypoints.py --json"],
+      "risk_notes": ["Codex hook event names in hooks.json are install-surface configuration, not runtime firing proof; require hook payload evidence, runtime smoke, or hookless/manual fallback before claiming gate completion"],
+      "last_verified_at": "2026-06-04",
+      "owner": "Ghost-ALICE",
+      "source_docs": ["docs/policies/installer-platform-compatibility-matrix.md"]
+    },
+    {
+      "id": "terminal-only",
+      "state": "terminal-only",
+      "supported_assets": ["AGENTS.md style policy text", "skills"],
+      "unsupported_surfaces": ["native hook runtime", "managed skill activation policy"],
+      "install_or_onramp": "read project AGENTS.md and install skills manually",
+      "verification_commands": ["python3 scripts/validate_skills.py --json"],
+      "risk_notes": ["No native hook runtime is assumed"],
+      "last_verified_at": "2026-05-13",
+      "owner": "Ghost-ALICE",
+      "source_docs": ["docs/policies/installer-platform-compatibility-matrix.md"]
+    }
+  ]
+}

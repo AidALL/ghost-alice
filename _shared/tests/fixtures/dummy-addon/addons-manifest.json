@@ -1,0 +1,11 @@
+{
+  "manifest_version": 1,
+  "addons": [
+    {
+      "id": "noop",
+      "path": "addons/noop",
+      "min_core_version": "0.1.0",
+      "tags": ["test"]
+    }
+  ]
+}

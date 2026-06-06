@@ -1,0 +1,71 @@
+name: Platform compatibility report
+description: Report installer, shell, or runtime compatibility problems that are not yet narrowed to a reproducible bug
+title: "[compat]: "
+labels:
+  - compatibility
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form for installer, shell, or runtime compatibility problems that are not yet a reproducible bug. Do not include secrets, private prompts, customer data, or local credential files.
+  - type: textarea
+    id: surface
+    attributes:
+      label: Compatibility surface
+      description: Platform, installer, shell, hook, command wrapper, or documentation surface.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15, Ubuntu 24.04, Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell
+      placeholder: "zsh, bash, PowerShell"
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Agent or runtime
+      placeholder: "Claude Code, Codex, installer only"
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "python3 --version output"
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried
+      description: Include commands and redacted output.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed result
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Public boundary check
+      options:
+        - label: I removed secrets, private prompts, customer data, and local credential values.
+          required: true
+        - label: This is not a security vulnerability report. Security reports follow SECURITY.md.
+          required: true

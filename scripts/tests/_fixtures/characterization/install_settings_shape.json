@@ -1,0 +1,10 @@
+{
+  "hook_events": {
+    "PostToolUse": 1,
+    "PreToolUse": 1,
+    "SessionStart": 1,
+    "Stop": 1,
+    "UserPromptSubmit": 4
+  },
+  "installed_markers": []
+}

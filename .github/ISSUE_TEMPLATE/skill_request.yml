@@ -1,0 +1,70 @@
+name: Skill or governance capability request
+description: Request a public Ghost-ALICE OS skill, gate, or governance capability
+title: "[skill-request]: "
+labels:
+  - skill-request
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form to request a public skill, gate, or governance capability. Do not include private customer workflows, prompts, documents, or credentials.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Public problem
+      description: Describe the public problem this capability should solve.
+    validations:
+      required: true
+  - type: input
+    id: users
+    attributes:
+      label: Intended users and frequency
+      placeholder: "Who would use it, and how often"
+    validations:
+      required: true
+  - type: textarea
+    id: io
+    attributes:
+      label: Input and output
+      description: What goes in, and what comes out.
+    validations:
+      required: true
+  - type: textarea
+    id: triggers
+    attributes:
+      label: Trigger phrases
+      description: How would a contributor or user naturally ask for this capability?
+  - type: checkboxes
+    id: existing
+    attributes:
+      label: Existing surface check
+      description: Check README.md, docs/reference/skills.md, and skill-catalog/skills.json before requesting a new public capability.
+      options:
+        - label: Existing public skills do not cover this.
+          required: true
+        - label: I checked whether an existing public skill could be extended instead.
+          required: true
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Public boundary
+      options:
+        - label: This request can be discussed publicly without secrets, private prompts, tenant-only content, customer data, or local runtime state.
+          required: true
+        - label: Any third-party material mentioned here has source and license/provenance notes.
+          required: true
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - High
+        - Normal
+        - Low
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
+      description: Links to public examples, related issues, or compatibility constraints.
