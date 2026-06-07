@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 import unittest
 from pathlib import Path
 from typing import Any
@@ -3089,6 +3090,98 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self.assertIn("[features]", config_toml.read_text(encoding="utf-8"))
         self.assertIn("hooks = true", config_toml.read_text(encoding="utf-8"))
         self.assertNotIn("codex_hooks", config_toml.read_text(encoding="utf-8"))
+
+    def test_install_codex_trusts_installed_ghost_alice_hooks(self):
+        """Codex installs trusted hashes for every Ghost-ALICE hook it writes."""
+        self._create_platform_dir("codex")
+
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            result = install_hooks.install_hook("codex")
+        self.assertEqual(result, "installed")
+
+        settings_file = self.fake_home / ".codex" / "hooks.json"
+        settings = json.loads(settings_file.read_text(encoding="utf-8"))
+        event_labels = {
+            "PreToolUse": "pre_tool_use",
+            "PostToolUse": "post_tool_use",
+            "SessionStart": "session_start",
+            "Stop": "stop",
+            "UserPromptSubmit": "user_prompt_submit",
+        }
+        managed_keys = []
+        for event, entries in settings["hooks"].items():
+            event_key = event_labels[event]
+            for group_index, entry in enumerate(entries):
+                for handler_index, hook in enumerate(entry.get("hooks", [])):
+                    command = hook.get("command", "")
+                    if "[hook-runner:" in command or "[io-trace] Ghost-ALICE" in command:
+                        managed_keys.append(
+                            f"{settings_file.as_posix()}:{event_key}:{group_index}:{handler_index}"
+                        )
+
+        config = tomllib.loads(self._codex_config_toml().read_text(encoding="utf-8"))
+        hook_state = config["hooks"]["state"]
+        self.assertEqual(set(hook_state), set(managed_keys))
+        self.assertEqual(len(hook_state), 8)
+        for key in managed_keys:
+            trusted_hash = hook_state[key]["trusted_hash"]
+            self.assertRegex(trusted_hash, r"^sha256:[0-9a-f]{64}$")
+
+    def test_install_codex_preserves_existing_hook_state_when_trusting_hooks(self):
+        """Codex hook auto-trust preserves unrelated hook state."""
+        self._create_platform_dir("codex")
+        config_toml = self._codex_config_toml()
+        config_toml.write_text(
+            '\n'.join([
+                '[features]',
+                'hooks = true',
+                'multi_agent = true',
+                '',
+                '[hooks.state."user-hook:pre_tool_use:0:0"]',
+                'enabled = false',
+                'trusted_hash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+                '',
+            ]),
+            encoding="utf-8",
+        )
+
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            result = install_hooks.install_hook("codex")
+        self.assertEqual(result, "installed")
+
+        config = tomllib.loads(config_toml.read_text(encoding="utf-8"))
+        self.assertTrue(config["features"]["hooks"])
+        self.assertTrue(config["features"]["multi_agent"])
+        user_state = config["hooks"]["state"]["user-hook:pre_tool_use:0:0"]
+        self.assertFalse(user_state["enabled"])
+        self.assertEqual(
+            user_state["trusted_hash"],
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        )
+        ghost_alice_states = [
+            key
+            for key in config["hooks"]["state"]
+            if key.startswith((self.fake_home / ".codex" / "hooks.json").as_posix())
+        ]
+        self.assertEqual(len(ghost_alice_states), 8)
+
+    def test_codex_hook_hash_omits_matcher_for_prompt_and_stop_events(self):
+        hook = {"type": "command", "command": "node /tmp/ghost-alice-hook.mjs", "timeout": 600}
+        group_with_matcher = {"matcher": "ignored-by-event", "hooks": [hook]}
+        group_without_matcher = {"hooks": [hook]}
+
+        self.assertEqual(
+            install_hooks._codex_command_hook_hash("UserPromptSubmit", group_with_matcher, hook),
+            install_hooks._codex_command_hook_hash("UserPromptSubmit", group_without_matcher, hook),
+        )
+        self.assertEqual(
+            install_hooks._codex_command_hook_hash("Stop", group_with_matcher, hook),
+            install_hooks._codex_command_hook_hash("Stop", group_without_matcher, hook),
+        )
+        self.assertNotEqual(
+            install_hooks._codex_command_hook_hash("PreToolUse", group_with_matcher, hook),
+            install_hooks._codex_command_hook_hash("PreToolUse", group_without_matcher, hook),
+        )
 
     def test_install_codex_replaces_legacy_plain_text_hooks(self):
         self._write_settings("codex", {

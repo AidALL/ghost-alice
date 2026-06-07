@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import io
 import json
 import os
@@ -1227,6 +1228,191 @@ def _codex_hook_feature_enabled() -> bool:
     return _codex_hook_feature_enabled_in_content(content)
 
 
+CODEX_HOOK_EVENT_KEY_LABELS = {
+    "PreToolUse": "pre_tool_use",
+    "PermissionRequest": "permission_request",
+    "PostToolUse": "post_tool_use",
+    "PreCompact": "pre_compact",
+    "PostCompact": "post_compact",
+    "SessionStart": "session_start",
+    "UserPromptSubmit": "user_prompt_submit",
+    "SubagentStart": "subagent_start",
+    "SubagentStop": "subagent_stop",
+    "Stop": "stop",
+}
+
+
+CODEX_HOOK_EVENTS_WITH_MATCHER = {
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "PreCompact",
+    "PostCompact",
+    "SessionStart",
+    "SubagentStart",
+    "SubagentStop",
+}
+
+
+def _codex_hook_event_key_label(event_name: str) -> str:
+    return CODEX_HOOK_EVENT_KEY_LABELS.get(event_name, event_name)
+
+
+def _codex_matcher_for_event(event_name: str, group: dict[str, Any]) -> Optional[str]:
+    if event_name not in CODEX_HOOK_EVENTS_WITH_MATCHER:
+        return None
+    matcher = group.get("matcher")
+    return matcher if isinstance(matcher, str) else None
+
+
+def _codex_command_hook_hash(event_name: str, group: dict[str, Any], hook: dict[str, Any]) -> str:
+    command = hook.get("command", "")
+    if _running_on_windows():
+        command = hook.get("commandWindows") or hook.get("command_windows") or command
+
+    timeout_raw = hook.get("timeout", 600)
+    try:
+        timeout = max(int(timeout_raw), 1)
+    except (TypeError, ValueError):
+        timeout = 600
+
+    normalized_handler: dict[str, Any] = {
+        "async": bool(hook.get("async", False)),
+        "command": command,
+        "timeout": timeout,
+        "type": "command",
+    }
+    status_message = hook.get("statusMessage")
+    if status_message is not None:
+        normalized_handler["statusMessage"] = status_message
+
+    identity: dict[str, Any] = {
+        "event_name": _codex_hook_event_key_label(event_name),
+        "hooks": [normalized_handler],
+    }
+    matcher = _codex_matcher_for_event(event_name, group)
+    if matcher is not None:
+        identity["matcher"] = matcher
+
+    canonical = json.dumps(
+        identity,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _codex_hook_state_key(settings_file: Path, event_name: str, group_index: int, handler_index: int) -> str:
+    return f"{settings_file.as_posix()}:{_codex_hook_event_key_label(event_name)}:{group_index}:{handler_index}"
+
+
+def _is_ghost_alice_hook_command(command: str) -> bool:
+    return any(marker in command for marker in GHOST_ALICE_HOOK_MARKERS)
+
+
+def _codex_trusted_hook_state_entries(settings_file: Path, settings: dict[str, Any]) -> dict[str, str]:
+    hooks_obj = settings.get("hooks")
+    if not isinstance(hooks_obj, dict):
+        return {}
+
+    entries: dict[str, str] = {}
+    for event_name, groups in hooks_obj.items():
+        if not isinstance(groups, list):
+            continue
+        for group_index, group in enumerate(groups):
+            if not isinstance(group, dict):
+                continue
+            hooks = group.get("hooks")
+            if not isinstance(hooks, list):
+                continue
+            for handler_index, hook in enumerate(hooks):
+                if not isinstance(hook, dict) or hook.get("type") != "command":
+                    continue
+                command = hook.get("command", "")
+                if not isinstance(command, str) or not _is_ghost_alice_hook_command(command):
+                    continue
+                key = _codex_hook_state_key(settings_file, event_name, group_index, handler_index)
+                entries[key] = _codex_command_hook_hash(event_name, group, hook)
+    return entries
+
+
+def _toml_basic_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _find_toml_header_bounds(lines: list[str], header: str) -> tuple[Optional[int], int]:
+    start: Optional[int] = None
+    end = len(lines)
+    for idx, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped == header:
+            start = idx
+            continue
+        if start is not None and stripped.startswith("[") and stripped.endswith("]"):
+            end = idx
+            break
+    return start, end
+
+
+def _merge_codex_hook_trust_state(content: str, state_entries: dict[str, str]) -> tuple[str, bool]:
+    lines = content.splitlines()
+    changed = False
+
+    for key, trusted_hash in state_entries.items():
+        header = f"[hooks.state.{_toml_basic_string(key)}]"
+        start, end = _find_toml_header_bounds(lines, header)
+        trusted_line = f'trusted_hash = "{trusted_hash}"'
+
+        if start is None:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.extend([header, trusted_line])
+            changed = True
+            continue
+
+        trusted_idx: Optional[int] = None
+        for idx in range(start + 1, end):
+            stripped = lines[idx].strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            candidate_key, _candidate_value = stripped.split("=", 1)
+            if candidate_key.strip() == "trusted_hash":
+                trusted_idx = idx
+                break
+
+        if trusted_idx is None:
+            lines.insert(end, trusted_line)
+            changed = True
+        elif lines[trusted_idx].strip() != trusted_line:
+            lines[trusted_idx] = trusted_line
+            changed = True
+
+    return _render_text_with_trailing_newline(lines), changed
+
+
+def _ensure_codex_hook_trust_state(
+    settings_file: Path,
+    settings: dict[str, Any],
+    dry_run: bool = False,
+) -> bool:
+    state_entries = _codex_trusted_hook_state_entries(settings_file, settings)
+    if not state_entries:
+        return False
+
+    config_file = _resolve_codex_config_toml()
+    current_content = _read_text_file(config_file)
+    updated_content, changed = _merge_codex_hook_trust_state(current_content, state_entries)
+
+    if not changed:
+        _log(_t("  Codex hook trust state already current", "  Codex hook trust state already current"))
+        return False
+
+    _write_text_file(config_file, updated_content, dry_run=dry_run)
+    _log(_t("  Trusted installed Ghost-ALICE Codex hooks", "  Trusted installed Ghost-ALICE Codex hooks"))
+    return True
+
+
 def _is_dispatcher_command(command: str) -> bool:
     return "ghost-alice-hook.mjs" in command
 
@@ -1737,6 +1923,8 @@ def install_hook(platform_key: str, dry_run: bool = False) -> str:
 
     if platform_key == "codex":
         if _ensure_codex_hook_feature_enabled(dry_run=dry_run):
+            changed = True
+        if _ensure_codex_hook_trust_state(settings_file, settings, dry_run=dry_run):
             changed = True
 
     if not changed:
