@@ -197,7 +197,7 @@ def sync_catalog(templates_dir: Path, catalog_dir: Path, dry_run: bool) -> dict:
     for local_fname in to_add + to_update:
         dst = catalog_dir / local_fname
         src = templates_dir / local_to_upstream[local_fname]
-        dst.write_text(catalog_file_text(src), encoding="utf-8")
+        write_text_lf(dst, catalog_file_text(src))
     for local_fname in to_remove:
         (catalog_dir / local_fname).unlink()
 
@@ -217,10 +217,7 @@ def sync_manifest(templates_dir: Path, library_root: Path, dry_run: bool) -> Non
         orig = entry.get("file")
         if orig and orig in COLLISION_MAP:
             entry["file"] = COLLISION_MAP[orig]
-    dst.write_text(
-        json.dumps(entries, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    write_text_lf(dst, json.dumps(entries, ensure_ascii=False, indent=2) + "\n")
 
 
 def write_source_meta(
@@ -251,10 +248,7 @@ def write_source_meta(
     }
     if dry_run:
         return
-    (library_root / ".source-meta.json").write_text(
-        json.dumps(source_meta, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    write_text_lf(library_root / ".source-meta.json", json.dumps(source_meta, ensure_ascii=False, indent=2) + "\n")
 
 
 def hash_file(path: Path) -> str:
@@ -267,6 +261,11 @@ def hash_text(text: str) -> str:
     h = hashlib.sha256()
     h.update(text.encode("utf-8"))
     return h.hexdigest()
+
+
+def write_text_lf(path: Path, text: str) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
 
 
 def main() -> int:

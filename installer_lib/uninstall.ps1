@@ -151,14 +151,14 @@ function Invoke-InstallDoctor {
         $sourceRoot = $ScriptDir
     }
 
-    $installStateManifest = Join-Path (Join-Path (Join-Path $HOME ".ghost-alice") "install-state") "$Platform.json"
+    $installStateManifest = Join-Path (Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state") "$Platform.json"
     $pyArgs = @(
         (Join-Path $script:GhostAliceRoot "_shared/install_doctor.py"),
         "--platform", $Platform,
         "--repo-root", $sourceRoot,
         "--encoding-root", $ScriptDir,
         "--encoding-root", $SkillsRoot,
-        "--ghost-alice-root", (Join-Path $HOME ".ghost-alice"),
+        "--ghost-alice-root", (Join-Path (Resolve-UserHome) ".ghost-alice"),
         "--install-state-manifest", $installStateManifest
     )
     if ($Mode -eq "doctor") {
@@ -285,7 +285,7 @@ function Invoke-UninstallCleanup {
         throw "uninstall cleanup cannot run - Python 3.11+ is required"
     }
 
-    $manifestPath = Join-Path (Join-Path (Join-Path $HOME ".ghost-alice") "install-state") "$Platform.json"
+    $manifestPath = Join-Path (Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state") "$Platform.json"
     $helper = Join-Path $script:GhostAliceRoot "_shared/uninstall_cleanup.py"
     $helperArgs = @(
         $helper,
@@ -309,9 +309,9 @@ function Show-Help {
     if ($LegacyAsciiConsole) {
         Write-Host @"
 Usage:
-  .\install.ps1                          # Install to detected AI tools
-  .\install.ps1 -Platform claude         # Install only to Claude Code
-  .\install.ps1 -Platform codex          # Install to Codex
+  .\install.cmd                          # Install to detected AI tools
+  .\install.cmd -Platform claude         # Install only to Claude Code
+  .\install.cmd -Platform codex          # Install to Codex
 
 Common commands:
   -Platform claude|codex                 Choose one platform
@@ -343,9 +343,9 @@ Advanced/operator commands:
 
     Write-Host @"
 Usage:
-  .\install.ps1                          # Install to detected AI tools
-  .\install.ps1 -Platform claude         # Install only to Claude Code
-  .\install.ps1 -Platform codex          # Install to Codex
+  .\install.cmd                          # Install to detected AI tools
+  .\install.cmd -Platform claude         # Install only to Claude Code
+  .\install.cmd -Platform codex          # Install to Codex
 
 Common commands:
   -Platform claude|codex                 Choose one platform

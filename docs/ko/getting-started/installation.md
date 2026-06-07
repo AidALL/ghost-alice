@@ -31,7 +31,7 @@ bash install.sh
 Windows PowerShell:
 
 ```powershell
-.\install.ps1
+.\install.cmd
 ```
 
 Windows CMD:
@@ -40,16 +40,16 @@ Windows CMD:
 install.cmd
 ```
 
-`install.cmd`는 PowerShell execution policy가 direct script execution을 막는 환경을 위한 wrapper다. 내부에서 `install.ps1`을 호출한다.
+`install.cmd`는 PowerShell execution policy가 direct script execution 또는 profile loading을 막는 환경을 위한 wrapper다. 내부에서 `install.ps1`을 `-NoProfile -ExecutionPolicy Bypass`로 호출하고, 사용자 또는 머신 execution policy를 변경하지 않는다.
 
 ## Install One Platform
 
 | Target | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
 | --- | --- | --- | --- |
-| Claude Code | `bash install.sh --platform claude` | `.\install.ps1 -Platform claude` | `install.cmd -Platform claude` |
-| Codex | `bash install.sh --platform codex` | `.\install.ps1 -Platform codex` | `install.cmd -Platform codex` |
+| Claude Code | `bash install.sh --platform claude` | `.\install.cmd -Platform claude` | `install.cmd -Platform claude` |
+| Codex | `bash install.sh --platform codex` | `.\install.cmd -Platform codex` | `install.cmd -Platform codex` |
 
-interactive 선택은 `bash install.sh --prompt-platform`, `.\install.ps1 -PromptPlatform`, `install.cmd -PromptPlatform`를 사용한다.
+interactive 선택은 `bash install.sh --prompt-platform`, `.\install.cmd -PromptPlatform`, `install.cmd -PromptPlatform`를 사용한다.
 
 ## Agent Visibility Profile
 
@@ -58,9 +58,9 @@ default profile은 `dynamic`다. 이 profile은 user에게 보이는 governance 
 
 | Profile | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
 | --- | --- | --- | --- |
-| strict | `bash install.sh --visibility strict` | `.\install.ps1 -Visibility strict` | `install.cmd -Visibility strict` |
-| dynamic | `bash install.sh --visibility dynamic` | `.\install.ps1 -Visibility dynamic` | `install.cmd -Visibility dynamic` |
-| minimal | `bash install.sh --visibility minimal` | `.\install.ps1 -Visibility minimal` | `install.cmd -Visibility minimal` |
+| strict | `bash install.sh --visibility strict` | `.\install.cmd -Visibility strict` | `install.cmd -Visibility strict` |
+| dynamic | `bash install.sh --visibility dynamic` | `.\install.cmd -Visibility dynamic` | `install.cmd -Visibility dynamic` |
+| minimal | `bash install.sh --visibility minimal` | `.\install.cmd -Visibility minimal` | `install.cmd -Visibility minimal` |
 
 `--agent-visibility`와 `-AgentVisibility`는 compatibility alias로 계속 받는다.
 새 문서와 명령 예시는 `--visibility`와 `-Visibility`를 우선 사용한다.
@@ -107,8 +107,8 @@ bash install.sh --status
 PowerShell:
 
 ```powershell
-.\install.ps1 -Doctor
-.\install.ps1 -Status
+.\install.cmd -Doctor
+.\install.cmd -Status
 ```
 
 CMD:
@@ -148,9 +148,9 @@ bash install.sh --status
 PowerShell:
 
 ```powershell
-.\install.ps1
-.\install.ps1 -Doctor
-.\install.ps1 -Status
+.\install.cmd
+.\install.cmd -Doctor
+.\install.cmd -Status
 ```
 
 ## Platform Update Behavior
@@ -191,15 +191,15 @@ update가 user-modified installed files를 감지하면 installer는 후보를 p
 
 ## Common Commands
 
-| Purpose | macOS / Linux / WSL / Git Bash | Windows PowerShell / CMD |
-| --- | --- | --- |
-| List skills | `bash install.sh --list` | `.\install.ps1 -List` / `install.cmd -List` |
-| Show install state | `bash install.sh --status` | `.\install.ps1 -Status` / `install.cmd -Status` |
-| Run protected diagnostic | `bash install.sh --doctor` | `.\install.ps1 -Doctor` / `install.cmd -Doctor` |
-| Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.ps1 -Skills task-router,verification-before-completion` |
-| Full uninstall | `bash install.sh --uninstall` | `.\install.ps1 -Uninstall` / `install.cmd -Uninstall` |
-| Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.ps1 -Platform codex -Uninstall -Skills task-router` |
-| Clean false pending entries | `bash install.sh --platform claude --cleanup-pending` | `.\install.ps1 -Platform claude -CleanupPending` / `install.cmd -Platform claude -CleanupPending` |
+| Purpose | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
+| --- | --- | --- | --- |
+| List skills | `bash install.sh --list` | `.\install.cmd -List` | `install.cmd -List` |
+| Show install state | `bash install.sh --status` | `.\install.cmd -Status` | `install.cmd -Status` |
+| Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd -Doctor` | `install.cmd -Doctor` |
+| Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd -Skills task-router,verification-before-completion` | `install.cmd -Skills task-router,verification-before-completion` |
+| Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
+| Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |
+| Clean false pending entries | `bash install.sh --platform claude --cleanup-pending` | `.\install.cmd -Platform claude -CleanupPending` | `install.cmd -Platform claude -CleanupPending` |
 
 ## Uninstall
 

@@ -79,10 +79,11 @@ uninstall report 디렉터리와 `~/.ghost-alice/secrets.env` 같은 privacy-sen
 
 `system_env_changes`는 installer가 적용한 environment 변경 목록이다. uninstall은 entry에 `before`/`after` 값이나 rollback metadata가 있을 때만 rollback한다.
 
-현재 구현은 `source_repo_hook_path`와 `codex_hooks_feature_flag`를 emit한다. 다른 `kind` 값은 reserved schema slot이고, install-recording과 uninstall-rollback test가 생기기 전까지는 실제 rollback 대상이 아니다.
+현재 구현은 `source_repo_hook_path`, `codex_hooks_feature_flag`, `codex_project_trust`를 emit한다. 다른 `kind` 값은 reserved schema slot이고, install-recording과 uninstall-rollback test가 생기기 전까지는 실제 rollback 대상이 아니다.
 
 - current: `source_repo_hook_path`
 - current: `codex_hooks_feature_flag`
+- current: `codex_project_trust`
 - reserved: `ps_policy_change`, `posix_rc_change`, `macos_quarantine_fix`, `posix_chmod_fix`
 
 새 `kind`를 추가할 때는 먼저 `installer_update/install_state_schema.md`를 갱신하고 install-recording과 uninstall-rollback test를 모두 추가한다.

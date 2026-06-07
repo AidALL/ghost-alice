@@ -1,7 +1,22 @@
 ﻿# Ghost-ALICE OS Installer (Windows PowerShell)
 # Supports: Claude Code, Codex
-# Usage:
-#   .\install.ps1                                  # Install to all detected platforms (~/.claude, ~/.codex)
+# Usage (PowerShell execution-policy safe wrapper):
+#   .\install.cmd                                  # Install to detected AI tools
+#   .\install.cmd -PromptPlatform                  # Select AI tool interactively before installing
+#   .\install.cmd -Skills task-router,verification-before-completion    # Install selected core skills only
+#   .\install.cmd -Platform claude                 # Install all skills to Claude Code
+#   .\install.cmd -Platform codex                  # Install all skills to Codex
+#   .\install.cmd -Platform codex -Visibility dynamic
+#   .\install.cmd -Platform codex -Skills hwpx     # Install selected Codex skills
+#   .\install.cmd -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
+#   .\install.cmd -Platform codex -Uninstall -Skills hwpx  # Remove selected skills from one platform
+#   .\install.cmd -List                            # List available skills
+#   .\install.cmd -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
+#   .\install.cmd -Status                          # Show current install status
+#   .\install.cmd -Doctor                          # Diagnose install protection state
+#   .\install.cmd -CleanupPending                  # Clean false-positive legacy pending entries
+# Direct .ps1 form, only when .ps1 script execution is already allowed:
+#   .\install.ps1                                  # Install to detected AI tools
 #   .\install.ps1 -PromptPlatform                  # Select AI tool interactively before installing
 #   .\install.ps1 -Skills task-router,verification-before-completion    # Install selected core skills only
 #   .\install.ps1 -Platform claude                 # Install all skills to Claude Code
@@ -64,7 +79,7 @@ $script:GhostAliceRoot = $PSScriptRoot
 $ErrorActionPreference = "Stop"
 if ($args.Count -gt 0) {
     [Console]::Error.WriteLine(("Unknown argument(s): {0}" -f ($args -join " ")))
-    [Console]::Error.WriteLine("Run install.ps1 -Help for usage.")
+    [Console]::Error.WriteLine("Run install.cmd -Help for usage.")
     exit 64
 }
 $PlatformWasExplicit = $PSBoundParameters.ContainsKey("Platform")

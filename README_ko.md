@@ -123,26 +123,26 @@ cd ~/ghost-alice
 bash install.sh
 ```
 
-Windows:
+Windows PowerShell / CMD:
 
 ```powershell
-.\install.ps1
+.\install.cmd
 ```
 
-CMD:
+`cmd.exe`에서는 앞의 `.\`를 생략한다.
 
 ```bat
 install.cmd
 ```
 
-`install.cmd`는 `install.ps1`을 호출하는 얇은 wrapper다. Windows install path는 Python 3.11+ runtime contract와 UTF-8 console setup을 `install.ps1`에 유지한다. CMD wrapper는 argument만 전달한다.
+`install.cmd`는 PowerShell execution policy 또는 profile loading이 direct `.ps1` execution을 막는 Windows shell을 위한 얇은 wrapper다. Windows install path는 Python 3.11+ runtime contract와 UTF-8 console setup을 `install.ps1`에 유지한다. wrapper는 `-NoProfile -ExecutionPolicy Bypass`로 호출하고 argument를 전달한다. 사용자 또는 머신 execution policy를 변경하지 않는다.
 
 Agent visibility command surface:
 
 - Claude Code는 workspace command로 `/visibility strict|dynamic|minimal`을 사용한다.
 - Codex는 trusted `UserPromptSubmit` hook pseudo-command path를 통해 `/visibility`를 처리한다.
 - 모든 platform은 `_shared/agent_visibility_cli.py`를 통해 같은 profile 값을 확인하고 변경할 수 있다.
-- install-time default는 `dynamic`다. initial profile은 `bash install.sh --visibility dynamic` 또는 `.\install.ps1 -Visibility dynamic`으로 설정한다. `--agent-visibility`와 `-AgentVisibility`는 compatibility alias로 유지한다.
+- install-time default는 `dynamic`다. initial profile은 `bash install.sh --visibility dynamic` 또는 `.\install.cmd -Visibility dynamic`으로 설정한다. `--agent-visibility`와 `-AgentVisibility`는 compatibility alias로 유지한다.
 - Visibility는 user-facing governance message surface만 바꾼다. hook execution, strict-grade logs, Work-Impact Projection은 약화하지 않는다.
 
 Detailed docs:
@@ -171,7 +171,7 @@ bash install.sh --uninstall
 ```
 
 ```powershell
-.\install.ps1 -Uninstall
+.\install.cmd -Uninstall
 ```
 
 ```cmd

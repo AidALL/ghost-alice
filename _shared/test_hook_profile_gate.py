@@ -21,6 +21,11 @@ import hook_profile_gate
 import install_hooks
 
 
+def _python_payload_command(args: str) -> str:
+    executable = sys.executable.replace("\\", "/")
+    return f"{executable} {args}"
+
+
 class TestHookRunnerExecutionGate(unittest.TestCase):
     def test_dynamic_visibility_does_not_disable_tool_checkpoint(self):
         env = {"GHOST_ALICE_AGENT_VISIBILITY": "dynamic"}
@@ -239,6 +244,8 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
 
 class TestHookCommandAllowlist(unittest.TestCase):
     def test_allows_system_and_homebrew_binaries(self):
+        if os.name == "nt":
+            self.skipTest("POSIX absolute executable allowlist does not apply on Windows")
         hook_profile_gate.assert_allowed_command(["/bin/bash", "-lc", "printf ok"], ["/bin", "/usr/bin"])
         hook_profile_gate.assert_allowed_command(["/opt/homebrew/bin/python3"], ["/opt/homebrew"])
 
@@ -283,7 +290,8 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertIn("rejected", result.stderr.lower())
 
     def test_cli_accepts_current_runner_shape_without_visibility_csv(self):
-        payload = base64.urlsafe_b64encode(f"{sys.executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
+        executable = sys.executable.replace("\\", "/")
+        payload = base64.urlsafe_b64encode(f"{executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
 
         with self.assertRaises(SystemExit) as cm:
             hook_profile_gate.main(["run", "prompt", payload])
@@ -291,7 +299,8 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(cm.exception.code, 0)
 
     def test_cli_keeps_legacy_runner_shape_for_installed_wrappers(self):
-        payload = base64.urlsafe_b64encode(f"{sys.executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
+        executable = sys.executable.replace("\\", "/")
+        payload = base64.urlsafe_b64encode(f"{executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
 
         with self.assertRaises(SystemExit) as cm:
             hook_profile_gate.main(["run", "prompt", "strict,dynamic,minimal", payload])
@@ -301,7 +310,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
     def test_runner_hides_clean_pass_after_strict_log_append(self):
         message = "No pending warning from this hook means merge-companion-precheck is clean."
         code = f"print({message!r})"
-        payload = base64.urlsafe_b64encode(f"{sys.executable} -c {shlex.quote(code)}".encode("utf-8")).decode("ascii")
+        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
             env = os.environ.copy()
@@ -342,7 +351,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
     def test_runner_records_work_impact_and_omits_model_output_for_hidden_routine(self):
         message = "routine clean pass already persisted"
         code = f"print({message!r})"
-        payload = base64.urlsafe_b64encode(f"{sys.executable} -c {shlex.quote(code)}".encode("utf-8")).decode("ascii")
+        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
             env = os.environ.copy()
@@ -383,7 +392,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
     def test_runner_materializes_routing_surface_compact_output_from_payload(self):
         message = "routine clean pass already persisted"
         code = f"print({message!r})"
-        payload = base64.urlsafe_b64encode(f"{sys.executable} -c {shlex.quote(code)}".encode("utf-8")).decode("ascii")
+        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
         hook_payload = {
             "session_id": "s-routing-surface",
             "hook_event_name": "UserPromptSubmit",
@@ -455,7 +464,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
     def test_runner_emits_forced_action_denial_after_strict_log_append(self):
         message = '{"decision":"deny","reason":"[tool-checkpoint] required"}'
         code = f"print({message!r})"
-        payload = base64.urlsafe_b64encode(f"{sys.executable} -c {shlex.quote(code)}".encode("utf-8")).decode("ascii")
+        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
             env = os.environ.copy()
@@ -492,7 +501,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
     def test_runner_force_shows_pending_manifest_after_strict_log_append(self):
         message = "routine clean pass already persisted"
         code = f"print({message!r})"
-        payload = base64.urlsafe_b64encode(f"{sys.executable} -c {shlex.quote(code)}".encode("utf-8")).decode("ascii")
+        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
             manifest = Path(temp_home) / ".ghost-alice" / "pending-merges" / "codex" / "manifest.json"
@@ -533,7 +542,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(row["stdout"].strip(), message)
 
     def test_runner_preserves_nonzero_exit_after_strict_log_append(self):
-        command = f"{sys.executable} -c 'import sys; print(\"bad\", file=sys.stderr); sys.exit(7)'"
+        command = _python_payload_command("-c 'import sys; print(\"bad\", file=sys.stderr); sys.exit(7)'")
         payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
@@ -569,7 +578,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(row["visible_decision"], "force_show")
 
     def test_runner_logs_surrogate_stdin_without_crashing(self):
-        command = f"{sys.executable} -c 'import sys; sys.exit(0)'"
+        command = _python_payload_command("-c 'import sys; sys.exit(0)'")
         payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
@@ -624,6 +633,8 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         self.assertIn(install_hooks.SESSION_START_MARKER, session_command)
 
     def test_installed_minimal_visibility_runs_prompt_and_session_start(self):
+        if os.name == "nt":
+            self.skipTest("POSIX shell launcher test does not apply on Windows")
         pending_entry = install_hooks._platform_prompt_pending_merge_entry("claude", "UserPromptSubmit")
         prompt_entry = install_hooks._platform_hook_entry("claude", "UserPromptSubmit")
         session_entry = install_hooks._platform_session_start_entry("claude", "SessionStart")

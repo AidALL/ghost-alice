@@ -67,6 +67,13 @@ def _find_test_bash() -> str | None:
     return None
 
 
+def _bash_path(path: Path) -> str:
+    path_text = path.resolve().as_posix()
+    if len(path_text) >= 3 and path_text[1:3] == ":/":
+        return f"/{path_text[0].lower()}{path_text[2:]}"
+    return path_text
+
+
 class InstallRuntimeDetectionTest(unittest.TestCase):
     def test_find_runtime_skips_python3_store_stub(self) -> None:
         bash_exe = _find_test_bash()
@@ -130,13 +137,15 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             bin_dir = Path(temp_dir) / "bin"
             bin_dir.mkdir()
+            bash_bin_dir = _bash_path(bin_dir)
             versioned_python = bin_dir / "python3.14"
+            bash_versioned_python = _bash_path(versioned_python)
             versioned_python.write_text(
                 textwrap.dedent(
-                    f"""\
-                    #!{bash_exe}
-                    if [ "${{1:-}}" = "-c" ]; then
-                      case "${{2:-}}" in
+                    """\
+                    #!/bin/sh
+                    if [ "${1:-}" = "-c" ]; then
+                      case "${2:-}" in
                         *"sys.version_info >= (3, 11)"*) exit 0 ;;
                         *"version_info.major"*) printf '003.014.002\\n'; exit 0 ;;
                       esac
@@ -154,7 +163,7 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
                     f"""\
                     #!/usr/bin/env bash
                     set -euo pipefail
-                    PATH="{bin_dir}"
+                    PATH="{bash_bin_dir}"
                     GHOST_ALICE_TEST_SKIP_COMMON_PYTHON_PATHS=1
 
                     python3() {{ return 1; }}
@@ -175,7 +184,7 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertEqual(result.stdout.strip(), f"python:{versioned_python}")
+        self.assertEqual(result.stdout.strip(), f"python:{bash_versioned_python}")
 
     def test_install_sh_bootstraps_python_for_default_install_only(self) -> None:
         install_sh = installer_bash_source()
@@ -217,12 +226,16 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
             bin_dir = Path(temp_dir) / "bin"
             bin_dir.mkdir()
             marker = Path(temp_dir) / "brew-called"
+            bash_bin_dir = _bash_path(bin_dir)
+            bash_marker = _bash_path(marker)
             chmod_exe = shutil.which("chmod") or "/bin/chmod"
             fake_python = bin_dir / "python3"
+            bash_fake_python = _bash_path(fake_python)
             fake_python.write_text(
                 textwrap.dedent(
-                    """\
+                    f"""\
                     #!/bin/sh
+                    [ -f "{bash_marker}" ] || exit 1
                     if [ "${1:-}" = "-c" ]; then
                       case "${2:-}" in
                         *"sys.version_info >= (3, 11)"*) exit 0 ;;
@@ -242,8 +255,8 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
                     #!/bin/sh
                     [ "${{1:-}}" = "install" ] || exit 2
                     [ "${{2:-}}" = "python3" ] || exit 3
-                    : > "{marker}"
-                    "{chmod_exe}" +x "{fake_python}"
+                    : > "{bash_marker}"
+                    "{chmod_exe}" +x "{bash_fake_python}"
                     exit 0
                     """
                 ),
@@ -257,7 +270,7 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
                     f"""\
                     #!/usr/bin/env bash
                     set -euo pipefail
-                    PATH="{bin_dir}"
+                    PATH="{bash_bin_dir}"
                     GHOST_ALICE_TEST_SKIP_COMMON_PYTHON_PATHS=1
                     t() {{ printf '%s' "$1"; }}
                     info() {{ :; }}
@@ -268,7 +281,7 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
                     {function_bundle}
 
                     _ensure_python_runtime_for_install
-                    test -f "{marker}"
+                    test -f "{bash_marker}"
                     _find_python_runtime
                     """
                 ),
@@ -310,6 +323,48 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertNotIn("3, 14", install_ps1)
         self.assertNotIn("Python.Python.3.13", install_ps1)
         self.assertNotIn("Python.Python.3.14", install_ps1)
+
+    def test_install_ps1_python_version_key_runs_under_powershell(self) -> None:
+        if not sys.platform.startswith("win"):
+            self.skipTest("PowerShell native argument regression is Windows-specific")
+        powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
+        if not powershell:
+            self.skipTest("PowerShell executable is required for python_runtime.ps1 test")
+
+        python_exe = sys.executable.replace("'", "''")
+        script = textwrap.dedent(
+            f"""
+            $ErrorActionPreference = "Stop"
+            $script:GhostAliceRoot = (Get-Location).Path
+            . (Join-Path $script:GhostAliceRoot "installer_lib/python_runtime.ps1")
+            $key = Get-PythonVersionKey '{python_exe}'
+            if (-not $key) {{
+                Write-Output "KEY_MISSING"
+                exit 1
+            }}
+            Write-Output "KEY=$key"
+            """
+        )
+
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+        self.assertRegex(result.stdout, r"KEY=\d{3}\.\d{3}\.\d{3}")
+
+    def test_install_ps1_avoids_pwsh_only_join_path_overload(self) -> None:
+        install_ps1 = installer_ps1_source()
+
+        self.assertNotRegex(
+            install_ps1,
+            r"Join-Path\s+\$[A-Za-z0-9_:]+\s+['\"][^'\"]+['\"]\s+['\"][^'\"]+['\"]",
+        )
 
     def test_install_sh_has_no_node_or_bash_hook_fallback(self) -> None:
         install_sh = installer_bash_source()

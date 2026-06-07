@@ -28,6 +28,77 @@ REMOVED_PS_REPORT_FLAG = REMOVED_PS_FLAG + "Report"
 REMOVED_DOC_STEM = "off" + "boarding"
 
 
+def _find_test_bash() -> str | None:
+    candidates = [
+        shutil.which("bash"),
+        shutil.which("bash.exe"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        normalized = path.as_posix().lower()
+        if sys.platform.startswith("win") and (
+            normalized.endswith("/windows/system32/bash.exe")
+            or normalized.endswith("/appdata/local/microsoft/windowsapps/bash.exe")
+        ):
+            continue
+        return str(path)
+    return None
+
+
+def _make_directory_link_or_skip(testcase: unittest.TestCase, dest: Path, source: Path) -> str:
+    try:
+        dest.symlink_to(source, target_is_directory=True)
+        return "symlink"
+    except OSError as exc:
+        symlink_error = exc
+
+    if os.name == "nt":
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(dest), str(source)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode == 0:
+            return "junction"
+        testcase.skipTest(
+            "directory symlink unavailable and Windows junction fallback failed: "
+            f"{symlink_error}; {result.stderr or result.stdout}"
+        )
+
+    testcase.skipTest(f"directory symlink unavailable: {symlink_error}")
+
+
+def _assert_directory_link_exists(testcase: unittest.TestCase, path: Path, link_kind: str) -> None:
+    if link_kind == "symlink":
+        testcase.assertTrue(path.is_symlink())
+    else:
+        testcase.assertTrue(path.exists(), msg=f"{link_kind} should still exist: {path}")
+
+
+def _make_windows_junction_or_skip(testcase: unittest.TestCase, dest: Path, source: Path) -> None:
+    if os.name != "nt":
+        testcase.skipTest("Windows junction regression test")
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(dest), str(source)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        testcase.skipTest(f"Windows junction unavailable: {result.stderr or result.stdout}")
+
+
 def _hash_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -96,9 +167,10 @@ class UninstallCleanupTest(unittest.TestCase):
         report: Path,
         *,
         confirm: bool = False,
-    ) -> subprocess.CompletedProcess[str]:
+        ) -> subprocess.CompletedProcess[str]:
         env = os.environ.copy()
         env["HOME"] = str(root)
+        env["USERPROFILE"] = str(root)
         args = [
             sys.executable,
             str(UNINSTALL_CLEANUP),
@@ -120,6 +192,45 @@ class UninstallCleanupTest(unittest.TestCase):
             encoding="utf-8",
             errors="replace",
         )
+
+    def test_default_report_and_scope_use_env_home_on_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+            )
+
+            env = os.environ.copy()
+            env["HOME"] = str(root)
+            env["USERPROFILE"] = str(root)
+            env["CODEX_HOME"] = str(root / ".codex")
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(UNINSTALL_CLEANUP),
+                    "--platform",
+                    "codex",
+                    "--install-state-manifest",
+                    str(manifest),
+                    "--confirm",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertFalse(managed.exists(), msg=result.stdout)
+            temp_report_root = root / ".ghost-alice" / "uninstall-reports"
+            self.assertIn(str(temp_report_root), result.stdout)
+            self.assertNotIn(str(Path.home() / ".ghost-alice" / "uninstall-reports"), result.stdout)
+            reports = glob(str(temp_report_root / "codex-confirm-*.json"))
+            self.assertEqual(len(reports), 1, msg=result.stdout)
 
     def test_dry_run_reports_managed_targets_without_deleting_user_owned_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -187,10 +298,10 @@ class UninstallCleanupTest(unittest.TestCase):
             (source / "helper.py").write_text("# helper\n", encoding="utf-8")
             dest = root / ".agents" / "skills" / "_shared"
             dest.parent.mkdir(parents=True)
-            dest.symlink_to(source, target_is_directory=True)
+            link_kind = _make_directory_link_or_skip(self, dest, source)
             manifest = _write_manifest(
                 root,
-                [{"target_name": "_shared", "dest_path": dest.as_posix(), "install_mode": "symlink"}],
+                [{"target_name": "_shared", "dest_path": dest.as_posix(), "install_mode": link_kind}],
             )
             report = root / "uninstall-report.json"
 
@@ -210,7 +321,7 @@ class UninstallCleanupTest(unittest.TestCase):
             (source / "SKILL.md").write_text("# personal\n", encoding="utf-8")
             dest = root / ".agents" / "skills" / "personal-link"
             dest.parent.mkdir(parents=True)
-            dest.symlink_to(source, target_is_directory=True)
+            link_kind = _make_directory_link_or_skip(self, dest, source)
             manifest = _write_manifest(
                 root,
                 [
@@ -218,7 +329,7 @@ class UninstallCleanupTest(unittest.TestCase):
                         "target_name": "personal-link",
                         "source_path": (repo / "personal-link").as_posix(),
                         "dest_path": dest.as_posix(),
-                        "install_mode": "symlink",
+                        "install_mode": link_kind,
                     }
                 ],
                 source_root=repo,
@@ -228,13 +339,13 @@ class UninstallCleanupTest(unittest.TestCase):
             result = self.run_cleanup(root, manifest, report, confirm=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            self.assertTrue(dest.is_symlink())
+            _assert_directory_link_exists(self, dest, link_kind)
             self.assertTrue(source.exists())
             data = json.loads(report.read_text(encoding="utf-8"))
             item = next(item for item in data["items"] if item.get("target_name") == "personal-link")
             self.assertEqual(item["action"], "manual-review")
             self.assertEqual(item["ownership"], "user-owned")
-            self.assertEqual(item["reason"], "symlink-outside-repo")
+            self.assertEqual(item["reason"], f"{link_kind}-outside-repo")
 
     def test_confirm_refuses_manifest_targets_outside_platform_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -242,21 +353,48 @@ class UninstallCleanupTest(unittest.TestCase):
             source = root / "repo" / "_shared"
             source.mkdir(parents=True)
             outside = root / "outside-link"
-            outside.symlink_to(source, target_is_directory=True)
+            link_kind = _make_directory_link_or_skip(self, outside, source)
             manifest = _write_manifest(
                 root,
-                [{"target_name": "_shared", "dest_path": outside.as_posix(), "install_mode": "symlink"}],
+                [{"target_name": "_shared", "dest_path": outside.as_posix(), "install_mode": link_kind}],
             )
             report = root / "uninstall-report.json"
 
             result = self.run_cleanup(root, manifest, report, confirm=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            self.assertTrue(outside.is_symlink())
+            _assert_directory_link_exists(self, outside, link_kind)
             data = json.loads(report.read_text(encoding="utf-8"))
             item = next(item for item in data["items"] if item.get("target_name") == "_shared")
             self.assertEqual(item["action"], "manual-review")
             self.assertEqual(item["reason"], "outside-allowed-roots")
+
+    def test_confirm_removes_manifest_junction_without_removing_source_on_windows(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "repo" / "_shared"
+            source.mkdir(parents=True)
+            (source / "helper.py").write_text("# helper\n", encoding="utf-8")
+            dest = root / ".agents" / "skills" / "_shared"
+            dest.parent.mkdir(parents=True)
+            _make_windows_junction_or_skip(self, dest, source)
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "_shared", "dest_path": dest.as_posix(), "install_mode": "junction"}],
+                source_root=root / "repo",
+            )
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertFalse(dest.exists())
+            self.assertTrue(source.exists())
+            data = json.loads(report.read_text(encoding="utf-8"))
+            item = next(item for item in data["items"] if item.get("target_name") == "_shared")
+            self.assertEqual(item["action"], "removed")
+            self.assertEqual(item["ownership"], "ghost-alice-managed")
+            self.assertEqual(item["reason"], "junction-to-repo")
 
     def test_confirm_checks_report_path_before_removing_targets(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -495,6 +633,122 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(feature["action"], "manual-review")
             self.assertEqual(feature["reason"], "codex-hooks-feature-required-by-non-ghost-hooks")
 
+    def test_confirm_restores_codex_project_trust_from_change_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_dir = root / ".codex"
+            codex_dir.mkdir()
+            config_toml = codex_dir / "config.toml"
+            project = root / "repo"
+            project.mkdir()
+            project_key = str(project.resolve())
+            config_toml.write_text(
+                f"[projects.{json.dumps(project_key)}]\ntrust_level = \"trusted\"\n",
+                encoding="utf-8",
+            )
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                system_env_changes=[
+                    {
+                        "kind": "codex_project_trust",
+                        "path": config_toml.as_posix(),
+                        "project_path": project_key,
+                        "before_state": "untrusted",
+                        "after_state": "trusted",
+                    }
+                ],
+            )
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertIn('trust_level = "untrusted"', config_toml.read_text(encoding="utf-8"))
+            data = json.loads(report.read_text(encoding="utf-8"))
+            trust = next(item for item in data["items"] if item.get("kind") == "codex-project-trust-config")
+            self.assertEqual(trust["action"], "restored-codex-project-trust")
+            self.assertEqual(trust["restored_to"], "untrusted")
+
+    def test_confirm_removes_codex_project_trust_when_change_record_was_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_dir = root / ".codex"
+            codex_dir.mkdir()
+            config_toml = codex_dir / "config.toml"
+            project = root / "repo"
+            project.mkdir()
+            project_key = str(project.resolve())
+            header = f"[projects.{json.dumps(project_key)}]"
+            config_toml.write_text(f"{header}\ntrust_level = \"trusted\"\n", encoding="utf-8")
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                system_env_changes=[
+                    {
+                        "kind": "codex_project_trust",
+                        "path": config_toml.as_posix(),
+                        "project_path": project_key,
+                        "before_state": "missing",
+                        "after_state": "trusted",
+                    }
+                ],
+            )
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            content = config_toml.read_text(encoding="utf-8")
+            self.assertNotIn(header, content)
+            self.assertNotIn("trust_level", content)
+            data = json.loads(report.read_text(encoding="utf-8"))
+            trust = next(item for item in data["items"] if item.get("kind") == "codex-project-trust-config")
+            self.assertEqual(trust["action"], "removed-codex-project-trust")
+            self.assertEqual(trust["restored_to"], "missing")
+
+    def test_confirm_surfaces_codex_project_trust_when_before_state_was_other(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            codex_dir = root / ".codex"
+            codex_dir.mkdir()
+            config_toml = codex_dir / "config.toml"
+            project = root / "repo"
+            project.mkdir()
+            project_key = str(project.resolve())
+            config_toml.write_text(
+                f"[projects.{json.dumps(project_key)}]\ntrust_level = \"trusted\"\n",
+                encoding="utf-8",
+            )
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                system_env_changes=[
+                    {
+                        "kind": "codex_project_trust",
+                        "path": config_toml.as_posix(),
+                        "project_path": project_key,
+                        "before_state": "other",
+                        "after_state": "trusted",
+                    }
+                ],
+            )
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertIn('trust_level = "trusted"', config_toml.read_text(encoding="utf-8"))
+            data = json.loads(report.read_text(encoding="utf-8"))
+            trust = next(item for item in data["items"] if item.get("kind") == "codex-project-trust-config")
+            self.assertEqual(trust["action"], "manual-review")
+            self.assertEqual(trust["reason"], "codex-project-trust-before-state-not-restorable")
+            self.assertEqual(trust["before_state"], "other")
+            self.assertEqual(trust["after_state"], "trusted")
+
     def test_confirm_defers_target_still_referenced_by_another_platform_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -556,12 +810,12 @@ class UninstallCleanupTest(unittest.TestCase):
         self.assertIn("Full uninstall", ps1)
         self.assertIn("_shared/uninstall_cleanup.py", ps1)
         self.assertIn("bash install.sh --uninstall", readme)
-        self.assertIn(".\\install.ps1 -Uninstall", readme)
+        self.assertIn(".\\install.cmd -Uninstall", readme)
         self.assertFalse(legacy_doc.exists())
         self.assertTrue(UNINSTALL_DOC.exists())
 
     def test_bash_removed_preview_flags_are_rejected_as_unknown_options(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh argument test")
 
@@ -616,7 +870,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 self.assertIn("Unknown argument", result.stdout + result.stderr)
 
     def test_bash_uninstall_without_skill_args_runs_full_confirm_cleanup(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh uninstall test")
 
@@ -651,7 +905,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(data["mode"], "confirm")
 
     def test_bash_plain_uninstall_detects_install_state_manifest_platforms(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh uninstall test")
 
@@ -685,6 +939,7 @@ class UninstallUserModifiedQuarantineTest(unittest.TestCase):
     def _run(self, root, manifest, report, *, confirm=False, purge_modified=False):
         env = os.environ.copy()
         env["HOME"] = str(root)
+        env["USERPROFILE"] = str(root)
         args = [
             sys.executable,
             str(UNINSTALL_CLEANUP),

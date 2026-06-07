@@ -15,6 +15,38 @@ FIXTURE_ROOT = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 
+def _find_test_bash() -> str | None:
+    candidates = [
+        shutil.which("bash"),
+        shutil.which("bash.exe"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        normalized = path.as_posix().lower()
+        if (
+            normalized.endswith("/windows/system32/bash.exe")
+            or normalized.endswith("/appdata/local/microsoft/windowsapps/bash.exe")
+        ):
+            continue
+        probe = subprocess.run(
+            [str(path), "-lc", "printf '%s\\n' ok"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+            return str(path)
+    return None
+
+
 def _python_311_or_newer() -> str | None:
     candidates = [
         sys.executable,
@@ -159,8 +191,9 @@ class AddonInstallerTest(unittest.TestCase):
         self.assertIn("noop (addon:noop)", result.stdout)
 
     def test_shell_installs_dummy_addon_into_temp_home(self) -> None:
-        if shutil.which("bash") is None:
-            self.skipTest("bash is required for install.sh")
+        bash = _find_test_bash()
+        if bash is None:
+            self.skipTest("Git Bash is required for install.sh")
         if _python_311_or_newer() is None:
             self.skipTest("install.sh requires Python 3.11+")
 
@@ -170,7 +203,7 @@ class AddonInstallerTest(unittest.TestCase):
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
             result = subprocess.run(
                 [
-                    "bash",
+                    bash,
                     str(REPO_ROOT / "install.sh"),
                     "--platform",
                     "claude",
@@ -199,8 +232,9 @@ class AddonInstallerTest(unittest.TestCase):
             self.assertIn("noop", target_names)
 
     def test_shell_install_without_addons_handles_empty_addon_targets(self) -> None:
-        if shutil.which("bash") is None:
-            self.skipTest("bash is required for install.sh")
+        bash = _find_test_bash()
+        if bash is None:
+            self.skipTest("Git Bash is required for install.sh")
         if _python_311_or_newer() is None:
             self.skipTest("install.sh requires Python 3.11+")
 
@@ -210,7 +244,7 @@ class AddonInstallerTest(unittest.TestCase):
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
             result = subprocess.run(
                 [
-                    "bash",
+                    bash,
                     str(REPO_ROOT / "install.sh"),
                     "--platform",
                     "claude",

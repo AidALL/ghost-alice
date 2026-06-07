@@ -205,7 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    args, _unknown = build_parser().parse_known_args(argv)
     base_message = DEFAULT_INTERNAL
     if args.internal_b64:
         try:

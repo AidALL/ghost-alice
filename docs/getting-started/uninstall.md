@@ -79,10 +79,11 @@ The uninstall report directory and privacy-sensitive local files such as `~/.gho
 
 `system_env_changes` is an array of environment changes applied by the installer. Uninstall rolls back an entry only when that entry has `before`/`after` values or rollback metadata.
 
-The current implementation emits `source_repo_hook_path` and `codex_hooks_feature_flag`. The other `kind` values are reserved schema slots and are not active rollback coverage until their install-recording and uninstall-rollback tests exist.
+The current implementation emits `source_repo_hook_path`, `codex_hooks_feature_flag`, and `codex_project_trust`. The other `kind` values are reserved schema slots and are not active rollback coverage until their install-recording and uninstall-rollback tests exist.
 
 - current: `source_repo_hook_path`
 - current: `codex_hooks_feature_flag`
+- current: `codex_project_trust`
 - reserved: `ps_policy_change`, `posix_rc_change`, `macos_quarantine_fix`, `posix_chmod_fix`
 
 When adding a new `kind`, update `installer_update/install_state_schema.md` first and add both install-recording and uninstall-rollback tests.

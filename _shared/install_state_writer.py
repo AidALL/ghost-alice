@@ -92,6 +92,24 @@ if platform == "codex" and sidecar.exists():
             }
         )
 
+project_trust_sidecar = Path(state_path).with_name(f"{platform}-project-trust-change.json")
+if platform == "codex" and project_trust_sidecar.exists():
+    try:
+        change = json.loads(project_trust_sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        change = None
+    if isinstance(change, dict) and change.get("kind") == "codex_project_trust":
+        system_env_changes.append(
+            {
+                "kind": "codex_project_trust",
+                "path": change.get("path"),
+                "project_path": change.get("project_path"),
+                "before_state": change.get("before_state"),
+                "after_state": change.get("after_state"),
+                "applied_at": change.get("applied_at") or installed_at,
+            }
+        )
+
 manifest = {
     "schema_version": 1,
     "platform": platform,

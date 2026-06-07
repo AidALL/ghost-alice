@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -107,6 +108,57 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
         return False
 
 
+def _is_windows_junction(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    if is_junction is not None:
+        return bool(is_junction())
+    if os.name != "nt" or path.is_symlink():
+        return False
+    try:
+        attrs = path.stat().st_file_attributes
+    except (AttributeError, OSError):
+        return False
+    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+
+
+def _classify_repo_link(
+    path: Path,
+    *,
+    asset_id: str,
+    repo_root: Optional[Path],
+    link_kind: str,
+) -> AssetClassification:
+    try:
+        target = path.resolve(strict=True)
+    except OSError:
+        return AssetClassification(
+            path=path,
+            kind=KIND_SKILL_ROOT,
+            asset_id=asset_id,
+            ownership=OWNERSHIP_CONFLICT,
+            reason=f"broken-{link_kind}",
+        )
+
+    if repo_root is not None and _is_relative_to(target, repo_root.resolve()):
+        return AssetClassification(
+            path=path,
+            kind=KIND_SKILL_ROOT,
+            asset_id=asset_id,
+            ownership=OWNERSHIP_GHOST_ALICE_MANAGED,
+            reason=f"{link_kind}-to-repo",
+            link_target=str(target),
+        )
+
+    return AssetClassification(
+        path=path,
+        kind=KIND_SKILL_ROOT,
+        asset_id=asset_id,
+        ownership=OWNERSHIP_USER_OWNED,
+        reason=f"{link_kind}-outside-repo",
+        link_target=str(target),
+    )
+
+
 def write_ownership_marker(
     root: Path,
     *,
@@ -144,39 +196,14 @@ def classify_skill_root(
     asset_id = expected_asset_id or path.name
 
     if path.is_symlink():
-        try:
-            target = path.resolve(strict=True)
-        except OSError:
-            return AssetClassification(
-                path=path,
-                kind=KIND_SKILL_ROOT,
-                asset_id=asset_id,
-                ownership=OWNERSHIP_CONFLICT,
-                reason="broken-symlink",
-            )
-
-        if repo_root is not None and _is_relative_to(target, repo_root.resolve()):
-            return AssetClassification(
-                path=path,
-                kind=KIND_SKILL_ROOT,
-                asset_id=asset_id,
-                ownership=OWNERSHIP_GHOST_ALICE_MANAGED,
-                reason="symlink-to-repo",
-                link_target=str(target),
-            )
-
-        return AssetClassification(
-            path=path,
-            kind=KIND_SKILL_ROOT,
-            asset_id=asset_id,
-            ownership=OWNERSHIP_USER_OWNED,
-            reason="symlink-outside-repo",
-            link_target=str(target),
-        )
+        return _classify_repo_link(path, asset_id=asset_id, repo_root=repo_root, link_kind="symlink")
 
     if not path.exists():
         reason = "expected-target-absent" if expected_asset_id else "path-absent"
         return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_ABSENT, reason)
+
+    if _is_windows_junction(path):
+        return _classify_repo_link(path, asset_id=asset_id, repo_root=repo_root, link_kind="junction")
 
     if not path.is_dir():
         return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT, "target-not-directory")

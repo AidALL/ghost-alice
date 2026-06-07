@@ -23,7 +23,9 @@ resolve_effective_visibility() {
     prof="$("$py" -c 'import sys, os
 sys.path.insert(0, os.path.join(sys.argv[1], "_shared"))
 import runtime_config
-print(runtime_config.load_config()["agent_visibility"]["profile"])' "$SCRIPT_DIR" 2>/dev/null)"
+import pathlib
+home = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
+print(runtime_config.load_config(home=home)["agent_visibility"]["profile"])' "$SCRIPT_DIR" "${HOME:-}" 2>/dev/null)"
     case "$prof" in
       strict|dynamic|minimal) printf '%s' "$prof"; return 0 ;;
     esac

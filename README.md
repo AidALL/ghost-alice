@@ -123,28 +123,28 @@ cd ~/ghost-alice
 bash install.sh
 ```
 
-Windows:
+Windows PowerShell / CMD:
 
 ```powershell
-.\install.ps1
+.\install.cmd
 ```
 
-CMD:
+For `cmd.exe`, omit the leading `.\`:
 
 ```bat
 install.cmd
 ```
 
-`install.cmd` is a thin wrapper around `install.ps1`. The Windows install
-path keeps the Python 3.11+ runtime contract and UTF-8 console setup in
-`install.ps1`; the CMD wrapper only forwards arguments.
+`install.cmd` is a thin wrapper around `install.ps1` for Windows shells where
+PowerShell execution policy or profile loading blocks direct `.ps1` execution.
+The Windows install path keeps the Python 3.11+ runtime contract and UTF-8 console setup in `install.ps1`; the wrapper calls it with `-NoProfile -ExecutionPolicy Bypass` and forwards arguments. It does not change the user or machine execution policy.
 
 Agent visibility command surface:
 
 - Claude Code uses `/visibility strict|dynamic|minimal` as its workspace command.
 - Codex handles `/visibility` through the trusted `UserPromptSubmit` hook pseudo-command path.
 - Every platform can inspect and change the same profile value through `_shared/agent_visibility_cli.py`.
-- The install-time default is `dynamic`. Use `bash install.sh --visibility dynamic` or `.\install.ps1 -Visibility dynamic` to set the initial profile; `--agent-visibility` and `-AgentVisibility` remain compatibility aliases.
+- The install-time default is `dynamic`. Use `bash install.sh --visibility dynamic` or `.\install.cmd -Visibility dynamic` to set the initial profile; `--agent-visibility` and `-AgentVisibility` remain compatibility aliases.
 - Visibility changes the user-facing governance message surface only. It does not weaken hook execution, strict-grade logs, or Work-Impact Projection.
 
 Detailed docs:
@@ -173,7 +173,7 @@ bash install.sh --uninstall
 ```
 
 ```powershell
-.\install.ps1 -Uninstall
+.\install.cmd -Uninstall
 ```
 
 ```cmd

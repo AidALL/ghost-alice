@@ -139,10 +139,12 @@ git diff --staged > ghost-alice-local-staged.diff
 Windows PowerShell:
 
 ```powershell
-.\install.ps1
-.\install.ps1 -Doctor
-.\install.ps1 -Status
+.\install.cmd
+.\install.cmd -Doctor
+.\install.cmd -Status
 ```
+
+Windows PowerShell이 `Microsoft.PowerShell_profile.ps1` 또는 `.\install.ps1`에 대해 `cannot be loaded because running scripts is disabled`를 출력하면 `.\install.cmd`를 사용한다. wrapper는 이번 installer 실행에서 PowerShell을 `-NoProfile -ExecutionPolicy Bypass`로 시작하고, 사용자 또는 머신 execution policy를 변경하지 않는다.
 
 macOS / Linux / WSL / Git Bash:
 

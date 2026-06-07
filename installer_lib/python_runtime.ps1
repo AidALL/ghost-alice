@@ -11,7 +11,8 @@ function Test-Python311OrNewer {
 function Get-PythonVersionKey {
     param([string]$PythonExe)
     if (-not (Test-Python311OrNewer $PythonExe)) { return $null }
-    $version = & $PythonExe -c 'import sys; print(f"{sys.version_info.major:03d}.{sys.version_info.minor:03d}.{sys.version_info.micro:03d}")' 2>$null
+    $versionCode = 'import sys; v=sys.version_info; print(str(v.major).zfill(3)+chr(46)+str(v.minor).zfill(3)+chr(46)+str(v.micro).zfill(3))'
+    $version = & $PythonExe -c $versionCode 2>$null
     if ($LASTEXITCODE -ne 0) { return $null }
     return $version
 }
@@ -86,6 +87,6 @@ function Initialize-PythonRuntimeForInstall {
     }
 
     Write-Err "Python 3.11+ is required. Automatic setup did not produce a working Python 3.11+ runtime." "Python 3.11+ is required. Automatic setup did not produce a working Python 3.11+ runtime."
-    Write-Info "On Windows, run winget install --id Python.Python.3 --exact, then rerun install.ps1." "On Windows, run winget install --id Python.Python.3 --exact, then rerun install.ps1."
+    Write-Info "On Windows, run winget install --id Python.Python.3 --exact, then rerun .\install.cmd." "On Windows, run winget install --id Python.Python.3 --exact, then rerun .\install.cmd."
     throw "Python 3.11+ is required - aborting installation"
 }

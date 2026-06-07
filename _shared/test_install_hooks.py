@@ -532,7 +532,10 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertIn("task_router_reminder_hook.py", command)
         self.assertIn("--root", command)
-        self.assertIn(str(install_hooks._repo_root_from_this_file() / ".tmp" / "session-intent"), command)
+        self.assertIn(
+            str(install_hooks._repo_root_from_this_file() / ".tmp" / "session-intent").replace("\\", "/"),
+            command.replace("\\", "/"),
+        )
 
     def test_codex_task_router_reminder_releases_after_intent_preflight_and_ignores_legacy_allow_gate(self):
         script = Path(install_hooks.__file__).with_name("task_router_reminder_hook.py")
@@ -3133,6 +3136,33 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             trusted_hash = hook_state[key]["trusted_hash"]
             self.assertRegex(trusted_hash, r"^sha256:[0-9a-f]{64}$")
 
+    def test_install_codex_trusts_current_project_config_layer(self):
+        """Codex install marks the Ghost-ALICE project config layer as trusted."""
+        self._create_platform_dir("codex")
+        repo = self.fake_home / "repo" / "Ghost-ALICE"
+        repo.mkdir(parents=True)
+
+        with (
+            patch.object(install_hooks, "_repo_root_from_this_file", return_value=repo),
+            patch.object(install_hooks, "_codex_hooks_supported", return_value=True),
+        ):
+            result = install_hooks.install_hook("codex")
+        self.assertEqual(result, "installed")
+
+        project_key = str(repo.resolve())
+        config = tomllib.loads(self._codex_config_toml().read_text(encoding="utf-8"))
+        self.assertEqual(config["projects"][project_key]["trust_level"], "trusted")
+        trace = self.fake_home / ".ghost-alice" / "install-state" / "codex-project-trust-change.json"
+        self.assertTrue(trace.exists())
+        data = json.loads(trace.read_text(encoding="utf-8"))
+        self.assertEqual(data["kind"], "codex_project_trust")
+        self.assertEqual(data["path"], self._codex_config_toml().as_posix())
+        self.assertEqual(data["project_path"], project_key)
+        self.assertEqual(data["before_state"], "missing")
+        self.assertEqual(data["after_state"], "trusted")
+        self.assertNotIn("raw_config", data)
+        self.assertNotIn("content", data)
+
     def test_install_codex_hook_commands_do_not_embed_versioned_homebrew_python(self):
         """Installed hook commands resolve Python at runtime instead of pinning one Homebrew minor."""
         if os.name == "nt":
@@ -3676,10 +3706,17 @@ class TestBackupRotation(unittest.TestCase):
 class TestSessionStartHook(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self.prev_home = os.environ.get("HOME")
+        os.environ["HOME"] = self.tmp.name
         os.environ["CLAUDE_CONFIG_DIR"] = self.tmp.name
         os.environ["CODEX_HOME"] = self.tmp.name
+
     def tearDown(self):
         self.tmp.cleanup()
+        if self.prev_home is None:
+            os.environ.pop("HOME", None)
+        else:
+            os.environ["HOME"] = self.prev_home
         os.environ.pop("CLAUDE_CONFIG_DIR", None)
         os.environ.pop("CODEX_HOME", None)
 

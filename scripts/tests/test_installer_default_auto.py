@@ -20,6 +20,29 @@ INSTALL_PS1 = REPO_ROOT / "install.ps1"
 README = REPO_ROOT / "README.md"
 
 
+def _find_test_bash() -> str | None:
+    candidates = [
+        shutil.which("bash"),
+        shutil.which("bash.exe"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        normalized = path.as_posix().lower()
+        if sys.platform.startswith("win") and (
+            normalized.endswith("/windows/system32/bash.exe")
+            or normalized.endswith("/appdata/local/microsoft/windowsapps/bash.exe")
+        ):
+            continue
+        return str(path)
+    return None
+
+
 def _skill_target_count(*skill_names: str) -> int:
     total = 0
     for skill_name in skill_names:
@@ -134,7 +157,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertIn("[switch]$Auto,", install_ps1)
         self.assertIn("if (-not $PlatformWasExplicit -and -not $PromptPlatform -and -not $hasInspectionCommand -and -not $PlainFullUninstall -and -not $CleanupPending) {", install_ps1)
         self.assertIn("$Auto = $true", install_ps1)
-        self.assertIn(".\\install.ps1                          # Install to detected AI tools", install_ps1)
+        self.assertIn(".\\install.cmd                          # Install to detected AI tools", install_ps1)
         self.assertNotIn(".\\install.ps1 -Auto                    # Recommended", install_ps1)
         self.assertNotIn("$AutoDetectRequested", install_ps1)
         self.assertNotIn("-Auto and -Platform", install_ps1)
@@ -211,8 +234,9 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
 
         self.assertIn("bash install.sh\n", readme)
-        self.assertIn(".\\install.ps1\n", readme)
+        self.assertIn(".\\install.cmd\n", readme)
         self.assertIn("install.cmd\n", readme)
+        self.assertNotIn("```powershell\n.\\install.ps1\n```", readme)
         self.assertNotIn("bash install.sh --auto", readme)
         self.assertNotIn(".\\install.ps1 -Auto", readme)
         self.assertNotIn("install.cmd -Auto", readme)
@@ -232,7 +256,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertIn("-Uninstall", install_ps1)
 
     def test_install_sh_auto_verbose_uses_expanded_output_not_process_report(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh auto-detect test")
 
@@ -264,7 +288,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertNotIn("rerun with --verbose", output)
 
     def test_install_sh_auto_tty_output_starts_report_before_live_updates(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh auto-detect test")
 
@@ -313,7 +337,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertIn("  [5/5] Verification        ok", output)
 
     def test_install_sh_default_output_uses_process_report_with_dynamic_counts(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh integration test")
 
@@ -367,7 +391,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertNotIn("→ copied (copy-only compatibility mode)", result.stdout)
 
     def test_install_sh_moves_deprecated_installed_skills_out_of_discovery_path(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh integration test")
 
@@ -402,7 +426,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertTrue(any(backup_root.glob("session-intent-guard-*")))
 
     def test_install_sh_tty_output_uses_one_line_skill_sync_counter(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh integration test")
 
@@ -505,6 +529,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["CODEX_HOME"] = codex_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
+            env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
 
             result = subprocess.run(
                 [
@@ -541,7 +566,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             )
             self.assertIn("  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]", result.stdout)
             self.assertIn("  [5/5] Verification        ok", result.stdout)
-            self.assertRegex(result.stdout, r"log: .+\.ghost-alice/install/\d{4}-\d{2}-\d{2}-\d{6}\.log")
+            self.assertRegex(result.stdout, r"log: .+\.ghost-alice[/\\]install[/\\]\d{4}-\d{2}-\d{2}-\d{6}\.log")
             self.assertNotIn("\r[2/5] Skill sync [", result.stdout)
             self.assertNotIn("[install_hooks]", result.stdout)
 
@@ -566,6 +591,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["GHOST_ALICE_INSTALL_LOG_FILE"] = stale_log.as_posix()
             env["GHOST_ALICE_INSTALL_EVENT_FILE"] = (stale_dir / "old.events.jsonl").as_posix()
             env.pop("GHOST_ALICE_INSTALL_REPORT_CHILD", None)
+            env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
 
             result = subprocess.run(
                 [
@@ -592,7 +618,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertNotIn(stale_log.as_posix(), result.stdout)
-            self.assertRegex(result.stdout, r"log: .+\.ghost-alice/install/\d{4}-\d{2}-\d{2}-\d{6}\.log")
+            self.assertRegex(result.stdout, r"log: .+\.ghost-alice[/\\]install[/\\]\d{4}-\d{2}-\d{2}-\d{6}\.log")
 
     def test_install_ps1_tty_output_uses_one_line_skill_sync_counter(self) -> None:
         pwsh = shutil.which("pwsh")
@@ -611,6 +637,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["CODEX_HOME"] = codex_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
+            env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
 
             return_code, output = _run_pty(
                 [
@@ -656,7 +683,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         return config_path
 
     def test_install_sh_report_reflects_existing_config_without_flag(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh integration test")
 
@@ -692,7 +719,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     self.assertEqual(saved["agent_visibility"]["profile"], existing)
 
     def test_install_sh_report_reflects_flag_over_existing_config(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh integration test")
 
@@ -721,7 +748,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertEqual(saved["agent_visibility"]["profile"], "minimal")
 
     def test_report_sh_resolve_effective_visibility_priority(self) -> None:
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for report.sh helper test")
 
@@ -814,6 +841,7 @@ Remove-Item -LiteralPath $configPath -Force
                     env["HOME"] = temp_home.as_posix()
                     env["CODEX_HOME"] = codex_home.as_posix()
                     env["GHOST_ALICE_LANG"] = "en"
+                    env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
 
                     result = subprocess.run(
                         [

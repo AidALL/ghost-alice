@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import os
 import shlex
 import sys
 from pathlib import Path
@@ -58,7 +59,19 @@ _CLEAN_TECH_COPY: dict[HookKind, str] = {
 
 
 def _pending_manifest_path(platform: str) -> Path:
-    return Path.home() / ".ghost-alice" / "pending-merges" / platform / "manifest.json"
+    return _home() / ".ghost-alice" / "pending-merges" / platform / "manifest.json"
+
+
+def _home() -> Path:
+    for key in ("HOME", "USERPROFILE"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return Path(value)
+    drive = os.environ.get("HOMEDRIVE", "").strip()
+    path = os.environ.get("HOMEPATH", "").strip()
+    if drive and path:
+        return Path(f"{drive}{path}")
+    return Path.home()
 
 
 def _pending_entries(platform: str) -> list[dict[str, Any]]:
@@ -176,7 +189,7 @@ def _visibility_json_payload(input_payload: dict[str, Any]) -> str | None:
 
     action, profile = parsed
     if action == "show":
-        current = runtime_config.load_config()["agent_visibility"]["profile"]
+        current = runtime_config.load_config(home=_home())["agent_visibility"]["profile"]
         reason = (
             f"Ghost-ALICE agent visibility profile is {current}. "
             "Use /visibility strict, /visibility dynamic, or /visibility minimal to change it."
@@ -186,7 +199,7 @@ def _visibility_json_payload(input_payload: dict[str, Any]) -> str | None:
     if action == "set" and profile is not None:
         normalized = runtime_config.canonical_agent_visibility_profile(profile)
         if normalized == str(profile).strip().lower().replace("_", "-"):
-            runtime_config.save_config({"agent_visibility": {"profile": normalized}})
+            runtime_config.save_config({"agent_visibility": {"profile": normalized}}, home=_home())
             reason = (
                 f"Ghost-ALICE agent visibility profile set to {normalized}. "
                 "Hook execution and strict session logging remain unchanged."
@@ -233,7 +246,7 @@ def main() -> int:
     parser.add_argument("--context", required=True, choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", required=True, choices=["text", "json"])
     parser.add_argument("--internal-b64", required=True)
-    args = parser.parse_args()
+    args, _unknown = parser.parse_known_args()
 
     internal = _decode_internal(args.internal_b64)
     if args.hook in {"prompt-check", "hook-reminder"} and args.context == "prompt_submit" and args.format == "json":

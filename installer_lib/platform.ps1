@@ -1,18 +1,23 @@
 ﻿# Ghost-ALICE installer library: platform
 # Dot-sourced by install.ps1. Do not run directly.
 
+function Resolve-UserHome {
+    if ($env:HOME) { return $env:HOME }
+    return $HOME
+}
+
 function Resolve-ClaudeHome {
     if ($env:CLAUDE_CONFIG_DIR) { return $env:CLAUDE_CONFIG_DIR }
-    return (Join-Path $HOME ".claude")
+    return (Join-Path (Resolve-UserHome) ".claude")
 }
 
 function Resolve-CodexHome {
     if ($env:CODEX_HOME) { return $env:CODEX_HOME }
-    return (Join-Path $HOME ".codex")
+    return (Join-Path (Resolve-UserHome) ".codex")
 }
 
 function Resolve-CodexSkillsDir {
-    return (Join-Path (Join-Path $HOME ".agents") "skills")
+    return (Join-Path (Join-Path (Resolve-UserHome) ".agents") "skills")
 }
 
 function Test-CodexHooksSupported {
@@ -46,7 +51,7 @@ function Get-DetectedUninstallPlatforms {
     foreach ($plat in (Get-DetectedUninstallPlatformHomes)) {
         $seen[$plat] = $true
     }
-    $stateRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install-state"
+    $stateRoot = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state"
     foreach ($plat in @("claude", "codex")) {
         if (Test-Path (Join-Path $stateRoot "$plat.json")) {
             $seen[$plat] = $true

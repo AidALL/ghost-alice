@@ -741,6 +741,9 @@ def _resolve_hook_event(intent: str, platform: str) -> str:
 #     Codex hooks are stored in hooks.json and enabled with a config.toml feature flag.
 
 def _home() -> Path:
+    env = os.environ.get("HOME")
+    if env:
+        return Path(env)
     return Path.home()
 
 
@@ -1068,7 +1071,7 @@ def _rotate_backups(
         pending_root: Optional[Path] = _pending_root
     else:
         try:
-            pending_root = (Path.home() / ".ghost-alice" / "pending-merges").resolve()
+            pending_root = (_home() / ".ghost-alice" / "pending-merges").resolve()
         except OSError:
             pending_root = None
 
@@ -1406,6 +1409,120 @@ def _find_toml_header_bounds(lines: list[str], header: str) -> tuple[Optional[in
             end = idx
             break
     return start, end
+
+
+def _codex_project_trust_change_path() -> Path:
+    return _home() / ".ghost-alice" / "install-state" / "codex-project-trust-change.json"
+
+
+def _codex_project_trust_header(project_path: str) -> str:
+    return f"[projects.{_toml_basic_string(project_path)}]"
+
+
+def _toml_trust_level_value(raw_value: str) -> str:
+    value = raw_value.split("#", 1)[0].strip()
+    if value in {'"trusted"', "'trusted'"}:
+        return "trusted"
+    if value in {'"untrusted"', "'untrusted'"}:
+        return "untrusted"
+    return "other"
+
+
+def _codex_project_trust_state_in_content(content: str, project_path: str) -> str:
+    lines = content.splitlines()
+    start, end = _find_toml_header_bounds(lines, _codex_project_trust_header(project_path))
+    if start is None:
+        return "missing"
+    for raw_line in lines[start + 1:end]:
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        if key.strip() == "trust_level":
+            return _toml_trust_level_value(value)
+    return "missing"
+
+
+def _merge_codex_project_trust(content: str, project_path: str) -> tuple[str, bool, str]:
+    lines = content.splitlines()
+    header = _codex_project_trust_header(project_path)
+    start, end = _find_toml_header_bounds(lines, header)
+    before_state = _codex_project_trust_state_in_content(content, project_path)
+
+    if before_state == "trusted":
+        return _render_text_with_trailing_newline(lines), False, before_state
+
+    trusted_line = 'trust_level = "trusted"'
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend([header, trusted_line])
+        return _render_text_with_trailing_newline(lines), True, before_state
+
+    trust_idx: Optional[int] = None
+    for idx in range(start + 1, end):
+        stripped = lines[idx].strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _value = stripped.split("=", 1)
+        if key.strip() == "trust_level":
+            trust_idx = idx
+            break
+
+    if trust_idx is None:
+        lines.insert(end, trusted_line)
+    else:
+        lines[trust_idx] = trusted_line
+    return _render_text_with_trailing_newline(lines), True, before_state
+
+
+def _write_codex_project_trust_change(
+    config_file: Path,
+    *,
+    project_path: str,
+    before_state: str,
+    after_state: str,
+    dry_run: bool = False,
+) -> None:
+    change = {
+        "schema_version": "codex-project-trust-change.v1",
+        "kind": "codex_project_trust",
+        "path": config_file.as_posix(),
+        "project_path": project_path,
+        "before_state": before_state,
+        "after_state": after_state,
+        "applied_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+    path = _codex_project_trust_change_path()
+    if dry_run:
+        _log(_t(f"  DRY-RUN: Would record Codex project trust change: {path}", f"  DRY-RUN: Would record Codex project trust change: {path}"))
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(change, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _log(_t("  Recorded Codex project trust rollback metadata", "  Recorded Codex project trust rollback metadata"))
+
+
+def _ensure_codex_project_trusted(dry_run: bool = False) -> bool:
+    config_file = _resolve_codex_config_toml()
+    project_path = str(_repo_root_from_this_file().resolve())
+    current_content = _read_text_file(config_file)
+    updated_content, changed, before_state = _merge_codex_project_trust(current_content, project_path)
+
+    if not changed:
+        _log(_t("  Codex project trust already current", "  Codex project trust already current"))
+        return False
+
+    _write_text_file(config_file, updated_content, dry_run=dry_run)
+    if before_state != "trusted":
+        _write_codex_project_trust_change(
+            config_file,
+            project_path=project_path,
+            before_state=before_state,
+            after_state="trusted",
+            dry_run=dry_run,
+        )
+    _log(_t("  Trusted Ghost-ALICE project config layer in Codex config.toml", "  Trusted Ghost-ALICE project config layer in Codex config.toml"))
+    return True
 
 
 def _merge_codex_hook_trust_state(content: str, state_entries: dict[str, str]) -> tuple[str, bool]:
@@ -1978,6 +2095,8 @@ def install_hook(platform_key: str, dry_run: bool = False) -> str:
 
     if platform_key == "codex":
         if _ensure_codex_hook_feature_enabled(dry_run=dry_run):
+            changed = True
+        if _ensure_codex_project_trusted(dry_run=dry_run):
             changed = True
         if _ensure_codex_hook_trust_state(settings_file, settings, dry_run=dry_run):
             changed = True

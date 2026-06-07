@@ -153,6 +153,10 @@ function Initialize-PwshLtsBaseline {
     }
     $script:PwshLtsEnsureChecked = $true
 
+    if ($env:GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE -eq "1") {
+        return
+    }
+
     if (-not (Test-Windows10OrNewer)) {
         return
     }

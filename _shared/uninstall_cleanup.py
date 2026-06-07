@@ -8,6 +8,7 @@ import json
 import os
 import shutil
 import subprocess
+import stat
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,6 +28,31 @@ REMOVABLE_TARGET_OWNERSHIPS = {
 }
 
 
+def _user_home() -> Path:
+    configured = os.environ.get("HOME")
+    if configured:
+        return Path(configured)
+    return Path.home()
+
+
+def _ghost_alice_root() -> Path:
+    return _user_home() / ".ghost-alice"
+
+
+def _codex_home() -> Path:
+    configured = os.environ.get("CODEX_HOME")
+    if configured:
+        return Path(configured)
+    return _user_home() / ".codex"
+
+
+def _claude_home() -> Path:
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    if configured:
+        return Path(configured)
+    return _user_home() / ".claude"
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
@@ -34,7 +60,7 @@ def _now() -> str:
 def _default_report_path(platform: str, *, confirm: bool) -> Path:
     mode = "confirm" if confirm else "dry-run"
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return Path.home() / ".ghost-alice" / "uninstall-reports" / f"{platform}-{mode}-{stamp}.json"
+    return _ghost_alice_root() / "uninstall-reports" / f"{platform}-{mode}-{stamp}.json"
 
 
 def _load_manifest(path: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -54,7 +80,15 @@ def _load_manifest(path: Path) -> tuple[dict[str, Any] | None, str | None]:
 
 def _is_junction(path: Path) -> bool:
     is_junction = getattr(path, "is_junction", None)
-    return bool(is_junction and is_junction())
+    if is_junction is not None:
+        return bool(is_junction())
+    if os.name != "nt" or path.is_symlink():
+        return False
+    try:
+        attrs = path.stat().st_file_attributes
+    except (AttributeError, OSError):
+        return False
+    return bool(attrs & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
 def _lexical_absolute(path: Path) -> Path:
@@ -70,11 +104,10 @@ def _is_under(path: Path, root: Path) -> bool:
 
 
 def _platform_target_roots(platform: str) -> list[Path]:
-    home = Path.home()
     if platform == "claude":
-        return [home / ".claude" / "skills"]
+        return [_claude_home() / "skills"]
     if platform == "codex":
-        return [home / ".agents" / "skills"]
+        return [_user_home() / ".agents" / "skills"]
     return []
 
 
@@ -83,7 +116,7 @@ def _is_allowed_target_path(path: Path, platform: str) -> bool:
 
 
 def _is_allowed_support_path(path: Path) -> bool:
-    return _is_under(path, Path.home() / ".ghost-alice")
+    return _is_under(path, _ghost_alice_root())
 
 
 def _remove_path(path: Path) -> None:
@@ -268,6 +301,24 @@ def _render_text_with_trailing_newline(lines: list[str]) -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+def _toml_basic_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _find_toml_header_bounds(lines: list[str], header: str) -> tuple[int | None, int]:
+    start: int | None = None
+    end = len(lines)
+    for idx, raw_line in enumerate(lines):
+        stripped = raw_line.strip()
+        if stripped == header:
+            start = idx
+            continue
+        if start is not None and stripped.startswith("[") and stripped.endswith("]"):
+            end = idx
+            break
+    return start, end
+
+
 def _restore_codex_hooks_feature_content(content: str, before_state: str) -> tuple[str, bool]:
     lines = content.splitlines()
     start, end = _find_toml_section_bounds(lines, "features")
@@ -306,12 +357,70 @@ def _restore_codex_hooks_feature_content(content: str, before_state: str) -> tup
     return _render_text_with_trailing_newline(lines), True
 
 
+def _codex_project_trust_header(project_path: str) -> str:
+    return f"[projects.{_toml_basic_string(project_path)}]"
+
+
+def _restore_codex_project_trust_content(
+    content: str,
+    *,
+    project_path: str,
+    before_state: str,
+) -> tuple[str, bool]:
+    lines = content.splitlines()
+    header = _codex_project_trust_header(project_path)
+    start, end = _find_toml_header_bounds(lines, header)
+
+    if start is None:
+        if before_state == "missing":
+            return content if content.endswith("\n") else content + "\n", False
+        new_content = content.rstrip("\n")
+        if new_content:
+            new_content += "\n\n"
+        new_content += f"{header}\ntrust_level = \"{before_state}\"\n"
+        return new_content, True
+
+    trust_idx: int | None = None
+    for idx in range(start + 1, end):
+        stripped = lines[idx].strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, _value = stripped.split("=", 1)
+        if key.strip() == "trust_level":
+            trust_idx = idx
+            break
+
+    if before_state == "missing":
+        if trust_idx is None:
+            return _render_text_with_trailing_newline(lines), False
+        del lines[trust_idx]
+        start, end = _find_toml_header_bounds(lines, header)
+        if start is not None:
+            meaningful = [
+                line
+                for line in lines[start + 1:end]
+                if line.strip() and not line.strip().startswith("#")
+            ]
+            if not meaningful:
+                del lines[start:end]
+        return _render_text_with_trailing_newline(lines), True
+
+    replacement = f'trust_level = "{before_state}"'
+    if trust_idx is None:
+        lines.insert(end, replacement)
+        return _render_text_with_trailing_newline(lines), True
+    if lines[trust_idx].strip() == replacement:
+        return _render_text_with_trailing_newline(lines), False
+    lines[trust_idx] = replacement
+    return _render_text_with_trailing_newline(lines), True
+
+
 def _is_allowed_codex_config_path(path: Path) -> bool:
-    return _same_path(path, Path.home() / ".codex" / "config.toml")
+    return _same_path(path, _codex_home() / "config.toml")
 
 
 def _codex_hooks_json_has_remaining_entries() -> bool:
-    hooks_path = Path.home() / ".codex" / "hooks.json"
+    hooks_path = _codex_home() / "hooks.json"
     try:
         data = json.loads(hooks_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -394,6 +503,87 @@ def _codex_hook_feature_items(manifest: dict[str, Any], *, confirm: bool) -> lis
     return items
 
 
+def _codex_project_trust_item_from_change(change: dict[str, Any], *, confirm: bool) -> dict[str, Any] | None:
+    raw_path = change.get("path")
+    raw_project_path = change.get("project_path")
+    before_state = str(change.get("before_state") or "").strip().lower()
+    after_state = str(change.get("after_state") or "").strip().lower()
+    if not isinstance(raw_path, str) or not raw_path:
+        return None
+    if not isinstance(raw_project_path, str) or not raw_project_path:
+        return None
+    if before_state not in {"missing", "untrusted", "other"} or after_state != "trusted":
+        return None
+
+    path = Path(raw_path).expanduser()
+    item: dict[str, Any] = {
+        "kind": "codex-project-trust-config",
+        "target_name": "codex-project-trust",
+        "path": path.as_posix(),
+        "project_path": raw_project_path,
+        "before_state": before_state,
+        "after_state": after_state,
+    }
+    if before_state == "other":
+        item.update(
+            action="manual-review",
+            reason="codex-project-trust-before-state-not-restorable",
+        )
+        return item
+    if not _is_allowed_codex_config_path(path):
+        item.update(action="manual-review", reason="outside-codex-config-path")
+        return item
+    if not path.exists():
+        item.update(action="missing", reason="codex-config-absent")
+        return item
+    try:
+        current = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        item.update(action="manual-review", reason="codex-config-read-failed", error=str(exc))
+        return item
+
+    restored, changed = _restore_codex_project_trust_content(
+        current,
+        project_path=raw_project_path,
+        before_state=before_state,
+    )
+    if not changed:
+        item.update(action="unchanged", reason="codex-project-trust-already-restored")
+        return item
+    if not confirm:
+        item.update(
+            action="would-remove-codex-project-trust"
+            if before_state == "missing"
+            else "would-restore-codex-project-trust",
+            reason="trace-backed-codex-project-trust",
+            restored_to=before_state,
+        )
+        return item
+    try:
+        path.write_text(restored, encoding="utf-8")
+    except OSError as exc:
+        item.update(action="manual-review", reason="codex-config-write-failed", error=str(exc))
+        return item
+    item.update(
+        action="removed-codex-project-trust"
+        if before_state == "missing"
+        else "restored-codex-project-trust",
+        reason="trace-backed-codex-project-trust",
+        restored_to=before_state,
+    )
+    return item
+
+
+def _codex_project_trust_items(manifest: dict[str, Any], *, confirm: bool) -> list[dict[str, Any]]:
+    items: list[dict[str, Any]] = []
+    for change in manifest.get("system_env_changes", []):
+        if isinstance(change, dict) and change.get("kind") == "codex_project_trust":
+            item = _codex_project_trust_item_from_change(change, confirm=confirm)
+            if item is not None:
+                items.append(item)
+    return items
+
+
 def _legacy_source_repo_hook_item(manifest: dict[str, Any], *, confirm: bool) -> dict[str, Any] | None:
     repo_root = _manifest_repo_root(manifest)
     if repo_root is None:
@@ -460,7 +650,7 @@ def _apply_remove_action(item: dict[str, Any], path: Path, *, confirm: bool, rea
 
 
 def _uninstall_backup_root(platform: str) -> Path:
-    return Path.home() / ".ghost-alice" / "uninstall-backup" / platform
+    return _ghost_alice_root() / "uninstall-backup" / platform
 
 
 def _quarantine_then_remove(
@@ -602,18 +792,23 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             confirm=args.confirm,
         ),
         _support_artifact_item(
+            "codex-project-trust-change",
+            install_state_dir / f"{args.platform}-project-trust-change.json",
+            confirm=args.confirm,
+        ),
+        _support_artifact_item(
             "pending-merges",
-            Path.home() / ".ghost-alice" / "pending-merges" / args.platform,
+            _ghost_alice_root() / "pending-merges" / args.platform,
             confirm=args.confirm,
         ),
         _support_artifact_item(
             "hook-dispatcher-assets",
-            Path.home() / ".ghost-alice" / "hooks",
+            _ghost_alice_root() / "hooks",
             confirm=args.confirm,
         ),
         _support_artifact_item(
             "install-rollbacks",
-            Path.home() / ".ghost-alice" / "install-rollbacks",
+            _ghost_alice_root() / "install-rollbacks",
             confirm=args.confirm,
         ),
     ]
@@ -621,7 +816,7 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
 
 def _global_rule_item(platform: str, *, confirm: bool) -> dict[str, Any] | None:
     if platform == "codex":
-        path = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")) / "AGENTS.md"
+        path = _codex_home() / "AGENTS.md"
         remover = remove_codex_bootstrap
     else:
         return None
@@ -681,12 +876,14 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
             "would-remove",
             "would-remove-global-rule",
             "would-remove-source-repo-hook-path",
+            "would-remove-codex-project-trust",
         }:
             summary["would_remove"] += 1
         elif action in {
             "removed",
             "removed-global-rule",
             "removed-source-repo-hook-path",
+            "removed-codex-project-trust",
         }:
             summary["removed"] += 1
         elif action == "manual-review":
@@ -717,6 +914,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     else:
         items.extend(_source_repo_hook_items(manifest, confirm=args.confirm))
         items.extend(_codex_hook_feature_items(manifest, confirm=args.confirm))
+        items.extend(_codex_project_trust_items(manifest, confirm=args.confirm))
         for target in manifest.get("targets", []):
             if isinstance(target, dict):
                 items.append(

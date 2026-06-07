@@ -43,6 +43,7 @@ class InstallPs1PwshLtsTest(unittest.TestCase):
         self.assertIn('function Get-InstalledPwshVersion', script)
         self.assertIn('function Resolve-PowerShell76LtsReleaseAsset', script)
         self.assertIn('function Initialize-PwshLtsBaseline', script)
+        self.assertIn('$env:GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE -eq "1"', script)
         self.assertIn('$script:PwshLtsBaselineVersion = [version]"7.6.0"', script)
         self.assertIn('$script:PwshLtsReleaseLine = "7.6"', script)
         self.assertRegex(script, r"\$existingVersion\s+-and\s+\$existingVersion\s+-ge\s+\$script:PwshLtsBaselineVersion")

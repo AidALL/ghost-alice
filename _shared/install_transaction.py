@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -70,6 +71,42 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path)
         return
     path.unlink()
+
+
+def _rename_path(source: Path, dest: Path) -> None:
+    attempts = 5 if os.name == "nt" else 1
+    last_error: OSError | None = None
+    for attempt in range(attempts):
+        try:
+            source.rename(dest)
+            return
+        except OSError as exc:
+            last_error = exc
+            if attempt + 1 >= attempts:
+                break
+            time.sleep(0.05 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+
+
+def _create_directory_link(source: Path, link: Path) -> str:
+    try:
+        os.symlink(source, link, target_is_directory=True)
+        return "symlink"
+    except OSError as exc:
+        if os.name != "nt" or not source.is_dir() or getattr(exc, "winerror", None) != 1314:
+            raise
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(source)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            raise exc
+        return "junction"
 
 
 def _prune_rollback_root(root: Path, keep: int = DEFAULT_ROLLBACK_KEEP) -> None:
@@ -240,14 +277,14 @@ def staged_copy_replace(
             phase = "publish"
             if dst.exists() or dst.is_symlink():
                 rollback.parent.mkdir(parents=True, exist_ok=True)
-                dst.rename(rollback)
+                _rename_path(dst, rollback)
                 moved_existing = True
-            stage.rename(dst)
+            _rename_path(stage, dst)
             _prune_rollback_root(root, rollback_keep)
         except OSError as exc:
             if moved_existing and not (dst.exists() or dst.is_symlink()) and (rollback.exists() or rollback.is_symlink()):
                 try:
-                    rollback.rename(dst)
+                    _rename_path(rollback, dst)
                 except OSError as rollback_exc:
                     phase = "rollback"
                     raise InstallTransactionError(
@@ -296,21 +333,21 @@ def staged_symlink_replace(
         stage_root.mkdir(parents=True, exist_ok=True)
         root.mkdir(parents=True, exist_ok=True)
         phase = "stage-symlink"
-        os.symlink(src, stage)
+        _create_directory_link(src, stage)
 
         moved_existing = False
         try:
             phase = "publish"
             if dst.exists() or dst.is_symlink():
                 rollback.parent.mkdir(parents=True, exist_ok=True)
-                dst.rename(rollback)
+                _rename_path(dst, rollback)
                 moved_existing = True
-            stage.rename(dst)
+            _rename_path(stage, dst)
             _prune_rollback_root(root, rollback_keep)
         except OSError as exc:
             if moved_existing and not (dst.exists() or dst.is_symlink()) and (rollback.exists() or rollback.is_symlink()):
                 try:
-                    rollback.rename(dst)
+                    _rename_path(rollback, dst)
                 except OSError as rollback_exc:
                     phase = "rollback"
                     raise InstallTransactionError(
@@ -371,7 +408,7 @@ def staged_copy_replace_many(
                 if item["moved_existing"] and (rollback.exists() or rollback.is_symlink()):
                     if dst.exists() or dst.is_symlink():
                         raise OSError(f"destination still exists during rollback: {dst}")
-                    rollback.rename(dst)
+                    _rename_path(rollback, dst)
             except OSError as exc:
                 if rollback_error is None:
                     rollback_error = exc
@@ -416,9 +453,9 @@ def staged_copy_replace_many(
             dst.parent.mkdir(parents=True, exist_ok=True)
             if dst.exists() or dst.is_symlink():
                 rollback.parent.mkdir(parents=True, exist_ok=True)
-                dst.rename(rollback)
+                _rename_path(dst, rollback)
                 item["moved_existing"] = True
-            stage.rename(dst)
+            _rename_path(stage, dst)
             item["published_new"] = True
             published_count += 1
             if progress_events is not None:

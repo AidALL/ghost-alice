@@ -492,10 +492,19 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
 
 
 def _emit_rendered_user_surface(user_stdout: str, user_stderr: str) -> None:
+    def _write(stream, text: str) -> None:
+        if not text:
+            return
+        try:
+            stream.write(text)
+        except UnicodeEncodeError:
+            encoding = getattr(stream, "encoding", None) or "utf-8"
+            stream.write(text.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+
     if user_stdout:
-        sys.stdout.write(user_stdout)
+        _write(sys.stdout, user_stdout)
     if user_stderr:
-        sys.stderr.write(user_stderr)
+        _write(sys.stderr, user_stderr)
 
 
 def run(hook_id: str, payload: str) -> int:

@@ -792,6 +792,15 @@ class InstallTransactionTest(unittest.TestCase):
 
 
 class StagedSymlinkReplaceTests(unittest.TestCase):
+    def assert_directory_link_points_to(self, link: Path, source: Path) -> None:
+        if link.is_symlink():
+            self.assertEqual(os.readlink(link), str(source))
+            return
+        is_junction = getattr(link, "is_junction", None)
+        self.assertIsNotNone(is_junction, "expected symlink or Windows junction")
+        self.assertTrue(is_junction(), "expected symlink or Windows junction")
+        self.assertEqual(link.resolve(), source.resolve())
+
     def test_staged_symlink_replace_creates_symlink_and_preserves_dest(self) -> None:
         transaction = _load_install_transaction()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -806,8 +815,7 @@ class StagedSymlinkReplaceTests(unittest.TestCase):
 
             transaction.staged_symlink_replace(source, dest, rollback_root=rollbacks)
 
-            self.assertTrue(dest.is_symlink())
-            self.assertEqual(os.readlink(dest), str(source))
+            self.assert_directory_link_points_to(dest, source)
             preserved = list(rollbacks.glob("rollback-*"))
             self.assertTrue(preserved, "previous dest must be moved aside, not unbacked-removed")
             self.assertEqual(
@@ -825,8 +833,7 @@ class StagedSymlinkReplaceTests(unittest.TestCase):
 
             transaction.staged_symlink_replace(source, dest, rollback_root=root / "rollbacks")
 
-            self.assertTrue(dest.is_symlink())
-            self.assertEqual(os.readlink(dest), str(source))
+            self.assert_directory_link_points_to(dest, source)
 
 
 class SymlinkInstallWiringTests(unittest.TestCase):

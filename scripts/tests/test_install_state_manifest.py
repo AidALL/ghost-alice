@@ -150,6 +150,7 @@ class InstallStateManifestTest(unittest.TestCase):
             "posix_chmod_fix",
             "source_repo_hook_path",
             "codex_hooks_feature_flag",
+            "codex_project_trust",
         ]:
             self.assertIn(kind, body)
 
@@ -172,10 +173,13 @@ class InstallStateManifestTest(unittest.TestCase):
             root = Path(temp_dir)
             state_path = root / ".ghost-alice" / "install-state" / "codex.json"
             sidecar = state_path.with_name("codex-hook-feature-change.json")
+            trust_sidecar = state_path.with_name("codex-project-trust-change.json")
             sidecar.parent.mkdir(parents=True)
             config_toml = root / ".codex" / "config.toml"
             config_toml.parent.mkdir()
             config_toml.write_text("[features]\nhooks = true\n", encoding="utf-8")
+            project = root / "repo"
+            project.mkdir()
             sidecar.write_text(
                 json.dumps(
                     {
@@ -183,6 +187,21 @@ class InstallStateManifestTest(unittest.TestCase):
                         "path": config_toml.as_posix(),
                         "before_state": "false",
                         "after_state": "true",
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            trust_sidecar.write_text(
+                json.dumps(
+                    {
+                        "kind": "codex_project_trust",
+                        "path": config_toml.as_posix(),
+                        "project_path": str(project.resolve()),
+                        "before_state": "missing",
+                        "after_state": "trusted",
                     },
                     indent=2,
                     sort_keys=True,
@@ -212,10 +231,14 @@ class InstallStateManifestTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             manifest = json.loads(state_path.read_text(encoding="utf-8"))
             changes = manifest["system_env_changes"]
-            self.assertEqual(1, len(changes))
+            self.assertEqual(2, len(changes))
             self.assertEqual("codex_hooks_feature_flag", changes[0]["kind"])
             self.assertEqual("false", changes[0]["before_state"])
             self.assertEqual("true", changes[0]["after_state"])
+            self.assertEqual("codex_project_trust", changes[1]["kind"])
+            self.assertEqual(str(project.resolve()), changes[1]["project_path"])
+            self.assertEqual("missing", changes[1]["before_state"])
+            self.assertEqual("trusted", changes[1]["after_state"])
 
 
 if __name__ == "__main__":

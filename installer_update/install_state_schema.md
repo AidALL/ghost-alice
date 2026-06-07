@@ -83,12 +83,13 @@ The per-platform manifest is placed at the following paths.
 
 `system_env_changes` is the array of changes that the install self-applied to the user system environment. Uninstall reads this record to roll back to the pre-change state.
 
-Each entry is distinguished by the `kind` field. `source_repo_hook_path` and `codex_hooks_feature_flag` are emitted by the current implementation. The other kinds below are reserved schema slots and must not be documented as active until the install-recording and uninstall-rollback code for that kind lands with tests.
+Each entry is distinguished by the `kind` field. `source_repo_hook_path`, `codex_hooks_feature_flag`, and `codex_project_trust` are emitted by the current implementation. The other kinds below are reserved schema slots and must not be documented as active until the install-recording and uninstall-rollback code for that kind lands with tests.
 
 | kind | meaning |
 | --- | --- |
 | `source_repo_hook_path` | Current. A record of changing the install source repository's `core.hooksPath` to the Ghost-ALICE post-merge hook path. `repo_root`, `before_present`, `before`, and `after` are recorded. Uninstall restores to `before` only when the current value equals `after`, or unsets it when there was no previous value. |
 | `codex_hooks_feature_flag` | Current. A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[features] hooks` to `true`. Records `path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores `before_state` only from this record. |
+| `codex_project_trust` | Current. A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted`. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
 | `ps_policy_change` | Reserved. A future self-applied change of the Windows PowerShell ExecutionPolicy (CurrentUser scope). The `before`/`after` policy values and the `rollback_command` are recorded together when implemented. |
 | `posix_rc_change` | Reserved. Future addition of a Ghost-ALICE managed block to a POSIX user shell rc file (`~/.bashrc`, `~/.zshrc`, `~/.profile`). `rc_path`, `block_marker`, and `added_lines` are recorded when implemented. |
 | `macos_quarantine_fix` | Reserved. Future automatic removal of the macOS `com.apple.quarantine` xattr. The array of target paths is recorded in `target_paths` when implemented. |

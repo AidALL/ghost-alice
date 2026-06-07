@@ -1,14 +1,23 @@
 ﻿# Ghost-ALICE installer library: report
 # Dot-sourced by install.ps1. Do not run directly.
 
+function Resolve-ReportUserHome {
+    if (Get-Command Resolve-UserHome -ErrorAction SilentlyContinue) {
+        return Resolve-UserHome
+    }
+    if ($env:HOME) { return $env:HOME }
+    if ($env:USERPROFILE) { return $env:USERPROFILE }
+    return [Environment]::GetFolderPath("UserProfile")
+}
+
 function Resolve-EffectiveVisibility {
     param([string]$Flag)
     if ($Flag) { return $Flag }
     $pythonExe = Find-PythonExe
     if ($pythonExe) {
         $shared = Join-Path $script:GhostAliceRoot "_shared"
-        $code = "import sys, os; sys.path.insert(0, sys.argv[1]); import runtime_config; print(runtime_config.load_config()['agent_visibility']['profile'])"
-        $prof = & $pythonExe -c $code $shared 2>$null
+        $code = "import sys, os, pathlib; sys.path.insert(0, sys.argv[1]); import runtime_config; home = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None; print(runtime_config.load_config(home=home)['agent_visibility']['profile'])"
+        $prof = & $pythonExe -c $code $shared (Resolve-ReportUserHome) 2>$null
         if ($LASTEXITCODE -eq 0 -and $prof) {
             $prof = "$prof".Trim()
             if ($prof -in @("strict", "dynamic", "minimal")) { return $prof }
@@ -23,7 +32,7 @@ function Initialize-InstallLog {
         return
     }
 
-    $logRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install"
+    $logRoot = Join-Path (Join-Path (Resolve-ReportUserHome) ".ghost-alice") "install"
     New-Item -ItemType Directory -Path $logRoot -Force | Out-Null
     $timestamp = Get-Date -Format "yyyy-MM-dd-HHmmss"
     $script:InstallReportLogFile = Join-Path $logRoot "$timestamp.log"

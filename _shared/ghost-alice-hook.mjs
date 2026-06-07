@@ -23,8 +23,24 @@ function parseArgs(argv) {
   return args;
 }
 
+function userHome(env = process.env) {
+  const candidates = [
+    env.HOME,
+    env.USERPROFILE,
+    env.HOMEDRIVE && env.HOMEPATH ? `${env.HOMEDRIVE}${env.HOMEPATH}` : "",
+    os.homedir(),
+  ];
+  for (const candidate of candidates) {
+    const value = String(candidate || "").trim();
+    if (value) {
+      return value;
+    }
+  }
+  return os.homedir();
+}
+
 function pendingManifestPath(platform) {
-  return path.join(os.homedir(), ".ghost-alice", "pending-merges", platform, "manifest.json");
+  return path.join(userHome(), ".ghost-alice", "pending-merges", platform, "manifest.json");
 }
 
 function sessionIntentRoot(configuredRoot = "") {
@@ -32,7 +48,7 @@ function sessionIntentRoot(configuredRoot = "") {
   if (configured) {
     return configured;
   }
-  return path.join(os.homedir(), ".ghost-alice", "session-intent");
+  return path.join(userHome(), ".ghost-alice", "session-intent");
 }
 
 function sessionIntentDir(platform, sessionId, root = "") {

@@ -55,7 +55,7 @@ function Invoke-DeprecatedInstalledSkillCleanup {
             continue
         }
 
-        $backupRoot = Join-Path $HOME ".ghost-alice/deprecated-skill-backups"
+        $backupRoot = Join-Path (Resolve-UserHome) ".ghost-alice/deprecated-skill-backups"
         New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
         $stamp = [DateTime]::UtcNow.ToString("yyyyMMddTHHmmssZ")
         $quarantine = Join-Path $backupRoot ("{0}-{1}" -f $skill, $stamp)
@@ -79,7 +79,7 @@ function Assert-SkillNames {
         $targets = Expand-SkillTargets $skill
         if ($targets.Count -eq 0) {
             Write-Err "Skill not found: $skill" "Skill not found: $skill"
-            Write-Err "Run .\\install.ps1 -List to see available skills." "Run .\\install.ps1 -List to see available skills."
+            Write-Err "Run .\\install.cmd -List to see available skills." "Run .\\install.cmd -List to see available skills."
             exit 1
         }
     }
@@ -232,7 +232,7 @@ function Get-InstallTargetsForSkillNames {
 
 function Invoke-CleanupPendingFalsePositives {
     $py = Initialize-PythonRuntimeForInstall
-    $pending = Join-Path (Join-Path $HOME ".ghost-alice") (Join-Path "pending-merges" $Platform)
+    $pending = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") (Join-Path "pending-merges" $Platform)
     $manifest = Join-Path $pending "manifest.json"
     & $py (Join-Path $script:GhostAliceRoot "merge-companion/scripts/cleanup_false_positive_legacy.py") `
         --platform $Platform `

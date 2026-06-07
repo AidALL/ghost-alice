@@ -24,6 +24,26 @@ from installer_assets import (  # noqa: E402
 )
 
 
+def _make_directory_link_or_skip(testcase: unittest.TestCase, source: Path, link: Path) -> str:
+    try:
+        link.symlink_to(source, target_is_directory=True)
+        return "symlink"
+    except OSError as exc:
+        if sys.platform != "win32":
+            testcase.skipTest(f"directory symlink unavailable: {exc}")
+        result = subprocess.run(
+            ["cmd", "/c", "mklink", "/J", str(link), str(source)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if result.returncode != 0:
+            testcase.skipTest(f"directory link unavailable: {result.stderr or result.stdout}")
+        return "junction"
+
+
 class InstallerAssetInventoryTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -96,7 +116,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
     def test_symlink_to_repo_is_managed_and_broken_symlink_is_conflict(self) -> None:
         source = self._skill(self.repo, "task-router")
         linked = self.skills / "task-router"
-        linked.symlink_to(source, target_is_directory=True)
+        link_kind = _make_directory_link_or_skip(self, source, linked)
 
         result = classify_skill_root(
             linked,
@@ -105,8 +125,10 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         )
 
         self.assertEqual(result.ownership, "ghost-alice-managed")
-        self.assertEqual(result.reason, "symlink-to-repo")
+        self.assertEqual(result.reason, f"{link_kind}-to-repo")
 
+        if link_kind != "symlink":
+            return
         broken = self.skills / "broken-skill"
         broken.symlink_to(self.repo / "missing", target_is_directory=True)
 
@@ -152,7 +174,7 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         copied = self._skill(self.skills, "task-router")
         symlink_source = self._skill(self.repo, "linked-skill")
         symlink_dest = self.skills / "linked-skill"
-        symlink_dest.symlink_to(symlink_source, target_is_directory=True)
+        _make_directory_link_or_skip(self, symlink_source, symlink_dest)
 
         result = subprocess.run(
             [

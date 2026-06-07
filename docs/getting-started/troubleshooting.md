@@ -139,10 +139,12 @@ Then share `git status --short --branch`, the conflict file list, and both diff 
 Windows PowerShell:
 
 ```powershell
-.\install.ps1
-.\install.ps1 -Doctor
-.\install.ps1 -Status
+.\install.cmd
+.\install.cmd -Doctor
+.\install.cmd -Status
 ```
+
+If Windows PowerShell prints `cannot be loaded because running scripts is disabled` for `Microsoft.PowerShell_profile.ps1` or `.\install.ps1`, use `.\install.cmd`. The wrapper starts PowerShell with `-NoProfile -ExecutionPolicy Bypass` for this installer run and does not change the user or machine execution policy.
 
 macOS / Linux / WSL / Git Bash:
 

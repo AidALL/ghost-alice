@@ -304,7 +304,7 @@ class SkillGateContractTest(unittest.TestCase):
             self._write_file(root, ".claude/commands/legacy.md", legacy_name)
 
             issues = run_contract_checks(root)
-            messages = "\n".join(f"{issue.path}: {issue.message}" for issue in issues)
+            messages = "\n".join(f"{issue.path}: {issue.message}" for issue in issues).replace("\\", "/")
             self.assertIn(".claude/commands/legacy.md", messages)
             self.assertIn("legacy tool checkpoint name is forbidden", messages)
 

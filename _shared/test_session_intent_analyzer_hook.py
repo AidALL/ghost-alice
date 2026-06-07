@@ -136,7 +136,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
 
         self.assertEqual(data["schema_version"], "session-intent-current.v1")
         self.assertEqual(data["session_id"], "s-camel")
-        self.assertIn("s-camel/intent-state.json", data["state_path"])
+        self.assertIn("s-camel/intent-state.json", data["state_path"].replace("\\", "/"))
         self.assertNotIn("secret-token", pointer.read_text(encoding="utf-8"))
 
     def test_hook_does_not_write_downstream_gate_at_prompt_submit(self) -> None:

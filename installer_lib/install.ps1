@@ -51,7 +51,7 @@ function Install-OneTarget {
 }
 
 function Get-InstallLockPath {
-    return (Join-Path (Join-Path $HOME ".ghost-alice") "install.lock")
+    return (Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install.lock")
 }
 
 function Enter-InstallLock {
@@ -109,8 +109,8 @@ function Invoke-StagedCopyReplace {
         throw "staged copy cannot run - aborting installation"
     }
 
-    $rollbackRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install-rollbacks"
-    $stateRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install-state"
+    $rollbackRoot = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-rollbacks"
+    $stateRoot = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state"
     $eventLog = Join-Path $stateRoot "$Platform-events.jsonl"
     & $py (Join-Path $script:GhostAliceRoot "_shared/install_transaction.py") "copy-replace" `
         --source $Source `
@@ -145,8 +145,8 @@ function Invoke-StagedCopyReplaceMany {
         throw "staged copy batch cannot run - aborting installation"
     }
 
-    $rollbackRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install-rollbacks"
-    $stateRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install-state"
+    $rollbackRoot = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-rollbacks"
+    $stateRoot = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state"
     $eventLog = Join-Path $stateRoot "$Platform-events.jsonl"
     $pyArgs = @(
         (Join-Path $script:GhostAliceRoot "_shared/install_transaction.py"),
@@ -196,7 +196,7 @@ function Invoke-InstallHooks {
     }
 
     $py = Find-PythonExe
-    $hookPy = Join-Path $ScriptDir "_shared" "install_hooks.py"
+    $hookPy = Join-Path (Join-Path $ScriptDir "_shared") "install_hooks.py"
 
     if (-not $py) {
         Write-Err "Python 3.11+ not found; hook ${Action} cannot run" "Python 3.11+ not found; hook ${Action} cannot run"
@@ -236,7 +236,7 @@ function Invoke-PreflightBeforeInstall {
     )
     if ($TargetPlatform -notin @("claude","codex")) { return }
 
-    $pending = Join-Path (Join-Path $HOME ".ghost-alice") (Join-Path "pending-merges" $TargetPlatform)
+    $pending = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") (Join-Path "pending-merges" $TargetPlatform)
     $manifest = Join-Path $pending "manifest.json"
     $snapshot = Join-Path $pending "snapshot.json"
 
@@ -360,7 +360,7 @@ function Invoke-SnapshotAfterInstall {
     param([string]$TargetPlatform, [string]$SkillsDir)
     if ($TargetPlatform -notin @("claude","codex")) { return }
 
-    $pending = Join-Path (Join-Path $HOME ".ghost-alice") (Join-Path "pending-merges" $TargetPlatform)
+    $pending = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") (Join-Path "pending-merges" $TargetPlatform)
     $snapshot = Join-Path $pending "snapshot.json"
     $manifest = Join-Path $pending "manifest.json"
 
@@ -518,7 +518,7 @@ function Invoke-PostflightInstallVerification {
         throw "post-install verification cannot run - aborting installation"
     }
 
-    $stateRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install-state"
+    $stateRoot = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state"
     $verifyArgs = @("--platform", $TargetPlatform, "--state-root", $stateRoot)
     $sharedSrc = Join-Path $ScriptDir "_shared"
     $sharedDest = Join-Path $SkillsRoot "_shared"
@@ -635,7 +635,7 @@ function Get-SystemEnvChangesForInstallState {
     if ($script:SourceRepoHookChange) {
         $changes += $script:SourceRepoHookChange
     }
-    $codexHookFeatureChange = Join-Path (Join-Path (Join-Path $HOME ".ghost-alice") "install-state") "codex-hook-feature-change.json"
+    $codexHookFeatureChange = Join-Path (Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state") "codex-hook-feature-change.json"
     if ($Platform -eq "codex" -and (Test-Path -LiteralPath $codexHookFeatureChange)) {
         try {
             $change = Get-Content -LiteralPath $codexHookFeatureChange -Raw | ConvertFrom-Json
@@ -650,6 +650,24 @@ function Get-SystemEnvChangesForInstallState {
             }
         } catch {
             Write-Warn "Could not read Codex hooks feature flag change metadata: $codexHookFeatureChange" "Could not read Codex hooks feature flag change metadata: $codexHookFeatureChange"
+        }
+    }
+    $codexProjectTrustChange = Join-Path (Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state") "codex-project-trust-change.json"
+    if ($Platform -eq "codex" -and (Test-Path -LiteralPath $codexProjectTrustChange)) {
+        try {
+            $change = Get-Content -LiteralPath $codexProjectTrustChange -Raw | ConvertFrom-Json
+            if ($change.kind -eq "codex_project_trust") {
+                $changes += [ordered]@{
+                    kind = "codex_project_trust"
+                    path = [string]$change.path
+                    project_path = [string]$change.project_path
+                    before_state = [string]$change.before_state
+                    after_state = [string]$change.after_state
+                    applied_at = [string]$change.applied_at
+                }
+            }
+        } catch {
+            Write-Warn "Could not read Codex project trust change metadata: $codexProjectTrustChange" "Could not read Codex project trust change metadata: $codexProjectTrustChange"
         }
     }
     return @($changes)
@@ -701,7 +719,7 @@ function Write-InstallStateManifest {
         }
 
         $gitInfo = Get-InstallStateGitInfo
-        $stateRoot = Join-Path (Join-Path $HOME ".ghost-alice") "install-state"
+        $stateRoot = Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "install-state"
         New-Item -ItemType Directory -Path $stateRoot -Force | Out-Null
         $manifestPath = Join-Path $stateRoot "$TargetPlatform.json"
         $manifest = [ordered]@{
@@ -801,7 +819,7 @@ function Invoke-Install {
             $targets = Expand-SkillTargets $skill
             if ($targets.Count -eq 0) {
                 Write-Err "Skill not found: $skill" "Skill not found: $skill"
-                Write-Err "Run .\\install.ps1 -List to see available skills." "Run .\\install.ps1 -List to see available skills."
+                Write-Err "Run .\\install.cmd -List to see available skills." "Run .\\install.cmd -List to see available skills."
                 exit 1
             }
             $allTargets += $targets
@@ -958,7 +976,7 @@ function Invoke-Install {
         Write-Ok ("Done: {0} installed, {1} skipped" -f $installed, $skipped) ("Done: {0} installed, {1} skipped" -f $installed, $skipped)
         Write-Info "Install path: $SkillsDir" "Install path: $SkillsDir"
         if ($copyOnly) {
-            Write-Info "To update skills: cd $ScriptDir; git pull --ff-only, then rerun install.ps1" "To update skills: cd $ScriptDir; git pull --ff-only, then rerun install.ps1"
+            Write-Info "To update skills: cd $ScriptDir; git pull --ff-only, then rerun .\install.cmd" "To update skills: cd $ScriptDir; git pull --ff-only, then rerun .\install.cmd"
         } else {
             Write-Info "To update skills: cd $ScriptDir; git pull --ff-only" "To update skills: cd $ScriptDir; git pull --ff-only"
         }
