@@ -286,6 +286,12 @@ def _visible_and_runner_payload_text(command: str) -> str:
     return "\n".join(texts)
 
 
+VERSIONED_HOMEBREW_PYTHON = "/opt/homebrew/opt/python@3.14/bin/python3.14"
+VERSIONED_HOMEBREW_PYTHON_RE = re.compile(
+    r"/opt/homebrew/(?:opt/python@\d+\.\d+/bin/python\d+\.\d+|bin/python\d+\.\d+)"
+)
+
+
 def _expected_ghost_alice_skill_names() -> list[str]:
     names = install_hooks._ghost_alice_installed_skill_names()
     if not names:
@@ -3126,6 +3132,78 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         for key in managed_keys:
             trusted_hash = hook_state[key]["trusted_hash"]
             self.assertRegex(trusted_hash, r"^sha256:[0-9a-f]{64}$")
+
+    def test_install_codex_hook_commands_do_not_embed_versioned_homebrew_python(self):
+        """Installed hook commands resolve Python at runtime instead of pinning one Homebrew minor."""
+        if os.name == "nt":
+            self.skipTest("POSIX Homebrew path regression does not apply on Windows")
+        self._create_platform_dir("codex")
+
+        with (
+            patch.object(install_hooks.sys, "executable", VERSIONED_HOMEBREW_PYTHON),
+            patch.object(install_hooks, "_codex_hooks_supported", return_value=True),
+        ):
+            result = install_hooks.install_hook("codex")
+        self.assertEqual(result, "installed")
+
+        settings = self._read_settings("codex")
+        command_surfaces: list[str] = []
+        for groups in settings["hooks"].values():
+            for entry in groups:
+                for hook in entry.get("hooks", []):
+                    command = hook.get("command", "")
+                    command_surfaces.append(_visible_and_runner_payload_text(command))
+
+        installed_text = "\n".join(command_surfaces)
+        self.assertNotIn(VERSIONED_HOMEBREW_PYTHON, installed_text)
+        self.assertIsNone(VERSIONED_HOMEBREW_PYTHON_RE.search(installed_text))
+
+    def test_hook_python_invocation_resolves_compatible_python_from_runtime_path(self):
+        if os.name == "nt":
+            self.skipTest("POSIX launcher test does not apply on Windows")
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("bash is required for POSIX launcher execution")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bin_dir = temp_path / "bin"
+            bin_dir.mkdir()
+            called = temp_path / "called.txt"
+            fake_python = bin_dir / "python3"
+            fake_python.write_text(
+                "\n".join([
+                    f"#!{bash}",
+                    'if [ "${1:-}" = "-c" ]; then',
+                    '  case "${2:-}" in',
+                    '    *"sys.version_info >= (3, 11)"*) exit 0 ;;',
+                    "  esac",
+                    "fi",
+                    f'printf "%s\\n" "$@" > "{called}"',
+                    "exit 0",
+                    "",
+                ]),
+                encoding="utf-8",
+            )
+            fake_python.chmod(0o755)
+            hook_script = temp_path / "hook.py"
+            hook_script.write_text("# fixture\n", encoding="utf-8")
+
+            with patch.object(install_hooks.sys, "executable", VERSIONED_HOMEBREW_PYTHON):
+                command = install_hooks._hook_python_invocation(hook_script, "--flag")
+            result = subprocess.run(
+                [bash, "-c", command],
+                env={"PATH": str(bin_dir), "HOME": str(temp_path)},
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertNotIn(VERSIONED_HOMEBREW_PYTHON, command)
+            self.assertEqual(called.read_text(encoding="utf-8").splitlines(), [str(hook_script), "--flag"])
 
     def test_install_codex_preserves_existing_hook_state_when_trusting_hooks(self):
         """Codex hook auto-trust preserves unrelated hook state."""

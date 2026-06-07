@@ -47,6 +47,22 @@ from pathlib import Path
 from typing import Any, Optional, Tuple
 
 MIN_PYTHON_VERSION = (3, 11)
+HOOK_PYTHON_SENTINEL = "__GHOST_ALICE_HOOK_PYTHON__"
+PYTHON_VERSION_CHECK_CODE = (
+    "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
+)
+POSIX_HOOK_PYTHON_LAUNCHER = (
+    'for py in "${GHOST_ALICE_PYTHON:-}" python3 python '
+    "/opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3 /bin/python3 "
+    "/opt/homebrew/bin/python3.[0-9]* /usr/local/bin/python3.[0-9]* "
+    "/usr/bin/python3.[0-9]* /bin/python3.[0-9]*; do "
+    '[ -n "$py" ] || continue; '
+    'if command -v "$py" >/dev/null 2>&1 || [ -x "$py" ]; then '
+    f'"$py" -c "{PYTHON_VERSION_CHECK_CODE}" >/dev/null 2>&1 && exec "$py" "$@"; '
+    "fi; "
+    "done; "
+    'echo "Ghost-ALICE hook requires Python 3.11+" >&2; exit 127'
+)
 
 if sys.version_info < MIN_PYTHON_VERSION:
     detected = ".".join(str(part) for part in sys.version_info[:3])
@@ -86,15 +102,14 @@ class HookStatus:
 
 # ── Hook Payload Definitions ──────────────────────────────
 
-def _shell_print_message(message: str) -> str:
-    payload = base64.b64encode((message + "\n").encode("utf-8")).decode("ascii")
-    code = f"import sys,base64;sys.stdout.buffer.write(base64.b64decode('{payload}'))"
-    python = sys.executable.replace("\\", "/")
-    return f'"{python}" -c "{code}"'
+def _shell_print_message(message: str, *, payload: bool = False) -> str:
+    message_payload = base64.b64encode((message + "\n").encode("utf-8")).decode("ascii")
+    code = f"import sys,base64;sys.stdout.buffer.write(base64.b64decode('{message_payload}'))"
+    return _hook_python_command("-c", code, payload=payload)
 
 
-def _shell_print_json(payload: dict[str, Any]) -> str:
-    return _shell_print_message(json.dumps(payload, ensure_ascii=False))
+def _shell_print_json(payload: dict[str, Any], *, payload_mode: bool = False) -> str:
+    return _shell_print_message(json.dumps(payload, ensure_ascii=False), payload=payload_mode)
 
 
 def _localized_bridge(
@@ -116,6 +131,35 @@ def _quote_static_arg(value: str | Path) -> str:
     if os.name == "nt" and re.fullmatch(r"[A-Za-z]:/[^\s\"<>|]+", text):
         return text
     return '"' + text.replace('"', '\\"') + '"'
+
+
+def _quote_posix_arg(value: str) -> str:
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
+def _hook_python_invocation(*args: str | Path) -> str:
+    quoted_args = [_quote_static_arg(arg) for arg in args]
+    if os.name == "nt" or sys.platform.startswith("win"):
+        python = sys.executable.replace("\\", "/")
+        return " ".join([_quote_static_arg(python), *quoted_args])
+    return " ".join([
+        "/bin/sh",
+        "-c",
+        _quote_posix_arg(POSIX_HOOK_PYTHON_LAUNCHER),
+        "ghost-alice-python",
+        *quoted_args,
+    ])
+
+
+def _hook_python_payload_invocation(*args: str | Path) -> str:
+    return " ".join([HOOK_PYTHON_SENTINEL, *[_quote_static_arg(arg) for arg in args]])
+
+
+def _hook_python_command(*args: str | Path, payload: bool = False) -> str:
+    if payload:
+        return _hook_python_payload_invocation(*args)
+    return _hook_python_invocation(*args)
+
 
 def _hook_shared_dir() -> Path:
     configured = os.environ.get(HOOK_SHARED_DIR_ENV, "").strip()
@@ -160,13 +204,13 @@ def _pending_merge_precheck_command(
     context: str,
     output_format: str,
     internal_instruction: str,
+    payload_mode: bool = False,
 ) -> str:
     script = _resolve_pending_merge_precheck_script()
     if script:
-        payload = base64.urlsafe_b64encode(internal_instruction.encode("utf-8")).decode("ascii")
-        python = sys.executable.replace("\\", "/")
+        instruction_payload = base64.urlsafe_b64encode(internal_instruction.encode("utf-8")).decode("ascii")
         return " ".join([
-            _quote_static_arg(python),
+            _hook_python_command(payload=payload_mode),
             _quote_static_arg(script),
             "--platform",
             platform,
@@ -177,15 +221,16 @@ def _pending_merge_precheck_command(
             "--format",
             output_format,
             "--internal-b64",
-            payload,
+            instruction_payload,
         ])
 
     if output_format == "json":
-        return _shell_print_json({"continue": True, "systemMessage": internal_instruction})
+        return _shell_print_json({"continue": True, "systemMessage": internal_instruction}, payload_mode=payload_mode)
 
     return _shell_print_message(
         f"Internal instruction: {internal_instruction}\n"
-        + render_pending_merge_message(context)  # type: ignore[arg-type]
+        + render_pending_merge_message(context),  # type: ignore[arg-type]
+        payload=payload_mode,
     )
 
 # 1. User input pre-hook: run only the pending-merge precheck first.
@@ -199,7 +244,7 @@ PROMPT_PENDING_MERGE_INTERNAL = (
 )
 
 
-def _prompt_pending_merge_command(*, platform: str, output_format: str) -> str:
+def _prompt_pending_merge_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
     return (
         _pending_merge_precheck_command(
             platform=platform,
@@ -207,6 +252,7 @@ def _prompt_pending_merge_command(*, platform: str, output_format: str) -> str:
             context="prompt_submit",
             output_format=output_format,
             internal_instruction=PROMPT_PENDING_MERGE_INTERNAL,
+            payload_mode=payload_mode,
         )
         + f" # {PROMPT_PENDING_MERGE_MARKER}"
     )
@@ -248,13 +294,12 @@ def _resolve_task_router_reminder_hook_script() -> str:
     return _resolve_shared_hook_script("task_router_reminder_hook.py")
 
 
-def _hook_reminder_command(*, platform: str, output_format: str) -> str:
+def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
     script = _resolve_task_router_reminder_hook_script()
     if script:
         payload = base64.urlsafe_b64encode(HOOK_INTERNAL.encode("utf-8")).decode("ascii")
-        python = sys.executable.replace("\\", "/")
         return " ".join([
-            _quote_static_arg(python),
+            _hook_python_command(payload=payload_mode),
             _quote_static_arg(script),
             "--platform",
             platform,
@@ -266,14 +311,14 @@ def _hook_reminder_command(*, platform: str, output_format: str) -> str:
             payload,
         ]) + f" # {HOOK_MARKER}"
     if output_format == "json":
-        return _shell_print_json({"continue": True, "systemMessage": HOOK_INTERNAL}) + f" # {HOOK_MARKER}"
+        return _shell_print_json({"continue": True, "systemMessage": HOOK_INTERNAL}, payload_mode=payload_mode) + f" # {HOOK_MARKER}"
     return _shell_print_message(_localized_bridge(
         HOOK_INTERNAL,
         "After session-intent preflight, run task-router when there is no current-lineage block gate and the path is silent allow.",
         "Run task-router after session-intent preflight; absent current-lineage block gate is silent allow.",
         "task-router reads the ledger, decomposes intent, chooses focus-layer and scope-reopen, then assigns skills.",
         "task-router reads the ledger, decomposes intent, chooses focus-layer and scope-reopen, then assigns skills.",
-    )) + f" # {HOOK_MARKER}"
+    ), payload=payload_mode) + f" # {HOOK_MARKER}"
 
 
 HOOK_COMMAND = _hook_reminder_command(platform="claude", output_format="text")
@@ -317,13 +362,12 @@ def _resolve_session_intent_analyzer_hook_script() -> str:
     return _resolve_shared_hook_script("session_intent_analyzer_hook.py")
 
 
-def _session_intent_analyzer_command(*, platform: str, output_format: str) -> str:
+def _session_intent_analyzer_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
     script = _resolve_session_intent_analyzer_hook_script()
     if script:
         payload = base64.urlsafe_b64encode(SESSION_INTENT_INTERNAL.encode("utf-8")).decode("ascii")
-        python = sys.executable.replace("\\", "/")
         return " ".join([
-            _quote_static_arg(python),
+            _hook_python_command(payload=payload_mode),
             _quote_static_arg(script),
             "--platform",
             platform,
@@ -339,8 +383,8 @@ def _session_intent_analyzer_command(*, platform: str, output_format: str) -> st
             payload,
         ])
     if output_format == "json":
-        return _shell_print_json({"continue": True, "systemMessage": SESSION_INTENT_INTERNAL})
-    return _shell_print_message(f"Internal instruction: {SESSION_INTENT_INTERNAL}")
+        return _shell_print_json({"continue": True, "systemMessage": SESSION_INTENT_INTERNAL}, payload_mode=payload_mode)
+    return _shell_print_message(f"Internal instruction: {SESSION_INTENT_INTERNAL}", payload=payload_mode)
 
 
 SESSION_INTENT_COMMAND = (
@@ -386,12 +430,11 @@ def _resolve_claude_stop_verification_script() -> str:
     return _resolve_shared_hook_script("claude_stop_verification_hook.py")
 
 
-def _stop_hook_command(platform: str) -> str:
+def _stop_hook_command(platform: str, *, payload_mode: bool = False) -> str:
     script = _resolve_claude_stop_verification_script()
     if script:
-        python = sys.executable.replace("\\", "/")
-        return f'"{python}" "{script}" --platform {platform} # {STOP_HOOK_MARKER}'
-    return _shell_print_message(STOP_HOOK_MESSAGE) + f" # {STOP_HOOK_MARKER}"
+        return f'{_hook_python_command(script, "--platform", platform, payload=payload_mode)} # {STOP_HOOK_MARKER}'
+    return _shell_print_message(STOP_HOOK_MESSAGE, payload=payload_mode) + f" # {STOP_HOOK_MARKER}"
 
 
 def _claude_stop_hook_command() -> str:
@@ -431,7 +474,7 @@ SESSION_START_INTERNAL = (
 )
 
 
-def _session_start_command(*, platform: str, output_format: str) -> str:
+def _session_start_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
     return (
         _pending_merge_precheck_command(
             platform=platform,
@@ -439,6 +482,7 @@ def _session_start_command(*, platform: str, output_format: str) -> str:
             context="session_start",
             output_format=output_format,
             internal_instruction=SESSION_START_INTERNAL,
+            payload_mode=payload_mode,
         )
         + f" || true # {SESSION_START_MARKER}"
     )
@@ -463,23 +507,31 @@ WEB_SEARCH_FIRST_MARKER = "[web-search-first]"
 WEB_SEARCH_FIRST_INTERNAL = (
     "web-search-first: AGENTS.md Rule 10. Before factual claims about external tools, libraries, CLIs, SDKs, frameworks, versions, or platform behavior, cross-check at least three community sources with WebSearch. Official docs alone are not enough for runtime behavior."
 )
-WEB_SEARCH_FIRST_COMMAND = (
-    _shell_print_message(_localized_bridge(
-        WEB_SEARCH_FIRST_INTERNAL,
-        "Current field reports are checked before describing external tool or version behavior.",
-        "Current field reports are checked before describing external tool or version behavior.",
-        "Rule 10: check at least three community signals such as GitHub issues, Reddit, HN, or Stack Overflow.",
-        "Rule 10: check at least three community signals such as GitHub issues, Reddit, HN, or Stack Overflow.",
-    ))
-    + f" # {WEB_SEARCH_FIRST_MARKER}"
-)
-WEB_SEARCH_FIRST_COMMAND_CODEX = (
-    _shell_print_json({
-        "continue": True,
-        "systemMessage": WEB_SEARCH_FIRST_INTERNAL,
-    })
-    + f" # {WEB_SEARCH_FIRST_MARKER}"
-)
+
+
+def _web_search_first_command(*, output_format: str, payload_mode: bool = False) -> str:
+    if output_format == "json":
+        return (
+            _shell_print_json({
+                "continue": True,
+                "systemMessage": WEB_SEARCH_FIRST_INTERNAL,
+            }, payload_mode=payload_mode)
+            + f" # {WEB_SEARCH_FIRST_MARKER}"
+        )
+    return (
+        _shell_print_message(_localized_bridge(
+            WEB_SEARCH_FIRST_INTERNAL,
+            "Current field reports are checked before describing external tool or version behavior.",
+            "Current field reports are checked before describing external tool or version behavior.",
+            "Rule 10: check at least three community signals such as GitHub issues, Reddit, HN, or Stack Overflow.",
+            "Rule 10: check at least three community signals such as GitHub issues, Reddit, HN, or Stack Overflow.",
+        ), payload=payload_mode)
+        + f" # {WEB_SEARCH_FIRST_MARKER}"
+    )
+
+
+WEB_SEARCH_FIRST_COMMAND = _web_search_first_command(output_format="text")
+WEB_SEARCH_FIRST_COMMAND_CODEX = _web_search_first_command(output_format="json")
 
 WEB_SEARCH_FIRST_ENTRY = {
     "matcher": "",
@@ -613,10 +665,9 @@ def _hook_runner_command(hook_id: str, command: str, marker: str) -> str:
         return command
     payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
     normalized = normalize_hook_id(hook_id)
-    python = sys.executable.replace("\\", "/")
     visible_hint = " ghost-alice-hook.mjs" if "ghost-alice-hook.mjs" in command else ""
     return (
-        f"{_quote_static_arg(python)} {_quote_static_arg(script)} run {normalized} {payload} "
+        f"{_hook_python_invocation(script, 'run', normalized, payload)} "
         f"# {marker} [hook-runner:{normalized}]{visible_hint}"
     )
 
@@ -798,32 +849,34 @@ def _command_entry(command: str) -> dict[str, Any]:
 
 def _platform_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
-        command = _hook_reminder_command(platform="codex", output_format="json")
+        command = _hook_reminder_command(platform="codex", output_format="json", payload_mode=True)
     else:
-        command = _hook_reminder_command(platform="claude", output_format="text")
+        command = _hook_reminder_command(platform="claude", output_format="text", payload_mode=True)
     return _hook_runner_command_entry("prompt", command, HOOK_MARKER)
 
 
 def _platform_prompt_pending_merge_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
-        command = _prompt_pending_merge_command(platform="codex", output_format="json")
+        command = _prompt_pending_merge_command(platform="codex", output_format="json", payload_mode=True)
     else:
-        command = _prompt_pending_merge_command(platform="claude", output_format="text")
+        command = _prompt_pending_merge_command(platform="claude", output_format="text", payload_mode=True)
     return _hook_runner_command_entry("pending-merge-prompt", command, PROMPT_PENDING_MERGE_MARKER)
 
 
 def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
-        command = _session_intent_analyzer_command(platform="codex", output_format="json") + f" # {SESSION_INTENT_MARKER}"
+        command = _session_intent_analyzer_command(platform="codex", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
     else:
-        command = _session_intent_analyzer_command(platform="claude", output_format="text") + f" # {SESSION_INTENT_MARKER}"
+        command = _session_intent_analyzer_command(platform="claude", output_format="text", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
     return _hook_runner_command_entry("session-intent", command, SESSION_INTENT_MARKER)
 
 
 def _platform_web_search_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
-        return _hook_runner_command_entry("web-search-first", WEB_SEARCH_FIRST_COMMAND_CODEX, WEB_SEARCH_FIRST_MARKER)
-    return _hook_runner_command_entry("web-search-first", WEB_SEARCH_FIRST_COMMAND, WEB_SEARCH_FIRST_MARKER)
+        command = _web_search_first_command(output_format="json", payload_mode=True)
+    else:
+        command = _web_search_first_command(output_format="text", payload_mode=True)
+    return _hook_runner_command_entry("web-search-first", command, WEB_SEARCH_FIRST_MARKER)
 
 
 def _platform_tool_checkpoint_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -835,20 +888,20 @@ def _platform_tool_checkpoint_entry(platform_key: str, event: str) -> dict[str, 
 
 def _platform_stop_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
-        return _hook_runner_command_entry("completion", _stop_hook_command("codex"), STOP_HOOK_MARKER)
-    return _hook_runner_command_entry("completion", _claude_stop_hook_command(), STOP_HOOK_MARKER)
+        return _hook_runner_command_entry("completion", _stop_hook_command("codex", payload_mode=True), STOP_HOOK_MARKER)
+    return _hook_runner_command_entry("completion", _stop_hook_command("claude", payload_mode=True), STOP_HOOK_MARKER)
 
 
 def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
-        command = _session_start_command(platform="codex", output_format="json")
+        command = _session_start_command(platform="codex", output_format="json", payload_mode=True)
     else:
-        command = _session_start_command(platform="claude", output_format="text")
+        command = _session_start_command(platform="claude", output_format="text", payload_mode=True)
     return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER)
 
 
 def _platform_io_trace_entry(platform_key: str, event: str) -> Optional[dict[str, Any]]:
-    io_command = _io_trace_hook_command()
+    io_command = _io_trace_hook_command(payload_mode=True)
     if not io_command:
         return None
     return _command_entry(_hook_runner_command("io-trace", io_command, IO_TRACE_MARKER))
@@ -1466,19 +1519,21 @@ def _hook_marker_match_status(
     return marker_present, exact_match
 
 
-def _io_trace_hook_command() -> str:
+def _io_trace_hook_command(*, payload_mode: bool = False) -> str:
     io_script = _resolve_io_trace_script()
     if not io_script:
         return ""
-    python = sys.executable.replace("\\", "/")
-    return f'"{python}" "{io_script}" # {IO_TRACE_MARKER}'
+    return f'{_hook_python_command(io_script, payload=payload_mode)} # {IO_TRACE_MARKER}'
 
 
 def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
     if not hook_id:
         return False
     normalized = re.escape(normalize_hook_id(hook_id))
-    return re.search(rf"hook_profile_gate\.py[\"']?\s+run\s+{normalized}(?:\s|$)", command) is not None
+    return re.search(
+        rf"hook_profile_gate\.py[\"']?\s+[\"']?run[\"']?\s+[\"']?{normalized}[\"']?(?:\s|$)",
+        command,
+    ) is not None
 
 
 def _remove_stale_hook_entries(

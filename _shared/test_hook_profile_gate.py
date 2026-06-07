@@ -240,7 +240,14 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
 class TestHookCommandAllowlist(unittest.TestCase):
     def test_allows_system_and_homebrew_binaries(self):
         hook_profile_gate.assert_allowed_command(["/bin/bash", "-lc", "printf ok"], ["/bin", "/usr/bin"])
-        hook_profile_gate.assert_allowed_command(["/opt/homebrew/bin/python3.14", "-V"], ["/opt/homebrew"])
+        hook_profile_gate.assert_allowed_command(["/opt/homebrew/bin/python3"], ["/opt/homebrew"])
+
+    def test_allows_versioned_python_bare_command_without_minor_pin(self):
+        hook_profile_gate.assert_allowed_command(["python3.15", "-V"], ["/bin", "/usr/bin"])
+
+    def test_rejects_malformed_versioned_python_bare_command(self):
+        with self.assertRaises(hook_profile_gate.HookCommandRejected):
+            hook_profile_gate.assert_allowed_command(["python3.evil"], ["/bin", "/usr/bin"])
 
     def test_rejects_path_traversal_and_arbitrary_executable(self):
         with self.assertRaises(hook_profile_gate.HookCommandRejected):
@@ -248,6 +255,14 @@ class TestHookCommandAllowlist(unittest.TestCase):
 
         with self.assertRaises(hook_profile_gate.HookCommandRejected):
             hook_profile_gate.assert_allowed_command(["/tmp/evil"], ["/bin", "/usr/bin"])
+
+    def test_validate_shell_command_resolves_managed_python_sentinel(self):
+        argv = hook_profile_gate._validate_shell_command(
+            f"{hook_profile_gate.HOOK_PYTHON_SENTINEL} -c 'import sys; sys.exit(0)'"
+        )
+
+        self.assertEqual(argv[0], sys.executable)
+        self.assertEqual(argv[1:], ["-c", "import sys; sys.exit(0)"])
 
     def test_cli_rejects_shell_injection_payload(self):
         payload = base64.urlsafe_b64encode(b"/bin/bash -lc 'printf ok'; /tmp/evil").decode("ascii")

@@ -29,11 +29,9 @@ SAFE_BARE_COMMANDS = {
     "node",
     "python",
     "python3",
-    "python3.11",
-    "python3.12",
-    "python3.13",
-    "python3.14",
 }
+SAFE_BARE_COMMAND_RE = re.compile(r"^python3\.[0-9]+$")
+HOOK_PYTHON_SENTINEL = "__GHOST_ALICE_HOOK_PYTHON__"
 SAFE_TRAILING_SUFFIX_RE = re.compile(r"\s*\|\|\s*true\s*(#.*)?\s*$")
 FORBIDDEN_SHELL_OPERATORS = {";", "&&", "|", "||", ">", ">>", "<", "<<"}
 
@@ -89,7 +87,7 @@ def assert_allowed_command(argv: list[str], allowed_roots: list[str]) -> None:
         raise HookCommandRejected("empty hook command rejected")
 
     executable = argv[0]
-    if executable in SAFE_BARE_COMMANDS:
+    if executable in SAFE_BARE_COMMANDS or SAFE_BARE_COMMAND_RE.fullmatch(executable):
         return
 
     path = Path(executable).expanduser()
@@ -140,6 +138,8 @@ def _validate_shell_command(command: str) -> list[str]:
         argv = shlex.split(check_command, comments=True, posix=True)
     except ValueError as exc:
         raise HookCommandRejected(f"hook command parse failed: {exc}") from exc
+    if argv and argv[0] == HOOK_PYTHON_SENTINEL:
+        argv[0] = sys.executable
     assert_allowed_command(argv, default_allowed_roots())
     return argv
 

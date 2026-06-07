@@ -18,12 +18,11 @@ sys.path.insert(0, str(REPO_ROOT / "_shared"))
 def _python_311_or_newer() -> str | None:
     candidates = [
         sys.executable,
-        shutil.which("python3.14"),
-        shutil.which("python3.13"),
-        shutil.which("python3.12"),
-        shutil.which("python3.11"),
+        shutil.which("python3"),
+        shutil.which("python"),
         "/opt/homebrew/bin/python3",
-        "/opt/homebrew/bin/python3.14",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
     ]
     for candidate in candidates:
         if not candidate:
