@@ -13,16 +13,6 @@ function Resolve-ReportUserHome {
 function Resolve-EffectiveVisibility {
     param([string]$Flag)
     if ($Flag) { return $Flag }
-    $pythonExe = Find-PythonExe
-    if ($pythonExe) {
-        $shared = Join-Path $script:GhostAliceRoot "_shared"
-        $code = "import sys, os, pathlib; sys.path.insert(0, sys.argv[1]); import runtime_config; home = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None; print(runtime_config.load_config(home=home)['agent_visibility']['profile'])"
-        $prof = & $pythonExe -c $code $shared (Resolve-ReportUserHome) 2>$null
-        if ($LASTEXITCODE -eq 0 -and $prof) {
-            $prof = "$prof".Trim()
-            if ($prof -in @("strict", "dynamic", "minimal")) { return $prof }
-        }
-    }
     return "dynamic"
 }
 

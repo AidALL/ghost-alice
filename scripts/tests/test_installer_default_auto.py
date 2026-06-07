@@ -682,7 +682,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         )
         return config_path
 
-    def test_install_sh_report_reflects_existing_config_without_flag(self) -> None:
+    def test_install_sh_defaults_visibility_dynamic_over_existing_config_without_flag(self) -> None:
         bash = _find_test_bash()
         if not bash:
             self.skipTest("bash executable is required for install.sh integration test")
@@ -709,14 +709,13 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     )
 
                     self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-                    self.assertIn(f"  Visibility Level: [{existing}]", result.stdout)
+                    self.assertIn("  Visibility Level: [dynamic]", result.stdout)
                     self.assertIn(
-                        f"  [4/5] Runtime config      codex hooks=true, Visibility Level=[{existing}]",
+                        "  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]",
                         result.stdout,
                     )
-                    self.assertNotIn("  Visibility Level: [dynamic]", result.stdout)
                     saved = json.loads(config_path.read_text(encoding="utf-8"))
-                    self.assertEqual(saved["agent_visibility"]["profile"], existing)
+                    self.assertEqual(saved["agent_visibility"]["profile"], "dynamic")
 
     def test_install_sh_report_reflects_flag_over_existing_config(self) -> None:
         bash = _find_test_bash()
@@ -782,7 +781,7 @@ printf 'default=%s\n' "$(resolve_effective_visibility)"
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-        self.assertIn("existing=minimal", result.stdout)
+        self.assertIn("existing=dynamic", result.stdout)
         self.assertIn("flag=strict", result.stdout)
         self.assertIn("default=dynamic", result.stdout)
 
@@ -820,11 +819,11 @@ Remove-Item -LiteralPath $configPath -Force
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-        self.assertIn("existing=minimal", result.stdout)
+        self.assertIn("existing=dynamic", result.stdout)
         self.assertIn("flag=strict", result.stdout)
         self.assertIn("default=dynamic", result.stdout)
 
-    def test_install_ps1_report_reflects_existing_config_without_flag(self) -> None:
+    def test_install_ps1_defaults_visibility_dynamic_over_existing_config_without_flag(self) -> None:
         pwsh = shutil.which("pwsh")
         if not pwsh:
             self.skipTest("pwsh executable is required for install.ps1 integration test")
@@ -867,14 +866,13 @@ Remove-Item -LiteralPath $configPath -Force
                     )
 
                     self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-                    self.assertIn(f"  Visibility Level: [{existing}]", result.stdout)
+                    self.assertIn("  Visibility Level: [dynamic]", result.stdout)
                     self.assertIn(
-                        f"  [4/5] Runtime config      codex hooks=true, Visibility Level=[{existing}]",
+                        "  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]",
                         result.stdout,
                     )
-                    self.assertNotIn("  Visibility Level: [dynamic]", result.stdout)
                     saved = json.loads(config_path.read_text(encoding="utf-8"))
-                    self.assertEqual(saved["agent_visibility"]["profile"], existing)
+                    self.assertEqual(saved["agent_visibility"]["profile"], "dynamic")
 
 
 if __name__ == "__main__":

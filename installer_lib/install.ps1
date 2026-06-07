@@ -217,8 +217,12 @@ function Invoke-InstallHooks {
         "uninstall" { $pyArgs += "--uninstall" }
         "status"    { $pyArgs += "--status" }
     }
-    if ($AgentVisibility) {
-        $pyArgs += @("--visibility", $AgentVisibility)
+    $visibility = $AgentVisibility
+    if ($Action -eq "install" -and -not $visibility) {
+        $visibility = "dynamic"
+    }
+    if ($visibility) {
+        $pyArgs += @("--visibility", $visibility)
     }
     & $py @pyArgs
     if ($LASTEXITCODE -ne 0) {
