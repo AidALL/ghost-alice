@@ -659,7 +659,10 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn('--hook-shared-dir "${SKILLS_DIR}/_shared"', bash_hooks)
         self.assertIn("--visibility", sh)
         self.assertIn("--agent-visibility", sh)
-        self.assertIn('args+=(--visibility "$AGENT_VISIBILITY")', bash_hooks)
+        self.assertIn('local visibility="${AGENT_VISIBILITY:-}"', bash_hooks)
+        self.assertIn('if [ "$action" = "install" ] && [ -z "$visibility" ]; then', bash_hooks)
+        self.assertIn('visibility="dynamic"', bash_hooks)
+        self.assertIn('args+=(--visibility "$visibility")', bash_hooks)
 
         ps1 = installer_ps1_source()
         self.assertIn("[switch]$Doctor", ps1)
@@ -687,7 +690,10 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn('"--hook-shared-dir", (Join-Path $SkillsDir "_shared")', powershell_hooks)
         self.assertIn('[Alias("Visibility")]', ps1)
         self.assertIn("[string]$AgentVisibility", ps1)
-        self.assertIn('"--visibility", $AgentVisibility', powershell_hooks)
+        self.assertIn('$visibility = $AgentVisibility', powershell_hooks)
+        self.assertIn('if ($Action -eq "install" -and -not $visibility) {', powershell_hooks)
+        self.assertIn('$visibility = "dynamic"', powershell_hooks)
+        self.assertIn('"--visibility", $visibility', powershell_hooks)
 
     def test_installers_write_empty_pending_merge_manifest_after_snapshot(self) -> None:
         sh = installer_bash_source()

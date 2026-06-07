@@ -11,24 +11,11 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; }
 
 resolve_effective_visibility() {
-  # Report the visibility the runtime will actually use: an explicit --visibility
-  # flag wins, else the existing config profile, else the dynamic default.
+  # Install-time default is dynamic. Existing runtime config is not a default
+  # source because plain install must repair stale minimal/strict profiles.
   if [ -n "${AGENT_VISIBILITY:-}" ]; then
     printf '%s' "$AGENT_VISIBILITY"
     return 0
-  fi
-  local py prof
-  py="$(_find_python_runtime || true)"
-  if [ -n "$py" ]; then
-    prof="$("$py" -c 'import sys, os
-sys.path.insert(0, os.path.join(sys.argv[1], "_shared"))
-import runtime_config
-import pathlib
-home = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
-print(runtime_config.load_config(home=home)["agent_visibility"]["profile"])' "$SCRIPT_DIR" "${HOME:-}" 2>/dev/null)"
-    case "$prof" in
-      strict|dynamic|minimal) printf '%s' "$prof"; return 0 ;;
-    esac
   fi
   printf 'dynamic'
 }

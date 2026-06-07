@@ -613,8 +613,12 @@ _run_install_hooks() {
         return 1
       fi
       local args=(--platform "$platform" --hook-shared-dir "${SKILLS_DIR}/_shared")
-      if [ -n "$AGENT_VISIBILITY" ]; then
-        args+=(--visibility "$AGENT_VISIBILITY")
+      local visibility="${AGENT_VISIBILITY:-}"
+      if [ "$action" = "install" ] && [ -z "$visibility" ]; then
+        visibility="dynamic"
+      fi
+      if [ -n "$visibility" ]; then
+        args+=(--visibility "$visibility")
       fi
       case "$action" in
         uninstall) args+=(--uninstall) ;;
