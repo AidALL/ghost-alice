@@ -671,7 +671,10 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         )
 
         self.assertEqual(pending.returncode, 0)
-        self.assertIn("Ghost-ALICE", pending.stdout)
+        pending_payload = json.loads(pending.stdout)
+        self.assertTrue(pending_payload["continue"])
+        self.assertIn("merge-companion prompt-check", pending_payload["systemMessage"])
+        self.assertIn("merge-companion-precheck: clean (hook-verified)", pending_payload["systemMessage"])
         self.assertEqual(prompt.returncode, 0)
         self.assertIn("task-router", prompt.stdout)
         self.assertEqual(session_start.returncode, 0)
