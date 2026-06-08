@@ -11,6 +11,7 @@ Public API:
 
 Helpers are exposed as module-level snake_case functions for unit testing:
     strip_control_blocks, extract_control_block, looks_like_completion_claim,
+    requires_completion_check,
     extract_top_level_field_section, section_is_none,
     extract_acceptance_criteria_ids, extract_claim_evidence_entries,
     validate_completion_evidence_map
@@ -32,9 +33,9 @@ _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
 # boundaries, which we do not want here.
 _NEWLINE_SPLIT_RE = re.compile(r"\r?\n")
 
-# Claim detection is marker-only ([completion-check]). Substring keyword matching is
-# not used: it false-positives (e.g. the Korean for "success criteria") and
-# string-matching intent is unreliable.
+# Explicit claim detection is marker-only ([completion-check]). Mandatory final
+# block mode also uses a narrow executed-work closure detector so routine
+# explanations do not become completion-check retry loops.
 
 _VERIFICATION_DONE_RE = re.compile(r"-\s*verification-before-completion:\s*done\b")
 _SKILL_CALL_RE = re.compile(r"-\s*skill-call:\s*([^\n]+)")
@@ -50,6 +51,23 @@ _ENTRY_FIELD_RE = re.compile(r"^\s*(criterion|evidence|verdict)\s*:\s*(.+?)\s*$"
 _NONE_LINE_RE = re.compile(r"^-\s*none\b", re.I)
 
 _VALID_VERDICTS = ("pass", "fail", "unverified")
+_EXECUTED_WORK_CLAIM_PATTERNS = (
+    re.compile(
+        r"\b(?:the\s+)?(?:requested\s+)?(?:work|task|change|fix|implementation|"
+        r"request|issue|bug)\s+(?:is\s+)?(?:complete|completed|done|fixed|"
+        r"resolved|implemented)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:i\s+)?(?:completed|finished|fixed|resolved|implemented)\s+"
+        r"(?:the\s+)?(?:requested\s+)?(?:work|task|change|fix|request|issue|bug)\b",
+        re.I,
+    ),
+    re.compile(r"\b(?:all\s+)?tests?\s+(?:pass|passed|green)\b", re.I),
+    re.compile(r"\b(?:build|lint|typecheck|test\s+suite)\s+(?:succeeded|passed|is\s+clean)\b", re.I),
+    re.compile(r"(?:작업|변경|수정|구현|요청|이슈|버그).{0,12}(?:완료|끝냈|끝남|고쳤|해결|반영)"),
+    re.compile(r"(?:테스트|빌드|린트|타입체크).{0,12}(?:통과|성공|깨끗)"),
+)
 
 
 def _split_lines(text):
@@ -112,6 +130,17 @@ def looks_like_completion_claim(text):
     string-matching intent is unreliable.
     """
     return "[completion-check]" in text
+
+
+def requires_completion_check(text):
+    """True when text makes an executed-work closure claim without the marker.
+
+    This is intentionally narrower than ordinary recommendation or explanation
+    detection. It protects claims that work finished or verification passed, but
+    avoids blocking routine meta-discussion, options, or status explanations.
+    """
+    stripped = strip_control_blocks(text)
+    return any(pattern.search(stripped) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS)
 
 
 def extract_top_level_field_section(block, field_name):
@@ -237,24 +266,24 @@ def validate_completion_text(text, *, require_completion_check=False):
 
     Returns None when `text` is empty, is not a completion claim, or passes
     every gate; otherwise the deny-reason string. When
-    `require_completion_check` is true, any non-empty final response must carry
-    the explicit marker, while claim detection itself remains marker-only.
+    `require_completion_check` is true, executed-work closure claims must carry
+    the explicit marker, while routine explanations remain allowed.
     """
     text = "" if text is None else str(text)
     if not text:
         return None
     if not looks_like_completion_claim(text):
-        if require_completion_check and text.strip():
+        if require_completion_check and requires_completion_check(text):
             return (
-                "Final responses require a [completion-check] block with fresh "
-                "verification evidence."
+                "Completion or success claims about executed work require a "
+                "[completion-check] block with fresh verification evidence."
             )
         return None
 
     completion_check = extract_control_block(text, "completion-check")
     if not completion_check:
         return (
-            "Completion, success, recommendation, or evaluation claims require a "
+            "Completion or success claims about executed work require a "
             "[completion-check] block with fresh evidence."
         )
 

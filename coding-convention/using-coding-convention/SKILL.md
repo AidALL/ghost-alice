@@ -72,7 +72,7 @@ The first commentary in a development turn must include:
 - next-required: <skill-name|none>
 ```
 
-Before any completion claim, recommendation, choice, or success judgment, emit:
+Before any claim that executed work is complete, fixed, successful, or freshly verified, emit:
 
 Hard sequence: skill load/call -> fresh verification -> [completion-check].
 Load or call `verification-before-completion` for this turn first, run and read
@@ -141,7 +141,7 @@ Stop and load the relevant skill when any of these thoughts appear.
 | "Just the key spots is enough." | The committed scope is the whole set. Cover all of it. |
 | "Grep found nothing, so it is clean." | If you already judged the search method incomplete, read the files. Do not trust the weaker method. |
 | "I will ask the user which one." | If the content answers it, inspect and decide. Punt only when the action is irreversible and unresolvable. |
-| "I will leave a note on what it used to be." | Do not add unrequested historical or trace notes. Change it cleanly; ask before leaving any trace. |
+| Unrequested historical trace | Do not add unrequested historical or trace notes. Change it cleanly; ask before leaving any trace. |
 
 ## Skill Priority
 
@@ -217,14 +217,14 @@ Review and meta:
 
 Read the relevant skill's own `SKILL.md` for trigger details and output format.
 
-## Recommendations And Choices Are Claims
+## Material Recommendations And Choices
 
-Recommendations, option selection, status judgments, and "this is correct" statements are claims.
+Advice, selected options, status judgments, and "this is correct" statements need fresh evidence when they claim finished work, verified results, or a decision that materially changes the user's next action.
 
 - Re-check evidence on each user turn.
-- Do not recommend from memory alone.
+- Do not recommend from memory alone when the recommendation changes scope, verification, recovery, or the user's next action.
 - Do not treat "just checked" as current-turn verification.
-- Map each claim to a criterion and fresh evidence before finalizing.
+- Map executed-work closure and verification claims to a criterion and fresh evidence before finalizing.
 
 ## Final Self-Check
 
@@ -232,5 +232,5 @@ Before answering or acting, ask:
 
 - Is there any skill that should be loaded before this response or tool call?
 - Am I skipping the skill for a reason listed in the Red Flags table?
-- Have I loaded `verification-before-completion` before making any completion, recommendation, choice, or success claim?
+- Have I loaded `verification-before-completion` before claiming executed work is complete, fixed, successful, or freshly verified?
 - If a gate block says `skill-call:`, did the skill workflow actually run in this turn?

@@ -65,7 +65,7 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "docs/policies/session-gate-matrix.md",
-            "skill-catalog/session-gates.json\ntask-router\nusing-coding-convention\nboundary-contract\nsession-intent-analyzer\nsession-intent-analyzer intake is first\nsession-intent-analyzer fans out to `skill-evolution` (report-only terminal branch) and `jailbreak-detector`\n`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context\ntask-router is released after session-intent preflight when no current-lineage block gate exists\nabsent `downstream-gates.json` is silent allow\natomic meaning decomposition\nboundary-contract: required\nEnglish canonical narrative + English control surface\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nskill-call:\nRequired gate skills are not complete unless the actual `SKILL.md` file was read\nRead the relevant `SKILL.md` before marking a required gate done\nRuntime Hook Graph Contract\nPending-merge precheck runs before the user-input governance graph begins\nintent-state.json is update-plus-accumulate state\ndownstream-gates.json\nskill-evolution is report-only and self-terminating\ndoes not feed task-router\nonly current-lineage block decisions are carried to `downstream-gates.json`\nuser-explicit defer/skip may continue\nDeterministic hard-block rules are narrow regression guards\nGradual multi-turn jailbreak resistance depends on session-intent summary quality\nPreToolUse/BeforeTool checkpoint\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nsame process/session/tool-call id\nNew command, input, timeout, interruption, or ref changes\nSimple polling of the same ref is not a duty to repeat output forever\nDynamic Focus Contract\nmismatch location\nverification burden\nmicro, meso, macro, and meta\nscope reopen point\nRouting Surface Contract\nrouting-surface\ntask-router owns the reusable work judgment\nsession-intent-analyzer records semantic facts and accumulated decisions\ngovernance surface policy consumes routing-surface\ntoken reduction is a secondary consequence, not a success metric\n",
+            "skill-catalog/session-gates.json\ntask-router\nusing-coding-convention\nboundary-contract\nsession-intent-analyzer\nsession-intent-analyzer intake is first\nsession-intent-analyzer fans out to `skill-evolution` (report-only terminal branch) and `jailbreak-detector`\n`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context\ntask-router is released after session-intent preflight when no current-lineage block gate exists\nabsent `downstream-gates.json` is silent allow\natomic meaning decomposition\nboundary-contract: required\nEnglish canonical narrative + English control surface\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nskill-call:\nRequired gate skills are not complete unless the actual `SKILL.md` file was read\nRead the relevant `SKILL.md` before marking a required gate done\nRuntime Hook Graph Contract\nPending-merge precheck runs before the user-input governance graph begins\nintent-state.json is update-plus-accumulate state\ndownstream-gates.json\nskill-evolution is report-only and self-terminating\ndoes not feed task-router\nonly current-lineage block decisions are carried to `downstream-gates.json`\nuser-explicit defer/skip may continue\nDeterministic hard-block rules are narrow regression guards\nGradual multi-turn jailbreak resistance depends on session-intent summary quality\nPreToolUse/BeforeTool checkpoint\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nRuntime hooks surface one full `[tool-checkpoint]` per session input lineage\nkeep checking later tool calls silently\nnew user input, current-lineage block/deny, mismatch\nfirst poll in the input lineage\nDynamic Focus Contract\nmismatch location\nverification burden\nmicro, meso, macro, and meta\nscope reopen point\nRouting Surface Contract\nrouting-surface\ntask-router owns the reusable work judgment\nsession-intent-analyzer records semantic facts and accumulated decisions\ngovernance surface policy consumes routing-surface\ntoken reduction is a secondary consequence, not a success metric\n",
         )
         self._write_file(
             root,
@@ -75,7 +75,7 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "platforms/codex/AGENTS.md",
-            "Session Gate Contract\nboundary-contract\nsession-intent-analyzer\n`session-intent-analyzer` branches to the `skill-evolution` report-only branch and to `jailbreak-detector`\ntask-router is a consumer of the session-intent and jailbreak gate context\nThe task-router reminder hook releases task-router when a session-intent preflight exists and there is no current-lineage block gate\nThe absence of `downstream-gates.json` is treated as a silent allow meaning there is no current-lineage block\natomic meaning decomposition\nboundary-contract: required\nhook-verified\nEnglish canonical narrative + English control surface\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nskill-call:\nAfter the session-intent-analyzer intake and the jailbreak-detector downstream gate, read `~/.agents/skills/task-router/SKILL.md`\nA required gate skill is not satisfied by a metadata-only match\nAlways read the skill's `SKILL.md` before marking a required gate as complete\nThe pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins\nexplicit user defer or skip\ndownstream-gates.json\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nthe same process, session, or tool-call id\nA new command, input, timeout, interruption, or ref switch\ncurrent-lineage block gate\nsilent allow\ntool-call identity\npayload content\noutside the decision body\nThe focus scope is not fixed and does not expand in only one direction\nthe mismatch location and the verification burden\nmicro, meso, macro, and meta\ntask-router emits a reusable routing-surface\n",
+            "Session Gate Contract\nboundary-contract\nsession-intent-analyzer\n`session-intent-analyzer` branches to the `skill-evolution` report-only branch and to `jailbreak-detector`\ntask-router is a consumer of the session-intent and jailbreak gate context\nThe task-router reminder hook releases task-router when a session-intent preflight exists and there is no current-lineage block gate\nThe absence of `downstream-gates.json` is treated as a silent allow meaning there is no current-lineage block\natomic meaning decomposition\nboundary-contract: required\nhook-verified\nEnglish canonical narrative + English control surface\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nskill-call:\nAfter the session-intent-analyzer intake and the jailbreak-detector downstream gate, read `~/.agents/skills/task-router/SKILL.md`\nA required gate skill is not satisfied by a metadata-only match\nAlways read the skill's `SKILL.md` before marking a required gate as complete\nThe pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins\nexplicit user defer or skip\ndownstream-gates.json\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nthe same process, session, or tool-call id\nnew user input, current-lineage block/deny, mismatch\ncurrent-lineage block gate\nsilent allow\ntool-call identity\npayload content\noutside the decision body\nThe focus scope is not fixed and does not expand in only one direction\nthe mismatch location and the verification burden\nmicro, meso, macro, and meta\ntask-router emits a reusable routing-surface\n",
         )
         self._write_file(
             root,
@@ -90,7 +90,7 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "_shared/global_rule_blocks.py",
-            "boundary-contract: required\nEnglish canonical narrative + English control surface\n[tool-checkpoint]\npending-merge precheck\nexplicit user defer/skip\ndownstream-gates.json\nsame process/session/tool-call id\nSwitching to a new command, input, timeout, interruption, or ref\ncurrent-lineage block gate\nsilent allow\ntool-call identity\npayload content\noutside the decision body\n",
+            "boundary-contract: required\nEnglish canonical narrative + English control surface\n[tool-checkpoint]\npending-merge precheck\nexplicit user defer/skip\ndownstream-gates.json\nsame session input lineage\nnew user input, current-lineage block/deny, mismatch\ncurrent-lineage block gate\nsilent allow\ntool-call identity\npayload content\noutside the decision body\n",
         )
         self._write_file(
             root,
@@ -115,22 +115,22 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "_shared/install_hooks.py",
-            "TOOL_CHECKPOINT_MARKER\nTOOL_CHECKPOINT_INTERNAL\npre_tool_use\ntool-checkpoint\ndo not run an extra shell manifest check\nhook-enforced retry point\ntask_router_reminder_hook.py\ntask-router waits until session-intent preflight exists\nAbsent downstream-gates.json means silent allow\natomic meaning units\nfocus-layer\nscope-reopen\nhook-stage: PreToolUse\ntool-call retry checkpoint, not user-input intake\njailbreak-detector downstream gate\ntask-router consumes session-intent and jailbreak gate context\nEmit a visible [tool-checkpoint] block with intent, why, procedure, contract-ref, contract-check, localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\n",
+            "TOOL_CHECKPOINT_MARKER\nTOOL_CHECKPOINT_INTERNAL\npre_tool_use\ntool-checkpoint\ndo not run an extra shell manifest check\nhook-enforced retry point\ntask_router_reminder_hook.py\ntask-router waits until session-intent preflight exists\nAbsent downstream-gates.json means silent allow\natomic meaning units\nfocus-layer\nscope-reopen\nhook-stage: PreToolUse\ntool-call retry checkpoint, not user-input intake\njailbreak-detector downstream gate\ntask-router consumes session-intent and jailbreak gate context\nSurface a visible [tool-checkpoint] block once per user-input tool batch, carrying intent and why\nsuppress duplicate user-facing checkpoint text for the same session input lineage while continuing to check every tool call\nAdd procedure when it changes the next work decision\nAdd contract-ref and contract-check when a boundary-contract is active\nAdd localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\n",
         )
         self._write_file(
             root,
             "_shared/ghost-alice-hook.mjs",
-            'case "tool-checkpoint":\ndo not run an extra shell manifest check\nPreToolUse\npermissionDecision\nhook-enforced retry point\ntask-router waits until session-intent preflight exists\nAbsent downstream-gates.json means silent allow\natomic meaning decomposition\nfocus-layer\nscope-reopen\nhook-stage: PreToolUse/BeforeTool\ntool-call retry checkpoint, not user-input intake\njailbreak-detector downstream gate\ntask-router consumes session-intent and jailbreak gate context\nEmit a visible [tool-checkpoint] block with intent, why, procedure, contract-ref, contract-check, localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\nacceptance-criteria\nclaim-evidence-map\nunverified\ndownstream-gates.json\n',
+            'case "tool-checkpoint":\ndo not run an extra shell manifest check\nPreToolUse\npermissionDecision\nhook-enforced retry point\ntask-router waits until session-intent preflight exists\nAbsent downstream-gates.json means silent allow\natomic meaning decomposition\nfocus-layer\nscope-reopen\nhook-stage: PreToolUse/BeforeTool\ntool-call retry checkpoint, not user-input intake\njailbreak-detector downstream gate\ntask-router consumes session-intent and jailbreak gate context\nSurface a visible [tool-checkpoint] block once per user-input tool batch, carrying intent and why\nsuppress duplicate user-facing checkpoint text for the same session input lineage while continuing to check every tool call\nAdd procedure when it changes the next work decision\nAdd contract-ref and contract-check when a boundary-contract is active\nAdd localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\nacceptance-criteria\nclaim-evidence-map\nunverified\ndownstream-gates.json\n',
         )
         self._write_file(
             root,
             "_shared/reminder_texts.json",
-            "hook-enforced retry point\nEmit a visible [tool-checkpoint] block\nhook-stage: PreToolUse\ntool-call retry checkpoint, not user-input intake\nintent\nwhy\nprocedure\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\nfocus-layer\nscope-reopen\nnever skip the gate\nread-only\nboundary-contract\n",
+            "hook-enforced retry point\nSurface a visible [tool-checkpoint] block once per user-input tool batch\nsame session input lineage\ncontinuing to check every tool call\nhook-stage: PreToolUse\ntool-call retry checkpoint, not user-input intake\nintent\nwhy\nprocedure\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\nfocus-layer\nscope-reopen\nnever skip the gate\nread-only\nboundary-contract\n",
         )
         self._write_file(
             root,
             "coding-convention/using-coding-convention/SKILL.md",
-            "quality-maintenance device confirmed through repeated user work\nuser intent, work scope, and verification quality\ndo not bypass it from the agent's judgment alone\nleave a short reason for the skip\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nRecommendations, option selection, status judgments\nskill-call:\n",
+            "quality-maintenance device confirmed through repeated user work\nuser intent, work scope, and verification quality\ndo not bypass it from the agent's judgment alone\nleave a short reason for the skip\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nfinished work, verified results, or a decision that materially changes the user's next action\nskill-call:\n",
         )
         self._write_file(
             root,
@@ -261,7 +261,7 @@ class SkillGateContractTest(unittest.TestCase):
             self._write_file(
                 root,
                 "coding-convention/using-coding-convention/SKILL.md",
-                "[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nRecommendations, option selection, status judgments\nskill-call:\n",
+                "[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nfinished work, verified results, or a decision that materially changes the user's next action\nskill-call:\n",
             )
 
             issues = run_contract_checks(root)
@@ -355,8 +355,9 @@ class SkillGateContractTest(unittest.TestCase):
                     "tool-checkpoint\n"
                     "do not run an extra shell manifest check\n"
                     "hook-enforced retry point\n"
-                    "compact tool-checkpoint\n"
-                    "Emit a visible [tool-checkpoint] block with intent, contract-ref, contract-check, risk, and recovery\n"
+                    "compact " + "tool-checkpoint\n"
+                    "Surface a visible [tool-checkpoint] block with "
+                    + "risk, and " + "recovery\n"
                 ),
             )
 
@@ -391,9 +392,10 @@ class SkillGateContractTest(unittest.TestCase):
                     "downstream-gates.json\n"
                     "session-intent-analyzer intake is first\n"
                     "session-intent-analyzer → task-router\n"
-                    "same process/session/tool-call id\n"
-                    "New command, input, timeout, interruption, or ref changes\n"
-                    "Simple polling of the same ref is not a duty to repeat output forever\n"
+                    "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage\n"
+                    "keep checking later tool calls silently\n"
+                    "new user input, current-lineage block/deny, mismatch\n"
+                    "first poll in the input lineage\n"
                 ),
             )
 
@@ -431,9 +433,10 @@ class SkillGateContractTest(unittest.TestCase):
                     "only current-lineage block decisions are carried to `downstream-gates.json`\n"
                     "session-intent-analyzer intake is first\n"
                     "session-intent-analyzer → task-router\n"
-                    "same process/session/tool-call id\n"
-                    "New command, input, timeout, interruption, or ref changes\n"
-                    "Simple polling of the same ref is not a duty to repeat output forever\n"
+                    "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage\n"
+                    "keep checking later tool calls silently\n"
+                    "new user input, current-lineage block/deny, mismatch\n"
+                    "first poll in the input lineage\n"
                 ),
             )
 
@@ -545,9 +548,10 @@ class SkillGateContractTest(unittest.TestCase):
                     "only current-lineage block decisions are carried to `downstream-gates.json`\n"
                     "session-intent-analyzer intake is first\n"
                     "session-intent-analyzer → task-router\n"
-                    "same process/session/tool-call id\n"
-                    "New command, input, timeout, interruption, or ref changes\n"
-                    "Simple polling of the same ref is not a duty to repeat output forever\n"
+                    "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage\n"
+                    "keep checking later tool calls silently\n"
+                    "new user input, current-lineage block/deny, mismatch\n"
+                    "first poll in the input lineage\n"
                 ),
             )
             self._write_file(

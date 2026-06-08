@@ -16,7 +16,7 @@ CODEX_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: codex-bootstrap -
 
 CODEX_HOOKLESS_FALLBACK_BLOCK = """## Codex Hook Enforcement And Hookless Fallback
 
-When Codex hooks are trusted and a `PreToolUse` tool-checkpoint payload is observed, treat tool-checkpoint as a hook-enforced retry point. After a hook denial, the agent emits a `[tool-checkpoint]` and retries the same tool call. Hook timing enforcement does not weaken the semantic gate. Required decision fields are `intent`, `why`, `procedure`, `contract-ref`, `contract-check`, `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong`. Add `recovery-action` only when a mismatch, scope reopen, external side effect, or hard-to-recover action needs a concrete next step.
+When Codex hooks are trusted and a `PreToolUse` tool-checkpoint payload is observed, treat tool-checkpoint as a hook-enforced retry point. After a hook denial, the agent emits a `[tool-checkpoint]` and retries the same tool call. Hook timing enforcement does not weaken the semantic gate. Every checkpoint carries at least `intent` and `why`. Add `procedure` when it changes the next work decision or clarifies a non-routine step. Add `contract-ref` and `contract-check` when a boundary-contract is active. Add `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong` only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful. Add `recovery-action` only when a mismatch, scope reopen, external side effect, or hard-to-recover action needs a concrete next step.
 
 If hooks are disabled, review/trust has not completed, or no hook payload has been observed in the current session, the session is in hookless/manual fallback mode. Only in that case, the bootstrap directly enforces the procedure below.
 
@@ -29,13 +29,13 @@ If hooks are disabled, review/trust has not completed, or no hook payload has be
 - tool-checkpoint looks only at the current-lineage block gate and the silent allow invariant. If `opened=false` or `decision=block`, it denies; an absent gate or any other state is silent allow. It does not use tool-call identity, payload content, or audit/log/correlation metadata as decision input; audit/log/correlation metadata stays outside the decision body.
 - If task-router outputs `boundary-contract: required`, apply `boundary-contract` before any other tool call.
 - Leave a `[gate-state]` block in the first commentary.
-- Leave a `[tool-checkpoint]` block immediately before every new tool action.
-- A routine inspection batch explicitly declared by the previous full gate may be referenced briefly as `[tool-checkpoint:batch]`; output polling for an already-started process may be referenced briefly as `[tool-checkpoint:continuation]`.
-- `[tool-checkpoint:continuation]` refers only to output polling for the same process/session/tool-call id. Switching to a new command, input, timeout, interruption, or ref returns to a full `[tool-checkpoint]`.
-- Simple polling of the same ref does not require repeated output; this is a shorthand that avoids repeating the full gate. Surface it the first time or when state changes.
+- Surface a `[tool-checkpoint]` block once per user-input tool batch. Repeated tool calls in the same session input lineage stay hook-checked but do not need repeated user-facing checkpoint text unless state changes.
+- A routine inspection batch may be referenced briefly as `[tool-checkpoint:batch]`; output polling for an already-started process may be referenced briefly as `[tool-checkpoint:continuation]`.
+- `[tool-checkpoint:continuation]` refers only to output polling for the same process/session/tool-call id. A new user input, current-lineage block/deny, mismatch, or other state change returns to a surfaced `[tool-checkpoint]`.
+- Simple polling of the same ref does not require repeated output; this is a shorthand that avoids repeating the full gate. Surface it the first time in the input lineage or when state changes.
 - Do not infer whether an action is safe from tool-call identity or payload content. The decision depends only on the current-lineage block gate and the silent allow invariant.
 - Gate schemas such as `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, and `[io-trace]` follow English canonical narrative + English control surface.
-- Immediately before a completion claim, leave a `[completion-check]` block that connects acceptance criteria to fresh evidence.
+- Before claiming executed work is complete, fixed, successful, or freshly verified, leave a `[completion-check]` block that connects acceptance criteria to fresh evidence.
 - Leave an `[io-trace]` block at the end of the response.
 - If any required step was missed, repair it immediately and then continue.
 

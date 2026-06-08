@@ -20,6 +20,7 @@ Usage:
 """
 
 import base64
+import concurrent.futures
 import contextlib
 import io
 import json
@@ -678,6 +679,60 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("Do not ask the user", payload["reason"])
         self.assertIn("always-on completion lifecycle gate", payload["reason"])
 
+    def test_claude_stop_hook_retry_reason_requires_standalone_final_answer(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            transcript = Path(temp_dir) / "transcript.jsonl"
+            transcript.write_text(
+                "\n".join([
+                    json.dumps({
+                        "type": "user",
+                        "message": {"role": "user", "content": "Summarize two papers."},
+                    }),
+                    json.dumps({
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{
+                                "type": "text",
+                                "text": (
+                                    "Paper A summary.\n\n"
+                                    "[completion-check]\n"
+                                    "- verification-before-completion: done\n"
+                                    "- skill-call: verification-before-completion (this turn)\n"
+                                    "- acceptance-criteria:\n"
+                                    "  - c1: cite two papers [source: user-explicit]\n"
+                                    "- claim-evidence-map:\n"
+                                    "  - claim: two papers cited\n"
+                                    "    criterion: c1\n"
+                                    "    evidence: search result\n"
+                                    "    verdict: pass\n"
+                                    "- unverified:\n"
+                                    "  - none\n"
+                                    "- evidence: search result\n"
+                                    "[io-trace]\n"
+                                    "- web-accessed: [query]\n"
+                                    "- skills-loaded: [verification-before-completion]"
+                                ),
+                            }],
+                        },
+                    }),
+                ])
+                + "\n",
+                encoding="utf-8",
+            )
+            result = _run_hook_command(
+                install_hooks.STOP_HOOK_COMMAND,
+                input_text=json.dumps({"transcript_path": str(transcript)}),
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload.get("decision"), "block")
+        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertIn("Do not refer to a previous answer", payload["reason"])
+        self.assertIn("Begin with the user's requested answer", payload["reason"])
+        self.assertIn("Do not begin with verification process notes", payload["reason"])
+
     def test_claude_stop_hook_allows_actual_verification_skill_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
@@ -848,10 +903,9 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(payload.get("continue"), True, msg=payload)
         self.assertNotIn("decision", payload)
 
-    def test_claude_stop_hook_blocks_nonempty_final_response_without_completion_check(self):
-        # Stop hooks validate the final response surface. A non-empty final response
-        # without a [completion-check] block is rejected in mandatory final-block mode;
-        # empty / unavailable transcripts still pass as hook input failures.
+    def test_claude_stop_hook_allows_explanatory_final_response_without_completion_check(self):
+        # Stop hooks keep the completion gate alive without turning every routine
+        # explanatory final response into a completion-check retry loop.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -859,6 +913,27 @@ class TestMessageLanguage(unittest.TestCase):
                     json.dumps({"type": "user", "message": {"role": "user", "content": "Explain both options."}}),
                     json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
                         {"type": "text", "text": "Here are the two options. The first is gate wiring, and the second is install safety. Choose the direction."}]}}),
+                ]) + "\n",
+                encoding="utf-8",
+            )
+            result = _run_hook_command(
+                install_hooks.STOP_HOOK_COMMAND,
+                input_text=json.dumps({"transcript_path": str(transcript)}),
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload.get("continue"), True, msg=payload)
+        self.assertNotIn("decision", payload)
+
+    def test_claude_stop_hook_blocks_completion_claim_without_completion_check(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            transcript = Path(temp_dir) / "transcript.jsonl"
+            transcript.write_text(
+                "\n".join([
+                    json.dumps({"type": "user", "message": {"role": "user", "content": "Fix it."}}),
+                    json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
+                        {"type": "text", "text": "The requested change is complete and tests pass."}]}}),
                 ]) + "\n",
                 encoding="utf-8",
             )
@@ -903,19 +978,20 @@ class TestMessageLanguage(unittest.TestCase):
     def test_tool_checkpoint_runtime_hook_uses_concise_enforced_instruction(self):
         """Installed tool-checkpoint instruction keeps the concise decision surface."""
         self.assertIn("hook-enforced", install_hooks.TOOL_CHECKPOINT_INTERNAL)
-        self.assertIn("Emit a visible [tool-checkpoint]", install_hooks.TOOL_CHECKPOINT_INTERNAL)
+        self.assertIn("Surface a visible [tool-checkpoint]", install_hooks.TOOL_CHECKPOINT_INTERNAL)
+        self.assertIn("same session input lineage", install_hooks.TOOL_CHECKPOINT_INTERNAL)
+        self.assertIn("continuing to check every tool call", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertIn("why", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertIn("procedure", install_hooks.TOOL_CHECKPOINT_INTERNAL)
-        self.assertIn("localized-human-note", install_hooks.TOOL_CHECKPOINT_INTERNAL)
-        self.assertIn("rejected-alternatives", install_hooks.TOOL_CHECKPOINT_INTERNAL)
-        self.assertIn("unverified-premises", install_hooks.TOOL_CHECKPOINT_INTERNAL)
-        self.assertIn("failure-mode-if-wrong", install_hooks.TOOL_CHECKPOINT_INTERNAL)
+        self.assertIn("when it changes the next work decision", install_hooks.TOOL_CHECKPOINT_INTERNAL)
+        self.assertIn("Add localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong only when", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertIn("recovery-action", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertNotIn("recovery-cost", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertNotIn("recovery-note", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertIn("focus-layer", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertIn("scope-reopen", install_hooks.TOOL_CHECKPOINT_INTERNAL)
-        # Tiered contract: intent always; analytical fields expand only on the
+        # Tiered contract: intent and why always; procedure is the normal
+        # operational summary. Analytical fields expand only on the
         # observable tool kind and recorded boundary/forced state, never on a
         # self-judgment that the call is safe, and the gate itself is never skipped.
         self.assertIn("read-only", install_hooks.TOOL_CHECKPOINT_INTERNAL)
@@ -927,7 +1003,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("previous full gate", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertNotIn("semantic safety classifier", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         self.assertNotIn("compact schema", install_hooks.TOOL_CHECKPOINT_INTERNAL)
-        self.assertNotIn("compact tool-checkpoint", install_hooks.TOOL_CHECKPOINT_INTERNAL)
+        self.assertNotIn("compact " + "tool-checkpoint", install_hooks.TOOL_CHECKPOINT_INTERNAL)
         opaque_risk_code_re = re.compile(r"(?<![A-Za-z0-9_])R[0-9][A-Z]?(?![A-Za-z0-9_])")
         self.assertIsNone(opaque_risk_code_re.search(install_hooks.TOOL_CHECKPOINT_INTERNAL))
         # ASCII boundaries (not \b) so a Korean-adjacent opaque code is still caught.
@@ -939,13 +1015,13 @@ class TestMessageLanguage(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn("hook-enforced", result.stdout)
-        self.assertIn("Emit a visible [tool-checkpoint]", result.stdout)
+        self.assertIn("Surface a visible [tool-checkpoint]", result.stdout)
+        self.assertIn("same session input lineage", result.stdout)
+        self.assertIn("continuing to check every tool call", result.stdout)
         self.assertIn("hook-stage: PreToolUse", result.stdout)
         self.assertIn("tool-call retry checkpoint, not user-input intake", result.stdout)
-        self.assertIn("localized-human-note", result.stdout)
-        self.assertIn("rejected-alternatives", result.stdout)
-        self.assertIn("unverified-premises", result.stdout)
-        self.assertIn("failure-mode-if-wrong", result.stdout)
+        self.assertIn("when it changes the next work decision", result.stdout)
+        self.assertIn("Add localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong only when", result.stdout)
         self.assertIn("recovery-action", result.stdout)
         self.assertIn("read-only", result.stdout)
         self.assertIn("never skip the gate", result.stdout)
@@ -956,7 +1032,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("[tool-checkpoint:continuation]", result.stdout)
         self.assertNotIn("semantic safety classifier", result.stdout)
         self.assertNotIn("compact schema", result.stdout)
-        self.assertNotIn("compact tool-checkpoint", result.stdout)
+        self.assertNotIn("compact " + "tool-checkpoint", result.stdout)
         self.assertIsNone(opaque_risk_code_re.search(result.stdout))
 
     def test_codex_dispatcher_tool_checkpoint_returns_pre_tool_use_deny_shape_for_blocked_gate(self):
@@ -1025,8 +1101,8 @@ class TestMessageLanguage(unittest.TestCase):
         second_payload = json.loads(second.stdout)
         self.assertEqual(second_payload["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_codex_dispatcher_tool_checkpoint_uses_no_replay_state_for_open_gate(self):
-        """Open downstream gate does not create or consume tool checkpoint replay state."""
+    def test_codex_dispatcher_tool_checkpoint_surfaces_once_per_input_lineage(self):
+        """Open downstream gate keeps checking each tool call but surfaces once per user input."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -1036,9 +1112,24 @@ class TestMessageLanguage(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_home:
             env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-long-running-replay")
+            session_id = "s-codex-tool-checkpoint-surface-batch"
+            _write_session_intent_preflight(
+                temp_home,
+                "codex",
+                session_id,
+                event_id="evt-a",
+                input_digest="sha256:a",
+            )
+            _write_downstream_gate(
+                temp_home,
+                "codex",
+                session_id,
+                "allow",
+                event_id="evt-a",
+                input_digest="sha256:a",
+            )
             request = json.dumps({
-                "session_id": "s-codex-long-running-replay",
+                "session_id": session_id,
                 "hook_event_name": "PreToolUse",
                 "tool_name": "apply_patch",
                 "tool_input": {"command": "*** Begin Patch\n*** End Patch\n"},
@@ -1076,13 +1167,305 @@ class TestMessageLanguage(unittest.TestCase):
                 env=env,
                 check=False,
             )
-            state_path = Path(temp_home) / ".ghost-alice" / "hooks" / ("tool-checkpoint-state" + ".json")
+            _write_session_intent_preflight(
+                temp_home,
+                "codex",
+                session_id,
+                event_id="evt-b",
+                input_digest="sha256:b",
+            )
+            _write_downstream_gate(
+                temp_home,
+                "codex",
+                session_id,
+                "allow",
+                event_id="evt-b",
+                input_digest="sha256:b",
+            )
+            third = subprocess.run(
+                command,
+                input=request,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
 
         self.assertEqual(first.returncode, 0, msg=first.stderr)
-        self.assert_no_pretool_deny(json.loads(first.stdout))
+        first_payload = json.loads(first.stdout)
+        self.assert_no_pretool_deny(first_payload)
+        self.assertIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
+
         self.assertEqual(second.returncode, 0, msg=second.stderr)
-        self.assert_no_pretool_deny(json.loads(second.stdout))
-        self.assertFalse(state_path.exists())
+        second_payload = json.loads(second.stdout)
+        self.assert_no_pretool_deny(second_payload)
+        self.assertNotIn("additionalContext", second_payload.get("hookSpecificOutput", {}))
+
+        self.assertEqual(third.returncode, 0, msg=third.stderr)
+        third_payload = json.loads(third.stdout)
+        self.assert_no_pretool_deny(third_payload)
+        self.assertIn("additionalContext", third_payload.get("hookSpecificOutput", {}))
+
+    def test_claude_dispatcher_tool_checkpoint_fallback_does_not_inject_answer_context(self):
+        """Claude print mode can miss intent lineage; allow checkpoints still avoid model-context text."""
+        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
+        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
+
+        node = shutil.which("node") or shutil.which("node.exe")
+        if not node:
+            self.skipTest("node is required to execute the hook dispatcher")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = _strict_hook_env({"HOME": temp_home})
+            session_id = "s-claude-tool-checkpoint-missing-lineage"
+            command = [
+                node,
+                str(dispatcher),
+                "--platform",
+                "claude",
+                "--event",
+                "PreToolUse",
+                "--hook",
+                "tool-checkpoint",
+                "--marker",
+                install_hooks.TOOL_CHECKPOINT_MARKER,
+            ]
+
+            def run_tool(tool_name: str) -> subprocess.CompletedProcess:
+                return subprocess.run(
+                    command,
+                    input=json.dumps({
+                        "session_id": session_id,
+                        "hook_event_name": "PreToolUse",
+                        "tool_name": tool_name,
+                        "tool_input": {"command": "echo smoke"},
+                    }),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    check=False,
+                )
+
+            first = run_tool("PowerShell")
+            second = run_tool("WebSearch")
+
+        self.assertEqual(first.returncode, 0, msg=first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assert_no_pretool_deny(first_payload)
+        self.assertNotIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
+        self.assertNotIn("[tool-checkpoint]", first.stdout)
+
+        self.assertEqual(second.returncode, 0, msg=second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assert_no_pretool_deny(second_payload)
+        self.assertNotIn("additionalContext", second_payload.get("hookSpecificOutput", {}))
+        self.assertNotIn("[tool-checkpoint]", second.stdout)
+
+    def test_claude_dispatcher_tool_checkpoint_allow_does_not_inject_answer_surface_context(self):
+        """Claude allow checkpoints must not enter model context as answer-shaped text."""
+        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
+        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
+
+        node = shutil.which("node") or shutil.which("node.exe")
+        if not node:
+            self.skipTest("node is required to execute the hook dispatcher")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = _strict_hook_env({"HOME": temp_home})
+            result = subprocess.run(
+                [
+                    node,
+                    str(dispatcher),
+                    "--platform",
+                    "claude",
+                    "--event",
+                    "PreToolUse",
+                    "--hook",
+                    "tool-checkpoint",
+                    "--marker",
+                    install_hooks.TOOL_CHECKPOINT_MARKER,
+                ],
+                input=json.dumps({
+                    "session_id": "s-claude-tool-checkpoint-no-answer-leak",
+                    "hook_event_name": "PreToolUse",
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ls"},
+                }),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assert_no_pretool_deny(payload)
+        output = payload.get("hookSpecificOutput", {})
+        self.assertNotIn("additionalContext", output)
+        self.assertNotIn("[tool-checkpoint]", result.stdout)
+        self.assertNotIn("Surface a visible", result.stdout)
+
+    def test_claude_dispatcher_tool_checkpoint_transcript_fallback_avoids_answer_context(self):
+        """Claude transcript fallback never injects answer-shaped checkpoint text."""
+        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
+        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
+
+        node = shutil.which("node") or shutil.which("node.exe")
+        if not node:
+            self.skipTest("node is required to execute the hook dispatcher")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = _strict_hook_env({"HOME": temp_home})
+            session_id = "s-claude-tool-checkpoint-transcript-fallback"
+            transcript = Path(temp_home) / "transcript.jsonl"
+            transcript.write_text(
+                json.dumps({
+                    "type": "user",
+                    "message": {"role": "user", "content": "first prompt"},
+                })
+                + "\n",
+                encoding="utf-8",
+            )
+            command = [
+                node,
+                str(dispatcher),
+                "--platform",
+                "claude",
+                "--event",
+                "PreToolUse",
+                "--hook",
+                "tool-checkpoint",
+                "--marker",
+                install_hooks.TOOL_CHECKPOINT_MARKER,
+            ]
+
+            def run_tool() -> subprocess.CompletedProcess:
+                return subprocess.run(
+                    command,
+                    input=json.dumps({
+                        "session_id": session_id,
+                        "transcript_path": str(transcript),
+                        "hook_event_name": "PreToolUse",
+                        "tool_name": "WebSearch",
+                        "tool_input": {"query": "neuromorphic AI"},
+                    }),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    check=False,
+                )
+
+            first = run_tool()
+            second = run_tool()
+            with transcript.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps({
+                    "type": "user",
+                    "message": {"role": "user", "content": [
+                        {"type": "tool_result", "content": "ignored tool result"},
+                    ]},
+                }) + "\n")
+                handle.write(json.dumps({
+                    "type": "user",
+                    "message": {"role": "user", "content": "second prompt"},
+                }) + "\n")
+            third = run_tool()
+
+        self.assertEqual(first.returncode, 0, msg=first.stderr)
+        first_payload = json.loads(first.stdout)
+        self.assertNotIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
+        self.assertNotIn("[tool-checkpoint]", first.stdout)
+
+        self.assertEqual(second.returncode, 0, msg=second.stderr)
+        second_payload = json.loads(second.stdout)
+        self.assertNotIn("additionalContext", second_payload.get("hookSpecificOutput", {}))
+        self.assertNotIn("[tool-checkpoint]", second.stdout)
+
+        self.assertEqual(third.returncode, 0, msg=third.stderr)
+        third_payload = json.loads(third.stdout)
+        self.assertNotIn("additionalContext", third_payload.get("hookSpecificOutput", {}))
+        self.assertNotIn("[tool-checkpoint]", third.stdout)
+
+    def test_codex_dispatcher_tool_checkpoint_parallel_calls_share_input_surface(self):
+        """Parallel tool calls in one input lineage share one user-facing checkpoint surface."""
+        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
+        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
+
+        node = shutil.which("node") or shutil.which("node.exe")
+        if not node:
+            self.skipTest("node is required to execute the hook dispatcher")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = _strict_hook_env({"HOME": temp_home})
+            session_id = "s-codex-tool-checkpoint-parallel-surface"
+            _write_session_intent_preflight(
+                temp_home,
+                "codex",
+                session_id,
+                event_id="evt-parallel",
+                input_digest="sha256:parallel",
+            )
+            _write_downstream_gate(
+                temp_home,
+                "codex",
+                session_id,
+                "allow",
+                event_id="evt-parallel",
+                input_digest="sha256:parallel",
+            )
+            command = [
+                node,
+                str(dispatcher),
+                "--platform",
+                "codex",
+                "--event",
+                "PreToolUse",
+                "--hook",
+                "tool-checkpoint",
+                "--marker",
+                install_hooks.TOOL_CHECKPOINT_MARKER,
+            ]
+
+            def run_one(index: int) -> subprocess.CompletedProcess:
+                return subprocess.run(
+                    command,
+                    input=json.dumps({
+                        "session_id": session_id,
+                        "hook_event_name": "PreToolUse",
+                        "tool_name": "shell",
+                        "tool_input": {"cmd": f"echo parallel-{index}"},
+                    }),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    check=False,
+                )
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                results = list(executor.map(run_one, range(8)))
+
+        payloads = []
+        for result in results:
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            payload = json.loads(result.stdout)
+            self.assert_no_pretool_deny(payload)
+            payloads.append(payload)
+
+        surfaced_count = sum(
+            1
+            for payload in payloads
+            if payload.get("hookSpecificOutput", {}).get("additionalContext")
+        )
+        self.assertEqual(surfaced_count, 1)
 
     def test_dispatcher_has_no_tool_checkpoint_replay_or_identity_decision_helpers(self):
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
@@ -3765,6 +4148,37 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertIn("user-explicit defer/skip may continue", result.stdout)
         self.assertNotIn("Check the current platform pending-merge manifest", result.stdout)
 
+    def test_claude_prompt_hooks_use_json_payloads_to_avoid_answer_text_leakage(self):
+        from install_hooks import (
+            _platform_hook_entry,
+            _platform_prompt_pending_merge_entry,
+            _platform_session_intent_entry,
+            _platform_session_start_entry,
+            _platform_web_search_entry,
+        )
+
+        entries = [
+            _platform_prompt_pending_merge_entry("claude", "UserPromptSubmit"),
+            _platform_hook_entry("claude", "UserPromptSubmit"),
+            _platform_session_intent_entry("claude", "UserPromptSubmit"),
+            _platform_web_search_entry("claude", "UserPromptSubmit"),
+            _platform_session_start_entry("claude", "SessionStart"),
+        ]
+        commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
+
+        for command in commands:
+            encoded_args = re.findall(r'"([A-Za-z0-9_-]{40,}=*)"', command)
+            self.assertTrue(encoded_args, msg=command)
+            wrapped_command = base64.urlsafe_b64decode(max(encoded_args, key=len)).decode("utf-8")
+            self.assertNotIn("--format text", wrapped_command)
+            if "--format" in wrapped_command:
+                self.assertIn("--format json", wrapped_command)
+            else:
+                inline_payload = re.search(r"b64decode\('([^']+)'\)", wrapped_command)
+                self.assertIsNotNone(inline_payload, msg=wrapped_command)
+                decoded = base64.b64decode(inline_payload.group(1)).decode("utf-8")  # type: ignore[union-attr]
+                self.assertIn("systemMessage", json.loads(decoded))
+
     def test_session_start_command_has_failsafe(self):
         from install_hooks import SESSION_START_COMMAND
         self.assertIn("|| true", SESSION_START_COMMAND)
@@ -3836,7 +4250,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self.assertNotIn("decision", payload)
         self.assertNotIn("systemMessage", payload)
 
-    def test_codex_stop_hook_blocks_missing_completion_check(self):
+    def test_codex_stop_hook_blocks_completion_claim_missing_completion_check(self):
         result = _run_hook_command(
             install_hooks.STOP_HOOK_COMMAND_CODEX,
             input_text=json.dumps({
@@ -3849,6 +4263,21 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload.get("decision"), "block", msg=payload)
         self.assertIn("[completion-check]", payload["reason"])
+        self.assertNotIn("systemMessage", payload)
+
+    def test_codex_stop_hook_allows_explanatory_response_without_completion_check(self):
+        result = _run_hook_command(
+            install_hooks.STOP_HOOK_COMMAND_CODEX,
+            input_text=json.dumps({
+                "hook_event_name": "Stop",
+                "last_assistant_message": "Here is why that hook behavior repeated too much.",
+            }),
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload.get("continue"), True, msg=payload)
+        self.assertNotIn("decision", payload)
         self.assertNotIn("systemMessage", payload)
 
     def test_codex_stop_hook_allows_valid_completion_check(self):
@@ -3886,7 +4315,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         command = install_hooks.STOP_HOOK_COMMAND_CODEX
 
         self.assertIn("claude_stop_verification_hook.py", command)
-        self.assertNotIn("completion-reminder: Before final response", command)
+        self.assertNotIn("completion-reminder: " + "Before " + "final " + "response", command)
 
     def test_codex_foreground_hooks_emit_valid_json_system_messages(self):
         cases = (

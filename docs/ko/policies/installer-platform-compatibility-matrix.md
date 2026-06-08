@@ -59,11 +59,11 @@ SessionStart 또는 UserPromptSubmit hook이 current platform pending-merge prec
 
 ### tool-checkpoint recovery surface
 
-Runtime tool-checkpoint payload는 routine recovery cost 또는 recovery note fields를 요구하지 않는다. Default visible surface는 `failure-mode-if-wrong`을 유지하고, `recovery-action`은 mismatch, scope reopen, external side effect, hard-to-recover action에 concrete next step이 필요할 때만 나타난다.
+Runtime tool-checkpoint payload는 routine recovery cost 또는 recovery note fields를 요구하지 않는다. Default visible surface는 `intent`와 `why`를 유지하고, `failure-mode-if-wrong`과 `recovery-action`은 side effect, forced signal, mismatch, meaningful user decision point, hard-to-recover action에 필요할 때만 나타난다.
 
 ### completion-reminder
 
-non-empty final response 직전에는 completion claims, recommendations, choices, success judgments를 포함해 `verification-before-completion`이 always-on lifecycle gate다. Claude Code처럼 visible Skill surface가 있는 환경에서는 actual Skill call 이후에만 `skill-call: verification-before-completion (this turn)`를 사용한다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 같은 record를 사용한다.
+executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 `verification-before-completion`이 lifecycle gate다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않는다. Claude Code처럼 visible Skill surface가 있는 환경에서는 actual Skill call 이후에만 `skill-call: verification-before-completion (this turn)`를 사용한다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 같은 record를 사용한다.
 
 final response `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`에도 같은 skill이 있어야 한다.
 

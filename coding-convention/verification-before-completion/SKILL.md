@@ -49,7 +49,7 @@ If the verification command or inspection did not run in this message, do not cl
 No acceptance-criteria means no completed verification-before-completion.
 ```
 
-Before any completion claim, recommendation, choice, or success judgment, extract verifiable criteria from the user intent, locked decisions, and boundary-contract. Put those criteria in `acceptance-criteria`, then connect each intended final claim to a criterion and fresh evidence in `claim-evidence-map`.
+Before any claim that executed work is complete, fixed, successful, or freshly verified, extract verifiable criteria from the user intent, locked decisions, and boundary-contract. Put those criteria in `acceptance-criteria`, then connect each intended closure claim to a criterion and fresh evidence in `claim-evidence-map`.
 
 Evidence such as link checks, lint, diff checks, or passing tests proves completion only when it directly satisfies the criterion. If the central criterion is not directly verified, leave it in `unverified` and report partial status in prose.
 
@@ -57,8 +57,8 @@ Evidence such as link checks, lint, diff checks, or passing tests proves complet
 
 Hard sequence: skill load/call -> fresh verification -> [completion-check]
 
-Before any non-empty final response, completion claim, recommendation, choice,
-or success judgment, perform the steps below in this exact order:
+Before any executed-work completion, fix, success, or fresh-verification claim,
+perform the steps below in this exact order:
 
 1. Load or call `verification-before-completion` for the current turn. On
    Claude Code, this means the visible Skill call. On Codex, this means reading
@@ -87,7 +87,7 @@ Skipping any step is not verification. It is a lie.
 
 ## Completion-Check Format
 
-Use this block immediately before the final summary when you are making a completion, recommendation, choice, or success claim.
+Use this block immediately before the final summary when you are making an executed-work completion, fix, success, or fresh-verification claim.
 
 ```text
 [completion-check]
@@ -257,7 +257,7 @@ The completion evidence must include an accepted `verifier-result.json`.
 Apply this skill immediately before:
 
 - any completion or success claim
-- any recommendation or choice
+- any recommendation or choice that claims finished work or verified results
 - any positive status judgment
 - commit, push, PR creation, or branch finishing
 - moving on from a delegated agent result
@@ -270,7 +270,7 @@ The rule covers exact words, paraphrases, implications, and tone that suggests t
 Before finalizing, ask:
 
 - What are the acceptance criteria?
-- Which final claims am I about to make?
+- Which closure claims am I about to make?
 - Which fresh evidence proves each claim?
 - Did I read the full output and exit status?
 - Is anything still unverified?

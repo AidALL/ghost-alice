@@ -179,16 +179,17 @@ def main() -> int:
         return 0
 
     skill_loaded = args.platform == "codex" or _verification_skill_loaded_this_turn(entries)
-    # Completion-body-validation invariant: Stop validates the final response
-    # surface in mandatory final-block mode. The marker remains the explicit
-    # claim declaration; this mode closes the hook-level marker-omission bypass.
+    # Completion-body-validation invariant: Stop validates executed-work closure
+    # claims and explicit completion-check blocks. Routine explanations are not
+    # forced through verification-before-completion.
     body_issue = validate_completion_text(final_text, require_completion_check=True)
+    has_completion_marker = looks_like_completion_claim(final_text)
 
-    if skill_loaded and body_issue is None:
+    if body_issue is None and (skill_loaded or not has_completion_marker):
         print(json.dumps(_allow_payload(), ensure_ascii=False))
         return 0
 
-    missing_marker = not looks_like_completion_claim(final_text) and body_issue is not None
+    missing_marker = not has_completion_marker and body_issue is not None
     if missing_marker:
         reason = body_issue
     elif not skill_loaded:
@@ -199,7 +200,11 @@ def main() -> int:
             "Do not ask the user whether to use the skill; invoke it directly. "
             "Then perform the fresh evidence check, and only then write [completion-check] with "
             "skill-call: verification-before-completion (this turn). Do not infer this from task-router, "
-            "metadata, prior context, or evidence-only status inspection."
+            "metadata, prior context, or evidence-only status inspection. "
+            "The retry must be a complete standalone final answer that includes the requested answer payload again. "
+            "Begin with the user's requested answer, not with the verification process. "
+            "Do not begin with verification process notes. "
+            "Do not refer to a previous answer with phrases such as above, earlier, already provided, or previously."
         )
     else:
         reason = body_issue

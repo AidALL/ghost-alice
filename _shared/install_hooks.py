@@ -408,8 +408,9 @@ SESSION_INTENT_ENTRY_CODEX = {
 # 2. Work-stop hook: verification-before-completion reminder.
 STOP_HOOK_MARKER = "[completion-reminder] AGENTS.md"
 STOP_HOOK_INTERNAL = (
-    "completion-reminder: Before final response, run verification-before-completion as an always-on completion lifecycle gate. "
-    "Include a [completion-check] block and an [io-trace] block in the final response. "
+    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. "
+    "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. "
+    "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. "
     "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. "
     "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. "
     "On visible Skill surfaces such as Claude Code Skill, actually load "
@@ -854,7 +855,7 @@ def _platform_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
         command = _hook_reminder_command(platform="codex", output_format="json", payload_mode=True)
     else:
-        command = _hook_reminder_command(platform="claude", output_format="text", payload_mode=True)
+        command = _hook_reminder_command(platform="claude", output_format="json", payload_mode=True)
     return _hook_runner_command_entry("prompt", command, HOOK_MARKER)
 
 
@@ -862,7 +863,7 @@ def _platform_prompt_pending_merge_entry(platform_key: str, event: str) -> dict[
     if platform_key == "codex":
         command = _prompt_pending_merge_command(platform="codex", output_format="json", payload_mode=True)
     else:
-        command = _prompt_pending_merge_command(platform="claude", output_format="text", payload_mode=True)
+        command = _prompt_pending_merge_command(platform="claude", output_format="json", payload_mode=True)
     return _hook_runner_command_entry("pending-merge-prompt", command, PROMPT_PENDING_MERGE_MARKER)
 
 
@@ -870,7 +871,7 @@ def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, A
     if platform_key == "codex":
         command = _session_intent_analyzer_command(platform="codex", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
     else:
-        command = _session_intent_analyzer_command(platform="claude", output_format="text", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
+        command = _session_intent_analyzer_command(platform="claude", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
     return _hook_runner_command_entry("session-intent", command, SESSION_INTENT_MARKER)
 
 
@@ -878,7 +879,7 @@ def _platform_web_search_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
         command = _web_search_first_command(output_format="json", payload_mode=True)
     else:
-        command = _web_search_first_command(output_format="text", payload_mode=True)
+        command = _web_search_first_command(output_format="json", payload_mode=True)
     return _hook_runner_command_entry("web-search-first", command, WEB_SEARCH_FIRST_MARKER)
 
 
@@ -899,7 +900,7 @@ def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, An
     if platform_key == "codex":
         command = _session_start_command(platform="codex", output_format="json", payload_mode=True)
     else:
-        command = _session_start_command(platform="claude", output_format="text", payload_mode=True)
+        command = _session_start_command(platform="claude", output_format="json", payload_mode=True)
     return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER)
 
 

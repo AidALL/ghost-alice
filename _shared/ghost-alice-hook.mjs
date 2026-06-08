@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -134,6 +135,51 @@ function writeJsonFile(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function sleepMs(ms) {
+  const buffer = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(buffer), 0, 0, ms);
+}
+
+function withJsonFileLock(filePath, callback) {
+  const lockPath = `${filePath}.lock`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    let fd = null;
+    try {
+      fd = fs.openSync(lockPath, "wx");
+      return callback();
+    } catch (error) {
+      if (!error || error.code !== "EEXIST") {
+        return callback();
+      }
+      try {
+        const stat = fs.statSync(lockPath);
+        if (Date.now() - stat.mtimeMs > 2000) {
+          fs.unlinkSync(lockPath);
+          continue;
+        }
+      } catch {
+        // Retry after transient lock-file races.
+      }
+      sleepMs(10);
+    } finally {
+      if (fd !== null) {
+        try {
+          fs.closeSync(fd);
+        } catch {
+          // Ignore close failures; the lock file cleanup below is decisive.
+        }
+        try {
+          fs.unlinkSync(lockPath);
+        } catch {
+          // A stale lock is handled by the next caller.
+        }
+      }
+    }
+  }
+  return callback();
+}
+
 function firstNonEmpty(...values) {
   for (const value of values) {
     if (value === undefined || value === null) {
@@ -195,7 +241,14 @@ function platformUsesPreToolPermissionDecision(platform, event) {
     && event === "PreToolUse";
 }
 
+function platformSuppressesPreToolAllowContext(platform, event) {
+  return String(platform || "").toLowerCase() === "claude" && event === "PreToolUse";
+}
+
 function payloadFor(platform, event, message) {
+  if (platformSuppressesPreToolAllowContext(platform, event)) {
+    return {};
+  }
   if (platformUsesPreToolPermissionDecision(platform, event)) {
     return message ? { hookSpecificOutput: { hookEventName: event, additionalContext: message } } : {};
   }
@@ -270,6 +323,41 @@ function latestIntentEvent(sessionDirPath) {
     }
   }
   return null;
+}
+
+function sha256Text(value) {
+  return `sha256:${crypto.createHash("sha256").update(String(value), "utf8").digest("hex")}`;
+}
+
+function latestTranscriptUserDigest(transcriptPath) {
+  const filePath = String(transcriptPath || "").trim();
+  if (!filePath) {
+    return "";
+  }
+  let lines = [];
+  try {
+    lines = fs.readFileSync(filePath, "utf8").trim().split(/\r?\n/u).filter(Boolean);
+  } catch {
+    return "";
+  }
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const row = readJsonLine(lines[index]);
+    if (!row) {
+      continue;
+    }
+    const message = row.message && typeof row.message === "object" ? row.message : {};
+    const role = firstNonEmpty(row.role, message.role);
+    const type = firstNonEmpty(row.type);
+    if (role !== "user" && type !== "user") {
+      continue;
+    }
+    const content = message.content ?? row.content;
+    if (Array.isArray(content) && content.some((item) => item && typeof item === "object" && item.type === "tool_result")) {
+      continue;
+    }
+    return sha256Text(lines[index]);
+  }
+  return "";
 }
 
 function downstreamGateMatchesLatestEvent(gate, latestEvent) {
@@ -350,6 +438,65 @@ function downstreamGateDenialReason(state) {
   ].join(" ");
 }
 
+function toolCheckpointSurfaceStatePath() {
+  return path.join(userHome(), ".ghost-alice", "hooks", "tool-checkpoint-surface-state.json");
+}
+
+function toolCheckpointSurfaceLineage(platform, input, root = "") {
+  const sessionId = inputSessionId(platform, input, root, "");
+  if (!sessionId || sessionId === "unknown") {
+    return null;
+  }
+  const safePlatform = safePathComponent(platform || "codex");
+  const latestEvent = latestIntentEvent(sessionIntentDir(platform, sessionId, root));
+  const eventId = firstNonEmpty(latestEvent?.event_id);
+  const inputDigest = firstNonEmpty(latestEvent?.input_digest);
+  if (eventId || inputDigest) {
+    return {
+      scope: `${safePlatform}:${sessionId}`,
+      key: `${safePlatform}:${sessionId}:intent:${eventId}:${inputDigest}`,
+    };
+  }
+  if (safePlatform === "claude") {
+    const transcriptDigest = latestTranscriptUserDigest(firstNonEmpty(input.transcript_path, input.transcriptPath));
+    return {
+      scope: `${safePlatform}:${sessionId}`,
+      key: `${safePlatform}:${sessionId}:fallback:${transcriptDigest || "session"}`,
+    };
+  }
+  if (!eventId && !inputDigest) {
+    return null;
+  }
+  return null;
+}
+
+function shouldSurfaceToolCheckpoint(platform, input, root = "") {
+  const lineage = toolCheckpointSurfaceLineage(platform, input, root);
+  if (!lineage) {
+    return true;
+  }
+  const statePath = toolCheckpointSurfaceStatePath();
+  return withJsonFileLock(statePath, () => {
+    const state = readJsonFile(statePath, {});
+    const surfaces = state && typeof state.surfaces === "object" && state.surfaces
+      ? state.surfaces
+      : {};
+    const current = surfaces[lineage.scope];
+    if (current && current.lineage_key === lineage.key) {
+      return false;
+    }
+    surfaces[lineage.scope] = {
+      lineage_key: lineage.key,
+      updated_at: new Date().toISOString(),
+    };
+    writeJsonFile(statePath, {
+      schema_version: "tool-checkpoint-surface.v1",
+      surfaces,
+    });
+    return true;
+  });
+}
+
 function toolCheckpointDecision(platform, input, sessionIntentRootArg = "") {
   if (!toolCheckpointEnforcementEnabled(platform)) {
     return null;
@@ -393,6 +540,11 @@ try {
       emit(payloadFor(platform, event, warningMessage));
       process.exit(0);
     }
+    const surfaceMessage = shouldSurfaceToolCheckpoint(platform, input, args["session-intent-root"])
+      ? message
+      : "";
+    emit(payloadFor(platform, event, surfaceMessage));
+    process.exit(0);
   }
 
   emit(payloadFor(platform, event, message));

@@ -27,7 +27,7 @@ The session gate SSOT is `skill-catalog/session-gates.json`. This document is th
 | Development/coding request | `coding-convention/using-coding-convention` |
 | Bug fix | `coding-convention/systematic-debugging` |
 | Production code change | `coding-convention/test-driven-development` |
-| Non-empty final response, including completion claims, recommendations, choices, or success judgments | `coding-convention/verification-before-completion` |
+| Final response claiming executed work is complete, fixed, successful, or freshly verified | `coding-convention/verification-before-completion` |
 | Immediately before commit/push | `coding-convention/finishing-a-development-branch` |
 | When defining a new task, sub-task, or follow-up item | `necessity-gate` |
 | Immediately after task-router routes `boundary-contract: required` | `boundary-contract` |
@@ -167,7 +167,7 @@ The first commentary must include this block:
 - next-required: <skill-name|none>
 ```
 
-In a non-empty final response, including completion claims, recommendations, choices, or success judgments, include this block:
+When a final response claims executed work is complete, fixed, successful, or freshly verified, include this block:
 
 ```text
 [completion-check]
@@ -185,13 +185,13 @@ In a non-empty final response, including completion claims, recommendations, cho
 - evidence: <fresh command or inspected file>
 ```
 
-`acceptance-criteria` are verifiable criteria extracted from user intent, locked decisions, and boundary-contract. `claim-evidence-map` links each final-response claim to a criterion and fresh evidence. If `unverified` is not `none`, do not speak as though completion, success, or recommendation is settled; report the partial state and remaining verification. A finalized `[completion-check]` uses `verdict: pass | fail` and `unverified: none`; an unverified item means you are not finalizing, so report partial state in prose rather than emitting `[completion-check]`. Installed Stop completion hooks run in mandatory final-block mode: a non-empty final response without `[completion-check]` is rejected, while an empty transcript is allowed.
+`acceptance-criteria` are verifiable criteria extracted from user intent, locked decisions, and boundary-contract. `claim-evidence-map` links each closure claim to a criterion and fresh evidence. If `unverified` is not `none`, do not speak as though completion or success is settled; report the partial state and remaining verification. A finalized `[completion-check]` uses `verdict: pass | fail` and `unverified: none`; an unverified item means you are not finalizing, so report partial state in prose rather than emitting `[completion-check]`. Installed Stop completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check]. Before a non-empty final response, load or call `verification-before-completion` for the current turn, run and read the fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
+Hard sequence: skill load/call -> fresh verification -> [completion-check]. Before claiming executed work is complete, fixed, successful, or freshly verified, load or call `verification-before-completion` for the current turn, run and read the fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
 
 The `skill-call:` line records that the workflow for that skill was actually executed through the platform's skill execution mechanism in this turn. On Claude Code, write it only after a visible Skill call. On Codex, where no visible Skill tool exists, write it only after reading that skill's `SKILL.md` in this turn and following the workflow.
 
-`verification-before-completion` is the always-on lifecycle gate before a non-empty final response, including completion claims, recommendations, choices, and success judgments. On a platform with a visible skill surface such as Claude Code `Skill`, do not write `skill-call: verification-before-completion (this turn)` in `[completion-check]` before the actual call. On Codex, write the same record only when that `SKILL.md` was actually read and the workflow followed in this turn.
+`verification-before-completion` is the lifecycle gate before executed-work closure claims. Routine explanations, meta-discussion, and options do not require it unless they claim finished work or verified results. On a platform with a visible skill surface such as Claude Code `Skill`, do not write `skill-call: verification-before-completion (this turn)` in `[completion-check]` before the actual call. On Codex, write the same record only when that `SKILL.md` was actually read and the workflow followed in this turn.
 
 If `[completion-check]` claims `skill-call: verification-before-completion (this turn)`, the same final response's `[io-trace]` `skills-loaded` must include `verification-before-completion`. Where a Stop completion hook validates the final response, this mismatch or a missing `[completion-check]` can cause retry loops.
 
@@ -206,7 +206,7 @@ In Codex environments without a visible Skill surface:
 
 `tool-checkpoint` is a PreToolUse/BeforeTool checkpoint. It is not part of the user-input intake order and must not be described as running before `session-intent-analyzer`, `jailbreak-detector`, or `task-router`.
 
-The default `[tool-checkpoint]` block requires these decision fields: `intent`, `why`, `procedure`, `contract-ref`, `contract-check`, `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`. These fields show what the agent is doing, why the action is inside the active boundary, which alternatives were rejected, which premises remain unverified, and what can fail if the judgment is wrong.
+The default `[tool-checkpoint]` block carries `intent` and `why`. Add `procedure` when it changes the next work decision or clarifies a non-routine step. Add `contract-ref` and `contract-check` when a boundary-contract is active. Add `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong` only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful. This preserves the checkpoint procedure without forcing low-impact tool calls to repeat values that do not change the work boundary, focus layer, verification burden, or recovery.
 
 `recovery-action` is conditional. Add it only when the failure mode requires a concrete recovery step, scope reopen, external side effect handling, or another hard-to-recover action. Keep it as a stable English action phrase or slug. If mismatch changes scope, state the `focus-layer` and `scope-reopen` target in `procedure` or `recovery-action`.
 
@@ -214,11 +214,13 @@ Do not require separate `recovery-cost` or `recovery-note` fields in routine too
 
 ## tool-checkpoint Batch / Continuation Compression
 
+Runtime hooks surface one full `[tool-checkpoint]` per session input lineage and keep checking later tool calls silently in that same lineage.
+
 `[tool-checkpoint:batch]` and `[tool-checkpoint:continuation]` are compact forms to reduce repeated full-gate cost. They do not create new permission and do not infer that a new tool action is safe.
 
-`[tool-checkpoint:continuation]` refers only to output polling for the same process/session/tool-call id that was already started by a full `[tool-checkpoint]`. New command, input, timeout, interruption, or ref changes must return to full `[tool-checkpoint]`.
+`[tool-checkpoint:continuation]` refers only to output polling for the same process/session/tool-call id. A new user input, current-lineage block/deny, mismatch, or other state change returns to a surfaced `[tool-checkpoint]`.
 
-Simple polling of the same ref is not a duty to repeat output forever; the compact form avoids repeating the full gate. Expose it on the first poll or when state changes.
+Simple polling of the same ref is not a duty to repeat output forever; the compact form avoids repeating the full gate. Expose it on the first poll in the input lineage or when state changes.
 
 ## Notes
 

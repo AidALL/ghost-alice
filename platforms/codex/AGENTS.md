@@ -40,7 +40,7 @@ When a user turn begins in a Codex session, apply the execution contract below b
 3. Fix the `jailbreak-detector/downstream-gates` state.
 4. Run `task-router`.
 5. Leave `[gate-state]` in the first commentary.
-6. Leave a `[tool-checkpoint]` first for every new tool action.
+6. Surface a `[tool-checkpoint]` once for the user-input tool batch. The hook still checks every tool call; repeated calls in the same session input lineage do not repeat the user-facing checkpoint text unless state changes.
 
 `tool-checkpoint` is not user-input intake. It is a tool-stage `PreToolUse` retry checkpoint.
 
@@ -62,7 +62,7 @@ Runtime notes:
 - Work-Impact Projection classifies hook-internal values by whether they change the work boundary, focus layer, verification burden, or recovery path. Hook execution and the strict audit log are never reduced.
 - `agent_visibility.profile` selects the governance message surface shown on the user's screen; it does not gate hook execution, strict logging, or work-impact classification. Forced/risk/gate values and failed verification always break through as user surface forced and model hint full. Routine/debug values stay full in the strict log, but they are omitted from model hints unless they change focus, boundary, verification, or recovery. Unknown, ambiguous, or failed values fail closed to fuller surface and reopen focus through the routing/scope-reopen path.
 - Goal: only values that can change the next work decision affect focus, boundary, verification, or recovery. Token reduction is a consequence, not a metric.
-- In a session that has hook payload evidence and has finished hook review and trust, treat tool-checkpoint as a hook-enforced retry point. In that case the agent leaves a `[tool-checkpoint]` after a hook denial and retries the same tool call. In Codex this surface is a tool-call retry checkpoint with `hook-stage: PreToolUse`, and it is not user-input intake. Hook timing enforcement does not weaken the semantic gate. Required decision fields are `intent`, `why`, `procedure`, `contract-ref`, `contract-check`, `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong`. Add `recovery-action` only when a mismatch, scope reopen, external side effect, or hard-to-recover action needs a concrete next step.
+- In a session that has hook payload evidence and has finished hook review and trust, treat tool-checkpoint as a hook-enforced retry point. In that case the agent leaves a `[tool-checkpoint]` after a hook denial and retries the same tool call. In Codex this surface is a tool-call retry checkpoint with `hook-stage: PreToolUse`, and it is not user-input intake. Hook timing enforcement does not weaken the semantic gate. Every checkpoint carries at least `intent` and `why`. Add `procedure` when it changes the next work decision or clarifies a non-routine step. Add `contract-ref` and `contract-check` when a boundary-contract is active. Add `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong` only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful. Add `recovery-action` only when a mismatch, scope reopen, external side effect, or hard-to-recover action needs a concrete next step.
 - In a session that has no hook payload evidence or is before hook review and trust, apply the bootstrap and skill placement plus the hookless/manual fallback.
 
 ## Codex Hookless Fallback
@@ -73,12 +73,13 @@ If hooks are disabled in the Codex session, if the session is before hook review
 - Do not store the raw user input, and leave a digest-only intake status in the session-intent-analyzer ledger. The agent augments a semantic delta only when the user's intent, constraints, decisions, or completion criteria materially change.
 - The task-router reminder hook releases task-router when a session-intent preflight exists and there is no current-lineage block gate. The absence of `downstream-gates.json` is treated as a silent allow meaning there is no current-lineage block. After release, task-router reads the session intent ledger and performs skill assignment after atomic meaning decomposition.
 - When task-router outputs `boundary-contract: required`, apply `boundary-contract` before any other tool call.
-- A routine inspection batch that a previous full gate explicitly declared can be referenced briefly as `[tool-checkpoint:batch]`, and checking the output of an already started process can be referenced briefly as `[tool-checkpoint:continuation]`.
-- `[tool-checkpoint:continuation]` refers only to output polling of the same process, session, or tool-call id. A new command, input, timeout, interruption, or ref switch returns to a full `[tool-checkpoint]`.
-- Simple polling of the same ref is not an obligation to repeat output. It is an allowed abbreviation to avoid repeating the full gate. Surface it only on the first occurrence or when the state changes.
+- Runtime hooks surface one full `[tool-checkpoint]` per session input lineage and keep checking later tool calls silently in that same lineage.
+- A routine inspection batch can be referenced briefly as `[tool-checkpoint:batch]`, and checking the output of an already started process can be referenced briefly as `[tool-checkpoint:continuation]`.
+- `[tool-checkpoint:continuation]` refers only to output polling of the same process, session, or tool-call id. A new user input, current-lineage block/deny, mismatch, or other state change returns to a surfaced `[tool-checkpoint]`.
+- Simple polling of the same ref is not an obligation to repeat output. It is an allowed abbreviation to avoid repeating the full gate. Surface it only on the first occurrence in the input lineage or when state changes.
 - Do not infer whether an action is safe from tool-call identity or payload content. The decision depends only on the current-lineage block gate and the silent allow invariant.
 - Gate schemas such as `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, and `[io-trace]` follow the English canonical narrative + English control surface principle.
-- In a non-empty final response, leave a `[completion-check]` block that connects acceptance criteria with fresh evidence.
+- When a final response claims executed work is complete, fixed, successful, or freshly verified, leave a `[completion-check]` block that connects acceptance criteria with fresh evidence.
 - Leave an `[io-trace]` block at the end of the response.
 - If you omit any of these, fill it in immediately and then continue.
 
@@ -90,7 +91,7 @@ The session gate SSOT is the repository `skill-catalog/session-gates.json` and `
 - After the session-intent-analyzer intake and the jailbreak-detector downstream gate, and before downstream work or a tool call: `task-router`
 - Development turn: `using-coding-convention`
 - Bug fix turn: `systematic-debugging` -> `test-driven-development`
-- Before a non-empty final response, including completion, recommendation, or choice: `verification-before-completion`
+- Before claiming executed work is complete, fixed, successful, or freshly verified: `verification-before-completion`
 - Before commit or push: `finishing-a-development-branch`
 - Immediately after task-router routes `boundary-contract: required`: `boundary-contract`
 
@@ -111,7 +112,7 @@ When task-router outputs `boundary-contract: required`, the next required gate i
 
 Ghost-ALICE OS uses an English canonical narrative + English control surface. Canonical narrative, including philosophy, explanation, operating intent, failure cases, and human-facing prose, is written in English. Korean is a secondary aid for Korean reviewers and contributors, not the main language. Field names, enum values, literal tokens, gate schemas, and allowed/forbidden values stay English and are not translated.
 
-Always leave the block below in a non-empty final response, including a completion claim, a recommendation, a choice, or a success judgment.
+Leave the block below when the final response claims executed work is complete, fixed, successful, or freshly verified. Routine explanations, meta-discussion, and options do not require `[completion-check]` unless they claim finished work or verified results.
 
 ```text
 [completion-check]
@@ -129,9 +130,9 @@ Always leave the block below in a non-empty final response, including a completi
 - evidence: <fresh command or inspected file>
 ```
 
-The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each final-answer claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks run in mandatory final-block mode: a non-empty final response without `[completion-check]` is rejected, while an empty transcript is allowed.
+The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each closure claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check]. Before a non-empty final response, load or call `verification-before-completion` for the current turn, run and read the fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
+Hard sequence: skill load/call -> fresh verification -> [completion-check]. Before claiming executed work is complete, fixed, successful, or freshly verified, load or call `verification-before-completion` for the current turn, run and read the fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
 
 The `skill-call:` line is a factual record that the relevant skill workflow was actually performed in the current turn. Because Codex has no visible Skill tool, considering a skill as a routing candidate from the skill description and metadata exposed to the system is not a `skill-call:`. Record it only when the skill's `SKILL.md` was actually read and the procedure was followed.
 

@@ -26,7 +26,7 @@ session gate SSOT는 `skill-catalog/session-gates.json`이다. 이 문서는 hum
 | development/coding request | `coding-convention/using-coding-convention` |
 | bug fix | `coding-convention/systematic-debugging` |
 | production code change | `coding-convention/test-driven-development` |
-| non-empty final response, including completion claims, recommendations, choices, success judgments | `coding-convention/verification-before-completion` |
+| executed work가 complete, fixed, successful, freshly verified라고 claim하는 final response | `coding-convention/verification-before-completion` |
 | commit/push 직전 | `coding-convention/finishing-a-development-branch` |
 | 새 task, sub-task, follow-up item 정의 시 | `necessity-gate` |
 | task-router가 `boundary-contract: required`를 route한 직후 | `boundary-contract` |
@@ -128,7 +128,7 @@ first commentary는 다음 block을 포함해야 한다.
 - next-required: <skill-name|none>
 ```
 
-non-empty final response에는 completion claims, recommendations, choices, success judgments를 포함해 다음 block을 포함해야 한다.
+final response가 executed work의 complete, fixed, successful, freshly verified 상태를 claim할 때 다음 block을 포함해야 한다.
 
 ```text
 [completion-check]
@@ -146,13 +146,13 @@ non-empty final response에는 completion claims, recommendations, choices, succ
 - evidence: <fresh command or inspected file>
 ```
 
-`acceptance-criteria`는 user intent, locked decisions, boundary-contract에서 추출한 verifiable criteria다. `claim-evidence-map`은 final-response claim을 criterion과 fresh evidence에 연결한다. `unverified`가 `none`이 아니면 completion, success, recommendation이 settled된 것처럼 말하지 않는다. finalized `[completion-check]`는 `verdict: pass | fail`과 `unverified: none`을 사용한다. unverified item이 있으면 finalizing하지 말고 prose로 partial state와 remaining verification을 보고한다. Installed Stop completion hooks는 mandatory final-block mode로 동작한다. non-empty final response에 `[completion-check]`가 없으면 reject하고, empty transcript는 allow한다.
+`acceptance-criteria`는 user intent, locked decisions, boundary-contract에서 추출한 verifiable criteria다. `claim-evidence-map`은 closure claim을 criterion과 fresh evidence에 연결한다. `unverified`가 `none`이 아니면 completion 또는 success가 settled된 것처럼 말하지 않는다. finalized `[completion-check]`는 `verdict: pass | fail`과 `unverified: none`을 사용한다. unverified item이 있으면 finalizing하지 말고 prose로 partial state와 remaining verification을 보고한다. Installed Stop completion hooks는 executed-work closure claim에 `[completion-check]`를 요구하고 routine non-closure response는 allow한다.
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check]. non-empty final response 전에는 current turn에서 `verification-before-completion`을 load/call하고, fresh verification을 run/read한 뒤에만 `skill-call: verification-before-completion (this turn)`가 있는 `[completion-check]`를 쓴다. If any step is missing or out of order, the completion-check is invalid.
+Hard sequence: skill load/call -> fresh verification -> [completion-check]. executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 current turn에서 `verification-before-completion`을 load/call하고, fresh verification을 run/read한 뒤에만 `skill-call: verification-before-completion (this turn)`가 있는 `[completion-check]`를 쓴다. If any step is missing or out of order, the completion-check is invalid.
 
 `skill-call:` line은 그 skill workflow가 current turn에서 실제로 실행됐다는 record다. Claude Code에서는 visible Skill call 이후에만 쓴다. Codex처럼 visible Skill tool이 없는 환경에서는 current turn에 해당 skill의 `SKILL.md`를 실제로 읽고 workflow를 따른 뒤에만 쓴다.
 
-`verification-before-completion`은 non-empty final response 직전 always-on lifecycle gate이며 completion claims, recommendations, choices, success judgments를 포함한다. Claude Code 같은 visible skill surface에서는 actual call 전 `[completion-check]`에 `skill-call: verification-before-completion (this turn)`를 쓰지 않는다. Codex에서는 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 쓴다.
+`verification-before-completion`은 executed-work closure claim 전 lifecycle gate다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않는다. Claude Code 같은 visible skill surface에서는 actual call 전 `[completion-check]`에 `skill-call: verification-before-completion (this turn)`를 쓰지 않는다. Codex에서는 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 쓴다.
 
 `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`도 `verification-before-completion`을 포함해야 한다. Stop completion hook이 final response를 validate하는 곳에서는 이 mismatch 또는 missing `[completion-check]`가 retry loop를 만들 수 있다.
 
@@ -167,7 +167,7 @@ Codex environments without a visible Skill surface:
 
 `tool-checkpoint`는 PreToolUse/BeforeTool checkpoint다. user-input intake order의 일부가 아니며 `session-intent-analyzer`, `jailbreak-detector`, `task-router`보다 먼저 run한다고 설명하면 안 된다.
 
-default `[tool-checkpoint]` block은 다음 decision fields를 요구한다. `intent`, `why`, `procedure`, `contract-ref`, `contract-check`, `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`. 이 fields는 agent가 무엇을 하는지, action이 active boundary 안에 있는 이유, reject한 alternatives, 아직 검증되지 않은 premises, 판단이 틀렸을 때 실패하는 지점을 보여준다.
+default `[tool-checkpoint]` block은 `intent`와 `why`를 carries한다. `procedure`는 next work decision을 바꾸거나 non-routine step을 명확히 할 때 추가한다. `contract-ref`와 `contract-check`는 boundary-contract가 active일 때 추가한다. `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`은 side effect, forced signal, mismatch, meaningful user decision point 때문에 field가 useful할 때만 추가한다. 이렇게 checkpoint procedure는 유지하되 work boundary, focus layer, verification burden, recovery를 바꾸지 않는 low-impact tool call에 무의미한 값을 반복하지 않는다.
 
 `recovery-action`은 conditional이다. failure mode가 concrete recovery step, scope reopen, external side effect handling, 또는 hard-to-recover action을 요구할 때만 추가한다. stable English action phrase 또는 slug로 유지한다. mismatch가 scope를 바꾸면 `procedure` 또는 `recovery-action`에 `focus-layer`와 `scope-reopen` target을 적는다.
 
@@ -175,11 +175,13 @@ routine tool checkpoint에서는 별도의 `recovery-cost` 또는 `recovery-note
 
 ## tool-checkpoint Batch / Continuation Compression
 
+Runtime hook은 session input lineage마다 full `[tool-checkpoint]`를 한 번 surface하고, 같은 lineage의 later tool call은 계속 check하되 user-facing text는 반복하지 않는다.
+
 `[tool-checkpoint:batch]`와 `[tool-checkpoint:continuation]`은 repeated full-gate cost를 줄이는 compact forms다. new permission을 만들지 않고 new tool action이 safe하다고 infer하지 않는다.
 
-`[tool-checkpoint:continuation]`은 full `[tool-checkpoint]`로 이미 시작한 same process/session/tool-call id의 output polling만 가리킨다. new command, input, timeout, interruption, ref changes는 full `[tool-checkpoint]`로 돌아가야 한다.
+`[tool-checkpoint:continuation]`은 same process/session/tool-call id의 output polling만 가리킨다. new user input, current-lineage block/deny, mismatch, other state change는 surfaced `[tool-checkpoint]`로 돌아간다.
 
-same ref의 simple polling은 output을 영원히 반복하라는 의무가 아니다. compact form은 full gate 반복을 피한다. first poll 또는 state change 때 expose한다.
+same ref의 simple polling은 output을 영원히 반복하라는 의무가 아니다. compact form은 full gate 반복을 피한다. input lineage의 first poll 또는 state change 때 expose한다.
 
 ## Notes
 

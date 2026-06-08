@@ -186,7 +186,7 @@ class ValidateCompletionResponseTest(unittest.TestCase):
     def test_non_completion_claim_returns_none(self) -> None:
         self.assertIsNone(MOD.validate_completion_text("Just a neutral sentence about the weather."))
 
-    def test_missing_completion_check_rejected_in_mandatory_final_block_mode(self) -> None:
+    def test_completion_claim_missing_completion_check_rejected_in_mandatory_final_block_mode(self) -> None:
         reason = MOD.validate_completion_text(
             "The requested change is complete and tests pass.",
             require_completion_check=True,
@@ -194,6 +194,14 @@ class ValidateCompletionResponseTest(unittest.TestCase):
 
         self.assertIsNotNone(reason)
         self.assertIn("[completion-check]", reason)
+
+    def test_explanatory_final_response_does_not_require_completion_check(self) -> None:
+        reason = MOD.validate_completion_text(
+            "Here is what happened: the hook treated a routine answer as closure.",
+            require_completion_check=True,
+        )
+
+        self.assertIsNone(reason)
 
     def test_empty_text_returns_none(self) -> None:
         self.assertIsNone(MOD.validate_completion_text(""))

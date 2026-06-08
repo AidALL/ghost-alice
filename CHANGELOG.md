@@ -15,3 +15,11 @@ Use this section for changes that have landed after the latest tagged public rel
 ### Fixed
 
 ### Removed
+
+## [0.1.1] - 2026-06-08
+
+### Fixed
+
+- Prevented Claude hook status and checkpoint surfaces from leaking into final answer text.
+- Reduced duplicate tool-checkpoint user-facing output while keeping every tool call checked.
+- Kept Claude Stop-hook retries as complete standalone answers instead of replacing the answer body with process notes.
