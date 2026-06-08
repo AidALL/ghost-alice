@@ -15,6 +15,7 @@
 #   .\install.cmd -Status                          # Show current install status
 #   .\install.cmd -Doctor                          # Diagnose install protection state
 #   .\install.cmd -CleanupPending                  # Clean false-positive legacy pending entries
+#   .\install.cmd -UpdateSource                    # Stash source checkout local changes and fast-forward
 # Direct .ps1 form, only when .ps1 script execution is already allowed:
 #   .\install.ps1                                  # Install to detected AI tools
 #   .\install.ps1 -PromptPlatform                  # Select AI tool interactively before installing
@@ -30,6 +31,7 @@
 #   .\install.ps1 -Status                          # Show current install status
 #   .\install.ps1 -Doctor                          # Diagnose install protection state
 #   .\install.ps1 -CleanupPending                  # Clean false-positive legacy pending entries
+#   .\install.ps1 -UpdateSource                    # Stash source checkout local changes and fast-forward
 
 param(
     [string[]]$Skills,
@@ -49,6 +51,7 @@ param(
     [Alias("Visibility")]
     [ValidateSet("strict", "dynamic", "minimal")]
     [string]$AgentVisibility = "",
+    [switch]$UpdateSource,
     [switch]$SkipSourceHealth,
     [switch]$Help
 )
@@ -367,6 +370,7 @@ $script:DeprecatedInstalledSkills = @(
 if ($Help)      { Show-Help; return }
 if ($List)      { Show-List; return }
 if ($ListAddons){ Show-Addons; return }
+if ($UpdateSource) { Update-SourceCheckout; return }
 
 # Default install: when no platform is specified, install to all detected tools.
 # Plain full uninstall also detects platform homes and install-state manifests for full cleanup.
@@ -374,7 +378,7 @@ if ($ListAddons){ Show-Addons; return }
 $Auto = $false
 $hasInspectionCommand = $Help -or $List -or $ListAddons -or $Status -or $Doctor
 $PlainFullUninstall = $Uninstall -and (-not $Skills -or $Skills.Count -eq 0)
-if (-not $PlatformWasExplicit -and -not $PromptPlatform -and -not $hasInspectionCommand -and -not $PlainFullUninstall -and -not $CleanupPending) {
+if (-not $PlatformWasExplicit -and -not $PromptPlatform -and -not $hasInspectionCommand -and -not $PlainFullUninstall -and -not $CleanupPending -and -not $UpdateSource) {
     $Auto = $true
 }
 

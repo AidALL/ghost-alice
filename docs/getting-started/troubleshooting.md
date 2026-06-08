@@ -35,14 +35,20 @@ If any of the following appears, the installer is not the first problem. The loc
 
 Do not keep rerunning `install.ps1`, `install.sh`, or `install.cmd` in this state. Clean up the Git state first, then rerun the installer.
 
-For normal macOS/Linux source updates, prefer the safe installer path instead of raw `git pull`:
+For normal source updates, prefer the safe installer path instead of raw `git pull`:
 
 ```bash
 cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-This command saves source-local tracked and untracked changes in `git stash`, fast-forwards the checkout, and leaves the stash for explicit review.
+PowerShell:
+
+```powershell
+.\install.cmd -UpdateSource
+```
+
+These commands save source-local tracked and untracked changes in `git stash`, fast-forward the checkout, and leave the stash for explicit review.
 
 If raw `git pull` is already blocked before the checkout can receive `--update-source`, use the bootstrap one-command update:
 
@@ -158,7 +164,7 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 
 ### 6. Operating Principles
 
-- Update commands should use `git pull --ff-only` by default.
+- Update commands should use the safe installer updater by default; the updater itself fast-forwards after saving source-local changes.
 - If `git pull` creates a merge conflict, the installer cannot resolve that conflict for the user.
 - A blocked-user guide is not enough when it exists only inside the repo. Keep the same recovery playbook somewhere readable without pulling, such as the Wiki or release notes.
 - Do not run the installer while `UU` or `AA` remains in Git status.

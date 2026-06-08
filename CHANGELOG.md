@@ -14,6 +14,8 @@ Use this section for changes that have landed after the latest tagged public rel
 
 ### Fixed
 
+- Routed installer update guidance through safe source updaters so tracked command additions do not push users toward raw `git pull` collisions with local untracked files.
+
 ### Removed
 
 ## [0.1.1] - 2026-06-08

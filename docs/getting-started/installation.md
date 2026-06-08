@@ -130,6 +130,12 @@ cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
+PowerShell:
+
+```powershell
+.\install.cmd -UpdateSource
+```
+
 If the checkout is too old to receive that option because raw `git pull` is already blocked by local changes, use the bootstrap updater instead. This command fetches the current updater through the already configured Git remote, saves local changes in `git stash`, fast-forwards `~/ghost-alice`, and then runs the updated installer.
 
 ```bash
@@ -197,6 +203,7 @@ On the next Claude/Codex session, if any pending entries exist, `merge-companion
 | List skills | `bash install.sh --list` | `.\install.cmd -List` | `install.cmd -List` |
 | Show install state | `bash install.sh --status` | `.\install.cmd -Status` | `install.cmd -Status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd -Doctor` | `install.cmd -Doctor` |
+| Safe source update | `bash install.sh --update-source` | `.\install.cmd -UpdateSource` | `install.cmd -UpdateSource` |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd -Skills task-router,verification-before-completion` | `install.cmd -Skills task-router,verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |

@@ -59,6 +59,8 @@ function Test-SourceHealth {
             } elseif ($behind -gt 0) {
                 Write-Err "Source branch is behind its upstream; refusing to install from stale source." "Source branch is behind its upstream; refusing to install from stale source."
                 Write-Err "Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout before installing. If this local source is intentional, rerun with -SkipSourceHealth." "Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout before installing. If this local source is intentional, rerun with -SkipSourceHealth."
+                Write-Err "To preserve source-local changes while updating, run .\install.cmd -UpdateSource." "To preserve source-local changes while updating, run .\install.cmd -UpdateSource."
+                Write-Err "If an old checkout is already blocked by local changes during git pull, use the bootstrap one-command update in docs/getting-started/troubleshooting.md." "If an old checkout is already blocked by local changes during git pull, use the bootstrap one-command update in docs/getting-started/troubleshooting.md."
                 throw "Source branch behind upstream"
             } elseif ($ahead -gt 0) {
                 Write-Warn "Source branch is ahead of its upstream; continuing because local commits may be intentional." "Source branch is ahead of its upstream; continuing because local commits may be intentional."
@@ -75,6 +77,74 @@ function Test-SourceHealth {
     if ($trackedDirty) {
         Write-Warn "Source tree has tracked local changes; continuing. Installed target user edits remain protected by pending-merges backup and manifest checks." "Source tree has tracked local changes; continuing. Installed target user edits remain protected by pending-merges backup and manifest checks."
         return
+    }
+}
+
+function Update-SourceCheckout {
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        Write-Err "git not found; cannot update source checkout" "git not found; cannot update source checkout"
+        throw "git not found; cannot update source checkout"
+    }
+
+    & git -C $ScriptDir rev-parse --is-inside-work-tree *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "source is not a git worktree; cannot update source checkout" "source is not a git worktree; cannot update source checkout"
+        throw "source is not a git worktree; cannot update source checkout"
+    }
+
+    $branch = (& git -C $ScriptDir symbolic-ref --quiet --short HEAD 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $branch) { $branch = "DETACHED" }
+    $upstream = (& git -C $ScriptDir rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>$null)
+    if ($LASTEXITCODE -ne 0 -or -not $upstream) {
+        Write-Err "source branch has no upstream; cannot update automatically: $branch" "source branch has no upstream; cannot update automatically: $branch"
+        Write-Err "Inspect git remote -v and git branch --set-upstream-to first." "Inspect git remote -v and git branch --set-upstream-to first."
+        throw "source branch has no upstream; cannot update automatically"
+    }
+
+    Write-Info "Source update: branch=$branch, upstream=$upstream" "Source update: branch=$branch, upstream=$upstream"
+
+    $statusLines = @(& git -C $ScriptDir status --porcelain=v1 --untracked-files=all)
+    $stashCreated = $false
+    $stashRef = ""
+    if ($statusLines.Count -gt 0) {
+        $stashMessage = "ghost-alice source update backup {0}" -f (Get-Date -Format "yyyyMMdd-HHmmss")
+        Write-Info "Saving source local changes in git stash." "Saving source local changes in git stash."
+        Push-Location -LiteralPath $ScriptDir
+        try {
+            & git stash push -u -m $stashMessage -- . *> $null
+        } finally {
+            Pop-Location
+        }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "Could not stash source local changes; aborting update." "Could not stash source local changes; aborting update."
+            throw "Could not stash source local changes; aborting update."
+        }
+        $stashCreated = $true
+        $stashRef = (& git -C $ScriptDir stash list "--format=%gd" | Select-Object -First 1)
+        if (-not $stashRef) { $stashRef = "stash@{0}" }
+        Write-Warn "Source local changes saved in git stash: $stashRef" "Source local changes saved in git stash: $stashRef"
+        Write-Warn "Review: git -C `"$ScriptDir`" stash show -p $stashRef" "Review: git -C `"$ScriptDir`" stash show -p $stashRef"
+        Write-Warn "Reapply only if intentional: git -C `"$ScriptDir`" stash pop $stashRef" "Reapply only if intentional: git -C `"$ScriptDir`" stash pop $stashRef"
+    }
+
+    Push-Location -LiteralPath $ScriptDir
+    try {
+        & git pull --ff-only
+    } finally {
+        Pop-Location
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Source checkout fast-forward update failed." "Source checkout fast-forward update failed."
+        if ($stashCreated) {
+            Write-Warn "Local changes remain saved in $stashRef." "Local changes remain saved in $stashRef."
+        }
+        throw "Source checkout fast-forward update failed."
+    }
+
+    Write-Ok "Source checkout updated. Now rerun the installer: .\install.cmd" "Source checkout updated. Now rerun the installer: .\install.cmd"
+    if ($stashCreated) {
+        Write-Warn "Review saved source changes: git -C `"$ScriptDir`" stash show -p $stashRef" "Review saved source changes: git -C `"$ScriptDir`" stash show -p $stashRef"
     }
 }
 

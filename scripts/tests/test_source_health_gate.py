@@ -500,6 +500,34 @@ class SourceHealthGateTest(unittest.TestCase):
         self.assertIn("Source local changes saved in git stash", result.stderr)
         self.assertIn("Install step skipped", result.stderr)
 
+    def test_installer_update_guidance_uses_safe_source_update_entrypoints(self) -> None:
+        bash = installer_bash_source()
+        ps1 = installer_ps1_source()
+
+        self.assertIn("bash install.sh --update-source", bash)
+        self.assertIn(".\\install.cmd -UpdateSource", ps1)
+        self.assertNotIn("To update skills: cd ${SCRIPT_DIR} && git pull --ff-only", bash)
+        self.assertNotIn(
+            "With symlink install, git pull --ff-only automatically updates skills.",
+            bash,
+        )
+        self.assertNotIn("To update skills: cd $ScriptDir; git pull --ff-only", ps1)
+        self.assertNotIn(
+            "Junction installs update automatically after git pull --ff-only.",
+            ps1,
+        )
+
+    def test_install_ps1_declares_safe_source_update_entrypoint(self) -> None:
+        body = installer_ps1_source()
+        source_update_body = _extract_powershell_function(body, "Update-SourceCheckout")
+
+        self.assertIn("[switch]$UpdateSource", body)
+        self.assertIn("git stash push -u", source_update_body)
+        self.assertIn("pull --ff-only", source_update_body)
+        self.assertIn("Source local changes saved in git stash", source_update_body)
+        self.assertIn("if ($UpdateSource)", body)
+        self.assertLess(body.index("if ($UpdateSource)"), body.index("Initialize-GitHooks"))
+
     def test_install_sh_calls_source_health_before_copying_targets(self) -> None:
         source = installer_bash_source()
         install_body = _extract_bash_function(source, "install")

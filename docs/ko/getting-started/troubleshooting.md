@@ -35,14 +35,20 @@
 
 이 상태에서는 `install.ps1`, `install.sh`, `install.cmd`를 반복 실행하지 않는다. Git state를 먼저 깨끗하게 만든 뒤 installer를 다시 실행한다.
 
-macOS/Linux의 일반 source update에서는 raw `git pull`보다 안전한 installer 경로를 먼저 쓴다.
+일반 source update에서는 raw `git pull`보다 안전한 installer 경로를 먼저 쓴다.
 
 ```bash
 cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-이 command는 source의 tracked/untracked 변경을 `git stash`에 저장하고, checkout을 fast-forward한 뒤, 그 stash를 직접 확인하도록 남긴다.
+PowerShell:
+
+```powershell
+.\install.cmd -UpdateSource
+```
+
+이 command들은 source의 tracked/untracked 변경을 `git stash`에 저장하고, checkout을 fast-forward한 뒤, 그 stash를 직접 확인하도록 남긴다.
 
 raw `git pull`이 이미 막혀서 checkout이 `--update-source`를 받지 못하면 bootstrap one-command update를 쓴다.
 
@@ -158,7 +164,7 @@ bash install.sh --status
 
 ### 6. Operating Principles
 
-- update command는 기본적으로 `git pull --ff-only`를 쓴다.
+- update command는 기본적으로 safe installer updater를 쓴다. updater 내부에서 source-local changes를 저장한 뒤 checkout을 fast-forward한다.
 - `git pull`이 merge conflict를 내면 installer가 그 conflict를 대신 풀어 주지 못한다.
 - 막힌 사용자를 위한 guide는 repo 안에만 두면 부족하다. Wiki나 release notes처럼 pull 없이 읽을 수 있는 위치에도 같은 recovery playbook을 둔다.
 - Git status에 `UU` 또는 `AA`가 남아 있으면 installer를 실행하지 않는다.

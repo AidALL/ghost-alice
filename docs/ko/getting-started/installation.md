@@ -129,6 +129,12 @@ cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
+PowerShell:
+
+```powershell
+.\install.cmd -UpdateSource
+```
+
 checkout이 너무 오래되어 해당 option을 받을 수 없고 raw `git pull`이 이미 local changes로 막힌 경우 bootstrap updater를 사용한다. 이 command는 이미 설정된 Git remote를 통해 current updater를 가져오고, local changes를 `git stash`에 저장하고, `~/ghost-alice`를 fast-forward한 뒤 updated installer를 실행한다.
 
 ```bash
@@ -196,6 +202,7 @@ update가 user-modified installed files를 감지하면 installer는 후보를 p
 | List skills | `bash install.sh --list` | `.\install.cmd -List` | `install.cmd -List` |
 | Show install state | `bash install.sh --status` | `.\install.cmd -Status` | `install.cmd -Status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd -Doctor` | `install.cmd -Doctor` |
+| Safe source update | `bash install.sh --update-source` | `.\install.cmd -UpdateSource` | `install.cmd -UpdateSource` |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd -Skills task-router,verification-before-completion` | `install.cmd -Skills task-router,verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |

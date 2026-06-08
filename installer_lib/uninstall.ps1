@@ -335,6 +335,7 @@ Advanced/operator commands:
   -AddonSkip                             Disable addon installation
   -ListAddons                            List addon manifest targets
   -CleanupPending                        Clean false-positive legacy pending entries
+  -UpdateSource                          Stash source checkout local changes and fast-forward
   -SkipSourceHealth                      Skip source health gate
   -Help                                  Show this help
 "@
@@ -369,6 +370,7 @@ Advanced/operator commands:
   -AddonSkip                             Disable addon installation
   -ListAddons                            List addon manifest targets
   -CleanupPending                        Clean false-positive legacy pending entries
+  -UpdateSource                          Stash source checkout local changes and fast-forward
   -SkipSourceHealth                      Skip source health gate
   -Help                                  Show this help
 "@

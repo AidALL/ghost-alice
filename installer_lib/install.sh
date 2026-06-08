@@ -864,14 +864,14 @@ install() {
     echo ""
     info "$(t "Install path: ${SKILLS_DIR}" "Install path: ${SKILLS_DIR}")"
     if [ "$PLATFORM" = "codex" ] && [ "$copy_only" = "1" ]; then
-      info "$(t "To update skills: cd ${SCRIPT_DIR} && git pull --ff-only, then re-run install.sh" "To update skills: cd ${SCRIPT_DIR} && git pull --ff-only, then re-run install.sh")"
+      info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source, then re-run bash install.sh" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source, then re-run bash install.sh")"
     elif [ "$PLATFORM" = "codex" ]; then
-      info "$(t "To update skills: cd ${SCRIPT_DIR} && git pull --ff-only" "To update skills: cd ${SCRIPT_DIR} && git pull --ff-only")"
+      info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source")"
     else
-      info "$(t "To update skills: cd ${SCRIPT_DIR} && git pull --ff-only" "To update skills: cd ${SCRIPT_DIR} && git pull --ff-only")"
+      info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source")"
     fi
     if [ "$installed" -gt 0 ] && [ "$copy_only" != "1" ]; then
-      info "$(t 'With symlink install, git pull --ff-only automatically updates skills.' 'With symlink install, git pull --ff-only automatically updates skills.')"
+      info "$(t 'With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.' 'With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.')"
     fi
   fi
 

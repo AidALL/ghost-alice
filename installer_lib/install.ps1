@@ -980,12 +980,12 @@ function Invoke-Install {
         Write-Ok ("Done: {0} installed, {1} skipped" -f $installed, $skipped) ("Done: {0} installed, {1} skipped" -f $installed, $skipped)
         Write-Info "Install path: $SkillsDir" "Install path: $SkillsDir"
         if ($copyOnly) {
-            Write-Info "To update skills: cd $ScriptDir; git pull --ff-only, then rerun .\install.cmd" "To update skills: cd $ScriptDir; git pull --ff-only, then rerun .\install.cmd"
+            Write-Info "To update skills safely: cd $ScriptDir; .\install.cmd -UpdateSource, then rerun .\install.cmd" "To update skills safely: cd $ScriptDir; .\install.cmd -UpdateSource, then rerun .\install.cmd"
         } else {
-            Write-Info "To update skills: cd $ScriptDir; git pull --ff-only" "To update skills: cd $ScriptDir; git pull --ff-only"
+            Write-Info "To update skills safely: cd $ScriptDir; .\install.cmd -UpdateSource" "To update skills safely: cd $ScriptDir; .\install.cmd -UpdateSource"
         }
         if (($installed -gt 0) -and (-not $copyOnly)) {
-            Write-Info "Junction installs update automatically after git pull --ff-only." "Junction installs update automatically after git pull --ff-only."
+            Write-Info "Junction installs refresh linked skills after the checkout fast-forwards through the safe source updater." "Junction installs refresh linked skills after the checkout fast-forwards through the safe source updater."
         }
 
         Invoke-LoggedIfCompact { Invoke-InstallHooks -Action "install" -TargetPlatform $Platform }
