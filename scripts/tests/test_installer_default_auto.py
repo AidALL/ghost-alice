@@ -155,7 +155,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         install_ps1 = installer_ps1_source()
 
         self.assertIn("[switch]$Auto,", install_ps1)
-        self.assertIn("if (-not $PlatformWasExplicit -and -not $PromptPlatform -and -not $hasInspectionCommand -and -not $PlainFullUninstall -and -not $CleanupPending) {", install_ps1)
+        self.assertIn("if (-not $PlatformWasExplicit -and -not $PromptPlatform -and -not $hasInspectionCommand -and -not $PlainFullUninstall -and -not $CleanupPending -and -not $UpdateSource) {", install_ps1)
         self.assertIn("$Auto = $true", install_ps1)
         self.assertIn(".\\install.cmd                          # Install to detected AI tools", install_ps1)
         self.assertNotIn(".\\install.ps1 -Auto                    # Recommended", install_ps1)
