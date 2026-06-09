@@ -90,6 +90,16 @@ function Get-PowerShell74LtsInstalledProducts {
     }
 }
 
+function Test-RunningAsAdministrator {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [Security.Principal.WindowsPrincipal]$identity
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
 function Uninstall-PowerShell74LtsInstallations {
     $products = @(Get-PowerShell74LtsInstalledProducts)
     foreach ($product in $products) {
@@ -162,6 +172,20 @@ function Initialize-PwshLtsBaseline {
     }
 
     try {
+        $existingVersion = Get-InstalledPwshVersion
+        if ($existingVersion -and $existingVersion -ge $script:PwshLtsBaselineVersion) {
+            Write-Info ("PowerShell {0} detected; skipping {1}+ baseline install." -f $existingVersion, $script:PwshLtsBaselineVersion) ("PowerShell {0} detected; skipping {1}+ baseline install." -f $existingVersion, $script:PwshLtsBaselineVersion)
+            return
+        }
+
+        if (-not (Test-RunningAsAdministrator)) {
+            $detectedVersion = if ($existingVersion) { $existingVersion.ToString() } else { "not found" }
+            Write-Warn `
+                ("PowerShell {0}+ baseline setup skipped because the current shell is not elevated. Detected PowerShell: {1}. Run install.cmd from an elevated PowerShell to install the {2}.x baseline." -f $script:PwshLtsBaselineVersion, $detectedVersion, $script:PwshLtsReleaseLine) `
+                ("PowerShell {0}+ baseline setup skipped because the current shell is not elevated. Detected PowerShell: {1}. Run install.cmd from an elevated PowerShell to install the {2}.x baseline." -f $script:PwshLtsBaselineVersion, $detectedVersion, $script:PwshLtsReleaseLine)
+            return
+        }
+
         Uninstall-PowerShell74LtsInstallations
 
         $existingVersion = Get-InstalledPwshVersion

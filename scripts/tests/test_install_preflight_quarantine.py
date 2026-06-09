@@ -8,7 +8,9 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "merge-companion" / "scripts"))
 from installer_assets import write_ownership_marker
+from file_walker import walk_user_files
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -59,6 +61,42 @@ def _find_test_powershell() -> str | None:
 
 
 class InstallPreflightQuarantineTest(unittest.TestCase):
+    def test_file_walker_skips_windows_junction_skill_roots(self) -> None:
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows junction behavior is platform-specific")
+        powershell = _find_test_powershell()
+        if not powershell:
+            self.skipTest("No PowerShell executable available for junction test")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_skill = root / "repo" / "task-router"
+            repo_skill.mkdir(parents=True)
+            (repo_skill / "SKILL.md").write_text("# repo skill\n", encoding="utf-8")
+            skills_dir = root / ".claude" / "skills"
+            skills_dir.mkdir(parents=True)
+            junction = skills_dir / "task-router"
+            source = str(repo_skill).replace("'", "''")
+            dest = str(junction).replace("'", "''")
+
+            result = subprocess.run(
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    f"New-Item -ItemType Junction -Path '{dest}' -Target '{source}' | Out-Null",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+
+            self.assertEqual(walk_user_files(skills_dir), [])
+
     def test_install_sh_backs_up_user_edit_before_copy_replacement(self) -> None:
         bash_exe = _find_test_bash()
         if not bash_exe:

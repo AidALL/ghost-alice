@@ -412,6 +412,39 @@ class InstallStatusContractTest(unittest.TestCase):
             self.assertNotIn("hwpx", result.stdout)
             self.assertIn("overall: error", result.stdout)
 
+    def test_doctor_strict_does_not_fail_for_pending_merge_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = self._valid_encoding_root(root)
+            ghost_alice = root / ".ghost-alice"
+            self._write_snapshot(ghost_alice, captured_at="2026-01-02T00:00:00Z")
+            self._write_pending_manifest(ghost_alice, "codex", 1)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(INSTALL_DOCTOR),
+                    "--platform",
+                    "codex",
+                    "--repo-root",
+                    str(repo),
+                    "--encoding-root",
+                    str(repo),
+                    "--ghost-alice-root",
+                    str(ghost_alice),
+                    "--strict",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertIn("pending-merge: pending (1 undecided)", result.stdout)
+            self.assertIn("overall: warning", result.stdout)
+
     def test_doctor_reports_stale_snapshot_when_marker_is_newer(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

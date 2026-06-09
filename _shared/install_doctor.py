@@ -389,7 +389,7 @@ def run(args: argparse.Namespace) -> int:
 
     overall = _max_status(statuses)
     print(f"overall: {overall}")
-    if args.strict and overall != STATUS_OK:
+    if args.strict and overall == STATUS_ERROR:
         return 1
     return 0
 

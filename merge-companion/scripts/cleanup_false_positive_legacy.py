@@ -26,6 +26,7 @@ from manifest_io import read_manifest, write_manifest
 
 
 CLEANUP_REASON = "clean-ghost-alice-managed-false-positive"
+REPO_JUNCTION_CLEANUP_REASON = "repo-junction-source-change-false-positive"
 
 
 def _default_pending(platform: str) -> Path:
@@ -41,6 +42,14 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
         path.resolve().relative_to(parent.resolve())
         return True
     except (OSError, ValueError):
+        return False
+
+
+def _is_unresolved_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.absolute().relative_to(parent.absolute())
+        return True
+    except ValueError:
         return False
 
 
@@ -80,6 +89,51 @@ def _legacy_false_positive_status(entry: dict, *, pending_dir: Path, repo_root: 
     return True, CLEANUP_REASON
 
 
+def _repo_junction_false_positive_status(entry: dict, *, pending_dir: Path, repo_root: Path) -> tuple[bool, str]:
+    if entry.get("decided", False):
+        return False, "already-decided"
+
+    source_raw = entry.get("source_path")
+    backup_raw = entry.get("backup_path")
+    if not source_raw or not backup_raw:
+        return False, "missing-source-or-backup"
+
+    source = Path(str(source_raw))
+    backup = Path(str(backup_raw))
+    if not _is_relative_to(backup, pending_dir):
+        return False, "backup-outside-pending"
+    if not backup.exists():
+        return False, "backup-missing"
+    if not source.exists():
+        return False, "source-missing"
+    if _is_unresolved_relative_to(source, repo_root):
+        return False, "source-already-repo-path"
+    if not _is_relative_to(source, repo_root):
+        return False, "source-not-repo-resolved"
+    return True, REPO_JUNCTION_CLEANUP_REASON
+
+
+def _false_positive_status(entry: dict, *, pending_dir: Path, repo_root: Path) -> tuple[bool, str]:
+    legacy_ok, legacy_reason = _legacy_false_positive_status(
+        entry,
+        pending_dir=pending_dir,
+        repo_root=repo_root,
+    )
+    if legacy_ok:
+        return True, legacy_reason
+
+    junction_ok, junction_reason = _repo_junction_false_positive_status(
+        entry,
+        pending_dir=pending_dir,
+        repo_root=repo_root,
+    )
+    if junction_ok:
+        return True, junction_reason
+    if legacy_reason == "not-legacy-no-baseline":
+        return False, junction_reason
+    return False, legacy_reason
+
+
 def cleanup_false_positive_legacy(
     *,
     manifest_path: Path,
@@ -89,16 +143,16 @@ def cleanup_false_positive_legacy(
 ) -> dict:
     data = read_manifest(manifest_path)
     entries = data.setdefault("entries", [])
-    cleanable: list[tuple[dict, Path]] = []
+    cleanable: list[tuple[dict, Path, str]] = []
     skipped: list[dict] = []
 
     for entry in entries:
         if not isinstance(entry, dict):
             skipped.append({"id": None, "reason": "entry-not-object"})
             continue
-        ok, reason = _legacy_false_positive_status(entry, pending_dir=pending_dir, repo_root=repo_root)
+        ok, reason = _false_positive_status(entry, pending_dir=pending_dir, repo_root=repo_root)
         if ok:
-            cleanable.append((entry, Path(str(entry["backup_path"]))))
+            cleanable.append((entry, Path(str(entry["backup_path"])), reason))
         else:
             if not entry.get("decided", False):
                 skipped.append({"id": entry.get("id"), "reason": reason})
@@ -106,10 +160,10 @@ def cleanup_false_positive_legacy(
     removed_backups = 0
     cleanup_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     if apply and cleanable:
-        for entry, backup in cleanable:
+        for entry, backup, reason in cleanable:
             entry["decided"] = True
             entry["decision"] = "discarded"
-            entry["cleanup_reason"] = CLEANUP_REASON
+            entry["cleanup_reason"] = reason
             entry["cleanup_at"] = cleanup_at
             if backup.exists():
                 if backup.is_dir() and not backup.is_symlink():

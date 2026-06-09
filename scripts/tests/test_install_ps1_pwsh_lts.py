@@ -1,5 +1,8 @@
 import re
+import shutil
+import subprocess
 import sys
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -81,11 +84,20 @@ class InstallPs1PwshLtsTest(unittest.TestCase):
         self.assertIn('3010', script)
         self.assertNotRegex(script, re.compile(r"cmd\s+/c\s+.*UninstallString", re.IGNORECASE))
         self.assertNotIn('Uninstall-Package', script)
+        self.assertIn('function Test-RunningAsAdministrator', script)
 
         initializer = script[script.index('function Initialize-PwshLtsBaseline'):]
         self.assertLess(
-            initializer.index('Uninstall-PowerShell74LtsInstallations'),
             initializer.index('Get-InstalledPwshVersion'),
+            initializer.index('Test-RunningAsAdministrator'),
+        )
+        self.assertLess(
+            initializer.index('Test-RunningAsAdministrator'),
+            initializer.index('Uninstall-PowerShell74LtsInstallations'),
+        )
+        self.assertLess(
+            initializer.index('Get-InstalledPwshVersion'),
+            initializer.index('Resolve-PowerShell76LtsReleaseAsset'),
         )
         self.assertLess(
             initializer.index('Uninstall-PowerShell74LtsInstallations'),
@@ -105,6 +117,49 @@ class InstallPs1PwshLtsTest(unittest.TestCase):
         self.assertIn('Write-Warn', initializer)
         self.assertIn('continuing with current PowerShell runtime', initializer)
         self.assertNotIn('PowerShell 7.6 baseline check failed before auto platform installs', script)
+
+    def test_pwsh_lts_baseline_skips_msi_when_shell_is_not_elevated(self) -> None:
+        if not sys.platform.startswith("win"):
+            self.skipTest("PowerShell elevation check is Windows-specific")
+        powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        if not powershell:
+            self.skipTest("PowerShell executable is required for baseline test")
+
+        script = textwrap.dedent(
+            """
+            $ErrorActionPreference = "Stop"
+            $script:GhostAliceRoot = (Get-Location).Path
+            $script:PwshLtsBaselineVersion = [version]"7.6.0"
+            $script:PwshLtsReleaseLine = "7.6"
+            $script:PwshLtsEnsureChecked = $false
+            function Write-Warn { param([string]$English, [string]$Korean) Write-Output "WARN:$English" }
+            function Write-Info { param([string]$English, [string]$Korean) Write-Output "INFO:$English" }
+            function Write-Ok { param([string]$English, [string]$Korean) Write-Output "OK:$English" }
+            . (Join-Path $script:GhostAliceRoot "installer_lib/pwsh_runtime.ps1")
+            function Test-Windows10OrNewer { return $true }
+            function Get-InstalledPwshVersion { return [version]"7.4.16" }
+            function Test-RunningAsAdministrator { return $false }
+            function Uninstall-PowerShell74LtsInstallations { throw "uninstall-called" }
+            function Resolve-PowerShell76LtsReleaseAsset { throw "resolve-called" }
+            Initialize-PwshLtsBaseline
+            Write-Output "completed"
+            """
+        )
+
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+        self.assertIn("PowerShell 7.6.0+ baseline setup skipped", result.stdout)
+        self.assertIn("completed", result.stdout)
+        self.assertNotIn("uninstall-called", result.stdout)
+        self.assertNotIn("resolve-called", result.stdout)
 
     def test_pwsh_lts_gate_runs_after_install_mutation_paths(self) -> None:
         script = self._script()

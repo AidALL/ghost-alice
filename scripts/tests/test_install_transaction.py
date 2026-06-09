@@ -105,6 +105,107 @@ class InstallTransactionTest(unittest.TestCase):
         )
         return dest
 
+    def test_cleanup_pending_apply_marks_repo_junction_false_positive_decided(self) -> None:
+        if not sys.platform.startswith("win"):
+            self.skipTest("Windows junction behavior is platform-specific")
+        powershell = shutil.which("pwsh") or shutil.which("powershell.exe")
+        if not powershell:
+            self.skipTest("PowerShell executable is required for junction cleanup test")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = root / "repo"
+            repo_shared = repo / "_shared"
+            repo_shared.mkdir(parents=True)
+            source_file = repo_shared / "install_doctor.py"
+            source_file.write_text("# repo-managed source\n", encoding="utf-8")
+            skills = root / ".claude" / "skills"
+            skills.mkdir(parents=True)
+            junction = skills / "_shared"
+            source = str(repo_shared).replace("'", "''")
+            dest = str(junction).replace("'", "''")
+
+            junction_result = subprocess.run(
+                [
+                    powershell,
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-Command",
+                    f"New-Item -ItemType Junction -Path '{dest}' -Target '{source}' | Out-Null",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            self.assertEqual(junction_result.returncode, 0, msg=junction_result.stderr + junction_result.stdout)
+
+            pending = root / ".ghost-alice" / "pending-merges" / "claude"
+            pending.mkdir(parents=True)
+            backup = pending / "repo-junction.bak"
+            shutil.copy2(skills / "_shared" / "install_doctor.py", backup)
+            manifest = pending / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "entries": [
+                            {
+                                "id": "repo-junction",
+                                "platform": "claude",
+                                "skill": "_shared",
+                                "source_path": (skills / "_shared" / "install_doctor.py").as_posix(),
+                                "backup_path": backup.as_posix(),
+                                "snapshot_hash": "old",
+                                "current_hash": "new",
+                                "change_kind": "modified",
+                                "relative_path": "_shared/install_doctor.py",
+                                "decided": False,
+                                "decision": None,
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(CLEANUP_FALSE_POSITIVE_LEGACY),
+                    "--platform",
+                    "claude",
+                    "--manifest",
+                    str(manifest),
+                    "--pending",
+                    str(pending),
+                    "--repo-root",
+                    str(repo),
+                    "--apply",
+                    "--json",
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            summary = json.loads(result.stdout)
+            self.assertEqual(summary["cleaned"], 1)
+            self.assertFalse(backup.exists())
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            entry = data["entries"][0]
+            self.assertTrue(entry["decided"])
+            self.assertEqual(entry["decision"], "discarded")
+            self.assertEqual(entry["cleanup_reason"], "repo-junction-source-change-false-positive")
+
     def test_install_lock_blocks_fresh_second_acquire(self) -> None:
         lock = _load_install_lock()
         with tempfile.TemporaryDirectory() as temp_dir:
