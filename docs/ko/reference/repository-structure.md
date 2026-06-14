@@ -10,7 +10,6 @@
 - [Shared Utilities](#shared-utilities)
 - [Core Governance And Runtime Gates](#core-governance-and-runtime-gates)
 - [Official Docs And Policies](#official-docs-and-policies)
-- [Design Data](#design-data)
 - [Installed Runtime State](#installed-runtime-state)
 - [Documentation Responsibility](#documentation-responsibility)
 

@@ -189,6 +189,23 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
+    def test_public_docs_do_not_render_stale_design_data_residue(self) -> None:
+        public_paths = [
+            REPO_ROOT / "docs" / "index.html",
+            REPO_ROOT / "docs" / "reference" / "repository-structure.md",
+            REPO_ROOT / "docs" / "ko" / "reference" / "repository-structure.md",
+        ]
+        stale_patterns = ("Design Data", "design data")
+
+        offenders = []
+        for path in public_paths:
+            text = path.read_text(encoding="utf-8")
+            for pattern in stale_patterns:
+                if pattern in text:
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}: {pattern}")
+
+        self.assertEqual(offenders, [])
+
     def test_homepage_gate_flow_diagram_has_compact_layout_contract(self) -> None:
         text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
 
