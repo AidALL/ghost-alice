@@ -14,9 +14,23 @@ Use this section for changes that have landed after the latest tagged public rel
 
 ### Fixed
 
+### Removed
+
+## [0.1.2] - 2026-06-14
+
+### Changed
+
 - Routed installer update guidance through safe source updaters so tracked command additions do not push users toward raw `git pull` collisions with local untracked files.
+- Hardened installer pending-merge cleanup and source auto-detection coverage for public update workflows.
+
+### Fixed
+
+- Guarded the public core catalog and public-surface validator against externalized addon skills or command wrappers re-entering the core repository.
+- Kept the installer encoding guard from scanning local `.tmp` experiment artifacts that are excluded from public release snapshots.
 
 ### Removed
+
+- Removed bundled addon residue, including the design-library reference bundle and public installer/docs references to externalized addon names.
 
 ## [0.1.1] - 2026-06-08
 

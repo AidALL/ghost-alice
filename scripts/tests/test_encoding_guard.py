@@ -141,6 +141,20 @@ class EncodingGuardTest(unittest.TestCase):
             self.assertEqual(len(issues), 1)
             self.assertEqual(issues[0].code, "missing-utf8-bom")
 
+    def test_repo_scan_ignores_tmp_local_artifacts(self) -> None:
+        guard = _load_guard()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            (root / "AGENTS.md").write_text("# Project rules\n", encoding="utf-8")
+            local_run = root / ".tmp" / "local-model-experiments"
+            local_run.mkdir(parents=True)
+            (local_run / "http-models.json").write_text("not json", encoding="utf-8")
+            (local_run / "Activate.ps1").write_text("Write-Host 'local venv'\n", encoding="utf-8")
+
+            issues = guard.validate_repo(root)
+
+            self.assertEqual(issues, [])
+
     def test_cli_returns_nonzero_for_invalid_semantic_asset(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             bad = Path(temp_dir) / "bad.md"
