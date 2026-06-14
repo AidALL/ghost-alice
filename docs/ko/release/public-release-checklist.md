@@ -44,7 +44,6 @@ local state, secrets, private addons, tenant content, private development artifa
 - `.claude/commands/`
 - `docs/`
 - `official-docs/`
-- `design-library/` (bundled MIT reference data. upstream notice와 함께 포함하거나 제외한다. License And Provenance Gates와 `THIRD_PARTY_NOTICES.md`를 본다)
 - public images under `imgs/`
 - `.github/`
 
@@ -87,8 +86,7 @@ python3 scripts/validate_platform_adapters.py
 
 - `LICENSE`가 수정되지 않은 Apache License, Version 2.0 text인지 확인한다.
 - `README.md`, `README_ko.md`, `NOTICE`, `THIRD_PARTY_NOTICES.md`가 project license boundary에 대해 일치하는지 확인한다.
-- bundled third-party reference material에 source URL, license, copyright notice, local path가 있는지 확인한다.
-- `design-library/`가 upstream MIT notice로 계속 덮이는지 또는 제외되는지 확인한다.
+- bundled third-party reference material이 포함되는 경우 source URL, license, copyright notice, local path가 있는지 확인한다.
 - copied upstream documentation snapshots를 publish하지 않는다. short citations와 source locators가 있는 original project commentary만 둔다.
 - contributor-facing file이 maintainers가 실제로 enforce하지 않는 CLA, DCO, inbound license rule을 암시하지 않는지 확인한다.
 

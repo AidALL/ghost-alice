@@ -25,7 +25,6 @@ BASE_SCAN_PATHS = [
 SKIP_PARTS = {
     ".git",
     "__pycache__",
-    "design-library",
     "node_modules",
 }
 

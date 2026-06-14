@@ -18,6 +18,26 @@ from typing import Any
 
 PUBLIC_SKILL_NAME_ALIASES = {}
 
+# These names belong to addon skills installed through --addon-source.
+# The core repo must not check them in as .claude/commands wrappers.
+ADDON_COMMAND_WRAPPERS_FORBIDDEN_IN_CORE_REPO = {
+    "cardnews-automation",
+    "company-profile",
+    "company-profile-injector",
+    "design-library-normalizer",
+    "document-to-markdown",
+    "edge-detector-architecture",
+    "edge-detector-deployment",
+    "fullstack-webapp",
+    "gov-proposal-writer",
+    "headless-browser-render",
+    "hwpx",
+    "jira-issue-writer",
+    "logical-writing",
+    "ml-model-builder",
+    "robot-control-system",
+}
+
 
 class Finding:
     __slots__ = ("severity", "area", "check", "message")
@@ -269,6 +289,27 @@ def check_command_wrappers(
     commands_dir = repo / ".claude" / "commands"
     if not commands_dir.is_dir():
         return "skipped-not-present"
+
+    for claude in sorted(commands_dir.glob("*.md")):
+        rel = claude.relative_to(repo).as_posix()
+        if claude.stem in ADDON_COMMAND_WRAPPERS_FORBIDDEN_IN_CORE_REPO:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "command-wrapper",
+                    "claude-addon-residue",
+                    f"addon command wrapper must not live in core: {rel}",
+                )
+            )
+        if claude.name == "evolution.md" and (commands_dir / "skill-evolution.md").is_file():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "command-wrapper",
+                    "claude-evolution-alias",
+                    f"use skill-evolution.md instead of local alias: {rel}",
+                )
+            )
 
     for name, skill_path in sorted(paths.items()):
         claude = commands_dir / f"{name}.md"

@@ -168,7 +168,6 @@ def discover_skills(repo_root: Path) -> list[Path]:
     excluded_roots = set(FAMILY_DIRS.values()) | {
         ".github", "skill-catalog", "scripts", "official-docs", "_shared",
         "company-info-files", "platforms", "psyco-neu-main", "psyco-neu-vision-main",
-        "design-library",
     }
     for entry in sorted(repo_root.iterdir()):
         if not entry.is_dir():
@@ -191,7 +190,6 @@ def discover_install_roots(repo_root: Path) -> list[str]:
     excluded_roots = set(FAMILY_DIRS.values()) | {
         ".github", "skill-catalog", "scripts", "official-docs", "_shared",
         "company-info-files", "platforms", "psyco-neu-main", "psyco-neu-vision-main",
-        "design-library",
     }
     for entry in sorted(repo_root.iterdir()):
         if not entry.is_dir():

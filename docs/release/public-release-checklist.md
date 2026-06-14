@@ -43,7 +43,6 @@ Create a public repository snapshot that includes the core Ghost-ALICE OS govern
 - `.claude/commands/`
 - `docs/`
 - `official-docs/`
-- `design-library/` (bundled MIT reference data; include with its upstream notice or exclude. See License And Provenance Gates and `THIRD_PARTY_NOTICES.md`)
 - public images under `imgs/`
 - `.github/`
 
@@ -86,8 +85,7 @@ python3 scripts/validate_platform_adapters.py
 
 - Confirm `LICENSE` is the unmodified Apache License, Version 2.0 text.
 - Confirm `README.md`, `NOTICE`, and `THIRD_PARTY_NOTICES.md` agree on the project license boundary.
-- Confirm bundled third-party reference material has source URL, license, copyright notice, and local path.
-- Confirm `design-library/` remains covered by its upstream MIT notice or is excluded.
+- Confirm bundled third-party reference material has source URL, license, copyright notice, and local path when any is included.
 - Do not publish copied upstream documentation snapshots. Keep only original project commentary with short citations and source locators.
 - Confirm no contributor-facing file implies a CLA, DCO, or inbound license rule that maintainers do not actually enforce.
 

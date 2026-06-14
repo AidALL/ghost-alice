@@ -108,7 +108,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         self.assertIsNone(changes[0]["current_hash"])
 
     def test_generated_file_deleted_from_stale_snapshot_is_ignored(self):
-        generated_file = self.skills_dir / "hwpx" / "examples" / ".DS_Store"
+        generated_file = self.skills_dir / "custom-local-skill" / "examples" / ".DS_Store"
         generated_file.parent.mkdir(parents=True)
         generated_file.write_text("generated", encoding="utf-8")
         snap = self.root / "snapshot.json"
@@ -120,7 +120,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         self.assertEqual(changes, [])
 
     def test_generated_file_passed_as_current_file_is_ignored(self):
-        generated_file = self.skills_dir / "hwpx" / "examples" / ".DS_Store"
+        generated_file = self.skills_dir / "custom-local-skill" / "examples" / ".DS_Store"
         generated_file.parent.mkdir(parents=True)
         generated_file.write_text("generated", encoding="utf-8")
         snap = self.root / "snapshot.json"

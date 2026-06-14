@@ -298,6 +298,66 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         self.assertIn(".claude/commands/alpha.md", messages)
         self.assertIn("alpha/SKILL.md", messages)
 
+    def test_validator_rejects_addon_command_wrapper_checked_into_core(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self.make_fixture(Path(td))
+            write_text(
+                repo / ".claude" / "commands" / "hwpx.md",
+                "@hwpx/SKILL.md\n\n$ARGUMENTS\n",
+            )
+
+            result = self.run_validator(repo)
+
+        self.assertEqual(result.returncode, 2, msg=result.stdout)
+        data = self.load_json_output(result)
+        messages = "\n".join(finding["message"] for finding in data["findings"])
+        self.assertIn("addon command wrapper must not live in core", messages)
+        self.assertIn(".claude/commands/hwpx.md", messages)
+
+    def test_validator_rejects_evolution_alias_when_skill_evolution_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self.make_fixture(Path(td))
+            skills_path = repo / "skill-catalog" / "skills.json"
+            data = json.loads(skills_path.read_text(encoding="utf-8"))
+            data["skills"].append(
+                {
+                    "name": "skill-evolution",
+                    "path": "skill-evolution/SKILL.md",
+                    "family": "governance",
+                }
+            )
+            skills_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            readme = repo / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8")
+                .replace("top-level 2 skills", "top-level 3 skills")
+                .replace("- top-level skills 2", "- top-level skills 3")
+                .replace("total 3", "total 4")
+                .replace("(alpha, beta)", "(alpha, beta, skill-evolution)"),
+                encoding="utf-8",
+            )
+            docs_index = repo / "docs" / "index.html"
+            docs_index.write_text(
+                docs_index.read_text(encoding="utf-8").replace('<div class="stat-num">3</div>', '<div class="stat-num">4</div>'),
+                encoding="utf-8",
+            )
+            write_text(
+                repo / ".claude" / "commands" / "skill-evolution.md",
+                "@skill-evolution/SKILL.md\n\n$ARGUMENTS\n",
+            )
+            write_text(
+                repo / ".claude" / "commands" / "evolution.md",
+                "@skill-evolution/SKILL.md\n\n$ARGUMENTS\n",
+            )
+
+            result = self.run_validator(repo)
+
+        self.assertEqual(result.returncode, 2, msg=result.stdout)
+        data = self.load_json_output(result)
+        messages = "\n".join(finding["message"] for finding in data["findings"])
+        self.assertIn("use skill-evolution.md instead of local alias", messages)
+        self.assertIn(".claude/commands/evolution.md", messages)
+
     def test_skill_validation_workflow_runs_public_surface_validator(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
 

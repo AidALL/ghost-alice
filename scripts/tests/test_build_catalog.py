@@ -48,7 +48,7 @@ class BuildCatalogFamilyTest(unittest.TestCase):
             repo_root = Path(tmp)
             write_skill(repo_root, "task-router", "task-router")
             write_skill(repo_root, "jailbreak-detector", "jailbreak-detector")
-            write_skill(repo_root, "fullstack-webapp", "fullstack-webapp")
+            write_skill(repo_root, "sample-domain-skill", "sample-domain-skill")
             write_skill(
                 repo_root,
                 "coding-convention/verification-before-completion",
@@ -64,7 +64,7 @@ class BuildCatalogFamilyTest(unittest.TestCase):
                 "governance-subskill",
             )
             self.assertEqual(
-                by_name["fullstack-webapp"]["governance_class"],
+                by_name["sample-domain-skill"]["governance_class"],
                 "non-governance-domain",
             )
             self.assertEqual(

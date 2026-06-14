@@ -7,9 +7,9 @@
 #   .\install.cmd -Platform claude                 # Install all skills to Claude Code
 #   .\install.cmd -Platform codex                  # Install all skills to Codex
 #   .\install.cmd -Platform codex -Visibility dynamic
-#   .\install.cmd -Platform codex -Skills hwpx     # Install selected Codex skills
+#   .\install.cmd -Platform codex -Skills skill-evolution     # Install selected Codex core skills
 #   .\install.cmd -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
-#   .\install.cmd -Platform codex -Uninstall -Skills hwpx  # Remove selected skills from one platform
+#   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
 #   .\install.cmd -List                            # List available skills
 #   .\install.cmd -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
 #   .\install.cmd -Status                          # Show current install status
@@ -23,9 +23,9 @@
 #   .\install.ps1 -Platform claude                 # Install all skills to Claude Code
 #   .\install.ps1 -Platform codex                  # Install all skills to Codex
 #   .\install.ps1 -Platform codex -Visibility dynamic
-#   .\install.ps1 -Platform codex -Skills hwpx     # Install selected Codex skills
+#   .\install.ps1 -Platform codex -Skills skill-evolution     # Install selected Codex core skills
 #   .\install.ps1 -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
-#   .\install.ps1 -Platform codex -Uninstall -Skills hwpx  # Remove selected skills from one platform
+#   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
 #   .\install.ps1 -List                            # List available skills
 #   .\install.ps1 -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
 #   .\install.ps1 -Status                          # Show current install status

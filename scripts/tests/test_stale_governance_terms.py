@@ -13,10 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-ALLOWED_PATHS = {
-    # Physical robot support equipment, not Ghost-ALICE governance naming.
-    "robot-control-system/references/hri-modalities.md",
-}
+ALLOWED_PATHS = set()
 
 LEGACY_TERM = "har" + "ness"
 

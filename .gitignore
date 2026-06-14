@@ -58,11 +58,5 @@ TODO.md
 psyco-neu-main/
 psyco-neu-vision-main/
 
-# Runtime auto-clone (created by convert_hwp.py when needed)
-hwpx/.hwp2hwpx-repo/
-
 # Sensitive company materials
 company-info-files/
-
-# Source PDF materials (6f558b9 policy extension)
-cardnews-automation/*.pdf

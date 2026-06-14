@@ -10,7 +10,7 @@
 #   bash install.sh --platform codex --visibility dynamic
 #   bash install.sh --update-source  # Safely stash local source edits and fast-forward this checkout
 #   bash install.sh --uninstall  # Full uninstall for all detected Ghost-ALICE managed footprint
-#   bash install.sh --platform codex --uninstall hwpx  # Remove selected skills from one platform
+#   bash install.sh --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
 #   bash install.sh --list       # List available skills
 #   bash install.sh --addon-source ./ghost-alice-addons --list-addons
 #   bash install.sh --status     # Check current install status

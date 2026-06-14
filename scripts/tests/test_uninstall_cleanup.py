@@ -236,14 +236,14 @@ class UninstallCleanupTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
-            user_owned = root / ".agents" / "skills" / "hwpx"
+            user_owned = root / ".agents" / "skills" / "custom-local-skill"
             user_owned.mkdir(parents=True)
             (user_owned / "SKILL.md").write_text("# user owned\n", encoding="utf-8")
             manifest = _write_manifest(
                 root,
                 [
                     {"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"},
-                    {"target_name": "hwpx", "dest_path": user_owned.as_posix(), "install_mode": "copy"},
+                    {"target_name": "custom-local-skill", "dest_path": user_owned.as_posix(), "install_mode": "copy"},
                 ],
             )
             report = root / "uninstall-report.json"
@@ -257,20 +257,20 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(data["mode"], "dry-run")
             actions = {item["target_name"]: item["action"] for item in data["items"] if "target_name" in item}
             self.assertEqual(actions["task-router"], "would-remove")
-            self.assertEqual(actions["hwpx"], "manual-review")
+            self.assertEqual(actions["custom-local-skill"], "manual-review")
 
     def test_confirm_removes_only_ghost_alice_managed_targets_and_writes_report(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
-            user_owned = root / ".agents" / "skills" / "hwpx"
+            user_owned = root / ".agents" / "skills" / "custom-local-skill"
             user_owned.mkdir(parents=True)
             (user_owned / "SKILL.md").write_text("# user owned\n", encoding="utf-8")
             manifest = _write_manifest(
                 root,
                 [
                     {"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"},
-                    {"target_name": "hwpx", "dest_path": user_owned.as_posix(), "install_mode": "copy"},
+                    {"target_name": "custom-local-skill", "dest_path": user_owned.as_posix(), "install_mode": "copy"},
                 ],
             )
             report = root / "uninstall-report.json"
@@ -288,7 +288,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 if item.get("kind") == "install-target"
             }
             self.assertEqual(install_actions["task-router"], "removed")
-            self.assertEqual(install_actions["hwpx"], "manual-review")
+            self.assertEqual(install_actions["custom-local-skill"], "manual-review")
 
     def test_confirm_unlinks_manifest_symlink_without_removing_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

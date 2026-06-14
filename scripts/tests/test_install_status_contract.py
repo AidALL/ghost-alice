@@ -353,8 +353,8 @@ class InstallStatusContractTest(unittest.TestCase):
                     "task-router",
                     str(target),
                     "--target",
-                    "hwpx",
-                    str(root / ".agents" / "skills" / "hwpx"),
+                    "custom-local-skill",
+                    str(root / ".agents" / "skills" / "custom-local-skill"),
                 ],
                 cwd=REPO_ROOT,
                 capture_output=True,
@@ -366,7 +366,7 @@ class InstallStatusContractTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
             self.assertIn("ownership: ok", result.stdout)
             self.assertIn("task-router", result.stdout)
-            self.assertNotIn("hwpx", result.stdout)
+            self.assertNotIn("custom-local-skill", result.stdout)
             self.assertIn("overall: ok", result.stdout)
 
     def test_doctor_still_reports_manifest_target_missing(self) -> None:
@@ -395,8 +395,8 @@ class InstallStatusContractTest(unittest.TestCase):
                     "task-router",
                     str(root / ".agents" / "skills" / "task-router"),
                     "--target",
-                    "hwpx",
-                    str(root / ".agents" / "skills" / "hwpx"),
+                    "custom-local-skill",
+                    str(root / ".agents" / "skills" / "custom-local-skill"),
                 ],
                 cwd=REPO_ROOT,
                 capture_output=True,
@@ -409,7 +409,7 @@ class InstallStatusContractTest(unittest.TestCase):
             self.assertIn("ownership: error", result.stdout)
             self.assertIn("task-router", result.stdout)
             self.assertIn("expected-target-absent", result.stdout)
-            self.assertNotIn("hwpx", result.stdout)
+            self.assertNotIn("custom-local-skill", result.stdout)
             self.assertIn("overall: error", result.stdout)
 
     def test_doctor_strict_does_not_fail_for_pending_merge_warning(self) -> None:

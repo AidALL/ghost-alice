@@ -8,7 +8,6 @@ not assumed to be project-owned Apache-2.0 content unless explicitly stated.
 ## Contents
 
 - [Bundled Reference Material](#bundled-reference-material)
-  - [`design-library/`](#design-library)
 - [Project-Owned Implementations With External Provenance](#project-owned-implementations-with-external-provenance)
   - [`coding-convention/`](#coding-convention)
 - [Maintainer Checklist](#maintainer-checklist)
@@ -16,45 +15,9 @@ not assumed to be project-owned Apache-2.0 content unless explicitly stated.
 
 ## Bundled Reference Material
 
-### `design-library/`
-
-- Source package: `getdesign`
-- Local source metadata: `design-library/.source-meta.json`
-- Upstream repository: https://github.com/VoltAgent/awesome-design-md
-- Package source: https://registry.npmjs.org/getdesign/
-- License: MIT License
-- Copyright notice from upstream: Copyright (c) 2026 VoltAgent
-
-The `design-library/catalog/` entries are bundled reference material derived
-from the upstream package listed above. Keep the upstream copyright and MIT
-permission notice available with public distributions that include this
-directory.
-
-MIT License notice:
-
-```text
-MIT License
-
-Copyright (c) 2026 VoltAgent
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
+The core repository ships no bundled third-party reference material. If
+reference data is added, record its source URL, license,
+copyright notice, and local path here for release readiness.
 
 ## Project-Owned Implementations With External Provenance
 

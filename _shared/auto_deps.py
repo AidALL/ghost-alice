@@ -35,7 +35,6 @@ KNOWN_ALIASES = {
     "python-dotenv": "dotenv",
     "python-pptx": "pptx",
     "python-docx": "docx",
-    "python-hwpx": "hwpx",
     "Pillow": "PIL",
     "pyyaml": "yaml",
     "google-auth": "google.auth",

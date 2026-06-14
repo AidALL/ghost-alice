@@ -66,17 +66,6 @@ installer 전체 architecture는 [installer architecture](./installer-architectu
 | [docs/plans/](../../plans/) | public roadmap policy and planning boundaries |
 | [docs/ko/plans/](../plans/) | Korean counterparts for planning documents |
 
-## Design Data
-
-| Path | Role |
-| --- | --- |
-| [design-library/catalog/](../../../design-library/catalog/) | upstream raw design references |
-| [design-library/normalized/](../../../design-library/normalized/) | normalized design SSOT |
-| `design-library/project-overlays/` | project-specific overlays. 필요할 때 생성되는 optional path다. |
-| [design-library/manifest.json](../../../design-library/manifest.json) | design-library manifest |
-
-design library는 reference data layer다. `design-library-normalizer` skill은 addon repository가 제공한다.
-
 ## Installed Runtime State
 
 다음 path는 repository 밖의 user home directory 아래에 있다.

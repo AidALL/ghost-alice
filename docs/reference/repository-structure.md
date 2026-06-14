@@ -64,17 +64,6 @@ For the full installer architecture, read [installer architecture](./installer-a
 | [docs/policies/](../policies/) | Runtime, platform, and evaluator policy documents |
 | [docs/plans/](../plans/) | Public roadmap policy and planning boundaries |
 
-## Design Data
-
-| Path | Role |
-| --- | --- |
-| [design-library/catalog/](../../design-library/catalog/) | Upstream raw design references |
-| [design-library/normalized/](../../design-library/normalized/) | Normalized design SSOT |
-| `design-library/project-overlays/` | Project-specific overlays. This optional path is created when needed. |
-| [design-library/manifest.json](../../design-library/manifest.json) | Design-library manifest |
-
-The design library is a reference data layer. The `design-library-normalizer` skill is provided by the addon repository.
-
 ## Installed Runtime State
 
 These paths live outside the repository under the user's home directory.

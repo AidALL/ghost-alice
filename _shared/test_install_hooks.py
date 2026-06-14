@@ -3069,7 +3069,7 @@ class TestInstallHook(TempHomeTestCase):
         self._write_settings("claude", {
             "autoUpdatesChannel": "latest",
             "customKey": "customValue",
-            "permissions": {"allow": ["Skill(hwpx)"]},
+            "permissions": {"allow": ["Skill(custom-local-skill)"]},
         })
         result = install_hooks.install_hook("claude")
         self.assertEqual(result, "installed")
@@ -3077,7 +3077,7 @@ class TestInstallHook(TempHomeTestCase):
         settings = self._read_settings("claude")
         self.assertEqual(settings["autoUpdatesChannel"], "latest")
         self.assertEqual(settings["customKey"], "customValue")
-        self.assertIn("Skill(hwpx)", settings["permissions"]["allow"])
+        self.assertIn("Skill(custom-local-skill)", settings["permissions"]["allow"])
         self.assertIn("Skill(verification-before-completion)", settings["permissions"]["allow"])
         self.assertEqual(
             settings["permissions"]["allow"].count("Skill(verification-before-completion)"),
@@ -3089,7 +3089,7 @@ class TestInstallHook(TempHomeTestCase):
         self._write_settings("claude", {
             "permissions": {
                 "allow": [
-                    "Skill(hwpx)",
+                    "Skill(custom-local-skill)",
                     "Bash(rg ghost-alice README.md)",
                 ],
             },
@@ -3099,7 +3099,7 @@ class TestInstallHook(TempHomeTestCase):
 
         self.assertEqual(result, "installed")
         allow = self._read_settings("claude")["permissions"]["allow"]
-        self.assertIn("Skill(hwpx)", allow)
+        self.assertIn("Skill(custom-local-skill)", allow)
         self.assertIn("Bash(rg ghost-alice README.md)", allow)
 
     def test_install_preserves_other_hooks(self):
