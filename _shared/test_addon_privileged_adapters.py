@@ -216,6 +216,22 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
         self.assertFalse(any("[adapter:p5-demo] p5-hook" in command for command in self._commands()))
         self.assertEqual(install_hooks.remove_adapter_hook("[addon:pilot] obs", platform_key="claude"), 0)
 
+    def test_full_uninstall_removes_adapter_hook(self):
+        # Full uninstall (install.sh --uninstall -> install_hooks.py --uninstall ->
+        # uninstall_hook) must strip managed [adapter:...] hooks, not only addon hooks,
+        # so a privileged adapter hook never survives a completed full uninstall.
+        src = _make_adapter_addon(self.tmp)
+        with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+            self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]), "installed")
+        self.assertTrue(any("[adapter:p5-demo] p5-hook" in c for c in self._commands()))
+
+        install_hooks.uninstall_hook("claude")
+
+        self.assertFalse(
+            any("[adapter:p5-demo] p5-hook" in c for c in self._commands()),
+            msg="full uninstall must remove the managed adapter hook",
+        )
+
     def test_adapter_hook_matching_uses_installer_runner_helper(self):
         marker = "[adapter:p5-demo] p5-hook"
         runner_id = "adapter-p5-demo-p5-hook-v2"

@@ -2500,11 +2500,13 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
     if _hook_already_exists(pt_list, IO_TRACE_MARKER):
         total_removed += _remove_hook_entries(pt_list, IO_TRACE_MARKER)
 
-    # Full uninstall also strips every MANAGED addon observational hook (plan Phase 4),
-    # so a drifted addon's hook is never left firing live after a full uninstall.
+    # Full uninstall also strips every MANAGED addon observational hook (plan Phase 4)
+    # and every MANAGED privileged adapter hook (Phase P5), so neither a drifted
+    # addon hook nor an adapter hook is ever left firing live after a full uninstall.
     for ev_list in hooks_obj.values():
         if isinstance(ev_list, list):
             total_removed += _remove_managed_addon_entries(ev_list)
+            total_removed += _remove_managed_adapter_entries(ev_list)
 
     if total_removed == 0:
         _log(_t("  No hooks found. Nothing to remove", "  No hooks found. Nothing to remove"))
