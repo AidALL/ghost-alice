@@ -29,7 +29,7 @@ If there is even a one percent (1%) chance that a coding-convention family skill
 - [Skill Types](#skill-types)
 - [User Instruction Interpretation](#user-instruction-interpretation)
 - [Coding-Convention Family](#coding-convention-family)
-- [Recommendations And Choices Are Claims](#recommendations-and-choices-are-claims)
+- [Material Recommendations And Choices](#material-recommendations-and-choices)
 - [Final Self-Check](#final-self-check)
 
 

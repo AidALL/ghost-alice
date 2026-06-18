@@ -11,6 +11,7 @@ compatibility:
 - [Overview](#overview)
 - [Iron Law](#iron-law)
 - [Acceptance Criteria Iron Law](#acceptance-criteria-iron-law)
+- [Relayed Verdicts And Absence Claims](#relayed-verdicts-and-absence-claims)
 - [Hard Finalization Order](#hard-finalization-order)
 - [Gate Function](#gate-function)
 - [Completion-Check Format](#completion-check-format)
@@ -52,6 +53,22 @@ No acceptance-criteria means no completed verification-before-completion.
 Before any claim that executed work is complete, fixed, successful, or freshly verified, extract verifiable criteria from the user intent, locked decisions, and boundary-contract. Put those criteria in `acceptance-criteria`, then connect each intended closure claim to a criterion and fresh evidence in `claim-evidence-map`.
 
 Evidence such as link checks, lint, diff checks, or passing tests proves completion only when it directly satisfies the criterion. If the central criterion is not directly verified, leave it in `unverified` and report partial status in prose.
+
+## Relayed Verdicts And Absence Claims
+
+A verdict you relay or endorse is your own claim. Agreeing with, confirming, or
+passing through a third party's finding -- a reviewer, a prior agent, another
+turn, a memory -- puts it in the `claim-evidence-map` as YOUR claim with YOUR
+fresh evidence; inheriting the source's verdict is not evidence. This holds for
+every item, including LOW-severity ones -- severity does not lower the bar.
+
+An absence claim -- "no test exists", "X is not enforced", "nothing handles
+this" -- is never proven by reasoning or by the source's say-so. It needs a
+fresh `grep`/read this turn that would surface the thing if present; cite that
+search as the evidence.
+
+A verdict stated only in prose, outside the `claim-evidence-map`, escapes this
+gate. If you assert it, map it.
 
 ## Hard Finalization Order
 
@@ -118,6 +135,8 @@ Only emit a finalized `[completion-check]` when every listed criterion has a `pa
 | Regression test works | Red-green evidence when TDD requires it | A test that passed once |
 | Agent completed the work | VCS diff plus independent verification | The agent's success report |
 | Requirements satisfied | Claim-evidence map for each acceptance criterion | Tests pass alone, links pass alone, or diff exists alone |
+| Relayed/endorsed review verdict | Your own fresh grep/read for that item, mapped in claim-evidence-map | The reviewer's verdict, or your agreement with it, alone |
+| Absence claim ("no test/code exists", "not enforced") | A fresh grep/read this turn that would surface it if present | Reasoning, prior context, or the source's say-so |
 
 ## Red Flags
 

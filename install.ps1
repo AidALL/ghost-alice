@@ -10,6 +10,7 @@
 #   .\install.cmd -Platform codex -Skills skill-evolution     # Install selected Codex core skills
 #   .\install.cmd -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
 #   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
+#   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
 #   .\install.cmd -List                            # List available skills
 #   .\install.cmd -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
 #   .\install.cmd -Status                          # Show current install status
@@ -26,6 +27,7 @@
 #   .\install.ps1 -Platform codex -Skills skill-evolution     # Install selected Codex core skills
 #   .\install.ps1 -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
 #   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
+#   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
 #   .\install.ps1 -List                            # List available skills
 #   .\install.ps1 -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
 #   .\install.ps1 -Status                          # Show current install status
@@ -43,6 +45,7 @@ param(
     [switch]$Status,
     [switch]$Doctor,
     [switch]$Uninstall,
+    [switch]$Force,
     [switch]$CleanupPending,
     [string[]]$AddonSource,
     [string[]]$AddonTag,
@@ -476,6 +479,9 @@ if ($Auto) {
             )
             if ($Uninstall) {
                 $childArgs += "-Uninstall"
+            }
+            if ($Force) {
+                $childArgs += "-Force"
             }
             if ($Status) {
                 $childArgs += "-Status"

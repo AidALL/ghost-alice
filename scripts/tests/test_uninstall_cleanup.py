@@ -455,6 +455,30 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(support["hook-dispatcher-assets"]["action"], "removed")
             self.assertEqual(support["install-rollbacks"]["action"], "removed")
 
+    def test_confirm_removes_addon_sidecars(self) -> None:
+        # Full uninstall must clean the per-addon sidecar registry; otherwise
+        # orphan ~/.ghost-alice/addons/*.json survive a full uninstall (C-ORPHAN-3).
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+            )
+            # platform-scoped (M5): run_cleanup uses platform "codex"
+            addons_dir = root / ".ghost-alice" / "addons" / "codex"
+            addons_dir.mkdir(parents=True)
+            (addons_dir / "noop.json").write_text('{"addon_id":"noop"}\n', encoding="utf-8")
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertFalse(addons_dir.exists())
+            data = json.loads(report.read_text(encoding="utf-8"))
+            support = {item["target_name"]: item for item in data["items"] if item.get("kind") == "support-artifact"}
+            self.assertEqual(support["addon-sidecars"]["action"], "removed")
+
     def test_confirm_reports_hook_uninstall_before_target_removal(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
