@@ -16,6 +16,21 @@ Use this section for changes that have landed after the latest tagged public rel
 
 ### Removed
 
+## [0.1.3] - 2026-06-18
+
+### Added
+
+- Core addon registry: each installed addon gets a per-addon sidecar under `~/.ghost-alice/addons/<platform>/` that records every target it provides plus a content hash, so install and uninstall can prove ownership before touching anything on disk.
+- Hash-gated, crash-resumable per-addon uninstall: a drifted or user-modified target is preserved for manual review, and only managed hooks and files the registry can prove it owns are removed.
+- Install-time collision preflight now also covers addon command and resource extras (not just skills), so a destination already owned by something else aborts the install before any hook or skill is written.
+- Enforced `depends_on_core` at install time: a declared core dependency must exist in the selected core skill set.
+- PowerShell installer parity for the addon uninstall safety gates (full-uninstall hash gate, and selected-uninstall dependency guard with `-Force`).
+- Skill validator gate for SKILL.md table-of-contents to heading parity.
+
+### Changed
+
+- Addon hook ownership is proven by an exact marker plus hook-runner token and argv match for both install-time stale pruning and uninstall, so a user hook that merely contains a marker substring is never removed.
+
 ## [0.1.2] - 2026-06-14
 
 ### Changed
