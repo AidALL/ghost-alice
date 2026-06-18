@@ -185,12 +185,12 @@ class HardeningTest(unittest.TestCase):
         self.assertEqual(rec["origin"], "addon:x")
 
     def test_min_core_version_exceeds_core_is_rejected(self):
-        # noop declares min_core 0.1.0 -> fine against core 0.1.2
-        self.assertEqual(len(ai.load_addon_targets([FIXTURE_ROOT], core_version="0.1.2")), 1)
+        # noop declares min_core 0.1.0 -> fine against the live core version (VERSION SSOT)
+        self.assertEqual(len(ai.load_addon_targets([FIXTURE_ROOT], core_version=ai._read_core_version())), 1)
         with tempfile.TemporaryDirectory() as tmp:
             src = self._make_source(tmp, "highver", "0.1.0", "highver", min_core="9999.0.0")
             with self.assertRaises(ai.AddonManifestError):
-                ai.load_addon_targets([src], core_version="0.1.2")
+                ai.load_addon_targets([src], core_version=ai._read_core_version())
 
     def test_default_core_version_from_file_rejects_future_addon(self):
         with tempfile.TemporaryDirectory() as tmp:
