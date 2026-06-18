@@ -193,6 +193,48 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -
     return out
 
 
+def _adapter_hook_items(provided: list[dict[str, Any]], *, platform: str, confirm: bool) -> list[dict[str, Any]]:
+    """Remove core-owned privileged adapter hooks recorded in provided[]."""
+    out: list[dict[str, Any]] = []
+    remover = None
+    for entry in provided:
+        if entry.get("kind") != "adapter":
+            continue
+        adapter_id = entry.get("name")
+        metadata = entry.get("metadata")
+        hook_id = metadata.get("hook_id") if isinstance(metadata, dict) else None
+        if not isinstance(adapter_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(adapter_id):
+            continue
+        if not isinstance(hook_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(hook_id):
+            continue
+        marker_str = f"[adapter:{adapter_id}] {hook_id}"
+        item: dict[str, Any] = {"kind": "adapter", "name": adapter_id, "marker": marker_str}
+        if not confirm:
+            item["action"] = "would-remove"
+            out.append(item)
+            continue
+        if remover is None:
+            import install_hooks
+            remover = install_hooks.remove_adapter_hook
+        removed = remover(marker_str, platform_key=platform, dry_run=False)
+        item["action"] = "removed" if removed else "missing"
+        out.append(item)
+    return out
+
+
+def _managed_executable_items(
+    record: dict[str, Any],
+    provided: list[dict[str, Any]],
+    *,
+    platform: str,
+    confirm: bool,
+) -> list[dict[str, Any]]:
+    return (
+        _addon_hook_items(record, platform=platform, confirm=confirm)
+        + _adapter_hook_items(provided, platform=platform, confirm=confirm)
+    )
+
+
 def uninstall_addon(
     addon_id: str,
     *,
@@ -231,24 +273,34 @@ def uninstall_addon(
     if confirm:
         _write_marker(marker, addon_id, provided)  # intent marker BEFORE any removal
 
-    items = [_process_target(entry, allowed_roots=allowed_roots, confirm=confirm) for entry in provided]
+    # Adapter entries are intentionally excluded from the hash-gated file
+    # removal below. A privileged adapter's script lives inside its owning skill
+    # directory, so the skill target is the file deletion unit and the adapter
+    # entry is an install-time integrity/ownership snapshot (T0.3), not a second
+    # uninstall-time delete gate. If the skill target is fully removable, its
+    # own hash gate covers the adapter script along with the rest of the skill
+    # tree. If the skill target is blocked for manual review, the script stays
+    # with it. In both cases only the adapter HOOK is removed here, by exact
+    # marker, via _adapter_hook_items.
+    file_targets = [entry for entry in provided if entry.get("kind") != "adapter"]
+    items = [_process_target(entry, allowed_roots=allowed_roots, confirm=confirm) for entry in file_targets]
     blocked = [item for item in items if item["action"] in _BLOCKED_ACTIONS]
 
     if not confirm:
         report = {"addon_id": addon_id, "status": "dry-run",
-                  "items": items + _addon_hook_items(record, platform=platform, confirm=False)}
+                  "items": items + _managed_executable_items(record, provided, platform=platform, confirm=False)}
         report["has_pending_marker"] = marker.exists()
         return report
     if blocked:
         # Keep sidecar + .removing marker for retry/manual review, but disable
         # the addon's managed hook commands. Hook ownership is proven by exact
         # marker + hook-runner signature, so removing them does not risk user data.
-        hook_items = _addon_hook_items(record, platform=platform, confirm=True)
+        hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
         return {"addon_id": addon_id, "status": "partial", "items": items + hook_items}
 
     # Fully removable: strip the addon's observational hooks from the platform
     # config (plan Phase 4) before deleting the sidecar that records their markers.
-    hook_items = _addon_hook_items(record, platform=platform, confirm=True)
+    hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
     addon_registry.remove_record(addon_id, addons_dir=addons_dir)  # sidecar deleted LAST
     _prune_install_state(addon_id, addons_dir=addons_dir, platform=platform)
     try:

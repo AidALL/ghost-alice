@@ -72,6 +72,7 @@ if sys.version_info < MIN_PYTHON_VERSION:
 from merge_companion_messages import render_pending_merge_message
 from hook_profile_gate import normalize_hook_id
 import runtime_config
+import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
 
 # Prevent Windows cp949 stdout encoding issues.
@@ -924,6 +925,19 @@ def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[st
         for hook_id, event_intent, script_path in target.hooks:
             out.append((target.addon_id, hook_id, event_intent, script_path))
     return out
+
+
+def _resolve_privileged_adapter_hooks(
+    addon_sources: Any,
+    platform_key: str,
+    *,
+    skills_dir: str | Path | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve core-owned privileged adapter hooks for one platform (plan Phase P5)."""
+    if not addon_sources:
+        return []
+    targets = addon_installer.load_addon_targets(list(addon_sources), platform=platform_key)
+    return addon_installer.iter_privileged_adapter_hook_specs(targets, skills_dir=skills_dir)
 
 
 def _platform_io_trace_entry(platform_key: str, event: str) -> Optional[dict[str, Any]]:
@@ -1823,7 +1837,12 @@ def _ensure_claude_ghost_alice_skill_permissions(settings: dict[str, Any]) -> bo
 
 # ── Install ───────────────────────────────────────────────
 
-def install_hook(platform_key: str, dry_run: bool = False, addon_sources: Any = ()) -> str:
+def install_hook(
+    platform_key: str,
+    dry_run: bool = False,
+    addon_sources: Any = (),
+    skills_dir: str | Path | None = None,
+) -> str:
     """Install hooks into a single framework.
 
     Return values:
@@ -2148,6 +2167,31 @@ def install_hook(platform_key: str, dry_run: bool = False, addon_sources: Any = 
         else:
             _log(_t(f"  {event_name} addon hook already exists: {marker}", f"  {event_name} addon hook already exists: {marker}"))
 
+    # Privileged adapters (plan Phase P5) are core-owned: manifests request adapter
+    # ids only, while the concrete event/script/marker/runner namespace comes from
+    # addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
+    for spec in _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir):
+        event_name = _resolve_hook_event(spec["event"], platform_key)
+        marker = spec["marker"]
+        match_marker = marker + " "
+        inner = _hook_python_command(spec["script"], payload=True)
+        entry = _hook_runner_command_entry(spec["runner_id"], inner, marker)
+        command = _entry_command(entry)
+        if event_name not in hooks_obj:
+            hooks_obj[event_name] = []
+        ev_list = hooks_obj[event_name]
+        if _remove_hook_commands_by_command(
+            ev_list,
+            lambda cmd, m=marker, exp=command: cmd != exp and _is_exact_adapter_hook_command(cmd, m),
+        ):
+            changed = True
+        if not _hook_already_exists(ev_list, match_marker, expected_command=command):
+            ev_list.append(entry)
+            _log(_t(f"  {event_name} adapter hook added: {marker}", f"  {event_name} adapter hook added: {marker}"))
+            changed = True
+        else:
+            _log(_t(f"  {event_name} adapter hook already exists: {marker}", f"  {event_name} adapter hook already exists: {marker}"))
+
     if platform_key == "codex":
         if _ensure_codex_hook_feature_enabled(dry_run=dry_run):
             changed = True
@@ -2177,6 +2221,14 @@ _MANAGED_ADDON_HOOK_COMMENT_RE = re.compile(
     r"(?P<hook_id>[a-z][a-z0-9-]*) "
     r"\[hook-runner:(?P=hook_id)\]"
 )
+_ADAPTER_HOOK_MARKER_RE = re.compile(
+    r"^\[adapter:(?P<adapter_id>[a-z][a-z0-9-]*)\] (?P<hook_id>[a-z][a-z0-9-]*)$"
+)
+_MANAGED_ADAPTER_HOOK_COMMENT_RE = re.compile(
+    r"\[adapter:(?P<adapter_id>[a-z][a-z0-9-]*)\] "
+    r"(?P<hook_id>[a-z][a-z0-9-]*) "
+    r"\[hook-runner:(?P<runner_id>[a-z0-9-]+)\]"
+)
 
 
 def _addon_runner_token(addon_id: str, hook_id: str) -> str:
@@ -2197,6 +2249,17 @@ def _is_exact_addon_hook_command(command: str, marker: str) -> bool:
     hook_id = match.group("hook_id")
     runner_id = _managed_addon_runner_id(addon_id, hook_id)
     exact_comment = f"{marker} {_addon_runner_token(addon_id, hook_id)}"
+    return exact_comment in command and _hook_runner_id_match(command, runner_id)
+
+
+def _is_exact_adapter_hook_command(command: str, marker: str) -> bool:
+    match = _ADAPTER_HOOK_MARKER_RE.fullmatch(marker)
+    if not match:
+        return False
+    adapter_id = match.group("adapter_id")
+    hook_id = match.group("hook_id")
+    runner_id = addon_installer.privileged_adapter_runner_id(adapter_id, hook_id)
+    exact_comment = f"{marker} [hook-runner:{runner_id}]"
     return exact_comment in command and _hook_runner_id_match(command, runner_id)
 
 
@@ -2267,6 +2330,32 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     return total
 
 
+def remove_adapter_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
+    """Remove one core-owned privileged adapter hook by exact marker (plan Phase P5)."""
+    if not isinstance(marker, str) or not _ADAPTER_HOOK_MARKER_RE.fullmatch(marker):
+        return 0
+    platform = PLATFORMS.get(platform_key)
+    if platform is None:
+        return 0
+    settings_file = platform["hook_file"]()
+    if not settings_file.exists():
+        return 0
+    settings = _read_settings(settings_file)
+    hooks_obj = settings.get("hooks", {})
+    if not isinstance(hooks_obj, dict):
+        return 0
+    total = 0
+    for event_list in hooks_obj.values():
+        if isinstance(event_list, list):
+            total += _remove_hook_commands_by_command(
+                event_list,
+                lambda command, marker=marker: _is_exact_adapter_hook_command(command, marker),
+            )
+    if total and not dry_run:
+        _write_settings(settings_file, settings, dry_run=False)
+    return total
+
+
 def _is_managed_addon_command(command: str) -> bool:
     """True for a Ghost-ALICE managed addon hook command.
 
@@ -2282,8 +2371,22 @@ def _is_managed_addon_command(command: str) -> bool:
     return _hook_runner_id_match(command, runner_id)
 
 
+def _is_managed_adapter_command(command: str) -> bool:
+    match = _MANAGED_ADAPTER_HOOK_COMMENT_RE.search(command)
+    if not match:
+        return False
+    expected = addon_installer.privileged_adapter_runner_id(match.group("adapter_id"), match.group("hook_id"))
+    if match.group("runner_id") != expected:
+        return False
+    return _hook_runner_id_match(command, expected)
+
+
 def _remove_managed_addon_entries(hooks_list: list) -> int:
     return _remove_hook_commands_by_command(hooks_list, _is_managed_addon_command)
+
+
+def _remove_managed_adapter_entries(hooks_list: list) -> int:
+    return _remove_hook_commands_by_command(hooks_list, _is_managed_adapter_command)
 
 
 def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
@@ -2307,6 +2410,7 @@ def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
     for event_list in hooks_obj.values():
         if isinstance(event_list, list):
             total += _remove_managed_addon_entries(event_list)
+            total += _remove_managed_adapter_entries(event_list)
     if total and not dry_run:
         _write_settings(settings_file, settings, dry_run=False)
     return total
@@ -2737,6 +2841,13 @@ def main() -> int:
         help=_t("Addon repo or local manifest path", "Addon repo or local manifest path"),
     )
     parser.add_argument(
+        "--skills-dir",
+        help=_t(
+            "Installed skills directory used to resolve privileged adapter scripts in copy installs",
+            "Installed skills directory used to resolve privileged adapter scripts in copy installs",
+        ),
+    )
+    parser.add_argument(
         "--list-addons",
         action="store_true",
         help=_t("List addon manifest targets only", "List addon manifest targets only"),
@@ -2785,7 +2896,12 @@ def main() -> int:
                 results[key] = uninstall_hook(key, dry_run=args.dry_run)
             else:
                 _ensure_node_runtime_for_hook_install(key)
-                results[key] = install_hook(key, dry_run=args.dry_run, addon_sources=args.addon_source)
+                results[key] = install_hook(
+                    key,
+                    dry_run=args.dry_run,
+                    addon_sources=args.addon_source,
+                    skills_dir=args.skills_dir,
+                )
         except Exception as e:
             _log(f"ERROR: {PLATFORMS[key]['name']}. {e}")
             results[key] = "error"
