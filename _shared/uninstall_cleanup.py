@@ -811,6 +811,11 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             _ghost_alice_root() / "install-rollbacks",
             confirm=args.confirm,
         ),
+        _support_artifact_item(
+            "addon-sidecars",
+            _ghost_alice_root() / "addons" / args.platform,
+            confirm=args.confirm,
+        ),
     ]
 
 

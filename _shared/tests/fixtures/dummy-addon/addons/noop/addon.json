@@ -9,6 +9,6 @@
     }
   ],
   "platforms": ["claude", "codex"],
-  "depends_on_core": ["task-router", "verification-before-completion"],
+  "depends_on_core": ["task-router"],
   "secrets": []
 }

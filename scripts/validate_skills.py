@@ -225,6 +225,91 @@ def validate_phase3_structure(skill_md: Path, text: str, issues: list[Issue]) ->
                         )
 
 
+_ANCHOR_DROP = re.compile(r"[^\w\s-]")
+
+
+def _github_anchor(heading: str) -> str:
+    """Derive a GitHub-style heading anchor: lowercase, drop punctuation, spaces->hyphens."""
+    text = _ANCHOR_DROP.sub("", heading.strip().lower())
+    return text.replace(" ", "-")
+
+
+def _parse_skill_nav(body: str) -> tuple[list[tuple[int, str]], set[str]]:
+    """Single fence-aware pass over the body.
+
+    Returns (headings, toc_anchors):
+    - headings: (level, title) for ATX headings that are NOT inside a fenced code
+      block. Variable-length backtick fences (``` or longer) are handled, so a
+      ``## X`` shown inside a ```` ```markdown ```` example is not a real section.
+    - toc_anchors: lowercased anchors collected from the ``## Contents`` list.
+    """
+    headings: list[tuple[int, str]] = []
+    toc_anchors: set[str] = set()
+    fence: int | None = None
+    in_toc = False
+    for line in body.splitlines():
+        fence_match = re.match(r"^(`{3,})", line.lstrip())
+        if fence_match:
+            ticks = len(fence_match.group(1))
+            if fence is None:
+                fence = ticks
+            elif ticks >= fence:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        heading_match = re.match(r"^(#{2,6})\s+(.*\S)\s*$", line)
+        if heading_match:
+            title = heading_match.group(2).strip()
+            headings.append((len(heading_match.group(1)), title))
+            in_toc = title.lower() == "contents"
+            continue
+        if in_toc:
+            for anchor in re.findall(r"\]\(#([A-Za-z0-9_-]+)\)", line):
+                toc_anchors.add(anchor.lower())
+    return headings, toc_anchors
+
+
+def validate_phase_toc_parity(skill_md: Path, text: str, issues: list[Issue]) -> None:
+    """3-5: SKILL.md ``## Contents`` <-> heading parity.
+
+    A deterministic navigation check. It runs ONLY when a ``## Contents`` section
+    exists (short skills without a TOC are exempt). Then:
+    - every ``##`` (h2) section heading outside fenced code must be listed in Contents;
+    - every Contents anchor must resolve to a real heading (no dangling links).
+    This catches the "added a section but forgot the Contents entry" and the
+    "renamed a section but left the stale Contents anchor" drift. Severity is
+    ERROR: TOC drift fails the build so it is caught without human review. Code-
+    fence headings are not sections.
+    """
+    skill_name = skill_md.parent.name
+    body = _extract_body(text)
+    headings, toc_anchors = _parse_skill_nav(body)
+    if not any(title.lower() == "contents" for _level, title in headings):
+        return  # no Contents section -> exempt
+    heading_anchors = {
+        _github_anchor(title) for _level, title in headings if title.lower() != "contents"
+    }
+    for level, title in headings:
+        if level != 2 or title.lower() == "contents":
+            continue
+        if _github_anchor(title) not in toc_anchors:
+            issues.append(
+                Issue(
+                    "ERROR", skill_name, "3", "3-5",
+                    f"section heading '{title}' is missing from the ## Contents list",
+                )
+            )
+    for anchor in sorted(toc_anchors):
+        if anchor not in heading_anchors:
+            issues.append(
+                Issue(
+                    "ERROR", skill_name, "3", "3-5",
+                    f"## Contents anchor '#{anchor}' has no matching heading (dangling link)",
+                )
+            )
+
+
 def validate_phase4_references(skill_md: Path, issues: list[Issue]) -> None:
     skill_name = skill_md.parent.name
     skill_dir = skill_md.parent
@@ -660,6 +745,7 @@ def main() -> int:
         validate_phase1_frontmatter(skill_md, fm, issues)
         validate_phase2_body(skill_md, text, issues)
         validate_phase3_structure(skill_md, text, issues)
+        validate_phase_toc_parity(skill_md, text, issues)
         validate_phase4_references(skill_md, issues)
         validate_phase5_korean_tone(skill_md, fm, text, issues)
 

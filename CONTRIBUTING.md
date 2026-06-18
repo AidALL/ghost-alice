@@ -131,6 +131,16 @@ Windows installer changes should include PowerShell-oriented validation where po
 .\install.ps1 -Doctor
 ```
 
+The Wiki lives in a separate repository (`<repo>.wiki.git`), so changes there are
+not covered by the repo test suites. When you edit Wiki pages, clone the wiki and
+run the report-only structural audit against your checkout. It flags broken
+internal links and missing English/Korean page pairs only; it does not judge prose.
+
+```bash
+git clone https://github.com/AidALL/ghost-alice.wiki.git /tmp/ga-wiki
+python3 scripts/audit_wiki_integrity.py --wiki /tmp/ga-wiki
+```
+
 ## Pull Request Expectations
 
 Each pull request should include:

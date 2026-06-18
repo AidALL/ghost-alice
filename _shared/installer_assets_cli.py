@@ -13,8 +13,20 @@ MARKER_INSTALL_MODES = {"copy", "copy-fallback"}
 
 
 def write_markers(args: argparse.Namespace) -> int:
+    # Unify core (--target, owner=ghost-alice) and addon (--addon-target,
+    # owner=addon, addon_id=<id>) targets into one ordered write list so a
+    # copy-mode addon skill is attributed to its addon for classify (T2.9).
+    jobs: list[tuple[str, str, str, str, str | None]] = [
+        (asset_id, dest_path, install_mode, "ghost-alice", None)
+        for asset_id, dest_path, install_mode in args.target
+    ]
+    jobs += [
+        (asset_id, dest_path, install_mode, "addon", addon_id)
+        for asset_id, dest_path, install_mode, addon_id in args.addon_target
+    ]
+
     wrote = 0
-    for asset_id, dest_path, install_mode in args.target:
+    for asset_id, dest_path, install_mode, owner, addon_id in jobs:
         if install_mode not in MARKER_INSTALL_MODES:
             continue
 
@@ -33,6 +45,9 @@ def write_markers(args: argparse.Namespace) -> int:
             source_repo=args.source_repo,
             source_commit=args.source_commit,
             install_mode=install_mode,
+            owner=owner,
+            addon_id=addon_id,
+            provided_kind="skill",
         )
         wrote += 1
 
@@ -67,6 +82,13 @@ def build_parser() -> argparse.ArgumentParser:
         nargs=3,
         default=[],
         metavar=("ASSET_ID", "DEST_PATH", "INSTALL_MODE"),
+    )
+    parser.add_argument(
+        "--addon-target",
+        action="append",
+        nargs=4,
+        default=[],
+        metavar=("ASSET_ID", "DEST_PATH", "INSTALL_MODE", "ADDON_ID"),
     )
     return parser
 

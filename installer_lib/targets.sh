@@ -50,7 +50,7 @@ collect_addon_targets() {
 }
 
 iter_install_targets() {
-  local skill targets sub_name sub_path addon_target
+  local skill targets sub_name sub_path addon_target a_name a_path a_id
   for skill in "$@"; do
     targets="$(expand_skill_targets "$skill")"
     while IFS='|' read -r sub_name sub_path; do
@@ -58,8 +58,12 @@ iter_install_targets() {
       printf "%s|%s\n" "$sub_name" "$sub_path"
     done <<< "$targets"
   done
+  # INSTALL_ADDON_TARGETS entries are name|source|addon_id; emit only name|source
+  # so generic two-field consumers stay correct (addon_id is consumed elsewhere).
   for addon_target in ${INSTALL_ADDON_TARGETS[@]+"${INSTALL_ADDON_TARGETS[@]}"}; do
-    [ -n "$addon_target" ] && printf "%s\n" "$addon_target"
+    [ -n "$addon_target" ] || continue
+    IFS='|' read -r a_name a_path a_id <<< "$addon_target"
+    [ -n "$a_name" ] && printf "%s|%s\n" "$a_name" "$a_path"
   done
 }
 

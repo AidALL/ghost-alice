@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
 
+import addon_registry
+import hash_utils
 from encoding_guard import validate_repo
 from installer_assets import (
     OWNERSHIP_ABSENT,
@@ -42,6 +45,92 @@ def _max_status(statuses: Sequence[str]) -> str:
     if not statuses:
         return STATUS_OK
     return max(statuses, key=lambda status: STATUS_RANK[status])
+
+
+def _addon_registry_audit(ghost_alice_root: Path, platform: str) -> tuple[str, list[dict[str, str]]]:
+    """Verify each addon sidecar's recorded content_hash against the live target.
+
+    Read-only integrity check for addon registry entries. A target whose live hash
+    no longer matches the recorded hash is a content_hash mismatch (tamper /
+    bit-rot, ERROR); an absent target is a WARNING; an unreadable sidecar (corrupt
+    / future major) is an ERROR so a dropped record is never mistaken for absence.
+    The platform-scoped addons dir keeps each platform's registry independent.
+    """
+    addons_dir = ghost_alice_root / "addons" / platform
+    records, skipped = addon_registry.scan_records(addons_dir=addons_dir)
+    findings: list[dict[str, str]] = []
+    for name, reason in skipped:
+        findings.append({"status": STATUS_ERROR, "addon_id": name, "name": name,
+                         "kind": "sidecar", "reason": f"unreadable-sidecar:{reason}"})
+    for record in records:
+        addon_id = str(record.get("addon_id"))
+        for entry in record.get("provided", []):
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name"))
+            kind = str(entry.get("kind") or "skill")
+            target = entry.get("target")
+            mode = entry.get("install_mode") or "missing"
+            recorded = entry.get("content_hash")
+            base = {"addon_id": addon_id, "name": name, "kind": kind}
+            if not isinstance(target, str) or mode == "missing" or not os.path.lexists(target):
+                findings.append({**base, "status": STATUS_WARNING, "reason": "target-absent"})
+                continue
+            if not recorded:
+                findings.append({**base, "status": STATUS_WARNING, "reason": "no-recorded-content_hash"})
+                continue
+            try:
+                live = hash_utils.hash_target(target, mode)
+            except Exception as exc:  # never let a hashing error crash the read-only doctor
+                findings.append({**base, "status": STATUS_ERROR, "reason": f"hash-error:{exc.__class__.__name__}"})
+                continue
+            if live == recorded:
+                findings.append({**base, "status": STATUS_OK, "reason": "content_hash-match"})
+            else:
+                findings.append({**base, "status": STATUS_ERROR, "reason": "content_hash-mismatch"})
+    return _max_status([f["status"] for f in findings]), findings
+
+
+def _live_dir_ownership(skills_root: Path, core_names: set[str], addons_dir: Path) -> list[dict[str, str]]:
+    """Classify each live skills-dir entry as core / addon / domain / user.
+
+    Read-only management view. ``core`` = a core skill name; ``addon`` = a dest
+    recorded in an addon sidecar; ``domain`` = an unmanaged skill the user authored
+    directly in the dir (has SKILL.md); ``user`` = any other entry. The ``_shared``
+    support dir and dotfiles are excluded. This management view never mutates.
+    """
+    skills_root = Path(skills_root)
+    if not skills_root.is_dir():
+        return []
+
+    def _norm(path_value: str | Path) -> str:
+        candidate = Path(path_value)
+        try:
+            return str(candidate.parent.resolve() / candidate.name)
+        except OSError:
+            return str(candidate)
+
+    addon_targets: set[str] = set()
+    for record in addon_registry.read_all(addons_dir=addons_dir):
+        for entry in record.get("provided", []):
+            if isinstance(entry, dict) and isinstance(entry.get("target"), str):
+                addon_targets.add(_norm(entry["target"]))
+
+    findings: list[dict[str, str]] = []
+    for child in sorted(skills_root.iterdir(), key=lambda p: p.name):
+        name = child.name
+        if name == "_shared" or name.startswith("."):
+            continue
+        if name in core_names:
+            owner = "core"
+        elif _norm(child) in addon_targets:
+            owner = "addon"
+        elif (child / "SKILL.md").exists():
+            owner = "domain"
+        else:
+            owner = "user"
+        findings.append({"name": name, "owner": owner})
+    return findings
 
 
 def _ownership_status(item: AssetClassification) -> str:
@@ -314,6 +403,22 @@ def run(args: argparse.Namespace) -> int:
     for item, status in zip(ownership_results, ownership_statuses, strict=True):
         print(f"  {status} {item.asset_id}: {item.ownership} {item.reason}")
 
+    addon_status, addon_findings = _addon_registry_audit(ghost_alice_root, args.platform)
+    statuses.append(addon_status)
+    print(f"addon-registry: {addon_status}")
+    for finding in addon_findings:
+        print(f"  {finding['status']} {finding['addon_id']}/{finding['name']} "
+              f"({finding['kind']}): {finding['reason']}")
+
+    if args.skills_root is not None:
+        # Informational management view: classify every live skills-dir entry.
+        # Read-only and status-neutral (it does not change overall health).
+        core_names = {asset_id for asset_id, _ in args.target if asset_id != "_shared"}
+        live_owners = _live_dir_ownership(args.skills_root, core_names, ghost_alice_root / "addons" / args.platform)
+        print(f"live-dir: {len(live_owners)} entries")
+        for entry in live_owners:
+            print(f"  {entry['owner']} {entry['name']}")
+
     global_rule_results = [
         (
             asset_id,
@@ -403,6 +508,8 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--install-state-manifest", type=Path, default=None)
     parser.add_argument("--target", action="append", nargs=2, default=[], metavar=("ASSET_ID", "DEST_PATH"))
     parser.add_argument("--skill-root", action="append", type=Path, default=[])
+    parser.add_argument("--skills-root", type=Path, default=None,
+                        help="live skills dir for the core/addon/domain/user management view")
     parser.add_argument("--mcp-health-state", type=Path, default=None)
     parser.add_argument(
         "--global-rule",

@@ -236,9 +236,9 @@ _run_encoding_guard_before_install() {
     return 1
   fi
 
-  local addon_target sub_name sub_path
+  local addon_target sub_name sub_path addon_id_unused
   for addon_target in ${INSTALL_ADDON_TARGETS[@]+"${INSTALL_ADDON_TARGETS[@]}"}; do
-    IFS='|' read -r sub_name sub_path <<< "$addon_target"
+    IFS='|' read -r sub_name sub_path addon_id_unused <<< "$addon_target"
     [ -n "$sub_path" ] || continue
     if ! "$py" "$guard_py" --repo-root "$sub_path"; then
       error "$(t "encoding guard failed; aborting install: ${sub_path}" "encoding guard failed; aborting install: ${sub_path}")"
@@ -454,6 +454,21 @@ _verify_install_after_copy() {
   fi
 }
 
+# Echo the addon_id that owns target NAME (empty + non-zero rc for core targets).
+# INSTALL_ADDON_TARGETS entries are name|source|addon_id so copied targets can
+# carry the addon owner in their install marker.
+_addon_id_for_target() {
+  local name="$1" line a_name a_path a_id
+  for line in ${INSTALL_ADDON_TARGETS[@]+"${INSTALL_ADDON_TARGETS[@]}"}; do
+    IFS='|' read -r a_name a_path a_id <<< "$line"
+    if [ "$a_name" = "$name" ] && [ -n "$a_id" ]; then
+      printf '%s' "$a_id"
+      return 0
+    fi
+  done
+  return 1
+}
+
 _write_ownership_markers_after_install() {
   local skills_dir="$1"
   local copy_only="${2:-0}"
@@ -482,13 +497,15 @@ _write_ownership_markers_after_install() {
     )
   fi
 
-  local sub_name sub_path
+  local sub_name sub_path sub_mode sub_addon_id
   while IFS='|' read -r sub_name sub_path; do
     [ -n "$sub_name" ] || continue
-    target_args+=(
-      --target "$sub_name" "${skills_dir}/${sub_name}"
-      "$(_detect_install_mode_for_state "${skills_dir}/${sub_name}" "$copy_only")"
-    )
+    sub_mode="$(_detect_install_mode_for_state "${skills_dir}/${sub_name}" "$copy_only")"
+    if sub_addon_id="$(_addon_id_for_target "$sub_name")"; then
+      target_args+=(--addon-target "$sub_name" "${skills_dir}/${sub_name}" "$sub_mode" "$sub_addon_id")
+    else
+      target_args+=(--target "$sub_name" "${skills_dir}/${sub_name}" "$sub_mode")
+    fi
   done < <(iter_install_targets "${skills[@]}")
 
   [ "${#target_args[@]}" -gt 0 ] || return 0
@@ -577,6 +594,165 @@ write_install_state_manifest() {
   info "Install-state manifest: $state_path"
 }
 
+write_addon_sidecars_after_install() {
+  local skills_dir="$1"
+  [ "${#ADDON_SOURCES[@]}" -gt 0 ] || return 0
+  local py installed_at
+  py="$(_find_python_runtime || true)"
+  if [ -z "$py" ]; then
+    error "$(t 'Python 3.11+ not found; cannot write addon sidecars; aborting install' 'Python 3.11+ not found; cannot write addon sidecars; aborting install')"
+    return 1
+  fi
+  installed_at="$("$py" -c 'from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())' 2>/dev/null || printf '%s' "unknown")"
+  local source_args=()
+  local source
+  for source in "${ADDON_SOURCES[@]}"; do
+    source_args+=(--source "$source")
+  done
+  if "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" write-sidecars \
+      "${source_args[@]}" --platform "$PLATFORM" \
+      --addons-dir "${HOME}/.ghost-alice/addons/${PLATFORM}" \
+      --skills-dir "$skills_dir" --installed-at "$installed_at" \
+      --claude-commands-dir "$(resolve_claude_home)/commands" \
+      --resources-dir "${HOME}/.ghost-alice/resources/${PLATFORM}"; then
+    info "$(t 'Addon sidecars written' 'Addon sidecars written')"
+  else
+    error "$(t 'Addon sidecar write failed; aborting install' 'Addon sidecar write failed; aborting install')"
+    return 1
+  fi
+}
+
+_repair_reprovision_target() {
+  local name="$1" src="$2" dest="$3" copy_only="$4"
+  if [ "$copy_only" = "1" ]; then
+    _install_copy_target "$src" "$dest"
+  elif ln -s "$src" "$dest" 2>/dev/null; then
+    :
+  else
+    _install_copy_target "$src" "$dest"
+  fi
+  ok "$(t "repair: re-provisioned ${name}" "repair: re-provisioned ${name}")"
+}
+
+_repair_addon_targets() {
+  local py="$1"
+  local addons_dir="${HOME}/.ghost-alice/addons/${PLATFORM}"
+  [ -d "$addons_dir" ] || return 0
+  "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" repair-missing \
+    --platform "$PLATFORM" \
+    --addons-dir "$addons_dir" \
+    --skills-dir "$SKILLS_DIR" \
+    --claude-commands-dir "$(resolve_claude_home)/commands" \
+    --resources-dir "${HOME}/.ghost-alice/resources/${PLATFORM}" >/dev/null
+}
+
+run_repair() {
+  # The mutating reconciliation path. Unlike --doctor (read-only), it
+  # re-provisions MISSING managed targets, but it classifies ownership before ever
+  # replacing anything: an occupied slot that is not a clean Ghost-ALICE managed
+  # target (a user/domain dir, or drift) is LEFT UNTOUCHED, never clobbered.
+  echo ""
+  info "$(t 'Installer repair: re-provisioning missing managed targets...' 'Installer repair: re-provisioning missing managed targets...')"
+  local py copy_only=0 repaired=0 kept=0
+  py="$(_find_python_runtime || true)"
+  if [ -z "$py" ]; then
+    error "$(t 'Python 3.11+ not found; repair cannot run' 'Python 3.11+ not found; repair cannot run')"
+    exit 1
+  fi
+  if codex_prefers_copy_install || shared_skills_prefers_copy_install; then
+    copy_only=1
+  fi
+
+  # _shared is the most critical target -- every managed skill resolves shared
+  # modules through it. A dangling symlink ([ ! -e ] is true, [ -L ] is true) is
+  # functionally missing, so it must be re-provisioned too (addon review), while an
+  # occupied non-clean _shared (user dir / drift) is classified and left untouched.
+  local shared="${SKILLS_DIR}/_shared"
+  if [ ! -e "$shared" ]; then
+    install_shared "${SKILLS_DIR}" "$copy_only"  # absent or dangling -> restore
+    repaired=$((repaired + 1))
+  elif "$py" "${SCRIPT_DIR}/_shared/installer_assets_cli.py" classify-clean \
+         --asset-id "_shared" --path "$shared" --repo-root "$SCRIPT_DIR" >/dev/null 2>&1; then
+    : # clean managed _shared; nothing to repair
+  else
+    kept=$((kept + 1))
+    warn "$(t 'repair: _shared is occupied and not cleanly managed; left untouched' 'repair: _shared is occupied and not cleanly managed; left untouched')"
+  fi
+
+  local sub_name sub_path dest
+  while IFS='|' read -r sub_name sub_path; do
+    [ -n "$sub_name" ] || continue
+    dest="${SKILLS_DIR}/${sub_name}"
+    if [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
+      _repair_reprovision_target "$sub_name" "$sub_path" "$dest" "$copy_only"
+      repaired=$((repaired + 1))
+    elif "$py" "${SCRIPT_DIR}/_shared/installer_assets_cli.py" classify-clean \
+           --asset-id "$sub_name" --path "$dest" --repo-root "$SCRIPT_DIR" >/dev/null 2>&1; then
+      : # already a clean managed target; nothing to repair
+    else
+      kept=$((kept + 1))
+      warn "$(t "repair: ${sub_name} is occupied and not cleanly managed; left untouched" "repair: ${sub_name} is occupied and not cleanly managed; left untouched")"
+    fi
+  done < <(iter_install_targets "${ALL_SKILLS[@]}")
+
+  if ! _repair_addon_targets "$py"; then
+    error "$(t 'repair: addon target repair failed; see addon registry sidecars' 'repair: addon target repair failed; see addon registry sidecars')"
+    return 1
+  fi
+
+  ok "$(t "Repair complete: ${repaired} re-provisioned, ${kept} left untouched" "Repair complete: ${repaired} re-provisioned, ${kept} left untouched")"
+}
+
+_check_addon_collisions() {
+  [ "${#ADDON_SOURCES[@]}" -gt 0 ] || return 0
+  local py
+  py="$(_find_python_runtime || true)"
+  if [ -z "$py" ]; then
+    # Addons were requested but collision detection cannot run: fail closed
+    # rather than installing over an unknown owner.
+    error "$(t 'Python 3.11+ not found; cannot check addon collisions; aborting install' 'Python 3.11+ not found; cannot check addon collisions; aborting install')"
+    exit 1
+  fi
+  local source_args=() core_args=() source skill
+  for source in "${ADDON_SOURCES[@]}"; do
+    source_args+=(--source "$source")
+  done
+  for skill in ${ALL_SKILLS[@]+"${ALL_SKILLS[@]}"}; do
+    core_args+=(--core-skill "$skill")
+  done
+  local rc=0
+  "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" detect-collisions \
+    "${source_args[@]}" --platform "$PLATFORM" --skills-dir "$SKILLS_DIR" \
+    --addons-dir "${HOME}/.ghost-alice/addons/${PLATFORM}" \
+    --claude-commands-dir "$(resolve_claude_home)/commands" \
+    --resources-dir "${HOME}/.ghost-alice/resources/${PLATFORM}" \
+    ${core_args[@]+"${core_args[@]}"} || rc=$?
+  if [ "$rc" -eq 2 ]; then
+    error "$(t 'Addon install collision detected; aborting install' 'Addon install collision detected; aborting install')"
+    exit 1
+  elif [ "$rc" -ne 0 ]; then
+    error "$(t 'Addon manifest error; aborting install' 'Addon manifest error; aborting install')"
+    exit 1
+  fi
+}
+
+migrate_addon_state_once() {
+  local py state_path
+  py="$(_find_python_runtime || true)"
+  [ -n "$py" ] || return 0
+  state_path="${HOME}/.ghost-alice/install-state/${PLATFORM}.json"
+  [ -f "$state_path" ] || return 0
+  local core_args=()
+  local skill
+  for skill in ${ALL_SKILLS[@]+"${ALL_SKILLS[@]}"}; do
+    core_args+=(--core-skill "$skill")
+  done
+  "$py" "${SCRIPT_DIR}/_shared/addon_migration.py" \
+    --platform "$PLATFORM" --install-state "$state_path" \
+    --addons-dir "${HOME}/.ghost-alice/addons/${PLATFORM}" \
+    ${core_args[@]+"${core_args[@]}"} >/dev/null 2>&1 || true
+}
+
 _run_install_hooks() {
   local action="${1:-install}"   # install | uninstall | status
   local platform="${2:-$PLATFORM}"
@@ -624,6 +800,14 @@ _run_install_hooks() {
         uninstall) args+=(--uninstall) ;;
         status)    args+=(--status) ;;
       esac
+      # Forward addon sources so observational addon hooks install after core hooks
+      # (plan Phase 4). Empty on a core-only run -> args[] stays byte-identical.
+      if [ "$action" = "install" ]; then
+        local _addon_src
+        for _addon_src in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"}; do
+          args+=(--addon-source "$_addon_src")
+        done
+      fi
       "$runtime_cmd" "$hook_py" "${args[@]}" || {
         error "$(t "Hook ${action} failed" "Hook ${action} failed")"
         return 1
@@ -740,6 +924,14 @@ install() {
       report_write_target_event "$PLATFORM" "_shared" "support" "$shared_report_status"
     fi
   fi
+
+  # Finish any interrupted prior uninstall BEFORE installing. If a leftover
+  # <addon>.json.removing marker is resumed AFTER install, it deletes the addon we
+  # just installed, leaving sidecar-present/skill-missing. Running it first
+  # completes the old removal and frees the name before collision detection.
+  run_logged_if_compact _resume_pending_addon_uninstalls || true
+
+  _check_addon_collisions
 
   local installed=0
   local skipped=0
@@ -889,6 +1081,8 @@ install() {
   run_logged_if_compact _verify_install_after_copy "$SKILLS_DIR" "$copy_only" "${skills[@]}" || exit 1
   run_logged_if_compact _write_ownership_markers_after_install "$SKILLS_DIR" "$copy_only" "${skills[@]}" || exit 1
   run_logged_if_compact _run_snapshot_after_install
+  run_logged_if_compact migrate_addon_state_once || true
+  run_logged_if_compact write_addon_sidecars_after_install "$SKILLS_DIR" || exit 1
   run_logged_if_compact write_install_state_manifest "$SKILLS_DIR" "$copy_only" "${skills[@]}" || exit 1
 
   local report_current="$sync_skipped"

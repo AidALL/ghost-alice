@@ -159,7 +159,8 @@ function Invoke-InstallDoctor {
         "--encoding-root", $ScriptDir,
         "--encoding-root", $SkillsRoot,
         "--ghost-alice-root", (Join-Path (Resolve-UserHome) ".ghost-alice"),
-        "--install-state-manifest", $installStateManifest
+        "--install-state-manifest", $installStateManifest,
+        "--skills-root", $SkillsRoot
     )
     if ($Mode -eq "doctor") {
         $pyArgs += "--strict"
@@ -235,6 +236,32 @@ function Show-Doctor {
     }
 }
 
+function Test-AddonDependentsForSkill {
+    param([string]$SkillName)
+
+    if ($Force) {
+        return $true
+    }
+
+    $py = Find-PythonExe
+    if (-not $py) {
+        Write-Warn ("Dependency check skipped for {0}: Python 3.11+ not found" -f $SkillName) ("Dependency check skipped for {0}: Python 3.11+ not found" -f $SkillName)
+        return $true
+    }
+
+    $addonsDir = Join-Path (Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "addons") $Platform
+    $helper = Join-Path $script:GhostAliceRoot "_shared/addon_uninstall.py"
+    & $py $helper --dependents $SkillName --addons-dir $addonsDir 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 2) {
+        Write-Warn ("Skipping {0}: an installed addon depends on it (use -Force to override)" -f $SkillName) ("Skipping {0}: an installed addon depends on it (use -Force to override)" -f $SkillName)
+        return $false
+    }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn ("Dependency check failed for {0}; proceeding with removal" -f $SkillName) ("Dependency check failed for {0}; proceeding with removal" -f $SkillName)
+    }
+    return $true
+}
+
 function Invoke-Uninstall {
     param([string[]]$SkillNames)
 
@@ -249,6 +276,9 @@ function Invoke-Uninstall {
     $removed = 0
 
     foreach ($skill in $SkillNames) {
+        if (-not (Test-AddonDependentsForSkill -SkillName $skill)) {
+            continue
+        }
         $targets = Expand-SkillTargets $skill
         if ($targets.Count -eq 0) { continue }
         foreach ($t in $targets) {
@@ -300,8 +330,47 @@ function Invoke-UninstallCleanup {
     }
 }
 
+function Invoke-AllAddonUninstallsBeforeFull {
+    # PowerShell mirror of bash _uninstall_all_addons_before_full (uninstall.sh):
+    # finish any interrupted addon uninstall, then remove every installed addon via
+    # the hash-gated per-addon path (commands + resources allowed roots) BEFORE the
+    # cleanup wipes the sidecar registry that points at them. Returns $true only if
+    # all addons cleared; $false if any was preserved for manual review (drift /
+    # user-modified target), so the full uninstall must halt instead of clobbering.
+    $py = Find-PythonExe
+    if (-not $py) { return $true }
+    $userHome = Resolve-UserHome
+    $adir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "addons") $Platform
+    if (-not (Test-Path -LiteralPath $adir)) { return $true }
+    $helper = Join-Path $script:GhostAliceRoot "_shared/addon_uninstall.py"
+    $commandsDir = Join-Path (Resolve-ClaudeHome) "commands"
+    $resourcesDir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "resources") $Platform
+
+    # 1) Finish any interrupted addon uninstall (leftover .removing markers).
+    & $py $helper --resume-pending --addons-dir $adir --skills-dir $SkillsDir `
+        --skills-dir $commandsDir --skills-dir $resourcesDir --platform $Platform --confirm 2>$null | Out-Null
+
+    # 2) Hash-gated per-addon uninstall for every recorded sidecar.
+    $allClear = $true
+    foreach ($sidecar in (Get-ChildItem -LiteralPath $adir -Filter "*.json" -File -ErrorAction SilentlyContinue)) {
+        $aid = $sidecar.BaseName
+        if ($aid -notmatch '^[a-z][a-z0-9-]*$') { continue }  # skip non-addon json (e.g. _migration-report)
+        & $py $helper --addon-id $aid --addons-dir $adir --skills-dir $SkillsDir `
+            --skills-dir $commandsDir --skills-dir $resourcesDir --platform $Platform --confirm 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            $allClear = $false
+            Write-Warn ("Full uninstall preserved addon {0}; manual review is required before sidecar cleanup" -f $aid) ("Full uninstall preserved addon {0}; manual review is required before sidecar cleanup" -f $aid)
+        }
+    }
+    return $allClear
+}
+
 function Invoke-FullUninstall {
     Write-Info "Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets." "Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets."
+    if (-not (Invoke-AllAddonUninstallsBeforeFull)) {
+        Write-Err "Full uninstall stopped because one or more addon targets need manual review." "Full uninstall stopped because one or more addon targets need manual review."
+        throw "full uninstall halted: addon manual review required"
+    }
     Invoke-UninstallCleanup
 }
 
@@ -326,6 +395,7 @@ Common commands:
 Removal commands:
   -Uninstall                             Full uninstall: remove managed hooks, bootstrap, support state, and install targets
   -Platform PLAT -Uninstall -Skills name Remove selected skills from one platform
+  -Force                                 Override selected-skill addon dependency guard
 
 Advanced/operator commands:
   -Skills name1,name2                    Install only selected skills
@@ -361,6 +431,7 @@ Common commands:
 Removal commands:
   -Uninstall                             Full uninstall: remove managed hooks, bootstrap, support state, and install targets
   -Platform PLAT -Uninstall -Skills name Remove selected skills from one platform
+  -Force                                 Override selected-skill addon dependency guard
 
 Advanced/operator commands:
   -Skills name1,name2                    Install only selected skills

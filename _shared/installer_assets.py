@@ -167,12 +167,18 @@ def write_ownership_marker(
     source_repo: str,
     source_commit: str,
     install_mode: str,
+    owner: str = "ghost-alice",
+    addon_id: Optional[str] = None,
+    provided_kind: str = "skill",
 ) -> Path:
     marker = {
         "schema_version": 1,
         "managed_by": GHOST_ALICE_MANAGED_BY,
         "platform": platform,
         "asset_id": asset_id,
+        "owner": owner,
+        "addon_id": addon_id,
+        "provided_kind": provided_kind,
         "source_repo": source_repo,
         "source_commit": source_commit,
         "installed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -192,10 +198,22 @@ def classify_skill_root(
     *,
     expected_asset_id: Optional[str] = None,
     repo_root: Optional[Path] = None,
+    expected_addon_id: Optional[str] = None,
 ) -> AssetClassification:
+    """Classify a skill root's ownership.
+
+    ``expected_addon_id`` (plan task T2.9) only gates copy-mode targets, which
+    carry a ``.ghost-alice-install.json`` marker recording ``addon_id``. Symlink
+    and junction targets carry NO marker — their addon ownership is proven by the
+    recorded sidecar ``content_hash`` of the link, not here — so this function
+    classifies them purely from the link target and does NOT consult
+    ``expected_addon_id``.
+    """
     asset_id = expected_asset_id or path.name
 
     if path.is_symlink():
+        # Symlink contract: ownership comes from the link target; expected_addon_id
+        # is intentionally not consulted (no marker exists on a symlink).
         return _classify_repo_link(path, asset_id=asset_id, repo_root=repo_root, link_kind="symlink")
 
     if not path.exists():
@@ -226,6 +244,13 @@ def classify_skill_root(
     marker_asset_id = marker.get("asset_id")
     if expected_asset_id and marker_asset_id != expected_asset_id:
         return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT, "marker-asset-mismatch", marker)
+
+    marker_addon_id = marker.get("addon_id")
+    if expected_addon_id is not None and marker_addon_id != expected_addon_id:
+        # Fail closed: a marker whose addon_id is absent (None) or differs cannot
+        # prove the caller's addon owns this copy-mode skill.
+        reason = "marker-addon-mismatch" if marker_addon_id is not None else "marker-addon-unattributed"
+        return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT, reason, marker)
 
     expected_hashes = marker.get("content_hashes")
     if isinstance(expected_hashes, dict) and expected_hashes != _content_hashes(path):

@@ -97,6 +97,16 @@ function Invoke-WithInstallLock {
     }
 }
 
+function Assert-PowerShellAddonInstallSupported {
+    if ($AddonSkip) {
+        return
+    }
+    if ($AddonSource -and $AddonSource.Count -gt 0) {
+        Write-Err "PowerShell addon installation is disabled until sidecar, command/resource provisioning, and uninstall parity are implemented. Use the bash installer for addon installation." "PowerShell addon installation is disabled until sidecar, command/resource provisioning, and uninstall parity are implemented. Use the bash installer for addon installation."
+        throw "PowerShell addon installation is not supported - aborting installation"
+    }
+}
+
 function Invoke-StagedCopyReplace {
     param(
         [string]$Source,
@@ -583,7 +593,14 @@ function Invoke-WriteOwnershipMarker {
     foreach ($target in (Get-InstallTargetsForSkillNames -SkillNames $SkillNames -ExtraTargets $ExtraTargets)) {
         $dest = Join-Path $SkillsRoot $target.Name
         $mode = Get-InstallStateMode -Path $dest -CopyOnly:$CopyOnly
-        $markerArgs += @("--target", $target.Name, $dest, $mode)
+        # Addon-provided skills carry AddonId so the marker is attributed to the
+        # addon (owner=addon), enabling classify (plan task T2.9/C-THREAD-1).
+        $addonId = if ($target.PSObject.Properties['AddonId']) { [string]$target.AddonId } else { "" }
+        if ($addonId) {
+            $markerArgs += @("--addon-target", $target.Name, $dest, $mode, $addonId)
+        } else {
+            $markerArgs += @("--target", $target.Name, $dest, $mode)
+        }
     }
 
     if ($markerArgs.Count -le 6) {
@@ -828,6 +845,7 @@ function Invoke-Install {
             }
             $allTargets += $targets
         }
+        Assert-PowerShellAddonInstallSupported
         $addonTargets = @(Get-AddonTargets)
         $allTargets += $addonTargets
 

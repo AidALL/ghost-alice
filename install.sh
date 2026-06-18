@@ -550,6 +550,10 @@ case "${ARGS[0]:-}" in
   --doctor)
     run_doctor
     ;;
+  --repair)
+    _ensure_python_runtime_for_install || exit 1
+    run_repair
+    ;;
   "")
     setup_git_hooks
     _ensure_python_runtime_for_install || exit 1
@@ -583,6 +587,7 @@ case "${ARGS[0]:-}" in
     echo "  --agent-visibility strict|dynamic|minimal"
     echo "                          $(t 'Alias for --visibility' 'Alias for --visibility')"
     echo "  --doctor               $(t 'Run install diagnostics' 'Run install diagnostics')"
+    echo "  --repair               $(t 'Re-provision missing managed targets (never overwrites user-owned slots)' 'Re-provision missing managed targets (never overwrites user-owned slots)')"
     echo "  --verbose, -v          $(t 'Show per-target install details' 'Show per-target install details')"
     echo ""
     echo "$(t 'Removal commands:' 'Removal commands:')"

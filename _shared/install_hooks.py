@@ -44,7 +44,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 MIN_PYTHON_VERSION = (3, 11)
 HOOK_PYTHON_SENTINEL = "__GHOST_ALICE_HOOK_PYTHON__"
@@ -902,6 +902,28 @@ def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, An
     else:
         command = _session_start_command(platform="claude", output_format="json", payload_mode=True)
     return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER)
+
+
+def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[str, str, str, str]]:
+    """Resolve observational addon hooks for one platform (plan Phase 4).
+
+    Returns [(addon_id, hook_id, event_intent, script_abs_path)]. Re-uses
+    addon_installer.load_addon_targets, which fail-closes on a forbidden hook
+    event or an escaping script, so a bad addon manifest aborts the hook install.
+    """
+    if not addon_sources:
+        return []
+    import addon_installer
+    targets = addon_installer.load_addon_targets(list(addon_sources), platform=platform_key)
+    out: list[tuple[str, str, str, str]] = []
+    seen: set[str] = set()
+    for target in targets:
+        if target.addon_id in seen:
+            continue
+        seen.add(target.addon_id)
+        for hook_id, event_intent, script_path in target.hooks:
+            out.append((target.addon_id, hook_id, event_intent, script_path))
+    return out
 
 
 def _platform_io_trace_entry(platform_key: str, event: str) -> Optional[dict[str, Any]]:
@@ -1801,7 +1823,7 @@ def _ensure_claude_ghost_alice_skill_permissions(settings: dict[str, Any]) -> bo
 
 # ── Install ───────────────────────────────────────────────
 
-def install_hook(platform_key: str, dry_run: bool = False) -> str:
+def install_hook(platform_key: str, dry_run: bool = False, addon_sources: Any = ()) -> str:
     """Install hooks into a single framework.
 
     Return values:
@@ -2094,6 +2116,38 @@ def install_hook(platform_key: str, dry_run: bool = False) -> str:
     elif platform_key in {"claude", "codex"}:
         _log(_t("  io_trace_hook.py not found. Skipping io-trace hook", "  io_trace_hook.py not found. Skipping io-trace hook"))
 
+    # Tier-2 observational addon hooks (plan Phase 4), wired AFTER the core suite.
+    # When addon_sources is empty this loop runs zero times, so a core-only install
+    # stays byte-identical (no entry added, `changed` untouched).
+    for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
+        event_name = _resolve_hook_event(event_intent, platform_key)
+        marker = f"[addon:{addon_id}] {hook_id}"
+        # The generated command embeds "{marker} [hook-runner:...]", so the marker is
+        # always followed by a space. Matching on "marker " makes removal exact and
+        # prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
+        match_marker = marker + " "
+        inner = _hook_python_command(script_path, payload=True)
+        entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker)
+        command = _entry_command(entry)
+        if event_name not in hooks_obj:
+            hooks_obj[event_name] = []
+        ev_list = hooks_obj[event_name]
+        # Prune only a STALE prior version of THIS managed addon hook -- proven by
+        # the exact marker + [hook-runner:] token + matching runner argv, the same
+        # ownership predicate remove_addon_hook uses. A user hook that merely
+        # contains the marker substring (no runner proof) is never deleted here.
+        if _remove_hook_commands_by_command(
+            ev_list,
+            lambda cmd, m=marker, exp=command: cmd != exp and _is_exact_addon_hook_command(cmd, m),
+        ):
+            changed = True
+        if not _hook_already_exists(ev_list, match_marker, expected_command=command):
+            ev_list.append(entry)
+            _log(_t(f"  {event_name} addon hook added: {marker}", f"  {event_name} addon hook added: {marker}"))
+            changed = True
+        else:
+            _log(_t(f"  {event_name} addon hook already exists: {marker}", f"  {event_name} addon hook already exists: {marker}"))
+
     if platform_key == "codex":
         if _ensure_codex_hook_feature_enabled(dry_run=dry_run):
             changed = True
@@ -2111,6 +2165,152 @@ def install_hook(platform_key: str, dry_run: bool = False) -> str:
 
 
 # ── Uninstall ─────────────────────────────────────────────
+
+# A well-formed addon hook marker -- the ONLY shape remove_addon_hook will act on.
+# This makes the function structurally incapable of stripping a core/peer hook even
+# if handed a forged/tampered marker (addon review: forged-sidecar gate-subversion).
+_ADDON_HOOK_MARKER_RE = re.compile(
+    r"^\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] (?P<hook_id>[a-z][a-z0-9-]*)$"
+)
+_MANAGED_ADDON_HOOK_COMMENT_RE = re.compile(
+    r"\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] "
+    r"(?P<hook_id>[a-z][a-z0-9-]*) "
+    r"\[hook-runner:(?P=hook_id)\]"
+)
+
+
+def _addon_runner_token(addon_id: str, hook_id: str) -> str:
+    _ = addon_id  # marker carries addon ownership; hook runner normalizes to hook_id.
+    return f"[hook-runner:{normalize_hook_id(hook_id)}]"
+
+
+def _managed_addon_runner_id(addon_id: str, hook_id: str) -> str:
+    _ = addon_id
+    return normalize_hook_id(hook_id)
+
+
+def _is_exact_addon_hook_command(command: str, marker: str) -> bool:
+    match = _ADDON_HOOK_MARKER_RE.fullmatch(marker)
+    if not match:
+        return False
+    addon_id = match.group("addon_id")
+    hook_id = match.group("hook_id")
+    runner_id = _managed_addon_runner_id(addon_id, hook_id)
+    exact_comment = f"{marker} {_addon_runner_token(addon_id, hook_id)}"
+    return exact_comment in command and _hook_runner_id_match(command, runner_id)
+
+
+def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str], bool]) -> int:
+    removed = 0
+    kept = []
+    for entry in hooks_list:
+        hooks = entry.get("hooks", [])
+        if not isinstance(hooks, list):
+            kept.append(entry)
+            continue
+        kept_hooks = []
+        removed_from_entry = 0
+        for hook in hooks:
+            if isinstance(hook, dict) and predicate(hook.get("command", "")):
+                removed += 1
+                removed_from_entry += 1
+            else:
+                kept_hooks.append(hook)
+        if kept_hooks:
+            if removed_from_entry:
+                entry["hooks"] = kept_hooks
+            kept.append(entry)
+        elif not removed_from_entry:
+            kept.append(entry)
+        else:
+            # All commands in this entry were managed addon commands; remove the
+            # now-empty entry instead of leaving a no-op hook container behind.
+            pass
+    hooks_list[:] = kept
+    return removed
+
+
+def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
+    """Remove one addon's observational hook entries by exact marker (plan Phase 4).
+
+    SECURITY: only a well-formed ``[addon:<id>] <hook_id>`` marker is honored; any
+    other string (e.g. a forged core marker like ``[completion-reminder] AGENTS.md``)
+    is refused, so a tampered sidecar can never strip a core governance hook. The
+    trailing-space match boundary keeps removal exact across hook ids that are
+    prefixes of one another. Returns the number of entries removed.
+    """
+    if not isinstance(marker, str) or not _ADDON_HOOK_MARKER_RE.fullmatch(marker):
+        return 0
+    platform = PLATFORMS.get(platform_key)
+    if platform is None:
+        return 0
+    settings_file = platform["hook_file"]()
+    if not settings_file.exists():
+        return 0
+    settings = _read_settings(settings_file)
+    hooks_obj = settings.get("hooks", {})
+    if not isinstance(hooks_obj, dict):
+        return 0
+    # Ownership proof: remove only the command generated by _hook_runner_command().
+    # A user hook can contain the marker text, or even a fake [hook-runner:] token;
+    # it is not ours unless the comment carries the exact generated marker/runner
+    # signature and argv invokes the same normalized hook id.
+    total = 0
+    for event_list in hooks_obj.values():
+        if isinstance(event_list, list):
+            total += _remove_hook_commands_by_command(
+                event_list,
+                lambda command, marker=marker: _is_exact_addon_hook_command(command, marker),
+            )
+    if total and not dry_run:
+        _write_settings(settings_file, settings, dry_run=False)
+    return total
+
+
+def _is_managed_addon_command(command: str) -> bool:
+    """True for a Ghost-ALICE managed addon hook command.
+
+    The comment must contain a matching ``[addon:<id>] <hook>`` marker and
+    normalized ``[hook-runner:<hook>]`` token, and argv must invoke the hook
+    runner with the same normalized id. This keeps a sweep from deleting
+    non-managed hooks that merely copied the marker/comment text.
+    """
+    match = _MANAGED_ADDON_HOOK_COMMENT_RE.search(command)
+    if not match:
+        return False
+    runner_id = _managed_addon_runner_id(match.group("addon_id"), match.group("hook_id"))
+    return _hook_runner_id_match(command, runner_id)
+
+
+def _remove_managed_addon_entries(hooks_list: list) -> int:
+    return _remove_hook_commands_by_command(hooks_list, _is_managed_addon_command)
+
+
+def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
+    """Strip EVERY MANAGED addon hook entry (full uninstall, plan Phase 4).
+
+    Removes only entries that are both ``[addon:`` and ``[hook-runner:`` (managed),
+    so a full uninstall cleans addon hooks even when a per-addon uninstall left a
+    partial (e.g. the addon's skill drifted) -- without touching a non-managed hook.
+    """
+    platform = PLATFORMS.get(platform_key)
+    if platform is None:
+        return 0
+    settings_file = platform["hook_file"]()
+    if not settings_file.exists():
+        return 0
+    settings = _read_settings(settings_file)
+    hooks_obj = settings.get("hooks", {})
+    if not isinstance(hooks_obj, dict):
+        return 0
+    total = 0
+    for event_list in hooks_obj.values():
+        if isinstance(event_list, list):
+            total += _remove_managed_addon_entries(event_list)
+    if total and not dry_run:
+        _write_settings(settings_file, settings, dry_run=False)
+    return total
+
 
 def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
     """Remove hooks from a single framework.
@@ -2195,6 +2395,12 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
     pt_list = hooks_obj.get(post_tool_key, [])
     if _hook_already_exists(pt_list, IO_TRACE_MARKER):
         total_removed += _remove_hook_entries(pt_list, IO_TRACE_MARKER)
+
+    # Full uninstall also strips every MANAGED addon observational hook (plan Phase 4),
+    # so a drifted addon's hook is never left firing live after a full uninstall.
+    for ev_list in hooks_obj.values():
+        if isinstance(ev_list, list):
+            total_removed += _remove_managed_addon_entries(ev_list)
 
     if total_removed == 0:
         _log(_t("  No hooks found. Nothing to remove", "  No hooks found. Nothing to remove"))
@@ -2579,7 +2785,7 @@ def main() -> int:
                 results[key] = uninstall_hook(key, dry_run=args.dry_run)
             else:
                 _ensure_node_runtime_for_hook_install(key)
-                results[key] = install_hook(key, dry_run=args.dry_run)
+                results[key] = install_hook(key, dry_run=args.dry_run, addon_sources=args.addon_source)
         except Exception as e:
             _log(f"ERROR: {PLATFORMS[key]['name']}. {e}")
             results[key] = "error"

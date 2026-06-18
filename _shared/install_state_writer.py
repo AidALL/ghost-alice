@@ -62,6 +62,83 @@ for offset in range(0, len(raw_targets), 4):
         }
     )
 
+# Derived aggregate (plan T1.4/T1.5): enrich/append addon targets from the
+# cumulative per-addon sidecar scan. Separate-run addons persist because they are
+# read from their own sidecars, not from this run's argv. This is a full rebuild,
+# never a read-modify-write of the shared manifest. Fail-safe: if the registry is
+# unavailable the install-state degrades to the core-only argv targets.
+try:
+    import addon_registry
+
+    # Platform-scoped (review M5): each platform owns ~/.ghost-alice/addons/<platform>/
+    # so the same addon installed on claude and codex keeps independent records and
+    # this aggregate never picks up the other platform's targets.
+    addons_dir = Path(state_path).resolve().parent.parent / "addons" / platform
+    sidecar_records, sidecar_skipped = addon_registry.scan_records(addons_dir=addons_dir)
+except Exception:
+    sidecar_records, sidecar_skipped = [], []
+
+if sidecar_skipped:
+    # Fail-closed: do NOT overwrite install-state with a success manifest that would
+    # silently hide an unreadable / tampered / future-major sidecar. Emit a
+    # registry-health diagnostic and abort so the drop is visible (plan T1.4/T1.5).
+    health_path = Path(state_path).with_name(f"{platform}-registry-health.json")
+    try:
+        health_path.parent.mkdir(parents=True, exist_ok=True)
+        health_path.write_text(
+            json.dumps(
+                {
+                    "platform": platform,
+                    "generated_at": installed_at,
+                    "skipped_sidecars": [
+                        {"file": skip_name, "reason": skip_reason}
+                        for skip_name, skip_reason in sidecar_skipped
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+    print(
+        f"install-state aborted: {len(sidecar_skipped)} addon sidecar(s) could not be read; "
+        f"see {health_path}",
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+
+dest_index = {target["dest_path"]: target for target in targets}
+for sidecar_record in sidecar_records:
+    attribution = {
+        "addon_id": sidecar_record.get("addon_id"),
+        "origin": sidecar_record.get("origin"),
+        "owner": "addon",
+    }
+    for provided_entry in sidecar_record.get("provided", []):
+        if not isinstance(provided_entry, dict):
+            continue
+        addon_dest = as_posix(provided_entry.get("target", ""))
+        existing_target = dest_index.get(addon_dest)
+        if existing_target is not None:
+            existing_target.update(attribution)
+            continue
+        addon_target = {
+            "target_name": provided_entry.get("name"),
+            "source_path": as_posix(sidecar_record.get("source", "")),
+            "dest_path": addon_dest,
+            "install_mode": provided_entry.get("install_mode", "missing"),
+            "target_tree_hash": provided_entry.get("content_hash") or "missing",
+            "managed_markers": ["addon"],
+            "installed_at": sidecar_record.get("installed_at", installed_at),
+        }
+        addon_target.update(attribution)
+        targets.append(addon_target)
+        dest_index[addon_dest] = addon_target
+
 system_env_changes = []
 if os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED") == "1":
     before_present = os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT") == "1"

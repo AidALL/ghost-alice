@@ -209,6 +209,7 @@ function Get-AddonTargets {
             IsFamily = $false
             Family   = $null
             Origin   = [string]$target.origin
+            AddonId  = [string]$target.addon_id
         }
     }
     return $targets

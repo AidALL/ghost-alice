@@ -1,0 +1,33 @@
+{
+  "addon_version": "0.1.0",
+  "addon_id": "rich",
+  "skills": [
+    {
+      "name": "richskill",
+      "source": "skill",
+      "skill_dir": "skill"
+    }
+  ],
+  "commands": [
+    {
+      "name": "richcmd",
+      "source": "commands/richcmd.md"
+    }
+  ],
+  "resources": [
+    {
+      "path": "ref.txt",
+      "source": "resources/ref.txt"
+    }
+  ],
+  "hooks": [
+    {
+      "id": "richobs",
+      "event": "post_tool_use",
+      "script": "hooks/obs.py"
+    }
+  ],
+  "platforms": ["claude", "codex"],
+  "depends_on_core": ["task-router"],
+  "secrets": []
+}
