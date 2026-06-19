@@ -1,5 +1,9 @@
 """Shell e2e: remote git addon sources clone, install, run, and uninstall.
 
+The zsh launcher case matters because users often run the installer from a zsh
+terminal. install.sh still owns a bash runtime contract, but zsh invocation must
+re-exec bash before the installer reaches bash-only syntax.
+
 Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_remote_source_shell.py -q
 """
 
@@ -201,6 +205,90 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             per_addon = run("--platform", "claude", "--uninstall", "--addon", "autopilot-mode")
             self.assertEqual(per_addon.returncode, 0, msg=per_addon.stderr + per_addon.stdout)
             self.assertFalse((claude / "skills" / "autopilot-mode").exists())
+            commands_after = _hook_commands(claude / "settings.json")
+            self.assertFalse(any("[adapter:autopilot-mode]" in cmd for cmd in commands_after))
+            self.assertTrue(any("tool-checkpoint" in cmd for cmd in commands_after), msg="core hooks should remain")
+
+            status = run("--platform", "claude", "--status")
+            self.assertEqual(status.returncode, 0, msg=status.stderr + status.stdout)
+            self.assertNotIn("[adapter:autopilot-mode]", status.stdout + status.stderr)
+
+    def test_zsh_launcher_reexecutes_bash_for_remote_addon_lifecycle(self):
+        zsh = shutil.which("zsh")
+        if not zsh:
+            self.skipTest("zsh required")
+        if not shutil.which("bash"):
+            self.skipTest("bash required")
+        if not shutil.which("git"):
+            self.skipTest("git required")
+        if not _python_311():
+            self.skipTest("python 3.11+ required")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            claude = root / "claude"
+            project = root / "project"
+            home.mkdir()
+            claude.mkdir()
+            project.mkdir()
+            remote_url = _make_bare_remote(root)
+            env = os.environ.copy()
+            env.update({
+                "HOME": str(home),
+                "CLAUDE_CONFIG_DIR": str(claude),
+                "GHOST_ALICE_INSTALL_PROGRESS": "off",
+            })
+
+            def run(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [zsh, str(REPO_ROOT / "install.sh"), *args],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=240,
+                    check=False,
+                )
+
+            install = run(
+                "--platform", "claude",
+                "--addon-source", remote_url,
+                "--addon-tag", "p6-privileged-adapter",
+                "--skip-source-health",
+                "task-router",
+            )
+            self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
+
+            cache = home / ".ghost-alice" / "addon-source-cache"
+            cloned = [p for p in cache.glob("*") if (p / "addons-manifest.json").is_file()]
+            self.assertEqual(len(cloned), 1, msg=f"expected one cloned addon source under {cache}")
+            self.assertTrue((claude / "skills" / "autopilot-mode" / "SKILL.md").exists())
+
+            commands = _hook_commands(claude / "settings.json")
+            adapter_commands = [cmd for cmd in commands if "[adapter:autopilot-mode] continue" in cmd]
+            self.assertEqual(len(adapter_commands), 1, msg="\n".join(commands))
+
+            hook = subprocess.run(
+                adapter_commands[0],
+                cwd=project,
+                env=env,
+                input="{}\n",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                shell=True,
+                timeout=60,
+                check=False,
+            )
+            self.assertEqual(hook.returncode, 0, msg=hook.stderr + hook.stdout)
+            self.assertIn("remote-clone-adapter-smoke", hook.stdout)
+
+            per_addon = run("--platform", "claude", "--uninstall", "--addon", "autopilot-mode")
+            self.assertEqual(per_addon.returncode, 0, msg=per_addon.stderr + per_addon.stdout)
             commands_after = _hook_commands(claude / "settings.json")
             self.assertFalse(any("[adapter:autopilot-mode]" in cmd for cmd in commands_after))
             self.assertTrue(any("tool-checkpoint" in cmd for cmd in commands_after), msg="core hooks should remain")
