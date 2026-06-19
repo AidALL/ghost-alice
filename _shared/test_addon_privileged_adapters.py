@@ -23,23 +23,45 @@ import hash_utils  # noqa: E402
 import install_hooks  # noqa: E402
 
 
-def _adapter_allowlist(addon_id: str = "pilot", skill_name: str = "pilot-skill") -> dict:
+def _adapter_spec(
+    *,
+    adapter_id: str = "p5-demo",
+    addon_id: str = "pilot",
+    skill_name: str = "pilot-skill",
+    event: str = "post_tool_use",
+    script_rel: str = "adapters/p5_demo.py",
+    hook_id: str = "p5-hook",
+) -> dict:
     return {
-        "p5-demo": {
-            "adapter_id": "p5-demo",
-            "allowed_addon_id": addon_id,
-            "expected_skill_name": skill_name,
-            "events": ["post_tool_use"],
-            "script_rel_by_event": {"post_tool_use": "adapters/p5_demo.py"},
-            "hook_id_by_event": {"post_tool_use": "p5-hook"},
-            "args_policy": "no_args",
-            "marker_template": "[adapter:{adapter_id}] {hook_id}",
-            "runner_namespace": "adapter-{adapter_id}-{hook_id}",
-            "source_policy": "expected_skill_source",
-            "hash_policy": "content_hash",
-            "uninstall_matcher": "exact_marker_runner",
-        },
+        "adapter_id": adapter_id,
+        "allowed_addon_id": addon_id,
+        "expected_skill_name": skill_name,
+        "events": [event],
+        "script_rel_by_event": {event: script_rel},
+        "hook_id_by_event": {event: hook_id},
+        "args_policy": "no_args",
+        "marker_template": "[adapter:{adapter_id}] {hook_id}",
+        "runner_namespace": "adapter-{adapter_id}-{hook_id}",
+        "source_policy": "expected_skill_source",
+        "hash_policy": "content_hash",
+        "uninstall_matcher": "exact_marker_runner",
     }
+
+
+def _adapter_allowlist(addon_id: str = "pilot", skill_name: str = "pilot-skill") -> dict:
+    return {"p5-demo": _adapter_spec(addon_id=addon_id, skill_name=skill_name)}
+
+
+def _write_allowlist(path: Path, *, trust_owner: str, adapters: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({
+            "schema_version": 1,
+            "trust_owner": trust_owner,
+            "adapters": adapters,
+        }),
+        encoding="utf-8",
+    )
 
 
 def _make_adapter_addon(
@@ -103,7 +125,12 @@ class PrivilegedAdapterManifestTest(unittest.TestCase):
                     platform="claude",
                     privileged_adapter_allowlist=_adapter_allowlist(),
                 )
-        self.assertIn("implementation", str(ctx.exception).lower())
+        message = str(ctx.exception).lower()
+        self.assertIn("implementation", message)
+        self.assertIn("request an adapter id only", message)
+        self.assertIn("core or machine-owner", message)
+        self.assertIn("allowlist", message)
+        self.assertNotIn("forbidden", message)
 
     def test_top_level_adapter_implementation_fields_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -118,7 +145,11 @@ class PrivilegedAdapterManifestTest(unittest.TestCase):
                     platform="claude",
                     privileged_adapter_allowlist=_adapter_allowlist(),
                 )
-        self.assertIn("implementation", str(ctx.exception).lower())
+        message = str(ctx.exception).lower()
+        self.assertIn("implementation", message)
+        self.assertIn("core or machine-owner", message)
+        self.assertIn("allowlist", message)
+        self.assertNotIn("forbidden", message)
 
     def test_unknown_wrong_addon_and_wrong_skill_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -143,6 +174,102 @@ class PrivilegedAdapterManifestTest(unittest.TestCase):
                     platform="claude",
                     privileged_adapter_allowlist=_adapter_allowlist(skill_name="pilot-skill"),
                 )
+
+
+class PrivilegedAdapterAllowlistRootTest(unittest.TestCase):
+    def test_default_core_allowlist_contains_autopilot_adapter(self):
+        allowlist = ai.load_privileged_adapter_allowlist(user_path=None)
+
+        spec = allowlist["autopilot-mode"]
+        self.assertEqual(spec["allowed_addon_id"], "autopilot-mode")
+        self.assertEqual(spec["expected_skill_name"], "autopilot-mode")
+        self.assertEqual(spec["events"], ["on_agent_stop"])
+        self.assertEqual(spec["args_policy"], "no_args")
+
+    def test_core_allowlist_data_file_enables_adapter_without_engine_constant_patch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            official = root / "skill-catalog" / "privileged-adapters.json"
+            _write_allowlist(official, trust_owner="core", adapters=_adapter_allowlist())
+            allowlist = ai.load_privileged_adapter_allowlist(official_path=official, user_path=None)
+
+            src = _make_adapter_addon(root / "addon-src")
+            targets = ai.load_addon_targets(
+                [src],
+                platform="claude",
+                privileged_adapter_allowlist=allowlist,
+            )
+
+        self.assertEqual(targets[0].privileged_adapters, ("p5-demo",))
+
+    def test_user_allowlist_requires_machine_owner_trust_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            user_allowlist = root / ".ghost-alice" / "privileged-adapters.json"
+            _write_allowlist(user_allowlist, trust_owner="core", adapters={
+                "local-pilot": _adapter_spec(
+                    adapter_id="local-pilot",
+                    addon_id="local",
+                    skill_name="local-skill",
+                    hook_id="local-hook",
+                ),
+            })
+
+            with self.assertRaises(ai.AddonManifestError) as ctx:
+                ai.load_privileged_adapter_allowlist(official_path=None, user_path=user_allowlist)
+
+        self.assertIn("machine-owner", str(ctx.exception))
+
+    def test_machine_owner_allowlist_enables_custom_addon_adapter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            user_allowlist = root / ".ghost-alice" / "privileged-adapters.json"
+            _write_allowlist(user_allowlist, trust_owner="machine-owner", adapters={
+                "local-pilot": _adapter_spec(
+                    adapter_id="local-pilot",
+                    addon_id="local",
+                    skill_name="local-skill",
+                    event="on_agent_stop",
+                    hook_id="local-stop",
+                ),
+            })
+            allowlist = ai.load_privileged_adapter_allowlist(official_path=None, user_path=user_allowlist)
+
+            src = _make_adapter_addon(
+                root / "addon-src",
+                addon_id="local",
+                skill_name="local-skill",
+                request=("local-pilot",),
+            )
+            targets = ai.load_addon_targets(
+                [src],
+                platform="claude",
+                privileged_adapter_allowlist=allowlist,
+            )
+            hooks = ai.iter_privileged_adapter_hook_specs(targets, privileged_adapter_allowlist=allowlist)
+
+        self.assertEqual(targets[0].privileged_adapters, ("local-pilot",))
+        self.assertEqual(hooks[0]["event"], "on_agent_stop")
+        self.assertEqual(hooks[0]["marker"], "[adapter:local-pilot] local-stop")
+
+    def test_default_user_allowlist_root_follows_current_home(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            user_allowlist = home / ".ghost-alice" / "privileged-adapters.json"
+            _write_allowlist(user_allowlist, trust_owner="machine-owner", adapters={
+                "local-pilot": _adapter_spec(
+                    adapter_id="local-pilot",
+                    addon_id="local",
+                    skill_name="local-skill",
+                    hook_id="local-hook",
+                ),
+            })
+
+            with mock.patch.dict(os.environ, {"HOME": str(home)}):
+                allowlist = ai.load_privileged_adapter_allowlist(official_path=None)
+
+        self.assertIn("local-pilot", allowlist)
 
 
 class PrivilegedAdapterSidecarTest(unittest.TestCase):

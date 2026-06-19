@@ -1,0 +1,18 @@
+{
+  "addon_version": "0.1.0",
+  "addon_id": "autopilot-mode",
+  "skills": [
+    {
+      "name": "autopilot-mode",
+      "source": "skill",
+      "skill_dir": "skill"
+    }
+  ],
+  "platforms": ["claude", "codex"],
+  "depends_on_core": [
+    "session-intent-analyzer",
+    "task-router"
+  ],
+  "secrets": [],
+  "privileged_adapters": ["autopilot-mode"]
+}

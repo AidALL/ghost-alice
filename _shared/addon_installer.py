@@ -37,6 +37,12 @@ RESERVED_CORE_HOOK_IDS = frozenset({
 _SIDECAR_KNOWN_OPTIONAL_FIELDS = frozenset({"secrets", "hooks", "migration"})
 PRIVILEGED_ADAPTER_REQUEST_FIELD = "privileged_adapters"
 CORE_PRIVILEGED_ADAPTER_ALLOWLIST: dict[str, dict[str, Any]] = {}
+PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION = 1
+CORE_PRIVILEGED_ADAPTER_ALLOWLIST_PATH = (
+    Path(__file__).resolve().parents[1] / "skill-catalog" / "privileged-adapters.json"
+)
+USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL = Path(".ghost-alice") / "privileged-adapters.json"
+_DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST = object()
 _PRIVILEGED_ADAPTER_REQUIRED_FIELDS = frozenset({
     "adapter_id",
     "allowed_addon_id",
@@ -80,6 +86,9 @@ _PRIVILEGED_ADAPTER_ALLOWED_EVENTS = frozenset({
     "on_agent_stop",
     "on_session_start",
 })
+_PRIVILEGED_ADAPTER_TRUST_ROOT_HINT = (
+    "register adapter implementations in the core or machine-owner privileged adapter allowlist"
+)
 
 
 class AddonManifestError(Exception):
@@ -175,7 +184,92 @@ def _validate_semver(value: str, field: str, path: Path) -> str:
 def _adapter_allowlist(
     allowlist: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    return CORE_PRIVILEGED_ADAPTER_ALLOWLIST if allowlist is None else allowlist
+    if allowlist is not None:
+        return allowlist
+    loaded = load_privileged_adapter_allowlist()
+    for adapter_id, spec in CORE_PRIVILEGED_ADAPTER_ALLOWLIST.items():
+        if adapter_id in loaded:
+            raise AddonManifestError(f"duplicate privileged adapter id {adapter_id!r} in core allow-list overlay")
+        loaded[adapter_id] = spec
+    return loaded
+
+
+def _read_privileged_adapter_allowlist_file(
+    path: Path,
+    *,
+    expected_trust_owner: str,
+) -> dict[str, dict[str, Any]]:
+    data = _read_json(path)
+    if data.get("schema_version") != PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION:
+        raise AddonManifestError(
+            f"{path}: schema_version must be {PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION}"
+        )
+    if data.get("trust_owner") != expected_trust_owner:
+        raise AddonManifestError(f"{path}: trust_owner must be {expected_trust_owner!r}")
+    adapters = data.get("adapters")
+    if not isinstance(adapters, dict):
+        raise AddonManifestError(f"{path}: adapters must be an object")
+
+    out: dict[str, dict[str, Any]] = {}
+    for adapter_id, spec in adapters.items():
+        if not isinstance(adapter_id, str) or not ADDON_ID_RE.fullmatch(adapter_id):
+            raise AddonManifestError(f"{path}: adapter id {adapter_id!r} must match {ADDON_ID_RE.pattern}")
+        if not isinstance(spec, dict):
+            raise AddonManifestError(f"{path}: adapter {adapter_id!r} spec must be an object")
+        candidate = dict(spec)
+        _privileged_adapter_spec(adapter_id, allowlist={adapter_id: candidate}, context=path)
+        out[adapter_id] = candidate
+    return out
+
+
+def _merge_allowlist_file(
+    merged: dict[str, dict[str, Any]],
+    path: str | Path | None,
+    *,
+    expected_trust_owner: str,
+) -> None:
+    if path is None:
+        return
+    allowlist_path = Path(path).expanduser()
+    if not allowlist_path.exists():
+        return
+    entries = _read_privileged_adapter_allowlist_file(
+        allowlist_path,
+        expected_trust_owner=expected_trust_owner,
+    )
+    for adapter_id, spec in entries.items():
+        if adapter_id in merged:
+            raise AddonManifestError(f"{allowlist_path}: duplicate privileged adapter id {adapter_id!r}")
+        merged[adapter_id] = spec
+
+
+def _default_user_privileged_adapter_allowlist_path() -> Path:
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home).expanduser() / USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL
+    return Path.home() / USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL
+
+
+def load_privileged_adapter_allowlist(
+    *,
+    official_path: str | Path | None = CORE_PRIVILEGED_ADAPTER_ALLOWLIST_PATH,
+    user_path: Any = _DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST,
+) -> dict[str, dict[str, Any]]:
+    """Load privileged adapter specs from separated trust roots.
+
+    The official file is core-owned repository data. The user file is a local
+    machine-owner trust record; addon manifests still request ids only and never
+    supply implementation fields.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    _merge_allowlist_file(merged, official_path, expected_trust_owner="core")
+    resolved_user_path = (
+        _default_user_privileged_adapter_allowlist_path()
+        if user_path is _DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST
+        else user_path
+    )
+    _merge_allowlist_file(merged, resolved_user_path, expected_trust_owner="machine-owner")
+    return merged
 
 
 def _parse_privileged_adapter_requests(manifest: dict[str, Any], path: Path) -> tuple[str, ...]:
@@ -193,7 +287,8 @@ def _parse_privileged_adapter_requests(manifest: dict[str, Any], path: Path) -> 
             detail = f": {supplied}" if supplied else ""
             raise AddonManifestError(
                 f"{path}: {field} may request an adapter id only; manifest-supplied "
-                f"privileged adapter implementation fields are forbidden{detail}"
+                f"privileged adapter implementation fields are not accepted{detail}; "
+                f"{_PRIVILEGED_ADAPTER_TRUST_ROOT_HINT}"
             )
         if not isinstance(item, str):
             raise AddonManifestError(f"{path}: {field} must be an adapter id string")
@@ -209,8 +304,8 @@ def _reject_privileged_adapter_implementation_fields(manifest: dict[str, Any], p
     supplied = sorted(str(key) for key in manifest if key in _PRIVILEGED_ADAPTER_IMPLEMENTATION_FIELDS)
     if supplied:
         raise AddonManifestError(
-            f"{path}: privileged adapter implementation fields are core-owned and forbidden in addon manifests: "
-            f"{supplied}"
+            f"{path}: privileged adapter implementation fields are not accepted in addon manifests: "
+            f"{supplied}; {_PRIVILEGED_ADAPTER_TRUST_ROOT_HINT}"
         )
 
 

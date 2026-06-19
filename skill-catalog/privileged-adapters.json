@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "trust_owner": "core",
+  "adapters": {
+    "autopilot-mode": {
+      "adapter_id": "autopilot-mode",
+      "allowed_addon_id": "autopilot-mode",
+      "expected_skill_name": "autopilot-mode",
+      "events": ["on_agent_stop"],
+      "script_rel_by_event": {
+        "on_agent_stop": "adapters/autopilot_mode.py"
+      },
+      "hook_id_by_event": {
+        "on_agent_stop": "continue"
+      },
+      "args_policy": "no_args",
+      "marker_template": "[adapter:{adapter_id}] {hook_id}",
+      "runner_namespace": "adapter-{adapter_id}-{hook_id}",
+      "source_policy": "expected_skill_source",
+      "hash_policy": "content_hash",
+      "uninstall_matcher": "exact_marker_runner"
+    }
+  }
+}
