@@ -52,7 +52,11 @@ def _write_approved_run(run_dir: Path, items: list[dict]) -> None:
             "run_id": "run-1",
             "approved": True,
             "status": "running",
+            "scope": {"summary": "P6 autopilot adapter test run"},
             "budget": {"remaining_steps": 3},
+            "allowed_surfaces": ["_shared/..."],
+            "stop_conditions": ["budget_exhausted", "user_stop"],
+            "approval_evidence": {"decision": "GO", "source": "unit-test"},
         }),
         encoding="utf-8",
     )

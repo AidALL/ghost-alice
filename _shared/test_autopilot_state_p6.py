@@ -37,16 +37,29 @@ def _item(item_id: str, *, status: str = "ready", depends_on: list[str] | None =
     }
 
 
+def _approved_run_record(
+    *,
+    approved: bool = True,
+    status: str = "running",
+    remaining_steps: int = 3,
+) -> dict:
+    return {
+        "schema_version": "autopilot-run.v1",
+        "run_id": "run-1",
+        "approved": approved,
+        "status": status,
+        "scope": {"summary": "P6 autopilot test run"},
+        "budget": {"remaining_steps": remaining_steps},
+        "allowed_surfaces": ["_shared/..."],
+        "stop_conditions": ["budget_exhausted", "user_stop"],
+        "approval_evidence": {"decision": "GO", "source": "unit-test"},
+    }
+
+
 def _write_run(run_dir: Path, items: list[dict], *, decision: dict | None = None) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "approved-run.json").write_text(
-        json.dumps({
-            "schema_version": "autopilot-run.v1",
-            "run_id": "run-1",
-            "approved": True,
-            "status": "running",
-            "budget": {"remaining_steps": 3},
-        }),
+        json.dumps(_approved_run_record()),
         encoding="utf-8",
     )
     aps.write_work_items(run_dir / "tasks.jsonl", items)
@@ -62,13 +75,11 @@ def _write_run_config(
     remaining_steps: int = 3,
 ) -> None:
     (run_dir / "approved-run.json").write_text(
-        json.dumps({
-            "schema_version": "autopilot-run.v1",
-            "run_id": "run-1",
-            "approved": approved,
-            "status": status,
-            "budget": {"remaining_steps": remaining_steps},
-        }),
+        json.dumps(_approved_run_record(
+            approved=approved,
+            status=status,
+            remaining_steps=remaining_steps,
+        )),
         encoding="utf-8",
     )
 
@@ -199,6 +210,59 @@ class AutopilotStateTest(unittest.TestCase):
             self.assertEqual(payload, {"continue": True, "systemMessage": ""})
             self.assertEqual(after, before)
             self.assertFalse(events_exists)
+
+    def test_approved_run_requires_explicit_go_boundaries_before_continuing(self):
+        cases = [
+            ("scope", lambda record: record.pop("scope")),
+            ("scope.empty", lambda record: record.__setitem__("scope", {})),
+            ("budget", lambda record: record.pop("budget")),
+            ("budget.remaining_steps", lambda record: record["budget"].pop("remaining_steps")),
+            ("budget.remaining_steps.type", lambda record: record["budget"].__setitem__("remaining_steps", "3")),
+            ("allowed_surfaces", lambda record: record.pop("allowed_surfaces")),
+            ("allowed_surfaces.type", lambda record: record.__setitem__("allowed_surfaces", "_shared/...")),
+            ("stop_conditions", lambda record: record.pop("stop_conditions")),
+            ("stop_conditions.empty", lambda record: record.__setitem__("stop_conditions", [])),
+            ("approval_evidence", lambda record: record.pop("approval_evidence")),
+            ("approval_evidence.empty", lambda record: record.__setitem__("approval_evidence", {})),
+        ]
+
+        for field, mutate in cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as tmp:
+                run_dir = Path(tmp)
+                _write_run(run_dir, [_item("next")])
+                before = (run_dir / "tasks.jsonl").read_text(encoding="utf-8")
+                record = _approved_run_record()
+                mutate(record)
+                (run_dir / "approved-run.json").write_text(json.dumps(record), encoding="utf-8")
+
+                payload = aps.advance_approved_run(run_dir)
+                after = (run_dir / "tasks.jsonl").read_text(encoding="utf-8")
+                events_exists = (run_dir / "events.jsonl").exists()
+
+            self.assertEqual(payload, {"continue": True, "systemMessage": ""})
+            self.assertEqual(after, before)
+            self.assertFalse(events_exists)
+
+    def test_work_item_outside_approved_run_allowed_surfaces_is_noop_without_mutating_tasks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            run_dir = Path(tmp)
+            _write_run(run_dir, [_item("next")])
+            before = (run_dir / "tasks.jsonl").read_text(encoding="utf-8")
+            record = _approved_run_record()
+            record["allowed_surfaces"] = ["docs/..."]
+            (run_dir / "approved-run.json").write_text(json.dumps(record), encoding="utf-8")
+
+            payload = aps.advance_approved_run(run_dir)
+            after = (run_dir / "tasks.jsonl").read_text(encoding="utf-8")
+            events = [
+                json.loads(line)
+                for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(payload, {"continue": True, "systemMessage": ""})
+        self.assertEqual(after, before)
+        self.assertEqual(events[0]["event"], "ready_item_outside_allowed_surfaces")
+        self.assertEqual(events[0]["work_item_id"], "next")
 
     def test_no_ready_item_records_event_and_returns_noop(self):
         with tempfile.TemporaryDirectory() as tmp:

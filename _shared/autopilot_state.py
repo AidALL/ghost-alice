@@ -249,6 +249,39 @@ def _noop_payload() -> dict[str, Any]:
     return dict(NOOP_PAYLOAD)
 
 
+def _has_non_empty_scope(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return isinstance(value, dict) and bool(value)
+
+
+def _has_non_empty_approval_evidence(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    return isinstance(value, dict) and bool(value)
+
+
+def _is_non_empty_string_array(value: Any) -> bool:
+    return isinstance(value, list) and bool(value) and all(isinstance(item, str) and item for item in value)
+
+
+def _surface_matches(allowed: str, candidate: str) -> bool:
+    if allowed == candidate:
+        return True
+    if allowed.endswith("/..."):
+        prefix = allowed.removesuffix("/...").rstrip("/")
+        return candidate == prefix or candidate.startswith(f"{prefix}/")
+    return False
+
+
+def _work_item_within_run_surfaces(run: dict[str, Any], item: dict[str, Any]) -> bool:
+    run_surfaces = run["allowed_surfaces"]
+    item_surfaces = item["allowed_surface"]
+    if not item_surfaces:
+        return False
+    return all(any(_surface_matches(allowed, surface) for allowed in run_surfaces) for surface in item_surfaces)
+
+
 def _read_json_object(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -266,11 +299,20 @@ def _approved_run_allows_continue(run: dict[str, Any]) -> bool:
         return False
     if run.get("status") != "running":
         return False
-    budget = run.get("budget", {})
-    if isinstance(budget, dict):
-        remaining_steps = budget.get("remaining_steps")
-        if isinstance(remaining_steps, int) and remaining_steps <= 0:
-            return False
+    if not _has_non_empty_scope(run.get("scope")):
+        return False
+    budget = run.get("budget")
+    if not isinstance(budget, dict):
+        return False
+    remaining_steps = budget.get("remaining_steps")
+    if not isinstance(remaining_steps, int) or isinstance(remaining_steps, bool) or remaining_steps <= 0:
+        return False
+    if not _is_non_empty_string_array(run.get("allowed_surfaces")):
+        return False
+    if not _is_non_empty_string_array(run.get("stop_conditions")):
+        return False
+    if not _has_non_empty_approval_evidence(run.get("approval_evidence")):
+        return False
     return True
 
 
@@ -361,7 +403,20 @@ def advance_approved_run(run_dir: str | Path) -> dict[str, Any]:
         )
         return _noop_payload()
 
-    selected = _select_ready_item(items, ready_queue[0])
+    next_item = _find_item(items, ready_queue[0])
+    if not _work_item_within_run_surfaces(run, next_item):
+        _append_event(
+            root,
+            {
+                "schema_version": "autopilot-event.v1",
+                "event": "ready_item_outside_allowed_surfaces",
+                "run_id": run.get("run_id"),
+                "work_item_id": next_item["id"],
+            },
+        )
+        return _noop_payload()
+
+    selected = _select_ready_item(items, next_item["id"])
     selected_item = selected["item"]
     write_work_items(tasks_path, selected["items"])
     _append_event(
