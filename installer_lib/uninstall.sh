@@ -81,14 +81,11 @@ list_addons() {
     info "$(t 'Addon installation is disabled (--addon-skip)' 'Addon installation is disabled (--addon-skip)')"
     return 0
   fi
-  if [ "${#ADDON_TAGS[@]}" -gt 0 ]; then
-    error "$(t '--addon-tag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with --addon-source.' '--addon-tag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with --addon-source.')"
-    return 1
-  fi
   if [ "${#ADDON_SOURCES[@]}" -eq 0 ]; then
     error "$(t '--list-addons requires --addon-source' '--list-addons requires --addon-source')"
     return 1
   fi
+  prepare_addon_sources || return 1
   local py source skill
   py="$(_find_python_runtime || true)"
   if [ -z "$py" ]; then
@@ -101,6 +98,12 @@ list_addons() {
   done
   for skill in "${ALL_SKILLS[@]}"; do
     args+=(--core-skill "$skill")
+    local core_targets core_name core_path
+    core_targets="$(expand_skill_targets "$skill")"
+    while IFS='|' read -r core_name core_path; do
+      [ -n "$core_name" ] || continue
+      args+=(--core-skill "$core_name")
+    done <<< "$core_targets"
   done
   "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" "${args[@]}" --platform "$PLATFORM" --format text
 }

@@ -60,6 +60,7 @@ SOURCE_REPO_HOOK_BEFORE=""
 SOURCE_REPO_HOOK_AFTER="hooks"
 ADDON_SOURCES=()
 ADDON_TAGS=()
+ADDON_SOURCE_PREPARED=0
 INSTALL_ADDON_TARGETS=()
 # ── Platform path resolution ──────────────────────────────
 # Environment variable takes precedence; falls back to default path.
@@ -534,6 +535,10 @@ if [ "$CLEANUP_PENDING" -eq 1 ]; then
   exit $?
 fi
 
+if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
+  prepare_addon_sources || exit 1
+fi
+
 if [ "$LIST_ADDONS" -eq 1 ]; then
   list_addons
   exit $?
@@ -600,8 +605,9 @@ case "${ARGS[0]:-}" in
     echo "  --list, -l             $(t 'List available skills' 'List available skills')"
     echo "  --cleanup-pending      $(t 'Clean false-positive legacy pending entries' 'Clean false-positive legacy pending entries')"
     echo "  --update-source        $(t 'Stash source checkout local changes and run git pull --ff-only' 'Stash source checkout local changes and run git pull --ff-only')"
-    echo "  --addon-source PATH    $(t 'Add addon repo or local manifest path' 'Add addon repo or local manifest path')"
-    echo "  --addon-tag TAG        $(t 'Reserved: check out tag locally for now' 'Reserved: check out tag locally for now')"
+    echo "  --addon-source PATH|URL"
+    echo "                          $(t 'Add local addon repo or git URL source' 'Add local addon repo or git URL source')"
+    echo "  --addon-tag TAG        $(t 'Checkout branch/tag for git URL addon sources' 'Checkout branch/tag for git URL addon sources')"
     echo "  --addon-skip           $(t 'Disable addon installation' 'Disable addon installation')"
     echo "  --list-addons          $(t 'List addon manifest targets' 'List addon manifest targets')"
     echo "  --skip-source-health   $(t 'Skip source health gate' 'Skip source health gate')"
