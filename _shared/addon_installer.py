@@ -161,9 +161,10 @@ def _string_list(value: Any, field: str, path: Path) -> tuple[str, ...]:
 def _safe_child_path(root: Path, relative_path: str, field: str, manifest_path: Path) -> Path:
     if Path(relative_path).is_absolute():
         raise AddonManifestError(f"{manifest_path}: {field} must be relative")
+    root_resolved = root.resolve()
     resolved = (root / relative_path).resolve()
     try:
-        resolved.relative_to(root)
+        resolved.relative_to(root_resolved)
     except ValueError as exc:
         raise AddonManifestError(f"{manifest_path}: {field} escapes addon source") from exc
     return resolved

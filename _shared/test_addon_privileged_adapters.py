@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -300,6 +301,38 @@ class PrivilegedAdapterSidecarTest(unittest.TestCase):
             self.assertEqual(entry["metadata"]["event"], "post_tool_use")
             self.assertEqual(entry["metadata"]["hook_id"], "p5-hook")
             self.assertEqual(entry["content_hash"], hash_utils.hash_target(entry["target"], "copy"))
+
+    def test_copy_mode_adapter_script_resolution_allows_symlinked_skill_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = _make_adapter_addon(root)
+            targets = ai.load_addon_targets(
+                [src],
+                platform="codex",
+                privileged_adapter_allowlist=_adapter_allowlist(),
+            )
+            real_skills = root / "real" / "skills"
+            real_dest = real_skills / "pilot-skill"
+            real_dest.mkdir(parents=True)
+            for child in (src / "addons" / "pilot" / "skill").iterdir():
+                target = real_dest / child.name
+                if child.is_dir():
+                    shutil.copytree(child, target)
+                else:
+                    target.write_text(child.read_text(encoding="utf-8"), encoding="utf-8")
+            alias_root = root / "alias"
+            alias_root.symlink_to(root / "real", target_is_directory=True)
+
+            hooks = ai.iter_privileged_adapter_hook_specs(
+                targets,
+                skills_dir=alias_root / "skills",
+                privileged_adapter_allowlist=_adapter_allowlist(),
+            )
+
+            self.assertEqual(len(hooks), 1)
+            script = Path(hooks[0]["script"])
+            self.assertTrue(script.is_file())
+            self.assertIn("adapters/p5_demo.py", script.as_posix())
 
 
 class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
