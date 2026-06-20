@@ -36,6 +36,8 @@
 
 Ghost-ALICE installer는 hook file이 있다는 것만으로 충분하다고 보지 않는다. hook payload와 platform permission policy도 current repo contract와 맞아야 한다. 오래된 hook entry가 남아 있어도 runtime payload가 바뀌면 installer는 managed entry를 update한다. hook 존재 여부와 `agent_visibility.profile`은 별개 문제다. profile은 user-facing message surface만 제어할 뿐, missing이나 drift 판정을 누그러뜨리지 않는다.
 
+Base session-gate contract는 core behavior를 설명한다. Official privileged adapter addon은 선언된 hook event 이후 behavior를 확장할 수 있지만, addon-specific queue, task schema, continuation policy는 addon에 남고 addon-owned smoke evidence가 필요하다.
+
 Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따른다. 이 procedure는 Claude Code, Codex, Antigravity에 같은 README first 10 lines request를 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission behavior를 관찰한다.
 
 | Platform | Runtime surface | Contract | Regression owner |

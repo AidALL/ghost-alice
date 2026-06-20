@@ -19,11 +19,13 @@ from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
+sys.path.insert(0, str(REPO_ROOT / "merge-companion" / "scripts"))
 
 import addon_registry as reg  # noqa: E402
 import install_hooks  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import hash_utils  # noqa: E402
+from snapshot import capture_snapshot, load_snapshot  # noqa: E402
 
 
 class UninstallTestBase(unittest.TestCase):
@@ -142,6 +144,126 @@ class CoreUninstallTest(UninstallTestBase):
         self._uninstall("alpha")
         names = {t["target_name"] for t in json.loads(state.read_text())["targets"]}
         self.assertEqual(names, {"task-router"})  # alpha pruned from install-state, core kept
+
+    def test_prunes_pending_snapshot_and_deleted_manifest_entries_after_copy_mode_addon_removal(self):
+        self.skills.mkdir(parents=True, exist_ok=True)
+        dest = self.skills / "copy-addon-skill"
+        adapters = dest / "adapters"
+        adapters.mkdir(parents=True)
+        skill_file = dest / "SKILL.md"
+        adapter_file = adapters / "adapter.py"
+        skill_file.write_text("skill\n", encoding="utf-8")
+        adapter_file.write_text("adapter\n", encoding="utf-8")
+        recorded = hash_utils.hash_target(str(dest), "copy")
+        self._write_sidecar("copy-addon", [{
+            "kind": "skill", "name": "copy-addon-skill", "target": str(dest), "ownership": "addon",
+            "install_mode": "copy", "content_hash": recorded, "marker": "", "metadata": {}}])
+        pending_dir = self.root / ".ghost-alice" / "pending-merges" / "claude"
+        snapshot_path = pending_dir / "snapshot.json"
+        manifest_path = pending_dir / "manifest.json"
+        capture_snapshot(snapshot_path, [skill_file, adapter_file], "claude", skills_dir=self.skills)
+        manifest_path.write_text(json.dumps({
+            "version": 1,
+            "platform": "claude",
+            "entries": [
+                {
+                    "id": "pending-copy-addon-skill",
+                    "platform": "claude",
+                    "skill": "copy-addon-skill",
+                    "source_path": str(skill_file),
+                    "backup_path": None,
+                    "snapshot_hash": "old",
+                    "current_hash": None,
+                    "change_kind": "deleted",
+                    "relative_path": "copy-addon-skill/SKILL.md",
+                    "decided": False,
+                    "decision": None,
+                    "created_at": "t",
+                },
+                {
+                    "id": "pending-user-skill",
+                    "platform": "claude",
+                    "skill": "user-skill",
+                    "source_path": str(self.skills / "user-skill" / "SKILL.md"),
+                    "backup_path": None,
+                    "snapshot_hash": "old",
+                    "current_hash": None,
+                    "change_kind": "deleted",
+                    "relative_path": "user-skill/SKILL.md",
+                    "decided": False,
+                    "decision": None,
+                    "created_at": "t",
+                },
+            ],
+        }), encoding="utf-8")
+
+        result = self._uninstall("copy-addon")
+        snapshot = load_snapshot(snapshot_path)
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["status"], "removed")
+        self.assertFalse(any("copy-addon-skill" in path for path in snapshot["files"]))
+        self.assertFalse(any("copy-addon-skill" in path for path in snapshot["file_records"]))
+        entries = {entry["id"]: entry for entry in manifest["entries"]}
+        self.assertTrue(entries["pending-copy-addon-skill"]["decided"])
+        self.assertEqual(entries["pending-copy-addon-skill"]["decision"], "addon-uninstalled")
+        self.assertFalse(entries["pending-user-skill"]["decided"])
+
+    def test_non_skill_target_relative_name_does_not_decide_skill_pending_entry(self):
+        self.skills.mkdir(parents=True, exist_ok=True)
+        commands = self.root / ".claude" / "commands"
+        resources = self.root / ".ghost-alice" / "resources" / "claude"
+        commands.mkdir(parents=True, exist_ok=True)
+        resources.mkdir(parents=True, exist_ok=True)
+        command_target = commands / "task-router.md"
+        command_target.write_text("command\n", encoding="utf-8")
+        skill_file = self.skills / "task-router" / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text("skill\n", encoding="utf-8")
+        self._write_sidecar("command-addon", [{
+            "kind": "command",
+            "name": "task-router",
+            "target": str(command_target),
+            "ownership": "addon",
+            "install_mode": "copy",
+            "content_hash": hash_utils.hash_target(str(command_target), "copy"),
+            "marker": "",
+            "metadata": {},
+        }])
+        pending_dir = self.root / ".ghost-alice" / "pending-merges" / "claude"
+        manifest_path = pending_dir / "manifest.json"
+        pending_dir.mkdir(parents=True)
+        manifest_path.write_text(json.dumps({
+            "version": 1,
+            "platform": "claude",
+            "entries": [
+                {
+                    "id": "pending-skill-task-router",
+                    "platform": "claude",
+                    "skill": "task-router",
+                    "source_path": str(skill_file),
+                    "backup_path": None,
+                    "snapshot_hash": "old",
+                    "current_hash": None,
+                    "change_kind": "deleted",
+                    "relative_path": "task-router/SKILL.md",
+                    "decided": False,
+                    "decision": None,
+                    "created_at": "t",
+                },
+            ],
+        }), encoding="utf-8")
+
+        result = self._uninstall(
+            "command-addon",
+            allowed_roots=[self.skills, commands, resources],
+        )
+        entry = json.loads(manifest_path.read_text(encoding="utf-8"))["entries"][0]
+
+        self.assertEqual(result["status"], "removed")
+        self.assertFalse(command_target.exists())
+        self.assertFalse(entry["decided"])
+        self.assertIsNone(entry["decision"])
 
     def test_dry_run_removes_nothing(self):
         self._install("alpha", ["one"])
