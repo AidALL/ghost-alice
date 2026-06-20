@@ -107,7 +107,7 @@ In Ghost-ALICE OS, a skill is not just a prompt fragment. It is a governed capab
 
 Each skill is managed against Ghost-ALICE Phase 1-5 compliance checks. The upstream Agent Skills format provides the packaging substrate; Ghost-ALICE OS adds session-level governance, routing, verification, lifecycle control, and audit traces.
 
-Ghost-ALICE OS is open to third-party capabilities. Anyone can package their own skills as an addon and install them with `bash install.sh --addon-source <path>`, so the platform grows with community and tenant skills instead of a fixed allowlist. An addon ships an `addons-manifest.json` index plus a per-addon `addon.json` that lists its skills, and an addon skill name must not collide with a core skill. The addon path resolves and lists addon entries, then installs addon skill directories for the selected platform; third-party addon quality still depends on the addon manifest, skill contents, and the same governance checks that apply to core skills. The [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/addon-authoring) documents the manifest format and a worked example.
+Ghost-ALICE OS is open to third-party capabilities. Official addons can use a short installer alias, for example `bash install.sh --addon autopilot`, and the installer applies it to detected Claude Code/Codex targets unless `--platform` narrows the target. Anyone can package their own skills as an addon and install them with `bash install.sh --addon-source <path-or-url>`, so the platform grows with community and tenant skills instead of a fixed allowlist. An addon ships an `addons-manifest.json` index plus a per-addon `addon.json` that lists its skills, and an addon skill name must not collide with a core skill. The addon path resolves and lists addon entries, then installs addon skill directories for the selected platform; third-party addon quality still depends on the addon manifest, skill contents, and the same governance checks that apply to core skills. The [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/addon-authoring) documents the manifest format and a worked example.
 
 ## Installation And Update Guide
 
@@ -159,7 +159,7 @@ Release validation:
 python3 scripts/validate_public_surfaces.py
 ```
 
-The validator checks that public docs, command wrappers, and catalog references stay aligned with `skill-catalog/skills.json`. Domain and tenant capabilities are optional addon installs through `--addon-source`.
+The validator checks that public docs, command wrappers, and catalog references stay aligned with `skill-catalog/skills.json`. Official addons use short aliases such as `--addon autopilot`; domain and tenant capabilities use `--addon-source`.
 
 The current `skill-catalog/skills.json` snapshot contains top-level 10 skills and 14 coding-convention sub-skills, total 24.
 

@@ -12,6 +12,7 @@
 #   bash install.sh --uninstall  # Full uninstall for all detected Ghost-ALICE managed footprint
 #   bash install.sh --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
 #   bash install.sh --list       # List available skills
+#   bash install.sh --addon autopilot  # Install the official autopilot addon
 #   bash install.sh --addon-source ./ghost-alice-addons --list-addons
 #   bash install.sh --status     # Check current install status
 
@@ -324,6 +325,58 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+official_addon_source() {
+  local name="$1"
+  case "$name" in
+    autopilot|autopilot-mode)
+      printf '%s\n' "${GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE:-https://github.com/AidALL/ghost-alice-autopilot.git}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+args_request_uninstall() {
+  local arg
+  for arg in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$arg" in
+      --uninstall|--remove|-u)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+normalize_official_addon_shortcuts() {
+  args_request_uninstall && return 0
+  local normalized=()
+  local i=0
+  local addon_name addon_source
+  while [ "$i" -lt "${#ARGS[@]}" ]; do
+    if [ "${ARGS[$i]}" = "--addon" ]; then
+      i=$((i + 1))
+      if [ "$i" -ge "${#ARGS[@]}" ]; then
+        error "$(t '--addon requires a value (autopilot)' '--addon requires a value (autopilot)')"
+        return 1
+      fi
+      addon_name="${ARGS[$i]}"
+      addon_source="$(official_addon_source "$addon_name")" || {
+        error "$(t "Unknown official addon: ${addon_name} (supported: autopilot)" "Unknown official addon: ${addon_name} (supported: autopilot)")"
+        return 1
+      }
+      ADDON_SOURCES+=("$addon_source")
+    else
+      normalized+=("${ARGS[$i]}")
+    fi
+    i=$((i + 1))
+  done
+  ARGS=(${normalized[@]+"${normalized[@]}"})
+}
+
+normalize_official_addon_shortcuts || exit 1
+
 # Default install: when no platform is specified, install to all detected tools.
 # Plain full uninstall also detects platform homes and install-state manifests for full cleanup.
 # Read-only, diagnostics, and partial removal commands keep the single-platform default (claude).
@@ -580,6 +633,7 @@ case "${ARGS[0]:-}" in
   --help|-h)
     echo "Usage:"
     echo "  bash install.sh                              # $(t 'Install to detected AI tools' 'Install to detected AI tools')"
+    echo "  bash install.sh --addon autopilot            # $(t 'Install official autopilot addon to detected AI tools' 'Install official autopilot addon to detected AI tools')"
     echo "  bash install.sh --platform claude            # $(t 'Install only to Claude Code' 'Install only to Claude Code')"
     echo "  bash install.sh --platform codex             # $(t 'Install to Codex' 'Install to Codex')"
     echo ""
@@ -594,6 +648,7 @@ case "${ARGS[0]:-}" in
     echo "  --doctor               $(t 'Run install diagnostics' 'Run install diagnostics')"
     echo "  --repair               $(t 'Re-provision missing managed targets (never overwrites user-owned slots)' 'Re-provision missing managed targets (never overwrites user-owned slots)')"
     echo "  --verbose, -v          $(t 'Show per-target install details' 'Show per-target install details')"
+    echo "  --addon autopilot     $(t 'Install official autopilot addon; --platform is optional' 'Install official autopilot addon; --platform is optional')"
     echo ""
     echo "$(t 'Removal commands:' 'Removal commands:')"
     echo "  --uninstall, -u        $(t 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets' 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets')"

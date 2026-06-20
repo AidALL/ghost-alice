@@ -74,6 +74,17 @@ def _python_311_or_newer() -> str | None:
     return None
 
 
+def _isolated_shell_install_env(temp_home: str | Path) -> dict[str, str]:
+    home = Path(temp_home)
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
+    env["CODEX_HOME"] = str(home / ".codex")
+    env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+    env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = str(FIXTURE_ROOT)
+    return env
+
+
 class AddonInstallerTest(unittest.TestCase):
     def test_fixture_manifest_discovers_noop_skill_target(self) -> None:
         from addon_installer import load_addon_targets
@@ -364,11 +375,114 @@ class AddonInstallerTest(unittest.TestCase):
             installed_skill = Path(temp_home) / ".claude" / "skills" / "task-router" / "SKILL.md"
             self.assertTrue(installed_skill.exists(), msg=result.stderr + result.stdout)
 
+    def test_shell_official_addon_alias_resolves_source(self) -> None:
+        bash = _find_test_bash()
+        if bash is None:
+            self.skipTest("Git Bash is required for install.sh")
+        if _python_311_or_newer() is None:
+            self.skipTest("install.sh requires Python 3.11+")
+
+        env = os.environ.copy()
+        env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = str(FIXTURE_ROOT)
+        result = subprocess.run(
+            [
+                bash,
+                str(REPO_ROOT / "install.sh"),
+                "--platform",
+                "claude",
+                "--addon",
+                "autopilot",
+                "--list-addons",
+            ],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            timeout=60,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+        self.assertIn("noop (addon:noop)", result.stdout)
+
+    def test_shell_official_addon_alias_uses_auto_platform_detection(self) -> None:
+        bash = _find_test_bash()
+        if bash is None:
+            self.skipTest("Git Bash is required for install.sh")
+        if _python_311_or_newer() is None:
+            self.skipTest("install.sh requires Python 3.11+")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            Path(temp_home, ".claude").mkdir()
+            env = _isolated_shell_install_env(temp_home)
+            result = subprocess.run(
+                [
+                    bash,
+                    str(REPO_ROOT / "install.sh"),
+                    "--addon",
+                    "autopilot",
+                    "--skip-source-health",
+                    "task-router",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=60,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            installed_addon = Path(temp_home) / ".claude" / "skills" / "noop" / "SKILL.md"
+            self.assertTrue(installed_addon.exists(), msg=result.stderr + result.stdout)
+            self.assertIn("Platform: claude", result.stdout)
+            self.assertFalse((Path(temp_home) / ".codex" / "hooks.json").exists())
+
+    def test_shell_official_addon_alias_installs_to_codex(self) -> None:
+        bash = _find_test_bash()
+        if bash is None:
+            self.skipTest("Git Bash is required for install.sh")
+        if _python_311_or_newer() is None:
+            self.skipTest("install.sh requires Python 3.11+")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            Path(temp_home, ".codex").mkdir()
+            env = _isolated_shell_install_env(temp_home)
+            result = subprocess.run(
+                [
+                    bash,
+                    str(REPO_ROOT / "install.sh"),
+                    "--addon",
+                    "autopilot",
+                    "--skip-source-health",
+                    "task-router",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=60,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            installed_addon = Path(temp_home) / ".agents" / "skills" / "noop" / "SKILL.md"
+            self.assertTrue(installed_addon.exists(), msg=result.stderr + result.stdout)
+            self.assertIn("Platform: codex", result.stdout)
+            self.assertFalse((Path(temp_home) / ".claude" / "settings.json").exists())
+
     def test_install_entrypoints_expose_addon_options(self) -> None:
         install_sh = REPO_ROOT.joinpath("install.sh").read_text(encoding="utf-8")
         install_ps1 = REPO_ROOT.joinpath("install.ps1").read_text(encoding="utf-8-sig")
 
         self.assertIn("--addon-source", install_sh)
+        self.assertIn("--addon autopilot", install_sh)
         self.assertIn("--addon-skip", install_sh)
         self.assertIn("--list-addons", install_sh)
         self.assertIn("[string[]]$AddonSource", install_ps1)
