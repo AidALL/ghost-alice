@@ -147,6 +147,86 @@ collect_addon_targets() {
   "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" "${args[@]}" --platform "$PLATFORM" --format shell
 }
 
+_auto_platform_target_keys() {
+  local target_platform="$1"
+  shift
+  local saved_platform="$PLATFORM"
+  local skill targets sub_name sub_path addon_targets_text addon_target a_name a_path a_id
+
+  PLATFORM="$target_platform"
+  [ -d "${SCRIPT_DIR}/_shared" ] && printf '%s\n' "support:_shared"
+
+  for skill in "$@"; do
+    targets="$(expand_skill_targets "$skill")"
+    while IFS='|' read -r sub_name sub_path; do
+      [ -n "$sub_name" ] || continue
+      printf 'skill:%s\n' "$sub_name"
+    done <<< "$targets"
+  done
+
+  if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
+    if ! addon_targets_text="$(collect_addon_targets)"; then
+      PLATFORM="$saved_platform"
+      return 1
+    fi
+    while IFS='|' read -r a_name a_path a_id; do
+      [ -n "$a_name" ] || continue
+      printf 'skill:%s\n' "$a_name"
+    done <<< "$addon_targets_text"
+  fi
+
+  PLATFORM="$saved_platform"
+}
+
+count_auto_common_targets() {
+  local platforms=()
+  while [ "$#" -gt 0 ] && [ "${1:-}" != "--" ]; do
+    platforms+=("$1")
+    shift
+  done
+  [ "${1:-}" = "--" ] && shift
+
+  if [ "${#platforms[@]}" -eq 0 ]; then
+    printf '0\n'
+    return 0
+  fi
+
+  local common_file keys_file next_file
+  common_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-common-targets.XXXXXX")" || return 1
+  keys_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-platform-targets.XXXXXX")" || {
+    rm -f "$common_file"
+    return 1
+  }
+  next_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-next-targets.XXXXXX")" || {
+    rm -f "$common_file" "$keys_file"
+    return 1
+  }
+
+  local first=1 platform
+  for platform in "${platforms[@]}"; do
+    if ! _auto_platform_target_keys "$platform" "$@" | LC_ALL=C sort -u >"$keys_file"; then
+      rm -f "$common_file" "$keys_file" "$next_file"
+      return 1
+    fi
+    if [ "$first" = "1" ]; then
+      cp "$keys_file" "$common_file"
+      first=0
+    else
+      comm -12 "$common_file" "$keys_file" >"$next_file"
+      mv "$next_file" "$common_file"
+      next_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-next-targets.XXXXXX")" || {
+        rm -f "$common_file" "$keys_file"
+        return 1
+      }
+    fi
+  done
+
+  local count
+  count="$(wc -l <"$common_file" | tr -d '[:space:]')"
+  rm -f "$common_file" "$keys_file" "$next_file"
+  printf '%s\n' "$count"
+}
+
 iter_install_targets() {
   local skill targets sub_name sub_path addon_target a_name a_path a_id
   for skill in "$@"; do
