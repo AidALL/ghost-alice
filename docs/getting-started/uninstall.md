@@ -1,16 +1,28 @@
 # Uninstall Cleanup Procedure
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/uninstall.md)
+Language: English | [Korean](../ko/getting-started/uninstall.md)
 
-Ghost-ALICE uninstall is driven by the `install-state` manifest written by the installer. The goal is not to guess how to restore the whole system. The uninstall path removes or restores only the entries that the Ghost-ALICE installer recorded as installed or changed.
+Ghost-ALICE uninstall is driven by the `install-state` manifest written by the installer. The uninstall path removes or restores only entries that the Ghost-ALICE installer recorded as installed or changed.
+
 ## Contents
 
+- [Choose The Removal Scope](#choose-the-removal-scope)
 - [Basic Commands](#basic-commands)
-- [Source of Truth Files](#source-of-truth-files)
+- [Source Of Truth Files](#source-of-truth-files)
 - [Cleanup Order](#cleanup-order)
 - [Recovery Principles](#recovery-principles)
 - [system_env_changes](#systemenvchanges)
 
+## Choose The Removal Scope
+
+| Goal | Command path | Notes |
+| --- | --- | --- |
+| Remove all managed Ghost-ALICE surfaces | `bash install.sh --uninstall` | Full uninstall across recorded targets |
+| Remove one platform | `bash install.sh --platform codex --uninstall` | Keeps other platform installs |
+| Remove selected skills | `bash install.sh --platform codex --uninstall task-router` | Keeps hooks and shared assets when other skills remain |
+| Remove one official addon | Follow that addon's repository documentation | Keeps addon hook and sidecar cleanup aligned |
+
+Addon-specific removal is different from selected skill removal. A full uninstall removes the managed Ghost-ALICE footprint, including installed addon sidecar cleanup. If you want to remove only one official addon, follow that addon's repository documentation so hook and sidecar cleanup stay aligned with the addon package.
 
 ## Basic Commands
 
@@ -21,7 +33,7 @@ bash install.sh --uninstall
 ```
 
 ```powershell
-.\install.ps1 -Uninstall
+.\install.cmd -Uninstall
 ```
 
 ```cmd
@@ -35,7 +47,7 @@ bash install.sh --platform codex --uninstall
 ```
 
 ```powershell
-.\install.ps1 -Platform codex -Uninstall
+.\install.cmd -Platform codex -Uninstall
 ```
 
 To remove only selected skills, provide both the platform and skill names. If other Ghost-ALICE skills remain, hooks and `_shared` stay installed.
@@ -45,10 +57,10 @@ bash install.sh --platform codex --uninstall task-router
 ```
 
 ```powershell
-.\install.ps1 -Platform codex -Uninstall -Skills task-router
+.\install.cmd -Platform codex -Uninstall -Skills task-router
 ```
 
-## Source of Truth Files
+## Source Of Truth Files
 
 Per-platform manifests live at:
 
