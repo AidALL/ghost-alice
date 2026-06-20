@@ -47,13 +47,22 @@ install.cmd
 Official addons use short aliases and install to detected Claude Code/Codex targets by default:
 
 ```bash
+cd ~/ghost-alice
 bash install.sh --addon autopilot
 ```
+
+Run this from the Ghost-ALICE core checkout. Normal users do not clone the autopilot addon repository or run an installer inside that repository; the core installer fetches the official addon package.
 
 To install the official addon for one platform only, add `--platform`:
 
 ```bash
 bash install.sh --platform codex --addon autopilot
+```
+
+Windows PowerShell/CMD use the same official alias from the core checkout:
+
+```powershell
+.\install.cmd --addon autopilot
 ```
 
 Custom, tenant, or local development addons still use `--addon-source PATH|URL`:
@@ -224,8 +233,8 @@ On the next Claude/Codex session, if any pending entries exist, `merge-companion
 | Show install state | `bash install.sh --status` | `.\install.cmd -Status` | `install.cmd -Status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd -Doctor` | `install.cmd -Doctor` |
 | Safe source update | `bash install.sh --update-source` | `.\install.cmd -UpdateSource` | `install.cmd -UpdateSource` |
-| Install official autopilot addon | `bash install.sh --addon autopilot` | not yet supported | not yet supported |
-| Install custom addon source | `bash install.sh --addon-source /path/to/addon-repo` | not yet supported | not yet supported |
+| Install official autopilot addon | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | `install.cmd --addon autopilot` |
+| Install custom addon source | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd -AddonSource C:\path\addon-repo` | `install.cmd -AddonSource C:\path\addon-repo` |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd -Skills task-router,verification-before-completion` | `install.cmd -Skills task-router,verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |

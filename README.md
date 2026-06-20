@@ -123,6 +123,15 @@ cd ~/ghost-alice
 bash install.sh
 ```
 
+Official autopilot addon:
+
+```bash
+cd ~/ghost-alice
+bash install.sh --addon autopilot
+```
+
+Run addon installation from the Ghost-ALICE core checkout. The autopilot repository is an addon package consumed by the core installer; normal users do not clone that repository or run an installer inside it. Windows PowerShell/CMD use the same official alias through `.\install.cmd --addon autopilot` or `install.cmd --addon autopilot`.
+
 Windows PowerShell / CMD:
 
 ```powershell

@@ -172,14 +172,147 @@ function Expand-SkillTargets {
     return $targets
 }
 
+function Resolve-OfficialAddonSource {
+    param([string]$Name)
+    switch ($Name) {
+        "autopilot" { return $(if ($env:GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE) { $env:GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE } else { "https://github.com/AidALL/ghost-alice-autopilot.git" }) }
+        "autopilot-mode" { return $(if ($env:GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE) { $env:GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE } else { "https://github.com/AidALL/ghost-alice-autopilot.git" }) }
+        default {
+            Write-Err ("Unknown official addon: {0} (supported: autopilot)" -f $Name) ("Unknown official addon: {0} (supported: autopilot)" -f $Name)
+            throw "unknown official addon - aborting installation"
+        }
+    }
+}
+
+function Resolve-OfficialAddonShortcuts {
+    if ($AddonSkip -or -not $Addon -or $Addon.Count -eq 0) {
+        return
+    }
+
+    $resolved = @()
+    foreach ($name in @($Addon)) {
+        $resolved += Resolve-OfficialAddonSource -Name $name
+    }
+    $current = @()
+    foreach ($source in @($AddonSource)) {
+        if ($source) {
+            $current += $source
+        }
+    }
+    $script:AddonSource = $current + $resolved
+}
+
+function Test-AddonSourceIsGitUrl {
+    param([string]$Source)
+    return (
+        $Source -like "http://*" -or
+        $Source -like "https://*" -or
+        $Source -like "ssh://*" -or
+        $Source -like "file://*" -or
+        $Source -like "git@*:*"
+    )
+}
+
+function Get-AddonSelectedRef {
+    if (-not $AddonTag -or $AddonTag.Count -eq 0) {
+        return ""
+    }
+    if ($AddonTag.Count -gt 1) {
+        Write-Err "-AddonTag accepts one branch/tag for git URL addon sources."
+        throw "addon tag selection failed - aborting installation"
+    }
+    return [string]$AddonTag[0]
+}
+
+function Get-AddonSourceCacheKey {
+    param(
+        [string]$Source,
+        [string]$Ref
+    )
+    $payload = $Source + [char]0 + $Ref
+    $bytes = [Text.Encoding]::UTF8.GetBytes($payload)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $hash = $sha.ComputeHash($bytes)
+    } finally {
+        $sha.Dispose()
+    }
+    return (($hash | ForEach-Object { $_.ToString("x2") }) -join "").Substring(0, 24)
+}
+
+function Copy-AddonGitSourceToCache {
+    param(
+        [string]$Source,
+        [string]$Ref
+    )
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if (-not $git) {
+        Write-Err "git not found; cannot clone addon source URL"
+        throw "git not found - aborting addon source preparation"
+    }
+
+    $cacheRoot = if ($env:GHOST_ALICE_ADDON_SOURCE_CACHE_DIR) {
+        $env:GHOST_ALICE_ADDON_SOURCE_CACHE_DIR
+    } else {
+        Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "addon-source-cache"
+    }
+    New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
+    $key = Get-AddonSourceCacheKey -Source $Source -Ref $Ref
+    $dest = Join-Path $cacheRoot $key
+    $tmp = "$dest.tmp.$PID"
+    Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+
+    $cloneArgs = @("clone", "--quiet", "--depth", "1")
+    if ($Ref) {
+        $cloneArgs += @("--branch", $Ref)
+    }
+    $cloneArgs += @($Source, $tmp)
+    & git @cloneArgs
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Err ("Addon source clone failed: {0}" -f $Source) ("Addon source clone failed: {0}" -f $Source)
+        throw "addon source clone failed - aborting installation"
+    }
+
+    Remove-Item -LiteralPath $dest -Recurse -Force -ErrorAction SilentlyContinue
+    Move-Item -LiteralPath $tmp -Destination $dest
+    return $dest
+}
+
+function Prepare-AddonSources {
+    if ($script:AddonSourcesPrepared) {
+        return
+    }
+    if ($AddonSkip -or -not $AddonSource -or $AddonSource.Count -eq 0) {
+        $script:AddonSourcesPrepared = $true
+        return
+    }
+
+    $ref = Get-AddonSelectedRef
+    $prepared = @()
+    foreach ($source in @($AddonSource)) {
+        if (-not $source) {
+            continue
+        }
+        if (Test-AddonSourceIsGitUrl -Source $source) {
+            $prepared += Copy-AddonGitSourceToCache -Source $source -Ref $ref
+        } else {
+            if ($ref) {
+                Write-Err "-AddonTag can only be used with git URL addon sources; check out local sources yourself."
+                throw "addon tag cannot be applied to local source - aborting installation"
+            }
+            $prepared += $source
+        }
+    }
+    $script:AddonSource = $prepared
+    $script:AddonSourcesPrepared = $true
+}
+
 function Get-AddonTargets {
     if ($AddonSkip -or -not $AddonSource -or $AddonSource.Count -eq 0) {
         return @()
     }
-    if ($AddonTag -and $AddonTag.Count -gt 0) {
-        Write-Err "-AddonTag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with -AddonSource."
-        throw "addon tag checkout is not supported - aborting installation"
-    }
+    Prepare-AddonSources
 
     $py = Find-PythonExe
     if (-not $py) {

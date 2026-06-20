@@ -84,7 +84,7 @@ final response `[completion-check]`가 `skill-call: verification-before-completi
 | Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible. analyzer가 있으면 `PSUseCompatibleSyntax` static analysis가 PS5-incompatible syntax를 잡는다 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | Windows PowerShell 7.4 LTS cleanup | `install.ps1`가 latest 7.6.x MSI를 resolve하기 전에 product-code scoped `msiexec.exe /x ... /quiet /norestart`로 detected PowerShell 7.4.x MSI products를 제거한다. product code 없는 non-MSI entries는 skip하고, 7.5/7.6+, Windows PowerShell 5.1, unrelated products는 제거하지 않는다 | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
 | PowerShell 7 | parser-compatible and install flow accepts Python 3.11+ | local/CI PowerShell smoke |
-| CMD wrapper | `install.ps1`에 delegates하고 arguments를 forward하며 UTF-8을 강제한다 | `scripts.tests.test_install_cmd_wrapper` |
+| CMD wrapper | `install.ps1`에 delegates하고 arguments를 forward하며 UTF-8을 강제한다. official `--addon autopilot` alias는 PowerShell binding과 addon source preparation을 거쳐 유지한다 | `scripts.tests.test_install_cmd_wrapper` |
 
 ## CI Commands
 

@@ -47,13 +47,22 @@ install.cmd
 공식 애드온은 짧은 alias를 사용하며, 기본값은 감지된 Claude Code/Codex 대상 전체 설치다.
 
 ```bash
+cd ~/ghost-alice
 bash install.sh --addon autopilot
 ```
+
+이 명령은 Ghost-ALICE core checkout에서 실행한다. 일반 사용자는 autopilot addon repository를 직접 clone하지 않는다. 그 repository 안에서 installer도 실행하지 않는다. core installer가 공식 addon package를 가져온다.
 
 한 플랫폼에만 설치하려면 `--platform`을 추가한다.
 
 ```bash
 bash install.sh --platform codex --addon autopilot
+```
+
+Windows PowerShell/CMD도 같은 official alias를 사용한다. core checkout에서 실행한다.
+
+```powershell
+.\install.cmd --addon autopilot
 ```
 
 custom, tenant, local development 애드온은 계속 `--addon-source PATH|URL`을 사용한다.
@@ -223,8 +232,8 @@ update가 user-modified installed files를 감지하면 installer는 후보를 p
 | Show install state | `bash install.sh --status` | `.\install.cmd -Status` | `install.cmd -Status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd -Doctor` | `install.cmd -Doctor` |
 | Safe source update | `bash install.sh --update-source` | `.\install.cmd -UpdateSource` | `install.cmd -UpdateSource` |
-| Install official autopilot addon | `bash install.sh --addon autopilot` | 아직 지원하지 않음 | 아직 지원하지 않음 |
-| Install custom addon source | `bash install.sh --addon-source /path/to/addon-repo` | 아직 지원하지 않음 | 아직 지원하지 않음 |
+| Install official autopilot addon | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | `install.cmd --addon autopilot` |
+| Install custom addon source | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd -AddonSource C:\path\addon-repo` | `install.cmd -AddonSource C:\path\addon-repo` |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd -Skills task-router,verification-before-completion` | `install.cmd -Skills task-router,verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |

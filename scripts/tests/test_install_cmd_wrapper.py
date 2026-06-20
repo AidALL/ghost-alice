@@ -1,3 +1,7 @@
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -7,6 +11,7 @@ INSTALL_CMD = REPO_ROOT / "install.cmd"
 INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALLER_INSTALL_PS1 = REPO_ROOT / "installer_lib" / "install.ps1"
 INSTALLER_PYTHON_RUNTIME_PS1 = REPO_ROOT / "installer_lib" / "python_runtime.ps1"
+INSTALLER_TARGETS_PS1 = REPO_ROOT / "installer_lib" / "targets.ps1"
 INSTALLER_UNINSTALL_PS1 = REPO_ROOT / "installer_lib" / "uninstall.ps1"
 README = REPO_ROOT / "README.md"
 README_KO = REPO_ROOT / "README_ko.md"
@@ -14,6 +19,7 @@ INSTALLATION_DOC = REPO_ROOT / "docs" / "getting-started" / "installation.md"
 INSTALLATION_DOC_KO = REPO_ROOT / "docs" / "ko" / "getting-started" / "installation.md"
 TROUBLESHOOTING_DOC = REPO_ROOT / "docs" / "getting-started" / "troubleshooting.md"
 TROUBLESHOOTING_DOC_KO = REPO_ROOT / "docs" / "ko" / "getting-started" / "troubleshooting.md"
+ADDON_FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 
 
 class InstallCmdWrapperTest(unittest.TestCase):
@@ -101,6 +107,97 @@ class InstallCmdWrapperTest(unittest.TestCase):
         self.assertNotIn("Run .\\install.ps1 -List", install_runtime)
         self.assertNotIn("rerun install.ps1", install_runtime)
         self.assertNotIn("rerun install.ps1", python_runtime)
+
+    def test_powershell_declares_official_addon_alias_and_source_preparation(self) -> None:
+        install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
+        targets_runtime = INSTALLER_TARGETS_PS1.read_text(encoding="utf-8-sig")
+
+        self.assertIn("[string[]]$Addon", install_ps1)
+        self.assertIn("Resolve-OfficialAddonShortcuts", targets_runtime)
+        self.assertIn("Prepare-AddonSources", targets_runtime)
+        self.assertIn("GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE", targets_runtime)
+        self.assertIn("addon-source-cache", targets_runtime)
+
+    def test_powershell_addon_alias_lists_official_addon_targets(self) -> None:
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            self.skipTest("PowerShell executable is required for addon alias binding test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            home = tmp_path / "home"
+            home.mkdir()
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "APPDATA": str(tmp_path / "AppData" / "Roaming"),
+                    "LOCALAPPDATA": str(tmp_path / "AppData" / "Local"),
+                    "PYTHONUTF8": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE": str(ADDON_FIXTURE),
+                }
+            )
+            result = subprocess.run(
+                [
+                    pwsh,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(INSTALL_PS1),
+                    "--addon",
+                    "autopilot",
+                    "-ListAddons",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, msg=combined)
+        self.assertNotIn("parameter name 'addon' is ambiguous", combined)
+        self.assertIn("noop (addon:noop)", combined)
+
+    def test_docs_explain_autopilot_addon_installs_from_core_checkout(self) -> None:
+        expectations = {
+            README: [
+                "Official autopilot addon:",
+                "cd ~/ghost-alice",
+                "bash install.sh --addon autopilot",
+                "The autopilot repository is an addon package consumed by the core installer",
+            ],
+            README_KO: [
+                "Official autopilot addon:",
+                "cd ~/ghost-alice",
+                "bash install.sh --addon autopilot",
+                "autopilot repository는 core installer가 소비하는 addon package",
+            ],
+            INSTALLATION_DOC: [
+                "Run this from the Ghost-ALICE core checkout",
+                "Normal users do not clone the autopilot addon repository",
+                "bash install.sh --addon autopilot",
+                "Windows PowerShell/CMD use the same official alias",
+            ],
+            INSTALLATION_DOC_KO: [
+                "Ghost-ALICE core checkout에서 실행한다",
+                "일반 사용자는 autopilot addon repository를 직접 clone하지 않는다",
+                "bash install.sh --addon autopilot",
+                "Windows PowerShell/CMD도 같은 official alias를 사용한다",
+            ],
+        }
+
+        for path, snippets in expectations.items():
+            with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
+                text = path.read_text(encoding="utf-8-sig")
+                for snippet in snippets:
+                    self.assertIn(snippet, text)
 
 
 if __name__ == "__main__":

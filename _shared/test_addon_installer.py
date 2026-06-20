@@ -47,6 +47,23 @@ def _find_test_bash() -> str | None:
     return None
 
 
+def _find_test_pwsh() -> str | None:
+    for candidate in (shutil.which("pwsh"), shutil.which("powershell")):
+        if not candidate:
+            continue
+        probe = subprocess.run(
+            [candidate, "-NoLogo", "-NoProfile", "-Command", "'ok'"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if probe.returncode == 0 and probe.stdout.strip() == "ok":
+            return candidate
+    return None
+
+
 def _python_311_or_newer() -> str | None:
     candidates = [
         sys.executable,
@@ -477,6 +494,56 @@ class AddonInstallerTest(unittest.TestCase):
             self.assertIn("Platform: codex", result.stdout)
             self.assertFalse((Path(temp_home) / ".claude" / "settings.json").exists())
 
+    def test_powershell_official_addon_alias_installs_to_codex(self) -> None:
+        pwsh = _find_test_pwsh()
+        if pwsh is None:
+            self.skipTest("PowerShell is required for install.ps1 addon alias test")
+        if _python_311_or_newer() is None:
+            self.skipTest("install.ps1 requires Python 3.11+")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            Path(temp_home, ".codex").mkdir()
+            env = _isolated_shell_install_env(temp_home)
+            result = subprocess.run(
+                [
+                    pwsh,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(REPO_ROOT / "install.ps1"),
+                    "--addon",
+                    "autopilot",
+                    "-SkipSourceHealth",
+                    "-Skills",
+                    "task-router",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+                timeout=90,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            installed_addon = Path(temp_home) / ".agents" / "skills" / "noop" / "SKILL.md"
+            self.assertTrue(installed_addon.exists(), msg=result.stderr + result.stdout)
+            sidecar = Path(temp_home) / ".ghost-alice" / "addons" / "codex" / "noop.json"
+            self.assertTrue(sidecar.exists(), msg=result.stderr + result.stdout)
+            record = json.loads(sidecar.read_text(encoding="utf-8"))
+            self.assertEqual(record["addon_id"], "noop")
+            provided_names = {p["name"] for p in record["provided"]}
+            self.assertIn("noop", provided_names)
+            state_path = Path(temp_home) / ".ghost-alice" / "install-state" / "codex.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state_noop = next(t for t in state["targets"] if t["target_name"] == "noop")
+            self.assertEqual(state_noop.get("addon_id"), "noop")
+            self.assertEqual(state_noop.get("owner"), "addon")
+
     def test_install_entrypoints_expose_addon_options(self) -> None:
         install_sh = REPO_ROOT.joinpath("install.sh").read_text(encoding="utf-8")
         install_ps1 = REPO_ROOT.joinpath("install.ps1").read_text(encoding="utf-8-sig")
@@ -485,17 +552,18 @@ class AddonInstallerTest(unittest.TestCase):
         self.assertIn("--addon autopilot", install_sh)
         self.assertIn("--addon-skip", install_sh)
         self.assertIn("--list-addons", install_sh)
+        self.assertIn("[string[]]$Addon", install_ps1)
         self.assertIn("[string[]]$AddonSource", install_ps1)
         self.assertIn("[switch]$AddonSkip", install_ps1)
         self.assertIn("[switch]$ListAddons", install_ps1)
 
-    def test_powershell_addon_install_fails_closed_until_sidecar_parity_exists(self) -> None:
+    def test_powershell_addon_install_writes_sidecars_after_target_collection(self) -> None:
         install_ps1 = (REPO_ROOT / "installer_lib" / "install.ps1").read_text(encoding="utf-8-sig")
 
-        self.assertIn("Assert-PowerShellAddonInstallSupported", install_ps1)
+        self.assertIn("Write-AddonSidecarsAfterInstall", install_ps1)
         self.assertLess(
-            install_ps1.index("Assert-PowerShellAddonInstallSupported"),
             install_ps1.index("$addonTargets = @(Get-AddonTargets)"),
+            install_ps1.index("Invoke-LoggedIfCompact { Write-AddonSidecarsAfterInstall"),
         )
 
 

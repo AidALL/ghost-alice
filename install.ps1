@@ -12,6 +12,7 @@
 #   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
 #   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
 #   .\install.cmd -List                            # List available skills
+#   .\install.cmd --addon autopilot                # Install official autopilot addon
 #   .\install.cmd -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
 #   .\install.cmd -Status                          # Show current install status
 #   .\install.cmd -Doctor                          # Diagnose install protection state
@@ -29,6 +30,7 @@
 #   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
 #   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
 #   .\install.ps1 -List                            # List available skills
+#   .\install.ps1 --addon autopilot                # Install official autopilot addon
 #   .\install.ps1 -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
 #   .\install.ps1 -Status                          # Show current install status
 #   .\install.ps1 -Doctor                          # Diagnose install protection state
@@ -47,6 +49,7 @@ param(
     [switch]$Uninstall,
     [switch]$Force,
     [switch]$CleanupPending,
+    [string[]]$Addon,
     [string[]]$AddonSource,
     [string[]]$AddonTag,
     [switch]$AddonSkip,
@@ -372,6 +375,7 @@ $script:DeprecatedInstalledSkills = @(
 # ── Main ───────────────────────────────────────────────────
 if ($Help)      { Show-Help; return }
 if ($List)      { Show-List; return }
+Resolve-OfficialAddonShortcuts
 if ($ListAddons){ Show-Addons; return }
 if ($UpdateSource) { Update-SourceCheckout; return }
 
