@@ -37,6 +37,7 @@ Every paired document should expose a language switch near the top. In an Englis
 | Repository structure | [reference/repository-structure.md](./reference/repository-structure.md) | [ko/reference/repository-structure.md](./ko/reference/repository-structure.md) |
 | Installer architecture | [reference/installer-architecture.md](./reference/installer-architecture.md) | [ko/reference/installer-architecture.md](./ko/reference/installer-architecture.md) |
 | Skill catalog guide | [reference/skills.md](./reference/skills.md) | [ko/reference/skills.md](./ko/reference/skills.md) |
+| Official addons | [reference/official-addons.md](./reference/official-addons.md) | [ko/reference/official-addons.md](./ko/reference/official-addons.md) |
 | Language policy | [concepts/language-policy.md](./concepts/language-policy.md) | [ko/concepts/language-policy.md](./ko/concepts/language-policy.md) |
 | Runtime gate matrix | [policies/session-gate-matrix.md](./policies/session-gate-matrix.md) | [ko/policies/session-gate-matrix.md](./ko/policies/session-gate-matrix.md) |
 | Platform compatibility | [policies/installer-platform-compatibility-matrix.md](./policies/installer-platform-compatibility-matrix.md) | [ko/policies/installer-platform-compatibility-matrix.md](./ko/policies/installer-platform-compatibility-matrix.md) |
