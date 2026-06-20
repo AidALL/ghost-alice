@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page.title | default: "Ghost-ALICE OS" }}</title>
+  <script>
+    (() => {
+      try {
+        const stored = localStorage.getItem("ghostAliceTheme") || "system";
+        document.documentElement.dataset.theme = ["system", "light", "dark"].includes(stored) ? stored : "system";
+      } catch {
+        document.documentElement.dataset.theme = "system";
+      }
+    })();
+  </script>
+  <style>
+    :root,
+    html[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f7f8f4;
+      --surface: #ffffff;
+      --surface-2: #eef2ed;
+      --ink: #18201b;
+      --muted: #59645e;
+      --subtle: #7d867f;
+      --line: #d8ded6;
+      --accent: #0f766e;
+      --accent-2: #b45309;
+      --accent-3: #334155;
+      --code: #101614;
+      --code-line: #27332f;
+      --topbar-bg: rgba(247, 248, 244, 0.92);
+      --support-bg: #edf1f2;
+      --theme-active: #ffffff;
+      --radius: 8px;
+      --shadow: 0 18px 50px rgba(24, 32, 27, 0.08);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        color-scheme: dark;
+        --bg: #0d1117;
+        --surface: #151b22;
+        --surface-2: #202832;
+        --ink: #eef5f1;
+        --muted: #aeb9b4;
+        --subtle: #7f8a86;
+        --line: #29343f;
+        --accent: #2dd4bf;
+        --accent-2: #a78bfa;
+        --accent-3: #cbd5e1;
+        --code: #080d12;
+        --code-line: #1c2732;
+        --topbar-bg: rgba(13, 17, 23, 0.9);
+        --support-bg: #121a20;
+        --theme-active: #24313c;
+        --shadow: 0 18px 54px rgba(0, 0, 0, 0.28);
+      }
+    }
+
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0d1117;
+      --surface: #151b22;
+      --surface-2: #202832;
+      --ink: #eef5f1;
+      --muted: #aeb9b4;
+      --subtle: #7f8a86;
+      --line: #29343f;
+      --accent: #2dd4bf;
+      --accent-2: #a78bfa;
+      --accent-3: #cbd5e1;
+      --code: #080d12;
+      --code-line: #1c2732;
+      --topbar-bg: rgba(13, 17, 23, 0.9);
+      --support-bg: #121a20;
+      --theme-active: #24313c;
+      --shadow: 0 18px 54px rgba(0, 0, 0, 0.28);
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--bg); }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.6;
+      transition: background-color 160ms ease, color 160ms ease;
+    }
+
+    .wrap { width: min(900px, calc(100% - 40px)); margin: 0 auto; }
+
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--topbar-bg);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+    }
+    .topbar-inner {
+      min-height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--ink);
+      font-weight: 760;
+    }
+    .brand img { width: 30px; height: 30px; }
+    .theme-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+    }
+    .theme-option {
+      min-height: 30px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 720;
+    }
+    .theme-option[aria-pressed="true"] {
+      background: var(--theme-active);
+      color: var(--ink);
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+    }
+
+    main.wrap { padding: 40px 0 64px; }
+
+    h1, h2, h3 {
+      color: var(--ink);
+      line-height: 1.2;
+      margin: 1.6em 0 0.6em;
+    }
+    h1 { font-size: 32px; margin-top: 0.4em; }
+    h2 {
+      font-size: 25px;
+      padding-bottom: 0.3em;
+      border-bottom: 1px solid var(--line);
+    }
+    h3 { font-size: 20px; }
+    h4, h5, h6 { color: var(--ink); margin: 1.4em 0 0.5em; }
+
+    p { margin: 0 0 1em; }
+    a:link, a:visited { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    ul, ol { margin: 0 0 1em; padding-left: 1.6em; }
+    li { margin: 0.25em 0; }
+
+    code {
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 0.9em;
+      padding: 0.15em 0.4em;
+      border-radius: 5px;
+      background: var(--surface-2);
+      color: var(--ink);
+    }
+    pre {
+      margin: 0 0 1em;
+      padding: 16px 18px;
+      overflow: auto;
+      border-radius: var(--radius);
+      background: var(--code);
+      border: 1px solid var(--code-line);
+      color: #eef7f0;
+      font-size: 14px;
+      line-height: 1.7;
+    }
+    pre code {
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0 0 1.2em;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      font-size: 14px;
+    }
+    th, td {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line);
+      border-right: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--surface-2); color: var(--accent-3); font-weight: 720; }
+    tr:last-child td { border-bottom: 0; }
+    th:last-child, td:last-child { border-right: 0; }
+
+    blockquote {
+      margin: 0 0 1em;
+      padding: 0.4em 1em;
+      border-left: 4px solid var(--accent);
+      background: var(--surface-2);
+      color: var(--muted);
+    }
+    blockquote p:last-child { margin-bottom: 0; }
+
+    hr {
+      border: 0;
+      border-top: 1px solid var(--line);
+      margin: 2em 0;
+    }
+
+    img { max-width: 100%; height: auto; }
+
+    footer {
+      padding: 28px 0;
+      border-top: 1px solid var(--line);
+      color: var(--subtle);
+      font-size: 13px;
+    }
+
+    @media (max-width: 560px) {
+      .wrap { width: min(900px, calc(100% - 28px)); }
+      .brand span { max-width: 150px; }
+      .theme-option { padding: 0 7px; }
+      h1 { font-size: 27px; }
+      h2 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap topbar-inner">
+      <a class="brand" href="{{ '/' | relative_url }}">
+        <img src="{{ '/icon.png' | relative_url }}" alt="" aria-hidden="true">
+        <span>Ghost-ALICE OS</span>
+      </a>
+      <div class="theme-toggle" role="group" aria-label="Theme">
+        <button class="theme-option" type="button" data-theme-choice="system" aria-pressed="true">System</button>
+        <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+        <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {{ content }}
+  </main>
+
+  <footer>
+    <div class="wrap">Ghost-ALICE OS. Agent governance operating layer.</div>
+  </footer>
+
+  <script>
+    const themeButtons = Array.from(document.querySelectorAll("[data-theme-choice]"));
+    const validThemes = new Set(["system", "light", "dark"]);
+
+    function readThemeChoice() {
+      try {
+        const stored = localStorage.getItem("ghostAliceTheme");
+        return validThemes.has(stored) ? stored : "system";
+      } catch {
+        return "system";
+      }
+    }
+
+    function applyThemeChoice(choice) {
+      const nextChoice = validThemes.has(choice) ? choice : "system";
+      document.documentElement.dataset.theme = nextChoice;
+      themeButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.themeChoice === nextChoice));
+      });
+      try {
+        localStorage.setItem("ghostAliceTheme", nextChoice);
+      } catch {
+        /* ignore storage failures */
+      }
+    }
+
+    applyThemeChoice(readThemeChoice());
+    themeButtons.forEach((button) => {
+      button.addEventListener("click", () => applyThemeChoice(button.dataset.themeChoice));
+    });
+  </script>
+</body>
+</html>

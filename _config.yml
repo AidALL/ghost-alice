@@ -6,6 +6,15 @@ optional_front_matter:
 relative_links:
   enabled: true
   collections: false
+defaults:
+  - scope: { path: "" }
+    values: { layout: default }
+  - scope: { path: "index.html" }
+    values: { layout: none }
+  - scope: { path: "docs/index.html" }
+    values: { layout: none }
+include:
+  - "README.md"
 exclude:
   - "*.py"
   - "*.sh"
