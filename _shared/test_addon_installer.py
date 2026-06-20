@@ -74,6 +74,17 @@ def _python_311_or_newer() -> str | None:
     return None
 
 
+def _isolated_shell_install_env(temp_home: str | Path) -> dict[str, str]:
+    home = Path(temp_home)
+    env = os.environ.copy()
+    env["HOME"] = str(home)
+    env["CLAUDE_CONFIG_DIR"] = str(home / ".claude")
+    env["CODEX_HOME"] = str(home / ".codex")
+    env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+    env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = str(FIXTURE_ROOT)
+    return env
+
+
 class AddonInstallerTest(unittest.TestCase):
     def test_fixture_manifest_discovers_noop_skill_target(self) -> None:
         from addon_installer import load_addon_targets
@@ -405,10 +416,7 @@ class AddonInstallerTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_home:
             Path(temp_home, ".claude").mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
-            env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = str(FIXTURE_ROOT)
+            env = _isolated_shell_install_env(temp_home)
             result = subprocess.run(
                 [
                     bash,
@@ -432,6 +440,7 @@ class AddonInstallerTest(unittest.TestCase):
             installed_addon = Path(temp_home) / ".claude" / "skills" / "noop" / "SKILL.md"
             self.assertTrue(installed_addon.exists(), msg=result.stderr + result.stdout)
             self.assertIn("Platform: claude", result.stdout)
+            self.assertFalse((Path(temp_home) / ".codex" / "hooks.json").exists())
 
     def test_shell_official_addon_alias_installs_to_codex(self) -> None:
         bash = _find_test_bash()
@@ -442,10 +451,7 @@ class AddonInstallerTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_home:
             Path(temp_home, ".codex").mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
-            env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = str(FIXTURE_ROOT)
+            env = _isolated_shell_install_env(temp_home)
             result = subprocess.run(
                 [
                     bash,
@@ -469,6 +475,7 @@ class AddonInstallerTest(unittest.TestCase):
             installed_addon = Path(temp_home) / ".agents" / "skills" / "noop" / "SKILL.md"
             self.assertTrue(installed_addon.exists(), msg=result.stderr + result.stdout)
             self.assertIn("Platform: codex", result.stdout)
+            self.assertFalse((Path(temp_home) / ".claude" / "settings.json").exists())
 
     def test_install_entrypoints_expose_addon_options(self) -> None:
         install_sh = REPO_ROOT.joinpath("install.sh").read_text(encoding="utf-8")
