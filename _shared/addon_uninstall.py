@@ -36,6 +36,7 @@ import json
 import os
 import shutil
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +152,135 @@ def _prune_install_state(addon_id: str, *, addons_dir: str | os.PathLike[str], p
     tmp = state_path.with_name(state_path.name + ".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(tmp, state_path)
+
+
+def _ghost_alice_root_for_addons(addons_dir: str | os.PathLike[str]) -> Path:
+    # addons_dir is ~/.ghost-alice/addons/<platform>.
+    return Path(addons_dir).parent.parent
+
+
+def _removed_file_targets(provided: list[dict[str, Any]]) -> list[tuple[str, Path]]:
+    targets: list[tuple[str, Path]] = []
+    for entry in provided:
+        if entry.get("kind") == "adapter":
+            continue
+        name = entry.get("name")
+        target = entry.get("target")
+        mode = entry.get("install_mode") or "missing"
+        if not isinstance(name, str) or not isinstance(target, str) or mode == "missing":
+            continue
+        targets.append((name, Path(target)))
+    return targets
+
+
+def _path_matches_removed_target(path: str, removed: list[tuple[str, Path]]) -> bool:
+    candidate = Path(path)
+    for _name, target in removed:
+        if candidate == target:
+            return True
+        try:
+            candidate.relative_to(target)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _relative_path_matches_removed_target(relative_path: Any, removed: list[tuple[str, Path]]) -> bool:
+    if not isinstance(relative_path, str) or not relative_path:
+        return False
+    for name, _target in removed:
+        if relative_path == name or relative_path.startswith(name + "/"):
+            return True
+    return False
+
+
+def _prune_pending_snapshot(addon_id: str, *, addons_dir: str | os.PathLike[str], platform: str,
+                            provided: list[dict[str, Any]]) -> None:
+    removed = _removed_file_targets(provided)
+    if not removed:
+        return
+    snapshot_path = _ghost_alice_root_for_addons(addons_dir) / "pending-merges" / platform / "snapshot.json"
+    try:
+        data = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    files = data.get("files")
+    file_records = data.get("file_records")
+    changed = False
+    if isinstance(files, dict):
+        for path in list(files):
+            if _path_matches_removed_target(path, removed):
+                del files[path]
+                changed = True
+    if isinstance(file_records, dict):
+        for path, record in list(file_records.items()):
+            if _path_matches_removed_target(path, removed):
+                del file_records[path]
+                changed = True
+                continue
+            if isinstance(record, dict) and _relative_path_matches_removed_target(record.get("relative_path"), removed):
+                del file_records[path]
+                changed = True
+    if not changed:
+        return
+    maintenance_events = data.get("maintenance_events")
+    if not isinstance(maintenance_events, list):
+        maintenance_events = []
+        data["maintenance_events"] = maintenance_events
+    maintenance_events.append({
+        "event": "addon-uninstall-pruned",
+        "addon_id": addon_id,
+        "platform": platform,
+        "pruned_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+    })
+    tmp = snapshot_path.with_name(snapshot_path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, snapshot_path)
+
+
+def _mark_pending_manifest_deleted_entries(addon_id: str, *, addons_dir: str | os.PathLike[str], platform: str,
+                                           provided: list[dict[str, Any]]) -> None:
+    removed = _removed_file_targets(provided)
+    if not removed:
+        return
+    manifest_path = _ghost_alice_root_for_addons(addons_dir) / "pending-merges" / platform / "manifest.json"
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    entries = data.get("entries")
+    if not isinstance(entries, list):
+        return
+    changed = False
+    decided_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("decided") is True or entry.get("change_kind") != "deleted":
+            continue
+        source_path = entry.get("source_path")
+        relative_path = entry.get("relative_path")
+        source_matches = isinstance(source_path, str) and _path_matches_removed_target(source_path, removed)
+        relative_matches = _relative_path_matches_removed_target(relative_path, removed)
+        if not (source_matches or relative_matches):
+            continue
+        entry["decided"] = True
+        entry["decision"] = "addon-uninstalled"
+        entry["decided_at"] = decided_at
+        entry["resolved_by_addon_id"] = addon_id
+        changed = True
+    if not changed:
+        return
+    tmp = manifest_path.with_name(manifest_path.name + ".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, manifest_path)
+
+
+def _prune_pending_merge_state(addon_id: str, *, addons_dir: str | os.PathLike[str], platform: str,
+                               provided: list[dict[str, Any]]) -> None:
+    _prune_pending_snapshot(addon_id, addons_dir=addons_dir, platform=platform, provided=provided)
+    _mark_pending_manifest_deleted_entries(addon_id, addons_dir=addons_dir, platform=platform, provided=provided)
 
 
 def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -> list[dict[str, Any]]:
@@ -303,6 +433,7 @@ def uninstall_addon(
     hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
     addon_registry.remove_record(addon_id, addons_dir=addons_dir)  # sidecar deleted LAST
     _prune_install_state(addon_id, addons_dir=addons_dir, platform=platform)
+    _prune_pending_merge_state(addon_id, addons_dir=addons_dir, platform=platform, provided=provided)
     try:
         marker.unlink()
     except FileNotFoundError:

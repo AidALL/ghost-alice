@@ -36,6 +36,8 @@ This document is the Phase 7 compatibility test contract for the Ghost-ALICE ins
 
 The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. Hook payload and platform permission policy must also be synchronized with the current repo contract. Even if an older hook entry exists, the installer must update managed entries when the runtime payload changes. Hook presence and `agent_visibility.profile` are separate concerns. The profile controls the user-facing message surface; it must not relax missing or drift judgments.
 
+The base session-gate contract describes core behavior. Official privileged adapter addons may extend behavior after their declared hook events, but addon-specific queues, task schemas, and continuation policies stay in the addon and require addon-owned smoke evidence.
+
 Runtime live smoke follows `docs/policies/live-smoke-regression.md`. That procedure sends the same README first 10 lines request to Claude Code, Codex, and Antigravity to observe `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, and skill activation permission behavior.
 
 | Platform | Runtime surface | Contract | Regression owner |

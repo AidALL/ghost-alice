@@ -497,5 +497,47 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
         self.assertFalse(any("[adapter:p5-demo] p5-hook" in command for command in self._commands()))
 
 
+class PrivilegedAdapterCodexHookLifecycleTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._tmp.name)
+        self.codex = self.tmp / ".codex"
+        self.codex.mkdir(parents=True)
+        self._env = {k: os.environ.get(k) for k in ("HOME", "CODEX_HOME")}
+        os.environ["HOME"] = str(self.tmp)
+        os.environ["CODEX_HOME"] = str(self.codex)
+
+    def tearDown(self):
+        for key, value in self._env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        self._tmp.cleanup()
+
+    def _commands_by_event(self, event: str) -> list[str]:
+        settings = json.loads((self.codex / "hooks.json").read_text(encoding="utf-8"))
+        return [
+            h.get("command", "")
+            for entry in settings.get("hooks", {}).get(event, [])
+            for h in entry.get("hooks", [])
+        ]
+
+    def test_codex_adapter_hook_installs_on_stop_and_uninstalls_by_marker(self):
+        src = _make_adapter_addon(self.tmp)
+        allowlist = {"p5-demo": _adapter_spec(event="on_agent_stop")}
+        with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, allowlist, clear=True):
+            self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(src)]), "installed")
+
+        stop_commands = self._commands_by_event("Stop")
+        self.assertTrue(any("[adapter:p5-demo] p5-hook" in command for command in stop_commands))
+        self.assertTrue(any("[hook-runner:adapter-p5-demo-p5-hook]" in command for command in stop_commands))
+
+        removed = install_hooks.remove_adapter_hook("[adapter:p5-demo] p5-hook", platform_key="codex")
+
+        self.assertEqual(removed, 1)
+        self.assertFalse(any("[adapter:p5-demo] p5-hook" in command for command in self._commands_by_event("Stop")))
+
+
 if __name__ == "__main__":
     unittest.main()
