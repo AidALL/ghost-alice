@@ -159,23 +159,24 @@ def _ghost_alice_root_for_addons(addons_dir: str | os.PathLike[str]) -> Path:
     return Path(addons_dir).parent.parent
 
 
-def _removed_file_targets(provided: list[dict[str, Any]]) -> list[tuple[str, Path]]:
-    targets: list[tuple[str, Path]] = []
+def _removed_file_targets(provided: list[dict[str, Any]]) -> list[tuple[str, str, Path]]:
+    targets: list[tuple[str, str, Path]] = []
     for entry in provided:
         if entry.get("kind") == "adapter":
             continue
+        kind = entry.get("kind")
         name = entry.get("name")
         target = entry.get("target")
         mode = entry.get("install_mode") or "missing"
-        if not isinstance(name, str) or not isinstance(target, str) or mode == "missing":
+        if not isinstance(kind, str) or not isinstance(name, str) or not isinstance(target, str) or mode == "missing":
             continue
-        targets.append((name, Path(target)))
+        targets.append((kind, name, Path(target)))
     return targets
 
 
-def _path_matches_removed_target(path: str, removed: list[tuple[str, Path]]) -> bool:
+def _path_matches_removed_target(path: str, removed: list[tuple[str, str, Path]]) -> bool:
     candidate = Path(path)
-    for _name, target in removed:
+    for _kind, _name, target in removed:
         if candidate == target:
             return True
         try:
@@ -186,10 +187,12 @@ def _path_matches_removed_target(path: str, removed: list[tuple[str, Path]]) -> 
     return False
 
 
-def _relative_path_matches_removed_target(relative_path: Any, removed: list[tuple[str, Path]]) -> bool:
+def _relative_path_matches_removed_skill_target(relative_path: Any, removed: list[tuple[str, str, Path]]) -> bool:
     if not isinstance(relative_path, str) or not relative_path:
         return False
-    for name, _target in removed:
+    for kind, name, _target in removed:
+        if kind != "skill":
+            continue
         if relative_path == name or relative_path.startswith(name + "/"):
             return True
     return False
@@ -219,7 +222,10 @@ def _prune_pending_snapshot(addon_id: str, *, addons_dir: str | os.PathLike[str]
                 del file_records[path]
                 changed = True
                 continue
-            if isinstance(record, dict) and _relative_path_matches_removed_target(record.get("relative_path"), removed):
+            if (
+                isinstance(record, dict)
+                and _relative_path_matches_removed_skill_target(record.get("relative_path"), removed)
+            ):
                 del file_records[path]
                 changed = True
     if not changed:
@@ -262,7 +268,7 @@ def _mark_pending_manifest_deleted_entries(addon_id: str, *, addons_dir: str | o
         source_path = entry.get("source_path")
         relative_path = entry.get("relative_path")
         source_matches = isinstance(source_path, str) and _path_matches_removed_target(source_path, removed)
-        relative_matches = _relative_path_matches_removed_target(relative_path, removed)
+        relative_matches = _relative_path_matches_removed_skill_target(relative_path, removed)
         if not (source_matches or relative_matches):
             continue
         entry["decided"] = True

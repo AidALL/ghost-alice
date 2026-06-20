@@ -209,6 +209,62 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertEqual(entries["pending-copy-addon-skill"]["decision"], "addon-uninstalled")
         self.assertFalse(entries["pending-user-skill"]["decided"])
 
+    def test_non_skill_target_relative_name_does_not_decide_skill_pending_entry(self):
+        self.skills.mkdir(parents=True, exist_ok=True)
+        commands = self.root / ".claude" / "commands"
+        resources = self.root / ".ghost-alice" / "resources" / "claude"
+        commands.mkdir(parents=True, exist_ok=True)
+        resources.mkdir(parents=True, exist_ok=True)
+        command_target = commands / "task-router.md"
+        command_target.write_text("command\n", encoding="utf-8")
+        skill_file = self.skills / "task-router" / "SKILL.md"
+        skill_file.parent.mkdir(parents=True)
+        skill_file.write_text("skill\n", encoding="utf-8")
+        self._write_sidecar("command-addon", [{
+            "kind": "command",
+            "name": "task-router",
+            "target": str(command_target),
+            "ownership": "addon",
+            "install_mode": "copy",
+            "content_hash": hash_utils.hash_target(str(command_target), "copy"),
+            "marker": "",
+            "metadata": {},
+        }])
+        pending_dir = self.root / ".ghost-alice" / "pending-merges" / "claude"
+        manifest_path = pending_dir / "manifest.json"
+        pending_dir.mkdir(parents=True)
+        manifest_path.write_text(json.dumps({
+            "version": 1,
+            "platform": "claude",
+            "entries": [
+                {
+                    "id": "pending-skill-task-router",
+                    "platform": "claude",
+                    "skill": "task-router",
+                    "source_path": str(skill_file),
+                    "backup_path": None,
+                    "snapshot_hash": "old",
+                    "current_hash": None,
+                    "change_kind": "deleted",
+                    "relative_path": "task-router/SKILL.md",
+                    "decided": False,
+                    "decision": None,
+                    "created_at": "t",
+                },
+            ],
+        }), encoding="utf-8")
+
+        result = self._uninstall(
+            "command-addon",
+            allowed_roots=[self.skills, commands, resources],
+        )
+        entry = json.loads(manifest_path.read_text(encoding="utf-8"))["entries"][0]
+
+        self.assertEqual(result["status"], "removed")
+        self.assertFalse(command_target.exists())
+        self.assertFalse(entry["decided"])
+        self.assertIsNone(entry["decision"])
+
     def test_dry_run_removes_nothing(self):
         self._install("alpha", ["one"])
         result = self._uninstall("alpha", confirm=False)
