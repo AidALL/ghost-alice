@@ -186,7 +186,9 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertIn("Read-AllCommonTargetProgress", install_ps1)
         self.assertIn("Read-WeightedCommonTargetProgress", install_ps1)
         self.assertIn("common targets synced on all platforms", install_ps1)
-        self.assertIn("$autoCommonTargets = Get-InstallTargetCount -Targets $fallbackTargets", auto_branch)
+        self.assertIn("function Get-AutoCommonTargetCount", install_ps1)
+        self.assertIn("Get-AddonTargets -TargetPlatform $plat", install_ps1)
+        self.assertIn("$autoCommonTargets = Get-AutoCommonTargetCount -DetectedPlatforms $detected -FallbackTargets $fallbackTargets", auto_branch)
         self.assertNotIn("* $detected.Count", auto_branch)
 
     def test_install_ps1_auto_child_output_avoids_shared_log_redirection(self) -> None:

@@ -417,6 +417,57 @@ if ($PlainFullUninstall -and -not $PlatformWasExplicit -and -not $PromptPlatform
     exit $rc
 }
 
+function Get-AutoCommonTargetCount {
+    param(
+        [string[]]$DetectedPlatforms,
+        [object[]]$FallbackTargets
+    )
+
+    $platformKeySets = @()
+    foreach ($plat in @($DetectedPlatforms)) {
+        $keys = @{}
+        if (Test-Path (Join-Path $ScriptDir "_shared")) {
+            $keys["support:_shared"] = $true
+        }
+        foreach ($target in @($FallbackTargets)) {
+            if ($target.Name) {
+                $keys[("skill:{0}" -f $target.Name)] = $true
+            }
+        }
+        if (-not $AddonSkip -and $AddonSource -and $AddonSource.Count -gt 0) {
+            try {
+                foreach ($target in @(Get-AddonTargets -TargetPlatform $plat)) {
+                    if ($target.Name) {
+                        $keys[("skill:{0}" -f $target.Name)] = $true
+                    }
+                }
+            } catch {
+                Write-InstallLogLine ("[WARN] [auto] addon target count preflight failed for {0}: {1}" -f $plat, $_)
+            }
+        }
+        $platformKeySets += ,$keys
+    }
+
+    if ($platformKeySets.Count -eq 0) {
+        return 0
+    }
+
+    $common = 0
+    foreach ($key in $platformKeySets[0].Keys) {
+        $presentOnAll = $true
+        foreach ($keys in @($platformKeySets)) {
+            if (-not $keys.ContainsKey($key)) {
+                $presentOnAll = $false
+                break
+            }
+        }
+        if ($presentOnAll) {
+            $common++
+        }
+    }
+    return $common
+}
+
 # auto/default: detect ~/.claude and ~/.codex, then recurse per platform.
 # Auto child installs are separate install path operations, not a duplicate install.
 if ($Auto) {
@@ -440,7 +491,7 @@ if ($Auto) {
     foreach ($skill in $selectedSkills) {
         $fallbackTargets += Expand-SkillTargets $skill
     }
-    $autoCommonTargets = Get-InstallTargetCount -Targets $fallbackTargets
+    $autoCommonTargets = Get-AutoCommonTargetCount -DetectedPlatforms $detected -FallbackTargets $fallbackTargets
     $platformLabel = Join-InstallLabels -Items $detected
     $visibility = Resolve-EffectiveVisibility -Flag $AgentVisibility
     if (Test-LiveCounterEnabled) {
@@ -570,6 +621,9 @@ if ($Auto) {
         }
     } else {
         Write-Err "[auto] some platforms failed. See log: $script:InstallReportLogFile" "[auto] some platforms failed. See log: $script:InstallReportLogFile"
+        foreach ($line in (Get-InstallReportFailureExcerpt -Path $script:InstallReportLogFile)) {
+            Write-Err ("[auto] " + $line) ("[auto] " + $line)
+        }
     }
     exit $rc
 }

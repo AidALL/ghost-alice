@@ -92,7 +92,7 @@ function Show-Addons {
     foreach ($source in $AddonSource) {
         $addonArgs += @("--source", $source)
     }
-    foreach ($skill in $AllSkills) {
+    foreach ($skill in (Get-CoreSkillNamesForAddonValidation)) {
         $addonArgs += @("--core-skill", $skill)
     }
 
