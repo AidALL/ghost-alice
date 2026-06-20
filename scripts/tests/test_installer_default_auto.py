@@ -378,6 +378,67 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertIn("[26/26] common targets synced on all platforms", result.stdout)
             self.assertNotIn("[26/25]", result.stdout)
 
+    def test_install_sh_auto_detect_accepts_git_addon_tag_after_parent_prepares_source(self) -> None:
+        bash = _find_test_bash()
+        if not bash:
+            self.skipTest("bash executable is required for install.sh addon auto-detect test")
+        if not shutil.which("git"):
+            self.skipTest("git executable is required for tagged addon source test")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            temp_home = temp_root / "home"
+            temp_home.mkdir()
+            (temp_home / ".claude").mkdir()
+            (temp_home / ".codex").mkdir()
+            addon_repo = temp_root / "addon-repo"
+            shutil.copytree(ADDON_FIXTURE, addon_repo)
+            for command in (
+                ["git", "init"],
+                ["git", "add", "."],
+                ["git", "-c", "user.name=Ghost ALICE Test", "-c", "user.email=test@example.com", "commit", "-m", "fixture"],
+                ["git", "tag", "v1"],
+            ):
+                subprocess.run(
+                    command,
+                    cwd=addon_repo,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+
+            env = os.environ.copy()
+            env["HOME"] = temp_home.as_posix()
+            env["GHOST_ALICE_LANG"] = "en"
+            env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
+
+            result = subprocess.run(
+                [
+                    bash,
+                    str(INSTALL_SH),
+                    "--addon-source",
+                    addon_repo.resolve().as_uri(),
+                    "--addon-tag",
+                    "v1",
+                    "--skip-source-health",
+                    "task-router",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            output = result.stderr + result.stdout
+            self.assertEqual(result.returncode, 0, msg=output)
+            self.assertIn("  Platform: claude, codex", result.stdout)
+            self.assertIn("common targets synced on all platforms", result.stdout)
+            self.assertNotIn("--addon-tag can only be used with git URL addon sources", output)
+
     def test_install_sh_default_output_uses_process_report_with_dynamic_counts(self) -> None:
         bash = _find_test_bash()
         if not bash:

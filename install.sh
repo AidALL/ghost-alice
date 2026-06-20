@@ -450,6 +450,9 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   [ "$VERBOSE" -eq 1 ] && verbose_args+=(--verbose)
   if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
     prepare_addon_sources || exit 1
+    # Prepared addon git sources are forwarded to child installs as local cache
+    # paths; the tag has already been applied by the parent checkout.
+    ADDON_TAGS=()
   fi
   addon_args=()
   for source in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"}; do
