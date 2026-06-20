@@ -1,6 +1,6 @@
 """TDD for plan tasks T1.1/T1.2/T1.3 (python layer): addon identity threading + sidecar writing.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_sidecar_write.py -q
+Run: python3 -m pytest _shared/test_addon_sidecar_write.py -q
 """
 
 from __future__ import annotations

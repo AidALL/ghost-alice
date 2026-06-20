@@ -4,7 +4,7 @@ A leftover `.removing` marker must be resumed BEFORE the install step, so
 re-running install can never delete the addon it just installed (which left
 sidecar=present but skill=missing).
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_pending_resume_order_shell.py -q
+Run: python3 -m pytest _shared/test_addon_pending_resume_order_shell.py -q
 """
 
 from __future__ import annotations

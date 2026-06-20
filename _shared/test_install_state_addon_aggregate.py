@@ -1,6 +1,6 @@
 """TDD for plan tasks T1.4/T1.5: install-state is a derived aggregate that includes
 addons from the cumulative sidecar scan (so separate-run addons persist -- the
-lost-update fix). Run: /opt/homebrew/bin/python3 -m pytest _shared/test_install_state_addon_aggregate.py -q
+lost-update fix). Run: python3 -m pytest _shared/test_install_state_addon_aggregate.py -q
 """
 
 from __future__ import annotations

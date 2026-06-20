@@ -1,7 +1,7 @@
 """TDD suite for the per-addon sidecar registry (addon Registry Schema Requirements).
 
 Run with a 3.11+ interpreter, e.g.:
-    /opt/homebrew/bin/python3 -m pytest _shared/test_addon_registry.py -q
+    python3 -m pytest _shared/test_addon_registry.py -q
 """
 
 from __future__ import annotations

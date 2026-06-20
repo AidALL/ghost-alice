@@ -1,6 +1,6 @@
 """TDD for Phase P5: core-owned privileged adapter provisioning.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_privileged_adapters.py -q
+Run: python3 -m pytest _shared/test_addon_privileged_adapters.py -q
 """
 
 from __future__ import annotations

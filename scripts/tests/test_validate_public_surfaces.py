@@ -330,10 +330,10 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "docs" / "imgs" / "Ghost-ALICE_logo.png").is_file())
         self.assertIn('src="imgs/Ghost-ALICE_logo.png"', text)
         for marker in (
-            'href="./getting-started/installation.md"',
-            'href="./getting-started/uninstall.md"',
-            'href="./policies/installer-platform-compatibility-matrix.md"',
-            'href="./ko/README.md"',
+            'href="./getting-started/installation.html"',
+            'href="./getting-started/uninstall.html"',
+            'href="./policies/installer-platform-compatibility-matrix.html"',
+            'href="./ko/README.html"',
         ):
             self.assertIn(marker, text)
         for stale_marker in ('href="./docs/', 'href="./README_ko.md"'):

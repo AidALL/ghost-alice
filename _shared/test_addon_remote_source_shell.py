@@ -4,7 +4,7 @@ The zsh launcher case matters because users often run the installer from a zsh
 terminal. install.sh still owns a bash runtime contract, but zsh invocation must
 re-exec bash before the installer reaches bash-only syntax.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_remote_source_shell.py -q
+Run: python3 -m pytest _shared/test_addon_remote_source_shell.py -q
 """
 
 from __future__ import annotations

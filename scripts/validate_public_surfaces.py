@@ -289,10 +289,10 @@ def check_docs_index(repo: Path, top_level: list[str], coding: list[str], findin
     if "Where to go next" in text and "hero-logo-lockup" in text:
         required_docs_root_markers = [
             'src="imgs/Ghost-ALICE_logo.png"',
-            'href="./getting-started/installation.md"',
-            'href="./getting-started/uninstall.md"',
-            'href="./policies/installer-platform-compatibility-matrix.md"',
-            'href="./ko/README.md"',
+            'href="./getting-started/installation.html"',
+            'href="./getting-started/uninstall.html"',
+            'href="./policies/installer-platform-compatibility-matrix.html"',
+            'href="./ko/README.html"',
         ]
         missing_docs_root_markers = [
             marker for marker in required_docs_root_markers if marker not in text
@@ -346,10 +346,10 @@ def check_repo_index(repo: Path, findings: list[Finding]) -> None:
 
     required_repo_root_markers = [
         'src="imgs/Ghost-ALICE_logo.png"',
-        'href="./docs/getting-started/installation.md"',
-        'href="./docs/getting-started/uninstall.md"',
-        'href="./docs/policies/installer-platform-compatibility-matrix.md"',
-        'href="./README_ko.md"',
+        'href="./docs/getting-started/installation.html"',
+        'href="./docs/getting-started/uninstall.html"',
+        'href="./docs/policies/installer-platform-compatibility-matrix.html"',
+        'href="./README_ko.html"',
     ]
     missing_repo_root_markers = [
         marker for marker in required_repo_root_markers if marker not in text

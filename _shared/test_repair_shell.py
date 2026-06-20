@@ -6,7 +6,7 @@ It calls the ownership classifier before replacing anything.
 - A target the user replaced (not cleanly managed) is LEFT UNTOUCHED (classify
   before replace) -- repair never clobbers user/domain content.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_repair_shell.py -q
+Run: python3 -m pytest _shared/test_repair_shell.py -q
 """
 
 from __future__ import annotations
