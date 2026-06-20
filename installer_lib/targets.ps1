@@ -172,6 +172,25 @@ function Expand-SkillTargets {
     return $targets
 }
 
+function Get-CoreSkillNamesForAddonValidation {
+    $seen = @{}
+    $names = @()
+
+    foreach ($skill in $AllSkills) {
+        if (-not $seen.ContainsKey($skill)) {
+            $seen[$skill] = $true
+            $names += $skill
+        }
+        foreach ($target in @(Expand-SkillTargets $skill)) {
+            if ($target.Name -and -not $seen.ContainsKey($target.Name)) {
+                $seen[$target.Name] = $true
+                $names += $target.Name
+            }
+        }
+    }
+    return $names
+}
+
 function Resolve-OfficialAddonSource {
     param([string]$Name)
     switch ($Name) {
@@ -309,10 +328,15 @@ function Prepare-AddonSources {
 }
 
 function Get-AddonTargets {
+    param([string]$TargetPlatform = "")
+
     if ($AddonSkip -or -not $AddonSource -or $AddonSource.Count -eq 0) {
         return @()
     }
     Prepare-AddonSources
+    if (-not $TargetPlatform) {
+        $TargetPlatform = $Platform
+    }
 
     $py = Find-PythonExe
     if (-not $py) {
@@ -324,11 +348,11 @@ function Get-AddonTargets {
     foreach ($source in $AddonSource) {
         $addonArgs += @("--source", $source)
     }
-    foreach ($skill in $AllSkills) {
+    foreach ($skill in (Get-CoreSkillNamesForAddonValidation)) {
         $addonArgs += @("--core-skill", $skill)
     }
 
-    $jsonText = @(& $py (Join-Path $ScriptDir "_shared/addon_installer.py") @addonArgs --platform $Platform --format json)
+    $jsonText = @(& $py (Join-Path $ScriptDir "_shared/addon_installer.py") @addonArgs --platform $TargetPlatform --format json)
     if ($LASTEXITCODE -ne 0) {
         throw "addon manifest inspection failed - aborting installation"
     }

@@ -35,6 +35,29 @@ function Write-InstallLogLine {
     Add-Content -LiteralPath $script:InstallReportLogFile -Encoding UTF8 -Value $Line
 }
 
+function Get-InstallReportFailureExcerpt {
+    param(
+        [string]$Path,
+        [int]$MaxLines = 8
+    )
+
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) {
+        return @()
+    }
+
+    $interesting = @()
+    foreach ($line in (Get-Content -LiteralPath $Path -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        $text = [string]$line
+        if ($text -match '(\[ERROR\]|\[WARN\] \[auto\].*failed|addon manifest error|Exception:|failed - aborting|clone failed|not found|Python 3\.11\+)') {
+            $interesting += $text.TrimEnd()
+        }
+    }
+    if ($interesting.Count -eq 0) {
+        return @()
+    }
+    return @($interesting | Select-Object -Last $MaxLines)
+}
+
 function Write-InstallMessage {
     param(
         [string]$Prefix,

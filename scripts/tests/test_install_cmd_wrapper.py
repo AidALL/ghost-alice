@@ -165,6 +165,259 @@ class InstallCmdWrapperTest(unittest.TestCase):
         self.assertNotIn("parameter name 'addon' is ambiguous", combined)
         self.assertIn("noop (addon:noop)", combined)
 
+    def test_powershell_auto_addon_report_counts_addon_target(self) -> None:
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            self.skipTest("PowerShell executable is required for auto addon report test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            home = tmp_path / "home"
+            home.mkdir()
+            (home / ".claude").mkdir()
+            (home / ".codex").mkdir()
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "APPDATA": str(tmp_path / "AppData" / "Roaming"),
+                    "LOCALAPPDATA": str(tmp_path / "AppData" / "Local"),
+                    "PYTHONUTF8": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "GHOST_ALICE_INSTALL_PROGRESS": "0",
+                    "GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE": str(ADDON_FIXTURE),
+                }
+            )
+            result = subprocess.run(
+                [
+                    pwsh,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(INSTALL_PS1),
+                    "--addon",
+                    "autopilot",
+                    "-SkipSourceHealth",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, msg=combined)
+        self.assertIn("Skills: [26] common targets", combined)
+        self.assertIn("[26/26] common targets synced on all platforms", combined)
+        self.assertNotIn("[26/25]", combined)
+
+    def test_powershell_auto_addon_report_omits_platform_specific_addon_from_common_count(self) -> None:
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            self.skipTest("PowerShell executable is required for platform-specific addon report test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            home = tmp_path / "home"
+            home.mkdir()
+            (home / ".claude").mkdir()
+            (home / ".codex").mkdir()
+            addon_source = tmp_path / "addon-source"
+            skill_dir = addon_source / "addons" / "claude-only" / "skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: claude-only\ndescription: test addon\n---\n",
+                encoding="utf-8",
+            )
+            (addon_source / "addons-manifest.json").write_text(
+                '{"manifest_version":1,"addons":[{"id":"claude-only","path":"addons/claude-only"}]}\n',
+                encoding="utf-8",
+            )
+            (addon_source / "addons" / "claude-only" / "addon.json").write_text(
+                """
+{
+  "addon_version": "0.1.0",
+  "addon_id": "claude-only",
+  "skills": [
+    { "name": "claude-only", "source": "skill", "skill_dir": "skill" }
+  ],
+  "platforms": ["claude"],
+  "depends_on_core": ["task-router"],
+  "secrets": []
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "APPDATA": str(tmp_path / "AppData" / "Roaming"),
+                    "LOCALAPPDATA": str(tmp_path / "AppData" / "Local"),
+                    "PYTHONUTF8": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "GHOST_ALICE_INSTALL_PROGRESS": "0",
+                }
+            )
+            result = subprocess.run(
+                [
+                    pwsh,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(INSTALL_PS1),
+                    "-AddonSource",
+                    str(addon_source),
+                    "-SkipSourceHealth",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, msg=combined)
+        self.assertIn("Skills: [25] common targets", combined)
+        self.assertIn("[25/25] common targets synced on all platforms", combined)
+        self.assertNotIn("[25/26]", combined)
+        self.assertNotIn("[26/26]", combined)
+
+    def test_powershell_auto_addon_failure_surfaces_child_error(self) -> None:
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            self.skipTest("PowerShell executable is required for auto addon failure test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            home = tmp_path / "home"
+            home.mkdir()
+            (home / ".claude").mkdir()
+            (home / ".codex").mkdir()
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "APPDATA": str(tmp_path / "AppData" / "Roaming"),
+                    "LOCALAPPDATA": str(tmp_path / "AppData" / "Local"),
+                    "PYTHONUTF8": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                    "GHOST_ALICE_INSTALL_PROGRESS": "0",
+                    "GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE": str(tmp_path / "missing-addon"),
+                }
+            )
+            result = subprocess.run(
+                [
+                    pwsh,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(INSTALL_PS1),
+                    "--addon",
+                    "autopilot",
+                    "-SkipSourceHealth",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, msg=combined)
+        self.assertIn("[auto] some platforms failed", combined)
+        self.assertIn("addon manifest error", combined)
+        self.assertIn("manifest not found", combined)
+
+    def test_powershell_addon_dependency_accepts_core_family_subskill(self) -> None:
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            self.skipTest("PowerShell executable is required for addon dependency test")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            home = tmp_path / "home"
+            home.mkdir()
+            addon_source = tmp_path / "addon-source"
+            skill_dir = addon_source / "addons" / "needs-verification" / "skill"
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                "---\nname: needs-verification\ndescription: test addon\n---\n",
+                encoding="utf-8",
+            )
+            (addon_source / "addons-manifest.json").write_text(
+                '{"manifest_version":1,"addons":[{"id":"needs-verification","path":"addons/needs-verification"}]}\n',
+                encoding="utf-8",
+            )
+            (addon_source / "addons" / "needs-verification" / "addon.json").write_text(
+                """
+{
+  "addon_version": "0.1.0",
+  "addon_id": "needs-verification",
+  "skills": [
+    { "name": "needs-verification", "source": "skill", "skill_dir": "skill" }
+  ],
+  "platforms": ["claude", "codex"],
+  "depends_on_core": ["verification-before-completion"],
+  "secrets": []
+}
+""".strip()
+                + "\n",
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env.update(
+                {
+                    "HOME": str(home),
+                    "USERPROFILE": str(home),
+                    "APPDATA": str(tmp_path / "AppData" / "Roaming"),
+                    "LOCALAPPDATA": str(tmp_path / "AppData" / "Local"),
+                    "PYTHONUTF8": "1",
+                    "PYTHONIOENCODING": "utf-8",
+                }
+            )
+            result = subprocess.run(
+                [
+                    pwsh,
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(INSTALL_PS1),
+                    "-AddonSource",
+                    str(addon_source),
+                    "-ListAddons",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, msg=combined)
+        self.assertIn("needs-verification (addon:needs-verification)", combined)
+        self.assertNotIn("depends_on_core", combined)
+
     def test_docs_explain_autopilot_addon_installs_from_core_checkout(self) -> None:
         expectations = {
             README: [
