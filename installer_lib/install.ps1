@@ -97,16 +97,6 @@ function Invoke-WithInstallLock {
     }
 }
 
-function Assert-PowerShellAddonInstallSupported {
-    if ($AddonSkip) {
-        return
-    }
-    if ($AddonSource -and $AddonSource.Count -gt 0) {
-        Write-Err "PowerShell addon installation is disabled until sidecar, command/resource provisioning, and uninstall parity are implemented. Use the bash installer for addon installation." "PowerShell addon installation is disabled until sidecar, command/resource provisioning, and uninstall parity are implemented. Use the bash installer for addon installation."
-        throw "PowerShell addon installation is not supported - aborting installation"
-    }
-}
-
 function Invoke-StagedCopyReplace {
     param(
         [string]$Source,
@@ -221,7 +211,8 @@ function Invoke-InstallHooks {
     $pyArgs = @(
         $hookPy,
         "--platform", $TargetPlatform,
-        "--hook-shared-dir", (Join-Path $SkillsDir "_shared")
+        "--hook-shared-dir", (Join-Path $SkillsDir "_shared"),
+        "--skills-dir", $SkillsDir
     )
     switch ($Action) {
         "uninstall" { $pyArgs += "--uninstall" }
@@ -233,6 +224,12 @@ function Invoke-InstallHooks {
     }
     if ($visibility) {
         $pyArgs += @("--visibility", $visibility)
+    }
+    if ($Action -eq "install" -and $AddonSource -and $AddonSource.Count -gt 0) {
+        Prepare-AddonSources
+        foreach ($source in @($AddonSource)) {
+            $pyArgs += @("--addon-source", $source)
+        }
     }
     & $py @pyArgs
     if ($LASTEXITCODE -ne 0) {
@@ -614,6 +611,49 @@ function Invoke-WriteOwnershipMarker {
     }
 }
 
+function Write-AddonSidecarsAfterInstall {
+    param([string]$SkillsRoot)
+
+    if ($AddonSkip -or -not $AddonSource -or $AddonSource.Count -eq 0) {
+        return
+    }
+    Prepare-AddonSources
+
+    $py = Find-PythonExe
+    if (-not $py) {
+        Write-Err "Python 3.11+ not found; cannot write addon sidecars; aborting install" "Python 3.11+ not found; cannot write addon sidecars; aborting install"
+        throw "addon sidecar write cannot run - aborting installation"
+    }
+
+    $userHome = Resolve-UserHome
+    $addonsDir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "addons") $Platform
+    $resourcesDir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "resources") $Platform
+    $commandsDir = Join-Path (Resolve-ClaudeHome) "commands"
+    $installedAt = [DateTimeOffset]::UtcNow.ToString("o")
+    $pyArgs = @(
+        (Join-Path $script:GhostAliceRoot "_shared/addon_installer.py"),
+        "write-sidecars"
+    )
+    foreach ($source in @($AddonSource)) {
+        $pyArgs += @("--source", $source)
+    }
+    $pyArgs += @(
+        "--platform", $Platform,
+        "--addons-dir", $addonsDir,
+        "--skills-dir", $SkillsRoot,
+        "--installed-at", $installedAt,
+        "--claude-commands-dir", $commandsDir,
+        "--resources-dir", $resourcesDir
+    )
+
+    & $py @pyArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "Addon sidecar write failed; aborting install" "Addon sidecar write failed; aborting install"
+        throw "addon sidecar write failed - aborting installation"
+    }
+    Write-Info "Addon sidecars written" "Addon sidecars written"
+}
+
 function Get-InstallStateGitInfo {
     $info = [ordered]@{
         Root = $ScriptDir
@@ -728,7 +768,7 @@ function Write-InstallStateManifest {
         foreach ($target in (Get-InstallTargetsForSkillNames -SkillNames $SkillNames -ExtraTargets $ExtraTargets)) {
             $dest = Join-Path $SkillsRoot $target.Name
             $mode = Get-InstallStateMode -Path $dest -CopyOnly:$CopyOnly
-            $targets += [ordered]@{
+            $entry = [ordered]@{
                 target_name = $target.Name
                 source_path = ConvertTo-InstallStatePath $target.Source
                 dest_path = ConvertTo-InstallStatePath $dest
@@ -737,6 +777,13 @@ function Write-InstallStateManifest {
                 managed_markers = @(Get-InstallStateManagedMarkers -Name $target.Name -SourcePath $target.Source -DestPath $dest)
                 installed_at = $installedAt
             }
+            $addonId = if ($target.PSObject.Properties['AddonId']) { [string]$target.AddonId } else { "" }
+            if ($addonId) {
+                $entry["addon_id"] = $addonId
+                $entry["origin"] = "addon:$addonId"
+                $entry["owner"] = "addon"
+            }
+            $targets += $entry
         }
 
         $gitInfo = Get-InstallStateGitInfo
@@ -845,7 +892,6 @@ function Invoke-Install {
             }
             $allTargets += $targets
         }
-        Assert-PowerShellAddonInstallSupported
         $addonTargets = @(Get-AddonTargets)
         $allTargets += $addonTargets
 
@@ -1010,6 +1056,7 @@ function Invoke-Install {
         Invoke-LoggedIfCompact { Invoke-PostflightInstallVerification -TargetPlatform $Platform -SkillsRoot $SkillsDir -SkillNames $SkillNames -ExtraTargets $addonTargets -CopyOnly:$copyOnly }
         Invoke-LoggedIfCompact { Invoke-WriteOwnershipMarker -TargetPlatform $Platform -SkillsRoot $SkillsDir -SkillNames $SkillNames -ExtraTargets $addonTargets -CopyOnly:$copyOnly }
         Invoke-LoggedIfCompact { Invoke-SnapshotAfterInstall -TargetPlatform $Platform -SkillsDir $SkillsDir }
+        Invoke-LoggedIfCompact { Write-AddonSidecarsAfterInstall -SkillsRoot $SkillsDir }
         Invoke-LoggedIfCompact { Write-InstallStateManifest -TargetPlatform $Platform -SkillsRoot $SkillsDir -SkillNames $SkillNames -ExtraTargets $addonTargets -CopyOnly:$copyOnly }
 
         Write-Info "[Ghost-ALICE] User: when local changes are detected during the agent tool update, they are backed up instead of overwritten. Next time you open Claude/Codex, please ask the line below." "[Ghost-ALICE] User: when local changes are detected during the agent tool update, they are backed up instead of overwritten. Next time you open Claude/Codex, please ask the line below."

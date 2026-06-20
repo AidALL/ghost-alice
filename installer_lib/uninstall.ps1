@@ -76,14 +76,11 @@ function Show-Addons {
         Write-Info "Addon installation is disabled." "Addon installation is disabled."
         return
     }
-    if ($AddonTag -and $AddonTag.Count -gt 0) {
-        Write-Err "-AddonTag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with -AddonSource."
-        exit 1
-    }
     if (-not $AddonSource -or $AddonSource.Count -eq 0) {
         Write-Err "-ListAddons requires at least one -AddonSource path."
         exit 1
     }
+    Prepare-AddonSources
 
     $py = Find-PythonExe
     if (-not $py) {
