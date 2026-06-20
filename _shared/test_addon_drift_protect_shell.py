@@ -2,7 +2,7 @@
 user has drifted (repointed symlink / edited copy) must ABORT instead of silently
 clobbering the user's change. The collision gate now hash-checks same-addon targets.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_drift_protect_shell.py -q
+Run: python3 -m pytest _shared/test_addon_drift_protect_shell.py -q
 """
 
 from __future__ import annotations

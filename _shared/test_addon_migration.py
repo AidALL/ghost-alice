@@ -2,7 +2,7 @@
 install-state, seed sidecars ONLY when attribution is unambiguous, and write
 unattributable targets to _migration-report.json (never fabricate ownership).
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_migration.py -q
+Run: python3 -m pytest _shared/test_addon_migration.py -q
 """
 
 from __future__ import annotations

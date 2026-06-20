@@ -3,7 +3,7 @@ block-addon-control-flow-hooks + hook-script-containment): addon hooks[] parse
 into AddonTarget.hooks, only observational events are permitted, control-flow
 events are rejected fail-closed, and the script is containment-checked.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_hooks.py -q
+Run: python3 -m pytest _shared/test_addon_hooks.py -q
 """
 
 from __future__ import annotations

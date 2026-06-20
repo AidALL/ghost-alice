@@ -5,7 +5,7 @@ A copy-mode addon skill must receive a marker whose owner=addon and
 addon_id=<id>, so classify_skill_root(expected_addon_id=<id>) (plan task T2.9)
 can prove the addon owns its own copied skill instead of failing closed.
 
-Run: /opt/homebrew/bin/python3 -m pytest scripts/tests/test_addon_marker_threading.py -q
+Run: python3 -m pytest scripts/tests/test_addon_marker_threading.py -q
 """
 
 from __future__ import annotations

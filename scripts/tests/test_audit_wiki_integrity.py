@@ -19,7 +19,7 @@ philosophy:
 - en<->ko page pairing (handles both name<->name_ko and name_en<->name_ko)
 - it must NOT flag external links, image links, same-page anchors, or special pages
 
-Run: /opt/homebrew/bin/python3 -m pytest scripts/tests/test_audit_wiki_integrity.py -q
+Run: python3 -m pytest scripts/tests/test_audit_wiki_integrity.py -q
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 installing the SAME addon to claude and codex keeps BOTH records (the last
 platform must not overwrite the first).
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_platform_scope_shell.py -q
+Run: python3 -m pytest _shared/test_addon_platform_scope_shell.py -q
 """
 
 from __future__ import annotations

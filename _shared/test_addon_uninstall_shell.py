@@ -1,7 +1,7 @@
 """Shell e2e for plan T2.3: `install.sh --uninstall --addon <id>` removes the
 addon's installed targets AND its sidecar (and resume + dep-block wiring loads).
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_uninstall_shell.py -q
+Run: python3 -m pytest _shared/test_addon_uninstall_shell.py -q
 """
 
 from __future__ import annotations

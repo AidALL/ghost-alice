@@ -6,7 +6,7 @@
   in the sidecar provided[] (kind=command / kind=resource) so the generic
   uninstall + doctor machinery covers them.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_commands_resources.py -q
+Run: python3 -m pytest _shared/test_addon_commands_resources.py -q
 """
 
 from __future__ import annotations

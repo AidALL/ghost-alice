@@ -11,7 +11,7 @@ The check is deterministic and structural:
 - Every Contents anchor must resolve to some real heading anchor (no dangling links).
 - Headings inside fenced code blocks (``` or longer fences) are NOT sections.
 
-Run: /opt/homebrew/bin/python3 -m pytest scripts/tests/test_validate_toc_parity.py -q
+Run: python3 -m pytest scripts/tests/test_validate_toc_parity.py -q
 """
 
 from __future__ import annotations

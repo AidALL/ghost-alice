@@ -11,7 +11,7 @@ symlink), must:
 This is the multi-addon counterpart of the single-addon full-uninstall-drift
 test in test_addon_commands_resources_shell.py.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_full_uninstall_multi_shell.py -q
+Run: python3 -m pytest _shared/test_addon_full_uninstall_multi_shell.py -q
 """
 
 from __future__ import annotations
