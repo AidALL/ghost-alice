@@ -448,6 +448,9 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   [ -n "$AGENT_VISIBILITY" ] && agent_visibility_args+=(--visibility "$AGENT_VISIBILITY")
   verbose_args=()
   [ "$VERBOSE" -eq 1 ] && verbose_args+=(--verbose)
+  if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
+    prepare_addon_sources || exit 1
+  fi
   addon_args=()
   for source in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"}; do
     addon_args+=(--addon-source "$source")
@@ -495,12 +498,9 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   if [ "${#auto_skills[@]}" -eq 0 ]; then
     auto_skills=("${ALL_SKILLS[@]}")
   fi
-  auto_common_targets="$(count_skill_targets "${auto_skills[@]}")"
-  [ -d "${SCRIPT_DIR}/_shared" ] && auto_common_targets=$((auto_common_targets + 1))
   auto_platform_count="${#detected[@]}"
-  auto_total_operations=$((auto_common_targets * auto_platform_count))
-  auto_completed_operations=0
-  auto_displayed_operations=0
+  auto_common_targets="$(count_auto_common_targets "${detected[@]}" -- "${auto_skills[@]}")" || exit 1
+  auto_displayed_targets=0
   auto_platform_label="$(join_by ', ' "${detected[@]}")"
   auto_visibility="$(resolve_effective_visibility)"
   if live_counter_enabled; then
@@ -517,13 +517,13 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
     child_pid=$!
     if live_counter_enabled; then
       while jobs -pr | grep -q "^${child_pid}$"; do
-        auto_completed_operations="$(report_read_target_operation_progress "$auto_event_file")"
-        report_auto_animate_target_operation_progress_line \
-          "$auto_displayed_operations" \
-          "$auto_completed_operations" \
-          "$auto_total_operations" \
-          "${plat} ${platform_index}/${auto_platform_count}"
-        auto_displayed_operations="$auto_completed_operations"
+        auto_synced_targets="$(report_read_weighted_common_target_progress "$auto_event_file" "$auto_platform_count" "$auto_common_targets")"
+        report_auto_animate_common_target_progress_line \
+          "$auto_displayed_targets" \
+          "$auto_synced_targets" \
+          "$auto_common_targets" \
+          "common targets synced on all platforms"
+        auto_displayed_targets="$auto_synced_targets"
         sleep 0.1
       done
     fi
@@ -535,30 +535,29 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
       warn "$(t "[auto] Install failed for ${plat} (exit code $child_rc)" "[auto] Install failed for ${plat} (exit code $child_rc)")"
     fi
     if live_counter_enabled; then
-      auto_completed_operations="$(report_read_target_operation_progress "$auto_event_file")"
-      report_auto_animate_target_operation_progress_line \
-        "$auto_displayed_operations" \
-        "$auto_completed_operations" \
-        "$auto_total_operations" \
-        "${plat} ${platform_index}/${auto_platform_count}"
-      auto_displayed_operations="$auto_completed_operations"
+      auto_synced_targets="$(report_read_weighted_common_target_progress "$auto_event_file" "$auto_platform_count" "$auto_common_targets")"
+      report_auto_animate_common_target_progress_line \
+        "$auto_displayed_targets" \
+        "$auto_synced_targets" \
+        "$auto_common_targets" \
+        "common targets synced on all platforms"
+      auto_displayed_targets="$auto_synced_targets"
     fi
   done
   auto_synced_targets="$(report_read_all_common_target_progress "$auto_event_file" "$auto_platform_count")"
   if [ "$rc" -eq 0 ]; then
     if live_counter_enabled; then
-      auto_completed_operations="$(report_read_target_operation_progress "$auto_event_file")"
-      report_auto_animate_target_operation_progress_line \
-        "$auto_displayed_operations" \
-        "$auto_completed_operations" \
-        "$auto_total_operations" \
-        "done"
-      [ "$auto_completed_operations" -gt "$auto_total_operations" ] && auto_completed_operations="$auto_total_operations"
-      auto_displayed_operations="$auto_completed_operations"
-      report_auto_update_target_operation_progress_line \
-        "$auto_displayed_operations" \
-        "$auto_total_operations" \
-        "done"
+      report_auto_animate_common_target_progress_line \
+        "$auto_displayed_targets" \
+        "$auto_synced_targets" \
+        "$auto_common_targets" \
+        "common targets synced on all platforms"
+      [ "$auto_synced_targets" -gt "$auto_common_targets" ] && auto_synced_targets="$auto_common_targets"
+      auto_displayed_targets="$auto_synced_targets"
+      report_auto_update_common_target_progress_line \
+        "$auto_displayed_targets" \
+        "$auto_common_targets" \
+        "common targets synced on all platforms"
       printf '\n'
       report_print_tail "$auto_platform_label" "$auto_visibility"
     else
