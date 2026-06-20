@@ -42,6 +42,26 @@ install.cmd
 
 `install.cmd` is a wrapper for environments where PowerShell execution policy blocks direct script execution or profile loading. It calls `install.ps1` internally with `-NoProfile -ExecutionPolicy Bypass` and does not change the user or machine execution policy.
 
+## Install Official Addons
+
+Official addons use short aliases and install to detected Claude Code/Codex targets by default:
+
+```bash
+bash install.sh --addon autopilot
+```
+
+To install the official addon for one platform only, add `--platform`:
+
+```bash
+bash install.sh --platform codex --addon autopilot
+```
+
+Custom, tenant, or local development addons still use `--addon-source PATH|URL`:
+
+```bash
+bash install.sh --addon-source /path/to/addon-repo
+```
+
 ## Install One Platform
 
 | Target | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
@@ -178,7 +198,7 @@ A full install deploys:
 
 - core skills from `skill-catalog/skills.json`
 - coding-convention workflow skills
-- optional addon skills when `--addon-source` is provided
+- optional addon skills through official `--addon` aliases or custom `--addon-source`
 - `_shared/` utilities
 - platform hook settings
 - Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
@@ -204,6 +224,8 @@ On the next Claude/Codex session, if any pending entries exist, `merge-companion
 | Show install state | `bash install.sh --status` | `.\install.cmd -Status` | `install.cmd -Status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd -Doctor` | `install.cmd -Doctor` |
 | Safe source update | `bash install.sh --update-source` | `.\install.cmd -UpdateSource` | `install.cmd -UpdateSource` |
+| Install official autopilot addon | `bash install.sh --addon autopilot` | not yet supported | not yet supported |
+| Install custom addon source | `bash install.sh --addon-source /path/to/addon-repo` | not yet supported | not yet supported |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd -Skills task-router,verification-before-completion` | `install.cmd -Skills task-router,verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |

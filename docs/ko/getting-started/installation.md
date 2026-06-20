@@ -42,6 +42,26 @@ install.cmd
 
 `install.cmd`는 PowerShell execution policy가 direct script execution 또는 profile loading을 막는 환경을 위한 wrapper다. 내부에서 `install.ps1`을 `-NoProfile -ExecutionPolicy Bypass`로 호출하고, 사용자 또는 머신 execution policy를 변경하지 않는다.
 
+## 공식 애드온 설치
+
+공식 애드온은 짧은 alias를 사용하며, 기본값은 감지된 Claude Code/Codex 대상 전체 설치다.
+
+```bash
+bash install.sh --addon autopilot
+```
+
+한 플랫폼에만 설치하려면 `--platform`을 추가한다.
+
+```bash
+bash install.sh --platform codex --addon autopilot
+```
+
+custom, tenant, local development 애드온은 계속 `--addon-source PATH|URL`을 사용한다.
+
+```bash
+bash install.sh --addon-source /path/to/addon-repo
+```
+
 ## Install One Platform
 
 | Target | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
@@ -177,7 +197,7 @@ full install은 다음을 배포한다.
 
 - `skill-catalog/skills.json`의 core skills
 - coding-convention workflow skills
-- `--addon-source`가 제공될 때 optional addon skills
+- 공식 `--addon` alias 또는 custom `--addon-source`로 설치하는 optional addon skills
 - `_shared/` utilities
 - platform hook settings
 - `~/.ghost-alice/hooks/` 아래 Node-backed hook dispatcher assets
@@ -203,6 +223,8 @@ update가 user-modified installed files를 감지하면 installer는 후보를 p
 | Show install state | `bash install.sh --status` | `.\install.cmd -Status` | `install.cmd -Status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd -Doctor` | `install.cmd -Doctor` |
 | Safe source update | `bash install.sh --update-source` | `.\install.cmd -UpdateSource` | `install.cmd -UpdateSource` |
+| Install official autopilot addon | `bash install.sh --addon autopilot` | 아직 지원하지 않음 | 아직 지원하지 않음 |
+| Install custom addon source | `bash install.sh --addon-source /path/to/addon-repo` | 아직 지원하지 않음 | 아직 지원하지 않음 |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd -Skills task-router,verification-before-completion` | `install.cmd -Skills task-router,verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |
