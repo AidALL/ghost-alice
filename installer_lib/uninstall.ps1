@@ -376,6 +376,7 @@ function Show-Help {
         Write-Host @"
 Usage:
   .\install.cmd                          # Install to detected AI tools
+  .\install.cmd --addon autopilot        # Install official autopilot addon to detected AI tools
   .\install.cmd -Platform claude         # Install only to Claude Code
   .\install.cmd -Platform codex          # Install to Codex
 
@@ -397,8 +398,9 @@ Removal commands:
 Advanced/operator commands:
   -Skills name1,name2                    Install only selected skills
   -List                                  List available skills
+  -Addon autopilot                       Install official autopilot addon; -Platform is optional
   -AddonSource PATH                      Add addon repo or local manifest path
-  -AddonTag TAG                          Reserved: check out tag locally for now
+  -AddonTag TAG                          Checkout branch/tag for git URL addon sources
   -AddonSkip                             Disable addon installation
   -ListAddons                            List addon manifest targets
   -CleanupPending                        Clean false-positive legacy pending entries
@@ -412,6 +414,7 @@ Advanced/operator commands:
     Write-Host @"
 Usage:
   .\install.cmd                          # Install to detected AI tools
+  .\install.cmd --addon autopilot        # Install official autopilot addon to detected AI tools
   .\install.cmd -Platform claude         # Install only to Claude Code
   .\install.cmd -Platform codex          # Install to Codex
 
@@ -433,8 +436,9 @@ Removal commands:
 Advanced/operator commands:
   -Skills name1,name2                    Install only selected skills
   -List                                  List available skills
+  -Addon autopilot                       Install official autopilot addon; -Platform is optional
   -AddonSource PATH                      Add addon repo or local manifest path
-  -AddonTag TAG                          Reserved: check out tag locally for now
+  -AddonTag TAG                          Checkout branch/tag for git URL addon sources
   -AddonSkip                             Disable addon installation
   -ListAddons                            List addon manifest targets
   -CleanupPending                        Clean false-positive legacy pending entries

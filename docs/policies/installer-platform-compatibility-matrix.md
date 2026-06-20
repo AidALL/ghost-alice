@@ -83,8 +83,8 @@ If the final response `[completion-check]` claims `skill-call: verification-befo
 | Windows visibility preference smoke | `install.ps1 -Visibility <profile>` and `install.cmd -Visibility <profile>` forward to `_shared/install_hooks.py --visibility`; `-AgentVisibility` remains accepted as a compatibility alias, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible; PS5-incompatible syntax is caught by `PSUseCompatibleSyntax` static analysis when the analyzer is available | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | Windows PowerShell 7.4 LTS cleanup | `install.ps1` removes detected PowerShell 7.4.x MSI products by product-code scoped `msiexec.exe /x ... /quiet /norestart` before resolving the latest 7.6.x MSI; non-MSI entries without a product code are skipped, and 7.5/7.6+, Windows PowerShell 5.1, and unrelated products are not removed | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
-| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+ | local/CI PowerShell smoke |
-| CMD wrapper | delegates to `install.ps1`, forwards arguments, forces UTF-8, and preserves the official `--addon autopilot` alias through PowerShell binding and addon source preparation | `scripts.tests.test_install_cmd_wrapper` |
+| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output exposes the official addon alias and describes `-AddonTag` as branch/tag selection for git URL addon sources | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |
+| CMD wrapper | delegates to `install.ps1`, forwards arguments, forces UTF-8, and preserves the official `--addon autopilot` alias through PowerShell binding and addon source preparation; wrapper-facing help exposes the same alias and AddonTag wording | `scripts.tests.test_install_cmd_wrapper` |
 
 ## CI Commands
 

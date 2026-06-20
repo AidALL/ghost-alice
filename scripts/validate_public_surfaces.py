@@ -2,8 +2,8 @@
 """
 validate_public_surfaces.py. Public surface and skill-catalog parity checks.
 
-Verifies that README, docs/index.html, and workspace command wrappers expose the
-same skill count, list, and target references as skill-catalog/skills.json.
+Verifies that README, docs/index.html, and workspace command wrappers keep the
+public command surface aligned with skill-catalog/skills.json.
 """
 
 from __future__ import annotations
@@ -129,12 +129,26 @@ def check_readme(repo: Path, top_level: list[str], coding: list[str], findings: 
         return
     text = path.read_text(encoding="utf-8")
     total = len(top_level) + len(coding)
+    has_validation_command = (
+        "python scripts/validate_public_surfaces.py" in text
+        or "python3 scripts/validate_public_surfaces.py" in text
+    )
+    compact_entrypoint = (
+        "## Quick Start" in text
+        and "## Official Addons" in text
+        and "## Documentation Map" in text
+        and "bash install.sh --addon autopilot" in text
+        and has_validation_command
+    )
 
     summary = re.search(
         r"top-level\s+(\d+)\s+skills?\s+and\s+(\d+)\s+coding-convention\s+sub-skills?,\s+total\s+(\d+)",
         text,
         re.IGNORECASE,
     )
+    if compact_entrypoint and not summary:
+        return
+
     if not summary:
         findings.append(
             Finding(
@@ -200,10 +214,7 @@ def check_readme(repo: Path, top_level: list[str], coding: list[str], findings: 
             )
         )
 
-    if (
-        "python scripts/validate_public_surfaces.py" not in text
-        and "python3 scripts/validate_public_surfaces.py" not in text
-    ):
+    if not has_validation_command:
         findings.append(
             Finding(
                 "ERROR",
@@ -272,6 +283,115 @@ def check_docs_index(repo: Path, top_level: list[str], coding: list[str], findin
                 "floor-first-contract",
                 "docs/index.html is missing floor-first homepage contract markers: "
                 + ", ".join(missing_markers),
+            )
+        )
+
+    if "Where to go next" in text and "hero-logo-lockup" in text:
+        required_docs_root_markers = [
+            'src="imgs/Ghost-ALICE_logo.png"',
+            'href="./getting-started/installation.md"',
+            'href="./getting-started/uninstall.md"',
+            'href="./policies/installer-platform-compatibility-matrix.md"',
+            'href="./ko/README.md"',
+        ]
+        missing_docs_root_markers = [
+            marker for marker in required_docs_root_markers if marker not in text
+        ]
+        if missing_docs_root_markers:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "docs/index.html",
+                    "docs-root-links",
+                    "docs/index.html is missing docs-root-relative homepage links: "
+                    + ", ".join(missing_docs_root_markers),
+                )
+            )
+        forbidden_docs_root_markers = [
+            'href="./docs/',
+            'href="./README_ko.md"',
+        ]
+        stale_docs_root_markers = [
+            marker for marker in forbidden_docs_root_markers if marker in text
+        ]
+        if stale_docs_root_markers:
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "docs/index.html",
+                    "docs-root-links",
+                    "docs/index.html contains repo-root-only links that break from docs root: "
+                    + ", ".join(stale_docs_root_markers),
+                )
+            )
+        docs_logo = repo / "docs" / "imgs" / "Ghost-ALICE_logo.png"
+        if not docs_logo.is_file():
+            findings.append(
+                Finding(
+                    "ERROR",
+                    "docs/index.html",
+                    "docs-root-asset",
+                    "docs/imgs/Ghost-ALICE_logo.png is missing for the docs-root homepage.",
+                )
+            )
+
+
+def check_repo_index(repo: Path, findings: list[Finding]) -> None:
+    path = repo / "index.html"
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8")
+    if "Where to go next" not in text or "hero-logo-lockup" not in text:
+        return
+
+    required_repo_root_markers = [
+        'src="imgs/Ghost-ALICE_logo.png"',
+        'href="./docs/getting-started/installation.md"',
+        'href="./docs/getting-started/uninstall.md"',
+        'href="./docs/policies/installer-platform-compatibility-matrix.md"',
+        'href="./README_ko.md"',
+    ]
+    missing_repo_root_markers = [
+        marker for marker in required_repo_root_markers if marker not in text
+    ]
+    if missing_repo_root_markers:
+        findings.append(
+            Finding(
+                "ERROR",
+                "index.html",
+                "repo-root-links",
+                "index.html is missing repo-root-relative homepage links: "
+                + ", ".join(missing_repo_root_markers),
+            )
+        )
+
+    forbidden_repo_root_markers = [
+        'href="./getting-started/',
+        'href="./policies/',
+        'href="./ko/README.md"',
+    ]
+    stale_repo_root_markers = [
+        marker for marker in forbidden_repo_root_markers if marker in text
+    ]
+    if stale_repo_root_markers:
+        findings.append(
+            Finding(
+                "ERROR",
+                "index.html",
+                "repo-root-links",
+                "index.html contains docs-root-only links that break from repo root: "
+                + ", ".join(stale_repo_root_markers),
+            )
+        )
+
+    repo_logo = repo / "imgs" / "Ghost-ALICE_logo.png"
+    if not repo_logo.is_file():
+        findings.append(
+            Finding(
+                "ERROR",
+                "index.html",
+                "repo-root-asset",
+                "imgs/Ghost-ALICE_logo.png is missing for the repo-root homepage.",
             )
         )
 
@@ -359,6 +479,7 @@ def run(repo: Path) -> tuple[list[Finding], dict[str, Any]]:
     top_level, coding, paths, descriptions = split_skill_sets(skills)
     if skills:
         check_readme(repo, top_level, coding, findings)
+        check_repo_index(repo, findings)
         check_docs_index(repo, top_level, coding, findings)
         command_wrappers = check_command_wrappers(repo, paths, descriptions, findings)
     else:
@@ -400,7 +521,7 @@ def main() -> int:
         )
     else:
         print(f"Public surface parity check: repo={repo}")
-        surfaces = ["README.md", "docs/index.html"]
+        surfaces = ["README.md", "index.html", "docs/index.html"]
         if checked["command_wrappers"] == "checked":
             surfaces.append(".claude/commands")
         else:

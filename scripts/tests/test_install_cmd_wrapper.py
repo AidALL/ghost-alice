@@ -118,6 +118,35 @@ class InstallCmdWrapperTest(unittest.TestCase):
         self.assertIn("GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE", targets_runtime)
         self.assertIn("addon-source-cache", targets_runtime)
 
+    def test_powershell_help_exposes_official_addon_alias_and_addon_tag_contract(self) -> None:
+        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+        if not pwsh:
+            self.skipTest("PowerShell executable is required for help output test")
+
+        result = subprocess.run(
+            [
+                pwsh,
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(INSTALL_PS1),
+                "-Help",
+            ],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        help_text = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, msg=help_text)
+        self.assertTrue("--addon autopilot" in help_text or "-Addon autopilot" in help_text)
+        self.assertIn("Checkout branch/tag for git URL addon sources", help_text)
+        self.assertNotIn("Reserved: check out tag locally for now", help_text)
+
     def test_powershell_addon_alias_lists_official_addon_targets(self) -> None:
         pwsh = shutil.which("pwsh") or shutil.which("powershell")
         if not pwsh:
@@ -421,28 +450,28 @@ class InstallCmdWrapperTest(unittest.TestCase):
     def test_docs_explain_autopilot_addon_installs_from_core_checkout(self) -> None:
         expectations = {
             README: [
-                "Official autopilot addon:",
-                "cd ~/ghost-alice",
+                "## Official Addons",
+                "Official addons are maintained as separate repositories",
                 "bash install.sh --addon autopilot",
-                "The autopilot repository is an addon package consumed by the core installer",
+                "Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository.",
             ],
             README_KO: [
-                "Official autopilot addon:",
-                "cd ~/ghost-alice",
+                "## Official Addons",
+                "official addon은 core checkout에서 alias로 설치한다",
                 "bash install.sh --addon autopilot",
-                "autopilot repository는 core installer가 소비하는 addon package",
+                "addon-specific detail은 addon repository에 둔다",
             ],
             INSTALLATION_DOC: [
-                "Run this from the Ghost-ALICE core checkout",
-                "Normal users do not clone the autopilot addon repository",
+                "## Install Official Addons",
+                "## Official Addon List",
                 "bash install.sh --addon autopilot",
-                "Windows PowerShell/CMD use the same official alias",
+                "## Runtime And Platform Reference",
             ],
             INSTALLATION_DOC_KO: [
-                "Ghost-ALICE core checkout에서 실행한다",
-                "일반 사용자는 autopilot addon repository를 직접 clone하지 않는다",
+                "## Install Official Addons",
+                "## Official Addon List",
                 "bash install.sh --addon autopilot",
-                "Windows PowerShell/CMD도 같은 official alias를 사용한다",
+                "## Runtime And Platform Reference",
             ],
         }
 
@@ -451,6 +480,30 @@ class InstallCmdWrapperTest(unittest.TestCase):
                 text = path.read_text(encoding="utf-8-sig")
                 for snippet in snippets:
                     self.assertIn(snippet, text)
+
+    def test_install_and_uninstall_docs_put_command_choices_before_runtime_detail(self) -> None:
+        install_docs = {
+            INSTALLATION_DOC: ("## Quick Install", "## Install Official Addons", "## Runtime And Platform Reference"),
+            INSTALLATION_DOC_KO: ("## Quick Install", "## Install Official Addons", "## Runtime And Platform Reference"),
+        }
+        for path, markers in install_docs.items():
+            with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
+                text = path.read_text(encoding="utf-8-sig")
+                positions = [text.index(marker) for marker in markers]
+                self.assertEqual(positions, sorted(positions))
+                self.assertLess(text.index("## Install Official Addons"), text.index("## Install One Platform"))
+                self.assertLess(text.index("## Common Commands"), text.index("## Runtime And Platform Reference"))
+
+        uninstall_docs = [
+            REPO_ROOT / "docs" / "getting-started" / "uninstall.md",
+            REPO_ROOT / "docs" / "ko" / "getting-started" / "uninstall.md",
+        ]
+        for path in uninstall_docs:
+            with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
+                text = path.read_text(encoding="utf-8-sig")
+                self.assertIn("## Choose The Removal Scope", text)
+                self.assertLess(text.index("## Choose The Removal Scope"), text.index("## Source"))
+                self.assertIn("Addon-specific removal", text)
 
 
 if __name__ == "__main__":

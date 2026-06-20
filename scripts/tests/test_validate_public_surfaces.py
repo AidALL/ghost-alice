@@ -149,6 +149,49 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         data = self.load_json_output(result)
         self.assertEqual(data["error_count"], 0, msg=result.stdout)
 
+    def test_validator_accepts_compact_readme_entrypoint_without_live_skill_count(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self.make_fixture(Path(td))
+            write_text(
+                repo / "README.md",
+                """
+                # Ghost-ALICE OS
+
+                Ghost-ALICE OS is an agent governance layer for AI work.
+
+                ## Quick Start
+
+                ```bash
+                bash install.sh
+                ```
+
+                ## Official Addons
+
+                Official addons are maintained as separate repositories and installed from the
+                Ghost-ALICE core checkout with a short alias.
+
+                ```bash
+                bash install.sh --addon autopilot
+                ```
+
+                ## Documentation Map
+
+                - [Skill catalog guide](./docs/reference/skills.md)
+
+                ## Contributing And Validation
+
+                ```bash
+                python3 scripts/validate_public_surfaces.py
+                ```
+                """,
+            )
+
+            result = self.run_validator(repo)
+
+        self.assertEqual(result.returncode, 0, msg=result.stdout)
+        data = self.load_json_output(result)
+        self.assertEqual(data["error_count"], 0, msg=result.stdout)
+
     def test_homepage_foregrounds_intent_analyzer_not_internal_router(self) -> None:
         text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
 
@@ -280,6 +323,48 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
             'class="support-name">verification-before-completion',
         ):
             self.assertNotIn(duplicated_gate_card, support_section)
+
+    def test_docs_homepage_uses_docs_root_relative_links(self) -> None:
+        text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+
+        self.assertTrue((REPO_ROOT / "docs" / "imgs" / "Ghost-ALICE_logo.png").is_file())
+        self.assertIn('src="imgs/Ghost-ALICE_logo.png"', text)
+        for marker in (
+            'href="./getting-started/installation.md"',
+            'href="./getting-started/uninstall.md"',
+            'href="./policies/installer-platform-compatibility-matrix.md"',
+            'href="./ko/README.md"',
+        ):
+            self.assertIn(marker, text)
+        for stale_marker in ('href="./docs/', 'href="./README_ko.md"'):
+            self.assertNotIn(stale_marker, text)
+
+    def test_validator_detects_repo_root_homepage_link_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self.make_fixture(Path(td))
+            write_text(
+                repo / "index.html",
+                """
+                <div class="hero-logo-lockup">
+                  <img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS">
+                </div>
+                <section id="routes">
+                  <h2>Where to go next</h2>
+                  <a href="./getting-started/installation.md">Install</a>
+                  <a href="./getting-started/uninstall.md">Uninstall</a>
+                  <a href="./policies/installer-platform-compatibility-matrix.md">Matrix</a>
+                  <a href="./ko/README.md">Korean docs</a>
+                </section>
+                """,
+            )
+
+            result = self.run_validator(repo)
+
+        self.assertEqual(result.returncode, 2, msg=result.stdout)
+        data = self.load_json_output(result)
+        messages = "\n".join(finding["message"] for finding in data["findings"])
+        self.assertIn("index.html", messages)
+        self.assertIn("repo-root-relative", messages)
 
     def test_validator_detects_readme_top_level_list_drift(self) -> None:
         with tempfile.TemporaryDirectory() as td:
