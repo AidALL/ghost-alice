@@ -259,18 +259,139 @@ function Test-AddonDependentsForSkill {
     return $true
 }
 
+function Test-InstalledAddonIdForUninstall {
+    param([string]$AddonId, [string]$AddonsDir)
+
+    if (-not $AddonId -or $AddonId -notmatch '^[a-z][a-z0-9-]*$') {
+        return $false
+    }
+    return (
+        (Test-Path -LiteralPath (Join-Path $AddonsDir "$AddonId.json")) -or
+        (Test-Path -LiteralPath (Join-Path $AddonsDir "$AddonId.json.removing"))
+    )
+}
+
+function Add-UniqueUninstallAddonId {
+    param(
+        [System.Collections.Generic.List[string]]$AddonIds,
+        [string]$AddonId
+    )
+
+    if ($AddonId -and -not $AddonIds.Contains($AddonId)) {
+        [void]$AddonIds.Add($AddonId)
+    }
+}
+
+function Split-UninstallSelection {
+    param(
+        [string[]]$SkillNames,
+        [string[]]$ExplicitAddonIds,
+        [string]$AddonsDir
+    )
+
+    $addonIds = [System.Collections.Generic.List[string]]::new()
+    foreach ($addonId in @($ExplicitAddonIds)) {
+        Add-UniqueUninstallAddonId -AddonIds $addonIds -AddonId $addonId
+    }
+
+    $keptSkills = @()
+    foreach ($skill in @($SkillNames)) {
+        $targets = Expand-SkillTargets $skill
+        if ($targets.Count -eq 0 -and (Test-InstalledAddonIdForUninstall -AddonId $skill -AddonsDir $AddonsDir)) {
+            Add-UniqueUninstallAddonId -AddonIds $addonIds -AddonId $skill
+        } else {
+            $keptSkills += $skill
+        }
+    }
+
+    return [PSCustomObject]@{
+        SkillNames = @($keptSkills)
+        AddonIds   = @($addonIds.ToArray())
+    }
+}
+
+function Invoke-ResumePendingAddonUninstalls {
+    param(
+        [string]$PythonExe,
+        [string]$AddonsDir,
+        [string]$Helper,
+        [string]$CommandsDir,
+        [string]$ResourcesDir
+    )
+
+    if (-not $PythonExe -or -not (Test-Path -LiteralPath $AddonsDir)) {
+        return
+    }
+    & $PythonExe $Helper --resume-pending --addons-dir $AddonsDir --skills-dir $SkillsDir `
+        --skills-dir $CommandsDir --skills-dir $ResourcesDir --platform $Platform --confirm 2>$null | Out-Null
+}
+
 function Invoke-Uninstall {
-    param([string[]]$SkillNames)
+    param([string[]]$SkillNames, [string[]]$AddonIds)
+
+    $userHome = Resolve-UserHome
+    $addonsDir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "addons") $Platform
+    $selection = Split-UninstallSelection -SkillNames $SkillNames -ExplicitAddonIds $AddonIds -AddonsDir $addonsDir
+    $SkillNames = @($selection.SkillNames)
+    $AddonIds = @($selection.AddonIds)
+
+    $py = Find-PythonExe
+    $helper = Join-Path $script:GhostAliceRoot "_shared/addon_uninstall.py"
+    $commandsDir = Join-Path (Resolve-ClaudeHome) "commands"
+    $resourcesDir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "resources") $Platform
+
+    $knownBefore = @{}
+    foreach ($addonId in @($AddonIds)) {
+        if (Test-InstalledAddonIdForUninstall -AddonId $addonId -AddonsDir $addonsDir) {
+            $knownBefore[$addonId] = $true
+        }
+    }
+
+    Invoke-ResumePendingAddonUninstalls -PythonExe $py -AddonsDir $addonsDir `
+        -Helper $helper -CommandsDir $commandsDir -ResourcesDir $resourcesDir
+
+    $removed = 0
+    $failed = 0
+
+    if ($AddonIds -and $AddonIds.Count -gt 0) {
+        if (-not $py) {
+            Write-Err "Python 3.11+ not found; cannot uninstall addons" "Python 3.11+ not found; cannot uninstall addons"
+            throw "addon uninstall cannot run - Python 3.11+ is required"
+        }
+        foreach ($addonId in @($AddonIds)) {
+            & $py $helper --addon-id $addonId --addons-dir $addonsDir --skills-dir $SkillsDir `
+                --skills-dir $commandsDir --skills-dir $resourcesDir --platform $Platform --confirm
+            $rc = $LASTEXITCODE
+            if ($rc -eq 0) {
+                $removed++
+            } elseif ($rc -eq 1 -and $knownBefore.ContainsKey($addonId)) {
+                $removed++
+            } else {
+                $failed++
+                if ($rc -eq 1) {
+                    Write-Warn ("Addon {0}: not installed (nothing to remove)" -f $addonId) ("Addon {0}: not installed (nothing to remove)" -f $addonId)
+                } else {
+                    Write-Warn ("Addon {0}: uninstall left items for manual review" -f $addonId) ("Addon {0}: uninstall left items for manual review" -f $addonId)
+                }
+            }
+        }
+    }
 
     if ($SkillNames -and $SkillNames.Count -gt 0) {
         Assert-SkillNames $SkillNames
         Write-Info "Removing selected skills..." "Removing selected skills..."
     } else {
+        if ($AddonIds -and $AddonIds.Count -gt 0) {
+            if ($removed -gt 0) { Write-Ok ("{0} addon(s) removed." -f $removed) ("{0} addon(s) removed." -f $removed) }
+            else { Write-Info "No addon targets to remove." "No addon targets to remove." }
+            if ($failed -gt 0) {
+                throw "one or more addon uninstalls failed"
+            }
+            return
+        }
         Invoke-FullUninstall
         return
     }
-
-    $removed = 0
 
     foreach ($skill in $SkillNames) {
         if (-not (Test-AddonDependentsForSkill -SkillName $skill)) {
@@ -302,6 +423,10 @@ function Invoke-Uninstall {
         Write-Info "Managed skills remain; keeping hooks installed." "Managed skills remain; keeping hooks installed."
     } else {
         Invoke-InstallHooks -Action "uninstall" -TargetPlatform $Platform
+    }
+
+    if ($failed -gt 0) {
+        throw "one or more addon uninstalls failed"
     }
 }
 
@@ -393,6 +518,7 @@ Common commands:
 Removal commands:
   -Uninstall                             Full uninstall: remove managed hooks, bootstrap, support state, and install targets
   -Platform PLAT -Uninstall -Skills name Remove selected skills from one platform
+  -Platform PLAT -Uninstall -Addon id    Remove selected addon from one platform
   -Force                                 Override selected-skill addon dependency guard
 
 Advanced/operator commands:
@@ -431,6 +557,7 @@ Common commands:
 Removal commands:
   -Uninstall                             Full uninstall: remove managed hooks, bootstrap, support state, and install targets
   -Platform PLAT -Uninstall -Skills name Remove selected skills from one platform
+  -Platform PLAT -Uninstall -Addon id    Remove selected addon from one platform
   -Force                                 Override selected-skill addon dependency guard
 
 Advanced/operator commands:

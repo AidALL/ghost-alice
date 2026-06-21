@@ -44,6 +44,8 @@ bash install.sh --addon <addon>
 
 Some official addons add only capability skills. Others can extend runtime workflow behavior. Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository.
 
+The autopilot repository is an addon package consumed by the core installer. This install example is not a full runtime compatibility claim; read the addon repository `compatibility-matrix.json` before making one.
+
 | Addon | Purpose | Basic install | Details |
 | --- | --- | --- | --- |
 | autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |

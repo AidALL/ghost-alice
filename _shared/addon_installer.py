@@ -1010,6 +1010,12 @@ def detect_collisions(
             # destroy their change, so flag same-addon drift and abort.
             if _same_addon_target_is_clean(dest, recorded_hash, recorded_mode):
                 continue
+            # Copy-mode targets can be in a recoverable stale-sidecar state: the
+            # installed bytes already match the incoming addon source, but the
+            # sidecar still records an older hash. Reinstalling is then a no-op
+            # for content and lets write-sidecars repair the registry.
+            if _same_addon_copy_matches_source(dest, target.source, recorded_hash, recorded_mode):
+                continue
             # A skill symlink already pointing at THIS install's source is the
             # installer's own (re)target, not a user edit -- not drift. This unwedges
             # a prior failed reinstall that re-pointed the symlink before the sidecar
@@ -1025,6 +1031,8 @@ def detect_collisions(
             owner = "core"
         elif owner_id is not None:
             owner = "addon"
+        elif _legacy_same_addon_symlink_is_safe(dest, target):
+            continue
         elif (dest / "SKILL.md").exists():
             owner = "domain"
         else:
@@ -1074,12 +1082,79 @@ def _same_addon_target_is_clean(dest: Path, recorded_hash: str, recorded_mode: s
         return False
 
 
+def _same_addon_copy_matches_source(
+    dest: Path,
+    source: Path,
+    recorded_hash: str,
+    recorded_mode: str,
+) -> bool:
+    """True when a stale sidecar points at an installed copy equal to source."""
+    if not recorded_hash or recorded_mode != "copy":
+        return False
+    if dest.is_symlink() or not dest.exists() or not source.exists():
+        return False
+    try:
+        return hash_utils.hash_target(str(dest), "copy") == hash_utils.hash_target(str(source), "copy")
+    except Exception:
+        return False
+
+
 def _resolves_to(dest: Path, source: Path) -> bool:
     """True iff ``dest`` and ``source`` resolve to the same real path."""
     try:
         return os.path.realpath(dest) == os.path.realpath(source)
     except OSError:
         return False
+
+
+def _legacy_same_addon_symlink_is_safe(dest: Path, target: AddonTarget) -> bool:
+    """Allow pre-sidecar same-addon symlinks to be updated by the addon installer."""
+    if not dest.is_symlink():
+        return False
+    try:
+        legacy_skill = dest.resolve(strict=True)
+    except OSError:
+        return False
+    if not (legacy_skill / "SKILL.md").is_file():
+        return False
+
+    checked: set[Path] = set()
+    for addon_root in legacy_skill.parents:
+        if addon_root in checked:
+            continue
+        checked.add(addon_root)
+        manifest_path = addon_root / ADDON_MANIFEST
+        if not manifest_path.is_file():
+            continue
+        try:
+            data = _read_json(manifest_path)
+        except AddonManifestError:
+            continue
+        if data.get("addon_id") != target.addon_id:
+            continue
+        skills = data.get("skills")
+        if not isinstance(skills, list):
+            continue
+        for entry in skills:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("source") != "skill" or entry.get("name") != target.name:
+                continue
+            skill_dir = entry.get("skill_dir")
+            if not isinstance(skill_dir, str) or not skill_dir:
+                continue
+            try:
+                recorded_skill = _safe_child_path(
+                    addon_root,
+                    skill_dir,
+                    "skills[].skill_dir",
+                    manifest_path,
+                )
+            except AddonManifestError:
+                continue
+            if recorded_skill == legacy_skill:
+                return True
+    return False
 
 
 def _render_json(targets: list[AddonTarget]) -> str:

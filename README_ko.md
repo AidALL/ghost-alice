@@ -44,6 +44,8 @@ bash install.sh --addon <addon>
 
 일부 official addon은 capability skill만 추가한다. 다른 official addon은 runtime workflow를 확장할 수 있다. addon-specific behavior, state files, pause/resume controls, removal details 같은 addon-specific detail은 addon repository에 둔다.
 
+autopilot repository는 core installer가 소비하는 addon package다. 이 설치 예시는 full runtime compatibility claim이 아니다. full compatibility claim 전에는 addon repository의 `compatibility-matrix.json`을 확인한다.
+
 | Addon | Purpose | Basic install | Details |
 | --- | --- | --- | --- |
 | autopilot | explicitly approved autonomous run을 work item 단위로 계속 진행한다 | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |

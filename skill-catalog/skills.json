@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-06-05T10:58:14Z",
+  "generated_at": "2026-06-21T11:12:15Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -238,7 +238,7 @@
     {
       "name": "test-driven-development",
       "path": "coding-convention/test-driven-development/SKILL.md",
-      "description": "Use before starting feature implementation, bug fixes, or refactors. Requires a failing test before writing production code. Blocks code-first work, manual-only verification excuses, and implementation without observing failure.",
+      "description": "Use when implementing a known feature, bug fix, or refactor with a resolved behavior contract. Requires a failing test before production code; use discovery first when the target or premise is unknown.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [

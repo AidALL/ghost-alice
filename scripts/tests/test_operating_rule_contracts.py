@@ -17,6 +17,8 @@ class OperatingRuleContractTest(unittest.TestCase):
             "problem cause, structure, and impact surface",
             "sufficient-change-depth",
             "temporary patch",
+            "survives the most relevant targeted tests",
+            "smaller diff alone",
         ]
 
         for target in targets:
@@ -34,6 +36,8 @@ class OperatingRuleContractTest(unittest.TestCase):
             "impact surface",
             "sufficient-change-depth",
             "Temporary patch",
+            "survives targeted tests",
+            "smaller diff alone",
         ]
         for needle in english_required:
             self.assertIn(needle, task_router)
@@ -74,6 +78,48 @@ class OperatingRuleContractTest(unittest.TestCase):
             "Forced/risk/gate",
             "Routine/debug values",
             "Token reduction is a consequence",
+        ]
+
+        for target in targets:
+            body = target.read_text(encoding="utf-8")
+            with self.subTest(path=target):
+                for needle in required:
+                    self.assertIn(needle, body)
+
+    def test_tdd_applies_only_after_behavior_contract_is_known(self) -> None:
+        targets = [
+            REPO_ROOT / "coding-convention" / "test-driven-development" / "SKILL.md",
+            REPO_ROOT / "coding-convention" / "using-coding-convention" / "SKILL.md",
+        ]
+        required = [
+            "behavior contract",
+            "premise or target behavior is unknown",
+            "bounded discovery or a proof",
+            "regression coverage",
+        ]
+        forbidden = [
+            "Throw away the exploration and start with TDD",
+        ]
+
+        for target in targets:
+            body = target.read_text(encoding="utf-8")
+            with self.subTest(path=target):
+                for needle in required:
+                    self.assertIn(needle, body)
+                for needle in forbidden:
+                    self.assertNotIn(needle, body)
+
+    def test_tdd_verification_scope_prefers_direct_evidence(self) -> None:
+        targets = [
+            REPO_ROOT / "coding-convention" / "test-driven-development" / "SKILL.md",
+            REPO_ROOT / "coding-convention" / "using-coding-convention" / "SKILL.md",
+        ]
+        required = [
+            "Verification scope",
+            "previously failing test",
+            "directly impacted tests",
+            "Do not repeat broad passing",
+            "risk signal",
         ]
 
         for target in targets:

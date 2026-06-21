@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use before starting feature implementation, bug fixes, or refactors. Requires a failing test before writing production code. Blocks code-first work, manual-only verification excuses, and implementation without observing failure.
+description: Use when implementing a known feature, bug fix, or refactor with a resolved behavior contract. Requires a failing test before production code; use discovery first when the target or premise is unknown.
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -10,12 +10,14 @@ compatibility:
 
 - [Overview](#overview)
 - [When to apply](#when-to-apply)
+- [Applicability gate](#applicability-gate)
 - [The Iron Law](#the-iron-law)
 - [The Red-Green-Refactor cycle](#the-red-green-refactor-cycle)
   - [RED: write a failing test](#red-write-a-failing-test)
   - [RED verification: see the failure with your own eyes](#red-verification-see-the-failure-with-your-own-eyes)
   - [GREEN: minimal code](#green-minimal-code)
   - [GREEN verification: see the pass with your own eyes](#green-verification-see-the-pass-with-your-own-eyes)
+  - [Verification scope after a change](#verification-scope-after-a-change)
   - [REFACTOR: clean up](#refactor-clean-up)
   - [Repeat](#repeat)
 - [Conditions of a good test](#conditions-of-a-good-test)
@@ -32,7 +34,12 @@ compatibility:
 
 ## Overview
 
-Write the test first. See the failure with your own eyes. Then write the minimal code that makes it pass.
+TDD starts after the target behavior is known. Write the test first, see the
+failure with your own eyes, then write the minimal code that makes it pass.
+
+If the premise, data flow, target module, or desired behavior is still unknown,
+do discovery or an implementation proof first. Once the contract is clear,
+freeze it with regression tests before claiming completion.
 
 ○ Core principles
 
@@ -41,37 +48,55 @@ Write the test first. See the failure with your own eyes. Then write the minimal
 
 ## When to apply
 
-□ Always apply
+□ Apply RED-first when
 
-- New features
-- Bug fixes
-- Refactors
-- Behavior changes
+- The feature, bug fix, refactor, or behavior change has a resolved contract.
+- The expected behavior can be stated before implementation.
+- A meaningful automated test can exercise the production path.
 
-□ Exceptions (user approval required)
+□ Do not force RED-first yet when
 
-- One-off prototypes
-- Code-generator output
-- Configuration files
+- The premise, data flow, target surface, or desired behavior is unknown.
+- The work is a one-off prototype, spike, or proof used to discover the contract.
+- The user explicitly instructs implementation first with immediate verification.
+- Code-generator output or configuration-only edits make a failing behavioral test
+  inapplicable.
 
-If the thought "let me skip TDD just this once" comes up, stop. That is rationalization.
+In these cases, run discovery or the proof under a bounded contract, then write
+regression tests for the discovered behavior before completion or merge.
+
+If the target behavior is known and the thought "let me skip TDD just this once"
+comes up, stop. That is rationalization.
+
+## Applicability gate
+
+Before invoking RED-first TDD, answer these questions.
+
+- What exact behavior should fail before the fix?
+- Which production path will the test exercise?
+- Is the expected behavior independent of the implementation you are about to
+  write?
+
+If any answer is unknown, the next step is discovery, root-cause tracing, or an
+implementation proof. Do not invent a test around an unresolved premise.
 
 ## The Iron Law
 
 ```
-Do not write production code without a failing test.
+For TDD-applicable work, do not write production code without a failing test.
 ```
 
-Did you write code before the test? Delete it. Start over from the beginning.
+Did you write code before the test even though the behavior contract was already
+known? Delete it. Start over from the beginning.
 
-□ No exceptions
+□ No exceptions after the applicability gate passes
 
 - Do not keep it around "for reference"
 - Do not "adapt" it while writing the test
 - Do not even look at it
 - Deleting means actually deleting
 
-Start from the test and implement anew. End of story.
+Start from the test and implement anew.
 
 ## The Red-Green-Refactor cycle
 
@@ -220,6 +245,21 @@ Things to confirm
 - Test fails? Fix the code, not the test.
 - Other tests fail? Fix them now.
 
+### Verification scope after a change
+
+A rerun is useful evidence only when it can fail because of the latest change.
+
+- Rerun the previously failing test after the fix.
+- Rerun directly impacted tests for adjacent production paths, shared helpers,
+  fixtures, schema, installer/runtime state, or public API you changed.
+- Do not repeat broad passing suites just because they are available.
+- Broaden to a larger suite only when a risk signal exists, such as a shared
+  dependency, changed environment, flaky-test check, generated artifact, or
+  cross-platform/runtime surface.
+
+If a broad suite already passed before the latest narrow fix, keep that result
+as context. Re-run it only when the latest change can invalidate that evidence.
+
 ### REFACTOR: clean up
 
 Do this only in the green state.
@@ -277,14 +317,16 @@ The "waste" is the side that keeps untrustworthy code. Working code with no real
 
 □ "TDD is dogma and pragmatism is adaptation"
 
-TDD is the pragmatism.
+For TDD-applicable work, TDD is the pragmatism.
 
 - It catches bugs before commit (faster than debugging afterward)
 - It prevents regressions (it catches a break the moment it happens)
 - It documents the behavior (the test shows how to use the code)
 - It makes refactoring possible (change freely, and the test catches any break)
 
-The "pragmatic" shortcut = debugging in production = slower.
+The "pragmatic" shortcut after the behavior contract is known = debugging in
+production = slower. Before the contract is known, discovery or a bounded proof
+is the pragmatic step.
 
 □ "An after-the-fact test achieves the same goal. It is the spirit, not the form"
 
@@ -292,7 +334,10 @@ No. An after-the-fact test answers "what does this code do?" A test-first answer
 
 An after-the-fact test is biased toward the implementation. It checks what you built, not what was required. It verifies only the edge cases you remembered, not the edge cases you discovered.
 
-A test-first forces edge-case discovery before implementation. A 30-minute after-the-fact test ≠ TDD. You gain coverage and lose the evidence that the test works.
+A test-first forces edge-case discovery before implementation when the intended
+behavior is known. A 30-minute after-the-fact test ≠ TDD in that case. When the
+premise was unknown, convert the discovered behavior into regression tests
+before claiming completion.
 
 ## Common rationalizations
 
@@ -304,7 +349,7 @@ A test-first forces edge-case discovery before implementation. A 30-minute after
 | "I already verified it manually" | Improvised ≠ systematic. No record, no re-run. |
 | "It is a shame to delete X hours of work" | Sunk cost. Keeping unverified code is the debt. |
 | "Keep it for reference and write the test first" | You end up adapting it. Deleting means actually deleting. |
-| "I have to explore first" | Fine. Throw away the exploration and start with TDD. |
+| "I have to explore first" | If the premise or target behavior is unknown, run bounded discovery or a proof first. Once the contract is clear, lock it with tests. |
 | "A hard test = unclear design" | Listen to the test. If it is hard to test, it is hard to use. |
 | "TDD slows me down" | TDD is faster than debugging. Pragmatism = test-first. |
 | "Manual testing is faster" | Manual cannot prove the edge cases. Re-run on every change. |
@@ -312,9 +357,9 @@ A test-first forces edge-case discovery before implementation. A 30-minute after
 
 ## Red flags: stop and start over
 
-- Code written before the test
-- A test written after the implementation
-- A test that passed immediately
+- Code written before the test after the behavior contract was already known
+- A test written after the implementation for a known-contract change
+- A test that passed immediately for behavior that should have been missing
 - Cannot explain why the test failed
 - A test added "later"
 - The "just this once" rationalization
@@ -326,7 +371,10 @@ A test-first forces edge-case discovery before implementation. A 30-minute after
 - "TDD is dogma, I am pragmatic"
 - "This case is different, so..."
 
-If even one of the items above comes to mind, the meaning is the same. Delete the code and start over with TDD.
+If one of the items above appears after the applicability gate passed, delete
+the code and start over with TDD. If the applicability gate did not pass, finish
+the discovery/proof under a bounded contract and then add regression tests for
+the discovered behavior.
 
 ## Example: bug fix
 
@@ -374,16 +422,22 @@ If there are several fields, extract the validation logic.
 
 Confirm before declaring the work complete.
 
-- [ ] Every new function or method has a test
-- [ ] You saw each test fail before the implementation
-- [ ] Each test failed for the expected reason (a missing feature, not a typo)
+- [ ] The behavior contract was known before RED-first TDD was invoked
+- [ ] Every new function or method on that known-contract path has a test
+- [ ] You saw each known-contract test fail before the implementation
+- [ ] Each known-contract test failed for the expected reason (a missing feature, not a typo)
+- [ ] Any discovery/proof work was converted into regression coverage before completion
 - [ ] You wrote the minimal code that makes each test pass
+- [ ] Verification scope matches the latest change: previously failing test
+      first, directly impacted tests next, broader suites only with a risk
+      signal
 - [ ] All tests pass
 - [ ] The output is clean (no errors or warnings)
 - [ ] The tests use the real code (mocks only when unavoidable)
 - [ ] Edge cases and error paths are covered
 
-Even one item left unchecked? You skipped TDD. Do it over from the beginning.
+Even one applicable item left unchecked? You either skipped TDD or left
+discovery unconverted into regression coverage. Fix that before completion.
 
 ## When you are stuck
 
@@ -396,9 +450,12 @@ Even one item left unchecked? You skipped TDD. Do it over from the beginning.
 
 ## Debugging integration
 
-Found a bug? Write a failing test that reproduces it. Follow the TDD cycle. The test proves the fix and prevents the regression.
+Found a bug with a clear reproduction contract? Write a failing test that
+reproduces it. Follow the TDD cycle. The test proves the fix and prevents the
+regression.
 
-Do not fix a bug without a test.
+If the reproduction contract is not clear, trace it first, then write the
+regression test before completion.
 
 ## Test anti-patterns
 
@@ -411,8 +468,9 @@ When adding a mock or a test utility, read `references/testing-anti-patterns.md`
 ## Final rule
 
 ```
-Production code → a test exists, and it failed first
-Otherwise → not TDD
+Known-contract production code → a test exists, and it failed first
+Unknown-premise work → bounded discovery/proof first, then regression coverage
+Otherwise → not acceptable for completion
 ```
 
 No exceptions without the permission of the user partner.

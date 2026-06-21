@@ -47,6 +47,16 @@ Official addons use short aliases and install from the Ghost-ALICE core checkout
 bash install.sh --addon autopilot
 ```
 
+Run this from the Ghost-ALICE core checkout. Normal users do not clone the autopilot addon repository or run an installer inside that repository; the core installer fetches the official addon package. This install example is not a full runtime compatibility claim; read the addon repository `compatibility-matrix.json` before making one.
+
+To install the official addon for one platform only, add `--platform`:
+
+```bash
+bash install.sh --platform codex --addon autopilot
+```
+
+Windows PowerShell/CMD use the same official alias from the core checkout:
+
 ```powershell
 .\install.cmd --addon autopilot
 ```

@@ -61,6 +61,101 @@ class ShellUninstallAddonTest(unittest.TestCase):
             self.assertFalse(os.path.lexists(skill), msg=uninstall.stderr + uninstall.stdout)
             self.assertFalse(sidecar.exists(), msg=uninstall.stderr + uninstall.stdout)
 
+    def test_bare_addon_id_uninstalls_addon(self):
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("bash required")
+        if not _python_311():
+            self.skipTest("python 3.11+ required")
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            env = os.environ.copy()
+            env["HOME"] = home
+            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+
+            def run(*args):
+                return subprocess.run(
+                    [bash, str(REPO_ROOT / "install.sh"), *args],
+                    cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=120, check=False)
+
+            install = run("--platform", "claude", "--addon-source", str(FIXTURE),
+                          "--skip-source-health", "task-router")
+            self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
+            sidecar = Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
+            skill = Path(home) / ".claude" / "skills" / "noop"
+            self.assertTrue(sidecar.exists(), msg=install.stderr + install.stdout)
+            self.assertTrue(os.path.lexists(skill))
+
+            uninstall = run("--platform", "claude", "--uninstall", "noop")
+            self.assertEqual(uninstall.returncode, 0, msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse(os.path.lexists(skill), msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse(sidecar.exists(), msg=uninstall.stderr + uninstall.stdout)
+
+    def test_bare_addon_id_resumes_pending_marker(self):
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("bash required")
+        if not _python_311():
+            self.skipTest("python 3.11+ required")
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            env = os.environ.copy()
+            env["HOME"] = home
+            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+
+            def run(*args):
+                return subprocess.run(
+                    [bash, str(REPO_ROOT / "install.sh"), *args],
+                    cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=120, check=False)
+
+            install = run("--platform", "claude", "--addon-source", str(FIXTURE),
+                          "--skip-source-health", "task-router")
+            self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
+            sidecar = Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
+            marker = sidecar.with_name("noop.json.removing")
+            skill = Path(home) / ".claude" / "skills" / "noop"
+            marker.write_text('{"addon_id":"noop","stage":"removing"}', encoding="utf-8")
+
+            uninstall = run("--platform", "claude", "--uninstall", "noop")
+            self.assertEqual(uninstall.returncode, 0, msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse(os.path.lexists(skill), msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse(sidecar.exists(), msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse(marker.exists(), msg=uninstall.stderr + uninstall.stdout)
+
+    def test_bare_addon_id_mixed_with_core_skill_removes_both(self):
+        bash = shutil.which("bash")
+        if not bash:
+            self.skipTest("bash required")
+        if not _python_311():
+            self.skipTest("python 3.11+ required")
+        import tempfile
+        with tempfile.TemporaryDirectory() as home:
+            env = os.environ.copy()
+            env["HOME"] = home
+            env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+
+            def run(*args):
+                return subprocess.run(
+                    [bash, str(REPO_ROOT / "install.sh"), *args],
+                    cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+                    encoding="utf-8", errors="replace", timeout=120, check=False)
+
+            install = run("--platform", "claude", "--addon-source", str(FIXTURE),
+                          "--skip-source-health", "task-router")
+            self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
+            root = Path(home) / ".claude" / "skills"
+            self.assertTrue(os.path.lexists(root / "noop"), msg=install.stderr + install.stdout)
+            self.assertTrue(os.path.lexists(root / "task-router"), msg=install.stderr + install.stdout)
+
+            uninstall = run("--platform", "claude", "--uninstall", "noop", "task-router")
+            self.assertEqual(uninstall.returncode, 0, msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse(os.path.lexists(root / "noop"), msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse(os.path.lexists(root / "task-router"), msg=uninstall.stderr + uninstall.stdout)
+            self.assertFalse((Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json").exists(),
+                             msg=uninstall.stderr + uninstall.stdout)
+
     def test_addon_flag_without_value_errors_not_full_uninstall(self):
         bash = shutil.which("bash")
         if not bash:

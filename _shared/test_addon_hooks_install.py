@@ -24,6 +24,33 @@ import hook_profile_gate  # noqa: E402
 from test_addon_hooks import _make_addon  # noqa: E402
 
 
+def _make_autopilot_adapter_addon(tmp: Path) -> Path:
+    src = tmp / "autopilot-src"
+    addon = src / "addons" / "autopilot-mode"
+    skill = addon / "skill"
+    (skill / "adapters").mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: autopilot-mode\ndescription: Use when testing adapter install.\n---\n# x\n",
+        encoding="utf-8",
+    )
+    (skill / "adapters" / "autopilot_mode.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
+    (addon / "addon.json").write_text(json.dumps({
+        "addon_version": "0.1.0",
+        "addon_id": "autopilot-mode",
+        "skills": [{"name": "autopilot-mode", "source": "skill", "skill_dir": "skill"}],
+        "privileged_adapters": ["autopilot-mode"],
+        "platforms": ["claude", "codex"],
+        "depends_on_core": [],
+        "secrets": [],
+    }), encoding="utf-8")
+    (src / "addons-manifest.json").write_text(json.dumps({
+        "manifest_version": 1,
+        "addons": [{"id": "autopilot-mode", "path": "addons/autopilot-mode",
+                    "min_core_version": "0.1.0", "tags": []}],
+    }), encoding="utf-8")
+    return src
+
+
 class AddonHookInstallTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -144,6 +171,41 @@ class AddonHookInstallTest(unittest.TestCase):
         install_hooks.install_hook("claude", addon_sources=[str(src)])
         self.assertEqual(len(self._addon_entries("PostToolUse", "[addon:aone] obs")), 1)
         self.assertEqual(len(self._addon_entries("PostToolUse", "[addon:atwo] obs2")), 1)
+
+    def test_autopilot_adapter_install_prunes_legacy_claude_autopilot_hooks(self):
+        legacy_reset = (
+            "/usr/bin/python3 /Users/example/.claude/skills/autopilot-mode/scripts/"
+            "reset_inject_count.py # [autopilot] reset-count"
+        )
+        legacy_stop = (
+            "/usr/bin/python3 /Users/example/.claude/skills/autopilot-mode/scripts/"
+            "autopilot_stop_hook.py --platform claude # [autopilot] stop-inject"
+        )
+        user_audit = "echo user audit '[autopilot] stop-inject' >> ~/audit.log"
+        (self.claude / "settings.json").write_text(json.dumps({
+            "hooks": {
+                "UserPromptSubmit": [{"matcher": "", "hooks": [
+                    {"type": "command", "command": legacy_reset},
+                ]}],
+                "Stop": [{"matcher": "", "hooks": [
+                    {"type": "command", "command": legacy_stop},
+                    {"type": "command", "command": user_audit},
+                ]}],
+            }
+        }), encoding="utf-8")
+
+        src = _make_autopilot_adapter_addon(self.tmp)
+        install_hooks.install_hook("claude", addon_sources=[str(src)])
+
+        commands = [
+            h.get("command", "")
+            for ev in self._settings()["hooks"].values() if isinstance(ev, list)
+            for e in ev for h in e.get("hooks", [])
+        ]
+        self.assertFalse(any("reset_inject_count.py" in command for command in commands))
+        self.assertFalse(any("autopilot_stop_hook.py" in command for command in commands))
+        self.assertTrue(any(user_audit == command for command in commands))
+        self.assertTrue(any("[adapter:autopilot-mode] continue" in command for command in commands))
 
 
 class AddonHookSecurityTest(AddonHookInstallTest):

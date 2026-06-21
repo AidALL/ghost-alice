@@ -204,6 +204,9 @@ function Resolve-OfficialAddonSource {
 }
 
 function Resolve-OfficialAddonShortcuts {
+    if ($Uninstall) {
+        return
+    }
     if ($AddonSkip -or -not $Addon -or $Addon.Count -eq 0) {
         return
     }

@@ -162,6 +162,48 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertNotIn(raw_prompt, events_text)
         self.assertNotIn("abc123", events_text)
 
+    def test_intent_delta_updates_jsonl_and_current_session_pointer(self) -> None:
+        root = self.tmpdir / "ledger"
+        delta = {
+            "current_goal": "bridge session intent to approved autopilot run state",
+            "acceptance_criteria": [
+                {
+                    "id": "bridge-jsonl",
+                    "summary": "intent update event carries delta keys without raw prompt text",
+                    "source": "user-explicit",
+                }
+            ],
+            "conduct_feedback": [
+                {
+                    "id": "premise-before-test-first",
+                    "summary": "establish unknown premises before RED-first testing",
+                    "source": "user-explicit",
+                    "status": "open",
+                }
+            ],
+        }
+
+        paths = self.ledger.record_turn(
+            root=root,
+            platform="codex",
+            session_id="session-jsonl",
+            intent_delta=delta,
+            source="agent",
+        )
+
+        rows = [json.loads(line) for line in paths["events"].read_text(encoding="utf-8").splitlines()]
+        pointer = json.loads((root / "codex" / "current-session.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(rows[-1]["event"], "intent-updated")
+        self.assertEqual(
+            rows[-1]["delta_keys"],
+            ["acceptance_criteria", "conduct_feedback", "current_goal"],
+        )
+        self.assertIn("intent_delta_digest", rows[-1])
+        self.assertNotIn("raw", json.dumps(rows[-1], ensure_ascii=False).lower())
+        self.assertEqual(pointer["session_id"], "session-jsonl")
+        self.assertEqual(pointer["state_path"], str(paths["state"]))
+
     def test_repeated_same_input_events_get_distinct_event_ids(self) -> None:
         root = self.tmpdir / "ledger"
         original_utc_now = self.ledger.utc_now

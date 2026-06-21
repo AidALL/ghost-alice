@@ -208,10 +208,11 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         install_ps1 = installer_ps1_source()
 
         self.assertIn('report_progress_bar "$done_count" "$total_count" 30', install_sh)
+        self.assertIn('report_progress_bar "$done_count" "$total_count" 20', install_sh)
         self.assertIn("count_auto_common_targets", install_sh)
         self.assertIn("report_read_weighted_common_target_progress", install_sh)
         self.assertIn("report_auto_animate_common_target_progress_line", install_sh)
-        self.assertIn("        Common targets      [", install_sh)
+        self.assertIn("report_live_common_target_progress_line", install_sh)
         self.assertNotIn('"${plat} ${platform_index}/${auto_platform_count}"', install_sh)
         auto_branch = install_sh[
             install_sh.index("# auto/default:") : install_sh.index('if [ "$PROMPT_PLATFORM" -eq 1 ]')
@@ -322,12 +323,12 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             expected_common_targets = _skill_target_count("task-router") + 1
             skill_sync_line = f"  [2/5] Skill sync          [{expected_common_targets}] common targets"
             initial_line = (
-                f"        Common targets      [------------------------------] "
-                f"[0/{expected_common_targets}] common targets synced"
+                f"        Common targets [--------------------] "
+                f"[0/{expected_common_targets}] synced"
             )
             final_line = (
-                f"\r\x1b[2K        Common targets      [##############################] "
-                f"[{expected_common_targets}/{expected_common_targets}] common targets synced on all platforms"
+                f"\r\x1b[2K        Common targets [####################] "
+                f"[{expected_common_targets}/{expected_common_targets}] all platforms"
             )
             self.assertEqual(return_code, 0, msg=output)
             self.assertEqual(output.count("Ghost-ALICE OS installation Process Report"), 1)
@@ -341,9 +342,22 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertIn(final_line, output)
             live_lines = _printable_live_progress_lines(output)
             self.assertTrue(live_lines, msg=output)
-            self.assertLessEqual(max(len(line) for line in live_lines), 120, msg=live_lines)
+            self.assertLessEqual(max(len(line) for line in live_lines), 80, msg=live_lines)
             self.assertLess(output.index(initial_line), output.rindex(final_line))
             self.assertIn("  [5/5] Verification        ok", output)
+
+    def test_install_sh_auto_failure_closes_progress_line_and_surfaces_excerpt_source(self) -> None:
+        install_sh = INSTALL_SH.read_text(encoding="utf-8")
+        compact_auto_branch = install_sh[
+            install_sh.index("install_log_init") : install_sh.index('if [ "$PROMPT_PLATFORM" -eq 1 ]')
+        ]
+
+        self.assertIn("live_counter_enabled && printf '\\n'\n      warn", compact_auto_branch)
+        self.assertIn("install_report_failure_excerpt", compact_auto_branch)
+        self.assertLess(
+            compact_auto_branch.index("live_counter_enabled && printf '\\n'\n      warn"),
+            compact_auto_branch.index('warn "$(t "[auto] Install failed for ${plat}'),
+        )
 
     def test_install_sh_auto_addon_report_counts_addon_common_target(self) -> None:
         bash = _find_test_bash()
