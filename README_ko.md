@@ -130,7 +130,7 @@ cd ~/ghost-alice
 bash install.sh --addon autopilot
 ```
 
-애드온 설치는 Ghost-ALICE core checkout에서 실행한다. autopilot repository는 core installer가 소비하는 addon package이며, 일반 사용자는 그 repository를 직접 clone하거나 그 안에서 installer를 실행하지 않는다. Windows PowerShell/CMD도 `.\install.cmd --addon autopilot` 또는 `install.cmd --addon autopilot`로 같은 official alias를 사용한다.
+애드온 설치는 Ghost-ALICE core checkout에서 실행한다. autopilot repository는 core installer가 소비하는 addon package이며, 일반 사용자는 그 repository를 직접 clone하거나 그 안에서 installer를 실행하지 않는다. 이 설치 예시는 full runtime compatibility claim이 아니다. full compatibility claim 전에는 addon repository의 `compatibility-matrix.json`을 확인한다. Windows PowerShell/CMD도 `.\install.cmd --addon autopilot` 또는 `install.cmd --addon autopilot`로 같은 official alias를 사용한다.
 
 Windows PowerShell / CMD:
 

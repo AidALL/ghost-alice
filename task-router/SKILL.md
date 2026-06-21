@@ -221,6 +221,9 @@ Set `boundary-contract: required` if any condition is true:
   effect layers are involved
 - read-only discovery is needed because target files or tests are unclear
 - screenshot, visual smoke, or read-only checks are tied to scope limits
+- the user corrects the agent for changing, narrowing, widening, relabeling, or
+  substituting the requested objective, scope, selection criterion, priority, or
+  completion meaning
 
 task-router writes only `boundary-contract: required | n/a` and the reason. It
 does not write filenames, `allowed-surface`, `test-purpose`, or tool

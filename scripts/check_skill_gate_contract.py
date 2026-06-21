@@ -236,6 +236,8 @@ REQUIRED_PATTERNS = {
         "forced-visibility",
         "accepted-continuation requires recorded acceptance",
         "unknown routing-surface values fail closed",
+        "user corrects the agent for changing, narrowing, widening, relabeling, or",
+        "substituting the requested objective, scope, selection criterion",
     ],
     "boundary-contract/SKILL.md": [
         "name: boundary-contract",
@@ -253,6 +255,8 @@ REQUIRED_PATTERNS = {
         "test-purpose",
         "stop-conditions",
         "next-allowed-actions",
+        "Scope changes need renegotiation in both directions",
+        "Never\n  shrink or grow the committed scope silently",
     ],
     "_shared/install_hooks.py": [
         "TOOL_CHECKPOINT_MARKER",
@@ -312,6 +316,8 @@ REQUIRED_PATTERNS = {
         "do not bypass it from the agent's judgment alone",
         "leave a short reason for the skip",
         "finished work, verified results, or a decision that materially changes the user's next action",
+        "Scope changes already belong to boundary-contract",
+        "Stop and renew or confirm before changing the committed scope",
     ],
     "coding-convention/verification-before-completion/SKILL.md": [
         "No acceptance-criteria means no completed verification-before-completion",

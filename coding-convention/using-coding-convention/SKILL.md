@@ -138,6 +138,7 @@ Stop and load the relevant skill when any of these thoughts appear.
 | "This feels productive right now." | Undisciplined action only wastes time. The skill prevents this. |
 | "I know that concept." | Knowing a concept differs from using the skill. Load it. |
 | "I will report what I found instead of doing it." | The user asked you to do it. Execute this turn, do not stop at a report. |
+| "I will reinterpret the requested scope into a more practical scope." | Scope changes already belong to boundary-contract. Stop and renew or confirm before changing the committed scope. |
 | "Just the key spots is enough." | The committed scope is the whole set. Cover all of it. |
 | "Grep found nothing, so it is clean." | If you already judged the search method incomplete, read the files. Do not trust the weaker method. |
 | "I will ask the user which one." | If the content answers it, inspect and decide. Punt only when the action is irreversible and unresolvable. |

@@ -105,12 +105,12 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "task-router/SKILL.md",
-            "English canonical narrative + English control surface\n[gate-state]\nrequest-routing gate\nrequest decomposition, work placement, skill routing\nconsumer of session-intent-analyzer and\nrouting decision\nraw user intent inference\nafter session-intent-analyzer intake and\nsilent allow\ncurrent-lineage block gate\natomic meaning\nnot a tool permission owner\nnot a tool-checkpoint owner\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nusing-coding-convention\nboundary-contract\nboundary-reason\nnext-required\nhook-verified clean\nuser-explicit defer/skip may continue\npending merge remains undecided when deferred\nskill-call:\nrouting-surface\nintent-relation\nchange-depth\nfocus-layer\nverification-complexity\nforced-visibility\naccepted-continuation requires recorded acceptance\nunknown routing-surface values fail closed\n",
+            "English canonical narrative + English control surface\n[gate-state]\nrequest-routing gate\nrequest decomposition, work placement, skill routing\nconsumer of session-intent-analyzer and\nrouting decision\nraw user intent inference\nafter session-intent-analyzer intake and\nsilent allow\ncurrent-lineage block gate\natomic meaning\nnot a tool permission owner\nnot a tool-checkpoint owner\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nusing-coding-convention\nboundary-contract\nboundary-reason\nnext-required\nhook-verified clean\nuser-explicit defer/skip may continue\npending merge remains undecided when deferred\nskill-call:\nrouting-surface\nintent-relation\nchange-depth\nfocus-layer\nverification-complexity\nforced-visibility\naccepted-continuation requires recorded acceptance\nunknown routing-surface values fail closed\nuser corrects the agent for changing, narrowing, widening, relabeling, or\nsubstituting the requested objective, scope, selection criterion\n",
         )
         self._write_file(
             root,
             "boundary-contract/SKILL.md",
-            "---\nname: boundary-contract\ndescription: Use after task-router routes boundary-contract: required.\n---\n\nKeep field names, enum values, literal tokens, gate schemas, and allowed/forbidden control values in English.\n[boundary-contract]\n- objective: <work-objective>\nphase\nobjective\nexplicit-non-goals\nallowed-surface\nprohibited-surface\nlocked-decisions\nacceptance-criteria\nopen-questions\ntest-purpose\nstop-conditions\nnext-allowed-actions\n",
+            "---\nname: boundary-contract\ndescription: Use after task-router routes boundary-contract: required.\n---\n\nKeep field names, enum values, literal tokens, gate schemas, and allowed/forbidden control values in English.\n[boundary-contract]\n- objective: <work-objective>\nphase\nobjective\nexplicit-non-goals\nallowed-surface\nprohibited-surface\nlocked-decisions\nacceptance-criteria\nopen-questions\ntest-purpose\nstop-conditions\nnext-allowed-actions\nScope changes need renegotiation in both directions\nNever\n  shrink or grow the committed scope silently\n",
         )
         self._write_file(
             root,
@@ -130,7 +130,7 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "coding-convention/using-coding-convention/SKILL.md",
-            "quality-maintenance device confirmed through repeated user work\nuser intent, work scope, and verification quality\ndo not bypass it from the agent's judgment alone\nleave a short reason for the skip\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nfinished work, verified results, or a decision that materially changes the user's next action\nskill-call:\n",
+            "quality-maintenance device confirmed through repeated user work\nuser intent, work scope, and verification quality\ndo not bypass it from the agent's judgment alone\nleave a short reason for the skip\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nfinished work, verified results, or a decision that materially changes the user's next action\nskill-call:\nScope changes already belong to boundary-contract\nStop and renew or confirm before changing the committed scope\n",
         )
         self._write_file(
             root,
