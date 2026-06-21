@@ -10,9 +10,22 @@ Use this section for changes that have landed after the latest tagged public rel
 
 ### Added
 
+- Release-prep notes for the post-`v0.1.3` addon/install governance work under `docs/release/2026-06-22-release-notes.md`.
+- In-repository official addon reference pages and homepage links so addon usage no longer depends only on wiki availability.
+- Public docs rendering support for the homepage, docs index, release pages, and official addon references.
+- Installer and test coverage for official autopilot addon aliases, remote addon source installs, privileged adapter provisioning, and uninstall cleanup.
+
 ### Changed
 
+- Official autopilot addon installation docs now clarify that the command runs from the Ghost-ALICE core checkout and that the addon repository compatibility matrix is the authority for full runtime compatibility claims.
+- Plan execution, TDD, task routing, and coding-convention guidance now route scope substitution, unnecessary broad reruns, and stale plan/task tracker state through explicit governance checks.
+- Installer progress, report, and PowerShell/CMD surfaces now preserve addon target counts and platform-specific install semantics more consistently.
+
 ### Fixed
+
+- Hardened Bash and PowerShell autopilot addon install/uninstall behavior, including hook marker ownership, adapter cleanup, sidecar handling, and selected uninstall guards.
+- Fixed public documentation link behavior where rendered pages previously fell through to raw Markdown or stale wiki-only targets.
+- Kept public installer and docs validation aligned after the addon install UX, official addon docs, and release-prep changes.
 
 ### Removed
 
