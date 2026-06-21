@@ -10,6 +10,7 @@
 #   .\install.cmd -Platform codex -Skills skill-evolution     # Install selected Codex core skills
 #   .\install.cmd -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
 #   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
+#   .\install.cmd -Platform codex -Uninstall -Addon autopilot-mode     # Remove selected addon from one platform
 #   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
 #   .\install.cmd -List                            # List available skills
 #   .\install.cmd --addon autopilot                # Install official autopilot addon
@@ -28,6 +29,7 @@
 #   .\install.ps1 -Platform codex -Skills skill-evolution     # Install selected Codex core skills
 #   .\install.ps1 -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
 #   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
+#   .\install.ps1 -Platform codex -Uninstall -Addon autopilot-mode     # Remove selected addon from one platform
 #   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
 #   .\install.ps1 -List                            # List available skills
 #   .\install.ps1 --addon autopilot                # Install official autopilot addon
@@ -642,7 +644,7 @@ if ($CleanupPending) {
 
 if ($Doctor)    { Show-Doctor; return }
 if ($Status)    { Show-Status; return }
-if ($Uninstall) { Invoke-Uninstall -SkillNames $Skills; return }
+if ($Uninstall) { Invoke-Uninstall -SkillNames $Skills -AddonIds $Addon; return }
 Initialize-GitHooks
 Initialize-PythonRuntimeForInstall | Out-Null
 Invoke-WithInstallLock { Invoke-Install -SkillNames $Skills }

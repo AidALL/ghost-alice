@@ -535,6 +535,7 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
     else
       child_rc=$?
       rc=1
+      live_counter_enabled && printf '\n'
       warn "$(t "[auto] Install failed for ${plat} (exit code $child_rc)" "[auto] Install failed for ${plat} (exit code $child_rc)")"
     fi
     if live_counter_enabled; then
@@ -570,6 +571,10 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
     live_counter_enabled && printf '\n'
     error "$(t '[auto] Some platform installs failed. Check the log above.' '[auto] Some platform installs failed. Check the log above.')"
     error "$(t "Details log: ${INSTALL_REPORT_LOG_FILE}" "Details log: ${INSTALL_REPORT_LOG_FILE}")"
+    while IFS= read -r failure_line; do
+      [ -n "$failure_line" ] || continue
+      error "[auto] ${failure_line}"
+    done < <(install_report_failure_excerpt "$INSTALL_REPORT_LOG_FILE")
   fi
   exit $rc
 fi

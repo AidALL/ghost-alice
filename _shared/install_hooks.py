@@ -2170,7 +2170,16 @@ def install_hook(
     # Privileged adapters (plan Phase P5) are core-owned: manifests request adapter
     # ids only, while the concrete event/script/marker/runner namespace comes from
     # addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
-    for spec in _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir):
+    privileged_adapter_specs = _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir)
+    if platform_key == "claude" and any(spec.get("adapter_id") == "autopilot-mode" for spec in privileged_adapter_specs):
+        removed = _remove_legacy_autopilot_hook_entries(hooks_obj)
+        if removed:
+            _log(_t(
+                f"  Removed {removed} legacy Claude autopilot hook entry(ies)",
+                f"  Removed {removed} legacy Claude autopilot hook entry(ies)",
+            ))
+            changed = True
+    for spec in privileged_adapter_specs:
         event_name = _resolve_hook_event(spec["event"], platform_key)
         marker = spec["marker"]
         match_marker = marker + " "
@@ -2229,6 +2238,10 @@ _MANAGED_ADAPTER_HOOK_COMMENT_RE = re.compile(
     r"(?P<hook_id>[a-z][a-z0-9-]*) "
     r"\[hook-runner:(?P<runner_id>[a-z0-9-]+)\]"
 )
+_LEGACY_AUTOPILOT_HOOKS = (
+    ("[autopilot] reset-count", "reset_inject_count.py"),
+    ("[autopilot] stop-inject", "autopilot_stop_hook.py"),
+)
 
 
 def _addon_runner_token(addon_id: str, hook_id: str) -> str:
@@ -2263,6 +2276,13 @@ def _is_exact_adapter_hook_command(command: str, marker: str) -> bool:
     return exact_comment in command and _hook_runner_id_match(command, runner_id)
 
 
+def _is_legacy_autopilot_hook_command(command: str) -> bool:
+    normalized = command.replace("\\", "/")
+    if "/autopilot-mode/scripts/" not in normalized:
+        return False
+    return any(marker in normalized and script in normalized for marker, script in _LEGACY_AUTOPILOT_HOOKS)
+
+
 def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str], bool]) -> int:
     removed = 0
     kept = []
@@ -2291,6 +2311,14 @@ def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str]
             pass
     hooks_list[:] = kept
     return removed
+
+
+def _remove_legacy_autopilot_hook_entries(hooks_obj: dict[str, Any]) -> int:
+    total = 0
+    for event_list in hooks_obj.values():
+        if isinstance(event_list, list):
+            total += _remove_hook_commands_by_command(event_list, _is_legacy_autopilot_hook_command)
+    return total
 
 
 def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
