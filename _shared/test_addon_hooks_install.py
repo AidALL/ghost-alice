@@ -3,7 +3,7 @@ addon-hook-runner-namespace): install_hook appends observational addon hook
 entries AFTER the core suite, the inner command passes the hook-runner allowlist,
 and a core-only install stays byte-identical.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_hooks_install.py -q
+Run: python3 -m pytest _shared/test_addon_hooks_install.py -q
 """
 
 from __future__ import annotations

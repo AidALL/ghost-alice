@@ -1,24 +1,23 @@
 # Installation And Update Guide
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/installation.md)
+Language: English | [Korean](../ko/getting-started/installation.md)
 
-This guide contains the detailed Ghost-ALICE OS installation, update, and recovery workflow. The root README keeps only the quick path.
+This guide is the command reference for installing, updating, checking, and repairing Ghost-ALICE OS. Start with the command path you need, then use the runtime reference only when you need platform details.
+
 ## Contents
 
 - [Quick Install](#quick-install)
+- [Install Official Addons](#install-official-addons)
+- [Official Addon List](#official-addon-list)
+- [Install One Official Addon To One Platform](#install-one-official-addon-to-one-platform)
+- [Install Custom Addons](#install-custom-addons)
 - [Install One Platform](#install-one-platform)
-- [Agent Visibility Profile](#agent-visibility-profile)
-- [Python Contract](#python-contract)
-- [Node.js Contract](#nodejs-contract)
 - [Check Status](#check-status)
 - [Update](#update)
-- [Platform Update Behavior](#platform-update-behavior)
-- [Installed Surfaces](#installed-surfaces)
-- [merge-companion](#merge-companion)
 - [Common Commands](#common-commands)
+- [Runtime And Platform Reference](#runtime-and-platform-reference)
 - [Uninstall](#uninstall)
 - [Troubleshooting](#troubleshooting)
-
 
 ## Quick Install
 
@@ -28,13 +27,11 @@ cd ~/ghost-alice
 bash install.sh
 ```
 
-Windows PowerShell:
+Windows PowerShell / CMD:
 
 ```powershell
 .\install.cmd
 ```
-
-Windows CMD:
 
 ```cmd
 install.cmd
@@ -44,10 +41,9 @@ install.cmd
 
 ## Install Official Addons
 
-Official addons use short aliases and install to detected Claude Code/Codex targets by default:
+Official addons use short aliases and install from the Ghost-ALICE core checkout.
 
 ```bash
-cd ~/ghost-alice
 bash install.sh --addon autopilot
 ```
 
@@ -65,11 +61,37 @@ Windows PowerShell/CMD use the same official alias from the core checkout:
 .\install.cmd --addon autopilot
 ```
 
-Custom, tenant, or local development addons still use `--addon-source PATH|URL`:
+Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository. The core checkout owns the common install command.
+
+## Official Addon List
+
+| Addon | Purpose | Basic install | Details |
+| --- | --- | --- | --- |
+| autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
+
+## Install One Official Addon To One Platform
+
+```bash
+bash install.sh --platform codex --addon autopilot
+```
+
+```powershell
+.\install.cmd -Platform codex --addon autopilot
+```
+
+## Install Custom Addons
+
+Custom, tenant, or local development addons use `--addon-source PATH|URL`.
 
 ```bash
 bash install.sh --addon-source /path/to/addon-repo
 ```
+
+```powershell
+.\install.cmd -AddonSource C:\path\addon-repo
+```
+
+For git URL addon sources, `-AddonTag` selects the branch or tag to clone into the local addon source cache.
 
 ## Install One Platform
 
@@ -80,92 +102,36 @@ bash install.sh --addon-source /path/to/addon-repo
 
 To choose interactively, use `bash install.sh --prompt-platform`, `.\install.cmd -PromptPlatform`, or `install.cmd -PromptPlatform`.
 
-## Agent Visibility Profile
-
-The default profile is `dynamic`. The profile controls how much governance
-surface is shown to the user; it does not disable hooks, strict-grade logs, or
-Work-Impact Projection.
-
-| Profile | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
-| --- | --- | --- | --- |
-| strict | `bash install.sh --visibility strict` | `.\install.cmd -Visibility strict` | `install.cmd -Visibility strict` |
-| dynamic | `bash install.sh --visibility dynamic` | `.\install.cmd -Visibility dynamic` | `install.cmd -Visibility dynamic` |
-| minimal | `bash install.sh --visibility minimal` | `.\install.cmd -Visibility minimal` | `install.cmd -Visibility minimal` |
-
-`--agent-visibility` and `-AgentVisibility` remain accepted compatibility
-aliases. Prefer `--visibility` and `-Visibility` in new docs and commands.
-
-## Slash Commands by Platform
-
-Claude Code treats slash commands as a first-class feature: `/visibility` and
-skill `/name` invocation are officially supported, with custom commands in
-`.claude/commands/` and `.claude/skills/<name>/SKILL.md` as the current form.
-See https://code.claude.com/docs/en/agent-sdk/slash-commands.
-
-Codex also documents slash commands (built-ins such as `/plan`, plus custom
-prompts under `~/.codex/prompts/`), but the custom-command surface is
-version-dependent, custom prompts are deprecated in favor of skills, and Codex
-does not auto-invoke slash commands from instructions the way Claude does. On
-Codex, type `/visibility` manually in a trusted session, and use
-`python3 _shared/agent_visibility_cli.py set <profile>` as the reliable
-cross-platform path. See https://developers.openai.com/codex/cli/slash-commands
-and https://developers.openai.com/codex/custom-prompts.
-
-## Python Contract
-
-The installer requires Python 3.11 or newer. If Python 3.11+ is missing, it attempts automatic preparation where possible.
-
-- macOS: if Homebrew is available, `brew install python3`
-- Linux / WSL: available package managers such as `apt-get`, `dnf`, `yum`, or `pacman`
-- Windows: `winget`, `choco`, then `scoop`
-
-If Python 3.11+ is still unavailable, installation stops and prints manual recovery guidance.
-
-## Node.js Contract
-
-Claude Code and Codex hook-enabled installs require Node.js on `PATH` because the `tool-checkpoint` PreToolUse gate runs `ghost-alice-hook.mjs`. The installer blocks hook installation when the target platform is present but `node` is unavailable; this prevents installing a Node-backed gate that cannot execute at runtime.
-
 ## Check Status
 
-Run doctor first when installation state looks suspicious. Doctor is a read-only strict diagnostic.
+Doctor is a read-only strict diagnostic. Use it before changing a suspicious install.
 
 ```bash
 bash install.sh --doctor
 bash install.sh --status
 ```
 
-PowerShell:
-
 ```powershell
 .\install.cmd -Doctor
 .\install.cmd -Status
-```
-
-CMD:
-
-```cmd
-install.cmd -Doctor
-install.cmd -Status
 ```
 
 The healthy target is `overall: ok`.
 
 ## Update
 
-First update the local clone through the installer. This preserves source-local edits in `git stash` before fast-forwarding the checkout.
+Update the local clone through the installer so source-local edits are stashed before a fast-forward.
 
 ```bash
 cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-PowerShell:
-
 ```powershell
 .\install.cmd -UpdateSource
 ```
 
-If the checkout is too old to receive that option because raw `git pull` is already blocked by local changes, use the bootstrap updater instead. This command fetches the current updater through the already configured Git remote, saves local changes in `git stash`, fast-forwards `~/ghost-alice`, and then runs the updated installer.
+If the checkout is too old to receive that option because raw `git pull` is already blocked by local changes, use the bootstrap updater.
 
 ```bash
 cd ~/ghost-alice && git fetch origin main && git show FETCH_HEAD:scripts/bootstrap-source-update.sh | /bin/bash -s --
@@ -181,50 +147,6 @@ bash install.sh --doctor
 bash install.sh --status
 ```
 
-PowerShell:
-
-```powershell
-.\install.cmd
-.\install.cmd -Doctor
-.\install.cmd -Status
-```
-
-## Platform Update Behavior
-
-| Platform | OS | Install mode | Install path | Skill body updates auto-reflect |
-| --- | --- | --- | --- | --- |
-| Claude Code | macOS / Linux / WSL | symlink | `~/.claude/skills/` | yes |
-| Claude Code | Windows | junction | `~/.claude/skills/` | yes |
-| Codex | macOS / Linux / WSL | copy | `~/.agents/skills/` | no |
-| Codex | Windows | copy | `~/.agents/skills/` | no |
-| All platforms | Git Bash on Windows | copy fallback | varies | no |
-
-Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are installer-managed runtime surfaces, so rerun the installer when they change.
-
-## Installed Surfaces
-
-A full install deploys:
-
-- core skills from `skill-catalog/skills.json`
-- coding-convention workflow skills
-- optional addon skills through official `--addon` aliases or custom `--addon-source`
-- `_shared/` utilities
-- platform hook settings
-- Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
-- Claude Code permission allowlist
-- Codex `~/.codex/AGENTS.md` bootstrap
-- support state for install-state, pending merges, install rollbacks, and uninstall reports
-
-## merge-companion
-
-When an update detects user-modified installed files, the installer isolates those candidates in a pending merge queue.
-
-- manifest: `~/.ghost-alice/pending-merges/<platform>/manifest.json`
-- backup: `~/.ghost-alice/pending-merges/<platform>/`
-- install state: `~/.ghost-alice/install-state/<platform>.json`
-
-On the next Claude/Codex session, if any pending entries exist, `merge-companion` asks whether each should be merged, discarded, or deferred.
-
 ## Common Commands
 
 | Purpose | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
@@ -239,6 +161,74 @@ On the next Claude/Codex session, if any pending entries exist, `merge-companion
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd -Uninstall` | `install.cmd -Uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd -Platform codex -Uninstall -Skills task-router` | `install.cmd -Platform codex -Uninstall -Skills task-router` |
 | Clean false pending entries | `bash install.sh --platform claude --cleanup-pending` | `.\install.cmd -Platform claude -CleanupPending` | `install.cmd -Platform claude -CleanupPending` |
+
+## Runtime And Platform Reference
+
+### Agent Visibility Profile
+
+The default profile is `dynamic`. The profile controls how much governance surface is shown to the user; it does not disable hooks, strict-grade logs, or Work-Impact Projection.
+
+| Profile | macOS / Linux / WSL / Git Bash | Windows PowerShell | Windows CMD |
+| --- | --- | --- | --- |
+| strict | `bash install.sh --visibility strict` | `.\install.cmd -Visibility strict` | `install.cmd -Visibility strict` |
+| dynamic | `bash install.sh --visibility dynamic` | `.\install.cmd -Visibility dynamic` | `install.cmd -Visibility dynamic` |
+| minimal | `bash install.sh --visibility minimal` | `.\install.cmd -Visibility minimal` | `install.cmd -Visibility minimal` |
+
+`--agent-visibility` and `-AgentVisibility` remain accepted compatibility aliases. Prefer `--visibility` and `-Visibility` in new docs and commands.
+
+### Slash Commands By Platform
+
+Claude Code treats slash commands as a first-class feature. Codex supports built-in slash commands and a custom prompt path, but stable Ghost-ALICE profile changes should use `_shared/agent_visibility_cli.py` when a trusted runtime command is not available.
+
+### Python Contract
+
+The installer requires Python 3.11 or newer. If Python 3.11+ is missing, it attempts automatic preparation where possible.
+
+- macOS: if Homebrew is available, `brew install python3`
+- Linux / WSL: available package managers such as `apt-get`, `dnf`, `yum`, or `pacman`
+- Windows: `winget`, `choco`, then `scoop`
+
+If Python 3.11+ is still unavailable, installation stops and prints manual recovery guidance.
+
+### Node.js Contract
+
+Claude Code and Codex hook-enabled installs require Node.js on `PATH` because the `tool-checkpoint` PreToolUse gate runs `ghost-alice-hook.mjs`. The installer blocks hook installation when the target platform is present but `node` is unavailable.
+
+### Platform Update Behavior
+
+| Platform | OS | Install mode | Install path | Skill body updates auto-reflect |
+| --- | --- | --- | --- | --- |
+| Claude Code | macOS / Linux / WSL | symlink | `~/.claude/skills/` | yes |
+| Claude Code | Windows | junction | `~/.claude/skills/` | yes |
+| Codex | macOS / Linux / WSL | copy | `~/.agents/skills/` | no |
+| Codex | Windows | copy | `~/.agents/skills/` | no |
+| All platforms | Git Bash on Windows | copy fallback | varies | no |
+
+Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are installer-managed runtime surfaces, so rerun the installer when they change.
+
+### Installed Surfaces
+
+A full install deploys:
+
+- core skills from `skill-catalog/skills.json`
+- coding-convention workflow skills
+- optional addon skills through official `--addon` aliases or custom `--addon-source`
+- `_shared/` utilities
+- platform hook settings
+- Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
+- Claude Code permission allowlist
+- Codex `~/.codex/AGENTS.md` bootstrap
+- support state for install-state, pending merges, install rollbacks, and uninstall reports
+
+### merge-companion
+
+When an update detects user-modified installed files, the installer isolates those candidates in a pending merge queue.
+
+- manifest: `~/.ghost-alice/pending-merges/<platform>/manifest.json`
+- backup: `~/.ghost-alice/pending-merges/<platform>/`
+- install state: `~/.ghost-alice/install-state/<platform>.json`
+
+On the next Claude/Codex session, if pending entries exist, `merge-companion` asks whether each should be merged, discarded, or deferred.
 
 ## Uninstall
 

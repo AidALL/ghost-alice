@@ -4,7 +4,7 @@
 (unknown addon, or a partial/manual-review outcome) so automation can detect it.
 The Python CLI already returns 1/2; the bash wrapper used to swallow it to 0.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_uninstall_exit_code_shell.py -q
+Run: python3 -m pytest _shared/test_addon_uninstall_exit_code_shell.py -q
 """
 
 from __future__ import annotations

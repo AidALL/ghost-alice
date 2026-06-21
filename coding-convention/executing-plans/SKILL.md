@@ -59,6 +59,8 @@ current execution contract, not a log of earlier attempts.
 - Do not append changelogs, past rationale, previous attempts, or case notes.
 - Keep only information needed for future execution: current scope, order,
   commands, acceptance criteria, and open blockers.
+- After editing task text or order, update the active TodoWrite/task tracker so
+  it matches the revised plan before continuing.
 - If the change widens or narrows the committed objective, stop and confirm
   before editing the plan.
 

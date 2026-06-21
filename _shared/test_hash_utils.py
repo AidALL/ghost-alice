@@ -3,7 +3,7 @@ the Ghost-ALICE managed marker (.ghost-alice-install.json), whose installed_at
 timestamp changes on every install. Otherwise a copy-mode addon's recorded hash
 drifts from its live hash across reinstalls and falsely trips the drift gate.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_hash_utils.py -q
+Run: python3 -m pytest _shared/test_hash_utils.py -q
 """
 
 from __future__ import annotations

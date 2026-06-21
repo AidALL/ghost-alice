@@ -1,7 +1,7 @@
 """TDD for remaining addon logic: marker v2 (T2.8/T2.9), collision detection
 (T2.1/T2.2), and core-dependency block (T2.11).
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_p2_extras.py -q
+Run: python3 -m pytest _shared/test_p2_extras.py -q
 """
 
 from __future__ import annotations

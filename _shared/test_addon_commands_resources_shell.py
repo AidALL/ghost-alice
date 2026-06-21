@@ -3,7 +3,7 @@
 A rich addon's command and resource are provisioned on install, recorded in the
 sidecar, verified by --doctor, and removed on per-addon uninstall with the skill.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_commands_resources_shell.py -q
+Run: python3 -m pytest _shared/test_addon_commands_resources_shell.py -q
 """
 
 from __future__ import annotations

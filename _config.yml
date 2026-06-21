@@ -1,0 +1,52 @@
+plugins:
+  - jekyll-optional-front-matter
+  - jekyll-relative-links
+optional_front_matter:
+  remove_originals: true
+relative_links:
+  enabled: true
+  collections: false
+defaults:
+  - scope: { path: "" }
+    values: { layout: default }
+  - scope: { path: "index.html" }
+    values: { layout: none }
+  - scope: { path: "docs/index.html" }
+    values: { layout: none }
+include:
+  - "README.md"
+exclude:
+  - "*.py"
+  - "*.sh"
+  - "*.ps1"
+  - "*.bat"
+  - "*.cmd"
+  - "*.psd1"
+  - "_shared/"
+  - "scripts/"
+  - "installer_lib/"
+  - "installer_update/"
+  - "hooks/"
+  - "platforms/"
+  - "skill-catalog/"
+  - "official-docs/"
+  - "adversarial-verification/"
+  - "agent-security-scan/"
+  - "boundary-contract/"
+  - "coding-convention/"
+  - "compact-handoff/"
+  - "jailbreak-detector/"
+  - "merge-companion/"
+  - "necessity-gate/"
+  - "session-intent-analyzer/"
+  - "skill-evolution/"
+  - "task-router/"
+  - "AGENTS.md"
+  - "CLAUDE.md"
+  - "CONTRIBUTING.md"
+  - "CODE_OF_CONDUCT.md"
+  - "SECURITY.md"
+  - "SUPPORT.md"
+  - "CHANGELOG.md"
+  - "THIRD_PARTY_NOTICES.md"
+  - "PSScriptAnalyzerSettings.psd1"

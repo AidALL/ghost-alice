@@ -4,7 +4,7 @@ Removes ONLY the requested addon's recorded targets, symlink-safe, preserves a
 target that drifted since install (user-modified), uses a two-phase
 <addon_id>.json.removing intent marker, deletes the sidecar last, and resumes.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_uninstall.py -q
+Run: python3 -m pytest _shared/test_addon_uninstall.py -q
 """
 
 from __future__ import annotations
