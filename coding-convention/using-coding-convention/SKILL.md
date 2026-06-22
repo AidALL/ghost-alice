@@ -138,6 +138,7 @@ Stop and load the relevant skill when any of these thoughts appear.
 | "This feels productive right now." | Undisciplined action only wastes time. The skill prevents this. |
 | "I know that concept." | Knowing a concept differs from using the skill. Load it. |
 | "I will report what I found instead of doing it." | The user asked you to do it. Execute this turn, do not stop at a report. |
+| "I will reinterpret the requested scope into a more practical scope." | Scope changes already belong to boundary-contract. Stop and renew or confirm before changing the committed scope. |
 | "Just the key spots is enough." | The committed scope is the whole set. Cover all of it. |
 | "Grep found nothing, so it is clean." | If you already judged the search method incomplete, read the files. Do not trust the weaker method. |
 | "I will ask the user which one." | If the content answers it, inspect and decide. Punt only when the action is irreversible and unresolvable. |
@@ -202,7 +203,7 @@ Process:
 
 Implementation:
 
-- `test-driven-development`: start fixes or features with a failing test.
+- `test-driven-development`: start known-contract fixes or features with a failing test; use bounded discovery or a proof first when the premise or target behavior is unknown, then convert the discovered behavior contract into regression coverage.
 - `subagent-driven-development`: execute independent implementation tasks through subagents.
 - `using-git-worktrees`: isolate parallel git work.
 - `executing-plans`: carry out an existing implementation plan.
@@ -220,6 +221,8 @@ Read the relevant skill's own `SKILL.md` for trigger details and output format.
 ## Material Recommendations And Choices
 
 Advice, selected options, status judgments, and "this is correct" statements need fresh evidence when they claim finished work, verified results, or a decision that materially changes the user's next action.
+
+Verification scope matters: prefer the previously failing test and directly impacted tests after a fix. Do not repeat broad passing suites unless a risk signal shows that the latest change can invalidate the earlier result.
 
 - Re-check evidence on each user turn.
 - Do not recommend from memory alone when the recommendation changes scope, verification, recovery, or the user's next action.

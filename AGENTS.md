@@ -370,5 +370,6 @@ Operating rules:
 
 - Choose `minimal` only when the cause is local and the recovery cost is small.
 - A temporary patch that fixes only the surface symptom when the cause is structural is a rule violation.
+- When local changes, generated outputs, agent suggestions, or reviewer suggestions conflict, choose the change set that best satisfies the locked contract and survives the most relevant targeted tests. Do not choose by recency, authorship, or smaller diff alone.
 - When the user explicitly asks to "just make it work" or requests urgent recovery, a temporary patch is allowed, but leave a `residual-impact` note.
 - For a new rule, skill, or document change, confirm with a test or a gate that the rule actually triggers on the real execution path.

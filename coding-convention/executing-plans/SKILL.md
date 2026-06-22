@@ -15,6 +15,7 @@ compatibility:
 - [Process](#process)
   - [Step 1: Load and review the plan](#step-1-load-and-review-the-plan)
   - [Step 2: Execute the tasks](#step-2-execute-the-tasks)
+  - [Step 2.1: Keep the plan current](#step-21-keep-the-plan-current)
   - [Step 3: Finish development](#step-3-finish-development)
 - [Failure modes and cautions](#failure-modes-and-cautions)
 - [When to stop and ask for help](#when-to-stop-and-ask-for-help)
@@ -47,6 +48,21 @@ For each task:
 2. Follow each step exactly (the plan is composed of bite-sized steps).
 3. Run verification as specified.
 4. Mark it completed.
+
+### Step 2.1: Keep the plan current
+
+If execution or verification proves the plan's scope, order, expected behavior,
+or task wording is wrong, update the plan before continuing. The plan is the
+current execution contract, not a log of earlier attempts.
+
+- Edit the existing task text so it reflects the current decision.
+- Do not append changelogs, past rationale, previous attempts, or case notes.
+- Keep only information needed for future execution: current scope, order,
+  commands, acceptance criteria, and open blockers.
+- After editing task text or order, update the active TodoWrite/task tracker so
+  it matches the revised plan before continuing.
+- If the change widens or narrows the committed objective, stop and confirm
+  before editing the plan.
 
 ### Step 3: Finish development
 

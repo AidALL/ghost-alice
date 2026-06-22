@@ -47,6 +47,37 @@ get_skill_description() {
     | perl -CSAD -ne 'chomp; if(length($_)>80){print substr($_,0,77)."..."}else{print $_}'
 }
 
+_installed_addon_id_for_uninstall() {
+  local addon_id="$1"
+  local addons_dir="$2"
+  [[ "$addon_id" =~ ^[a-z][a-z0-9-]*$ ]] || return 1
+  [ -f "${addons_dir}/${addon_id}.json" ] || [ -f "${addons_dir}/${addon_id}.json.removing" ]
+}
+
+_append_unique_uninstall_addon_id() {
+  local addon_id="$1"
+  local existing
+  for existing in ${addon_ids[@]+"${addon_ids[@]}"}; do
+    [ "$existing" = "$addon_id" ] && return 0
+  done
+  addon_ids+=("$addon_id")
+}
+
+_promote_bare_installed_addon_ids() {
+  local addons_dir="$1"
+  local kept=()
+  local requested targets
+  for requested in ${skills[@]+"${skills[@]}"}; do
+    targets="$(expand_skill_targets "$requested")"
+    if [ -z "$targets" ] && _installed_addon_id_for_uninstall "$requested" "$addons_dir"; then
+      _append_unique_uninstall_addon_id "$requested"
+    else
+      kept+=("$requested")
+    fi
+  done
+  skills=(${kept[@]+"${kept[@]}"})
+}
+
 list_skills() {
   echo "$(t 'Available skills:' 'Available skills:')"
   echo ""
@@ -81,14 +112,11 @@ list_addons() {
     info "$(t 'Addon installation is disabled (--addon-skip)' 'Addon installation is disabled (--addon-skip)')"
     return 0
   fi
-  if [ "${#ADDON_TAGS[@]}" -gt 0 ]; then
-    error "$(t '--addon-tag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with --addon-source.' '--addon-tag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with --addon-source.')"
-    return 1
-  fi
   if [ "${#ADDON_SOURCES[@]}" -eq 0 ]; then
     error "$(t '--list-addons requires --addon-source' '--list-addons requires --addon-source')"
     return 1
   fi
+  prepare_addon_sources || return 1
   local py source skill
   py="$(_find_python_runtime || true)"
   if [ -z "$py" ]; then
@@ -101,6 +129,12 @@ list_addons() {
   done
   for skill in "${ALL_SKILLS[@]}"; do
     args+=(--core-skill "$skill")
+    local core_targets core_name core_path
+    core_targets="$(expand_skill_targets "$skill")"
+    while IFS='|' read -r core_name core_path; do
+      [ -n "$core_name" ] || continue
+      args+=(--core-skill "$core_name")
+    done <<< "$core_targets"
   done
   "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" "${args[@]}" --platform "$PLATFORM" --format text
 }
@@ -266,6 +300,7 @@ uninstall() {
   # removed, not as a spurious unknown-addon failure when the explicit pass below
   # then finds nothing.
   local _adir="${HOME}/.ghost-alice/addons/${PLATFORM}"
+  _promote_bare_installed_addon_ids "${_adir}"
   local known_before=" "
   local _kid
   for _kid in ${addon_ids[@]+"${addon_ids[@]}"}; do

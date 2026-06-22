@@ -24,17 +24,19 @@
 | Python runtime | Python 3.11+ accepted, upper bound 없음, future-version allowlist 없음 | `scripts/run_installer_compat_tests.py`, `scripts.tests.test_install_runtime_detection` |
 | Python bootstrap | default install path는 abort 전에 package-manager Python setup을 시도한다. read-only status/doctor/list는 system을 mutate하지 않는다 | `scripts.tests.test_install_runtime_detection` |
 | Python lookup | `python`, `python3`, `python3.*`, broken store stubs, spaces in PATH | `scripts.tests.test_install_runtime_detection` |
-| Encoding | shell, PowerShell, CMD wrapper에서 UTF-8 mode 강제 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_install_cmd_wrapper` |
+| Encoding | shell entrypoint와 native wrapper에서 UTF-8 mode 강제 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_install_cmd_wrapper` |
 | User home paths | spaces와 non-ASCII HOME fixtures 지원 유지 | `scripts.tests.test_installer_asset_inventory`, installer integration tests |
 | PSScriptAnalyzer optional | PSScriptAnalyzer는 optional이다. module이 없으면 parser/static tests가 minimum gate다 | local full validation |
 | Public surface parity | README, docs/index.html, Claude command wrappers는 `skill-catalog/skills.json` count, list, targets와 정렬되어야 한다 | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
 | Ghost-ALICE fresh clone install policy | public installs는 fresh `AidALL/ghost-alice` clone plus install을 사용한다. installer는 existing remotes를 rewrite하거나 local checkout directories를 rename하거나 repository migration flags를 expose하지 않는다. installed Claude permission cleanup은 managed stale checkout path allow rules로 제한된다 | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook` |
-| Agent visibility profile | default `agent_visibility.profile`은 `dynamic`다. allowed values는 `strict`, `dynamic`, `minimal`이다. installer는 `--visibility`와 PowerShell `-Visibility`를 primary runtime preference toggle로 받고, `--agent-visibility`와 `-AgentVisibility`는 compatibility alias로 유지한다. profile은 user-facing governance message surface만 제어한다. hook installation/execution을 suppress하지 않고 generated hook command contracts를 바꾸지 않으며 strict-grade session logging은 always-on이다 | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
+| Agent visibility profile | default `agent_visibility.profile`은 `dynamic`다. allowed values는 `strict`, `dynamic`, `minimal`이다. public installer command surface는 `--visibility`를 사용한다. native wrapper compatibility alias는 implementation-test coverage로 유지한다. `--agent-visibility`는 long-form compatibility alias로 계속 허용된다. profile은 user-facing governance message surface만 제어한다. hook installation/execution을 suppress하지 않고 generated hook command contracts를 바꾸지 않으며 strict-grade session logging은 always-on이다 | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
 | Agent visibility runtime command surface | Claude Code는 `/visibility strict|dynamic|minimal`, Codex는 trusted `UserPromptSubmit` hook pseudo-command path for `/visibility`, 모든 platform은 `_shared/agent_visibility_cli.py`를 사용한다. Documentation은 이것들을 하나의 slash-command spelling으로 collapse하면 안 된다 | `scripts.tests.test_install_status_contract` |
 
 ## Agent Hook Runtime Contract
 
 Ghost-ALICE installer는 hook file이 있다는 것만으로 충분하다고 보지 않는다. hook payload와 platform permission policy도 current repo contract와 맞아야 한다. 오래된 hook entry가 남아 있어도 runtime payload가 바뀌면 installer는 managed entry를 update한다. hook 존재 여부와 `agent_visibility.profile`은 별개 문제다. profile은 user-facing message surface만 제어할 뿐, missing이나 drift 판정을 누그러뜨리지 않는다.
+
+Base session-gate contract는 core behavior를 설명한다. Official privileged adapter addon은 선언된 hook event 이후 behavior를 확장할 수 있지만, addon-specific queue, task schema, continuation policy는 addon에 남고 addon-owned smoke evidence가 필요하다.
 
 Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따른다. 이 procedure는 Claude Code, Codex, Antigravity에 같은 README first 10 lines request를 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission behavior를 관찰한다.
 
@@ -77,12 +79,12 @@ final response `[completion-check]`가 `skill-call: verification-before-completi
 | Linux bash | `install.sh --platform codex --skip-source-health task-router` fixture | `scripts.tests.test_install_preflight_quarantine` |
 | WSL | Linux bash와 동일하며 Windows path boundary smoke 포함 | manual 또는 Windows CI |
 | Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, UTF-8 bridge | runtime detection and Codex hook config tests |
-| Windows native Codex hook smoke | `install.ps1 --platform codex`가 Codex bootstrap, `hooks.json`, `config.toml` hooks enabled를 작성하고 live smoke가 hook payload firing을 관찰한다 | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/ko/policies/live-smoke-regression.md` |
-| Windows visibility preference smoke | `install.ps1 -Visibility <profile>`와 `install.cmd -Visibility <profile>`가 `_shared/install_hooks.py --visibility`로 forward된다. `-AgentVisibility`는 compatibility alias로 유지하고 status는 hook state와 runtime profile을 separately report한다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
+| Windows native Codex hook smoke | native Windows Codex installer path `.\install.cmd --platform codex`가 Codex bootstrap, `hooks.json`, `config.toml` hooks enabled를 작성하고 live smoke가 hook payload firing을 관찰한다 | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/ko/policies/live-smoke-regression.md` |
+| Windows visibility preference smoke | native wrapper visibility forwarding이 `_shared/install_hooks.py --visibility`에 도달한다. legacy visibility alias는 compatibility coverage로 계속 허용되고 status는 hook state와 runtime profile을 separately report한다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible. analyzer가 있으면 `PSUseCompatibleSyntax` static analysis가 PS5-incompatible syntax를 잡는다 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
-| Windows PowerShell 7.4 LTS cleanup | `install.ps1`가 latest 7.6.x MSI를 resolve하기 전에 product-code scoped `msiexec.exe /x ... /quiet /norestart`로 detected PowerShell 7.4.x MSI products를 제거한다. product code 없는 non-MSI entries는 skip하고, 7.5/7.6+, Windows PowerShell 5.1, unrelated products는 제거하지 않는다 | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
-| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+ | local/CI PowerShell smoke |
-| CMD wrapper | `install.ps1`에 delegates하고 arguments를 forward하며 UTF-8을 강제한다 | `scripts.tests.test_install_cmd_wrapper` |
+| Windows PowerShell 7.4 LTS cleanup | native Windows installer cleanup이 latest 7.6.x MSI를 resolve하기 전에 product-code scoped `msiexec.exe /x ... /quiet /norestart`로 detected PowerShell 7.4.x MSI products를 제거한다. product code 없는 non-MSI entries는 skip하고, 7.5/7.6+, Windows PowerShell 5.1, unrelated products는 제거하지 않는다 | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
+| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output은 official addon alias를 노출하고 git URL addon source용 native wrapper branch/tag option을 설명한다 | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |
+| CMD wrapper | native Windows installer entrypoint에 delegates하고 arguments를 forward하며 UTF-8을 강제한다. official `--addon autopilot` alias는 PowerShell binding과 addon source preparation을 거쳐 유지한다. wrapper-facing help도 같은 alias와 branch/tag wording을 노출한다 | `scripts.tests.test_install_cmd_wrapper` |
 
 ## CI Commands
 
@@ -102,8 +104,4 @@ python3 scripts/run_installer_compat_tests.py --group installer-status-contract
 python3 scripts/run_installer_compat_tests.py --group installer-powershell-static
 ```
 
-optional PowerShell analyzer gate:
-
-```powershell
-Invoke-ScriptAnalyzer -Path ./install.ps1 -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Warning,Error
-```
+optional analyzer coverage는 위 `installer-powershell-static` group을 통해 노출한다. 직접 analyzer invocation은 public install guidance에 포함하지 않는다.

@@ -2,7 +2,7 @@
 pending addon uninstall at its start, and must report NON-ok when a `.removing`
 marker remains (a stuck uninstall), instead of silently saying overall ok.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_doctor_resume_shell.py -q
+Run: python3 -m pytest _shared/test_addon_doctor_resume_shell.py -q
 """
 
 from __future__ import annotations

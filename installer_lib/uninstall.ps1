@@ -76,14 +76,11 @@ function Show-Addons {
         Write-Info "Addon installation is disabled." "Addon installation is disabled."
         return
     }
-    if ($AddonTag -and $AddonTag.Count -gt 0) {
-        Write-Err "-AddonTag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with -AddonSource."
-        exit 1
-    }
     if (-not $AddonSource -or $AddonSource.Count -eq 0) {
-        Write-Err "-ListAddons requires at least one -AddonSource path."
+        Write-Err "--list-addons requires at least one --addon-source path."
         exit 1
     }
+    Prepare-AddonSources
 
     $py = Find-PythonExe
     if (-not $py) {
@@ -95,7 +92,7 @@ function Show-Addons {
     foreach ($source in $AddonSource) {
         $addonArgs += @("--source", $source)
     }
-    foreach ($skill in $AllSkills) {
+    foreach ($skill in (Get-CoreSkillNamesForAddonValidation)) {
         $addonArgs += @("--core-skill", $skill)
     }
 
@@ -262,18 +259,139 @@ function Test-AddonDependentsForSkill {
     return $true
 }
 
+function Test-InstalledAddonIdForUninstall {
+    param([string]$AddonId, [string]$AddonsDir)
+
+    if (-not $AddonId -or $AddonId -notmatch '^[a-z][a-z0-9-]*$') {
+        return $false
+    }
+    return (
+        (Test-Path -LiteralPath (Join-Path $AddonsDir "$AddonId.json")) -or
+        (Test-Path -LiteralPath (Join-Path $AddonsDir "$AddonId.json.removing"))
+    )
+}
+
+function Add-UniqueUninstallAddonId {
+    param(
+        [System.Collections.Generic.List[string]]$AddonIds,
+        [string]$AddonId
+    )
+
+    if ($AddonId -and -not $AddonIds.Contains($AddonId)) {
+        [void]$AddonIds.Add($AddonId)
+    }
+}
+
+function Split-UninstallSelection {
+    param(
+        [string[]]$SkillNames,
+        [string[]]$ExplicitAddonIds,
+        [string]$AddonsDir
+    )
+
+    $addonIds = [System.Collections.Generic.List[string]]::new()
+    foreach ($addonId in @($ExplicitAddonIds)) {
+        Add-UniqueUninstallAddonId -AddonIds $addonIds -AddonId $addonId
+    }
+
+    $keptSkills = @()
+    foreach ($skill in @($SkillNames)) {
+        $targets = Expand-SkillTargets $skill
+        if ($targets.Count -eq 0 -and (Test-InstalledAddonIdForUninstall -AddonId $skill -AddonsDir $AddonsDir)) {
+            Add-UniqueUninstallAddonId -AddonIds $addonIds -AddonId $skill
+        } else {
+            $keptSkills += $skill
+        }
+    }
+
+    return [PSCustomObject]@{
+        SkillNames = @($keptSkills)
+        AddonIds   = @($addonIds.ToArray())
+    }
+}
+
+function Invoke-ResumePendingAddonUninstalls {
+    param(
+        [string]$PythonExe,
+        [string]$AddonsDir,
+        [string]$Helper,
+        [string]$CommandsDir,
+        [string]$ResourcesDir
+    )
+
+    if (-not $PythonExe -or -not (Test-Path -LiteralPath $AddonsDir)) {
+        return
+    }
+    & $PythonExe $Helper --resume-pending --addons-dir $AddonsDir --skills-dir $SkillsDir `
+        --skills-dir $CommandsDir --skills-dir $ResourcesDir --platform $Platform --confirm 2>$null | Out-Null
+}
+
 function Invoke-Uninstall {
-    param([string[]]$SkillNames)
+    param([string[]]$SkillNames, [string[]]$AddonIds)
+
+    $userHome = Resolve-UserHome
+    $addonsDir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "addons") $Platform
+    $selection = Split-UninstallSelection -SkillNames $SkillNames -ExplicitAddonIds $AddonIds -AddonsDir $addonsDir
+    $SkillNames = @($selection.SkillNames)
+    $AddonIds = @($selection.AddonIds)
+
+    $py = Find-PythonExe
+    $helper = Join-Path $script:GhostAliceRoot "_shared/addon_uninstall.py"
+    $commandsDir = Join-Path (Resolve-ClaudeHome) "commands"
+    $resourcesDir = Join-Path (Join-Path (Join-Path $userHome ".ghost-alice") "resources") $Platform
+
+    $knownBefore = @{}
+    foreach ($addonId in @($AddonIds)) {
+        if (Test-InstalledAddonIdForUninstall -AddonId $addonId -AddonsDir $addonsDir) {
+            $knownBefore[$addonId] = $true
+        }
+    }
+
+    Invoke-ResumePendingAddonUninstalls -PythonExe $py -AddonsDir $addonsDir `
+        -Helper $helper -CommandsDir $commandsDir -ResourcesDir $resourcesDir
+
+    $removed = 0
+    $failed = 0
+
+    if ($AddonIds -and $AddonIds.Count -gt 0) {
+        if (-not $py) {
+            Write-Err "Python 3.11+ not found; cannot uninstall addons" "Python 3.11+ not found; cannot uninstall addons"
+            throw "addon uninstall cannot run - Python 3.11+ is required"
+        }
+        foreach ($addonId in @($AddonIds)) {
+            & $py $helper --addon-id $addonId --addons-dir $addonsDir --skills-dir $SkillsDir `
+                --skills-dir $commandsDir --skills-dir $resourcesDir --platform $Platform --confirm
+            $rc = $LASTEXITCODE
+            if ($rc -eq 0) {
+                $removed++
+            } elseif ($rc -eq 1 -and $knownBefore.ContainsKey($addonId)) {
+                $removed++
+            } else {
+                $failed++
+                if ($rc -eq 1) {
+                    Write-Warn ("Addon {0}: not installed (nothing to remove)" -f $addonId) ("Addon {0}: not installed (nothing to remove)" -f $addonId)
+                } else {
+                    Write-Warn ("Addon {0}: uninstall left items for manual review" -f $addonId) ("Addon {0}: uninstall left items for manual review" -f $addonId)
+                }
+            }
+        }
+    }
 
     if ($SkillNames -and $SkillNames.Count -gt 0) {
         Assert-SkillNames $SkillNames
         Write-Info "Removing selected skills..." "Removing selected skills..."
     } else {
+        if ($AddonIds -and $AddonIds.Count -gt 0) {
+            if ($removed -gt 0) { Write-Ok ("{0} addon(s) removed." -f $removed) ("{0} addon(s) removed." -f $removed) }
+            else { Write-Info "No addon targets to remove." "No addon targets to remove." }
+            if ($failed -gt 0) {
+                throw "one or more addon uninstalls failed"
+            }
+            return
+        }
         Invoke-FullUninstall
         return
     }
-
-    $removed = 0
 
     foreach ($skill in $SkillNames) {
         if (-not (Test-AddonDependentsForSkill -SkillName $skill)) {
@@ -305,6 +423,10 @@ function Invoke-Uninstall {
         Write-Info "Managed skills remain; keeping hooks installed." "Managed skills remain; keeping hooks installed."
     } else {
         Invoke-InstallHooks -Action "uninstall" -TargetPlatform $Platform
+    }
+
+    if ($failed -gt 0) {
+        throw "one or more addon uninstalls failed"
     }
 }
 
@@ -379,35 +501,38 @@ function Show-Help {
         Write-Host @"
 Usage:
   .\install.cmd                          # Install to detected AI tools
-  .\install.cmd -Platform claude         # Install only to Claude Code
-  .\install.cmd -Platform codex          # Install to Codex
+  .\install.cmd --addon autopilot        # Install official autopilot addon to detected AI tools
+  .\install.cmd --platform claude        # Install only to Claude Code
+  .\install.cmd --platform codex         # Install to Codex
 
 Common commands:
-  -Platform claude|codex                 Choose one platform
-  -PromptPlatform                        Ask which AI tool to install
-  -Status                                Show install status
-  -Visibility strict|dynamic|minimal
+  --platform claude|codex                Choose one platform
+  --prompt-platform                      Ask which AI tool to install
+  --status                               Show install status
+  --visibility strict|dynamic|minimal
                                          Set user-facing governance message visibility profile
-  -AgentVisibility strict|dynamic|minimal
-                                         Alias for -Visibility
-  -Doctor                                Run install diagnostics
+  --agent-visibility strict|dynamic|minimal
+                                         Compatibility alias for --visibility
+  --doctor                               Run install diagnostics
 
 Removal commands:
-  -Uninstall                             Full uninstall: remove managed hooks, bootstrap, support state, and install targets
-  -Platform PLAT -Uninstall -Skills name Remove selected skills from one platform
-  -Force                                 Override selected-skill addon dependency guard
+  --uninstall                            Full uninstall: remove managed hooks, bootstrap, support state, and install targets
+  --platform PLAT --uninstall name       Remove selected skill from one platform
+  --platform PLAT --uninstall --addon id Remove selected addon from one platform
+  --force                                Override selected-skill addon dependency guard
 
 Advanced/operator commands:
-  -Skills name1,name2                    Install only selected skills
-  -List                                  List available skills
-  -AddonSource PATH                      Add addon repo or local manifest path
-  -AddonTag TAG                          Reserved: check out tag locally for now
-  -AddonSkip                             Disable addon installation
-  -ListAddons                            List addon manifest targets
-  -CleanupPending                        Clean false-positive legacy pending entries
-  -UpdateSource                          Stash source checkout local changes and fast-forward
-  -SkipSourceHealth                      Skip source health gate
-  -Help                                  Show this help
+  skill-a skill-b                        Install only selected skills
+  --list                                 List available skills
+  --addon autopilot                      Install official autopilot addon; --platform is optional
+  --addon-source PATH                    Add addon repo or local manifest path
+  --addon-tag TAG                        Checkout branch/tag for git URL addon sources
+  --addon-skip                           Disable addon installation
+  --list-addons                          List addon manifest targets
+  --cleanup-pending                      Clean false-positive legacy pending entries
+  --update-source                        Stash source checkout local changes and fast-forward
+  --skip-source-health                   Skip source health gate
+  --help                                 Show this help
 "@
         return
     }
@@ -415,34 +540,37 @@ Advanced/operator commands:
     Write-Host @"
 Usage:
   .\install.cmd                          # Install to detected AI tools
-  .\install.cmd -Platform claude         # Install only to Claude Code
-  .\install.cmd -Platform codex          # Install to Codex
+  .\install.cmd --addon autopilot        # Install official autopilot addon to detected AI tools
+  .\install.cmd --platform claude        # Install only to Claude Code
+  .\install.cmd --platform codex         # Install to Codex
 
 Common commands:
-  -Platform claude|codex                 Choose one platform
-  -PromptPlatform                        Ask which AI tool to install
-  -Status                                Show install status
-  -Visibility strict|dynamic|minimal
+  --platform claude|codex                Choose one platform
+  --prompt-platform                      Ask which AI tool to install
+  --status                               Show install status
+  --visibility strict|dynamic|minimal
                                          Set user-facing governance message visibility profile
-  -AgentVisibility strict|dynamic|minimal
-                                         Alias for -Visibility
-  -Doctor                                Run install diagnostics
+  --agent-visibility strict|dynamic|minimal
+                                         Compatibility alias for --visibility
+  --doctor                               Run install diagnostics
 
 Removal commands:
-  -Uninstall                             Full uninstall: remove managed hooks, bootstrap, support state, and install targets
-  -Platform PLAT -Uninstall -Skills name Remove selected skills from one platform
-  -Force                                 Override selected-skill addon dependency guard
+  --uninstall                            Full uninstall: remove managed hooks, bootstrap, support state, and install targets
+  --platform PLAT --uninstall name       Remove selected skill from one platform
+  --platform PLAT --uninstall --addon id Remove selected addon from one platform
+  --force                                Override selected-skill addon dependency guard
 
 Advanced/operator commands:
-  -Skills name1,name2                    Install only selected skills
-  -List                                  List available skills
-  -AddonSource PATH                      Add addon repo or local manifest path
-  -AddonTag TAG                          Reserved: check out tag locally for now
-  -AddonSkip                             Disable addon installation
-  -ListAddons                            List addon manifest targets
-  -CleanupPending                        Clean false-positive legacy pending entries
-  -UpdateSource                          Stash source checkout local changes and fast-forward
-  -SkipSourceHealth                      Skip source health gate
-  -Help                                  Show this help
+  skill-a skill-b                        Install only selected skills
+  --list                                 List available skills
+  --addon autopilot                      Install official autopilot addon; --platform is optional
+  --addon-source PATH                    Add addon repo or local manifest path
+  --addon-tag TAG                        Checkout branch/tag for git URL addon sources
+  --addon-skip                           Disable addon installation
+  --list-addons                          List addon manifest targets
+  --cleanup-pending                      Clean false-positive legacy pending entries
+  --update-source                        Stash source checkout local changes and fast-forward
+  --skip-source-health                   Skip source health gate
+  --help                                 Show this help
 "@
 }

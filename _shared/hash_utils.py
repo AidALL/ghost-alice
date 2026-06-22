@@ -16,6 +16,7 @@ from pathlib import Path
 # content hash; otherwise a copy-mode target's recorded hash drifts from its live
 # hash across reinstalls and falsely trips the same-addon drift gate (review H1).
 _MANAGED_MARKER_FILENAME = ".ghost-alice-install.json"
+_PYTHON_CACHE_DIR = "__pycache__"
 
 
 def as_posix(path) -> str:
@@ -47,7 +48,10 @@ def hash_target(path, install_mode: str) -> str:
     for child in sorted(p for p in target.rglob("*") if p.is_file()):
         if child.name == _MANAGED_MARKER_FILENAME:
             continue  # our own marker (volatile timestamp), not addon content
-        rel = child.relative_to(target).as_posix()
+        rel_path = child.relative_to(target)
+        if _PYTHON_CACHE_DIR in rel_path.parts:
+            continue  # runtime import cache, not installed addon content
+        rel = rel_path.as_posix()
         digest.update(rel.encode("utf-8"))
         digest.update(b"\0")
         digest.update(child.read_bytes())

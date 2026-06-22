@@ -643,14 +643,21 @@ def main(argv: list[str] | None = None) -> int:
         delta = json.loads(args.delta_json)
         if not isinstance(delta, dict):
             raise SystemExit("--delta-json must decode to an object")
-    paths = record_turn(
-        root=Path(args.root),
+    root = Path(args.root)
+    session_id = resolve_session_id(
+        root=root,
         platform=args.platform,
-        session_id=resolve_session_id(
-            root=Path(args.root),
-            platform=args.platform,
-            explicit=args.session_id,
-        ),
+        explicit=args.session_id,
+    )
+    if args.snapshot and args.input is None and delta is None:
+        paths = session_paths(root, args.platform, session_id)
+        state = load_state(paths["state"], platform=args.platform, session_id=session_id)
+        print(json.dumps(consumer_snapshot(state), ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+    paths = record_turn(
+        root=root,
+        platform=args.platform,
+        session_id=session_id,
         raw_user_input=args.input,
         intent_delta=delta,
         source="cli",

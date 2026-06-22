@@ -35,6 +35,60 @@ RESERVED_CORE_HOOK_IDS = frozenset({
     "tool-checkpoint", "completion", "session-start", "io-trace",
 })
 _SIDECAR_KNOWN_OPTIONAL_FIELDS = frozenset({"secrets", "hooks", "migration"})
+PRIVILEGED_ADAPTER_REQUEST_FIELD = "privileged_adapters"
+CORE_PRIVILEGED_ADAPTER_ALLOWLIST: dict[str, dict[str, Any]] = {}
+PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION = 1
+CORE_PRIVILEGED_ADAPTER_ALLOWLIST_PATH = (
+    Path(__file__).resolve().parents[1] / "skill-catalog" / "privileged-adapters.json"
+)
+USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL = Path(".ghost-alice") / "privileged-adapters.json"
+_DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST = object()
+_PRIVILEGED_ADAPTER_REQUIRED_FIELDS = frozenset({
+    "adapter_id",
+    "allowed_addon_id",
+    "expected_skill_name",
+    "events",
+    "script_rel_by_event",
+    "hook_id_by_event",
+    "args_policy",
+    "marker_template",
+    "runner_namespace",
+    "source_policy",
+    "hash_policy",
+    "uninstall_matcher",
+})
+_PRIVILEGED_ADAPTER_IMPLEMENTATION_FIELDS = frozenset({
+    "event",
+    "events",
+    "script",
+    "scripts",
+    "script_rel",
+    "script_rel_by_event",
+    "hook_id",
+    "hook_id_by_event",
+    "args",
+    "args_policy",
+    "marker",
+    "marker_template",
+    "runner_namespace",
+    "skill_path",
+    "skill_dir",
+    "source",
+    "source_policy",
+    "hash",
+    "hash_policy",
+    "uninstall_matcher",
+})
+_PRIVILEGED_ADAPTER_ALLOWED_EVENTS = frozenset({
+    "on_user_prompt",
+    "pre_tool_use",
+    "post_tool_use",
+    "on_agent_stop",
+    "on_session_start",
+})
+_PRIVILEGED_ADAPTER_TRUST_ROOT_HINT = (
+    "register adapter implementations in the core or machine-owner privileged adapter allowlist"
+)
 
 
 class AddonManifestError(Exception):
@@ -60,6 +114,7 @@ class AddonTarget:
     resources: tuple[tuple[str, str], ...] = ()
     # observational hooks (plan Phase 4): (hook_id, event_intent, script_abs_path).
     hooks: tuple[tuple[str, str, str], ...] = ()
+    privileged_adapters: tuple[str, ...] = ()
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +128,7 @@ class AddonTarget:
             "secrets": list(self.secrets),
             "tags": list(self.tags),
             "min_core_version": self.min_core_version,
+            "privileged_adapters": list(self.privileged_adapters),
         }
 
 
@@ -105,9 +161,10 @@ def _string_list(value: Any, field: str, path: Path) -> tuple[str, ...]:
 def _safe_child_path(root: Path, relative_path: str, field: str, manifest_path: Path) -> Path:
     if Path(relative_path).is_absolute():
         raise AddonManifestError(f"{manifest_path}: {field} must be relative")
+    root_resolved = root.resolve()
     resolved = (root / relative_path).resolve()
     try:
-        resolved.relative_to(root)
+        resolved.relative_to(root_resolved)
     except ValueError as exc:
         raise AddonManifestError(f"{manifest_path}: {field} escapes addon source") from exc
     return resolved
@@ -123,6 +180,358 @@ def _validate_semver(value: str, field: str, path: Path) -> str:
     if not _SEMVER_RE.fullmatch(value):
         raise AddonManifestError(f"{path}: {field} must be semver major.minor.patch: {value!r}")
     return value
+
+
+def _adapter_allowlist(
+    allowlist: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    if allowlist is not None:
+        return allowlist
+    loaded = load_privileged_adapter_allowlist()
+    for adapter_id, spec in CORE_PRIVILEGED_ADAPTER_ALLOWLIST.items():
+        if adapter_id in loaded:
+            raise AddonManifestError(f"duplicate privileged adapter id {adapter_id!r} in core allow-list overlay")
+        loaded[adapter_id] = spec
+    return loaded
+
+
+def _read_privileged_adapter_allowlist_file(
+    path: Path,
+    *,
+    expected_trust_owner: str,
+) -> dict[str, dict[str, Any]]:
+    data = _read_json(path)
+    if data.get("schema_version") != PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION:
+        raise AddonManifestError(
+            f"{path}: schema_version must be {PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION}"
+        )
+    if data.get("trust_owner") != expected_trust_owner:
+        raise AddonManifestError(f"{path}: trust_owner must be {expected_trust_owner!r}")
+    adapters = data.get("adapters")
+    if not isinstance(adapters, dict):
+        raise AddonManifestError(f"{path}: adapters must be an object")
+
+    out: dict[str, dict[str, Any]] = {}
+    for adapter_id, spec in adapters.items():
+        if not isinstance(adapter_id, str) or not ADDON_ID_RE.fullmatch(adapter_id):
+            raise AddonManifestError(f"{path}: adapter id {adapter_id!r} must match {ADDON_ID_RE.pattern}")
+        if not isinstance(spec, dict):
+            raise AddonManifestError(f"{path}: adapter {adapter_id!r} spec must be an object")
+        candidate = dict(spec)
+        _privileged_adapter_spec(adapter_id, allowlist={adapter_id: candidate}, context=path)
+        out[adapter_id] = candidate
+    return out
+
+
+def _merge_allowlist_file(
+    merged: dict[str, dict[str, Any]],
+    path: str | Path | None,
+    *,
+    expected_trust_owner: str,
+) -> None:
+    if path is None:
+        return
+    allowlist_path = Path(path).expanduser()
+    if not allowlist_path.exists():
+        return
+    entries = _read_privileged_adapter_allowlist_file(
+        allowlist_path,
+        expected_trust_owner=expected_trust_owner,
+    )
+    for adapter_id, spec in entries.items():
+        if adapter_id in merged:
+            raise AddonManifestError(f"{allowlist_path}: duplicate privileged adapter id {adapter_id!r}")
+        merged[adapter_id] = spec
+
+
+def _default_user_privileged_adapter_allowlist_path() -> Path:
+    home = os.environ.get("HOME")
+    if home:
+        return Path(home).expanduser() / USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL
+    return Path.home() / USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL
+
+
+def load_privileged_adapter_allowlist(
+    *,
+    official_path: str | Path | None = CORE_PRIVILEGED_ADAPTER_ALLOWLIST_PATH,
+    user_path: Any = _DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST,
+) -> dict[str, dict[str, Any]]:
+    """Load privileged adapter specs from separated trust roots.
+
+    The official file is core-owned repository data. The user file is a local
+    machine-owner trust record; addon manifests still request ids only and never
+    supply implementation fields.
+    """
+    merged: dict[str, dict[str, Any]] = {}
+    _merge_allowlist_file(merged, official_path, expected_trust_owner="core")
+    resolved_user_path = (
+        _default_user_privileged_adapter_allowlist_path()
+        if user_path is _DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST
+        else user_path
+    )
+    _merge_allowlist_file(merged, resolved_user_path, expected_trust_owner="machine-owner")
+    return merged
+
+
+def _parse_privileged_adapter_requests(manifest: dict[str, Any], path: Path) -> tuple[str, ...]:
+    raw = manifest.get(PRIVILEGED_ADAPTER_REQUEST_FIELD, [])
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise AddonManifestError(f"{path}: {PRIVILEGED_ADAPTER_REQUEST_FIELD} must be a string array")
+    requested: list[str] = []
+    seen: set[str] = set()
+    for index, item in enumerate(raw):
+        field = f"{PRIVILEGED_ADAPTER_REQUEST_FIELD}[{index}]"
+        if isinstance(item, dict):
+            supplied = sorted(str(key) for key in item if key in _PRIVILEGED_ADAPTER_IMPLEMENTATION_FIELDS)
+            detail = f": {supplied}" if supplied else ""
+            raise AddonManifestError(
+                f"{path}: {field} may request an adapter id only; manifest-supplied "
+                f"privileged adapter implementation fields are not accepted{detail}; "
+                f"{_PRIVILEGED_ADAPTER_TRUST_ROOT_HINT}"
+            )
+        if not isinstance(item, str):
+            raise AddonManifestError(f"{path}: {field} must be an adapter id string")
+        adapter_id = _validate_id(item, field, path)
+        if adapter_id in seen:
+            raise AddonManifestError(f"{path}: duplicate privileged adapter id {adapter_id!r}")
+        seen.add(adapter_id)
+        requested.append(adapter_id)
+    return tuple(requested)
+
+
+def _reject_privileged_adapter_implementation_fields(manifest: dict[str, Any], path: Path) -> None:
+    supplied = sorted(str(key) for key in manifest if key in _PRIVILEGED_ADAPTER_IMPLEMENTATION_FIELDS)
+    if supplied:
+        raise AddonManifestError(
+            f"{path}: privileged adapter implementation fields are not accepted in addon manifests: "
+            f"{supplied}; {_PRIVILEGED_ADAPTER_TRUST_ROOT_HINT}"
+        )
+
+
+def _render_adapter_template(
+    template: str,
+    *,
+    adapter_id: str,
+    hook_id: str,
+    context: Path | None,
+    field: str,
+) -> str:
+    where = f"{context}: " if context is not None else ""
+    # Safe substitution: honor only the two whitelisted placeholders. A
+    # leftover brace means an unsupported field; str.format attribute/index
+    # access (e.g. {x.__class__}, {0}) is never reachable.
+    rendered = template.replace("{adapter_id}", adapter_id).replace("{hook_id}", hook_id)
+    if "{" in rendered or "}" in rendered:
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} {field} template has unsupported fields "
+            "(only {adapter_id} and {hook_id} are allowed)"
+        )
+    if not isinstance(rendered, str) or not rendered.strip():
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} {field} template rendered empty"
+        )
+    return rendered
+
+
+def _adapter_marker(adapter_id: str, hook_id: str) -> str:
+    return f"[adapter:{adapter_id}] {hook_id}"
+
+
+def _adapter_runner_id(adapter_id: str, hook_id: str) -> str:
+    # Canonical single source of truth for the privileged adapter runner id.
+    return f"adapter-{adapter_id}-{hook_id}"
+
+
+def _adapter_marker_from_spec(
+    spec: dict[str, Any],
+    adapter_id: str,
+    hook_id: str,
+    *,
+    context: Path | None,
+) -> str:
+    marker = _render_adapter_template(
+        spec["marker_template"],
+        adapter_id=adapter_id,
+        hook_id=hook_id,
+        context=context,
+        field="marker_template",
+    )
+    expected = _adapter_marker(adapter_id, hook_id)
+    if marker != expected:
+        where = f"{context}: " if context is not None else ""
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} marker_template must render {expected!r}"
+        )
+    return marker
+
+
+def _adapter_runner_id_from_spec(
+    spec: dict[str, Any],
+    adapter_id: str,
+    hook_id: str,
+    *,
+    context: Path | None,
+) -> str:
+    runner_id = _render_adapter_template(
+        spec["runner_namespace"],
+        adapter_id=adapter_id,
+        hook_id=hook_id,
+        context=context,
+        field="runner_namespace",
+    )
+    if not ADDON_ID_RE.fullmatch(runner_id):
+        where = f"{context}: " if context is not None else ""
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} runner_namespace must render a safe hook id"
+        )
+    expected = _adapter_runner_id(adapter_id, hook_id)
+    if runner_id != expected:
+        where = f"{context}: " if context is not None else ""
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} runner_namespace must render {expected!r} "
+            "(single source of truth with the spec=None runner id)"
+        )
+    return runner_id
+
+
+def privileged_adapter_runner_id(
+    adapter_id: str,
+    hook_id: str,
+    spec: dict[str, Any] | None = None,
+    *,
+    context: Path | None = None,
+) -> str:
+    if spec is None:
+        return _adapter_runner_id(adapter_id, hook_id)
+    return _adapter_runner_id_from_spec(spec, adapter_id, hook_id, context=context)
+
+
+def _validate_privileged_adapter_script_rel(
+    script_rel: str,
+    adapter_id: str,
+    event: str,
+    context: Path | None,
+) -> None:
+    where = f"{context}: " if context is not None else ""
+    rel = Path(script_rel)
+    if rel.is_absolute() or script_rel.startswith(("/", "\\")):
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} script for {event!r} must be relative"
+        )
+    if any(ch in script_rel for ch in (";", "|", "&", "`", "$", "\n", "\0")):
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} script for {event!r} must be a contained path"
+        )
+    # A backslash is never valid in a contained POSIX adapter path; rejecting
+    # it closes the posix-evasion where "..\\..\\x" is a single rel.part.
+    if "\\" in script_rel:
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} script for {event!r} must be a contained path"
+        )
+    # Detect ".." under both separator styles for defense in depth.
+    segments = re.split(r"[\\/]+", script_rel)
+    if ".." in segments or ".." in rel.parts or os.path.normpath(script_rel) in ("", "."):
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} script for {event!r} escapes expected skill source"
+        )
+
+
+def _privileged_adapter_spec(
+    adapter_id: str,
+    *,
+    allowlist: dict[str, dict[str, Any]] | None = None,
+    context: Path | None = None,
+) -> dict[str, Any]:
+    registry = _adapter_allowlist(allowlist)
+    spec = registry.get(adapter_id)
+    where = f"{context}: " if context is not None else ""
+    if not isinstance(spec, dict):
+        raise AddonManifestError(f"{where}unknown privileged adapter id {adapter_id!r}")
+    missing = sorted(_PRIVILEGED_ADAPTER_REQUIRED_FIELDS - set(spec))
+    if missing:
+        raise AddonManifestError(f"{where}privileged adapter {adapter_id!r} missing core allow-list fields: {missing}")
+    if spec.get("adapter_id") != adapter_id:
+        raise AddonManifestError(f"{where}privileged adapter {adapter_id!r} has mismatched adapter_id")
+    for key in ("allowed_addon_id", "expected_skill_name"):
+        value = spec.get(key)
+        if not isinstance(value, str) or not ADDON_ID_RE.fullmatch(value):
+            raise AddonManifestError(f"{where}privileged adapter {adapter_id!r} {key} must match {ADDON_ID_RE.pattern}")
+    events = spec.get("events")
+    if not isinstance(events, list) or not events or not all(isinstance(event, str) and event for event in events):
+        raise AddonManifestError(f"{where}privileged adapter {adapter_id!r} events must be a non-empty string array")
+    script_rel_by_event = spec.get("script_rel_by_event")
+    hook_id_by_event = spec.get("hook_id_by_event")
+    if not isinstance(script_rel_by_event, dict) or not isinstance(hook_id_by_event, dict):
+        raise AddonManifestError(
+            f"{where}privileged adapter {adapter_id!r} script_rel_by_event and hook_id_by_event must be objects"
+        )
+    for key in ("args_policy", "marker_template", "runner_namespace", "source_policy", "hash_policy", "uninstall_matcher"):
+        if not isinstance(spec.get(key), str) or not spec[key].strip():
+            raise AddonManifestError(f"{where}privileged adapter {adapter_id!r} {key} must be a non-empty string")
+    for event in events:
+        if event not in _PRIVILEGED_ADAPTER_ALLOWED_EVENTS:
+            raise AddonManifestError(
+                f"{where}privileged adapter {adapter_id!r} event {event!r} is not a known hook intent"
+            )
+        script_rel = script_rel_by_event.get(event)
+        hook_id = hook_id_by_event.get(event)
+        if not isinstance(script_rel, str) or not script_rel.strip():
+            raise AddonManifestError(f"{where}privileged adapter {adapter_id!r} missing script for event {event!r}")
+        if not isinstance(hook_id, str) or not ADDON_ID_RE.fullmatch(hook_id):
+            raise AddonManifestError(
+                f"{where}privileged adapter {adapter_id!r} hook id for event {event!r} must match {ADDON_ID_RE.pattern}"
+            )
+        _validate_privileged_adapter_script_rel(script_rel, adapter_id, event, context)
+        _adapter_marker_from_spec(spec, adapter_id, hook_id, context=context)
+        _adapter_runner_id_from_spec(spec, adapter_id, hook_id, context=context)
+    required_policies = {
+        "args_policy": "no_args",
+        "source_policy": "expected_skill_source",
+        "hash_policy": "content_hash",
+        "uninstall_matcher": "exact_marker_runner",
+    }
+    for key, expected in required_policies.items():
+        if spec[key] != expected:
+            raise AddonManifestError(
+                f"{where}privileged adapter {adapter_id!r} {key} must be {expected!r}"
+            )
+    return spec
+
+
+def _adapter_ids_by_skill(
+    *,
+    addon_id: str,
+    skill_names: set[str],
+    requested: tuple[str, ...],
+    secrets: tuple[str, ...],
+    manifest_path: Path,
+    allowlist: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, tuple[str, ...]]:
+    if not requested:
+        return {}
+    if secrets:
+        raise AddonManifestError(
+            f"{manifest_path}: privileged adapters cannot declare secrets[] until a secrets contract exists"
+        )
+    by_skill: dict[str, list[str]] = {name: [] for name in skill_names}
+    for adapter_id in requested:
+        spec = _privileged_adapter_spec(adapter_id, allowlist=allowlist, context=manifest_path)
+        allowed_addon_id = spec["allowed_addon_id"]
+        if allowed_addon_id != addon_id:
+            raise AddonManifestError(
+                f"{manifest_path}: privileged adapter {adapter_id!r} is allowed only for addon "
+                f"{allowed_addon_id!r}, not {addon_id!r}"
+            )
+        expected_skill_name = spec["expected_skill_name"]
+        if expected_skill_name not in skill_names:
+            raise AddonManifestError(
+                f"{manifest_path}: privileged adapter {adapter_id!r} expects installed skill "
+                f"{expected_skill_name!r}, but addon declares {sorted(skill_names)}"
+            )
+        by_skill[expected_skill_name].append(adapter_id)
+    return {name: tuple(ids) for name, ids in by_skill.items() if ids}
 
 
 def _semver_tuple(value: str) -> tuple[int, int, int]:
@@ -160,6 +569,7 @@ def load_addon_targets(
     core_skill_names: Iterable[str] = (),
     platform: str | None = None,
     core_version: str | None = None,
+    privileged_adapter_allowlist: dict[str, dict[str, Any]] | None = None,
 ) -> list[AddonTarget]:
     core_names = set(core_skill_names)
     resolved_core_version = core_version if core_version is not None else _read_core_version()
@@ -192,9 +602,10 @@ def load_addon_targets(
                 raise AddonManifestError(
                     f"{top_manifest_path}: addon requires core >= {min_core_version} "
                     f"but installed core is {resolved_core_version} (fail-closed, nothing installed)"
-                )
+            )
             addon_manifest_path = addon_path / ADDON_MANIFEST
             addon_manifest = _read_json(addon_manifest_path)
+            _reject_privileged_adapter_implementation_fields(addon_manifest, addon_manifest_path)
             declared_id = _validate_id(
                 _require_string(addon_manifest.get("addon_id"), "addon_id", addon_manifest_path),
                 "addon_id",
@@ -236,6 +647,7 @@ def load_addon_targets(
                             f"{addon_manifest_path}: depends_on_core {dep!r} is not a known "
                             "installed/core skill (a declared dependency must exist)")
             secrets = _string_list(addon_manifest.get("secrets", []), "secrets", addon_manifest_path)
+            requested_privileged_adapters = _parse_privileged_adapter_requests(addon_manifest, addon_manifest_path)
 
             addon_commands: list[tuple[str, str]] = []
             for command in addon_manifest.get("commands", []) or []:
@@ -303,10 +715,30 @@ def load_addon_targets(
             skills = addon_manifest.get("skills")
             if not isinstance(skills, list) or not skills:
                 raise AddonManifestError(f"{addon_manifest_path}: skills must be a non-empty array")
-
-            for skill in skills:
+            skill_entries: list[dict[str, Any]] = []
+            skill_names: set[str] = set()
+            for index, skill in enumerate(skills):
                 if not isinstance(skill, dict):
                     raise AddonManifestError(f"{addon_manifest_path}: skill entries must be objects")
+                skill_name = _validate_id(
+                    _require_string(skill.get("name"), f"skills[{index}].name", addon_manifest_path),
+                    f"skills[{index}].name",
+                    addon_manifest_path,
+                )
+                if skill_name in skill_names:
+                    raise AddonManifestError(f"{addon_manifest_path}: duplicate skill name {skill_name!r}")
+                skill_entries.append(skill)
+                skill_names.add(skill_name)
+            privileged_adapters_by_skill = _adapter_ids_by_skill(
+                addon_id=addon_id,
+                skill_names=skill_names,
+                requested=requested_privileged_adapters,
+                secrets=secrets,
+                manifest_path=addon_manifest_path,
+                allowlist=privileged_adapter_allowlist,
+            )
+
+            for skill in skill_entries:
                 if skill.get("source") != "skill":
                     raise AddonManifestError(f"{addon_manifest_path}: skill.source must be 'skill'")
                 skill_name = _validate_id(
@@ -329,6 +761,21 @@ def load_addon_targets(
                 )
                 if not (skill_dir / "SKILL.md").is_file():
                     raise AddonManifestError(f"{addon_manifest_path}: missing SKILL.md for {skill_name!r}")
+                # Fail closed at load if a requested adapter's core-owned script is
+                # missing from the skill source, matching hooks/commands/resources which
+                # all verify existence here instead of deferring to provision time.
+                for _adapter_id in privileged_adapters_by_skill.get(skill_name, ()):
+                    _adapter_spec = _privileged_adapter_spec(
+                        _adapter_id, allowlist=privileged_adapter_allowlist, context=addon_manifest_path
+                    )
+                    for _adapter_event in _adapter_spec["events"]:
+                        _adapter_script_path(
+                            skill_dir,
+                            adapter_id=_adapter_id,
+                            event=_adapter_event,
+                            spec=_adapter_spec,
+                            context=addon_manifest_path,
+                        )
                 seen_names[skill_name] = addon_id
                 targets.append(
                     AddonTarget(
@@ -346,6 +793,7 @@ def load_addon_targets(
                         commands=tuple(addon_commands),
                         resources=tuple(addon_resources),
                         hooks=tuple(addon_hooks),
+                        privileged_adapters=privileged_adapters_by_skill.get(skill_name, ()),
                     )
                 )
 
@@ -562,6 +1010,12 @@ def detect_collisions(
             # destroy their change, so flag same-addon drift and abort.
             if _same_addon_target_is_clean(dest, recorded_hash, recorded_mode):
                 continue
+            # Copy-mode targets can be in a recoverable stale-sidecar state: the
+            # installed bytes already match the incoming addon source, but the
+            # sidecar still records an older hash. Reinstalling is then a no-op
+            # for content and lets write-sidecars repair the registry.
+            if _same_addon_copy_matches_source(dest, target.source, recorded_hash, recorded_mode):
+                continue
             # A skill symlink already pointing at THIS install's source is the
             # installer's own (re)target, not a user edit -- not drift. This unwedges
             # a prior failed reinstall that re-pointed the symlink before the sidecar
@@ -577,6 +1031,8 @@ def detect_collisions(
             owner = "core"
         elif owner_id is not None:
             owner = "addon"
+        elif _legacy_same_addon_symlink_is_safe(dest, target):
+            continue
         elif (dest / "SKILL.md").exists():
             owner = "domain"
         else:
@@ -626,12 +1082,79 @@ def _same_addon_target_is_clean(dest: Path, recorded_hash: str, recorded_mode: s
         return False
 
 
+def _same_addon_copy_matches_source(
+    dest: Path,
+    source: Path,
+    recorded_hash: str,
+    recorded_mode: str,
+) -> bool:
+    """True when a stale sidecar points at an installed copy equal to source."""
+    if not recorded_hash or recorded_mode != "copy":
+        return False
+    if dest.is_symlink() or not dest.exists() or not source.exists():
+        return False
+    try:
+        return hash_utils.hash_target(str(dest), "copy") == hash_utils.hash_target(str(source), "copy")
+    except Exception:
+        return False
+
+
 def _resolves_to(dest: Path, source: Path) -> bool:
     """True iff ``dest`` and ``source`` resolve to the same real path."""
     try:
         return os.path.realpath(dest) == os.path.realpath(source)
     except OSError:
         return False
+
+
+def _legacy_same_addon_symlink_is_safe(dest: Path, target: AddonTarget) -> bool:
+    """Allow pre-sidecar same-addon symlinks to be updated by the addon installer."""
+    if not dest.is_symlink():
+        return False
+    try:
+        legacy_skill = dest.resolve(strict=True)
+    except OSError:
+        return False
+    if not (legacy_skill / "SKILL.md").is_file():
+        return False
+
+    checked: set[Path] = set()
+    for addon_root in legacy_skill.parents:
+        if addon_root in checked:
+            continue
+        checked.add(addon_root)
+        manifest_path = addon_root / ADDON_MANIFEST
+        if not manifest_path.is_file():
+            continue
+        try:
+            data = _read_json(manifest_path)
+        except AddonManifestError:
+            continue
+        if data.get("addon_id") != target.addon_id:
+            continue
+        skills = data.get("skills")
+        if not isinstance(skills, list):
+            continue
+        for entry in skills:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("source") != "skill" or entry.get("name") != target.name:
+                continue
+            skill_dir = entry.get("skill_dir")
+            if not isinstance(skill_dir, str) or not skill_dir:
+                continue
+            try:
+                recorded_skill = _safe_child_path(
+                    addon_root,
+                    skill_dir,
+                    "skills[].skill_dir",
+                    manifest_path,
+                )
+            except AddonManifestError:
+                continue
+            if recorded_skill == legacy_skill:
+                return True
+    return False
 
 
 def _render_json(targets: list[AddonTarget]) -> str:
@@ -808,6 +1331,129 @@ def provision_addon_extras(
         if entries:
             extra[target.addon_id] = entries
     return extra
+
+
+def _adapter_script_path(
+    base: Path,
+    *,
+    adapter_id: str,
+    event: str,
+    spec: dict[str, Any],
+    context: Path,
+) -> Path:
+    script_rel = spec["script_rel_by_event"][event]
+    _validate_privileged_adapter_script_rel(script_rel, adapter_id, event, context)
+    script = _safe_child_path(base, script_rel, f"adapter {adapter_id} script", context)
+    if not script.is_file():
+        raise AddonManifestError(
+            f"{context}: privileged adapter {adapter_id!r} script for event {event!r} is missing: {script_rel}"
+        )
+    return script
+
+
+def _resolve_adapter_hooks(
+    target: AddonTarget,
+    *,
+    skills_dir: str | Path | None = None,
+    privileged_adapter_allowlist: dict[str, dict[str, Any]] | None = None,
+) -> Iterable[dict[str, Any]]:
+    """Single source of truth for resolving a target's privileged adapter
+    hooks. iter_privileged_adapter_hook_specs (install wiring) and
+    build_privileged_adapter_provided_entries (sidecar ownership record) both
+    consume this, so the installed hook and its uninstall-time ownership record
+    cannot drift. Trusts no addon-supplied event/script/marker/runner value.
+    """
+    context = target.addon_root / ADDON_MANIFEST if target.addon_root else target.source / ADDON_MANIFEST
+    script_base = target.source
+    if skills_dir is not None:
+        installed_dest = Path(skills_dir) / target.name
+        if _detect_install_mode(installed_dest) == "copy":
+            script_base = installed_dest
+    for adapter_id in target.privileged_adapters:
+        spec = _privileged_adapter_spec(
+            adapter_id, allowlist=privileged_adapter_allowlist, context=context
+        )
+        if spec["allowed_addon_id"] != target.addon_id or spec["expected_skill_name"] != target.name:
+            raise AddonManifestError(
+                f"{context}: privileged adapter {adapter_id!r} target identity mismatch "
+                f"for addon {target.addon_id!r} skill {target.name!r}"
+            )
+        for event in spec["events"]:
+            hook_id = spec["hook_id_by_event"][event]
+            yield {
+                "adapter_id": adapter_id,
+                "event": event,
+                "hook_id": hook_id,
+                "marker": _adapter_marker_from_spec(spec, adapter_id, hook_id, context=context),
+                "runner_id": privileged_adapter_runner_id(adapter_id, hook_id, spec, context=context),
+                "script": _adapter_script_path(
+                    script_base, adapter_id=adapter_id, event=event, spec=spec, context=context
+                ),
+                "script_rel": spec["script_rel_by_event"][event],
+                "spec": spec,
+            }
+
+
+def iter_privileged_adapter_hook_specs(
+    targets: Iterable[AddonTarget],
+    *,
+    skills_dir: str | Path | None = None,
+    privileged_adapter_allowlist: dict[str, dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Resolve core-owned privileged adapter hook specs for install_hooks.py."""
+    specs: list[dict[str, Any]] = []
+    for target in targets:
+        for r in _resolve_adapter_hooks(
+            target, skills_dir=skills_dir, privileged_adapter_allowlist=privileged_adapter_allowlist
+        ):
+            specs.append({
+                "addon_id": target.addon_id,
+                "skill_name": target.name,
+                "adapter_id": r["adapter_id"],
+                "event": r["event"],
+                "hook_id": r["hook_id"],
+                "marker": r["marker"],
+                "runner_id": r["runner_id"],
+                "script": str(r["script"]),
+                "script_rel": r["script_rel"],
+            })
+    return specs
+
+
+def build_privileged_adapter_provided_entries(
+    targets: Iterable[AddonTarget],
+    *,
+    skills_dir: str | Path,
+    privileged_adapter_allowlist: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Build marker-keyed sidecar provided[] entries for privileged adapters."""
+    entries_by_addon: dict[str, list[dict[str, Any]]] = {}
+    for target in targets:
+        for r in _resolve_adapter_hooks(
+            target, skills_dir=skills_dir, privileged_adapter_allowlist=privileged_adapter_allowlist
+        ):
+            spec = r["spec"]
+            script = r["script"]
+            entries_by_addon.setdefault(target.addon_id, []).append({
+                "kind": "adapter",
+                "name": r["adapter_id"],
+                "target": str(script),
+                "ownership": "addon",
+                "install_mode": "copy",
+                "content_hash": hash_utils.hash_target(str(script), "copy"),
+                "marker": r["marker"],
+                "metadata": {
+                    "adapter_id": r["adapter_id"],
+                    "event": r["event"],
+                    "hook_id": r["hook_id"],
+                    "runner_id": r["runner_id"],
+                    "script_rel": r["script_rel"],
+                    "skill_name": target.name,
+                    "source_policy": spec["source_policy"],
+                    "hash_policy": spec["hash_policy"],
+                },
+            })
+    return entries_by_addon
 
 
 def _normalized_location(path: Path) -> str:
@@ -1037,6 +1683,13 @@ def _main_write_sidecars(argv: list[str]) -> int:
         print(f"addon extras provisioning error: {exc}", file=sys.stderr)
         return 1
     for addon_id, entries in extras.items():
+        provided_by_addon.setdefault(addon_id, []).extend(entries)
+    try:
+        adapters = build_privileged_adapter_provided_entries(targets, skills_dir=skills_dir)
+    except (AddonManifestError, OSError) as exc:
+        print(f"addon privileged adapter provisioning error: {exc}", file=sys.stderr)
+        return 1
+    for addon_id, entries in adapters.items():
         provided_by_addon.setdefault(addon_id, []).extend(entries)
     try:
         write_addon_sidecars(

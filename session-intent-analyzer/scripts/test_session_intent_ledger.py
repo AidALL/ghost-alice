@@ -162,6 +162,48 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertNotIn(raw_prompt, events_text)
         self.assertNotIn("abc123", events_text)
 
+    def test_intent_delta_updates_jsonl_and_current_session_pointer(self) -> None:
+        root = self.tmpdir / "ledger"
+        delta = {
+            "current_goal": "bridge session intent to approved autopilot run state",
+            "acceptance_criteria": [
+                {
+                    "id": "bridge-jsonl",
+                    "summary": "intent update event carries delta keys without raw prompt text",
+                    "source": "user-explicit",
+                }
+            ],
+            "conduct_feedback": [
+                {
+                    "id": "premise-before-test-first",
+                    "summary": "establish unknown premises before RED-first testing",
+                    "source": "user-explicit",
+                    "status": "open",
+                }
+            ],
+        }
+
+        paths = self.ledger.record_turn(
+            root=root,
+            platform="codex",
+            session_id="session-jsonl",
+            intent_delta=delta,
+            source="agent",
+        )
+
+        rows = [json.loads(line) for line in paths["events"].read_text(encoding="utf-8").splitlines()]
+        pointer = json.loads((root / "codex" / "current-session.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(rows[-1]["event"], "intent-updated")
+        self.assertEqual(
+            rows[-1]["delta_keys"],
+            ["acceptance_criteria", "conduct_feedback", "current_goal"],
+        )
+        self.assertIn("intent_delta_digest", rows[-1])
+        self.assertNotIn("raw", json.dumps(rows[-1], ensure_ascii=False).lower())
+        self.assertEqual(pointer["session_id"], "session-jsonl")
+        self.assertEqual(pointer["state_path"], str(paths["state"]))
+
     def test_repeated_same_input_events_get_distinct_event_ids(self) -> None:
         root = self.tmpdir / "ledger"
         original_utc_now = self.ledger.utc_now
@@ -399,6 +441,114 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(snapshot["current_goal"], "join semantic delta into the pointer session")
         self.assertTrue((root / "codex" / "s-pointer" / "intent-state.json").exists())
         self.assertFalse((root / "codex" / "unknown" / "intent-state.json").exists())
+
+    def test_cli_snapshot_without_input_or_delta_is_read_only(self) -> None:
+        root = self.tmpdir / "ledger"
+        paths = self.ledger.record_turn(
+            root=root,
+            platform="codex",
+            session_id="s-snapshot",
+            intent_delta={"current_goal": "read the current snapshot only"},
+            source="agent",
+        )
+        state_before = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state_before["updated_at"] = "2026-01-01T00:00:00Z"
+        self.ledger.write_json(paths["state"], state_before)
+        events_before = paths["events"].read_text(encoding="utf-8")
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(LEDGER),
+                "--root",
+                str(root),
+                "--platform",
+                "codex",
+                "--snapshot",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+
+        snapshot = json.loads(completed.stdout)
+        state_after = json.loads(paths["state"].read_text(encoding="utf-8"))
+        events_after = paths["events"].read_text(encoding="utf-8")
+
+        self.assertEqual(snapshot["current_goal"], "read the current snapshot only")
+        self.assertEqual(state_after, state_before)
+        self.assertEqual(events_after, events_before)
+
+    def test_cli_delta_snapshot_still_updates_and_prints_updated_snapshot(self) -> None:
+        root = self.tmpdir / "ledger"
+        self.ledger.write_current_session_pointer(root, "codex", "s-delta-snapshot")
+        delta = {"current_goal": "update then print snapshot"}
+
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(LEDGER),
+                "--root",
+                str(root),
+                "--platform",
+                "codex",
+                "--delta-json",
+                json.dumps(delta, ensure_ascii=False),
+                "--snapshot",
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+
+        snapshot = json.loads(completed.stdout)
+        events_path = root / "codex" / "s-delta-snapshot" / "intent-events.jsonl"
+        rows = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+
+        self.assertEqual(snapshot["current_goal"], "update then print snapshot")
+        self.assertEqual(rows[-1]["event"], "intent-updated")
+        self.assertEqual(rows[-1]["delta_keys"], ["current_goal"])
+
+    def test_cli_input_records_digest_only_observation(self) -> None:
+        root = self.tmpdir / "ledger"
+        raw_input = "record this without persisting raw secret-token"
+
+        subprocess.run(
+            [
+                sys.executable,
+                str(LEDGER),
+                "--root",
+                str(root),
+                "--platform",
+                "codex",
+                "--session-id",
+                "s-input",
+                "--input",
+                raw_input,
+            ],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+        )
+
+        state_path = root / "codex" / "s-input" / "intent-state.json"
+        events_path = root / "codex" / "s-input" / "intent-events.jsonl"
+        state_text = state_path.read_text(encoding="utf-8")
+        events_text = events_path.read_text(encoding="utf-8")
+        row = json.loads(events_text.splitlines()[0])
+
+        self.assertEqual(row["event"], "user-input-observed")
+        self.assertIn("input_digest", row)
+        self.assertNotIn(raw_input, state_text)
+        self.assertNotIn(raw_input, events_text)
+        self.assertNotIn("secret-token", state_text)
+        self.assertNotIn("secret-token", events_text)
 
 
 class ModelSecurityDecisionTests(unittest.TestCase):

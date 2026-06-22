@@ -525,18 +525,20 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("acceptance_criteria", install_hooks.SESSION_INTENT_INTERNAL)
 
     def test_codex_hook_reminder_command_uses_task_router_gate_helper(self):
-        command = _visible_and_runner_payload_text(
-            install_hooks._entry_command(
-                install_hooks._platform_hook_entry("codex", "UserPromptSubmit")
-            )
+        entry_command = install_hooks._entry_command(
+            install_hooks._platform_hook_entry("codex", "UserPromptSubmit")
         )
+        command = _visible_and_runner_payload_text(entry_command)
 
         self.assertIn("task_router_reminder_hook.py", command)
         self.assertIn("--root", command)
-        self.assertIn(
-            str(install_hooks._repo_root_from_this_file() / ".tmp" / "session-intent").replace("\\", "/"),
-            command.replace("\\", "/"),
+        hook_command = next(
+            line for line in command.splitlines()
+            if "task_router_reminder_hook.py" in line
         )
+        parts = shlex.split(hook_command)
+        root = Path(parts[parts.index("--root") + 1])
+        self.assertEqual(root, install_hooks._repo_root_from_this_file() / ".tmp" / "session-intent")
 
     def test_codex_task_router_reminder_releases_after_intent_preflight_and_ignores_legacy_allow_gate(self):
         script = Path(install_hooks.__file__).with_name("task_router_reminder_hook.py")
@@ -3655,6 +3657,49 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             if key.startswith((self.fake_home / ".codex" / "hooks.json").as_posix())
         ]
         self.assertEqual(len(ghost_alice_states), 8)
+
+    def test_install_codex_prunes_legacy_path_variant_hook_state(self):
+        """Codex hook auto-trust removes duplicate Ghost-ALICE path variants."""
+        self._create_platform_dir("codex")
+        config_toml = self._codex_config_toml()
+        hooks_file = self.fake_home / ".codex" / "hooks.json"
+        legacy_settings_path = hooks_file.as_posix().replace("/", "\\")
+        legacy_key = f"{legacy_settings_path}:pre_tool_use:0:0"
+        unrelated_key = "user-hook:pre_tool_use:0:0"
+        config_toml.write_text(
+            '\n'.join([
+                '[features]',
+                'hooks = true',
+                'multi_agent = true',
+                '',
+                f'[hooks.state.{json.dumps(legacy_key)}]',
+                'trusted_hash = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"',
+                '',
+                f'[hooks.state.{json.dumps(unrelated_key)}]',
+                'enabled = false',
+                'trusted_hash = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"',
+                '',
+            ]),
+            encoding="utf-8",
+        )
+
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            result = install_hooks.install_hook("codex")
+        self.assertEqual(result, "installed")
+
+        config = tomllib.loads(config_toml.read_text(encoding="utf-8"))
+        hook_state = config["hooks"]["state"]
+        managed_prefix = hooks_file.as_posix()
+        managed_states = [
+            key for key in hook_state
+            if key.startswith(managed_prefix)
+        ]
+
+        self.assertEqual(len(managed_states), 8)
+        self.assertNotIn(legacy_key, hook_state)
+        self.assertFalse(any(key.startswith(legacy_settings_path) for key in hook_state))
+        self.assertIn(unrelated_key, hook_state)
+        self.assertFalse(hook_state[unrelated_key]["enabled"])
 
     def test_codex_hook_hash_omits_matcher_for_prompt_and_stop_events(self):
         hook = {"type": "command", "command": "node /tmp/ghost-alice-hook.mjs", "timeout": 600}

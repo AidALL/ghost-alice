@@ -5,7 +5,7 @@ A copy-mode addon skill must receive a marker whose owner=addon and
 addon_id=<id>, so classify_skill_root(expected_addon_id=<id>) (plan task T2.9)
 can prove the addon owns its own copied skill instead of failing closed.
 
-Run: /opt/homebrew/bin/python3 -m pytest scripts/tests/test_addon_marker_threading.py -q
+Run: python3 -m pytest scripts/tests/test_addon_marker_threading.py -q
 """
 
 from __future__ import annotations
@@ -107,6 +107,33 @@ class InstallerThreadsAddonAttributionTest(unittest.TestCase):
         self.assertLess(
             uninstall_body.index("Test-AddonDependentsForSkill"),
             uninstall_body.index("Remove-InstalledTarget"),
+        )
+
+    def test_ps1_selected_uninstall_routes_addon_ids_before_skill_assertion(self) -> None:
+        source = installer_ps1_source()
+
+        self.assertIn("Invoke-Uninstall -SkillNames $Skills -AddonIds $Addon", source)
+        self.assertIn("Split-UninstallSelection", source)
+        self.assertIn("Test-InstalledAddonIdForUninstall", source)
+        uninstall_body = source.split("function Invoke-Uninstall", 1)[1].split("function Invoke-UninstallCleanup", 1)[0]
+        self.assertLess(
+            uninstall_body.index("Split-UninstallSelection"),
+            uninstall_body.index("Assert-SkillNames"),
+        )
+        self.assertLess(
+            uninstall_body.index("Invoke-ResumePendingAddonUninstalls"),
+            uninstall_body.index("Assert-SkillNames"),
+        )
+
+    def test_ps1_uninstall_addon_does_not_resolve_official_source_shortcut(self) -> None:
+        source = installer_ps1_source()
+
+        shortcut_body = source.split("function Resolve-OfficialAddonShortcuts", 1)[1].split(
+            "function Test-AddonSourceIsGitUrl", 1
+        )[0]
+        self.assertLess(
+            shortcut_body.index("if ($Uninstall)"),
+            shortcut_body.index("Resolve-OfficialAddonSource"),
         )
 
 

@@ -834,7 +834,7 @@ class UninstallCleanupTest(unittest.TestCase):
         self.assertIn("Full uninstall", ps1)
         self.assertIn("_shared/uninstall_cleanup.py", ps1)
         self.assertIn("bash install.sh --uninstall", readme)
-        self.assertIn(".\\install.cmd -Uninstall", readme)
+        self.assertIn(".\\install.cmd --uninstall", readme)
         self.assertFalse(legacy_doc.exists())
         self.assertTrue(UNINSTALL_DOC.exists())
 

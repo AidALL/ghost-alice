@@ -28,6 +28,7 @@ _CONTROL_BLOCKS = frozenset(
 
 # Block header `^\[([a-z0-9-]+)\]`, case-insensitive.
 _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
+_BLOCK_HEADER_POSITION_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I | re.M)
 
 # Split on \r?\n only; splitlines() would also split on other Unicode line
 # boundaries, which we do not want here.
@@ -121,6 +122,16 @@ def extract_control_block(text, name):
     return "\n".join(kept).strip()
 
 
+def find_control_block_positions(text, name):
+    """Return start offsets for `[name]` headers."""
+    wanted = ("" if name is None else str(name)).lower()
+    return [
+        match.start()
+        for match in _BLOCK_HEADER_POSITION_RE.finditer("" if text is None else str(text))
+        if match.group(1).lower() == wanted
+    ]
+
+
 def looks_like_completion_claim(text):
     """True only when the text carries an explicit `[completion-check]` marker.
 
@@ -161,6 +172,8 @@ def extract_top_level_field_section(block, field_name):
     kept = []
     for index in range(start + 1, len(lines)):
         if _TOP_LEVEL_FIELD_RE.search(lines[index]):
+            break
+        if lines[index].strip() and lines[index] == lines[index].lstrip():
             break
         kept.append(lines[index])
     return "\n".join(kept).strip()
@@ -286,6 +299,16 @@ def validate_completion_text(text, *, require_completion_check=False):
             "Completion or success claims about executed work require a "
             "[completion-check] block with fresh evidence."
         )
+
+    completion_positions = find_control_block_positions(text, "completion-check")
+    first_completion = completion_positions[0]
+    gate_state_positions = find_control_block_positions(text, "gate-state")
+    if any(position > first_completion for position in gate_state_positions):
+        return "[gate-state] belongs to the opening surface and must not appear after [completion-check]."
+
+    io_trace_positions = find_control_block_positions(text, "io-trace")
+    if io_trace_positions and io_trace_positions[0] < first_completion:
+        return "[io-trace] must appear after [completion-check] on finalized completion surfaces."
 
     if not _VERIFICATION_DONE_RE.search(completion_check):
         return "[completion-check] must include '- verification-before-completion: done'."

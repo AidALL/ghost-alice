@@ -8,6 +8,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPORT_PS1 = REPO_ROOT / "installer_lib" / "report.ps1"
+REPORT_SH = REPO_ROOT / "installer_lib" / "report.sh"
 
 
 class CommonTargetProgressLineFixedWidth(unittest.TestCase):
@@ -63,6 +64,38 @@ class CommonTargetProgressLineFixedWidth(unittest.TestCase):
             "progress-line length varies by suffix; in-place residue regression",
         )
         self.assertEqual(short, mid, "progress line is not fixed width; in-place residue regression")
+
+
+class BashLiveCommonTargetProgressLineWidth(unittest.TestCase):
+    """Guard against wrapped live progress frames in standard 80-column terminals."""
+
+    def test_live_formatter_exists_source(self) -> None:
+        source = REPORT_SH.read_text(encoding="utf-8")
+
+        self.assertIn("report_live_common_target_progress_line()", source)
+        self.assertIn('report_progress_bar "$done_count" "$total_count" 20', source)
+
+    @unittest.skipUnless(shutil.which("bash"), "bash not installed")
+    def test_live_formatter_stays_within_80_columns_runtime(self) -> None:
+        script = (
+            f"source '{REPORT_SH.as_posix()}'; "
+            "report_live_common_target_progress_line 26 26 "
+            "'common targets synced on all platforms'"
+        )
+        result = subprocess.run(
+            ["bash", "-lc", script],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        line = result.stdout
+        self.assertLessEqual(len(line), 80, line)
+        self.assertIn("Common targets", line)
+        self.assertIn("[26/26]", line)
+        self.assertIn("all platforms", line)
 
 
 if __name__ == "__main__":

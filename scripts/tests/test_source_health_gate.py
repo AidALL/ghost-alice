@@ -505,7 +505,7 @@ class SourceHealthGateTest(unittest.TestCase):
         ps1 = installer_ps1_source()
 
         self.assertIn("bash install.sh --update-source", bash)
-        self.assertIn(".\\install.cmd -UpdateSource", ps1)
+        self.assertIn(".\\install.cmd --update-source", ps1)
         self.assertNotIn("To update skills: cd ${SCRIPT_DIR} && git pull --ff-only", bash)
         self.assertNotIn(
             "With symlink install, git pull --ff-only automatically updates skills.",

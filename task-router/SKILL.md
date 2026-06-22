@@ -178,6 +178,9 @@ structure, and impact surface before choosing `sufficient-change-depth`.
 - Use `localized`, `structural`, or `systemic` when the request involves
   open-source hardening, compatibility, governance rules, repeated failure, or
   cross-surface consistency.
+- When competing change sets conflict, prefer the one that satisfies the locked
+  contract and survives targeted tests; do not choose by recency, authorship, or
+  smaller diff alone.
 - Temporary patch work is allowed only when the user explicitly asks for urgent
   recovery; record residual impact.
 
@@ -218,6 +221,9 @@ Set `boundary-contract: required` if any condition is true:
   effect layers are involved
 - read-only discovery is needed because target files or tests are unclear
 - screenshot, visual smoke, or read-only checks are tied to scope limits
+- the user corrects the agent for changing, narrowing, widening, relabeling, or
+  substituting the requested objective, scope, selection criterion, priority, or
+  completion meaning
 
 task-router writes only `boundary-contract: required | n/a` and the reason. It
 does not write filenames, `allowed-surface`, `test-purpose`, or tool

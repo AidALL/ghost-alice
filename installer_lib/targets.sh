@@ -25,14 +25,106 @@ expand_skill_targets() {
   done
 }
 
+_addon_source_is_git_url() {
+  local source="$1"
+  case "$source" in
+    http://*|https://*|ssh://*|file://*|git@*:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_addon_selected_ref() {
+  if [ "${#ADDON_TAGS[@]}" -eq 0 ]; then
+    printf '%s' ""
+    return 0
+  fi
+  if [ "${#ADDON_TAGS[@]}" -gt 1 ]; then
+    error "$(t '--addon-tag accepts one branch/tag for git URL addon sources' '--addon-tag accepts one branch/tag for git URL addon sources')" >&2
+    return 1
+  fi
+  printf '%s' "${ADDON_TAGS[0]}"
+}
+
+_addon_source_cache_key() {
+  local source="$1" ref="$2" py
+  py="$(_find_python_runtime || true)"
+  if [ -z "$py" ]; then
+    error "$(t 'Python 3.11+ not found; cannot prepare addon git source cache' 'Python 3.11+ not found; cannot prepare addon git source cache')" >&2
+    return 1
+  fi
+  "$py" - "$source" "$ref" <<'PY'
+import hashlib
+import sys
+
+payload = (sys.argv[1] + "\0" + sys.argv[2]).encode("utf-8")
+print(hashlib.sha256(payload).hexdigest()[:24])
+PY
+}
+
+_clone_addon_git_source() {
+  local source="$1" ref="$2" cache_root key dest tmp
+  if ! command -v git >/dev/null 2>&1; then
+    error "$(t 'git not found; cannot clone addon source URL' 'git not found; cannot clone addon source URL')" >&2
+    return 1
+  fi
+  key="$(_addon_source_cache_key "$source" "$ref")" || return 1
+  cache_root="${GHOST_ALICE_ADDON_SOURCE_CACHE_DIR:-${HOME}/.ghost-alice/addon-source-cache}"
+  dest="${cache_root}/${key}"
+  tmp="${dest}.tmp.$$"
+  mkdir -p "$cache_root"
+  rm -rf "$tmp"
+  if [ -n "$ref" ]; then
+    info "$(t "Cloning addon source: ${source} (${ref})" "Cloning addon source: ${source} (${ref})")" >&2
+    if ! git clone --quiet --depth 1 --branch "$ref" "$source" "$tmp"; then
+      rm -rf "$tmp"
+      error "$(t "Addon source clone failed: ${source}" "Addon source clone failed: ${source}")" >&2
+      return 1
+    fi
+  else
+    info "$(t "Cloning addon source: ${source}" "Cloning addon source: ${source}")" >&2
+    if ! git clone --quiet --depth 1 "$source" "$tmp"; then
+      rm -rf "$tmp"
+      error "$(t "Addon source clone failed: ${source}" "Addon source clone failed: ${source}")" >&2
+      return 1
+    fi
+  fi
+  rm -rf "$dest"
+  mv "$tmp" "$dest"
+  printf '%s\n' "$dest"
+}
+
+prepare_addon_sources() {
+  if [ "${ADDON_SOURCE_PREPARED:-0}" = "1" ]; then
+    return 0
+  fi
+  if [ "$ADDON_SKIP" = "1" ] || [ "${#ADDON_SOURCES[@]}" -eq 0 ]; then
+    ADDON_SOURCE_PREPARED=1
+    return 0
+  fi
+  local ref source resolved
+  ref="$(_addon_selected_ref)" || return 1
+  local prepared=()
+  for source in "${ADDON_SOURCES[@]}"; do
+    if _addon_source_is_git_url "$source"; then
+      resolved="$(_clone_addon_git_source "$source" "$ref")" || return 1
+      prepared+=("$resolved")
+    else
+      if [ -n "$ref" ]; then
+        error "$(t '--addon-tag can only be used with git URL addon sources; check out local sources yourself' '--addon-tag can only be used with git URL addon sources; check out local sources yourself')"
+        return 1
+      fi
+      prepared+=("$source")
+    fi
+  done
+  ADDON_SOURCES=("${prepared[@]}")
+  ADDON_SOURCE_PREPARED=1
+}
+
 collect_addon_targets() {
   if [ "$ADDON_SKIP" = "1" ] || [ "${#ADDON_SOURCES[@]}" -eq 0 ]; then
     return 0
   fi
-  if [ "${#ADDON_TAGS[@]}" -gt 0 ]; then
-    error "$(t '--addon-tag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with --addon-source.' '--addon-tag is not supported for local addon sources yet. Check out the desired tag locally and pass that path with --addon-source.')"
-    return 1
-  fi
+  prepare_addon_sources || return 1
   local py source skill
   py="$(_find_python_runtime || true)"
   if [ -z "$py" ]; then
@@ -45,8 +137,94 @@ collect_addon_targets() {
   done
   for skill in "${ALL_SKILLS[@]}"; do
     args+=(--core-skill "$skill")
+    local core_targets core_name core_path
+    core_targets="$(expand_skill_targets "$skill")"
+    while IFS='|' read -r core_name core_path; do
+      [ -n "$core_name" ] || continue
+      args+=(--core-skill "$core_name")
+    done <<< "$core_targets"
   done
   "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" "${args[@]}" --platform "$PLATFORM" --format shell
+}
+
+_auto_platform_target_keys() {
+  local target_platform="$1"
+  shift
+  local saved_platform="$PLATFORM"
+  local skill targets sub_name sub_path addon_targets_text addon_target a_name a_path a_id
+
+  PLATFORM="$target_platform"
+  [ -d "${SCRIPT_DIR}/_shared" ] && printf '%s\n' "support:_shared"
+
+  for skill in "$@"; do
+    targets="$(expand_skill_targets "$skill")"
+    while IFS='|' read -r sub_name sub_path; do
+      [ -n "$sub_name" ] || continue
+      printf 'skill:%s\n' "$sub_name"
+    done <<< "$targets"
+  done
+
+  if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
+    if ! addon_targets_text="$(collect_addon_targets)"; then
+      PLATFORM="$saved_platform"
+      return 1
+    fi
+    while IFS='|' read -r a_name a_path a_id; do
+      [ -n "$a_name" ] || continue
+      printf 'skill:%s\n' "$a_name"
+    done <<< "$addon_targets_text"
+  fi
+
+  PLATFORM="$saved_platform"
+}
+
+count_auto_common_targets() {
+  local platforms=()
+  while [ "$#" -gt 0 ] && [ "${1:-}" != "--" ]; do
+    platforms+=("$1")
+    shift
+  done
+  [ "${1:-}" = "--" ] && shift
+
+  if [ "${#platforms[@]}" -eq 0 ]; then
+    printf '0\n'
+    return 0
+  fi
+
+  local common_file keys_file next_file
+  common_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-common-targets.XXXXXX")" || return 1
+  keys_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-platform-targets.XXXXXX")" || {
+    rm -f "$common_file"
+    return 1
+  }
+  next_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-next-targets.XXXXXX")" || {
+    rm -f "$common_file" "$keys_file"
+    return 1
+  }
+
+  local first=1 platform
+  for platform in "${platforms[@]}"; do
+    if ! _auto_platform_target_keys "$platform" "$@" | LC_ALL=C sort -u >"$keys_file"; then
+      rm -f "$common_file" "$keys_file" "$next_file"
+      return 1
+    fi
+    if [ "$first" = "1" ]; then
+      cp "$keys_file" "$common_file"
+      first=0
+    else
+      comm -12 "$common_file" "$keys_file" >"$next_file"
+      mv "$next_file" "$common_file"
+      next_file="$(mktemp "${TMPDIR:-/tmp}/ghost-alice-next-targets.XXXXXX")" || {
+        rm -f "$common_file" "$keys_file"
+        return 1
+      }
+    fi
+  done
+
+  local count
+  count="$(wc -l <"$common_file" | tr -d '[:space:]')"
+  rm -f "$common_file" "$keys_file" "$next_file"
+  printf '%s\n' "$count"
 }
 
 iter_install_targets() {

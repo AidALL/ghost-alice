@@ -2,43 +2,48 @@
 # Supports: Claude Code, Codex
 # Usage (PowerShell execution-policy safe wrapper):
 #   .\install.cmd                                  # Install to detected AI tools
-#   .\install.cmd -PromptPlatform                  # Select AI tool interactively before installing
-#   .\install.cmd -Skills task-router,verification-before-completion    # Install selected core skills only
-#   .\install.cmd -Platform claude                 # Install all skills to Claude Code
-#   .\install.cmd -Platform codex                  # Install all skills to Codex
-#   .\install.cmd -Platform codex -Visibility dynamic
-#   .\install.cmd -Platform codex -Skills skill-evolution     # Install selected Codex core skills
-#   .\install.cmd -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
-#   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
-#   .\install.cmd -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
-#   .\install.cmd -List                            # List available skills
-#   .\install.cmd -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
-#   .\install.cmd -Status                          # Show current install status
-#   .\install.cmd -Doctor                          # Diagnose install protection state
-#   .\install.cmd -CleanupPending                  # Clean false-positive legacy pending entries
-#   .\install.cmd -UpdateSource                    # Stash source checkout local changes and fast-forward
+#   .\install.cmd --prompt-platform                # Select AI tool interactively before installing
+#   .\install.cmd task-router verification-before-completion    # Install selected core skills only
+#   .\install.cmd --platform claude                # Install all skills to Claude Code
+#   .\install.cmd --platform codex                 # Install all skills to Codex
+#   .\install.cmd --platform codex --visibility dynamic
+#   .\install.cmd --platform codex skill-evolution # Install selected Codex core skills
+#   .\install.cmd --uninstall                      # Full uninstall for all detected Ghost-ALICE managed footprint
+#   .\install.cmd --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
+#   .\install.cmd --platform codex --uninstall --addon autopilot-mode  # Remove selected addon from one platform
+#   .\install.cmd --platform codex --uninstall skill-evolution --force # Override addon dependency guard
+#   .\install.cmd --list                           # List available skills
+#   .\install.cmd --addon autopilot                # Install official autopilot addon
+#   .\install.cmd --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
+#   .\install.cmd --status                         # Show current install status
+#   .\install.cmd --doctor                         # Diagnose install protection state
+#   .\install.cmd --cleanup-pending                # Clean false-positive legacy pending entries
+#   .\install.cmd --update-source                  # Stash source checkout local changes and fast-forward
 # Direct .ps1 form, only when .ps1 script execution is already allowed:
 #   .\install.ps1                                  # Install to detected AI tools
-#   .\install.ps1 -PromptPlatform                  # Select AI tool interactively before installing
-#   .\install.ps1 -Skills task-router,verification-before-completion    # Install selected core skills only
-#   .\install.ps1 -Platform claude                 # Install all skills to Claude Code
-#   .\install.ps1 -Platform codex                  # Install all skills to Codex
-#   .\install.ps1 -Platform codex -Visibility dynamic
-#   .\install.ps1 -Platform codex -Skills skill-evolution     # Install selected Codex core skills
-#   .\install.ps1 -Uninstall                       # Full uninstall for all detected Ghost-ALICE managed footprint
-#   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution  # Remove selected core skills from one platform
-#   .\install.ps1 -Platform codex -Uninstall -Skills skill-evolution -Force  # Override addon dependency guard
-#   .\install.ps1 -List                            # List available skills
-#   .\install.ps1 -AddonSource .\ghost-alice-addons -ListAddons  # List addon manifest targets
-#   .\install.ps1 -Status                          # Show current install status
-#   .\install.ps1 -Doctor                          # Diagnose install protection state
-#   .\install.ps1 -CleanupPending                  # Clean false-positive legacy pending entries
-#   .\install.ps1 -UpdateSource                    # Stash source checkout local changes and fast-forward
+#   .\install.ps1 --prompt-platform                # Select AI tool interactively before installing
+#   .\install.ps1 task-router verification-before-completion    # Install selected core skills only
+#   .\install.ps1 --platform claude                # Install all skills to Claude Code
+#   .\install.ps1 --platform codex                 # Install all skills to Codex
+#   .\install.ps1 --platform codex --visibility dynamic
+#   .\install.ps1 --platform codex skill-evolution # Install selected Codex core skills
+#   .\install.ps1 --uninstall                      # Full uninstall for all detected Ghost-ALICE managed footprint
+#   .\install.ps1 --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
+#   .\install.ps1 --platform codex --uninstall --addon autopilot-mode  # Remove selected addon from one platform
+#   .\install.ps1 --platform codex --uninstall skill-evolution --force # Override addon dependency guard
+#   .\install.ps1 --list                           # List available skills
+#   .\install.ps1 --addon autopilot                # Install official autopilot addon
+#   .\install.ps1 --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
+#   .\install.ps1 --status                         # Show current install status
+#   .\install.ps1 --doctor                         # Diagnose install protection state
+#   .\install.ps1 --cleanup-pending                # Clean false-positive legacy pending entries
+#   .\install.ps1 --update-source                  # Stash source checkout local changes and fast-forward
 
 param(
     [string[]]$Skills,
     [ValidateSet("claude", "codex")]
     [string]$Platform = "claude",
+    [Alias("prompt-platform")]
     [switch]$PromptPlatform,
     [switch]$Auto,
     [switch]$List,
@@ -46,15 +51,23 @@ param(
     [switch]$Doctor,
     [switch]$Uninstall,
     [switch]$Force,
+    [Alias("cleanup-pending")]
     [switch]$CleanupPending,
+    [string[]]$Addon,
+    [Alias("addon-source")]
     [string[]]$AddonSource,
+    [Alias("addon-tag")]
     [string[]]$AddonTag,
+    [Alias("addon-skip")]
     [switch]$AddonSkip,
+    [Alias("list-addons")]
     [switch]$ListAddons,
-    [Alias("Visibility")]
+    [Alias("Visibility", "agent-visibility")]
     [ValidateSet("strict", "dynamic", "minimal")]
     [string]$AgentVisibility = "",
+    [Alias("update-source")]
     [switch]$UpdateSource,
+    [Alias("skip-source-health")]
     [switch]$SkipSourceHealth,
     [switch]$Help
 )
@@ -85,7 +98,7 @@ $script:GhostAliceRoot = $PSScriptRoot
 $ErrorActionPreference = "Stop"
 if ($args.Count -gt 0) {
     [Console]::Error.WriteLine(("Unknown argument(s): {0}" -f ($args -join " ")))
-    [Console]::Error.WriteLine("Run install.cmd -Help for usage.")
+    [Console]::Error.WriteLine("Run .\install.cmd --help for usage.")
     exit 64
 }
 $PlatformWasExplicit = $PSBoundParameters.ContainsKey("Platform")
@@ -372,6 +385,7 @@ $script:DeprecatedInstalledSkills = @(
 # ── Main ───────────────────────────────────────────────────
 if ($Help)      { Show-Help; return }
 if ($List)      { Show-List; return }
+Resolve-OfficialAddonShortcuts
 if ($ListAddons){ Show-Addons; return }
 if ($UpdateSource) { Update-SourceCheckout; return }
 
@@ -413,6 +427,57 @@ if ($PlainFullUninstall -and -not $PlatformWasExplicit -and -not $PromptPlatform
     exit $rc
 }
 
+function Get-AutoCommonTargetCount {
+    param(
+        [string[]]$DetectedPlatforms,
+        [object[]]$FallbackTargets
+    )
+
+    $platformKeySets = @()
+    foreach ($plat in @($DetectedPlatforms)) {
+        $keys = @{}
+        if (Test-Path (Join-Path $ScriptDir "_shared")) {
+            $keys["support:_shared"] = $true
+        }
+        foreach ($target in @($FallbackTargets)) {
+            if ($target.Name) {
+                $keys[("skill:{0}" -f $target.Name)] = $true
+            }
+        }
+        if (-not $AddonSkip -and $AddonSource -and $AddonSource.Count -gt 0) {
+            try {
+                foreach ($target in @(Get-AddonTargets -TargetPlatform $plat)) {
+                    if ($target.Name) {
+                        $keys[("skill:{0}" -f $target.Name)] = $true
+                    }
+                }
+            } catch {
+                Write-InstallLogLine ("[WARN] [auto] addon target count preflight failed for {0}: {1}" -f $plat, $_)
+            }
+        }
+        $platformKeySets += ,$keys
+    }
+
+    if ($platformKeySets.Count -eq 0) {
+        return 0
+    }
+
+    $common = 0
+    foreach ($key in $platformKeySets[0].Keys) {
+        $presentOnAll = $true
+        foreach ($keys in @($platformKeySets)) {
+            if (-not $keys.ContainsKey($key)) {
+                $presentOnAll = $false
+                break
+            }
+        }
+        if ($presentOnAll) {
+            $common++
+        }
+    }
+    return $common
+}
+
 # auto/default: detect ~/.claude and ~/.codex, then recurse per platform.
 # Auto child installs are separate install path operations, not a duplicate install.
 if ($Auto) {
@@ -436,7 +501,7 @@ if ($Auto) {
     foreach ($skill in $selectedSkills) {
         $fallbackTargets += Expand-SkillTargets $skill
     }
-    $autoCommonTargets = Get-InstallTargetCount -Targets $fallbackTargets
+    $autoCommonTargets = Get-AutoCommonTargetCount -DetectedPlatforms $detected -FallbackTargets $fallbackTargets
     $platformLabel = Join-InstallLabels -Items $detected
     $visibility = Resolve-EffectiveVisibility -Flag $AgentVisibility
     if (Test-LiveCounterEnabled) {
@@ -566,6 +631,9 @@ if ($Auto) {
         }
     } else {
         Write-Err "[auto] some platforms failed. See log: $script:InstallReportLogFile" "[auto] some platforms failed. See log: $script:InstallReportLogFile"
+        foreach ($line in (Get-InstallReportFailureExcerpt -Path $script:InstallReportLogFile)) {
+            Write-Err ("[auto] " + $line) ("[auto] " + $line)
+        }
     }
     exit $rc
 }
@@ -573,7 +641,7 @@ if ($Auto) {
 if ($PromptPlatform -and -not $PlatformWasExplicit) {
     $Platform = Select-TargetPlatform
 } elseif ($PromptPlatform -and $PlatformWasExplicit) {
-    Write-Warn "-PromptPlatform is ignored because -Platform was already specified." "-PromptPlatform is ignored because -Platform was already specified."
+    Write-Warn "--prompt-platform is ignored because --platform was already specified." "--prompt-platform is ignored because --platform was already specified."
 }
 $script:SkillsDir = Resolve-SkillsDir $Platform
 
@@ -584,7 +652,7 @@ if ($CleanupPending) {
 
 if ($Doctor)    { Show-Doctor; return }
 if ($Status)    { Show-Status; return }
-if ($Uninstall) { Invoke-Uninstall -SkillNames $Skills; return }
+if ($Uninstall) { Invoke-Uninstall -SkillNames $Skills -AddonIds $Addon; return }
 Initialize-GitHooks
 Initialize-PythonRuntimeForInstall | Out-Null
 Invoke-WithInstallLock { Invoke-Install -SkillNames $Skills }

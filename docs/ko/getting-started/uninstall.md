@@ -1,16 +1,28 @@
 # Uninstall Cleanup Procedure
 
-언어: [🇺🇸 English](../../getting-started/uninstall.md) | 🇰🇷 한국어
+언어: [English](../../getting-started/uninstall.md) | Korean
 
-Ghost-ALICE uninstall은 installer가 작성한 `install-state` manifest를 기준으로 동작한다. 목표는 전체 system을 추측으로 복원하는 게 아니다. uninstall은 Ghost-ALICE installer가 installed 또는 changed로 기록한 entry만 제거하거나 복원한다.
+Ghost-ALICE uninstall은 installer가 작성한 `install-state` manifest를 기준으로 동작한다. uninstall path는 Ghost-ALICE installer가 installed 또는 changed로 기록한 entry만 제거하거나 복원한다.
+
 ## Contents
 
+- [Choose The Removal Scope](#choose-the-removal-scope)
 - [Basic Commands](#basic-commands)
 - [Source Of Truth Files](#source-of-truth-files)
 - [Cleanup Order](#cleanup-order)
 - [Recovery Principles](#recovery-principles)
 - [system_env_changes](#systemenvchanges)
 
+## Choose The Removal Scope
+
+| Goal | Command path | Notes |
+| --- | --- | --- |
+| managed Ghost-ALICE surface 전체 제거 | `bash install.sh --uninstall` | recorded target 전체에 대한 full uninstall |
+| 한 platform 제거 | `bash install.sh --platform codex --uninstall` | 다른 platform install은 유지 |
+| 선택한 skill 제거 | `bash install.sh --platform codex --uninstall task-router` | 다른 skill이 남으면 hooks와 shared assets 유지 |
+| official addon 하나 제거 | 해당 addon repository documentation을 따른다 | addon hook과 sidecar cleanup을 addon package와 정렬 |
+
+Addon-specific removal은 selected skill removal과 다르다. Full uninstall은 installed addon sidecar cleanup을 포함해 managed Ghost-ALICE footprint를 제거한다. official addon 하나만 제거하려면 해당 addon repository documentation을 따라 hook과 sidecar cleanup이 addon package와 정렬되게 한다.
 
 ## Basic Commands
 
@@ -20,12 +32,8 @@ platform argument가 없는 uninstall은 full uninstall이다.
 bash install.sh --uninstall
 ```
 
-```powershell
-.\install.ps1 -Uninstall
-```
-
 ```cmd
-install.cmd -Uninstall
+.\install.cmd --uninstall
 ```
 
 platform을 지정하면 그 platform만 정리한다.
@@ -34,8 +42,8 @@ platform을 지정하면 그 platform만 정리한다.
 bash install.sh --platform codex --uninstall
 ```
 
-```powershell
-.\install.ps1 -Platform codex -Uninstall
+```cmd
+.\install.cmd --platform codex --uninstall
 ```
 
 특정 skill만 제거하려면 platform과 skill name을 함께 준다. 다른 Ghost-ALICE skill이 남아 있으면 hooks와 `_shared`는 설치된 채로 둔다.
@@ -44,8 +52,8 @@ bash install.sh --platform codex --uninstall
 bash install.sh --platform codex --uninstall task-router
 ```
 
-```powershell
-.\install.ps1 -Platform codex -Uninstall -Skills task-router
+```cmd
+.\install.cmd --platform codex --uninstall task-router
 ```
 
 ## Source Of Truth Files

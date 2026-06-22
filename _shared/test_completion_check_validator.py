@@ -66,5 +66,58 @@ class TestCompletionEvidenceMap(unittest.TestCase):
         self.assertIsNotNone(result)
 
 
+def _final_text(*parts):
+    completion_check = "\n".join(
+        [
+            "[completion-check]",
+            "- verification-before-completion: done",
+            "- skill-call: verification-before-completion (this turn)",
+            "- acceptance-criteria:",
+            "  - c1: do the thing [source: user-explicit]",
+            "- claim-evidence-map:",
+            "  - claim: did the thing",
+            "    criterion: c1",
+            "    evidence: ran test X",
+            "    verdict: pass",
+            "- unverified:",
+            "  - none",
+        ]
+    )
+    io_trace = "\n".join(
+        [
+            "[io-trace]",
+            "- commands-run: [python -m unittest _shared.test_completion_check_validator]",
+            "- skills-loaded: [verification-before-completion]",
+        ]
+    )
+    gate_state = "\n".join(["[gate-state]", "- task-router: done"])
+    available = {
+        "completion": completion_check,
+        "gate": gate_state,
+        "io": io_trace,
+        "summary": "Short summary.",
+    }
+    return "\n\n".join(available[part] for part in parts)
+
+
+class TestCompletionTextFinalSurfaceOrder(unittest.TestCase):
+    def test_completion_check_rejects_gate_state_after_completion_check(self):
+        result = v.validate_completion_text(_final_text("completion", "summary", "gate", "io"))
+        self.assertIsNotNone(result)
+        self.assertIn("gate-state", result)
+
+    def test_completion_check_rejects_io_trace_before_completion_check(self):
+        result = v.validate_completion_text(_final_text("io", "completion", "summary"))
+        self.assertIsNotNone(result)
+        self.assertIn("io-trace", result)
+
+    def test_completion_check_allows_completion_summary_io_trace_order(self):
+        self.assertIsNone(v.validate_completion_text(_final_text("completion", "summary", "io")))
+
+    def test_routine_text_without_completion_check_is_unchanged(self):
+        text = "[io-trace]\n- commands-run: [none]\n\nRoutine explanation without a final claim."
+        self.assertIsNone(v.validate_completion_text(text))
+
+
 if __name__ == "__main__":
     unittest.main()

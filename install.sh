@@ -12,6 +12,7 @@
 #   bash install.sh --uninstall  # Full uninstall for all detected Ghost-ALICE managed footprint
 #   bash install.sh --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
 #   bash install.sh --list       # List available skills
+#   bash install.sh --addon autopilot  # Install the official autopilot addon
 #   bash install.sh --addon-source ./ghost-alice-addons --list-addons
 #   bash install.sh --status     # Check current install status
 
@@ -60,6 +61,7 @@ SOURCE_REPO_HOOK_BEFORE=""
 SOURCE_REPO_HOOK_AFTER="hooks"
 ADDON_SOURCES=()
 ADDON_TAGS=()
+ADDON_SOURCE_PREPARED=0
 INSTALL_ADDON_TARGETS=()
 # ── Platform path resolution ──────────────────────────────
 # Environment variable takes precedence; falls back to default path.
@@ -323,6 +325,58 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+official_addon_source() {
+  local name="$1"
+  case "$name" in
+    autopilot|autopilot-mode)
+      printf '%s\n' "${GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE:-https://github.com/AidALL/ghost-alice-autopilot.git}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+args_request_uninstall() {
+  local arg
+  for arg in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$arg" in
+      --uninstall|--remove|-u)
+        return 0
+        ;;
+    esac
+  done
+  return 1
+}
+
+normalize_official_addon_shortcuts() {
+  args_request_uninstall && return 0
+  local normalized=()
+  local i=0
+  local addon_name addon_source
+  while [ "$i" -lt "${#ARGS[@]}" ]; do
+    if [ "${ARGS[$i]}" = "--addon" ]; then
+      i=$((i + 1))
+      if [ "$i" -ge "${#ARGS[@]}" ]; then
+        error "$(t '--addon requires a value (autopilot)' '--addon requires a value (autopilot)')"
+        return 1
+      fi
+      addon_name="${ARGS[$i]}"
+      addon_source="$(official_addon_source "$addon_name")" || {
+        error "$(t "Unknown official addon: ${addon_name} (supported: autopilot)" "Unknown official addon: ${addon_name} (supported: autopilot)")"
+        return 1
+      }
+      ADDON_SOURCES+=("$addon_source")
+    else
+      normalized+=("${ARGS[$i]}")
+    fi
+    i=$((i + 1))
+  done
+  ARGS=(${normalized[@]+"${normalized[@]}"})
+}
+
+normalize_official_addon_shortcuts || exit 1
+
 # Default install: when no platform is specified, install to all detected tools.
 # Plain full uninstall also detects platform homes and install-state manifests for full cleanup.
 # Read-only, diagnostics, and partial removal commands keep the single-platform default (claude).
@@ -394,6 +448,12 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   [ -n "$AGENT_VISIBILITY" ] && agent_visibility_args+=(--visibility "$AGENT_VISIBILITY")
   verbose_args=()
   [ "$VERBOSE" -eq 1 ] && verbose_args+=(--verbose)
+  if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
+    prepare_addon_sources || exit 1
+    # Prepared addon git sources are forwarded to child installs as local cache
+    # paths; the tag has already been applied by the parent checkout.
+    ADDON_TAGS=()
+  fi
   addon_args=()
   for source in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"}; do
     addon_args+=(--addon-source "$source")
@@ -441,12 +501,9 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   if [ "${#auto_skills[@]}" -eq 0 ]; then
     auto_skills=("${ALL_SKILLS[@]}")
   fi
-  auto_common_targets="$(count_skill_targets "${auto_skills[@]}")"
-  [ -d "${SCRIPT_DIR}/_shared" ] && auto_common_targets=$((auto_common_targets + 1))
   auto_platform_count="${#detected[@]}"
-  auto_total_operations=$((auto_common_targets * auto_platform_count))
-  auto_completed_operations=0
-  auto_displayed_operations=0
+  auto_common_targets="$(count_auto_common_targets "${detected[@]}" -- "${auto_skills[@]}")" || exit 1
+  auto_displayed_targets=0
   auto_platform_label="$(join_by ', ' "${detected[@]}")"
   auto_visibility="$(resolve_effective_visibility)"
   if live_counter_enabled; then
@@ -463,13 +520,13 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
     child_pid=$!
     if live_counter_enabled; then
       while jobs -pr | grep -q "^${child_pid}$"; do
-        auto_completed_operations="$(report_read_target_operation_progress "$auto_event_file")"
-        report_auto_animate_target_operation_progress_line \
-          "$auto_displayed_operations" \
-          "$auto_completed_operations" \
-          "$auto_total_operations" \
-          "${plat} ${platform_index}/${auto_platform_count}"
-        auto_displayed_operations="$auto_completed_operations"
+        auto_synced_targets="$(report_read_weighted_common_target_progress "$auto_event_file" "$auto_platform_count" "$auto_common_targets")"
+        report_auto_animate_common_target_progress_line \
+          "$auto_displayed_targets" \
+          "$auto_synced_targets" \
+          "$auto_common_targets" \
+          "common targets synced on all platforms"
+        auto_displayed_targets="$auto_synced_targets"
         sleep 0.1
       done
     fi
@@ -478,33 +535,33 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
     else
       child_rc=$?
       rc=1
+      live_counter_enabled && printf '\n'
       warn "$(t "[auto] Install failed for ${plat} (exit code $child_rc)" "[auto] Install failed for ${plat} (exit code $child_rc)")"
     fi
     if live_counter_enabled; then
-      auto_completed_operations="$(report_read_target_operation_progress "$auto_event_file")"
-      report_auto_animate_target_operation_progress_line \
-        "$auto_displayed_operations" \
-        "$auto_completed_operations" \
-        "$auto_total_operations" \
-        "${plat} ${platform_index}/${auto_platform_count}"
-      auto_displayed_operations="$auto_completed_operations"
+      auto_synced_targets="$(report_read_weighted_common_target_progress "$auto_event_file" "$auto_platform_count" "$auto_common_targets")"
+      report_auto_animate_common_target_progress_line \
+        "$auto_displayed_targets" \
+        "$auto_synced_targets" \
+        "$auto_common_targets" \
+        "common targets synced on all platforms"
+      auto_displayed_targets="$auto_synced_targets"
     fi
   done
   auto_synced_targets="$(report_read_all_common_target_progress "$auto_event_file" "$auto_platform_count")"
   if [ "$rc" -eq 0 ]; then
     if live_counter_enabled; then
-      auto_completed_operations="$(report_read_target_operation_progress "$auto_event_file")"
-      report_auto_animate_target_operation_progress_line \
-        "$auto_displayed_operations" \
-        "$auto_completed_operations" \
-        "$auto_total_operations" \
-        "done"
-      [ "$auto_completed_operations" -gt "$auto_total_operations" ] && auto_completed_operations="$auto_total_operations"
-      auto_displayed_operations="$auto_completed_operations"
-      report_auto_update_target_operation_progress_line \
-        "$auto_displayed_operations" \
-        "$auto_total_operations" \
-        "done"
+      report_auto_animate_common_target_progress_line \
+        "$auto_displayed_targets" \
+        "$auto_synced_targets" \
+        "$auto_common_targets" \
+        "common targets synced on all platforms"
+      [ "$auto_synced_targets" -gt "$auto_common_targets" ] && auto_synced_targets="$auto_common_targets"
+      auto_displayed_targets="$auto_synced_targets"
+      report_auto_update_common_target_progress_line \
+        "$auto_displayed_targets" \
+        "$auto_common_targets" \
+        "common targets synced on all platforms"
       printf '\n'
       report_print_tail "$auto_platform_label" "$auto_visibility"
     else
@@ -514,6 +571,10 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
     live_counter_enabled && printf '\n'
     error "$(t '[auto] Some platform installs failed. Check the log above.' '[auto] Some platform installs failed. Check the log above.')"
     error "$(t "Details log: ${INSTALL_REPORT_LOG_FILE}" "Details log: ${INSTALL_REPORT_LOG_FILE}")"
+    while IFS= read -r failure_line; do
+      [ -n "$failure_line" ] || continue
+      error "[auto] ${failure_line}"
+    done < <(install_report_failure_excerpt "$INSTALL_REPORT_LOG_FILE")
   fi
   exit $rc
 fi
@@ -532,6 +593,10 @@ fi
 if [ "$CLEANUP_PENDING" -eq 1 ]; then
   cleanup_pending_false_positives
   exit $?
+fi
+
+if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
+  prepare_addon_sources || exit 1
 fi
 
 if [ "$LIST_ADDONS" -eq 1 ]; then
@@ -575,6 +640,7 @@ case "${ARGS[0]:-}" in
   --help|-h)
     echo "Usage:"
     echo "  bash install.sh                              # $(t 'Install to detected AI tools' 'Install to detected AI tools')"
+    echo "  bash install.sh --addon autopilot            # $(t 'Install official autopilot addon to detected AI tools' 'Install official autopilot addon to detected AI tools')"
     echo "  bash install.sh --platform claude            # $(t 'Install only to Claude Code' 'Install only to Claude Code')"
     echo "  bash install.sh --platform codex             # $(t 'Install to Codex' 'Install to Codex')"
     echo ""
@@ -589,6 +655,7 @@ case "${ARGS[0]:-}" in
     echo "  --doctor               $(t 'Run install diagnostics' 'Run install diagnostics')"
     echo "  --repair               $(t 'Re-provision missing managed targets (never overwrites user-owned slots)' 'Re-provision missing managed targets (never overwrites user-owned slots)')"
     echo "  --verbose, -v          $(t 'Show per-target install details' 'Show per-target install details')"
+    echo "  --addon autopilot     $(t 'Install official autopilot addon; --platform is optional' 'Install official autopilot addon; --platform is optional')"
     echo ""
     echo "$(t 'Removal commands:' 'Removal commands:')"
     echo "  --uninstall, -u        $(t 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets' 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets')"
@@ -600,8 +667,9 @@ case "${ARGS[0]:-}" in
     echo "  --list, -l             $(t 'List available skills' 'List available skills')"
     echo "  --cleanup-pending      $(t 'Clean false-positive legacy pending entries' 'Clean false-positive legacy pending entries')"
     echo "  --update-source        $(t 'Stash source checkout local changes and run git pull --ff-only' 'Stash source checkout local changes and run git pull --ff-only')"
-    echo "  --addon-source PATH    $(t 'Add addon repo or local manifest path' 'Add addon repo or local manifest path')"
-    echo "  --addon-tag TAG        $(t 'Reserved: check out tag locally for now' 'Reserved: check out tag locally for now')"
+    echo "  --addon-source PATH|URL"
+    echo "                          $(t 'Add local addon repo or git URL source' 'Add local addon repo or git URL source')"
+    echo "  --addon-tag TAG        $(t 'Checkout branch/tag for git URL addon sources' 'Checkout branch/tag for git URL addon sources')"
     echo "  --addon-skip           $(t 'Disable addon installation' 'Disable addon installation')"
     echo "  --list-addons          $(t 'List addon manifest targets' 'List addon manifest targets')"
     echo "  --skip-source-health   $(t 'Skip source health gate' 'Skip source health gate')"

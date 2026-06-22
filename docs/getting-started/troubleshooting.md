@@ -33,7 +33,7 @@ If any of the following appears, the installer is not the first problem. The loc
 - `## main...origin/main [ahead N, behind M]`
 - `git status --short` shows `UU` or `AA`
 
-Do not keep rerunning `install.ps1`, `install.sh`, or `install.cmd` in this state. Clean up the Git state first, then rerun the installer.
+Do not keep rerunning the installer in this state. Clean up the Git state first, then rerun the installer.
 
 For normal source updates, prefer the safe installer path instead of raw `git pull`:
 
@@ -42,13 +42,11 @@ cd ~/ghost-alice
 bash install.sh --update-source
 ```
 
-PowerShell:
+This command saves source-local tracked and untracked changes in `git stash`, fast-forwards the checkout, and leaves the stash for explicit review.
 
-```powershell
-.\install.cmd -UpdateSource
-```
-
-These commands save source-local tracked and untracked changes in `git stash`, fast-forward the checkout, and leave the stash for explicit review.
+On Windows, use `.\install.cmd` for the same installer path. If PowerShell
+shows `cannot be loaded because running scripts is disabled`, the wrapper
+invokes PowerShell with `-NoProfile -ExecutionPolicy Bypass` and does not change the user or machine execution policy.
 
 If raw `git pull` is already blocked before the checkout can receive `--update-source`, use the bootstrap one-command update:
 
@@ -62,7 +60,7 @@ The bootstrap updater runs from the fetched remote blob instead of the old local
 
 `Committer identity unknown` means Git cannot create a merge commit because author identity is missing. Configure it once with the user's own account values.
 
-```powershell
+```bash
 git config --global user.email "you@example.com"
 git config --global user.name "your-name"
 ```
@@ -71,7 +69,7 @@ If a conflict has already started, do not repeat `git pull` immediately after se
 
 ### 2. Inspect Current State
 
-```powershell
+```bash
 git status --short --branch
 git diff --name-only --diff-filter=U
 ```
@@ -84,13 +82,13 @@ Use this path only for deployment clones, installer-only clones, or checkouts wi
 
 If `git status --short` already shows `UU` or `AA`, abort the merge first.
 
-```powershell
+```bash
 git merge --abort
 ```
 
 Then refetch upstream and align the local checkout with the public `main`.
 
-```powershell
+```bash
 git fetch origin
 git reset --hard origin/main
 git clean -nd
@@ -131,7 +129,7 @@ git stash pop stash@{0}
 
 Manual backup path:
 
-```powershell
+```bash
 git status --short --branch
 git branch backup/before-update-YYYYMMDD-HHMM
 git diff > ghost-alice-local.diff
@@ -142,17 +140,7 @@ Then share `git status --short --branch`, the conflict file list, and both diff 
 
 ### 5. Run the Installer After Git Is Clean
 
-Windows PowerShell:
-
-```powershell
-.\install.cmd
-.\install.cmd -Doctor
-.\install.cmd -Status
-```
-
-If Windows PowerShell prints `cannot be loaded because running scripts is disabled` for `Microsoft.PowerShell_profile.ps1` or `.\install.ps1`, use `.\install.cmd`. The wrapper starts PowerShell with `-NoProfile -ExecutionPolicy Bypass` for this installer run and does not change the user or machine execution policy.
-
-macOS / Linux / WSL / Git Bash:
+Use the bash-first installer path:
 
 ```bash
 bash install.sh

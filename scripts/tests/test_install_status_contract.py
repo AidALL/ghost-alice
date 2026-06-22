@@ -721,7 +721,7 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn("Codex hooks are unavailable in this runtime", powershell_hooks)
         self.assertNotIn("disabled on Windows", powershell_hooks)
         self.assertIn('"--hook-shared-dir", (Join-Path $SkillsDir "_shared")', powershell_hooks)
-        self.assertIn('[Alias("Visibility")]', ps1)
+        self.assertIn('[Alias("Visibility", "agent-visibility")]', ps1)
         self.assertIn("[string]$AgentVisibility", ps1)
         self.assertIn('$visibility = $AgentVisibility', powershell_hooks)
         self.assertIn('if ($Action -eq "install" -and -not $visibility) {', powershell_hooks)

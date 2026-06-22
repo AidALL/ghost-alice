@@ -34,7 +34,7 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         self.assertIn("non-ASCII HOME", matrix)
         self.assertIn("PSScriptAnalyzer optional", matrix)
         self.assertIn("Windows native Codex hook smoke", matrix)
-        self.assertIn("install.ps1 --platform codex", matrix)
+        self.assertIn(".\\install.cmd --platform codex", matrix)
 
     def test_matrix_document_covers_ghost_alice_fresh_clone_policy(self) -> None:
         matrix = MATRIX_DOC.read_text(encoding="utf-8")

@@ -3,7 +3,7 @@ ownership marker attributed to the addon (owner=addon, addon_id=<id>), so
 classify_skill_root(expected_addon_id=<id>) (plan task T2.9) proves addon
 ownership end-to-end instead of failing closed.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_addon_marker_threading_shell.py -q
+Run: python3 -m pytest _shared/test_addon_marker_threading_shell.py -q
 """
 
 from __future__ import annotations

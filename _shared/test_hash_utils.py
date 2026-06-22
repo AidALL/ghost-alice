@@ -3,7 +3,7 @@ the Ghost-ALICE managed marker (.ghost-alice-install.json), whose installed_at
 timestamp changes on every install. Otherwise a copy-mode addon's recorded hash
 drifts from its live hash across reinstalls and falsely trips the drift gate.
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_hash_utils.py -q
+Run: python3 -m pytest _shared/test_hash_utils.py -q
 """
 
 from __future__ import annotations
@@ -44,6 +44,20 @@ class HashTargetMarkerTest(unittest.TestCase):
         (self.d / "SKILL.md").write_text("EDITED BY USER\n", encoding="utf-8")
         h2 = hash_utils.hash_target(str(self.d), "copy")
         self.assertNotEqual(h1, h2, "a real content change must still change the hash")
+
+    def test_copy_hash_ignores_python_bytecode_cache(self):
+        h1 = hash_utils.hash_target(str(self.d), "copy")
+        cache = self.d / "__pycache__"
+        cache.mkdir()
+        (cache / "module.cpython-314.pyc").write_bytes(b"bytecode-cache")
+        h2 = hash_utils.hash_target(str(self.d), "copy")
+        self.assertEqual(h1, h2, "Python import cache files must not affect the content hash")
+
+    def test_copy_hash_tracks_bytecode_named_payload_outside_python_cache(self):
+        h1 = hash_utils.hash_target(str(self.d), "copy")
+        (self.d / "payload.pyc").write_bytes(b"managed-content")
+        h2 = hash_utils.hash_target(str(self.d), "copy")
+        self.assertNotEqual(h1, h2, "bytecode-named payloads outside __pycache__ must affect the content hash")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """TDD for remaining addon logic: marker v2 (T2.8/T2.9), collision detection
 (T2.1/T2.2), and core-dependency block (T2.11).
 
-Run: /opt/homebrew/bin/python3 -m pytest _shared/test_p2_extras.py -q
+Run: python3 -m pytest _shared/test_p2_extras.py -q
 """
 
 from __future__ import annotations
@@ -184,6 +184,83 @@ class CollisionTest(unittest.TestCase):
                                 origin="addon:noop", platforms=("claude",), depends_on_core=(),
                                 secrets=(), tags=())
         self.assertEqual(ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons), [])
+
+    def test_same_addon_copy_equal_to_install_source_is_clean_with_stale_sidecar(self):
+        # The installed copy can already match the incoming addon source while the
+        # sidecar hash is stale from a failed or manual sidecar rewrite. Reinstall
+        # must repair the sidecar instead of classifying unchanged bytes as drift.
+        import hash_utils  # noqa: PLC0415
+        src_old = self.root / "src-old" / "noop"
+        src_new = self.root / "src-new" / "noop"
+        dest = self.skills / "noop"
+        src_old.mkdir(parents=True)
+        src_new.mkdir(parents=True)
+        dest.mkdir()
+        (src_old / "SKILL.md").write_text("old", encoding="utf-8")
+        (src_new / "SKILL.md").write_text("new", encoding="utf-8")
+        (dest / "SKILL.md").write_text("new", encoding="utf-8")
+        stale = hash_utils.hash_target(str(src_old), "copy")
+        reg.write_record(_sidecar("noop", provided=[{
+            "kind": "skill", "name": "noop", "target": str(dest), "ownership": "addon",
+            "install_mode": "copy", "content_hash": stale, "marker": "", "metadata": {}}]),
+            addons_dir=self.addons)
+        target = ai.AddonTarget(name="noop", source=src_new, addon_id="noop", addon_version="1.0.0",
+                                origin="addon:noop", platforms=("claude",), depends_on_core=(),
+                                secrets=(), tags=())
+
+        self.assertEqual(ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons), [])
+
+    def test_legacy_same_addon_symlink_without_sidecar_is_not_a_collision(self):
+        # A pre-sidecar addon install may leave only a symlink in .claude/skills.
+        # If the symlink target's addon.json proves the same addon id and skill
+        # mapping, the installer should treat it as an update path, not as an
+        # arbitrary domain skill.
+        old_addon = self.root / "old-autopilot" / "addons" / "autopilot-mode"
+        new_addon = self.root / "new-autopilot" / "addons" / "autopilot-mode"
+        old_skill = old_addon / "skill"
+        new_skill = new_addon / "skill"
+        old_skill.mkdir(parents=True)
+        new_skill.mkdir(parents=True)
+        (old_skill / "SKILL.md").write_text(
+            "---\nname: autopilot-mode\ndescription: old local addon\n---\n",
+            encoding="utf-8",
+        )
+        (new_skill / "SKILL.md").write_text(
+            "---\nname: autopilot-mode\ndescription: new addon source\n---\n",
+            encoding="utf-8",
+        )
+        addon_json = """
+{
+  "addon_version": "0.1.0",
+  "addon_id": "autopilot-mode",
+  "skills": [
+    { "name": "autopilot-mode", "source": "skill", "skill_dir": "skill" }
+  ],
+  "platforms": ["claude", "codex"],
+  "depends_on_core": ["task-router"],
+  "secrets": []
+}
+""".strip()
+        (old_addon / "addon.json").write_text(addon_json + "\n", encoding="utf-8")
+        (new_addon / "addon.json").write_text(addon_json + "\n", encoding="utf-8")
+        target = ai.AddonTarget(
+            name="autopilot-mode",
+            source=new_skill,
+            addon_id="autopilot-mode",
+            addon_version="0.1.0",
+            origin="addon:autopilot-mode",
+            platforms=("claude", "codex"),
+            depends_on_core=("task-router",),
+            secrets=(),
+            tags=(),
+        )
+        dest = self.skills / "autopilot-mode"
+        dest.symlink_to(old_skill)
+
+        self.assertEqual(
+            ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons),
+            [],
+        )
 
     def test_same_addon_skill_symlink_to_foreign_dir_is_drift(self):
         # user repointed the symlink elsewhere -> still drift (must not be cleared).

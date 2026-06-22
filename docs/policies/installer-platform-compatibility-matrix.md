@@ -24,17 +24,19 @@ This document is the Phase 7 compatibility test contract for the Ghost-ALICE ins
 | Python runtime | Python 3.11+ accepted, no upper bound, no future-version allowlist | `scripts/run_installer_compat_tests.py`, `scripts.tests.test_install_runtime_detection` |
 | Python bootstrap | Default install path attempts package-manager Python setup before aborting; read-only status/doctor/list do not mutate the system | `scripts.tests.test_install_runtime_detection` |
 | Python lookup | `python`, `python3`, `python3.*`, broken store stubs, PATH with spaces | `scripts.tests.test_install_runtime_detection` |
-| Encoding | UTF-8 mode forced for shell, PowerShell, CMD wrapper | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_install_cmd_wrapper` |
+| Encoding | UTF-8 mode forced for shell entrypoints and native wrappers | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_install_cmd_wrapper` |
 | User home paths | spaces and non-ASCII HOME fixtures stay supported | `scripts.tests.test_installer_asset_inventory`, installer integration tests |
 | PSScriptAnalyzer optional | PSScriptAnalyzer optional; parser/static tests are the minimum gate when the module is absent | local full validation |
 | Public surface parity | README, docs/index.html, Claude command wrappers stay aligned with `skill-catalog/skills.json` count, list, and targets | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
 | Ghost-ALICE fresh clone install policy | Public installs use a fresh `AidALL/ghost-alice` clone plus install. The installer does not rewrite existing remotes, rename local checkout directories, or expose repository migration flags. Installed Claude permission cleanup is limited to managed stale checkout path allow rules. | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook` |
-| Agent visibility profile | Default `agent_visibility.profile` is `dynamic`. Allowed values are `strict`, `dynamic`, and `minimal`. The installer accepts `--visibility` and PowerShell `-Visibility` as the primary runtime preference toggles, with `--agent-visibility` and `-AgentVisibility` retained as compatibility aliases. The profile controls the user-facing governance message surface only. It does not suppress hook installation or hook execution, does not change generated hook command contracts, and strict-grade session logging remains always-on. | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
+| Agent visibility profile | Default `agent_visibility.profile` is `dynamic`. Allowed values are `strict`, `dynamic`, and `minimal`. The public installer command surface uses `--visibility`; native wrapper compatibility aliases remain implementation-test coverage. `--agent-visibility` remains accepted as the long-form compatibility alias. The profile controls the user-facing governance message surface only. It does not suppress hook installation or hook execution, does not change generated hook command contracts, and strict-grade session logging remains always-on. | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
 | Agent visibility runtime command surface | Claude Code uses `/visibility strict|dynamic|minimal`, Codex uses the trusted `UserPromptSubmit` hook pseudo-command path for `/visibility`, and all platforms can use `_shared/agent_visibility_cli.py`. Documentation must not collapse these into one slash-command spelling. | `scripts.tests.test_install_status_contract` |
 
 ## Agent Hook Runtime Contract
 
 The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. Hook payload and platform permission policy must also be synchronized with the current repo contract. Even if an older hook entry exists, the installer must update managed entries when the runtime payload changes. Hook presence and `agent_visibility.profile` are separate concerns. The profile controls the user-facing message surface; it must not relax missing or drift judgments.
+
+The base session-gate contract describes core behavior. Official privileged adapter addons may extend behavior after their declared hook events, but addon-specific queues, task schemas, and continuation policies stay in the addon and require addon-owned smoke evidence.
 
 Runtime live smoke follows `docs/policies/live-smoke-regression.md`. That procedure sends the same README first 10 lines request to Claude Code, Codex, and Antigravity to observe `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, and skill activation permission behavior.
 
@@ -77,12 +79,12 @@ If the final response `[completion-check]` claims `skill-call: verification-befo
 | Linux bash | `install.sh --platform codex --skip-source-health task-router` fixture | `scripts.tests.test_install_preflight_quarantine` |
 | WSL | same as Linux bash, with Windows path boundary smoke | manual or Windows CI |
 | Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, UTF-8 bridge | runtime detection and Codex hook config tests |
-| Windows native Codex hook smoke | `install.ps1 --platform codex` writes Codex bootstrap, `hooks.json`, and `config.toml` with hooks enabled; live smoke observes hook payload firing | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/policies/live-smoke-regression.md` |
-| Windows visibility preference smoke | `install.ps1 -Visibility <profile>` and `install.cmd -Visibility <profile>` forward to `_shared/install_hooks.py --visibility`; `-AgentVisibility` remains accepted as a compatibility alias, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
+| Windows native Codex hook smoke | Native Windows Codex installer path `.\install.cmd --platform codex` writes Codex bootstrap, `hooks.json`, and `config.toml` with hooks enabled; live smoke observes hook payload firing | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/policies/live-smoke-regression.md` |
+| Windows visibility preference smoke | Native wrapper visibility forwarding reaches `_shared/install_hooks.py --visibility`; legacy visibility aliases remain accepted as compatibility coverage, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible; PS5-incompatible syntax is caught by `PSUseCompatibleSyntax` static analysis when the analyzer is available | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
-| Windows PowerShell 7.4 LTS cleanup | `install.ps1` removes detected PowerShell 7.4.x MSI products by product-code scoped `msiexec.exe /x ... /quiet /norestart` before resolving the latest 7.6.x MSI; non-MSI entries without a product code are skipped, and 7.5/7.6+, Windows PowerShell 5.1, and unrelated products are not removed | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
-| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+ | local/CI PowerShell smoke |
-| CMD wrapper | delegates to `install.ps1`, forwards arguments, forces UTF-8 | `scripts.tests.test_install_cmd_wrapper` |
+| Windows PowerShell 7.4 LTS cleanup | Native Windows installer cleanup removes detected PowerShell 7.4.x MSI products by product-code scoped `msiexec.exe /x ... /quiet /norestart` before resolving the latest 7.6.x MSI; non-MSI entries without a product code are skipped, and 7.5/7.6+, Windows PowerShell 5.1, and unrelated products are not removed | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
+| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output exposes the official addon alias and describes the native wrapper branch/tag option for git URL addon sources | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |
+| CMD wrapper | delegates to the native Windows installer entrypoint, forwards arguments, forces UTF-8, and preserves the official `--addon autopilot` alias through PowerShell binding and addon source preparation; wrapper-facing help exposes the same alias and branch/tag wording | `scripts.tests.test_install_cmd_wrapper` |
 
 ## CI Commands
 
@@ -102,8 +104,4 @@ python3 scripts/run_installer_compat_tests.py --group installer-status-contract
 python3 scripts/run_installer_compat_tests.py --group installer-powershell-static
 ```
 
-Optional PowerShell analyzer gate:
-
-```powershell
-Invoke-ScriptAnalyzer -Path ./install.ps1 -Settings ./PSScriptAnalyzerSettings.psd1 -Severity Warning,Error
-```
+Optional analyzer coverage is exposed through the `installer-powershell-static` group above; direct analyzer invocation is intentionally not part of public install guidance.

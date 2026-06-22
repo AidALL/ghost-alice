@@ -59,7 +59,7 @@ function Test-SourceHealth {
             } elseif ($behind -gt 0) {
                 Write-Err "Source branch is behind its upstream; refusing to install from stale source." "Source branch is behind its upstream; refusing to install from stale source."
                 Write-Err "Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout before installing. If this local source is intentional, rerun with -SkipSourceHealth." "Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout before installing. If this local source is intentional, rerun with -SkipSourceHealth."
-                Write-Err "To preserve source-local changes while updating, run .\install.cmd -UpdateSource." "To preserve source-local changes while updating, run .\install.cmd -UpdateSource."
+                Write-Err "To preserve source-local changes while updating, run .\install.cmd --update-source." "To preserve source-local changes while updating, run .\install.cmd --update-source."
                 Write-Err "If an old checkout is already blocked by local changes during git pull, use the bootstrap one-command update in docs/getting-started/troubleshooting.md." "If an old checkout is already blocked by local changes during git pull, use the bootstrap one-command update in docs/getting-started/troubleshooting.md."
                 throw "Source branch behind upstream"
             } elseif ($ahead -gt 0) {

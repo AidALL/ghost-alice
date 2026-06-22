@@ -18,6 +18,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SH = REPO_ROOT / "install.sh"
 INSTALL_PS1 = REPO_ROOT / "install.ps1"
 README = REPO_ROOT / "README.md"
+ADDON_FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 
 
 def _find_test_bash() -> str | None:
@@ -129,7 +130,7 @@ def _printable_live_progress_lines(output: str) -> list[str]:
     lines: list[str] = []
     for segment in re.split(r"[\r\n]", output):
         clean = ANSI_RE.sub("", segment)
-        if "Target operations" in clean or "Sync [" in clean:
+        if "Target operations" in clean or "Sync [" in clean or "Common targets" in clean:
             lines.append(clean)
     return lines
 
@@ -186,7 +187,9 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertIn("Read-AllCommonTargetProgress", install_ps1)
         self.assertIn("Read-WeightedCommonTargetProgress", install_ps1)
         self.assertIn("common targets synced on all platforms", install_ps1)
-        self.assertIn("$autoCommonTargets = Get-InstallTargetCount -Targets $fallbackTargets", auto_branch)
+        self.assertIn("function Get-AutoCommonTargetCount", install_ps1)
+        self.assertIn("Get-AddonTargets -TargetPlatform $plat", install_ps1)
+        self.assertIn("$autoCommonTargets = Get-AutoCommonTargetCount -DetectedPlatforms $detected -FallbackTargets $fallbackTargets", auto_branch)
         self.assertNotIn("* $detected.Count", auto_branch)
 
     def test_install_ps1_auto_child_output_avoids_shared_log_redirection(self) -> None:
@@ -205,9 +208,19 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         install_ps1 = installer_ps1_source()
 
         self.assertIn('report_progress_bar "$done_count" "$total_count" 30', install_sh)
-        self.assertIn('"${plat} ${platform_index}/${auto_platform_count}"', install_sh)
-        self.assertIn("report_read_target_operation_progress", install_sh)
-        self.assertIn("        Sync [", install_sh)
+        self.assertIn('report_progress_bar "$done_count" "$total_count" 20', install_sh)
+        self.assertIn("count_auto_common_targets", install_sh)
+        self.assertIn("report_read_weighted_common_target_progress", install_sh)
+        self.assertIn("report_auto_animate_common_target_progress_line", install_sh)
+        self.assertIn("report_live_common_target_progress_line", install_sh)
+        self.assertNotIn('"${plat} ${platform_index}/${auto_platform_count}"', install_sh)
+        auto_branch = install_sh[
+            install_sh.index("# auto/default:") : install_sh.index('if [ "$PROMPT_PLATFORM" -eq 1 ]')
+        ]
+        self.assertLess(
+            auto_branch.index("prepare_addon_sources || exit 1"),
+            auto_branch.index("addon_args=()"),
+        )
         self.assertNotIn("report_auto_progress_cursor_up_rows", install_sh)
         self.assertNotIn("report_print_tail_pending", install_sh)
         self.assertNotIn("report_print_tail_overwrite", install_sh)
@@ -308,33 +321,137 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             )
 
             expected_common_targets = _skill_target_count("task-router") + 1
-            expected_operations = expected_common_targets * 2
             skill_sync_line = f"  [2/5] Skill sync          [{expected_common_targets}] common targets"
             initial_line = (
-                f"        Sync [--------------------] "
-                f"[0/{expected_operations}] pending"
+                f"        Common targets [--------------------] "
+                f"[0/{expected_common_targets}] synced"
             )
             final_line = (
-                f"\r\x1b[2K        Sync [####################] "
-                f"[{expected_operations}/{expected_operations}] done"
+                f"\r\x1b[2K        Common targets [####################] "
+                f"[{expected_common_targets}/{expected_common_targets}] all platforms"
             )
             self.assertEqual(return_code, 0, msg=output)
             self.assertEqual(output.count("Ghost-ALICE OS installation Process Report"), 1)
             self.assertIn(f"  Skills: [{expected_common_targets}] common targets", output)
-            self.assertNotIn("platform-target operations", output)
             self.assertIn(skill_sync_line, output)
             self.assertIn(initial_line, output)
             self.assertNotIn("  [3/5] Hooks               pending", output)
             self.assertNotIn("\x1b[11A\r", output)
             self.assertNotIn("\x1b[1B\r", output)
+            self.assertNotIn("        Sync [", output)
             self.assertIn(final_line, output)
-            for completed in range(1, expected_operations + 1):
-                self.assertIn(f"[{completed}/{expected_operations}]", output)
             live_lines = _printable_live_progress_lines(output)
             self.assertTrue(live_lines, msg=output)
-            self.assertLessEqual(max(len(line) for line in live_lines), 79, msg=live_lines)
+            self.assertLessEqual(max(len(line) for line in live_lines), 80, msg=live_lines)
             self.assertLess(output.index(initial_line), output.rindex(final_line))
             self.assertIn("  [5/5] Verification        ok", output)
+
+    def test_install_sh_auto_failure_closes_progress_line_and_surfaces_excerpt_source(self) -> None:
+        install_sh = INSTALL_SH.read_text(encoding="utf-8")
+        compact_auto_branch = install_sh[
+            install_sh.index("install_log_init") : install_sh.index('if [ "$PROMPT_PLATFORM" -eq 1 ]')
+        ]
+
+        self.assertIn("live_counter_enabled && printf '\\n'\n      warn", compact_auto_branch)
+        self.assertIn("install_report_failure_excerpt", compact_auto_branch)
+        self.assertLess(
+            compact_auto_branch.index("live_counter_enabled && printf '\\n'\n      warn"),
+            compact_auto_branch.index('warn "$(t "[auto] Install failed for ${plat}'),
+        )
+
+    def test_install_sh_auto_addon_report_counts_addon_common_target(self) -> None:
+        bash = _find_test_bash()
+        if not bash:
+            self.skipTest("bash executable is required for install.sh addon auto-detect test")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_home = Path(temp_dir)
+            (temp_home / ".claude").mkdir()
+            (temp_home / ".codex").mkdir()
+
+            env = os.environ.copy()
+            env["HOME"] = temp_home.as_posix()
+            env["GHOST_ALICE_LANG"] = "en"
+            env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
+            env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = ADDON_FIXTURE.as_posix()
+
+            result = subprocess.run(
+                [bash, str(INSTALL_SH), "--addon", "autopilot", "--skip-source-health"],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            output = result.stderr + result.stdout
+            self.assertEqual(result.returncode, 0, msg=output)
+            self.assertIn("  Platform: claude, codex", result.stdout)
+            self.assertIn("  Skills: [26] common targets", result.stdout)
+            self.assertIn("[26/26] common targets synced on all platforms", result.stdout)
+            self.assertNotIn("[26/25]", result.stdout)
+
+    def test_install_sh_auto_detect_accepts_git_addon_tag_after_parent_prepares_source(self) -> None:
+        bash = _find_test_bash()
+        if not bash:
+            self.skipTest("bash executable is required for install.sh addon auto-detect test")
+        if not shutil.which("git"):
+            self.skipTest("git executable is required for tagged addon source test")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            temp_home = temp_root / "home"
+            temp_home.mkdir()
+            (temp_home / ".claude").mkdir()
+            (temp_home / ".codex").mkdir()
+            addon_repo = temp_root / "addon-repo"
+            shutil.copytree(ADDON_FIXTURE, addon_repo)
+            for command in (
+                ["git", "init"],
+                ["git", "add", "."],
+                ["git", "-c", "user.name=Ghost ALICE Test", "-c", "user.email=test@example.com", "commit", "-m", "fixture"],
+                ["git", "tag", "v1"],
+            ):
+                subprocess.run(
+                    command,
+                    cwd=addon_repo,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+
+            env = os.environ.copy()
+            env["HOME"] = temp_home.as_posix()
+            env["GHOST_ALICE_LANG"] = "en"
+            env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
+
+            result = subprocess.run(
+                [
+                    bash,
+                    str(INSTALL_SH),
+                    "--addon-source",
+                    addon_repo.resolve().as_uri(),
+                    "--addon-tag",
+                    "v1",
+                    "--skip-source-health",
+                    "task-router",
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            output = result.stderr + result.stdout
+            self.assertEqual(result.returncode, 0, msg=output)
+            self.assertIn("  Platform: claude, codex", result.stdout)
+            self.assertIn("common targets synced on all platforms", result.stdout)
+            self.assertNotIn("--addon-tag can only be used with git URL addon sources", output)
 
     def test_install_sh_default_output_uses_process_report_with_dynamic_counts(self) -> None:
         bash = _find_test_bash()

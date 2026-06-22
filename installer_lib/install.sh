@@ -719,6 +719,12 @@ _check_addon_collisions() {
   done
   for skill in ${ALL_SKILLS[@]+"${ALL_SKILLS[@]}"}; do
     core_args+=(--core-skill "$skill")
+    local core_targets core_name core_path
+    core_targets="$(expand_skill_targets "$skill")"
+    while IFS='|' read -r core_name core_path; do
+      [ -n "$core_name" ] || continue
+      core_args+=(--core-skill "$core_name")
+    done <<< "$core_targets"
   done
   local rc=0
   "$py" "${SCRIPT_DIR}/_shared/addon_installer.py" detect-collisions \
@@ -788,7 +794,7 @@ _run_install_hooks() {
         error "$(t "install_hooks.py not found: ${hook_py}" "install_hooks.py not found: ${hook_py}")"
         return 1
       fi
-      local args=(--platform "$platform" --hook-shared-dir "${SKILLS_DIR}/_shared")
+      local args=(--platform "$platform" --hook-shared-dir "${SKILLS_DIR}/_shared" --skills-dir "$SKILLS_DIR")
       local visibility="${AGENT_VISIBILITY:-}"
       if [ "$action" = "install" ] && [ -z "$visibility" ]; then
         visibility="dynamic"
