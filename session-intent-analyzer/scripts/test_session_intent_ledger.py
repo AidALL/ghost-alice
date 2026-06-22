@@ -481,6 +481,24 @@ class SessionIntentLedgerTests(unittest.TestCase):
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
         self.assertEqual(ac["status"], "met")
 
+    def test_recording_inferred_criterion_with_contract_source_admits_it(self) -> None:
+        root = self.tmpdir / "ledger"
+        base = {"id": "AC-up", "summary": "maybe Z", "source": "inferred"}
+        self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(base)]},
+        )
+        # Re-recording with a contract-bound source admits the criterion even
+        # without an explicit admitted field (source-based admission, matching
+        # first-record behavior).
+        paths = self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(base, source="user-explicit")]},
+        )
+        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-up")
+        self.assertTrue(ac["admitted"])
+
     def test_current_session_pointer_tracks_latest_real_session(self) -> None:
         root = self.tmpdir / "ledger"
 

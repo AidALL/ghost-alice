@@ -388,9 +388,10 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
                 criterion["met_completion_check_digest"] = prior["met_completion_check_digest"]
             incoming_admitted = item.get("admitted") if isinstance(item, dict) else None
             if not isinstance(incoming_admitted, bool):
-                # Only a valid boolean admission overrides the prior lifecycle; a
-                # present-but-invalid field (e.g. null) must not silently drop it.
-                criterion["admitted"] = prior["admitted"]
+                # No explicit boolean admission: admission is sticky and can be
+                # upgraded by a newly contract-bound source, but a present-but-
+                # invalid field (e.g. null) must never silently drop it.
+                criterion["admitted"] = bool(prior["admitted"]) or bool(criterion["admitted"])
         else:
             criterion["status"] = "unmet"
         store(criterion_id, criterion)
