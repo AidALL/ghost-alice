@@ -155,7 +155,7 @@ def infer_scope(path: str, cwd: str = "") -> str:
 
 def scope_from_path(value: str) -> str:
     candidate = Path(value).expanduser()
-    parts = [part for part in candidate.parts if part not in {"", "/", ".", "~"}]
+    parts = [part for part in candidate.parts if part not in {"", "/", "\\", candidate.anchor, ".", "~"}]
     if not parts:
         return ""
     if parts[0] in {"Users", "home"} and len(parts) >= 3:
