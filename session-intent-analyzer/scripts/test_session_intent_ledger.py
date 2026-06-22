@@ -374,9 +374,10 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(common)]},
         )
-        self.ledger.record_turn(
+        # "met" is reached only through the validated completion-check writer.
+        self.ledger.mark_acceptance_criterion_met(
             root=root, platform="codex", session_id="s",
-            intent_delta={"acceptance_criteria": [dict(common, status="met")]},
+            criterion_id="AC1", completion_check_digest="a" * 64,
         )
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
@@ -387,6 +388,43 @@ class SessionIntentLedgerTests(unittest.TestCase):
         # Re-recording without an explicit status must not reset a met criterion.
         self.assertEqual(ac1["status"], "met")
         self.assertEqual(ac1["summary"], "do X (clarified)")
+
+    def test_mark_criterion_met_requires_valid_digest_and_sets_met(self) -> None:
+        root = self.tmpdir / "ledger"
+        self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [
+                {"id": "AC1", "summary": "do X", "source": "user-explicit"},
+            ]},
+        )
+        digest = "a" * 64
+        paths = self.ledger.mark_acceptance_criterion_met(
+            root=root, platform="codex", session_id="s",
+            criterion_id="AC1", completion_check_digest=digest,
+        )
+        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        ac1 = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
+        self.assertEqual(ac1["status"], "met")
+        self.assertEqual(ac1["met_completion_check_digest"], digest)
+        # An invalid digest is rejected: the validated completion-check is the gate.
+        with self.assertRaises(ValueError):
+            self.ledger.mark_acceptance_criterion_met(
+                root=root, platform="codex", session_id="s",
+                criterion_id="AC1", completion_check_digest="not-a-sha256",
+            )
+
+    def test_raw_delta_cannot_set_met_status(self) -> None:
+        root = self.tmpdir / "ledger"
+        paths = self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [
+                {"id": "AC1", "summary": "do X", "source": "user-explicit", "status": "met"},
+            ]},
+        )
+        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        ac1 = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
+        # "met" is write-only via mark_acceptance_criterion_met; raw input cannot assert it.
+        self.assertEqual(ac1["status"], "unmet")
 
     def test_inferred_criterion_is_admitted_only_after_explicit_promotion(self) -> None:
         root = self.tmpdir / "ledger"
@@ -406,6 +444,42 @@ class SessionIntentLedgerTests(unittest.TestCase):
         state = json.loads(paths["state"].read_text(encoding="utf-8"))
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
         self.assertTrue(ac["admitted"])
+
+    def test_invalid_admitted_field_preserves_prior_admission(self) -> None:
+        root = self.tmpdir / "ledger"
+        base = {"id": "AC-inf", "summary": "maybe Z", "source": "inferred"}
+        self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(base, admitted=True)]},
+        )
+        # A present-but-invalid admitted field must not silently drop the admission.
+        paths = self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(base, admitted=None)]},
+        )
+        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
+        self.assertTrue(ac["admitted"])
+
+    def test_invalid_status_field_preserves_prior_met(self) -> None:
+        root = self.tmpdir / "ledger"
+        common = {"id": "AC1", "summary": "do X", "source": "user-explicit"}
+        self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(common)]},
+        )
+        self.ledger.mark_acceptance_criterion_met(
+            root=root, platform="codex", session_id="s",
+            criterion_id="AC1", completion_check_digest="a" * 64,
+        )
+        # A present-but-invalid status field must not silently reset a met criterion.
+        paths = self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(common, status="done")]},
+        )
+        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
+        self.assertEqual(ac["status"], "met")
 
     def test_current_session_pointer_tracks_latest_real_session(self) -> None:
         root = self.tmpdir / "ledger"

@@ -27,6 +27,7 @@ LIST_FIELDS = ("constraints", "non_goals", "open_questions", "risk_flags")
 ACCEPTANCE_CRITERIA_SOURCES = {"user-explicit", "inferred", "previous-tool", "system-doc"}
 ACCEPTANCE_CRITERIA_STATUSES = {"unmet", "met"}
 ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-explicit", "previous-tool", "system-doc"}
+COMPLETION_CHECK_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 SECURITY_DECISIONS = {"allow", "block"}
 SECURITY_REASON_MAX = 240
 SECURITY_RISK_FLAG_MAX = 12
@@ -350,24 +351,50 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
 def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
     order: list[str] = []
-    for source in (existing, incoming):
-        iterable = source if isinstance(source, list) else [source]
-        for item in iterable:
-            criterion = normalize_acceptance_criterion(item)
-            if criterion is None:
-                continue
-            criterion_id = criterion["id"]
-            prior = merged.get(criterion_id)
-            if prior is not None:
-                # Re-recording a criterion carries forward its lifecycle state
-                # (status/admitted) unless the incoming item sets them explicitly.
-                if not (isinstance(item, dict) and "status" in item):
-                    criterion["status"] = prior["status"]
-                if not (isinstance(item, dict) and "admitted" in item):
-                    criterion["admitted"] = prior["admitted"]
-            if criterion_id not in merged:
-                order.append(criterion_id)
-            merged[criterion_id] = criterion
+
+    def store(criterion_id: str, criterion: dict[str, Any]) -> None:
+        if criterion_id not in merged:
+            order.append(criterion_id)
+        merged[criterion_id] = criterion
+
+    # Existing persisted criteria are trusted, including a "met" status set by
+    # mark_acceptance_criterion_met (the sole legitimate "met" writer).
+    existing_items = existing if isinstance(existing, list) else [existing]
+    for item in existing_items:
+        criterion = normalize_acceptance_criterion(item)
+        if criterion is None:
+            continue
+        if isinstance(item, dict):
+            stored_status = str(item.get("status") or "").strip().lower()
+            if stored_status in ACCEPTANCE_CRITERIA_STATUSES:
+                criterion["status"] = stored_status
+            digest = item.get("met_completion_check_digest")
+            if isinstance(digest, str) and digest:
+                criterion["met_completion_check_digest"] = digest
+        store(criterion["id"], criterion)
+
+    # Incoming raw deltas may not assert "met": the status only transitions
+    # through mark_acceptance_criterion_met. Admission may still be promoted.
+    incoming_items = incoming if isinstance(incoming, list) else [incoming]
+    for item in incoming_items:
+        criterion = normalize_acceptance_criterion(item)
+        if criterion is None:
+            continue
+        criterion_id = criterion["id"]
+        prior = merged.get(criterion_id)
+        if prior is not None:
+            criterion["status"] = prior["status"]
+            if "met_completion_check_digest" in prior:
+                criterion["met_completion_check_digest"] = prior["met_completion_check_digest"]
+            incoming_admitted = item.get("admitted") if isinstance(item, dict) else None
+            if not isinstance(incoming_admitted, bool):
+                # Only a valid boolean admission overrides the prior lifecycle; a
+                # present-but-invalid field (e.g. null) must not silently drop it.
+                criterion["admitted"] = prior["admitted"]
+        else:
+            criterion["status"] = "unmet"
+        store(criterion_id, criterion)
+
     return [merged[criterion_id] for criterion_id in order]
 
 
@@ -613,6 +640,65 @@ def record_turn(
     append_jsonl(paths["events"], event)
     if safe_component(session_id) != "unknown":
         write_current_session_pointer(root, platform, session_id)
+    return paths
+
+
+def mark_acceptance_criterion_met(
+    *,
+    root: Path = DEFAULT_ROOT,
+    platform: str,
+    session_id: str,
+    criterion_id: str,
+    completion_check_digest: str,
+) -> dict[str, Path]:
+    """Flip an acceptance criterion to "met". The sole writer of "met".
+
+    Verification is the single arbiter: the flip is gated by a validated
+    completion-check digest (sha256 hex). Raw intent deltas can never assert
+    "met"; only this writer can, so an autopilot run terminates a criterion
+    only after a passing completion-check, not merely because work happened.
+    """
+    digest = str(completion_check_digest or "").strip().lower()
+    if not COMPLETION_CHECK_DIGEST_PATTERN.fullmatch(digest):
+        raise ValueError(
+            "mark_acceptance_criterion_met requires a sha256 completion-check digest"
+        )
+    target_id = safe_component(str(criterion_id), "criterion")
+    paths = session_paths(root, platform, session_id)
+    state = load_state(paths["state"], platform=platform, session_id=session_id)
+    criteria = state.get("acceptance_criteria")
+    if not isinstance(criteria, list):
+        raise ValueError(
+            f"no acceptance criteria to mark met for session {session_id!r}"
+        )
+    now = utc_now()
+    matched = False
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            continue
+        if str(criterion.get("id")) == target_id:
+            criterion["status"] = "met"
+            criterion["met_completion_check_digest"] = digest
+            criterion["met_at"] = now
+            matched = True
+            break
+    if not matched:
+        raise ValueError(
+            f"acceptance criterion {criterion_id!r} not found for session {session_id!r}"
+        )
+    state["updated_at"] = now
+    write_json(paths["state"], state)
+    append_jsonl(
+        paths["events"],
+        {
+            "ts": now,
+            "event": "acceptance-criterion-met",
+            "platform": platform,
+            "session_id": session_id,
+            "criterion_id": target_id,
+            "completion_check_digest": digest,
+        },
+    )
     return paths
 
 
