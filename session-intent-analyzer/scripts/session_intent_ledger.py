@@ -25,6 +25,8 @@ LEGACY_DEFAULT_ROOT = Path("~/.ghost-alice/session-intent")
 TEXT_FIELDS = ("current_goal", "user_intent_summary")
 LIST_FIELDS = ("constraints", "non_goals", "open_questions", "risk_flags")
 ACCEPTANCE_CRITERIA_SOURCES = {"user-explicit", "inferred", "previous-tool", "system-doc"}
+ACCEPTANCE_CRITERIA_STATUSES = {"unmet", "met"}
+ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-explicit", "previous-tool", "system-doc"}
 SECURITY_DECISIONS = {"allow", "block"}
 SECURITY_REASON_MAX = 240
 SECURITY_RISK_FLAG_MAX = 12
@@ -309,7 +311,7 @@ def normalize_decision(raw: Any, timestamp: str) -> dict[str, Any] | None:
     return payload
 
 
-def normalize_acceptance_criterion(raw: Any) -> dict[str, str] | None:
+def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     if isinstance(raw, str):
         summary = raw.strip()
         if not summary:
@@ -318,6 +320,8 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, str] | None:
             "id": safe_component(summary.lower(), "criterion"),
             "summary": summary,
             "source": "inferred",
+            "status": "unmet",
+            "admitted": False,
         }
     if not isinstance(raw, dict):
         return None
@@ -328,15 +332,23 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, str] | None:
     source = str(raw.get("source") or "inferred").strip()
     if source not in ACCEPTANCE_CRITERIA_SOURCES:
         source = "inferred"
+    status = str(raw.get("status") or "").strip().lower()
+    if status not in ACCEPTANCE_CRITERIA_STATUSES:
+        status = "unmet"
+    admitted = raw.get("admitted")
+    if not isinstance(admitted, bool):
+        admitted = source in ACCEPTANCE_CRITERIA_ADMITTED_SOURCES
     return {
         "id": criterion_id,
         "summary": summary,
         "source": source,
+        "status": status,
+        "admitted": admitted,
     }
 
 
-def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, str]]:
-    merged: dict[str, dict[str, str]] = {}
+def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for source in (existing, incoming):
         iterable = source if isinstance(source, list) else [source]
@@ -345,6 +357,14 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, st
             if criterion is None:
                 continue
             criterion_id = criterion["id"]
+            prior = merged.get(criterion_id)
+            if prior is not None:
+                # Re-recording a criterion carries forward its lifecycle state
+                # (status/admitted) unless the incoming item sets them explicitly.
+                if not (isinstance(item, dict) and "status" in item):
+                    criterion["status"] = prior["status"]
+                if not (isinstance(item, dict) and "admitted" in item):
+                    criterion["admitted"] = prior["admitted"]
             if criterion_id not in merged:
                 order.append(criterion_id)
             merged[criterion_id] = criterion
