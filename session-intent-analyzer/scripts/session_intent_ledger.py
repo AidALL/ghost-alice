@@ -371,6 +371,9 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             digest = item.get("met_completion_check_digest")
             if isinstance(digest, str) and digest:
                 criterion["met_completion_check_digest"] = digest
+            met_at = item.get("met_at")
+            if isinstance(met_at, str) and met_at:
+                criterion["met_at"] = met_at
         store(criterion["id"], criterion)
 
     # Incoming raw deltas may not assert "met": the status only transitions
@@ -386,6 +389,8 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             criterion["status"] = prior["status"]
             if "met_completion_check_digest" in prior:
                 criterion["met_completion_check_digest"] = prior["met_completion_check_digest"]
+            if "met_at" in prior:
+                criterion["met_at"] = prior["met_at"]
             incoming_admitted = item.get("admitted") if isinstance(item, dict) else None
             if not isinstance(incoming_admitted, bool):
                 # No explicit boolean admission: admission is sticky and can be
