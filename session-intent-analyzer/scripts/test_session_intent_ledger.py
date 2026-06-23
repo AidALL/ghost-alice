@@ -499,6 +499,33 @@ class SessionIntentLedgerTests(unittest.TestCase):
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-up")
         self.assertTrue(ac["admitted"])
 
+    def test_remerging_met_criterion_preserves_met_at(self) -> None:
+        root = self.tmpdir / "ledger"
+        common = {"id": "AC1", "summary": "do X", "source": "user-explicit"}
+        self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(common)]},
+        )
+        mark_paths = self.ledger.mark_acceptance_criterion_met(
+            root=root, platform="codex", session_id="s",
+            criterion_id="AC1", completion_check_digest="a" * 64,
+        )
+        met_at = next(
+            c for c in json.loads(mark_paths["state"].read_text(encoding="utf-8"))["acceptance_criteria"]
+            if c["id"] == "AC1"
+        )["met_at"]
+        # Re-recording with a refreshed summary must keep the met_at audit stamp.
+        paths = self.ledger.record_turn(
+            root=root, platform="codex", session_id="s",
+            intent_delta={"acceptance_criteria": [dict(common, summary="do X (clarified)")]},
+        )
+        ac1 = next(
+            c for c in json.loads(paths["state"].read_text(encoding="utf-8"))["acceptance_criteria"]
+            if c["id"] == "AC1"
+        )
+        self.assertEqual(ac1["met_at"], met_at)
+        self.assertEqual(ac1["status"], "met")
+
     def test_current_session_pointer_tracks_latest_real_session(self) -> None:
         root = self.tmpdir / "ledger"
 
