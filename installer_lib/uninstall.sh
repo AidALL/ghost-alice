@@ -177,6 +177,7 @@ _run_install_doctor() {
     --encoding-root "$skills_dir"
     --ghost-alice-root "${HOME}/.ghost-alice"
     --install-state-manifest "${HOME}/.ghost-alice/install-state/${PLATFORM}.json"
+    --runtime-shared "$(resolve_ghost_alice_runtime_shared_dir)"
     --skills-root "$skills_dir"
   )
   [ "$mode" = "doctor" ] && args+=(--strict)
@@ -184,9 +185,13 @@ _run_install_doctor() {
   case "$PLATFORM" in
     codex)
       args+=(
+        --hook-config "$(resolve_codex_home)/hooks.json"
         --global-rule "codex-bootstrap" "$(resolve_codex_home)/AGENTS.md"
         "$CODEX_BOOTSTRAP_MARKER" "$CODEX_MANAGED_BLOCK_BEGIN" "$CODEX_MANAGED_BLOCK_END"
       )
+      ;;
+    claude)
+      args+=(--hook-config "$(resolve_claude_home)/settings.json")
       ;;
   esac
 

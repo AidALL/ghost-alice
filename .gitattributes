@@ -1,1 +1,8 @@
 *.pbxproj binary merge=union
+
+# Pin line endings so cross-platform checkouts and Windows core.autocrlf=true do
+# not corrupt shell scripts (CRLF breaks bash) or drift hashed runtime files.
+.gitattributes text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.ps1 text eol=crlf

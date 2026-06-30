@@ -39,6 +39,28 @@ def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _read_stdin_utf8() -> str:
+    """Read stdin as UTF-8 regardless of the platform default encoding.
+
+    Claude Code delivers the hook payload as UTF-8 JSON. On Windows the default
+    stdin encoding is cp949/cp1252, so a bare ``sys.stdin.read()`` decodes the
+    bytes with the wrong codec and corrupts non-ASCII (Korean) text into mojibake
+    and lone surrogates before it is ever logged. Reading the raw byte buffer and
+    decoding UTF-8 explicitly avoids that; ``errors="replace"`` keeps a stray
+    non-UTF-8 byte from crashing the audit hook.
+    """
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is not None:
+        try:
+            data = buffer.read()
+        except Exception:
+            return ""
+        if isinstance(data, bytes):
+            return data.decode("utf-8", errors="replace")
+        return str(data)
+    return sys.stdin.read()
+
+
 def _safe_text(value: Any) -> str:
     text = str(value)
     return "".join(
@@ -213,7 +235,7 @@ def _semantic_delta_warning(payload: dict[str, Any]) -> dict[str, str] | None:
 
 def main() -> int:
     try:
-        raw = sys.stdin.read()
+        raw = _read_stdin_utf8()
         _capture_governance_event(raw)
         payload = json.loads(raw) if raw.strip() else {}
         if not isinstance(payload, dict):

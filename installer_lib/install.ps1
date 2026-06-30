@@ -123,6 +123,16 @@ function Invoke-StagedCopyReplace {
     }
 }
 
+function Sync-RuntimeSharedCore {
+    $sharedSrc = Join-Path $ScriptDir "_shared"
+    if (-not (Test-Path $sharedSrc)) {
+        return
+    }
+    Invoke-StagedCopyReplace -Source $sharedSrc -Dest (Resolve-GhostAliceRuntimeSharedDir)
+    $message = T "runtime _shared -> copied" "runtime _shared -> copied"
+    Write-Ok $message $message
+}
+
 function Invoke-StagedCopyReplaceMany {
     param(
         [object[]]$Targets,
@@ -211,7 +221,7 @@ function Invoke-InstallHooks {
     $pyArgs = @(
         $hookPy,
         "--platform", $TargetPlatform,
-        "--hook-shared-dir", (Join-Path $SkillsDir "_shared"),
+        "--hook-shared-dir", (Resolve-GhostAliceRuntimeSharedDir),
         "--skills-dir", $SkillsDir
     )
     switch ($Action) {
@@ -1052,6 +1062,13 @@ function Invoke-Install {
             Write-Info "Junction installs refresh linked skills after the checkout fast-forwards through the safe source updater." "Junction installs refresh linked skills after the checkout fast-forwards through the safe source updater."
         }
 
+        try {
+            Invoke-LoggedIfCompact { Sync-RuntimeSharedCore }
+        } catch {
+            $message = T "Runtime shared core sync failed. Aborting hook install" "Runtime shared core sync failed. Aborting hook install"
+            Write-Err $message $message
+            throw
+        }
         Invoke-LoggedIfCompact { Invoke-InstallHooks -Action "install" -TargetPlatform $Platform }
         Invoke-LoggedIfCompact { Invoke-PostflightInstallVerification -TargetPlatform $Platform -SkillsRoot $SkillsDir -SkillNames $SkillNames -ExtraTargets $addonTargets -CopyOnly:$copyOnly }
         Invoke-LoggedIfCompact { Invoke-WriteOwnershipMarker -TargetPlatform $Platform -SkillsRoot $SkillsDir -SkillNames $SkillNames -ExtraTargets $addonTargets -CopyOnly:$copyOnly }

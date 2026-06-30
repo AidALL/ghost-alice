@@ -13,16 +13,55 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LEDGER_DIR = REPO_ROOT / "session-intent-analyzer" / "scripts"
-if str(LEDGER_DIR) not in sys.path:
-    sys.path.insert(0, str(LEDGER_DIR))
 
-from session_intent_ledger import (  # noqa: E402
-    DEFAULT_ROOT,
-    build_input_observation,
-    record_turn,
-    resolve_session_id,
-)
+
+def _home() -> Path:
+    for key in ("HOME", "USERPROFILE"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return Path(value)
+    drive = os.environ.get("HOMEDRIVE", "").strip()
+    path = os.environ.get("HOMEPATH", "").strip()
+    if drive and path:
+        return Path(f"{drive}{path}")
+    return Path.home()
+
+
+def _ledger_dir_candidates() -> list[Path]:
+    home = _home()
+    candidates = [
+        REPO_ROOT / "session-intent-analyzer" / "scripts",
+        home / ".agents" / "skills" / "session-intent-analyzer" / "scripts",
+        home / ".claude" / "skills" / "session-intent-analyzer" / "scripts",
+    ]
+    claude_home = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if claude_home:
+        candidates.append(Path(claude_home) / "skills" / "session-intent-analyzer" / "scripts")
+    return candidates
+
+
+for LEDGER_DIR in _ledger_dir_candidates():
+    if (LEDGER_DIR / "session_intent_ledger.py").is_file() and str(LEDGER_DIR) not in sys.path:
+        sys.path.insert(0, str(LEDGER_DIR))
+        break
+
+try:
+    from session_intent_ledger import (  # noqa: E402
+        DEFAULT_ROOT,
+        build_input_observation,
+        record_turn,
+        resolve_session_id,
+    )
+except Exception:
+    # The ledger module may be absent (skill uninstalled, mid-reinstall, or
+    # relocated while the hook entry remains). Degrade gracefully instead of
+    # crashing the hook at import time: leave the ledger callables unbound so the
+    # existing non-blocking try/except in main() routes through its degrade path,
+    # and provide an argparse-default fallback for DEFAULT_ROOT.
+    DEFAULT_ROOT = ".tmp/session-intent"
+    build_input_observation = None
+    record_turn = None
+    resolve_session_id = None
 
 
 DEFAULT_INTERNAL = (

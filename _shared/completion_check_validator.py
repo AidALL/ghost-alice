@@ -26,9 +26,13 @@ _CONTROL_BLOCKS = frozenset(
     {"tool-checkpoint", "gate-state", "task-router", "boundary-contract", "io-trace"}
 )
 
-# Block header `^\[([a-z0-9-]+)\]`, case-insensitive.
+# Block header `^\[([a-z0-9-]+)\]`, case-insensitive. The position variant
+# tolerates leading whitespace so an indented header is still located, keeping it
+# consistent with extract_control_block (which matches on the stripped line). A
+# mismatch here previously yielded zero positions for an indented header and
+# crashed the position lookup with IndexError.
 _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
-_BLOCK_HEADER_POSITION_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I | re.M)
+_BLOCK_HEADER_POSITION_RE = re.compile(r"^[ \t]*\[([a-z0-9-]+)\]", re.I | re.M)
 
 # Split on \r?\n only; splitlines() would also split on other Unicode line
 # boundaries, which we do not want here.
@@ -40,7 +44,11 @@ _NEWLINE_SPLIT_RE = re.compile(r"\r?\n")
 
 _VERIFICATION_DONE_RE = re.compile(r"-\s*verification-before-completion:\s*done\b")
 _SKILL_CALL_RE = re.compile(r"-\s*skill-call:\s*([^\n]+)")
-_SKILLS_LOADED_RE = re.compile(r"-\s*skills-loaded:\s*\[([^\]]*)\]")
+# skills-loaded accepts three equivalent serializations (inline CSV, flow-list
+# `[...]`, or a nested bullet list). The header line is matched here; token
+# extraction and nested-list collection happen in extract_skills_loaded().
+_SKILLS_LOADED_HEADER_RE = re.compile(r"^\s*-?\s*skills-loaded\s*:\s*(.*)$", re.I)
+_ZERO_WIDTH_RE = re.compile("[​‌‍‎‏﻿]")
 
 _TOP_LEVEL_FIELD_RE = re.compile(r"^-\s*[A-Za-z0-9_-]+\s*:")
 # Acceptance-criteria id: a leading `- <id>:` on each line.
@@ -70,9 +78,79 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
     re.compile(r"(?:테스트|빌드|린트|타입체크).{0,12}(?:통과|성공|깨끗)"),
 )
 
+# Spans that are quotation or code, not the model's own assertion. Stripped
+# before executed-work detection so illustrative output, quoted user text, and
+# fenced examples do not trigger a spurious completion-check demand.
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
+_INLINE_CODE_RE = re.compile(r"`[^`]*`")
+# Single-quoted spans only count when the quotes sit on word boundaries, so an
+# ordinary contraction apostrophe (won't, don't, y'all) is not mistaken for a
+# quotation delimiter and does not swallow a real claim between two contractions.
+_QUOTED_SPAN_RE = re.compile(
+    "(?<![A-Za-z0-9])'[^'\n]*'(?![A-Za-z0-9])"
+    "|\"[^\"\n]*\""
+    "|(?<![A-Za-z0-9])‘[^’\n]*’(?![A-Za-z0-9])"
+    "|“[^”\n]*”"
+)
+
+# Executed-work detection runs per clause. Two lead families are exempt, with
+# different governance scope:
+#   - GOAL / enumeration leads (goal, acceptance criteria, todo, next steps,
+#     plan, ...) introduce a list and govern the WHOLE sentence, so a
+#     comma-separated goal list ("Goal: tests pass, lint is clean") is exempt.
+#   - CONDITIONAL leads (if, once, when, ...) govern only their own protasis, so
+#     the asserted main clause after the comma ("If you're curious, I fixed it")
+#     is still checked.
+# Sentences split on . ! ? and newlines; within a sentence, clauses split on
+# commas. ";" and ":" are deliberately NOT split points so a goal lead governs an
+# enumeration across them ("Acceptance criteria: all tests pass; not there yet").
+# A clause that negates the closure verb is also exempt. The ambiguous temporal
+# leads after/before/until are intentionally absent: they usually introduce an
+# asserted main clause ("After much effort the task is complete"), not a
+# hypothetical.
+_SENTENCE_SPLIT_RE = re.compile(r"[\n.!?]+")
+_COMMA_SPLIT_RE = re.compile(r",+")
+_GOAL_LEAD_RE = re.compile(
+    r"^\s*(?:[>*\-]|\d+[.)])?\s*"
+    r"(?:goal|goals|aim|aims|objective|objectives|target|targets|"
+    r"acceptance\s+criteria|criteria|todo|to-?do|next\s+steps?|"
+    r"plan|plans|remaining|pending)\b"
+    r"|^\s*(?:목표|예정)",
+    re.I,
+)
+_CONDITIONAL_LEAD_RE = re.compile(
+    r"^\s*(?:[>*\-]|\d+[.)])?\s*"
+    r"(?:if|once|when|whenever|unless|as\s+soon\s+as)\b"
+    r"|^\s*만약",
+    re.I,
+)
+_NEGATED_CLOSURE_RE = re.compile(
+    r"\b(?:not|never|isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|won['’]?t|"
+    r"cannot|can['’]?t|don['’]?t|doesn['’]?t|didn['’]?t|no\s+longer)\s+"
+    r"(?:yet\s+|fully\s+|completely\s+|quite\s+)*"
+    r"(?:complete|completed|done|fixed|resolved|implemented|passing|pass|"
+    r"passed|green|clean|succeed|succeeded)\b"
+    r"|\bnot\s+there\s+yet\b|\bnot\s+yet\b"
+    r"|아직|않았|않은|않고",
+    re.I,
+)
+
 
 def _split_lines(text):
     return _NEWLINE_SPLIT_RE.split("" if text is None else str(text))
+
+
+def _strip_noncommittal_spans(text):
+    """Drop fenced/inline code, blockquotes, and quoted spans.
+
+    These carry illustrative or reported content, not the model's own
+    executed-work assertion, so they must not trigger completion detection.
+    """
+    text = _FENCED_CODE_RE.sub(" ", "" if text is None else str(text))
+    text = _INLINE_CODE_RE.sub(" ", text)
+    kept = [line for line in _split_lines(text) if not line.lstrip().startswith(">")]
+    text = "\n".join(kept)
+    return _QUOTED_SPAN_RE.sub(" ", text)
 
 
 def strip_control_blocks(text):
@@ -133,14 +211,19 @@ def find_control_block_positions(text, name):
 
 
 def looks_like_completion_claim(text):
-    """True only when the text carries an explicit `[completion-check]` marker.
+    """True only when a real `[completion-check]` block header is present.
 
-    Claim detection is marker-only: the model declares a completion / success /
-    recommendation claim by emitting a `[completion-check]` block. Substring keyword
-    matching is intentionally NOT used: it false-positives on substrings and
-    string-matching intent is unreliable.
+    A header is a line whose stripped form begins with the `[completion-check]`
+    token. A mere inline prose mention of the token (for example, explaining what
+    the block contains) does not count, so meta-discussion is not mistaken for a
+    completion claim. Substring keyword matching of intent is intentionally NOT
+    used: it false-positives and string-matching intent is unreliable.
     """
-    return "[completion-check]" in text
+    for line in _split_lines(text):
+        match = _BLOCK_HEADER_RE.match(line.strip())
+        if match and match.group(1).lower() == "completion-check":
+            return True
+    return False
 
 
 def requires_completion_check(text):
@@ -149,9 +232,31 @@ def requires_completion_check(text):
     This is intentionally narrower than ordinary recommendation or explanation
     detection. It protects claims that work finished or verification passed, but
     avoids blocking routine meta-discussion, options, or status explanations.
+
+    Detection runs per clause on text with control blocks and non-committal
+    spans (code, quotes, blockquotes) removed, and skips clauses that are
+    hypothetical / goal-framing or that negate the closure verb, so future,
+    conditional, quoted, and illustrative phrasing does not trigger the gate.
     """
-    stripped = strip_control_blocks(text)
-    return any(pattern.search(stripped) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS)
+    cleaned = _strip_noncommittal_spans(strip_control_blocks(text))
+    for sentence in _SENTENCE_SPLIT_RE.split(cleaned):
+        if not sentence.strip():
+            continue
+        clauses = _COMMA_SPLIT_RE.split(sentence)
+        # A goal / enumeration lead at the sentence start governs the whole list.
+        if clauses and _GOAL_LEAD_RE.search(clauses[0]):
+            continue
+        for clause in clauses:
+            if not clause.strip():
+                continue
+            # A conditional lead governs only its own protasis clause.
+            if _CONDITIONAL_LEAD_RE.search(clause):
+                continue
+            if _NEGATED_CLOSURE_RE.search(clause):
+                continue
+            if any(pattern.search(clause) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS):
+                return True
+    return False
 
 
 def extract_top_level_field_section(block, field_name):
@@ -274,6 +379,99 @@ def validate_completion_evidence_map(completion_check):
     return None
 
 
+def _split_skill_tokens(raw):
+    """Split a skills-loaded value into normalized skill tokens.
+
+    Accepts comma- or newline-separated values; strips surrounding brackets,
+    quotes, whitespace, and zero-width characters so that visually-identical
+    values do not produce false negatives.
+    """
+    tokens = []
+    for part in re.split(r"[,\n]+", raw):
+        token = _ZERO_WIDTH_RE.sub("", part).strip().strip("[]").strip().strip("\"'").strip()
+        if token:
+            tokens.append(token)
+    return tokens
+
+
+def _skill_name(token):
+    """Bare skill name: the leading component before any space or annotation.
+
+    ``verification-before-completion (this turn)`` -> ``verification-before-completion``
+    while a different skill such as ``verification-before-completion-v2`` keeps its
+    suffix and therefore does not match the canonical name on exact comparison.
+    """
+    return re.split(r"[\s(]", token, maxsplit=1)[0].strip().rstrip(":").lower()
+
+
+def extract_all_control_blocks(text, name):
+    """Return every `[name]` block body in document order.
+
+    Unlike ``extract_control_block`` (first block only), this collects all
+    occurrences so that a malformed later block cannot hide behind a valid
+    earlier one.
+    """
+    lines = _split_lines(text)
+    wanted = ("" if name is None else str(name)).lower()
+    blocks = []
+    current = None
+    for line in lines:
+        block = _BLOCK_HEADER_RE.match(line.strip())
+        if block:
+            if current is not None:
+                blocks.append("\n".join(current).strip())
+                current = None
+            if block.group(1).lower() == wanted:
+                current = []
+            continue
+        if current is not None:
+            current.append(line)
+    if current is not None:
+        blocks.append("\n".join(current).strip())
+    return blocks
+
+
+def extract_skills_loaded(io_trace):
+    """Return skill tokens from an io-trace `skills-loaded` field.
+
+    Accepts three equivalent serializations so the gate is format-agnostic:
+      - inline CSV:   ``- skills-loaded: a, b``
+      - flow list:    ``- skills-loaded: [a, b]``
+      - nested list:  ``- skills-loaded:`` then indented ``  - a`` / ``  - b`` lines
+    """
+    lines = _split_lines(io_trace)
+    for index, line in enumerate(lines):
+        header = _SKILLS_LOADED_HEADER_RE.match(line)
+        if not header:
+            continue
+        inline = header.group(1).strip()
+        if inline.startswith("[") and inline.endswith("]"):
+            inline = inline[1:-1]
+        if inline.strip():
+            return _split_skill_tokens(inline)
+        # Nested form: collect indented bullet lines. Blank-line gaps and
+        # non-bullet prose lines under the header are tolerated (skipped), so the
+        # list is not truncated by a stray blank line or an introductory line.
+        # Collection stops at the next top-level `- field:` entry or a
+        # non-indented line that is neither blank nor a bullet.
+        tokens = []
+        for nxt in lines[index + 1:]:
+            if not nxt.strip():
+                continue
+            if _TOP_LEVEL_FIELD_RE.search(nxt):
+                break
+            bullet = re.match(r"^\s*-\s*(.+?)\s*$", nxt)
+            if bullet:
+                tokens.extend(_split_skill_tokens(bullet.group(1)))
+                continue
+            if nxt[:1] in (" ", "\t"):
+                # Indented non-bullet prose under the header: ignore and keep scanning.
+                continue
+            break
+        return tokens
+    return []
+
+
 def validate_completion_text(text, *, require_completion_check=False):
     """Validate a completion claim.
 
@@ -301,6 +499,13 @@ def validate_completion_text(text, *, require_completion_check=False):
         )
 
     completion_positions = find_control_block_positions(text, "completion-check")
+    if not completion_positions:
+        # Header body was extracted but no position was located (e.g. an unusual
+        # header form). Treat as a missing marker rather than crashing.
+        return (
+            "Completion or success claims about executed work require a "
+            "[completion-check] block with fresh evidence."
+        )
     first_completion = completion_positions[0]
     gate_state_positions = find_control_block_positions(text, "gate-state")
     if any(position > first_completion for position in gate_state_positions):
@@ -328,11 +533,17 @@ def validate_completion_text(text, *, require_completion_check=False):
         return "A verification skill-call should be backed by [io-trace] with skills-loaded evidence."
 
     io_trace = extract_control_block(text, "io-trace")
-    skills_loaded = _SKILLS_LOADED_RE.search(io_trace)
-    if not skills_loaded or "verification-before-completion" not in skills_loaded.group(1):
+    skills_loaded = extract_skills_loaded(io_trace)
+    if not any(_skill_name(skill) == "verification-before-completion" for skill in skills_loaded):
         return (
             "The [io-trace] skills-loaded list should include verification-before-completion "
             "when completion-check claims that skill-call."
         )
 
-    return validate_completion_evidence_map(completion_check)
+    # Validate every completion-check block, not just the first, so a malformed
+    # later block cannot pass by hiding behind a valid earlier one.
+    for block in extract_all_control_blocks(text, "completion-check"):
+        reason = validate_completion_evidence_map(block)
+        if reason:
+            return reason
+    return None

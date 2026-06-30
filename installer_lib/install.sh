@@ -96,6 +96,16 @@ _install_copy_target() {
     }
 }
 
+_sync_runtime_shared_core() {
+  local shared_src="${SCRIPT_DIR}/_shared"
+  local runtime_shared
+  runtime_shared="$(resolve_ghost_alice_runtime_shared_dir)"
+
+  [ -d "$shared_src" ] || return 0
+  _install_copy_target "$shared_src" "$runtime_shared" || return 1
+  detail_ok "$(t 'runtime _shared → copied' 'runtime _shared -> copied')"
+}
+
 _install_copy_targets() {
   local progress_label=""
   local progress_statuses=()
@@ -794,7 +804,7 @@ _run_install_hooks() {
         error "$(t "install_hooks.py not found: ${hook_py}" "install_hooks.py not found: ${hook_py}")"
         return 1
       fi
-      local args=(--platform "$platform" --hook-shared-dir "${SKILLS_DIR}/_shared" --skills-dir "$SKILLS_DIR")
+      local args=(--platform "$platform" --hook-shared-dir "$(resolve_ghost_alice_runtime_shared_dir)" --skills-dir "$SKILLS_DIR")
       local visibility="${AGENT_VISIBILITY:-}"
       if [ "$action" = "install" ] && [ -z "$visibility" ]; then
         visibility="dynamic"
@@ -1072,6 +1082,12 @@ install() {
       info "$(t 'With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.' 'With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.')"
     fi
   fi
+
+  run_logged_if_compact _sync_runtime_shared_core || {
+    error "$(t 'Runtime shared core sync failed. Aborting hook install' 'Runtime shared core sync failed. Aborting hook install')"
+    [ -n "${INSTALL_REPORT_LOG_FILE:-}" ] && error "$(t "Details log: ${INSTALL_REPORT_LOG_FILE}" "Details log: ${INSTALL_REPORT_LOG_FILE}")"
+    exit 1
+  }
 
   run_logged_if_compact _run_install_hooks "install" "$PLATFORM" || {
     error "$(t 'Hook install failed. Aborting skill install' 'Hook install failed. Aborting skill install')"

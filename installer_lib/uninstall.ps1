@@ -157,6 +157,7 @@ function Invoke-InstallDoctor {
         "--encoding-root", $SkillsRoot,
         "--ghost-alice-root", (Join-Path (Resolve-UserHome) ".ghost-alice"),
         "--install-state-manifest", $installStateManifest,
+        "--runtime-shared", (Resolve-GhostAliceRuntimeSharedDir),
         "--skills-root", $SkillsRoot
     )
     if ($Mode -eq "doctor") {
@@ -166,9 +167,12 @@ function Invoke-InstallDoctor {
     if ($Platform -eq "codex") {
         $codexRule = Join-Path (Resolve-CodexHome) "AGENTS.md"
         $pyArgs += @(
+            "--hook-config", (Join-Path (Resolve-CodexHome) "hooks.json"),
             "--global-rule", "codex-bootstrap", $codexRule,
             $CodexBootstrapMarker, $CodexManagedBlockBegin, $CodexManagedBlockEnd
         )
+    } elseif ($Platform -eq "claude") {
+        $pyArgs += @("--hook-config", (Join-Path (Resolve-ClaudeHome) "settings.json"))
     }
 
     $sharedSrc = Join-Path $ScriptDir "_shared"

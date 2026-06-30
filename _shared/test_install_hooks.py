@@ -481,6 +481,18 @@ class TestMessageLanguage(unittest.TestCase):
         root = Path(parts[parts.index("--root") + 1])
         self.assertEqual(root, install_hooks._repo_root_from_this_file() / ".tmp" / "session-intent")
 
+    def test_default_hook_shared_dir_uses_runtime_core(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = {
+                "HOME": temp_home,
+                install_hooks.HOOK_SHARED_DIR_ENV: "",
+                "GHOST_ALICE_RUNTIME_SHARED_DIR": "",
+            }
+            with patch.dict(os.environ, env, clear=False):
+                shared = install_hooks._hook_shared_dir_for_platform("codex")
+
+        self.assertEqual(shared, Path(temp_home) / ".ghost-alice" / "runtime" / "current" / "_shared")
+
     def test_claude_codex_tool_checkpoint_entries_use_dispatcher(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
@@ -2921,11 +2933,14 @@ class TestInstallHook(TempHomeTestCase):
         self.assertIn((runtime_shared / "io_trace_hook.py").as_posix(), joined)
         self.assertNotIn(source_shared, joined)
 
-    def test_cli_defaults_to_installed_platform_shared_dir_when_available(self):
-        """Direct CLI execution uses installed platform _shared as the expected command path when present."""
+    def test_cli_defaults_to_runtime_shared_dir_when_platform_shared_is_available(self):
+        """Direct CLI execution uses the shared runtime core even when platform _shared exists."""
         self._write_settings("claude", {})
-        runtime_shared = self._create_runtime_shared_dir(
+        platform_shared = self._create_runtime_shared_dir(
             self.fake_home / ".claude" / "skills" / "_shared"
+        )
+        runtime_shared = self._create_runtime_shared_dir(
+            self.fake_home / ".ghost-alice" / "runtime" / "current" / "_shared"
         )
         source_shared = Path(install_hooks.__file__).resolve().parent.as_posix()
 
@@ -2947,6 +2962,7 @@ class TestInstallHook(TempHomeTestCase):
         ).replace("\\", "/")
         self.assertIn(runtime_shared.as_posix(), joined)
         self.assertIn((runtime_shared / "io_trace_hook.py").as_posix(), joined)
+        self.assertNotIn(platform_shared.as_posix(), joined)
         self.assertNotIn(source_shared, joined)
 
     def test_cli_agent_visibility_status_writes_runtime_config_and_reports_profile(self):

@@ -36,6 +36,10 @@ resolve_codex_skills_dir() {
   resolve_shared_skills_dir
 }
 
+resolve_ghost_alice_runtime_shared_dir() {
+  printf '%s\n' "${GHOST_ALICE_RUNTIME_SHARED_DIR:-${HOME}/.ghost-alice/runtime/current/_shared}"
+}
+
 is_windows_like_runtime() {
   case "${OSTYPE:-}" in
     msys*|cygwin*|win32*) return 0 ;;
