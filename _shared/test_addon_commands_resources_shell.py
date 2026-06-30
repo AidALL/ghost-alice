@@ -33,10 +33,28 @@ def _python_311() -> bool:
     return False
 
 
+def _test_bash() -> str | None:
+    candidate = shutil.which("bash")
+    if not candidate:
+        return None
+    probe = subprocess.run(
+        [candidate, "-lc", "printf ok"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if probe.returncode == 0 and probe.stdout == "ok":
+        return candidate
+    return None
+
+
 class CommandResourceLifecycleTest(unittest.TestCase):
     def test_install_doctor_uninstall_command_and_resource(self):
-        if not shutil.which("bash"):
-            self.skipTest("bash required")
+        bash = _test_bash()
+        if not bash:
+            self.skipTest("working bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with tempfile.TemporaryDirectory() as home:
@@ -46,7 +64,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
 
             def run(*args):
                 return subprocess.run(
-                    [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 
@@ -95,8 +113,9 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             self.assertFalse(any("[addon:rich]" in c for c in post_after), msg="addon hook orphaned after uninstall")
 
     def test_full_uninstall_removes_command_and_resource(self):
-        if not shutil.which("bash"):
-            self.skipTest("bash required")
+        bash = _test_bash()
+        if not bash:
+            self.skipTest("working bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with tempfile.TemporaryDirectory() as home:
@@ -106,7 +125,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
 
             def run(*args):
                 return subprocess.run(
-                    [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 
@@ -123,8 +142,9 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             self.assertFalse(resource.exists(), msg="full uninstall orphaned the addon resource")
 
     def test_full_uninstall_fails_and_preserves_sidecar_when_addon_extra_modified(self):
-        if not shutil.which("bash"):
-            self.skipTest("bash required")
+        bash = _test_bash()
+        if not bash:
+            self.skipTest("working bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
         with tempfile.TemporaryDirectory() as home:
@@ -134,7 +154,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
 
             def run(*args):
                 return subprocess.run(
-                    [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 

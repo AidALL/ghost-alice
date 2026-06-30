@@ -9,6 +9,7 @@ non-blocking, so the gate would silently fail open.
 """
 
 import unittest
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -151,6 +152,130 @@ class NodeRuntimeStatusTest(unittest.TestCase):
             status, detail = install_doctor._node_runtime_status(strict=False)
         self.assertEqual(status, install_doctor.STATUS_OK)
         self.assertIn("ok", detail)
+
+
+class RuntimeCoreAuditTest(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.source = self.root / "repo" / "_shared"
+        self.runtime = self.root / ".ghost-alice" / "runtime" / "current" / "_shared"
+        self.config = self.root / "hooks.json"
+        self.source.mkdir(parents=True)
+        self.runtime.mkdir(parents=True)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _write_runtime_files(self):
+        files = {
+            "hook_profile_gate.py": "# runner\n",
+            "completion_check_validator.py": (
+                "def validate_completion_text(text, *, require_completion_check=False):\n"
+                "    return None\n"
+            ),
+        }
+        for name, body in files.items():
+            (self.source / name).write_text(body, encoding="utf-8")
+            (self.runtime / name).write_text(body, encoding="utf-8")
+
+    def _audit_with_files(self):
+        with mock.patch.object(
+            install_doctor,
+            "RUNTIME_SHARED_FILES",
+            ("hook_profile_gate.py", "completion_check_validator.py"),
+        ), mock.patch.object(
+            install_doctor,
+            "_runtime_session_intent_golden_status",
+            return_value=(install_doctor.STATUS_OK, "golden-pass"),
+        ):
+            return install_doctor._runtime_core_audit(self.source, self.runtime, self.config, "codex")
+
+    def test_runtime_core_audit_skips_when_runtime_shared_not_requested(self):
+        status, findings = install_doctor._runtime_core_audit(self.source, None, None, "codex")
+
+        self.assertEqual(status, install_doctor.STATUS_OK)
+        self.assertEqual(findings[0]["reason"], "not-requested")
+
+    def test_runtime_shared_file_audit_covers_runner_import_dependencies(self):
+        for dependency in (
+            "agent_visibility_policy.py",
+            "runtime_config.py",
+            "work_impact_projection.py",
+            "strict_session_log.py",
+        ):
+            self.assertIn(dependency, install_doctor.RUNTIME_SHARED_FILES)
+
+    def test_runtime_shared_file_audit_rejects_missing_runner_dependency(self):
+        (self.source / "hook_profile_gate.py").write_text("# runner\n", encoding="utf-8")
+        (self.runtime / "hook_profile_gate.py").write_text("# runner\n", encoding="utf-8")
+        (self.source / "agent_visibility_policy.py").write_text("# dependency\n", encoding="utf-8")
+
+        with mock.patch.object(
+            install_doctor,
+            "RUNTIME_SHARED_FILES",
+            ("hook_profile_gate.py", "agent_visibility_policy.py"),
+        ):
+            findings = install_doctor._runtime_shared_file_audit(self.source, self.runtime)
+
+        self.assertTrue(any(f["status"] == install_doctor.STATUS_ERROR for f in findings))
+        self.assertTrue(any(f["name"] == "agent_visibility_policy.py" for f in findings))
+
+    def test_runtime_core_audit_accepts_runtime_hook_config(self):
+        self._write_runtime_files()
+        command = f'"{sys.executable}" "{(self.runtime / "hook_profile_gate.py").as_posix()}" run prompt x # [hook-reminder] AGENTS.md'
+        self.config.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{"command": command}]}]}}),
+                               encoding="utf-8")
+
+        status, findings = self._audit_with_files()
+
+        self.assertEqual(status, install_doctor.STATUS_OK)
+        self.assertTrue(any(f["reason"] == "runtime-core-referenced" for f in findings))
+        self.assertTrue(any(f["reason"] == "golden-pass" for f in findings))
+
+    def test_runtime_core_audit_rejects_platform_shared_hook_config(self):
+        self._write_runtime_files()
+        stale_runner = self.root / ".agents" / "skills" / "_shared" / "hook_profile_gate.py"
+        command = f'"{sys.executable}" "{stale_runner.as_posix()}" run prompt x # [hook-reminder] AGENTS.md'
+        self.config.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{"command": command}]}]}}),
+                               encoding="utf-8")
+
+        status, findings = self._audit_with_files()
+
+        self.assertEqual(status, install_doctor.STATUS_ERROR)
+        self.assertTrue(any(f["reason"] == "runner-not-runtime-core" for f in findings))
+
+    def test_session_intent_golden_accepts_missing_ledger_dependency_degrade(self):
+        hook = self.runtime / "session_intent_analyzer_hook.py"
+        hook.write_text(
+            "import json\n"
+            "print(json.dumps({"
+            "\"continue\": True, "
+            "\"systemMessage\": \"Ledger dependency unavailable non-blockingly; continue without raw prompt persistence.\""
+            "}))\n",
+            encoding="utf-8",
+        )
+
+        status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+
+        self.assertEqual(status, install_doctor.STATUS_OK)
+        self.assertEqual(detail, "ledger-unavailable-degraded")
+
+    def test_session_intent_golden_rejects_pointerless_write_failure(self):
+        hook = self.runtime / "session_intent_analyzer_hook.py"
+        hook.write_text(
+            "import json\n"
+            "print(json.dumps({"
+            "\"continue\": True, "
+            "\"systemMessage\": \"Ledger write failed non-blockingly; continue without raw prompt persistence.\""
+            "}))\n",
+            encoding="utf-8",
+        )
+
+        status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+
+        self.assertEqual(status, install_doctor.STATUS_ERROR)
+        self.assertEqual(detail, "current-session-not-written")
 
 
 if __name__ == "__main__":

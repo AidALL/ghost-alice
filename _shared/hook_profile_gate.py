@@ -161,6 +161,20 @@ def _home_from_env(env: dict[str, str]) -> Path | None:
 def _read_stdin() -> str:
     if sys.stdin.isatty():
         return ""
+    # Read the raw byte buffer and decode UTF-8 explicitly. Claude Code sends the
+    # hook payload as UTF-8 JSON, but the default stdin encoding on Windows is
+    # cp949/cp1252, so a bare sys.stdin.read() would mis-decode non-ASCII (Korean)
+    # text into mojibake/lone-surrogates at this outer boundary before it reaches
+    # any inner hook. errors="replace" keeps a stray byte from crashing the gate.
+    buffer = getattr(sys.stdin, "buffer", None)
+    if buffer is not None:
+        try:
+            data = buffer.read()
+        except OSError:
+            return ""
+        if isinstance(data, bytes):
+            return data.decode("utf-8", errors="replace")
+        return str(data)
     try:
         return sys.stdin.read()
     except OSError:

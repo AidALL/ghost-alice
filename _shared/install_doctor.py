@@ -4,10 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
+import importlib.util
 import json
 import os
+import re
 import shutil
+import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -39,6 +45,31 @@ STATUS_RANK = {
     STATUS_ERROR: 2,
 }
 SUPPORTED_PLATFORMS = ("claude", "codex")
+RUNTIME_SHARED_FILES = (
+    "hook_profile_gate.py",
+    "agent_visibility_policy.py",
+    "runtime_config.py",
+    "work_impact_projection.py",
+    "strict_session_log.py",
+    "claude_stop_verification_hook.py",
+    "completion_check_validator.py",
+    "io_trace_hook.py",
+    "pending_merge_precheck_hook.py",
+    "session_intent_analyzer_hook.py",
+    "task_router_reminder_hook.py",
+)
+LEDGER_UNAVAILABLE_DEGRADE = "Ledger dependency unavailable non-blockingly"
+RUNTIME_MANAGED_MARKERS = (
+    "[merge-companion] prompt-check",
+    "[hook-reminder] AGENTS.md",
+    "[session-intent-analyzer]",
+    "[web-search-first]",
+    "[tool-checkpoint] pre-tool-check",
+    "[completion-reminder] AGENTS.md",
+    "[merge-companion] session-check",
+    "[io-trace] audit",
+)
+BASE64_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{32,}={0,2}")
 
 
 def _max_status(statuses: Sequence[str]) -> str:
@@ -373,6 +404,279 @@ def _node_runtime_status(strict: bool) -> tuple[str, str]:
     return status, "missing (required for tool-checkpoint hook dispatcher; gate fails open without it)"
 
 
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _path_token(path: Path) -> str:
+    return path.expanduser().as_posix()
+
+
+def _runtime_shared_file_audit(source_shared: Path, runtime_shared: Path) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    for name in RUNTIME_SHARED_FILES:
+        source = source_shared / name
+        runtime = runtime_shared / name
+        base = {"name": name, "kind": "runtime-file"}
+        if not source.exists():
+            findings.append({**base, "status": STATUS_ERROR, "reason": "source-missing"})
+            continue
+        if not runtime.exists():
+            findings.append({**base, "status": STATUS_ERROR, "reason": "runtime-missing"})
+            continue
+        try:
+            if _sha256_file(source) == _sha256_file(runtime):
+                findings.append({**base, "status": STATUS_OK, "reason": "hash-match"})
+            else:
+                findings.append({**base, "status": STATUS_ERROR, "reason": "hash-mismatch"})
+        except OSError as exc:
+            findings.append({**base, "status": STATUS_ERROR, "reason": f"hash-error:{exc.__class__.__name__}"})
+    return findings
+
+
+def _walk_hook_commands(value: object) -> list[str]:
+    commands: list[str] = []
+    if isinstance(value, dict):
+        command = value.get("command")
+        if isinstance(command, str):
+            commands.append(command)
+        for child in value.values():
+            commands.extend(_walk_hook_commands(child))
+    elif isinstance(value, list):
+        for child in value:
+            commands.extend(_walk_hook_commands(child))
+    return commands
+
+
+def _hook_config_commands(hook_config: Path | None) -> tuple[str, list[str]]:
+    if hook_config is None:
+        return STATUS_WARNING, []
+    if not hook_config.exists():
+        return STATUS_ERROR, []
+    try:
+        data = json.loads(hook_config.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return STATUS_ERROR, []
+    if not isinstance(data, dict):
+        return STATUS_ERROR, []
+    return STATUS_OK, _walk_hook_commands(data.get("hooks", data))
+
+
+def _decode_base64_tokens(text: str) -> list[str]:
+    decoded: list[str] = []
+    for token in BASE64_TOKEN_RE.findall(text):
+        padded = token + ("=" * ((4 - len(token) % 4) % 4))
+        try:
+            raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+            candidate = raw.decode("utf-8")
+        except Exception:
+            continue
+        if candidate and candidate not in decoded:
+            decoded.append(candidate)
+    return decoded
+
+
+def _expanded_hook_command_text(command: str) -> str:
+    seen = {command}
+    pending = [command]
+    while pending:
+        current = pending.pop()
+        for decoded in _decode_base64_tokens(current):
+            if decoded in seen:
+                continue
+            seen.add(decoded)
+            pending.append(decoded)
+    return "\n".join(seen)
+
+
+def _norm_for_compare(text: str) -> str:
+    """Case-fold paths for comparison on case-insensitive filesystems.
+
+    On Windows a drive-letter or path-segment case difference between
+    settings.json and Path.home() refers to the same file, so a case-sensitive
+    substring test would otherwise flag a correctly-installed runtime as drifted.
+    """
+    return text.casefold() if os.name == "nt" else text
+
+
+def _runtime_hook_config_audit(commands: list[str], runtime_shared: Path) -> list[dict[str, str]]:
+    findings: list[dict[str, str]] = []
+    runtime_runner = _path_token(runtime_shared / "hook_profile_gate.py")
+    managed = [
+        command for command in commands
+        if any(marker in command for marker in RUNTIME_MANAGED_MARKERS)
+    ]
+    if not managed:
+        return [{"status": STATUS_ERROR, "name": "managed-hooks", "kind": "hook-config", "reason": "none-found"}]
+
+    for index, command in enumerate(managed):
+        expanded = _expanded_hook_command_text(command).replace("\\", "/")
+        expanded_cmp = _norm_for_compare(expanded)
+        name = f"managed-hook-{index + 1}"
+        if _norm_for_compare(runtime_runner) not in expanded_cmp:
+            findings.append({
+                "status": STATUS_ERROR,
+                "name": name,
+                "kind": "hook-config",
+                "reason": "runner-not-runtime-core",
+            })
+            continue
+        drifted_script = None
+        for script_name in RUNTIME_SHARED_FILES:
+            if _norm_for_compare(script_name) in expanded_cmp and _norm_for_compare(_path_token(runtime_shared / script_name)) not in expanded_cmp:
+                drifted_script = script_name
+                break
+        if drifted_script:
+            findings.append({
+                "status": STATUS_ERROR,
+                "name": name,
+                "kind": "hook-config",
+                "reason": f"script-not-runtime-core:{drifted_script}",
+            })
+            continue
+        findings.append({
+            "status": STATUS_OK,
+            "name": name,
+            "kind": "hook-config",
+            "reason": "runtime-core-referenced",
+        })
+    return findings
+
+
+def _runtime_validator_golden_status(runtime_shared: Path) -> tuple[str, str]:
+    validator = runtime_shared / "completion_check_validator.py"
+    if not validator.exists():
+        return STATUS_ERROR, "validator-missing"
+    try:
+        spec = importlib.util.spec_from_file_location("_ghost_alice_runtime_completion_validator", validator)
+        if spec is None or spec.loader is None:
+            return STATUS_ERROR, "validator-load-spec-missing"
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sample = (
+            "   [completion-check]\n"
+            "- verification-before-completion: done\n"
+            "- skill-call: verification-before-completion (this turn)\n"
+            "- acceptance-criteria:\n"
+            "  - crit-a: golden sample [source: system-doc]\n"
+            "- claim-evidence-map:\n"
+            "  - claim: golden validation passed\n"
+            "    criterion: crit-a\n"
+            "    evidence: install_doctor runtime validator golden sample\n"
+            "    verdict: pass\n"
+            "- unverified:\n"
+            "  - none\n"
+            "[io-trace]\n"
+            "- skills-loaded: [verification-before-completion]\n"
+        )
+        reason = module.validate_completion_text(sample, require_completion_check=True)
+    except Exception as exc:
+        return STATUS_ERROR, f"validator-exception:{exc.__class__.__name__}"
+    if reason:
+        return STATUS_ERROR, f"validator-denied:{reason}"
+    return STATUS_OK, "golden-pass"
+
+
+def _runtime_session_intent_golden_status(runtime_shared: Path, platform: str) -> tuple[str, str]:
+    hook = runtime_shared / "session_intent_analyzer_hook.py"
+    if not hook.exists():
+        return STATUS_ERROR, "hook-missing"
+    payload = json.dumps({
+        "hook_event_name": "UserPromptSubmit",
+        "session_id": "doctor-runtime-golden",
+        "prompt": "runtime session intent golden",
+    })
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp) / "session-intent"
+        proc = subprocess.run(
+            [
+                sys.executable,
+                str(hook),
+                "--platform",
+                platform,
+                "--hook",
+                "session-intent",
+                "--context",
+                "prompt_submit",
+                "--format",
+                "json",
+                "--root",
+                str(root),
+            ],
+            input=payload,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        if proc.returncode != 0:
+            stderr = proc.stderr.strip().splitlines()
+            detail = stderr[-1] if stderr else f"rc={proc.returncode}"
+            return STATUS_ERROR, f"hook-exit:{detail}"
+        try:
+            data = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            return STATUS_ERROR, "hook-output-invalid-json"
+        if data.get("continue") is not True:
+            return STATUS_ERROR, "hook-output-not-continue"
+        pointer = root / platform / "current-session.json"
+        if not pointer.exists():
+            system_message = str(data.get("systemMessage") or "")
+            if LEDGER_UNAVAILABLE_DEGRADE in system_message:
+                return STATUS_OK, "ledger-unavailable-degraded"
+            return STATUS_ERROR, "current-session-not-written"
+    return STATUS_OK, "golden-pass"
+
+
+def _runtime_core_audit(
+    source_shared: Path,
+    runtime_shared: Path | None,
+    hook_config: Path | None,
+    platform: str,
+) -> tuple[str, list[dict[str, str]]]:
+    if runtime_shared is None:
+        return STATUS_OK, [{
+            "status": STATUS_OK,
+            "name": "runtime-shared",
+            "kind": "runtime-core",
+            "reason": "not-requested",
+        }]
+
+    runtime_shared = runtime_shared.expanduser()
+    findings = _runtime_shared_file_audit(source_shared, runtime_shared)
+    config_status, commands = _hook_config_commands(hook_config)
+    if config_status != STATUS_OK:
+        findings.append({
+            "status": config_status,
+            "name": "hook-config",
+            "kind": "hook-config",
+            "reason": "missing-or-invalid",
+        })
+    else:
+        findings.extend(_runtime_hook_config_audit(commands, runtime_shared))
+
+    golden_status, golden_detail = _runtime_validator_golden_status(runtime_shared)
+    findings.append({
+        "status": golden_status,
+        "name": "completion-validator",
+        "kind": "golden-hook-test",
+        "reason": golden_detail,
+    })
+    session_status, session_detail = _runtime_session_intent_golden_status(runtime_shared, platform)
+    findings.append({
+        "status": session_status,
+        "name": "session-intent",
+        "kind": "golden-hook-test",
+        "reason": session_detail,
+    })
+    return _max_status([finding["status"] for finding in findings]), findings
+
+
 def run(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     ghost_alice_root = args.ghost_alice_root.expanduser()
@@ -492,6 +796,20 @@ def run(args: argparse.Namespace) -> int:
     statuses.append(node_status)
     print(f"node-runtime: {node_detail}")
 
+    runtime_status, runtime_findings = _runtime_core_audit(
+        repo_root / "_shared",
+        args.runtime_shared,
+        args.hook_config,
+        args.platform,
+    )
+    statuses.append(runtime_status)
+    print(f"runtime-core: {runtime_status}")
+    for finding in runtime_findings:
+        print(
+            f"  {finding['status']} {finding['kind']}/{finding['name']}: "
+            f"{finding['reason']}"
+        )
+
     overall = _max_status(statuses)
     print(f"overall: {overall}")
     if args.strict and overall == STATUS_ERROR:
@@ -506,6 +824,8 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--encoding-root", action="append", type=Path, default=None)
     parser.add_argument("--ghost-alice-root", type=Path, default=Path.home() / ".ghost-alice")
     parser.add_argument("--install-state-manifest", type=Path, default=None)
+    parser.add_argument("--runtime-shared", type=Path, default=None)
+    parser.add_argument("--hook-config", type=Path, default=None)
     parser.add_argument("--target", action="append", nargs=2, default=[], metavar=("ASSET_ID", "DEST_PATH"))
     parser.add_argument("--skill-root", action="append", type=Path, default=[])
     parser.add_argument("--skills-root", type=Path, default=None,

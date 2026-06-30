@@ -44,6 +44,9 @@ Antigravity adapter가 없으면 그 smoke item은 inconclusive로 기록한다.
 
 각 smoke record는 다음 signal이 관찰됐는지 기록한다.
 
+- `agent-run result`: agent process가 timeout 안에 exit 0으로 종료하고 non-empty last-message artifact를 쓴다.
+- `tool/runtime errors`: log에 tool router error, hook failure, traceback, runtime panic, cache initialization error가 없다.
+- `harness validity`: prompt가 request를 만족하는 데 필요한 read-only tool action을 허용한다. 모순된 prompt는 `pass`가 아니라 `invalid-harness`다.
 - `task-router`: first tool action 전에 routing이 보인다.
 - `session-intent-analyzer`: raw prompt 저장 없이 intent delta 또는 hook observation이 기록된다.
 - `boundary-contract`: read-only work에서는 `n/a` 또는 미사용 사유가 보인다.
@@ -72,9 +75,23 @@ observed:
   verification-before-completion:
   io-trace:
 failure triage:
-  status: pass | fail | inconclusive
+  status: pass | fail | invalid-harness | inconclusive
   reason:
   next owner:
+```
+
+local scratch summary의 minimum machine-readable fields는 다음과 같다.
+
+```text
+platform:
+case:
+status: pass | fail | invalid-harness | inconclusive
+agent_command:
+exit_code:
+timed_out:
+log_file:
+output_file:
+reasons:
 ```
 
 ## Failure Triage
@@ -86,9 +103,16 @@ failure triage:
 | routine tool-checkpoint output requires recovery-cost or recovery-note fields | tool-checkpoint surface failure | `docs/ko/policies/session-gate-matrix.md`, platform bootstrap, hook message wording을 맞춘다. |
 | skill activation permission allows only core gates | permission scope failure | installer hook permission sync와 platform policy files를 inspect한다. |
 | smoke record stores raw prompt or transcript | audit hygiene failure | session-intent-analyzer storage contract를 먼저 fix한다. |
+| agent command times out | runtime smoke failure | loop를 닫지 않는다. log를 inspect하고, failing behavior를 fix하거나 좁힌 뒤 reinstall하고 fresh session에서 rerun한다. |
+| log contains `ERROR codex_core::tools::router`, hook failure, traceback, panic, or cache initialization error | runtime smoke failure | 나중의 다른 prompt가 pass해도 이 run은 failed로 처리한다. failing case를 reproduce하거나 source-grounded reason으로 retire한다. |
+| output file is missing or empty | runtime smoke failure | partial log activity만으로 success를 추론하지 않는다. agent command 또는 output path를 고친 뒤 rerun한다. |
+| Windows resolves `codex` to different shim or binary across PowerShell, CMD, and automation | harness drift | `agent_command`를 기록하고, Codex smoke에서는 의도한 `codex.cmd` shim 또는 explicit absolute path를 우선한다. |
+| prompt forbids the only available read-only method needed by the task | invalid harness | harness를 고친 뒤 rerun한다. 이것은 product pass evidence가 아니다. |
+| a later bounded pass follows an earlier unresolved failure in the same loop | partial status | failed case가 fix되거나, 근거와 함께 retire되거나, 명시적으로 out of scope 처리될 때까지 loop를 열어 둔다. |
 | Antigravity adapter is not ready | inconclusive | compatibility discovery가 끝난 뒤 같은 input을 다시 돌린다. |
 
 ## Automated Verification Boundary
 
 Runtime smoke records는 manual evidence이며 keyword-presence unit test target이 아니다.
 static hook payload와 gate wording contract는 `scripts/check_skill_gate_contract.py`, `scripts/validate_entrypoints.py`, `_shared.test_install_hooks`가 cover한다.
+`_shared/live_agent_smoke.py`는 process-level evidence를 classify하고 Codex fresh-session smoke case를 실행할 수 있지만, 이 policy와 design documents에 대한 adversarial review를 대체하지 않는다.

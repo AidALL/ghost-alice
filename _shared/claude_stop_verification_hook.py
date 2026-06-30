@@ -19,8 +19,15 @@ VERIFICATION_SKILL = "verification-before-completion"
 
 
 def _read_hook_input() -> dict[str, Any]:
+    # Decode stdin as UTF-8 explicitly (Windows default is cp949/cp1252), so a
+    # non-ASCII transcript_path or inline message is not mis-decoded.
     try:
-        raw = sys.stdin.read()
+        buffer = getattr(sys.stdin, "buffer", None)
+        if buffer is not None:
+            data = buffer.read()
+            raw = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
+        else:
+            raw = sys.stdin.read()
     except Exception:
         return {}
     if not raw.strip():

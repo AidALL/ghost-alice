@@ -3,12 +3,36 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPORT_PS1 = REPO_ROOT / "installer_lib" / "report.ps1"
 REPORT_SH = REPO_ROOT / "installer_lib" / "report.sh"
+
+
+def _find_test_bash() -> str | None:
+    candidates = [
+        shutil.which("bash"),
+        shutil.which("bash.exe"),
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate)
+        if not path.exists():
+            continue
+        normalized = path.as_posix().lower()
+        if sys.platform.startswith("win") and (
+            normalized.endswith("/windows/system32/bash.exe")
+            or normalized.endswith("/appdata/local/microsoft/windowsapps/bash.exe")
+        ):
+            continue
+        return str(path)
+    return None
 
 
 class CommonTargetProgressLineFixedWidth(unittest.TestCase):
@@ -75,15 +99,18 @@ class BashLiveCommonTargetProgressLineWidth(unittest.TestCase):
         self.assertIn("report_live_common_target_progress_line()", source)
         self.assertIn('report_progress_bar "$done_count" "$total_count" 20', source)
 
-    @unittest.skipUnless(shutil.which("bash"), "bash not installed")
     def test_live_formatter_stays_within_80_columns_runtime(self) -> None:
+        bash_exe = _find_test_bash()
+        if not bash_exe:
+            self.skipTest("No non-WSL bash executable available for report.sh runtime test")
+
         script = (
             f"source '{REPORT_SH.as_posix()}'; "
             "report_live_common_target_progress_line 26 26 "
             "'common targets synced on all platforms'"
         )
         result = subprocess.run(
-            ["bash", "-lc", script],
+            [bash_exe, "-lc", script],
             capture_output=True,
             text=True,
             encoding="utf-8",

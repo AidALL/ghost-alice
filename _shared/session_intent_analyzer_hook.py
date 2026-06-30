@@ -13,16 +13,55 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-LEDGER_DIR = REPO_ROOT / "session-intent-analyzer" / "scripts"
-if str(LEDGER_DIR) not in sys.path:
-    sys.path.insert(0, str(LEDGER_DIR))
 
-from session_intent_ledger import (  # noqa: E402
-    DEFAULT_ROOT,
-    build_input_observation,
-    record_turn,
-    resolve_session_id,
-)
+
+def _home() -> Path:
+    for key in ("HOME", "USERPROFILE"):
+        value = os.environ.get(key, "").strip()
+        if value:
+            return Path(value)
+    drive = os.environ.get("HOMEDRIVE", "").strip()
+    path = os.environ.get("HOMEPATH", "").strip()
+    if drive and path:
+        return Path(f"{drive}{path}")
+    return Path.home()
+
+
+def _ledger_dir_candidates() -> list[Path]:
+    home = _home()
+    candidates = [
+        REPO_ROOT / "session-intent-analyzer" / "scripts",
+        home / ".agents" / "skills" / "session-intent-analyzer" / "scripts",
+        home / ".claude" / "skills" / "session-intent-analyzer" / "scripts",
+    ]
+    claude_home = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if claude_home:
+        candidates.append(Path(claude_home) / "skills" / "session-intent-analyzer" / "scripts")
+    return candidates
+
+
+for LEDGER_DIR in _ledger_dir_candidates():
+    if (LEDGER_DIR / "session_intent_ledger.py").is_file() and str(LEDGER_DIR) not in sys.path:
+        sys.path.insert(0, str(LEDGER_DIR))
+        break
+
+try:
+    from session_intent_ledger import (  # noqa: E402
+        DEFAULT_ROOT,
+        build_input_observation,
+        record_turn,
+        resolve_session_id,
+    )
+except Exception:
+    # The ledger module may be absent (skill uninstalled, mid-reinstall, or
+    # relocated while the hook entry remains). Degrade gracefully instead of
+    # crashing the hook at import time: leave the ledger callables unbound so the
+    # existing non-blocking try/except in main() routes through its degrade path,
+    # and provide an argparse-default fallback for DEFAULT_ROOT.
+    DEFAULT_ROOT = ".tmp/session-intent"
+    build_input_observation = None
+    record_turn = None
+    resolve_session_id = None
 
 
 DEFAULT_INTERNAL = (
@@ -31,6 +70,12 @@ DEFAULT_INTERNAL = (
     "Agents add semantic summaries, constraints, and decisions only when intent materially changes. "
     "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
     "Use the ledger as context for skill-evolution and jailbreak-detector."
+)
+LEDGER_UNAVAILABLE_DEGRADE = (
+    "Ledger dependency unavailable non-blockingly; continue without raw prompt persistence."
+)
+LEDGER_WRITE_FAILED_DEGRADE = (
+    "Ledger write failed non-blockingly; continue without raw prompt persistence."
 )
 
 
@@ -111,30 +156,37 @@ def main(argv: list[str] | None = None) -> int:
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
     try:
-        session_id = resolve_session_id(
-            root=ledger_root,
-            platform=args.platform,
-            payload=payload,
-            env=os.environ,
+        ledger_available = all(
+            callable(func)
+            for func in (resolve_session_id, build_input_observation, record_turn)
         )
-        prompt = extract_prompt(payload)
-        if prompt:
-            observation = build_input_observation(
-                platform=args.platform,
-                session_id=session_id,
-                raw_user_input=prompt,
-            )
-            record_turn(
+        if not ledger_available:
+            message = message + " " + LEDGER_UNAVAILABLE_DEGRADE
+        else:
+            session_id = resolve_session_id(
                 root=ledger_root,
                 platform=args.platform,
-                session_id=session_id,
-                raw_user_input=prompt,
-                intent_delta=None,
-                source="hook",
-                observation=observation,
+                payload=payload,
+                env=os.environ,
             )
+            prompt = extract_prompt(payload)
+            if prompt:
+                observation = build_input_observation(
+                    platform=args.platform,
+                    session_id=session_id,
+                    raw_user_input=prompt,
+                )
+                record_turn(
+                    root=ledger_root,
+                    platform=args.platform,
+                    session_id=session_id,
+                    raw_user_input=prompt,
+                    intent_delta=None,
+                    source="hook",
+                    observation=observation,
+                )
     except Exception:
-        message = message + " Ledger write failed non-blockingly; continue without raw prompt persistence."
+        message = message + " " + LEDGER_WRITE_FAILED_DEGRADE
 
     sys.stdout.write(render_payload(args.format, message, ledger_root))
     if args.format == "json":

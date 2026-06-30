@@ -170,9 +170,10 @@ def _hook_shared_dir() -> Path:
 
 
 def _default_installed_hook_shared_dir(platform_key: str) -> Path:
-    if platform_key == "claude":
-        return _resolve_claude_dir() / "skills" / "_shared"
-    return _home() / ".agents" / "skills" / "_shared"
+    configured = os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser()
+    return _home() / ".ghost-alice" / "runtime" / "current" / "_shared"
 
 
 def _hook_shared_dir_for_platform(platform_key: str, explicit: str | None = None) -> Path | None:
@@ -181,10 +182,7 @@ def _hook_shared_dir_for_platform(platform_key: str, explicit: str | None = None
     configured = os.environ.get(HOOK_SHARED_DIR_ENV, "").strip()
     if configured:
         return Path(configured).expanduser()
-    installed_shared = _default_installed_hook_shared_dir(platform_key)
-    if installed_shared.exists():
-        return installed_shared
-    return None
+    return _default_installed_hook_shared_dir(platform_key)
 
 
 def _resolve_shared_hook_script(name: str) -> str:

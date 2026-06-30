@@ -776,6 +776,59 @@ def _support_artifact_item(name: str, path: Path, *, confirm: bool) -> dict[str,
     return _apply_remove_action(item, path, confirm=confirm, reason="trace-backed-support-artifact")
 
 
+def _other_platform_install_states(manifest_path: Path, current_platform: str) -> list[str]:
+    """Platforms (other than current) that still have an install-state manifest.
+
+    A platform install-state manifest is exactly ``<platform>.json``; suffixed
+    sidecars such as ``<platform>-hook-feature-change.json`` are not manifests.
+    """
+    install_state_dir = manifest_path.parent
+    if not install_state_dir.is_dir():
+        return []
+    others: list[str] = []
+    for candidate in sorted(install_state_dir.glob("*.json")):
+        if candidate == manifest_path:
+            continue
+        stem = candidate.stem
+        if "-" in stem or "." in stem:
+            continue
+        if stem != current_platform:
+            others.append(stem)
+    return others
+
+
+def _runtime_core_item(args: argparse.Namespace) -> dict[str, Any]:
+    """Sweep the shared runtime-core tree (``~/.ghost-alice/runtime``).
+
+    Every platform's hooks resolve to ``~/.ghost-alice/runtime/current/_shared``,
+    so the tree is removed only when no other platform still has an install-state
+    manifest; otherwise removing it would break the remaining platform's hooks.
+    A non-default ``GHOST_ALICE_RUNTIME_SHARED_DIR`` override resolves outside the
+    Ghost-ALICE root and is left for manual review.
+    """
+    path = _ghost_alice_root() / "runtime"
+    item: dict[str, Any] = {
+        "kind": "support-artifact",
+        "target_name": "runtime-core",
+        "path": path.as_posix(),
+    }
+    if not _is_allowed_support_path(path):
+        item.update(action="manual-review", reason="outside-ghost-alice-root")
+        return item
+    if not path.exists() and not path.is_symlink():
+        item.update(action="missing", reason="support-artifact-absent")
+        return item
+    others = _other_platform_install_states(args.install_state_manifest, args.platform)
+    if others:
+        item.update(
+            action="manual-review",
+            reason="shared-runtime-in-use-by-other-platform",
+            shared_platforms=others,
+        )
+        return item
+    return _apply_remove_action(item, path, confirm=args.confirm, reason="trace-backed-support-artifact")
+
+
 def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
     manifest_path = args.install_state_manifest
     install_state_dir = manifest_path.parent
@@ -816,6 +869,7 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             _ghost_alice_root() / "addons" / args.platform,
             confirm=args.confirm,
         ),
+        _runtime_core_item(args),
     ]
 
 

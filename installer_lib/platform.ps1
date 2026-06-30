@@ -20,6 +20,13 @@ function Resolve-CodexSkillsDir {
     return (Join-Path (Join-Path (Resolve-UserHome) ".agents") "skills")
 }
 
+function Resolve-GhostAliceRuntimeSharedDir {
+    if ($env:GHOST_ALICE_RUNTIME_SHARED_DIR) {
+        return $env:GHOST_ALICE_RUNTIME_SHARED_DIR
+    }
+    return (Join-Path (Join-Path (Join-Path (Resolve-UserHome) ".ghost-alice") "runtime/current") "_shared")
+}
+
 function Test-CodexHooksSupported {
     return $true
 }
