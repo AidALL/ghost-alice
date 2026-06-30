@@ -71,6 +71,12 @@ DEFAULT_INTERNAL = (
     "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
     "Use the ledger as context for skill-evolution and jailbreak-detector."
 )
+LEDGER_UNAVAILABLE_DEGRADE = (
+    "Ledger dependency unavailable non-blockingly; continue without raw prompt persistence."
+)
+LEDGER_WRITE_FAILED_DEGRADE = (
+    "Ledger write failed non-blockingly; continue without raw prompt persistence."
+)
 
 
 def read_payload() -> dict[str, Any]:
@@ -150,30 +156,37 @@ def main(argv: list[str] | None = None) -> int:
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
     try:
-        session_id = resolve_session_id(
-            root=ledger_root,
-            platform=args.platform,
-            payload=payload,
-            env=os.environ,
+        ledger_available = all(
+            callable(func)
+            for func in (resolve_session_id, build_input_observation, record_turn)
         )
-        prompt = extract_prompt(payload)
-        if prompt:
-            observation = build_input_observation(
-                platform=args.platform,
-                session_id=session_id,
-                raw_user_input=prompt,
-            )
-            record_turn(
+        if not ledger_available:
+            message = message + " " + LEDGER_UNAVAILABLE_DEGRADE
+        else:
+            session_id = resolve_session_id(
                 root=ledger_root,
                 platform=args.platform,
-                session_id=session_id,
-                raw_user_input=prompt,
-                intent_delta=None,
-                source="hook",
-                observation=observation,
+                payload=payload,
+                env=os.environ,
             )
+            prompt = extract_prompt(payload)
+            if prompt:
+                observation = build_input_observation(
+                    platform=args.platform,
+                    session_id=session_id,
+                    raw_user_input=prompt,
+                )
+                record_turn(
+                    root=ledger_root,
+                    platform=args.platform,
+                    session_id=session_id,
+                    raw_user_input=prompt,
+                    intent_delta=None,
+                    source="hook",
+                    observation=observation,
+                )
     except Exception:
-        message = message + " Ledger write failed non-blockingly; continue without raw prompt persistence."
+        message = message + " " + LEDGER_WRITE_FAILED_DEGRADE
 
     sys.stdout.write(render_payload(args.format, message, ledger_root))
     if args.format == "json":

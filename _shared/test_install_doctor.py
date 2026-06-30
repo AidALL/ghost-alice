@@ -221,6 +221,38 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         self.assertEqual(status, install_doctor.STATUS_ERROR)
         self.assertTrue(any(f["reason"] == "runner-not-runtime-core" for f in findings))
 
+    def test_session_intent_golden_accepts_missing_ledger_dependency_degrade(self):
+        hook = self.runtime / "session_intent_analyzer_hook.py"
+        hook.write_text(
+            "import json\n"
+            "print(json.dumps({"
+            "\"continue\": True, "
+            "\"systemMessage\": \"Ledger dependency unavailable non-blockingly; continue without raw prompt persistence.\""
+            "}))\n",
+            encoding="utf-8",
+        )
+
+        status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+
+        self.assertEqual(status, install_doctor.STATUS_OK)
+        self.assertEqual(detail, "ledger-unavailable-degraded")
+
+    def test_session_intent_golden_rejects_pointerless_write_failure(self):
+        hook = self.runtime / "session_intent_analyzer_hook.py"
+        hook.write_text(
+            "import json\n"
+            "print(json.dumps({"
+            "\"continue\": True, "
+            "\"systemMessage\": \"Ledger write failed non-blockingly; continue without raw prompt persistence.\""
+            "}))\n",
+            encoding="utf-8",
+        )
+
+        status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+
+        self.assertEqual(status, install_doctor.STATUS_ERROR)
+        self.assertEqual(detail, "current-session-not-written")
+
 
 if __name__ == "__main__":
     unittest.main()

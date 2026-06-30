@@ -54,6 +54,7 @@ RUNTIME_SHARED_FILES = (
     "session_intent_analyzer_hook.py",
     "task_router_reminder_hook.py",
 )
+LEDGER_UNAVAILABLE_DEGRADE = "Ledger dependency unavailable non-blockingly"
 RUNTIME_MANAGED_MARKERS = (
     "[merge-companion] prompt-check",
     "[hook-reminder] AGENTS.md",
@@ -621,6 +622,9 @@ def _runtime_session_intent_golden_status(runtime_shared: Path, platform: str) -
             return STATUS_ERROR, "hook-output-not-continue"
         pointer = root / platform / "current-session.json"
         if not pointer.exists():
+            system_message = str(data.get("systemMessage") or "")
+            if LEDGER_UNAVAILABLE_DEGRADE in system_message:
+                return STATUS_OK, "ledger-unavailable-degraded"
             return STATUS_ERROR, "current-session-not-written"
     return STATUS_OK, "golden-pass"
 
