@@ -252,9 +252,8 @@ def requires_completion_check(text):
             # A conditional lead governs only its own protasis clause.
             if _CONDITIONAL_LEAD_RE.search(clause):
                 continue
-            if _NEGATED_CLOSURE_RE.search(clause):
-                continue
-            if any(pattern.search(clause) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS):
+            claim_clause = _NEGATED_CLOSURE_RE.sub(" ", clause)
+            if any(pattern.search(claim_clause) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS):
                 return True
     return False
 

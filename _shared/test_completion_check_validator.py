@@ -203,6 +203,9 @@ class TestExecutedWorkDetectorFalseBlocks(unittest.TestCase):
     def test_negated_closure_is_not_a_claim(self):
         self.assertFalse(v.requires_completion_check("The task is not complete yet."))
 
+    def test_negation_does_not_hide_later_success_claim(self):
+        self.assertTrue(v.requires_completion_check("The build is not clean but tests passed."))
+
     def test_plain_completion_still_detected(self):
         self.assertTrue(v.requires_completion_check("The task is complete."))
 
@@ -340,6 +343,11 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
         # A real claim in a new sentence after a goal line is still caught.
         self.assertTrue(
             v.requires_completion_check("Goal: ship it. The task is complete and all tests pass.")
+        )
+
+    def test_negated_status_with_later_claim_still_requires_completion_check(self):
+        self.assertTrue(
+            v.requires_completion_check("The task is not complete but the install doctor tests passed.")
         )
 
     def test_indented_completion_header_does_not_crash(self):

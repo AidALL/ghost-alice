@@ -47,6 +47,10 @@ STATUS_RANK = {
 SUPPORTED_PLATFORMS = ("claude", "codex")
 RUNTIME_SHARED_FILES = (
     "hook_profile_gate.py",
+    "agent_visibility_policy.py",
+    "runtime_config.py",
+    "work_impact_projection.py",
+    "strict_session_log.py",
     "claude_stop_verification_hook.py",
     "completion_check_validator.py",
     "io_trace_hook.py",
