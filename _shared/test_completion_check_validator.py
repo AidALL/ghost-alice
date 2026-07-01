@@ -368,5 +368,22 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
         self.assertTrue(result is None or isinstance(result, str))
 
 
+class TestKoreanNegatedStatusNotABlock(unittest.TestCase):
+    """Korean negation is post-verbal; stripping only the negation particle left
+    the closure word intact and false-blocked an honest 'not complete' report."""
+
+    def test_korean_post_verbal_negation_is_not_a_claim(self):
+        for phrase in (
+            "작업이 완료되지 않았다.",
+            "테스트가 통과하지 못했다.",
+            "작업이 아직 완료 안 됐다.",
+        ):
+            self.assertFalse(v.requires_completion_check(phrase), phrase)
+
+    def test_korean_real_completion_still_detected(self):
+        self.assertTrue(v.requires_completion_check("작업 완료했습니다."))
+        self.assertTrue(v.requires_completion_check("테스트 통과했다."))
+
+
 if __name__ == "__main__":
     unittest.main()

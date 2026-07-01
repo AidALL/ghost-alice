@@ -35,6 +35,7 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -90,10 +91,37 @@ def _within_allowed(dest: str, allowed_roots: list[Path]) -> bool:
     return False
 
 
+def _is_reparse_point(path: Path) -> bool:
+    """True for a Windows reparse point (junction or directory/file symlink).
+
+    Path.is_symlink() returns False for a directory junction and for an MSYS /
+    Git-bash directory symlink, yet those entries must be removed as links, not
+    recursed into. Detect any reparse point via the Windows file attribute.
+    On non-Windows there is no st_file_attributes, so this returns False and the
+    POSIX is_symlink() path handles real symlinks.
+    """
+    try:
+        attrs = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
+
+
 def _symlink_safe_remove(path: Path) -> None:
     if path.is_symlink():
-        path.unlink()  # remove the link, NEVER the resolved target
-    elif path.is_dir():
+        path.unlink()  # POSIX/real symlink: remove the link, NEVER the target
+        return
+    if os.name == "nt" and _is_reparse_point(path):
+        # Windows junction or directory reparse point (e.g. an MSYS/Git-bash
+        # directory symlink): is_symlink() is False and shutil.rmtree refuses on
+        # a link. Remove the link itself with rmdir (dir reparse), falling back to
+        # unlink (file reparse) -- never the resolved target.
+        try:
+            os.rmdir(path)
+        except OSError:
+            os.unlink(path)
+        return
+    if path.is_dir():
         shutil.rmtree(path)
     elif path.exists():
         path.unlink()

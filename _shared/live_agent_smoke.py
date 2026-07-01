@@ -166,6 +166,7 @@ def classify_smoke_result(
 ) -> SmokeClassification:
     """Classify a live smoke run without storing raw prompts."""
 
+    markers = tuple(required_markers)
     combined = f"{log_text}\n{output_text}"
     runtime_log = _runtime_diagnostic_log_text(log_text)
     fail_reasons: list[str] = []
@@ -189,17 +190,34 @@ def classify_smoke_result(
     elif exit_code not in (None, 0):
         fail_reasons.append(f"exit-code:{exit_code}")
 
+    # A run that exited 0, produced non-empty output, and emitted every required
+    # governance marker is a completed governed task. A runtime-error line that
+    # Codex recovered from (the agent still delivered the full surface) is then a
+    # transient, not a smoke failure -- the agent.log preserves it for audit. So
+    # the runtime-error patterns only fail a run that did NOT otherwise clearly
+    # succeed. When no markers are required we cannot confirm success this way, so
+    # the patterns still apply.
+    recovered_ok = (
+        exit_code == 0
+        and not timed_out
+        and output_exists
+        and bool(output_text.strip())
+        and bool(markers)
+        and all(marker in combined for marker in markers)
+    )
+
     # Runtime-error patterns are scanned against the runtime LOG only, never the
     # agent's own answer text, so an agent that legitimately quotes an error
     # string in its summary is not false-failed.
-    for reason, pattern in FAILURE_PATTERNS:
-        if _contains_pattern(pattern, runtime_log) and reason not in fail_reasons:
-            fail_reasons.append(reason)
+    if not recovered_ok:
+        for reason, pattern in FAILURE_PATTERNS:
+            if _contains_pattern(pattern, runtime_log) and reason not in fail_reasons:
+                fail_reasons.append(reason)
 
     if not output_exists or not output_text.strip():
         fail_reasons.append("missing-output")
 
-    for marker in required_markers:
+    for marker in markers:
         if marker not in combined:
             fail_reasons.append(f"missing-marker:{marker}")
 

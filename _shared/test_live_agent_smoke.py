@@ -275,6 +275,44 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
         self.assertIn("Get-Content _shared/install_doctor.py -Raw", prompt)
         self.assertIn("full-file", prompt)
 
+    def test_recovered_runtime_error_with_full_surface_passes(self):
+        # exit 0 + all required markers + non-empty output = completed governed
+        # task; a recovered (timestamped) tool-router-error in the runtime log
+        # must not false-fail it (the agent.log still preserves the line).
+        result = live_agent_smoke.classify_smoke_result(
+            exit_code=0,
+            timed_out=False,
+            log_text=(
+                "2026-06-30T22:24:14Z ERROR codex_core::tools::router: transient retry\n"
+                "hook: Stop Completed\n"
+            ),
+            output_text=(
+                "[gate-state]\n- task-router: done\n"
+                "Summary: completed the multi-step task.\n"
+                "[completion-check]\n- verification-before-completion: done\n"
+                "[io-trace]\n- files-read: [README.md]\n"
+            ),
+            output_exists=True,
+            required_markers=("[gate-state]", "[completion-check]", "[io-trace]"),
+        )
+        self.assertEqual(result.status, "pass")
+
+    def test_runtime_error_without_full_surface_still_fails(self):
+        # Same router error but the required surface is MISSING -> still a failure.
+        result = live_agent_smoke.classify_smoke_result(
+            exit_code=0,
+            timed_out=False,
+            log_text=(
+                "2026-06-30T22:24:14Z ERROR codex_core::tools::router: boom\n"
+                "hook: Stop Completed\n"
+            ),
+            output_text="partial output, no governance surface\n",
+            output_exists=True,
+            required_markers=("[gate-state]", "[io-trace]"),
+        )
+        self.assertEqual(result.status, "fail")
+        self.assertIn("tool-router-error", result.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

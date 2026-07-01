@@ -52,16 +52,27 @@ try:
         record_turn,
         resolve_session_id,
     )
-except Exception:
-    # The ledger module may be absent (skill uninstalled, mid-reinstall, or
-    # relocated while the hook entry remains). Degrade gracefully instead of
-    # crashing the hook at import time: leave the ledger callables unbound so the
-    # existing non-blocking try/except in main() routes through its degrade path,
-    # and provide an argparse-default fallback for DEFAULT_ROOT.
+    _LEDGER_IMPORT_BROKEN = False
+except ImportError as _ledger_exc:
+    # ImportError naming the ledger module itself means it is genuinely absent
+    # (skill uninstalled, mid-reinstall, or relocated) -> degrade as "unavailable".
+    # An ImportError naming a DIFFERENT module means the ledger is present but a
+    # transitive dependency is broken -> flag as broken, not absent. Either way
+    # degrade gracefully instead of crashing at import time.
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
     resolve_session_id = None
+    _LEDGER_IMPORT_BROKEN = getattr(_ledger_exc, "name", None) not in (None, "session_intent_ledger")
+except Exception:
+    # Present but broken at import (syntax error, a failing transitive dependency).
+    # Still degrade non-blockingly, but flag it as broken so main() reports a
+    # distinct message instead of silently labelling a real defect "unavailable".
+    DEFAULT_ROOT = ".tmp/session-intent"
+    build_input_observation = None
+    record_turn = None
+    resolve_session_id = None
+    _LEDGER_IMPORT_BROKEN = True
 
 
 DEFAULT_INTERNAL = (
@@ -76,6 +87,10 @@ LEDGER_UNAVAILABLE_DEGRADE = (
 )
 LEDGER_WRITE_FAILED_DEGRADE = (
     "Ledger write failed non-blockingly; continue without raw prompt persistence."
+)
+LEDGER_BROKEN_DEGRADE = (
+    "Ledger module present but failed to load non-blockingly; "
+    "continue without raw prompt persistence."
 )
 
 
@@ -161,7 +176,12 @@ def main(argv: list[str] | None = None) -> int:
             for func in (resolve_session_id, build_input_observation, record_turn)
         )
         if not ledger_available:
-            message = message + " " + LEDGER_UNAVAILABLE_DEGRADE
+            # Distinguish a genuinely absent ledger from one that is installed but
+            # broken at import, so a real defect is not silently mislabeled
+            # "unavailable". Both remain non-blocking (rc 0).
+            message = message + " " + (
+                LEDGER_BROKEN_DEGRADE if _LEDGER_IMPORT_BROKEN else LEDGER_UNAVAILABLE_DEGRADE
+            )
         else:
             session_id = resolve_session_id(
                 root=ledger_root,

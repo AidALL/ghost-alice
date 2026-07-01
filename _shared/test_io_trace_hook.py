@@ -68,6 +68,96 @@ class TestIoTraceHook(unittest.TestCase):
         self.assertEqual(row["tool"], "Read")
         self.assertEqual(row["path"], "C:/tmp/bad \\udcec.txt")
 
+    def test_bash_row_extracts_neutral_op_and_path_keeping_raw_command(self):
+        raw = json.dumps({
+            "session_id": "s-bash",
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": 'Get-Content -LiteralPath "C:\\Users\\try2q\\.agents\\skills\\foo\\SKILL.md" -Raw',
+            },
+        })
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(os.environ, {"HOME": temp_home}, clear=False),
+                mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            ):
+                exit_code = io_trace_hook.main()
+
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(row["tool"], "Bash")
+        # structured neutral view for the continuation signal
+        self.assertEqual(row["op"], "read")
+        self.assertEqual(row["path"], "C:\\Users\\try2q\\.agents\\skills\\foo\\SKILL.md")
+        # raw command preserved in the audit log (never reduced)
+        self.assertIn("Get-Content", row["pattern"])
+
+    def test_bash_row_extracts_op_from_assignment_led_one_liner(self):
+        # Loop-found gap: agents lead with a variable assignment, so the verb is
+        # not token[0]. The scan must still find `Get-Content` -> op=read + path.
+        raw = json.dumps({
+            "session_id": "s-bash3",
+            "tool_name": "Bash",
+            "tool_input": {
+                "command": '$path = "C:\\Users\\try2q\\ghost-alice\\_shared\\io_trace_hook.py"; $lines = Get-Content $path -Raw',
+            },
+        })
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(os.environ, {"HOME": temp_home}, clear=False),
+                mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            ):
+                io_trace_hook.main()
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertEqual(row["op"], "read")
+        self.assertEqual(row["path"], "C:\\Users\\try2q\\ghost-alice\\_shared\\io_trace_hook.py")
+
+    def test_bash_row_without_detectable_path_has_no_op_and_keeps_command(self):
+        raw = json.dumps({
+            "session_id": "s-bash2",
+            "tool_name": "Bash",
+            "tool_input": {"command": "npm run build"},
+        })
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(os.environ, {"HOME": temp_home}, clear=False),
+                mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            ):
+                io_trace_hook.main()
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertNotIn("op", row)  # no recognized verb -> no structured op
+        self.assertEqual(row["path"], "n/a")
+        self.assertEqual(row["pattern"], "npm run build")
+
+    def test_bash_row_with_recognized_verb_without_path_has_no_op(self):
+        raw = json.dumps({
+            "session_id": "s-bash-no-path",
+            "tool_name": "Bash",
+            "tool_input": {"command": "grep TODO"},
+        })
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(os.environ, {"HOME": temp_home}, clear=False),
+                mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            ):
+                io_trace_hook.main()
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertNotIn("op", row)
+        self.assertEqual(row["path"], "n/a")
+        self.assertEqual(row["pattern"], "grep TODO")
+
     def test_main_emits_semantic_delta_starvation_warning_after_three_digest_only_turns(self):
         raw = json.dumps({
             "session_id": "s-digest-only",
