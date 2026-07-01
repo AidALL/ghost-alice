@@ -297,6 +297,26 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
         )
         self.assertEqual(result.status, "pass")
 
+    def test_hook_failure_with_full_surface_still_fails(self):
+        result = live_agent_smoke.classify_smoke_result(
+            exit_code=0,
+            timed_out=False,
+            log_text=(
+                "hook: Stop Failed\n"
+                "hook: UserPromptSubmit Completed\n"
+            ),
+            output_text=(
+                "[gate-state]\n- task-router: done\n"
+                "Summary: produced output despite the hook failure.\n"
+                "[completion-check]\n- verification-before-completion: done\n"
+                "[io-trace]\n- files-read: [README.md]\n"
+            ),
+            output_exists=True,
+            required_markers=("[gate-state]", "[completion-check]", "[io-trace]"),
+        )
+        self.assertEqual(result.status, "fail")
+        self.assertIn("hook-failure", result.reasons)
+
     def test_runtime_error_without_full_surface_still_fails(self):
         # Same router error but the required surface is MISSING -> still a failure.
         result = live_agent_smoke.classify_smoke_result(
