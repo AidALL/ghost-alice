@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -18,6 +19,57 @@ from typing import Any
 
 
 MAX_LINES = 10000
+
+# Best-effort neutral extraction of a shell row's operation + file target, so the
+# autopilot continuation signal can render it platform-neutrally (e.g. "read
+# <path>") instead of leaking a per-runtime command string. The raw command is
+# still stored in `pattern` (the audit log is never reduced); `op`/`path` are an
+# additive structured view. Extraction is conservative and never executes input.
+_SHELL_READ_VERBS = {"cat", "less", "more", "head", "tail", "type", "get-content", "gc"}
+_SHELL_WRITE_VERBS = {"tee", "set-content", "out-file", "add-content"}
+_SHELL_SEARCH_VERBS = {"grep", "rg", "egrep", "fgrep", "select-string", "findstr", "sls"}
+_QUOTED_RE = re.compile(r'"([^"]+)"|\'([^\']+)\'')
+_LITERAL_PATH_RE = re.compile(r"-(?:Literal)?Path\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))", re.IGNORECASE)
+_PATHISH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|[\\/]{1,2}|~[\\/]|\.{1,2}[\\/])[^\s\"']*")
+
+
+def _looks_like_path(value: str) -> bool:
+    return "/" in value or "\\" in value or bool(re.match(r"[A-Za-z]:", value))
+
+
+def _first_pathish(command: str) -> str:
+    match = _LITERAL_PATH_RE.search(command)
+    if match:
+        return match.group(1) or match.group(2) or match.group(3) or ""
+    for quoted in _QUOTED_RE.finditer(command):
+        value = quoted.group(1) or quoted.group(2) or ""
+        if _looks_like_path(value):
+            return value
+    bare = _PATHISH_RE.search(command)
+    return bare.group(0) if bare else ""
+
+
+def _classify_shell_verb(token: str) -> str:
+    verb = token.lower().strip("()[]{}|;&`'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if verb in _SHELL_READ_VERBS:
+        return "read"
+    if verb in _SHELL_WRITE_VERBS:
+        return "write"
+    if verb in _SHELL_SEARCH_VERBS:
+        return "search"
+    return ""
+
+
+def _shell_op_and_path(command: str) -> tuple[str, str]:
+    # Scan every token, not just the first: agents often lead with a variable
+    # assignment or a subshell (e.g. `$path = "..."; $lines = Get-Content $path`),
+    # so the recognized verb is not token[0]. First recognized verb wins.
+    op = ""
+    for token in command.split():
+        op = _classify_shell_verb(token)
+        if op:
+            break
+    return op, _first_pathish(command)
 
 
 def _home() -> Path:
@@ -82,6 +134,7 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
     tool_input = _as_dict(payload.get("tool_input"))
     path = "n/a"
     pattern = ""
+    op = ""
 
     if tool in {"Read", "Edit", "Write"}:
         path = _text(tool_input.get("file_path"), "n/a")
@@ -89,7 +142,11 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
         path = _text(tool_input.get("path"), "cwd")
         pattern = _text(tool_input.get("pattern"))
     elif tool == "Bash":
-        pattern = _text(tool_input.get("command"))[:200]
+        command = _text(tool_input.get("command"))
+        pattern = command[:200]
+        op, extracted = _shell_op_and_path(command)
+        if extracted:
+            path = extracted
     elif tool == "Agent":
         pattern = _text(tool_input.get("description"))
     elif tool == "Skill":
@@ -99,7 +156,10 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
     else:
         path = _text(tool_input.get("file_path") or tool_input.get("path"), "n/a")
 
-    return {"session": session, "tool": tool, "path": path, "pattern": pattern}
+    row = {"session": session, "tool": tool, "path": path, "pattern": pattern}
+    if op and path != "n/a":
+        row["op"] = op
+    return row
 
 
 def _capture_governance_event(raw: str) -> None:

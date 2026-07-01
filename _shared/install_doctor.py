@@ -55,6 +55,7 @@ RUNTIME_SHARED_FILES = (
     "completion_check_validator.py",
     "io_trace_hook.py",
     "pending_merge_precheck_hook.py",
+    "merge_companion_messages.py",
     "session_intent_analyzer_hook.py",
     "task_router_reminder_hook.py",
 )

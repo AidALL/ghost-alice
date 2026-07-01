@@ -8,6 +8,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Use this section for changes that have landed after the latest tagged public release.
 
+## [0.2.1] - 2026-07-01
+
+### Added
+
+- Live Codex smoke harness coverage for completion-check and install-doctor prompts, including hook-trust flag compatibility and Windows command shim handling.
+- Runtime doctor audits for installed shared hook dependencies so partial installs and missing runtime files surface as first-class diagnostics.
+- Acceptance-criteria lifecycle tracking for admitted, met, and unmet completion criteria.
+- Structured Bash io-trace fields (`op` and `path`) so downstream runtime signals can render platform-neutral file activity while preserving the raw command in the local audit log.
+
+### Changed
+
+- Codex installer and doctor flows now sync and validate the live runtime shared core more directly after installation.
+- Session-intent, completion-check, uninstall, and io-trace paths now preserve clearer failure boundaries for Codex and Windows runs.
+- Live smoke classification now treats recovered runtime router errors as pass only when the run exited cleanly, produced output, and emitted every required governance marker.
+
+### Fixed
+
+- Prevented Korean post-verbal negated status text from being misread as a completion claim while keeping real completion claims detectable.
+- Added the pending-merge message helper to runtime doctor dependency audits so transitive hook imports cannot drift silently.
+- Distinguished absent session-intent ledger modules from present-but-broken imports without blocking the hook.
+- Removed Windows reparse-point addon targets safely during uninstall without recursing into junction or MSYS symlink targets.
+- Skipped Bash-backed addon lifecycle tests cleanly when a discovered Bash path cannot actually be launched.
+- Preserved `met_at` when already-met acceptance criteria are merged again.
+- Scoped Windows io-trace paths and structured shell rows correctly for cross-platform continuation consumers.
+- Added line-ending and compatibility guards for shell, PowerShell, and Codex command resolution surfaces.
+
 ## [0.2.0] - 2026-06-22
 
 ### Added

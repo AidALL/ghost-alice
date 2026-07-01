@@ -166,6 +166,7 @@ def classify_smoke_result(
 ) -> SmokeClassification:
     """Classify a live smoke run without storing raw prompts."""
 
+    markers = tuple(required_markers)
     combined = f"{log_text}\n{output_text}"
     runtime_log = _runtime_diagnostic_log_text(log_text)
     fail_reasons: list[str] = []
@@ -189,17 +190,35 @@ def classify_smoke_result(
     elif exit_code not in (None, 0):
         fail_reasons.append(f"exit-code:{exit_code}")
 
+    # A run that exited 0, produced non-empty output, and emitted every required
+    # governance marker is a completed governed task. Only a recovered Codex tool
+    # router diagnostic is treated as transient; hook failures, tracebacks, cache
+    # failures, and panics remain fatal because they can invalidate the governance
+    # surface even when the agent produced final text.
+    recovered_ok = (
+        exit_code == 0
+        and not timed_out
+        and output_exists
+        and bool(output_text.strip())
+        and bool(markers)
+        and all(marker in combined for marker in markers)
+    )
+
     # Runtime-error patterns are scanned against the runtime LOG only, never the
     # agent's own answer text, so an agent that legitimately quotes an error
     # string in its summary is not false-failed.
     for reason, pattern in FAILURE_PATTERNS:
-        if _contains_pattern(pattern, runtime_log) and reason not in fail_reasons:
+        if (
+            _contains_pattern(pattern, runtime_log)
+            and reason not in fail_reasons
+            and not (recovered_ok and reason == "tool-router-error")
+        ):
             fail_reasons.append(reason)
 
     if not output_exists or not output_text.strip():
         fail_reasons.append("missing-output")
 
-    for marker in required_markers:
+    for marker in markers:
         if marker not in combined:
             fail_reasons.append(f"missing-marker:{marker}")
 

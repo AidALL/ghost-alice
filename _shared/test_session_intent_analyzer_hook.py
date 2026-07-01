@@ -179,5 +179,61 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertFalse((self.ledger_root / "codex" / "unknown").exists())
 
 
+class LedgerDependencyDegradeTests(unittest.TestCase):
+    """The hook degrades non-blockingly and distinguishes an ABSENT ledger from a
+    PRESENT-but-broken one, instead of crashing or conflating the two."""
+
+    def setUp(self) -> None:
+        self.base = pathlib.Path(tempfile.mkdtemp(prefix="sia-degrade-"))
+        self.addCleanup(lambda: shutil.rmtree(self.base, ignore_errors=True))
+        shared = self.base / "_shared"
+        shared.mkdir(parents=True)
+        # Copy the hook so its REPO_ROOT has no sibling ledger; resolution must
+        # fall to the home/CLAUDE_CONFIG_DIR candidates we control.
+        self.hook = shared / "session_intent_analyzer_hook.py"
+        shutil.copy2(SCRIPT, self.hook)
+        self.home = self.base / "home"
+        self.home.mkdir()
+        self.root = self.base / "root"
+
+    def _run(self) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env["HOME"] = str(self.home)
+        env["USERPROFILE"] = str(self.home)
+        env.pop("CLAUDE_CONFIG_DIR", None)
+        env.pop("GHOST_ALICE_SESSION_ID", None)
+        return subprocess.run(
+            [
+                sys.executable, str(self.hook),
+                "--platform", "codex", "--format", "json",
+                "--root", str(self.root),
+                "--hook", "session-intent", "--context", "prompt_submit",
+            ],
+            input=json.dumps({"session_id": "s-degrade", "prompt": "hello"}),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            env=env, check=False,
+        )
+
+    def _put_ledger(self, body: str) -> None:
+        d = self.home / ".claude" / "skills" / "session-intent-analyzer" / "scripts"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "session_intent_ledger.py").write_text(body, encoding="utf-8")
+
+    def test_absent_ledger_degrades_as_unavailable(self) -> None:
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        message = json.loads(result.stdout)["systemMessage"]
+        self.assertIn("dependency unavailable", message)
+        self.assertNotIn("present but failed", message)
+
+    def test_present_but_broken_ledger_degrades_as_broken(self) -> None:
+        self._put_ledger("raise RuntimeError('boom at import')\n")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        message = json.loads(result.stdout)["systemMessage"]
+        self.assertIn("present but failed to load", message)
+        self.assertNotIn("dependency unavailable", message)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

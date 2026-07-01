@@ -37,14 +37,20 @@ def _test_bash() -> str | None:
     candidate = shutil.which("bash")
     if not candidate:
         return None
-    probe = subprocess.run(
-        [candidate, "-lc", "printf ok"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
+    try:
+        probe = subprocess.run(
+            [candidate, "-lc", "printf ok"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError:
+        # which() returned a path that cannot actually be launched (Store alias
+        # stub, stale PATH entry, or a non-PE shim). Degrade to "no working bash"
+        # so the test SKIPS rather than ERRORing on an exec-time OSError.
+        return None
     if probe.returncode == 0 and probe.stdout == "ok":
         return candidate
     return None
