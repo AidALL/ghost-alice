@@ -498,6 +498,43 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(row["stdout"].strip(), message)
         self.assertEqual(row["visible_decision"], "force_show")
 
+    def test_runner_preserves_protocol_block_json_under_minimal_visibility(self):
+        message = '{"decision":"block","reason":"completion-check required"}'
+        code = f"print({message!r})"
+        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = os.environ.copy()
+            env["HOME"] = temp_home
+            env["GHOST_ALICE_PLATFORM"] = "claude"
+            env["GHOST_ALICE_SESSION_ID"] = "s-protocol-block"
+            env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
+
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "completion", payload],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            log_path = (
+                Path(temp_home)
+                / ".ghost-alice"
+                / "session-logs"
+                / "claude"
+                / "s-protocol-block"
+                / "strict-hook-output.jsonl"
+            )
+            row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, message + "\n")
+        self.assertEqual(row["stdout"].strip(), message)
+        self.assertEqual(row["visible_decision"], "force_show")
+
     def test_runner_force_shows_pending_manifest_after_strict_log_append(self):
         message = "routine clean pass already persisted"
         code = f"print({message!r})"

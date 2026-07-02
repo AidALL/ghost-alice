@@ -6,6 +6,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -158,6 +160,66 @@ class TestIoTraceHook(unittest.TestCase):
         self.assertEqual(row["path"], "n/a")
         self.assertEqual(row["pattern"], "grep TODO")
 
+    def test_destructive_shell_command_is_not_reduced_to_read_path(self):
+        raw = json.dumps({
+            "session_id": "s-bash-destructive",
+            "tool_name": "Bash",
+            "tool_input": {"command": "rm -rf /tmp/cat"},
+        })
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(os.environ, {"HOME": temp_home}, clear=False),
+                mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            ):
+                io_trace_hook.main()
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertNotIn("op", row)
+        self.assertEqual(row["path"], "n/a")
+        self.assertEqual(row["pattern"], "rm -rf /tmp/cat")
+
+    def test_url_pipeline_is_not_extracted_as_a_file_path(self):
+        raw = json.dumps({
+            "session_id": "s-bash-url",
+            "tool_name": "Bash",
+            "tool_input": {"command": "curl http://example.com/data | tail -1"},
+        })
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(os.environ, {"HOME": temp_home}, clear=False),
+                mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            ):
+                io_trace_hook.main()
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertNotIn("op", row)
+        self.assertEqual(row["path"], "n/a")
+        self.assertEqual(row["pattern"], "curl http://example.com/data | tail -1")
+
+    def test_mutating_command_before_read_is_not_reduced_to_read(self):
+        raw = json.dumps({
+            "session_id": "s-bash-mixed",
+            "tool_name": "Bash",
+            "tool_input": {"command": "Move-Item C:/a.txt C:/b.txt; Get-Content C:/b.txt"},
+        })
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(os.environ, {"HOME": temp_home}, clear=False),
+                mock.patch.object(sys, "stdin", io.StringIO(raw)),
+            ):
+                io_trace_hook.main()
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            row = json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertNotIn("op", row)
+        self.assertEqual(row["path"], "n/a")
+        self.assertEqual(row["pattern"], "Move-Item C:/a.txt C:/b.txt; Get-Content C:/b.txt")
+
     def test_main_emits_semantic_delta_starvation_warning_after_three_digest_only_turns(self):
         raw = json.dumps({
             "session_id": "s-digest-only",
@@ -263,6 +325,55 @@ class TestIoTraceHook(unittest.TestCase):
             if row.get("tool") == "governance-warning"
         ]
         self.assertEqual(len(warning_rows), 1)
+
+
+class TestSessionIntentRootResolution(unittest.TestCase):
+    def test_runtime_copy_resolves_ledger_root_from_skill_install(self):
+        # N2: the runtime tree ships only _shared, so the repo-relative ledger
+        # candidate never exists there. The hook must resolve the real ledger
+        # from a skill install location and use its repo-aware default_root,
+        # instead of silently falling back to the legacy ~/.ghost-alice root
+        # (which diverges from where the ledger actually writes in repo
+        # sessions). Runs in a subprocess so no cached module can mask it.
+        repo_shared = Path(__file__).resolve().parent
+        repo_root = repo_shared.parent
+        real_ledger = repo_root / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            home = base / "home"
+            skill_scripts = home / ".agents" / "skills" / "session-intent-analyzer" / "scripts"
+            skill_scripts.mkdir(parents=True)
+            shutil.copy2(real_ledger, skill_scripts / "session_intent_ledger.py")
+            runtime_shared = base / "runtime" / "current" / "_shared"
+            runtime_shared.mkdir(parents=True)
+            shutil.copy2(repo_shared / "io_trace_hook.py", runtime_shared / "io_trace_hook.py")
+            fake_repo = base / "repo"
+            (fake_repo / "skill-catalog").mkdir(parents=True)
+            (fake_repo / "session-intent-analyzer").mkdir()
+            (fake_repo / "install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
+
+            env = {k: v for k, v in os.environ.items() if k != "GHOST_ALICE_SESSION_INTENT_ROOT"}
+            env["HOME"] = str(home)
+            env["USERPROFILE"] = str(home)
+            hook_path = str(runtime_shared / "io_trace_hook.py").replace("\\", "/")
+            script = (
+                "import importlib.util; "
+                f"spec = importlib.util.spec_from_file_location('io_trace_hook_rt', '{hook_path}'); "
+                "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
+                "print(mod._session_intent_root())"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                cwd=str(fake_repo),
+                env=env,
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resolved = Path(result.stdout.strip())
+        expected = (fake_repo / ".tmp" / "session-intent").resolve()
+        self.assertEqual(resolved.resolve(), expected)
 
 
 if __name__ == "__main__":

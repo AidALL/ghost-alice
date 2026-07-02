@@ -187,7 +187,7 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
         self.assertEqual(result.status, "pass")
         self.assertEqual(result.reasons, [])
 
-    def test_gate_state_can_be_observed_in_agent_log(self):
+    def test_required_markers_must_come_from_agent_output_not_log_echo(self):
         result = live_agent_smoke.classify_smoke_result(
             exit_code=0,
             timed_out=False,
@@ -202,7 +202,8 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             required_markers=("[gate-state]", "[io-trace]"),
         )
 
-        self.assertEqual(result.status, "pass")
+        self.assertEqual(result.status, "fail")
+        self.assertIn("missing-marker:[gate-state]", result.reasons)
 
     def test_third_person_could_not_read_in_answer_is_not_invalid_harness(self):
         # A successful answer that incidentally describes some tool's behaviour

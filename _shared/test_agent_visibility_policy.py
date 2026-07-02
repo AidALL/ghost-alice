@@ -324,5 +324,40 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
             self.assertTrue(decision["reason"])
 
 
+class TestLedgerDegradeForcedVisibility(unittest.TestCase):
+    # M9: a degraded intent-audit surface must not depend on the profile
+    # default to reach the user.
+
+    def _decide(self, message: str) -> dict:
+        return agent_visibility_policy.decide(
+            profile="minimal",
+            hook_id="session-intent",
+            event="UserPromptSubmit",
+            stdout='{"continue": true, "systemMessage": "' + message + '"}',
+            stderr="",
+            exit_code=0,
+            context={},
+        )
+
+    def test_broken_ledger_degrade_is_forced_under_minimal(self):
+        decision = self._decide(
+            "Ledger module present but failed to load non-blockingly; "
+            "continue without raw prompt persistence."
+        )
+        self.assertEqual(decision.get("visible_decision"), "force_show")
+
+    def test_write_failed_degrade_is_forced_under_minimal(self):
+        decision = self._decide(
+            "Ledger write failed non-blockingly; continue without raw prompt persistence."
+        )
+        self.assertEqual(decision.get("visible_decision"), "force_show")
+
+    def test_absent_ledger_degrade_is_not_forced(self):
+        decision = self._decide(
+            "Ledger dependency unavailable non-blockingly; continue without raw prompt persistence."
+        )
+        self.assertNotEqual(decision.get("visible_decision"), "force_show")
+
+
 if __name__ == "__main__":
     unittest.main()

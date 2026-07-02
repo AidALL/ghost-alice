@@ -54,6 +54,7 @@ RUNTIME_SHARED_FILES = (
     "claude_stop_verification_hook.py",
     "completion_check_validator.py",
     "io_trace_hook.py",
+    "governance_events.py",
     "pending_merge_precheck_hook.py",
     "merge_companion_messages.py",
     "session_intent_analyzer_hook.py",
@@ -559,7 +560,16 @@ def _runtime_validator_golden_status(runtime_shared: Path) -> tuple[str, str]:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         sample = (
-            "   [completion-check]\n"
+            "[gate-state]\n"
+            "- merge-companion-precheck: clean\n"
+            "- session-intent-analyzer: done\n"
+            "- task-router: done\n"
+            "- using-coding-convention: n/a\n"
+            "- boundary-contract: n/a\n"
+            "- skill-call: session-intent-analyzer (this turn); task-router (this turn)\n"
+            "- next-required: none\n"
+            "\n"
+            "[completion-check]\n"
             "- verification-before-completion: done\n"
             "- skill-call: verification-before-completion (this turn)\n"
             "- acceptance-criteria:\n"
@@ -629,7 +639,10 @@ def _runtime_session_intent_golden_status(runtime_shared: Path, platform: str) -
         if not pointer.exists():
             system_message = str(data.get("systemMessage") or "")
             if LEDGER_UNAVAILABLE_DEGRADE in system_message:
-                return STATUS_OK, "ledger-unavailable-degraded"
+                # The intent-audit surface is the governance input anchor; an
+                # install without it must not read as fully healthy. WARNING,
+                # not ERROR: the absent-ledger degrade is documented behavior.
+                return STATUS_WARNING, "ledger-unavailable-degraded"
             return STATUS_ERROR, "current-session-not-written"
     return STATUS_OK, "golden-pass"
 

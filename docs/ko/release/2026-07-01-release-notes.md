@@ -4,7 +4,7 @@ Date: 2026-07-01
 
 Scope: `v0.2.0` 이후 현재 `main` 기준이며, `v0.2.1` 태그를 위한 거버넌스 런타임 하드닝, acceptance-criteria lifecycle 변경, cross-platform io-trace/runtime diagnostic 보강을 포함한다.
 
-Status: 릴리즈 문서가 `v0.2.1` 태그 준비용으로 작성되었다. GitHub Release 발행은 브랜치, PR, CI, merge 흐름 이후 진행한다.
+Status: `v0.2.1`은 2026-07-01 발행된 core 릴리즈다. 이 문서는 릴리즈 본문의 source of truth이며, GitHub Release 본문이 어긋나면 이 파일로부터 발행 본문을 갱신한다.
 
 ## Main Changes
 
@@ -21,7 +21,7 @@ Status: 릴리즈 문서가 `v0.2.1` 태그 준비용으로 작성되었다. Git
 - 로컬 unit verification은 `_shared` tests, `scripts/tests`, public surface validators, installer compatibility checks, platform adapter validation을 포함해야 한다.
 - Korean public-doc counterpart validation은 이 파일 `docs/ko/release/2026-07-01-release-notes.md`를 포함해야 한다.
 - Live Codex smoke verification은 설치된 runtime 기준 `completion-check-readme` 및 `install-doctor-read` cases를 포함해야 한다.
-- `v0.2.1` 발행 전 release PR에서 GitHub Actions가 통과해야 한다.
+- `v0.2.1` 발행 전 release PR에서 GitHub Actions가 통과했다. 이후 발행 본문을 수정할 때는 동일한 검증 표면을 다시 통과해야 한다.
 
 ## Compatibility Boundary
 
@@ -30,5 +30,5 @@ Status: 릴리즈 문서가 `v0.2.1` 태그 준비용으로 작성되었다. Git
 
 ## Release Boundary
 
-- 이 노트 자체는 tag 또는 GitHub Release를 생성하지 않는다.
+- 발행된 GitHub Release 본문은 이 파일과 `CHANGELOG.md`로부터 생성·갱신된다.
 - `v0.2.1` release body의 source로 이 문서와 `CHANGELOG.md`를 사용한다.

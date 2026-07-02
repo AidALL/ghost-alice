@@ -234,6 +234,83 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.assertIn("present but failed to load", message)
         self.assertNotIn("dependency unavailable", message)
 
+    def _marker(self) -> pathlib.Path:
+        return self.root / "codex" / "s-degrade" / "ledger-degraded.json"
+
+    def test_broken_ledger_writes_durable_degrade_marker(self) -> None:
+        # H5: a BROKEN ledger must leave a ledger-independent marker so
+        # freshness consumers (task-router reminder) fail closed instead of
+        # riding the frozen lineage anchor.
+        self._put_ledger("raise RuntimeError('boom at import')\n")
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertTrue(self._marker().is_file())
+        marker = json.loads(self._marker().read_text(encoding="utf-8"))
+        self.assertEqual(marker["reason"], "ledger-broken")
+
+    def test_absent_ledger_writes_no_marker(self) -> None:
+        # ABSENT is the documented baseline degrade; it must stay marker-free
+        # so intentionally ledger-less setups are not routed fail-closed.
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertFalse(self._marker().exists())
+
+    def test_recovery_clears_degrade_marker(self) -> None:
+        self._marker().parent.mkdir(parents=True, exist_ok=True)
+        self._marker().write_text(
+            '{"schema_version": "session-intent-degrade.v1", "reason": "ledger-broken"}\n',
+            encoding="utf-8",
+        )
+        real_ledger = SCRIPT.resolve().parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
+        self._put_ledger(real_ledger.read_text(encoding="utf-8"))
+        result = self._run()
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertFalse(self._marker().exists(), msg=result.stdout)
+
+
+class TestDegradeMarkerPathParity(unittest.TestCase):
+    # Cross-module drift guard: the analyzer WRITES the degrade marker and the
+    # task-router reminder REBUILDS the same path to read it. Any charset or
+    # normalization drift between the two safe-component implementations hides
+    # the marker from the consumer (silent fail-open), so pin them equal over a
+    # hostile input set -- including '=' (base64-ish ids), consecutive unsafe
+    # runs, edge dots/dashes, over-long ids, non-ASCII, and empties.
+
+    @staticmethod
+    def _load(name: str):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location(
+            f"{name}_parity", pathlib.Path(__file__).resolve().with_name(f"{name}.py")
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_safe_component_matches_router_over_hostile_inputs(self):
+        sah = self._load("session_intent_analyzer_hook")
+        trh = self._load("task_router_reminder_hook")
+        cases = [
+            "s==base64==", "normal-uuid-1234", "s!!weird!!", "...dots...",
+            "x" * 200, "한글세션", "", None, "a b c", ".-.",
+        ]
+        for case in cases:
+            self.assertEqual(
+                sah._safe_component(case),
+                trh.safe_path_component(case),
+                f"safe-component drift for {case!r}",
+            )
+
+    def test_marker_path_matches_router_session_dir_for_equals_id(self):
+        sah = self._load("session_intent_analyzer_hook")
+        trh = self._load("task_router_reminder_hook")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            payload = {"session_id": "s==base64=="}
+            produced = sah._degrade_marker_path(root, "codex", payload)
+            consumed = trh.session_dir(root, "codex", "s==base64==") / "ledger-degraded.json"
+            self.assertEqual(produced, consumed)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

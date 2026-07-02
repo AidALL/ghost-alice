@@ -165,6 +165,24 @@ def _block_payload(reason: str) -> dict[str, Any]:
     }
 
 
+def _standalone_retry_guidance() -> str:
+    return (
+        "Retry by writing a complete standalone final answer that includes the requested answer payload again. "
+        "Begin with the user's requested answer, not with the verification process. "
+        "Required control block format overrides any requested line-count limit. "
+        "Write [completion-check] and [io-trace] as canonical multi-line blocks, not inline one-line summaries. "
+        "Do not output a correction-only note. "
+        "Do not refer to a previous answer with phrases such as above, earlier, already provided, or previously."
+    )
+
+
+def _append_standalone_retry_guidance(reason: str) -> str:
+    guidance = _standalone_retry_guidance()
+    if guidance in reason:
+        return reason
+    return f"{reason} {guidance}"
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--platform", choices=("claude", "codex"), default="claude")
@@ -207,14 +225,12 @@ def main() -> int:
             "Do not ask the user whether to use the skill; invoke it directly. "
             "Then perform the fresh evidence check, and only then write [completion-check] with "
             "skill-call: verification-before-completion (this turn). Do not infer this from task-router, "
-            "metadata, prior context, or evidence-only status inspection. "
-            "The retry must be a complete standalone final answer that includes the requested answer payload again. "
-            "Begin with the user's requested answer, not with the verification process. "
-            "Do not begin with verification process notes. "
-            "Do not refer to a previous answer with phrases such as above, earlier, already provided, or previously."
+            "metadata, prior context, or evidence-only status inspection."
         )
     else:
         reason = body_issue
+
+    reason = _append_standalone_retry_guidance(reason)
 
     if _already_retrying(input_data):
         print(json.dumps(_allow_payload(reason), ensure_ascii=False))

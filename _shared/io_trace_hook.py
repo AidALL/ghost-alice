@@ -28,9 +28,25 @@ MAX_LINES = 10000
 _SHELL_READ_VERBS = {"cat", "less", "more", "head", "tail", "type", "get-content", "gc"}
 _SHELL_WRITE_VERBS = {"tee", "set-content", "out-file", "add-content"}
 _SHELL_SEARCH_VERBS = {"grep", "rg", "egrep", "fgrep", "select-string", "findstr", "sls"}
+_SHELL_UNSTRUCTURED_VERBS = {
+    "rm",
+    "del",
+    "erase",
+    "rmdir",
+    "remove-item",
+    "ri",
+    "move-item",
+    "mv",
+    "copy-item",
+    "cp",
+    "curl",
+    "wget",
+    "invoke-webrequest",
+    "iwr",
+}
 _QUOTED_RE = re.compile(r'"([^"]+)"|\'([^\']+)\'')
 _LITERAL_PATH_RE = re.compile(r"-(?:Literal)?Path\s+(?:\"([^\"]+)\"|'([^']+)'|(\S+))", re.IGNORECASE)
-_PATHISH_RE = re.compile(r"(?:[A-Za-z]:[\\/]|[\\/]{1,2}|~[\\/]|\.{1,2}[\\/])[^\s\"']*")
+_PATHISH_RE = re.compile(r"(?<!:)(?:[A-Za-z]:[\\/]|[\\/]{1,2}|~[\\/]|\.{1,2}[\\/])[^\s\"']*")
 
 
 def _looks_like_path(value: str) -> bool:
@@ -51,6 +67,8 @@ def _first_pathish(command: str) -> str:
 
 def _classify_shell_verb(token: str) -> str:
     verb = token.lower().strip("()[]{}|;&`'\"").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if verb in _SHELL_UNSTRUCTURED_VERBS:
+        return "unstructured"
     if verb in _SHELL_READ_VERBS:
         return "read"
     if verb in _SHELL_WRITE_VERBS:
@@ -63,13 +81,21 @@ def _classify_shell_verb(token: str) -> str:
 def _shell_op_and_path(command: str) -> tuple[str, str]:
     # Scan every token, not just the first: agents often lead with a variable
     # assignment or a subshell (e.g. `$path = "..."; $lines = Get-Content $path`),
-    # so the recognized verb is not token[0]. First recognized verb wins.
-    op = ""
+    # so the recognized verb is not token[0]. Destructive/network/mixed shell
+    # commands stay unstructured so continuation messages preserve the raw
+    # command instead of misrepresenting it as a simple file read.
+    ops: list[str] = []
     for token in command.split():
-        op = _classify_shell_verb(token)
-        if op:
-            break
-    return op, _first_pathish(command)
+        classified = _classify_shell_verb(token)
+        if classified:
+            ops.append(classified)
+    if "unstructured" in ops:
+        return "", ""
+    op = ops[0] if ops else ""
+    path = _first_pathish(command)
+    if not op or not path:
+        return "", ""
+    return op, path
 
 
 def _home() -> Path:
@@ -199,17 +225,38 @@ def _rotate(path: Path) -> None:
     path.write_text("\n".join(lines[-keep:]) + "\n", encoding="utf-8")
 
 
+def _ledger_dir_candidates() -> list[Path]:
+    # Mirrors session_intent_analyzer_hook: repo checkout first, then skill
+    # install locations. The runtime tree ships only _shared, so the
+    # repo-relative candidate always misses there; without the skill-install
+    # candidates this hook would fall back to a hardcoded legacy root and
+    # silently diverge from the ledger's repo-aware default root.
+    home = _home()
+    candidates = [
+        Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts",
+        home / ".agents" / "skills" / "session-intent-analyzer" / "scripts",
+        home / ".claude" / "skills" / "session-intent-analyzer" / "scripts",
+    ]
+    claude_home = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    if claude_home:
+        candidates.append(Path(claude_home) / "skills" / "session-intent-analyzer" / "scripts")
+    return candidates
+
+
 def _session_intent_root() -> Path:
     configured = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT", "").strip()
     if configured:
         return Path(configured).expanduser()
-    ledger_dir = Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts"
-    if str(ledger_dir) not in sys.path:
-        sys.path.insert(0, str(ledger_dir))
+    for ledger_dir in _ledger_dir_candidates():
+        if not (ledger_dir / "session_intent_ledger.py").is_file():
+            continue
+        if str(ledger_dir) not in sys.path:
+            sys.path.insert(0, str(ledger_dir))
+        break
     try:
         from session_intent_ledger import default_root
     except Exception:
-        return Path.home() / ".ghost-alice" / "session-intent"
+        return _home() / ".ghost-alice" / "session-intent"
     return default_root()
 
 
