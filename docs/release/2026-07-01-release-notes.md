@@ -4,7 +4,7 @@ Date: 2026-07-01
 
 Scope: current `main` after `v0.2.0`, including governance runtime hardening, acceptance-criteria lifecycle changes, and the cross-platform io-trace/runtime diagnostic fixes prepared for `v0.2.1`.
 
-Status: release documentation prepared for tag `v0.2.1`; GitHub Release publication follows the branch, PR, CI, and merge flow.
+Status: `v0.2.1` is the published core release (2026-07-01). This document is the release-body source of truth; if the GitHub Release body diverges, update the published body from this file.
 
 ## Main Changes
 
@@ -21,7 +21,7 @@ Status: release documentation prepared for tag `v0.2.1`; GitHub Release publicat
 - Local unit verification should cover `_shared` tests, `scripts/tests`, public surface validators, installer compatibility checks, and platform adapter validation.
 - Korean public-doc counterpart validation should include `docs/ko/release/2026-07-01-release-notes.md`.
 - Live Codex smoke verification should cover `completion-check-readme` and `install-doctor-read` cases against the installed runtime.
-- GitHub Actions must pass on the release PR before publishing `v0.2.1`.
+- GitHub Actions passed on the release PR before `v0.2.1` publication; future amendments must rerun the same verification surfaces before updating the published body.
 
 ## Compatibility Boundary
 
@@ -30,5 +30,4 @@ Status: release documentation prepared for tag `v0.2.1`; GitHub Release publicat
 
 ## Release Boundary
 
-- This note does not create the tag or GitHub Release by itself.
-- Use this note and `CHANGELOG.md` as the release body source for `v0.2.1`.
+- The published GitHub Release body is generated from this file and `CHANGELOG.md`; amendments to the published body must come from here.

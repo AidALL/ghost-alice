@@ -167,7 +167,6 @@ def classify_smoke_result(
     """Classify a live smoke run without storing raw prompts."""
 
     markers = tuple(required_markers)
-    combined = f"{log_text}\n{output_text}"
     runtime_log = _runtime_diagnostic_log_text(log_text)
     fail_reasons: list[str] = []
 
@@ -201,7 +200,7 @@ def classify_smoke_result(
         and output_exists
         and bool(output_text.strip())
         and bool(markers)
-        and all(marker in combined for marker in markers)
+        and all(marker in output_text for marker in markers)
     )
 
     # Runtime-error patterns are scanned against the runtime LOG only, never the
@@ -219,7 +218,7 @@ def classify_smoke_result(
         fail_reasons.append("missing-output")
 
     for marker in markers:
-        if marker not in combined:
+        if marker not in output_text:
             fail_reasons.append(f"missing-marker:{marker}")
 
     if fail_reasons:

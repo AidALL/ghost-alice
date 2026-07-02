@@ -141,6 +141,27 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
             "and the current-lineage block check can run. Do not run task-router yet."
         )
 
+    # Fail-closed on a degraded ledger: when session-intent-analyzer could not
+    # record the latest input (broken import or write failure), the "latest
+    # event" anchor is stale, so releasing routing here would ride a previous
+    # turn's lineage. The marker is cleared by the analyzer hook on the next
+    # successful observation.
+    degrade_marker = session_dir(root, platform, session_id) / "ledger-degraded.json"
+    if degrade_marker.exists():
+        reason = "degraded"
+        try:
+            marker = json.loads(degrade_marker.read_text(encoding="utf-8"))
+            if isinstance(marker, dict):
+                reason = str(marker.get("reason") or reason)
+        except (OSError, json.JSONDecodeError):
+            reason = "unreadable-marker"
+        return (
+            "hook-reminder: task-router withheld: the session-intent ledger is degraded "
+            f"({reason}) and the latest input was NOT recorded, so current-lineage checks "
+            "would ride a stale anchor. Fail closed: repair the session-intent ledger "
+            "(fix the broken dependency or reinstall the skill) before routing."
+        )
+
     gate = gate_state(root, platform, session_id)
     if not gate:
         latest_event = latest_intent_event(root, platform, session_id)

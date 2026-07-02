@@ -745,7 +745,9 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("complete standalone final answer", payload["reason"])
         self.assertIn("Do not refer to a previous answer", payload["reason"])
         self.assertIn("Begin with the user's requested answer", payload["reason"])
-        self.assertIn("Do not begin with verification process notes", payload["reason"])
+        self.assertIn("control block format overrides any requested line-count limit", payload["reason"])
+        self.assertIn("canonical multi-line blocks", payload["reason"])
+        self.assertIn("Do not output a correction-only note", payload["reason"])
 
     def test_claude_stop_hook_allows_actual_verification_skill_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -774,6 +776,9 @@ class TestMessageLanguage(unittest.TestCase):
                             "content": [{
                                 "type": "text",
                                 "text": (
+                                    "[gate-state]\n"
+                                    "- task-router: done\n"
+                                    "\n"
                                     "[completion-check]\n"
                                     "- verification-before-completion: done\n"
                                     "- skill-call: verification-before-completion (this turn)\n"
@@ -870,6 +875,9 @@ class TestMessageLanguage(unittest.TestCase):
                     # earlier response carries an INVALID completion-check (missing verification-done)
                     json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
                         {"type": "text", "text": (
+                            "[gate-state]\n"
+                            "- task-router: done\n"
+                            "\n"
                             "[completion-check]\n"
                             "- skill-call: verification-before-completion (this turn)\n"
                             "- acceptance-criteria:\n"
@@ -889,6 +897,9 @@ class TestMessageLanguage(unittest.TestCase):
                     # FINAL response: a fully valid completion-check
                     json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
                         {"type": "text", "text": (
+                            "[gate-state]\n"
+                            "- task-router: done\n"
+                            "\n"
                             "[completion-check]\n"
                             "- verification-before-completion: done\n"
                             "- skill-call: verification-before-completion (this turn)\n"
@@ -4347,6 +4358,9 @@ class TestWebSearchFirstHook(TempHomeTestCase):
             input_text=json.dumps({
                 "hook_event_name": "Stop",
                 "last_assistant_message": (
+                    "[gate-state]\n"
+                    "- task-router: done\n"
+                    "\n"
                     "[completion-check]\n"
                     "- verification-before-completion: done\n"
                     "- skill-call: verification-before-completion (this turn)\n"
@@ -4371,6 +4385,39 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self.assertEqual(payload.get("continue"), True, msg=payload)
         self.assertNotIn("decision", payload)
         self.assertNotIn("systemMessage", payload)
+
+    def test_codex_stop_hook_body_issue_retry_requires_standalone_answer(self):
+        result = _run_hook_command(
+            install_hooks.STOP_HOOK_COMMAND_CODEX,
+            input_text=json.dumps({
+                "hook_event_name": "Stop",
+                "last_assistant_message": (
+                    "[gate-state]\n"
+                    "- task-router: done\n"
+                    "\n"
+                    "[completion-check]\n"
+                    "- verification-before-completion: done\n"
+                    "- skill-call: verification-before-completion (this turn)\n"
+                    "- claim-evidence-map:\n"
+                    "  - claim: fixed formatting\n"
+                    "    evidence: stop hook prompt\n"
+                    "    verdict: pass\n"
+                    "- unverified:\n"
+                    "  - none\n"
+                    "- evidence: stop hook prompt\n"
+                    "[io-trace] no tools run this correction turn."
+                ),
+            }),
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload.get("decision"), "block", msg=payload)
+        self.assertIn("skills-loaded", payload["reason"])
+        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertIn("control block format overrides any requested line-count limit", payload["reason"])
+        self.assertIn("canonical multi-line blocks", payload["reason"])
+        self.assertIn("Do not output a correction-only note", payload["reason"])
 
     def test_codex_stop_hook_uses_validator_command(self):
         command = install_hooks.STOP_HOOK_COMMAND_CODEX

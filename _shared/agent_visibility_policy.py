@@ -168,11 +168,27 @@ def _forced_reason(
 
     text = f"{hook_id}\n{event}\n{stdout}\n{stderr}"
     decision = str(context.get("decision") or "").strip().lower()
+    if decision == "block" or _text_contains_any(
+        text,
+        ('"decision":"block"', '"decision": "block"', "decision: block"),
+    ):
+        return "forced-verification"
     if decision == "deny" or _text_contains_any(
         text,
         ('"decision":"deny"', '"decision": "deny"', "decision: deny", "tool checkpoint required"),
     ):
         return "forced-action-denial"
+
+    # A degraded intent-audit surface (ledger broken at import, or a real write
+    # failure) must not depend on the profile default to reach the user: the
+    # turn's input digest was lost from the audit trail. The intentionally
+    # ABSENT ledger baseline is not forced (documented degrade, install-level
+    # visibility handled by the doctor).
+    if _text_contains_any(
+        text,
+        ("ledger module present but failed to load", "ledger write failed"),
+    ):
+        return "forced-verification"
 
     if _context_bool(context, "pending_merge_undecided") or _text_contains_any(
         text,

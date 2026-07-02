@@ -203,6 +203,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             "runtime_config.py",
             "work_impact_projection.py",
             "strict_session_log.py",
+            "governance_events.py",
         ):
             self.assertIn(dependency, install_doctor.RUNTIME_SHARED_FILES)
 
@@ -245,7 +246,10 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         self.assertEqual(status, install_doctor.STATUS_ERROR)
         self.assertTrue(any(f["reason"] == "runner-not-runtime-core" for f in findings))
 
-    def test_session_intent_golden_accepts_missing_ledger_dependency_degrade(self):
+    def test_session_intent_golden_flags_missing_ledger_dependency_as_warning(self):
+        # First-layer install: no intent-audit capability at all must not read
+        # as fully healthy — the ledger is the governance input anchor. WARNING
+        # (documented degrade), not OK, not ERROR.
         hook = self.runtime / "session_intent_analyzer_hook.py"
         hook.write_text(
             "import json\n"
@@ -258,7 +262,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
 
         status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
 
-        self.assertEqual(status, install_doctor.STATUS_OK)
+        self.assertEqual(status, install_doctor.STATUS_WARNING)
         self.assertEqual(detail, "ledger-unavailable-degraded")
 
     def test_session_intent_golden_rejects_pointerless_write_failure(self):

@@ -383,6 +383,66 @@ class TestKoreanNegatedStatusNotABlock(unittest.TestCase):
     def test_korean_real_completion_still_detected(self):
         self.assertTrue(v.requires_completion_check("작업 완료했습니다."))
         self.assertTrue(v.requires_completion_check("테스트 통과했다."))
+        for phrase in (
+            "완료했습니다.",
+            "수정했습니다.",
+            "구현했습니다.",
+            "해결했습니다.",
+            "반영했습니다.",
+            "끝냈습니다.",
+        ):
+            self.assertTrue(v.requires_completion_check(phrase), phrase)
+
+
+class TestHonestNegativeStatusNotABlock(unittest.TestCase):
+    def test_korean_honest_negative_verification_status_is_not_a_claim(self):
+        for phrase in (
+            "테스트가 통과했다고 말할 수는 없습니다.",
+            "구현 완료 여부는 확인하지 못했습니다.",
+            "작업이 완료라고 보기 어렵습니다.",
+            "작업이 완료된 것은 아닙니다.",
+            "테스트가 통과한 것은 아닙니다.",
+            "작업을 완료했다고 볼 수 없습니다.",
+        ):
+            self.assertFalse(v.requires_completion_check(phrase), phrase)
+            self.assertIsNone(v.validate_completion_text(phrase, require_completion_check=True), phrase)
+
+    def test_english_honest_negative_verification_status_is_not_a_claim(self):
+        for phrase in (
+            "I haven't verified that the tests pass.",
+            "I don't think the tests passed.",
+        ):
+            self.assertFalse(v.requires_completion_check(phrase), phrase)
+            self.assertIsNone(v.validate_completion_text(phrase, require_completion_check=True), phrase)
+
+    def test_honest_negative_does_not_hide_later_real_claim(self):
+        self.assertTrue(
+            v.requires_completion_check(
+                "I haven't verified that the tests pass, but the implementation is complete."
+            )
+        )
+
+    def test_korean_honest_negative_does_not_hide_separate_real_claim(self):
+        self.assertTrue(v.requires_completion_check("작업 완료했고 원인은 확인하지 못했습니다."))
+
+
+class TestGateStatePlacement(unittest.TestCase):
+    # Stop validation receives the final assistant message, not necessarily the
+    # opening commentary where [gate-state] is surfaced. Enforce placement only
+    # when the block is present in the validated text.
+
+    def test_completion_surface_without_gate_state_is_allowed_in_hook_mode(self):
+        text = _final_text("completion", "summary", "io")
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_completion_surface_with_gate_state_before_completion_check_is_allowed(self):
+        text = _final_text("gate", "completion", "summary", "io")
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_routine_explanation_is_unaffected_by_gate_state_placement(self):
+        self.assertIsNone(
+            v.validate_completion_text("이 함수는 경로를 정규화한다.", require_completion_check=True)
+        )
 
 
 if __name__ == "__main__":

@@ -76,6 +76,7 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
     re.compile(r"\b(?:build|lint|typecheck|test\s+suite)\s+(?:succeeded|passed|is\s+clean)\b", re.I),
     re.compile(r"(?:작업|변경|수정|구현|요청|이슈|버그).{0,12}(?:완료|끝냈|끝남|고쳤|해결|반영)"),
     re.compile(r"(?:테스트|빌드|린트|타입체크).{0,12}(?:통과|성공|깨끗)"),
+    re.compile(r"(?:완료|수정|구현|해결|반영)(?:했|했습니다|했다|함|됐|되었습니다)|(?:끝냈|고쳤)(?:습니다|다)"),
 )
 
 # Spans that are quotation or code, not the model's own assertion. Stripped
@@ -136,7 +137,23 @@ _NEGATED_CLOSURE_RE = re.compile(
     # closure word survives if only the negation particle is removed. Match the
     # closure word together with its trailing negation so the whole span is
     # stripped and the executed-work pattern no longer sees a bare "작업...완료".
-    r"|(?:완료|끝냈|끝남|고쳤|해결|반영|통과|성공|깨끗)[^\n]{0,6}(?:않|못|안\s)",
+    r"|(?:완료|끝냈|끝남|고쳤|해결|반영|통과|성공|깨끗)"
+    r"[^\n.!?;,]{0,6}(?:않|안\s|아니|아닙|하지\s*못|되지\s*못|못했|못했다|못했습니다|볼\s*수[^\n.!?;,]{0,8}없)",
+    re.I,
+)
+_HONEST_NEGATIVE_STATUS_RE = re.compile(
+    r"\b(?:have|has|had)\s+not\s+(?:verified?|confirmed?|checked|proven)\b"
+    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
+    r"|\b(?:haven['’]?t|hasn['’]?t|hadn['’]?t)\s+(?:verified?|confirmed?|checked|proven)\b"
+    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
+    r"|\b(?:do|does|did)\s+not\s+(?:think|believe|claim|say)\b"
+    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
+    r"|\b(?:don['’]?t|doesn['’]?t|didn['’]?t)\s+(?:think|believe|claim|say)\b"
+    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
+    r"|(?:완료|통과|성공|해결|반영)[^\n.!?;,]{0,24}(?:여부|라고|했다고|한\s*것|된\s*것)"
+    r"[^\n.!?;,]{0,24}(?:말할\s*수[^\n.!?;,]{0,12}없|확인하지\s*못|검증하지\s*못|보기\s*어렵|볼\s*수[^\n.!?;,]{0,8}없|아니|아닙)"
+    r"|(?:말할\s*수[^\n.!?;,]{0,12}없|확인하지\s*못|검증하지\s*못|보기\s*어렵)[^\n.!?;,]{0,40}"
+    r"(?:완료|통과|성공|해결|반영)",
     re.I,
 )
 
@@ -257,7 +274,8 @@ def requires_completion_check(text):
             # A conditional lead governs only its own protasis clause.
             if _CONDITIONAL_LEAD_RE.search(clause):
                 continue
-            claim_clause = _NEGATED_CLOSURE_RE.sub(" ", clause)
+            claim_clause = _HONEST_NEGATIVE_STATUS_RE.sub(" ", clause)
+            claim_clause = _NEGATED_CLOSURE_RE.sub(" ", claim_clause)
             if any(pattern.search(claim_clause) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS):
                 return True
     return False
