@@ -653,7 +653,7 @@ if ($CleanupPending) {
 if ($Doctor)    { Show-Doctor; return }
 if ($Status)    { Show-Status; return }
 if ($Uninstall) { Invoke-Uninstall -SkillNames $Skills -AddonIds $Addon; return }
+Install-Prerequisites
 Initialize-GitHooks
-Initialize-PythonRuntimeForInstall | Out-Null
 Invoke-WithInstallLock { Invoke-Install -SkillNames $Skills }
 Initialize-PwshLtsBaseline

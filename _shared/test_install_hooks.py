@@ -301,6 +301,45 @@ def _expected_ghost_alice_skill_names() -> list[str]:
 
 
 class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
+    def test_configured_node_runtime_absolute_path_is_allowed_in_hook_payload(self):
+        """Configured Node runtimes are valid hook executables even outside fixed roots."""
+        with tempfile.TemporaryDirectory() as temp_home:
+            codex_home = Path(temp_home) / ".codex"
+            node = codex_home / "runtime" / ("node.exe" if os.name == "nt" else "node")
+            node.parent.mkdir(parents=True, exist_ok=True)
+            node.write_text("# fake node\n", encoding="utf-8")
+            config_toml = codex_home / "config.toml"
+            config_toml.write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+                encoding="utf-8",
+            )
+            command = f'"{node.as_posix()}" "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+
+            with patch.dict(os.environ, {"HOME": temp_home, "CODEX_HOME": str(codex_home)}, clear=False):
+                argv = hook_profile_gate._validate_shell_command(command)
+
+        self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_configured_node_runtime_must_be_named_node(self):
+        """A configured runtime path is not a generic absolute executable bypass."""
+        with tempfile.TemporaryDirectory() as temp_home:
+            codex_home = Path(temp_home) / ".codex"
+            runtime = codex_home / "runtime" / ("python.exe" if os.name == "nt" else "python")
+            runtime.parent.mkdir(parents=True, exist_ok=True)
+            runtime.write_text("# fake runtime\n", encoding="utf-8")
+            config_toml = codex_home / "config.toml"
+            config_toml.write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(runtime.as_posix())}\n",
+                encoding="utf-8",
+            )
+            command = f'"{runtime.as_posix()}" "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+
+            with patch.dict(os.environ, {"HOME": temp_home, "CODEX_HOME": str(codex_home)}, clear=False):
+                with self.assertRaises(hook_profile_gate.HookCommandRejected):
+                    hook_profile_gate._validate_shell_command(command)
+
     def test_wrapped_command_validation_strips_marker_comment(self):
         command = f'"{sys.executable}" -c "import sys; sys.exit(0)" # [hook-reminder] AGENTS.md'
 
@@ -2830,6 +2869,24 @@ class TempHomeTestCase(unittest.TestCase):
             (shared / name).write_text("# fixture\n", encoding="utf-8")
         return shared
 
+    def _write_codex_node_runtime(self) -> Path:
+        """Create a fake Codex-managed node runtime path in config.toml."""
+        node = self.fake_home / "codex-runtime" / "bin" / ("node.exe" if os.name == "nt" else "node")
+        node.parent.mkdir(parents=True, exist_ok=True)
+        node.write_text("# fake node\n", encoding="utf-8")
+        try:
+            node.chmod(0o755)
+        except OSError:
+            pass
+        config_toml = self._codex_config_toml()
+        config_toml.parent.mkdir(parents=True, exist_ok=True)
+        config_toml.write_text(
+            "[mcp_servers.node_repl.env]\n"
+            f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+            encoding="utf-8",
+        )
+        return node
+
 
 class TestInstallHook(TempHomeTestCase):
     """Install behavior tests."""
@@ -2947,6 +3004,7 @@ class TestInstallHook(TempHomeTestCase):
     def test_cli_defaults_to_runtime_shared_dir_when_platform_shared_is_available(self):
         """Direct CLI execution uses the shared runtime core even when platform _shared exists."""
         self._write_settings("claude", {})
+        self._write_codex_node_runtime()
         platform_shared = self._create_runtime_shared_dir(
             self.fake_home / ".claude" / "skills" / "_shared"
         )
@@ -3029,6 +3087,7 @@ class TestInstallHook(TempHomeTestCase):
     def test_cli_install_prints_agent_visibility_guidance(self):
         """Install output reports the dynamic default and runtime adjustment method."""
         self._create_platform_dir("codex")
+        self._write_codex_node_runtime()
 
         output = io.StringIO()
         with patch.object(sys, "argv", [
@@ -3070,9 +3129,45 @@ class TestInstallHook(TempHomeTestCase):
         text = output.getvalue()
         self.assertEqual(result, 1)
         self.assertIn("Node.js runtime is required for Claude Code hook enforcement", text)
+        self.assertIn("For full capability, install Node.js:", text)
+        self.assertIn("https://nodejs.org/en/download", text)
         self.assertFalse((self.fake_home / ".claude" / "settings.json").exists())
         self.assertIn("/visibility strict, /visibility dynamic, or /visibility minimal", text)
         self.assertIn("Hook execution, governance gates, and strict session logging remain unchanged.", text)
+
+    def test_cli_install_uses_codex_configured_node_when_path_node_is_missing(self):
+        """Hook-enabled installs can use the Codex-managed node runtime when PATH lacks node."""
+        configured_node = self._write_codex_node_runtime()
+        original_which = shutil.which
+
+        def fake_which(command: str) -> str | None:
+            if command in {"node", "node.exe"}:
+                return None
+            return original_which(command)
+
+        for platform in ("claude", "codex"):
+            with self.subTest(platform=platform):
+                self._create_platform_dir(platform)
+                output = io.StringIO()
+                with patch.object(install_hooks.shutil, "which", side_effect=fake_which):
+                    with patch.object(sys, "argv", [
+                        "install_hooks.py",
+                        "--platform",
+                        platform,
+                    ]):
+                        with contextlib.redirect_stdout(output):
+                            result = install_hooks.main()
+
+                self.assertEqual(result, 0, msg=output.getvalue())
+                settings = self._read_settings(platform)
+                pre_tool_key = install_hooks._resolve_hook_event("pre_tool_use", platform)
+                command = _visible_and_runner_payload_text(
+                    settings["hooks"][pre_tool_key][0]["hooks"][0]["command"]
+                )
+                self.assertIn(configured_node.as_posix(), command)
+                self.assertNotIn("node C:/", command)
+                self.assertIn("For full capability, install Node.js:", output.getvalue())
+                self.assertIn("https://nodejs.org/en/download", output.getvalue())
 
     def test_agent_visibility_env_does_not_change_generated_hook_command(self):
         hook_key = install_hooks._resolve_hook_event("on_user_prompt", "claude")

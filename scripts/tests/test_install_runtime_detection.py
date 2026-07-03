@@ -204,6 +204,154 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertNotIn("_ensure_python_runtime_for_install || exit 1\n    check_status", install_sh)
         self.assertNotIn("_ensure_python_runtime_for_install || exit 1\n    run_doctor", install_sh)
 
+    def test_install_sh_runs_prerequisites_before_git_hooks_for_install_paths(self) -> None:
+        install_sh = installer_bash_source()
+
+        default_branch = install_sh.split('  "")', 1)[-1]
+        self.assertIn("_ensure_python_runtime_for_install || exit 1\n    install_prerequisites\n    setup_git_hooks", default_branch)
+        selected_skill_branch = install_sh.split("  *)", 1)[-1]
+        self.assertIn("_ensure_python_runtime_for_install || exit 1\n    install_prerequisites\n    setup_git_hooks", selected_skill_branch)
+        self.assertNotIn("install_prerequisites\n    list_skills", install_sh)
+        self.assertNotIn("install_prerequisites\n    check_status", install_sh)
+        self.assertNotIn("install_prerequisites\n    run_doctor", install_sh)
+
+    def test_install_sh_prerequisites_use_brew_for_missing_git_and_node(self) -> None:
+        bash_exe = _find_test_bash()
+        if not bash_exe:
+            self.skipTest("No non-WSL bash executable available for install.sh runtime test")
+
+        source = installer_bash_source()
+        function_bundle = "\n".join(
+            _extract_function(source, name)
+            for name in (
+                "_prereq_command_exists",
+                "_prereq_run_as_root_or_sudo",
+                "_prereq_manual_notice",
+                "_try_install_unix_prerequisite",
+                "install_prerequisites",
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bin_dir = Path(temp_dir) / "bin"
+            bin_dir.mkdir()
+            log = Path(temp_dir) / "calls.log"
+            bash_bin_dir = _bash_path(bin_dir)
+            bash_log = _bash_path(log)
+            brew = bin_dir / "brew"
+            brew.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    printf '%s\\n' "brew $*" >> "{bash_log}"
+                    exit 0
+                    """
+                ),
+                encoding="utf-8",
+            )
+            brew.chmod(0o755)
+
+            runner = Path(temp_dir) / "runner.sh"
+            runner.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    PATH="{bash_bin_dir}"
+                    t() {{ printf '%s' "$1"; }}
+                    info() {{ :; }}
+                    warn() {{ :; }}
+                    ok() {{ :; }}
+                    error() {{ :; }}
+
+                    {function_bundle}
+
+                    install_prerequisites
+                    while IFS= read -r line; do printf '%s\\n' "$line"; done < "{bash_log}"
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [bash_exe, str(runner)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+        self.assertIn("brew install git", result.stdout)
+        self.assertIn("brew install node", result.stdout)
+
+    def test_install_sh_prerequisites_use_apt_for_missing_git_and_node(self) -> None:
+        bash_exe = _find_test_bash()
+        if not bash_exe:
+            self.skipTest("No non-WSL bash executable available for install.sh runtime test")
+
+        source = installer_bash_source()
+        function_bundle = "\n".join(
+            _extract_function(source, name)
+            for name in (
+                "_prereq_command_exists",
+                "_prereq_run_as_root_or_sudo",
+                "_prereq_manual_notice",
+                "_try_install_unix_prerequisite",
+                "install_prerequisites",
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bin_dir = Path(temp_dir) / "bin"
+            bin_dir.mkdir()
+            log = Path(temp_dir) / "calls.log"
+            bash_bin_dir = _bash_path(bin_dir)
+            bash_log = _bash_path(log)
+            apt_get = bin_dir / "apt-get"
+            apt_get.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    printf '%s\\n' "apt-get $*" >> "{bash_log}"
+                    exit 0
+                    """
+                ),
+                encoding="utf-8",
+            )
+            apt_get.chmod(0o755)
+
+            runner = Path(temp_dir) / "runner.sh"
+            runner.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    PATH="{bash_bin_dir}"
+                    t() {{ printf '%s' "$1"; }}
+                    info() {{ :; }}
+                    warn() {{ :; }}
+                    ok() {{ :; }}
+                    error() {{ :; }}
+
+                    {function_bundle}
+
+                    install_prerequisites
+                    while IFS= read -r line; do printf '%s\\n' "$line"; done < "{bash_log}"
+                    """
+                ),
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [bash_exe, str(runner)],
+                capture_output=True,
+                text=True,
+            )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+        self.assertIn("apt-get update", result.stdout)
+        self.assertIn("apt-get install -y git", result.stdout)
+        self.assertIn("apt-get install -y nodejs", result.stdout)
+
     def test_install_sh_python_bootstrap_rechecks_runtime_after_package_manager(self) -> None:
         bash_exe = _find_test_bash()
         if not bash_exe:
@@ -323,6 +471,16 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertNotIn("3, 14", install_ps1)
         self.assertNotIn("Python.Python.3.13", install_ps1)
         self.assertNotIn("Python.Python.3.14", install_ps1)
+
+    def test_install_ps1_declares_git_node_python_prerequisite_bootstrap(self) -> None:
+        install_ps1 = installer_ps1_source()
+
+        self.assertIn("function Install-Prerequisites", install_ps1)
+        self.assertIn("Initialize-PythonRuntimeForInstall", install_ps1)
+        self.assertIn("Git.Git", install_ps1)
+        self.assertIn("OpenJS.NodeJS.LTS", install_ps1)
+        self.assertIn("Python.Python.3", install_ps1)
+        self.assertIn("Install-Prerequisites\nInitialize-GitHooks", install_ps1)
 
     def test_install_ps1_python_version_key_runs_under_powershell(self) -> None:
         if not sys.platform.startswith("win"):

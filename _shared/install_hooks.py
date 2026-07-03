@@ -41,6 +41,7 @@ import os
 import re
 import shutil
 import sys
+import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -82,6 +83,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
 
 VERSION = "1.7.0"
 HOOK_SHARED_DIR_ENV = "GHOST_ALICE_HOOK_SHARED_DIR"
+NODE_JS_DOWNLOAD_URL = "https://nodejs.org/en/download"
 STALE_LEGACY_CHECKOUT_NAMES = ("Ghost-ALICE", "Ghost-ALICE")
 
 
@@ -821,10 +823,70 @@ def _quote_command_arg(value: str | Path) -> str:
     return '"' + text.replace('"', '\\"') + '"'
 
 
+def _configured_node_runtime_from_env() -> str | None:
+    for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
+        value = os.environ.get(env_name, "").strip().strip('"')
+        if value and Path(value).expanduser().is_file():
+            return str(Path(value).expanduser())
+    return None
+
+
+def _configured_node_runtime_from_codex_config() -> str | None:
+    config_file = _resolve_codex_config_toml()
+    if not config_file.exists():
+        return None
+    try:
+        with config_file.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+    env = (
+        data.get("mcp_servers", {})
+        .get("node_repl", {})
+        .get("env", {})
+    )
+    value = env.get("NODE_REPL_NODE_PATH") if isinstance(env, dict) else None
+    if not isinstance(value, str):
+        return None
+    candidate = Path(value.strip().strip('"')).expanduser()
+    if candidate.is_file():
+        return str(candidate)
+    return None
+
+
+def _path_node_runtime_available() -> bool:
+    return bool(shutil.which("node") or shutil.which("node.exe"))
+
+
+def _node_full_capability_guidance() -> str:
+    return (
+        f"For full capability, install Node.js: {NODE_JS_DOWNLOAD_URL} "
+        "and ensure node is available on PATH."
+    )
+
+
+def _resolve_node_runtime() -> str | None:
+    configured = _configured_node_runtime_from_env()
+    if configured:
+        return configured
+    found = shutil.which("node") or shutil.which("node.exe")
+    if found:
+        return found
+    return _configured_node_runtime_from_codex_config()
+
+
+def _node_runtime_command() -> str:
+    runtime = _resolve_node_runtime()
+    if runtime:
+        return _quote_command_arg(runtime)
+    return "node"
+
+
 def _dispatcher_hook_command(platform: str, event: str, hook_name: str, marker: str, hook_id: str) -> str:
     dispatcher = _resolve_installed_hook_dispatcher()
     parts = [
-        "node",
+        _node_runtime_command(),
         _quote_command_arg(dispatcher),
         "--platform",
         platform,
@@ -1020,7 +1082,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
 
 
 def _node_runtime_available() -> bool:
-    return bool(shutil.which("node") or shutil.which("node.exe"))
+    return bool(_resolve_node_runtime())
 
 
 def _ensure_node_runtime_for_hook_install(platform_key: str) -> None:
@@ -1036,7 +1098,8 @@ def _ensure_node_runtime_for_hook_install(platform_key: str) -> None:
     name = platform["name"]
     raise RuntimeError(
         f"Node.js runtime is required for {name} hook enforcement because "
-        "tool-checkpoint runs ghost-alice-hook.mjs. Install Node.js and rerun the installer."
+        f"tool-checkpoint runs ghost-alice-hook.mjs. {_node_full_capability_guidance()} "
+        "Then rerun the installer."
     )
 
 # ── Core Logic ─────────────────────────────────────────────
@@ -2879,6 +2942,16 @@ def _print_runtime_visibility_guidance() -> None:
     _log("    Hook execution, governance gates, and strict session logging remain unchanged.")
 
 
+def _print_node_runtime_guidance() -> None:
+    if _path_node_runtime_available():
+        return
+    configured = _resolve_node_runtime()
+    _log("  Node.js guidance:")
+    if configured:
+        _log(f"    Current hook install can use configured Node runtime: {configured}")
+    _log(f"    {_node_full_capability_guidance()}")
+
+
 # ── Main ──────────────────────────────────────────────────
 
 def main() -> int:
@@ -3005,6 +3078,7 @@ def main() -> int:
     if not args.uninstall:
         _print_runtime_visibility_status()
         _print_runtime_visibility_guidance()
+        _print_node_runtime_guidance()
 
     return 1 if has_error else 0
 
