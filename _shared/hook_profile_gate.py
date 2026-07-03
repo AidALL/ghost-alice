@@ -15,6 +15,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tomllib
 import time
 from pathlib import Path
 from typing import NoReturn
@@ -82,6 +83,65 @@ def _resolve_allowed_roots(allowed_roots: list[str]) -> list[Path]:
     return roots
 
 
+def _is_node_executable(path: Path) -> bool:
+    return path.name.lower() in {"node", "node.exe"}
+
+
+def _configured_node_runtime_from_value(value: str | None) -> Path | None:
+    text = (value or "").strip().strip('"')
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    if not _is_node_executable(candidate) or not candidate.is_file():
+        return None
+    try:
+        return candidate.resolve()
+    except OSError:
+        return None
+
+
+def _codex_config_candidates(env: dict[str, str]) -> list[Path]:
+    candidates: list[Path] = []
+    codex_home = env.get("CODEX_HOME", "").strip()
+    if codex_home:
+        candidates.append(Path(codex_home).expanduser() / "config.toml")
+    home = _home_from_env(env)
+    if home is not None:
+        candidates.append(home / ".codex" / "config.toml")
+    return candidates
+
+
+def _configured_node_runtime_paths(env: dict[str, str]) -> set[Path]:
+    paths: set[Path] = set()
+    for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
+        configured = _configured_node_runtime_from_value(env.get(env_name))
+        if configured is not None:
+            paths.add(configured)
+
+    for config_file in _codex_config_candidates(env):
+        try:
+            with config_file.open("rb") as handle:
+                data = tomllib.load(handle)
+        except (OSError, tomllib.TOMLDecodeError):
+            continue
+        env_config = (
+            data.get("mcp_servers", {})
+            .get("node_repl", {})
+            .get("env", {})
+        )
+        value = env_config.get("NODE_REPL_NODE_PATH") if isinstance(env_config, dict) else None
+        configured = _configured_node_runtime_from_value(value if isinstance(value, str) else None)
+        if configured is not None:
+            paths.add(configured)
+    return paths
+
+
+def _is_configured_node_runtime(path: Path, env: dict[str, str]) -> bool:
+    if not _is_node_executable(path):
+        return False
+    return path in _configured_node_runtime_paths(env)
+
+
 def assert_allowed_command(argv: list[str], allowed_roots: list[str]) -> None:
     if not argv:
         raise HookCommandRejected("empty hook command rejected")
@@ -98,6 +158,9 @@ def assert_allowed_command(argv: list[str], allowed_roots: list[str]) -> None:
         resolved = path.resolve()
     except OSError as exc:
         raise HookCommandRejected(f"hook executable cannot be resolved: {executable}") from exc
+
+    if _is_configured_node_runtime(resolved, os.environ):
+        return
 
     for root in _resolve_allowed_roots(allowed_roots):
         try:

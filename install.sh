@@ -620,8 +620,9 @@ case "${ARGS[0]:-}" in
     run_repair
     ;;
   "")
-    setup_git_hooks
     _ensure_python_runtime_for_install || exit 1
+    install_prerequisites
+    setup_git_hooks
     _acquire_install_lock
     trap _release_install_lock EXIT
     install "${ARGS[@]+"${ARGS[@]}"}"
@@ -684,6 +685,7 @@ case "${ARGS[0]:-}" in
     ;;
   *)
     _ensure_python_runtime_for_install || exit 1
+    install_prerequisites
     setup_git_hooks
     _acquire_install_lock
     trap _release_install_lock EXIT

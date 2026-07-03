@@ -138,13 +138,21 @@ class LiveDirOwnershipTest(unittest.TestCase):
 class NodeRuntimeStatusTest(unittest.TestCase):
     def test_missing_node_is_warning(self) -> None:
         with mock.patch.object(install_doctor.shutil, "which", return_value=None):
-            status, detail = install_doctor._node_runtime_status(strict=False)
+            status, detail = install_doctor._node_runtime_status(
+                strict=False,
+                codex_config=Path("__missing_codex_config__.toml"),
+            )
         self.assertEqual(status, install_doctor.STATUS_WARNING)
         self.assertIn("missing", detail)
+        self.assertIn("For full capability, install Node.js:", detail)
+        self.assertIn("https://nodejs.org/en/download", detail)
 
     def test_missing_node_under_strict_is_error(self) -> None:
         with mock.patch.object(install_doctor.shutil, "which", return_value=None):
-            status, _detail = install_doctor._node_runtime_status(strict=True)
+            status, _detail = install_doctor._node_runtime_status(
+                strict=True,
+                codex_config=Path("__missing_codex_config__.toml"),
+            )
         self.assertEqual(status, install_doctor.STATUS_ERROR)
 
     def test_present_node_is_ok(self) -> None:
@@ -152,6 +160,30 @@ class NodeRuntimeStatusTest(unittest.TestCase):
             status, detail = install_doctor._node_runtime_status(strict=False)
         self.assertEqual(status, install_doctor.STATUS_OK)
         self.assertIn("ok", detail)
+
+    def test_codex_configured_node_is_ok_when_path_node_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            node = Path(tmp) / "codex-runtime" / "bin" / "node.exe"
+            node.parent.mkdir(parents=True)
+            node.write_text("# fake node\n", encoding="utf-8")
+            config = Path(tmp) / ".codex" / "config.toml"
+            config.parent.mkdir()
+            config.write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(install_doctor.shutil, "which", return_value=None):
+                status, detail = install_doctor._node_runtime_status(
+                    strict=False,
+                    codex_config=config,
+                )
+
+        self.assertEqual(status, install_doctor.STATUS_OK)
+        self.assertIn("codex-config", detail)
+        self.assertIn("For full capability, install Node.js:", detail)
+        self.assertIn("https://nodejs.org/en/download", detail)
 
 
 class RuntimeCoreAuditTest(unittest.TestCase):

@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Sequence
@@ -45,6 +46,7 @@ STATUS_RANK = {
     STATUS_ERROR: 2,
 }
 SUPPORTED_PLATFORMS = ("claude", "codex")
+NODE_JS_DOWNLOAD_URL = "https://nodejs.org/en/download"
 RUNTIME_SHARED_FILES = (
     "hook_profile_gate.py",
     "agent_visibility_policy.py",
@@ -392,18 +394,71 @@ def _skill_layout_audit(skills_root: Path, repo_root: Path) -> list[dict[str, st
     return findings
 
 
-def _node_runtime_status(strict: bool) -> tuple[str, str]:
+def _configured_node_runtime_from_env() -> Path | None:
+    for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
+        value = os.environ.get(env_name, "").strip().strip('"')
+        if not value:
+            continue
+        candidate = Path(value).expanduser()
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _configured_node_runtime_from_codex_config(codex_config: Path | None = None) -> Path | None:
+    config = codex_config or (Path.home() / ".codex" / "config.toml")
+    if not config.exists():
+        return None
+    try:
+        with config.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+
+    env = (
+        data.get("mcp_servers", {})
+        .get("node_repl", {})
+        .get("env", {})
+    )
+    value = env.get("NODE_REPL_NODE_PATH") if isinstance(env, dict) else None
+    if not isinstance(value, str):
+        return None
+    candidate = Path(value.strip().strip('"')).expanduser()
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _node_full_capability_guidance() -> str:
+    return (
+        f"For full capability, install Node.js: {NODE_JS_DOWNLOAD_URL} "
+        "and ensure node is available on PATH"
+    )
+
+
+def _node_runtime_status(strict: bool, codex_config: Path | None = None) -> tuple[str, str]:
     """Report whether the node runtime needed by the tool-checkpoint dispatcher exists.
 
-    The PreToolUse gate runs `node ghost-alice-hook.mjs`. The installer blocks hook
-    install when node is missing, but node can be removed from PATH afterward. Since
-    Claude Code treats a non-2 PreToolUse exit as non-blocking, a missing node makes
-    the gate fail open silently, so doctor flags it. Under --strict it is an error.
+    The PreToolUse gate runs the configured Node runtime with ghost-alice-hook.mjs.
+    The installer blocks hook install when no usable node runtime is available, but
+    that runtime can be removed afterward. Since Claude Code treats a non-2 PreToolUse
+    exit as non-blocking, a missing node makes the gate fail open silently, so doctor
+    flags it. Under --strict it is an error.
     """
     if shutil.which("node") or shutil.which("node.exe"):
         return STATUS_OK, "ok"
+    env_node = _configured_node_runtime_from_env()
+    if env_node:
+        return STATUS_OK, f"ok (env:{env_node}; {_node_full_capability_guidance()})"
+    config_node = _configured_node_runtime_from_codex_config(codex_config)
+    if config_node:
+        return STATUS_OK, f"ok (codex-config:{config_node}; {_node_full_capability_guidance()})"
     status = STATUS_ERROR if strict else STATUS_WARNING
-    return status, "missing (required for tool-checkpoint hook dispatcher; gate fails open without it)"
+    return (
+        status,
+        "missing (required for tool-checkpoint hook dispatcher; "
+        f"gate fails open without it; {_node_full_capability_guidance()})",
+    )
 
 
 def _sha256_file(path: Path) -> str:

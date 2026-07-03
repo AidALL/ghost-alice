@@ -13,5 +13,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
       - run: python scripts/check_skill_gate_contract.py
       - run: python -m unittest scripts.tests.test_check_skill_gate_contract scripts.tests.test_validate_entrypoints
