@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -27,6 +28,48 @@ def _python_payload_command(args: str) -> str:
 
 
 class TestHookRunnerExecutionGate(unittest.TestCase):
+    def test_runner_normalizes_child_stdio_to_utf8(self):
+        code = (
+            "import hashlib, json, sys; "
+            "prompt = json.load(sys.stdin)['prompt']; "
+            "print(hashlib.sha256(prompt.encode('utf-8')).hexdigest())"
+        )
+        command = _python_payload_command(f"-c {shlex.quote(code)}")
+        payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+        stdin_text = json.dumps(
+            {"session_id": "s-child-utf8", "prompt": "상태 확인"},
+            ensure_ascii=False,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = os.environ.copy()
+            env["HOME"] = temp_home
+            env["GHOST_ALICE_PLATFORM"] = "codex"
+            env["GHOST_ALICE_SESSION_ID"] = "s-child-utf8"
+            env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
+            env["PYTHONIOENCODING"] = "cp949:surrogateescape"
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                mock.patch.object(sys, "stdout", io.StringIO()),
+            ):
+                return_code = hook_profile_gate.run("prompt", payload)
+
+            log_path = (
+                Path(temp_home)
+                / ".ghost-alice"
+                / "session-logs"
+                / "codex"
+                / "s-child-utf8"
+                / "strict-hook-output.jsonl"
+            )
+            row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+
+        self.assertEqual(return_code, 0, msg=row["stderr"])
+        expected_digest = hashlib.sha256("상태 확인".encode("utf-8")).hexdigest()
+        self.assertEqual(row["stdout"].strip(), expected_digest)
+
     def test_dynamic_visibility_does_not_disable_tool_checkpoint(self):
         env = {"GHOST_ALICE_AGENT_VISIBILITY": "dynamic"}
 

@@ -168,7 +168,14 @@ def _clear_degrade_marker(root: Path, platform: str, payload: dict[str, Any]) ->
 
 
 def read_payload() -> dict[str, Any]:
-    raw = sys.stdin.read()
+    # Hook runners send JSON as UTF-8. Read raw bytes so the Windows console
+    # code page cannot turn non-ASCII input into lone surrogate characters.
+    buffer = getattr(sys.stdin, "buffer", None)
+    try:
+        data = buffer.read() if buffer is not None else sys.stdin.read()
+    except OSError:
+        return {}
+    raw = data.decode("utf-8", errors="replace") if isinstance(data, bytes) else str(data)
     if not raw.strip():
         return {}
     try:

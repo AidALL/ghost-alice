@@ -593,6 +593,10 @@ def run(hook_id: str, payload: str) -> int:
     force_success = _has_allowed_success_suffix(command)
     argv = _validate_shell_command(command)
     stdin_text = _read_stdin()
+    child_env = dict(env)
+    # subprocess.run encodes the pipe as UTF-8 below; Python children must
+    # decode the same bytes independently of the Windows console code page.
+    child_env["PYTHONIOENCODING"] = "utf-8"
     started = time.perf_counter()
     result = subprocess.run(
         argv,
@@ -601,6 +605,7 @@ def run(hook_id: str, payload: str) -> int:
         text=True,
         encoding="utf-8",
         errors="replace",
+        env=child_env,
         check=False,
     )
     observed_duration = time.perf_counter() - started
