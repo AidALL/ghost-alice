@@ -866,18 +866,22 @@ def _node_full_capability_guidance() -> str:
     )
 
 
-def _resolve_node_runtime() -> str | None:
+def _resolve_node_runtime(platform_key: str | None = None) -> str | None:
     configured = _configured_node_runtime_from_env()
     if configured:
         return configured
+    if platform_key == "codex":
+        configured = _configured_node_runtime_from_codex_config()
+        if configured:
+            return configured
     found = shutil.which("node") or shutil.which("node.exe")
     if found:
         return found
     return _configured_node_runtime_from_codex_config()
 
 
-def _node_runtime_command() -> str:
-    runtime = _resolve_node_runtime()
+def _node_runtime_command(platform_key: str | None = None) -> str:
+    runtime = _resolve_node_runtime(platform_key)
     if runtime:
         return _quote_command_arg(runtime)
     return "node"
@@ -886,7 +890,7 @@ def _node_runtime_command() -> str:
 def _dispatcher_hook_command(platform: str, event: str, hook_name: str, marker: str, hook_id: str) -> str:
     dispatcher = _resolve_installed_hook_dispatcher()
     parts = [
-        _node_runtime_command(),
+        _node_runtime_command(platform),
         _quote_command_arg(dispatcher),
         "--platform",
         platform,
@@ -1081,8 +1085,8 @@ PLATFORMS: dict[str, dict[str, Any]] = {
 }
 
 
-def _node_runtime_available() -> bool:
-    return bool(_resolve_node_runtime())
+def _node_runtime_available(platform_key: str | None = None) -> bool:
+    return bool(_resolve_node_runtime(platform_key))
 
 
 def _ensure_node_runtime_for_hook_install(platform_key: str) -> None:
@@ -1093,7 +1097,7 @@ def _ensure_node_runtime_for_hook_install(platform_key: str) -> None:
     platform = PLATFORMS[platform_key]
     if not platform["detect"]():
         return
-    if _node_runtime_available():
+    if _node_runtime_available(platform_key):
         return
     name = platform["name"]
     raise RuntimeError(

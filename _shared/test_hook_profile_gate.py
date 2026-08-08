@@ -286,6 +286,55 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
 
 
 class TestHookCommandAllowlist(unittest.TestCase):
+    def test_allows_node_runtime_resolved_from_current_path(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# path node\n", encoding="utf-8")
+            command = f'"{node.as_posix()}" "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+            env = {
+                "PATH": str(root),
+                "PATHEXT": ".EXE",
+                "GHOST_ALICE_PLATFORM": "claude",
+                "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+            }
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("shutil.which", return_value=str(node)),
+            ):
+                try:
+                    argv = hook_profile_gate._validate_shell_command(command)
+                except hook_profile_gate.HookCommandRejected as exc:
+                    self.fail(f"PATH-resolved Node runtime was rejected: {exc}")
+
+        self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_userprofile_locates_configured_node_when_home_is_missing(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            codex_home = root / ".codex"
+            node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
+            node.parent.mkdir(parents=True, exist_ok=True)
+            node.write_text("# configured node\n", encoding="utf-8")
+            codex_home.mkdir(parents=True, exist_ok=True)
+            (codex_home / "config.toml").write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+                encoding="utf-8",
+            )
+            command = f'"{node.as_posix()}" "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+            env = {
+                "USERPROFILE": str(root),
+                "GHOST_ALICE_PLATFORM": "codex",
+                "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+            }
+
+            with mock.patch.dict(os.environ, env, clear=True):
+                argv = hook_profile_gate._validate_shell_command(command)
+
+        self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
     def test_allows_system_and_homebrew_binaries(self):
         if os.name == "nt":
             self.skipTest("POSIX absolute executable allowlist does not apply on Windows")
