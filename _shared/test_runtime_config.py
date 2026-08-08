@@ -121,5 +121,99 @@ class TestRuntimeConfigDefaults(unittest.TestCase):
         self.assertIn("profile=minimal", "\n".join(cm.output))
 
 
+class TestRuntimeConfigNodeRegistrations(unittest.TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.home = Path(self.temp_dir.name)
+        self.node_registrations = {
+            "claude": "/usr/local/bin/node",
+            "codex": r"C:\Program Files\nodejs\node.exe",
+        }
+
+    def test_default_hook_runtime_node_is_empty(self):
+        config = runtime_config.load_config(env={}, home=self.home)
+
+        self.assertEqual(config["hook_runtime"]["node"], {})
+
+    def test_two_platform_node_registrations_round_trip(self):
+        runtime_config.save_config(
+            {"hook_runtime": {"node": self.node_registrations}},
+            home=self.home,
+        )
+
+        config = runtime_config.load_config(env={}, home=self.home)
+
+        self.assertEqual(config["hook_runtime"]["node"], self.node_registrations)
+
+    def test_visibility_only_save_preserves_node_registrations(self):
+        runtime_config.save_config(
+            {"hook_runtime": {"node": self.node_registrations}},
+            home=self.home,
+        )
+
+        runtime_config.save_config(
+            {"agent_visibility": {"profile": "minimal"}},
+            home=self.home,
+        )
+
+        config = runtime_config.load_config(env={}, home=self.home)
+        self.assertEqual(config["agent_visibility"]["profile"], "minimal")
+        self.assertEqual(config["hook_runtime"]["node"], self.node_registrations)
+
+    def test_updating_one_platform_preserves_other_registration(self):
+        runtime_config.save_config(
+            {"hook_runtime": {"node": self.node_registrations}},
+            home=self.home,
+        )
+
+        runtime_config.save_config(
+            {"hook_runtime": {"node": {"codex": r"D:\nodejs\node.exe"}}},
+            home=self.home,
+        )
+
+        config = runtime_config.load_config(env={}, home=self.home)
+        self.assertEqual(
+            config["hook_runtime"]["node"],
+            {
+                "claude": "/usr/local/bin/node",
+                "codex": r"D:\nodejs\node.exe",
+            },
+        )
+
+    def test_malformed_node_registrations_do_not_survive_normalization(self):
+        path = runtime_config.config_path(self.home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "hook_runtime": {
+                        "node": {
+                            "codex": r"C:\Program Files\nodejs\node.exe",
+                            "": "/empty/platform",
+                            "   ": "/blank/platform",
+                            "claude": "",
+                            "gemini": "   ",
+                            "cursor": None,
+                            "windsurf": 17,
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runtime_config.save_config(
+            {"agent_visibility": {"profile": "minimal"}},
+            home=self.home,
+        )
+
+        config = runtime_config.load_config(env={}, home=self.home)
+        self.assertEqual(
+            config["hook_runtime"]["node"],
+            {"codex": r"C:\Program Files\nodejs\node.exe"},
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

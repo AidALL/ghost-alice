@@ -13,6 +13,7 @@ VALID_AGENT_VISIBILITY_PROFILES = {"strict", "dynamic", "minimal"}
 DEFAULT_CONFIG = {
     "schema_version": "ghost-alice-config.v1",
     "agent_visibility": {"profile": "dynamic"},
+    "hook_runtime": {"node": {}},
     "strict_session_log": {"mode": "always"},
 }
 
@@ -38,6 +39,19 @@ def canonical_profile(value: str | None) -> str:
 
 def _default_config() -> dict[str, Any]:
     return copy.deepcopy(DEFAULT_CONFIG)
+
+
+def _normalized_node_registrations(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        platform: path
+        for platform, path in value.items()
+        if isinstance(platform, str)
+        and platform.strip()
+        and isinstance(path, str)
+        and path.strip()
+    }
 
 
 def _apply_env_overrides(config: dict[str, Any], env: dict[str, str]) -> None:
@@ -66,6 +80,11 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> 
     strict_session_log = loaded.get("strict_session_log")
     if isinstance(strict_session_log, dict):
         config["strict_session_log"].update(strict_session_log)
+    hook_runtime = loaded.get("hook_runtime")
+    if isinstance(hook_runtime, dict):
+        config["hook_runtime"]["node"] = _normalized_node_registrations(
+            hook_runtime.get("node")
+        )
     config["schema_version"] = "ghost-alice-config.v1"
     config["agent_visibility"]["profile"] = canonical_agent_visibility_profile(
         config["agent_visibility"].get("profile")
@@ -79,13 +98,18 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> 
 def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
     path = config_path(home)
     path.parent.mkdir(parents=True, exist_ok=True)
-    normalized = _default_config()
+    normalized = load_config(env={}, home=home)
     agent_visibility = config.get("agent_visibility")
     if isinstance(agent_visibility, dict):
         normalized["agent_visibility"].update(agent_visibility)
     strict_session_log = config.get("strict_session_log")
     if isinstance(strict_session_log, dict):
         normalized["strict_session_log"].update(strict_session_log)
+    hook_runtime = config.get("hook_runtime")
+    if isinstance(hook_runtime, dict) and isinstance(hook_runtime.get("node"), dict):
+        normalized["hook_runtime"]["node"].update(
+            _normalized_node_registrations(hook_runtime["node"])
+        )
     normalized["agent_visibility"]["profile"] = canonical_agent_visibility_profile(
         normalized["agent_visibility"].get("profile")
     )
