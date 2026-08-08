@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -142,6 +143,22 @@ def _is_configured_node_runtime(path: Path, env: dict[str, str]) -> bool:
     return path in _configured_node_runtime_paths(env)
 
 
+def _is_path_node_runtime(path: Path, env: dict[str, str]) -> bool:
+    if not _is_node_executable(path):
+        return False
+    search_path = env.get("PATH")
+    for executable in ("node", "node.exe"):
+        resolved = shutil.which(executable, path=search_path)
+        if not resolved:
+            continue
+        try:
+            if Path(resolved).resolve() == path:
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def assert_allowed_command(argv: list[str], allowed_roots: list[str]) -> None:
     if not argv:
         raise HookCommandRejected("empty hook command rejected")
@@ -160,6 +177,8 @@ def assert_allowed_command(argv: list[str], allowed_roots: list[str]) -> None:
         raise HookCommandRejected(f"hook executable cannot be resolved: {executable}") from exc
 
     if _is_configured_node_runtime(resolved, os.environ):
+        return
+    if _is_path_node_runtime(resolved, os.environ):
         return
 
     for root in _resolve_allowed_roots(allowed_roots):
@@ -215,10 +234,11 @@ def _decode_payload(payload: str) -> str:
 
 
 def _home_from_env(env: dict[str, str]) -> Path | None:
-    home = env.get("HOME")
-    if not home:
-        return None
-    return Path(home)
+    for env_name in ("HOME", "USERPROFILE"):
+        home = env.get(env_name, "").strip()
+        if home:
+            return Path(home)
+    return None
 
 
 def _read_stdin() -> str:

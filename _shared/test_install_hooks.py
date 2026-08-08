@@ -301,6 +301,72 @@ def _expected_ghost_alice_skill_names() -> list[str]:
 
 
 class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
+    def test_installer_prefers_codex_configured_node_over_path_node(self):
+        """The generated hook command must use the runtime trusted by the gate."""
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            configured_node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
+            configured_node.parent.mkdir(parents=True, exist_ok=True)
+            configured_node.write_text("# configured node\n", encoding="utf-8")
+            path_node = root / "path-runtime" / ("node.exe" if os.name == "nt" else "node")
+            path_node.parent.mkdir(parents=True, exist_ok=True)
+            path_node.write_text("# path node\n", encoding="utf-8")
+            config_toml = root / ".codex" / "config.toml"
+            config_toml.parent.mkdir(parents=True, exist_ok=True)
+            config_toml.write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(configured_node.as_posix())}\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(install_hooks, "_resolve_codex_config_toml", return_value=config_toml),
+                patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
+                patch.dict(
+                    os.environ,
+                    {"GHOST_ALICE_NODE": "", "NODE_REPL_NODE_PATH": ""},
+                    clear=False,
+                ),
+            ):
+                command = install_hooks._dispatcher_hook_command(
+                    "codex", "PreToolUse", "tool-checkpoint", "[test]", "tool-checkpoint"
+                )
+
+        self.assertTrue(command.startswith(install_hooks._quote_command_arg(configured_node)))
+
+    def test_installer_preserves_path_node_priority_for_claude(self):
+        """Claude hooks stay independent from a concurrently installed Codex runtime."""
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            configured_node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
+            configured_node.parent.mkdir(parents=True, exist_ok=True)
+            configured_node.write_text("# configured node\n", encoding="utf-8")
+            path_node = root / "path-runtime" / ("node.exe" if os.name == "nt" else "node")
+            path_node.parent.mkdir(parents=True, exist_ok=True)
+            path_node.write_text("# path node\n", encoding="utf-8")
+            config_toml = root / ".codex" / "config.toml"
+            config_toml.parent.mkdir(parents=True, exist_ok=True)
+            config_toml.write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(configured_node.as_posix())}\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(install_hooks, "_resolve_codex_config_toml", return_value=config_toml),
+                patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
+                patch.dict(
+                    os.environ,
+                    {"GHOST_ALICE_NODE": "", "NODE_REPL_NODE_PATH": ""},
+                    clear=False,
+                ),
+            ):
+                command = install_hooks._dispatcher_hook_command(
+                    "claude", "PreToolUse", "tool-checkpoint", "[test]", "tool-checkpoint"
+                )
+
+        self.assertTrue(command.startswith(install_hooks._quote_command_arg(path_node)))
+
     def test_configured_node_runtime_absolute_path_is_allowed_in_hook_payload(self):
         """Configured Node runtimes are valid hook executables even outside fixed roots."""
         with tempfile.TemporaryDirectory() as temp_home:
