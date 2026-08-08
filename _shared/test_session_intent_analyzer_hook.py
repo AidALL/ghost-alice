@@ -5,6 +5,7 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -24,10 +25,17 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.ledger_root = self.tmp_home / "ghost-alice" / ".tmp" / "session-intent"
         self.addCleanup(lambda: shutil.rmtree(self.tmp_home, ignore_errors=True))
 
-    def run_hook(self, payload: dict, *args: str) -> subprocess.CompletedProcess:
+    def run_hook(
+        self,
+        payload: dict,
+        *args: str,
+        child_io_encoding: str | None = None,
+    ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["HOME"] = str(self.tmp_home)
         env.pop("GHOST_ALICE_SESSION_ID", None)
+        if child_io_encoding:
+            env["PYTHONIOENCODING"] = child_io_encoding
         return subprocess.run(
             [
                 sys.executable,
@@ -48,6 +56,25 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             env=env,
             check=False,
         )
+
+    def test_hook_decodes_utf8_stdin_before_hashing_korean_prompt(self) -> None:
+        prompt = "상태 확인"
+        result = self.run_hook(
+            {"session_id": "s-korean", "prompt": prompt},
+            child_io_encoding="cp949:surrogateescape",
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertNotIn("Ledger write failed", payload["systemMessage"])
+
+        events = self.ledger_root / "codex" / "s-korean" / "intent-events.jsonl"
+        text = events.read_text(encoding="utf-8")
+        row = json.loads(text.splitlines()[0])
+        self.assertEqual(row["input_char_count"], len(prompt))
+        expected_digest = f"sha256:{hashlib.sha256(prompt.encode('utf-8')).hexdigest()}"
+        self.assertEqual(row["input_digest"], expected_digest)
+        self.assertNotIn(prompt, text)
 
     def test_hook_writes_event_without_raw_prompt(self) -> None:
         result = self.run_hook({
