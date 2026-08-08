@@ -711,6 +711,39 @@ def _strip_trailing_marker_args(args: list[str]) -> list[str] | None:
     return None
 
 
+def _audit_rejected_command(hook_id: str, rejection_stderr: str) -> None:
+    """Best-effort audit for commands rejected before the normal run path."""
+    try:
+        env = os.environ
+        stdin_text = _read_stdin()
+        hook_payload = _payload_from_stdin(stdin_text)
+        config = runtime_config.load_config(env=env, home=_home_from_env(env))
+        profile = config["agent_visibility"]["profile"]
+        platform = env.get("GHOST_ALICE_PLATFORM", "unknown")
+        session_id = strict_session_log.session_id_from_payload(hook_payload, env=env)
+        strict_session_log.append_event(
+            home=_home_from_env(env),
+            platform=platform,
+            session_id=session_id,
+            event={
+                "hook_id": hook_id,
+                "event": _event_name(hook_payload, env),
+                "stdin": stdin_text,
+                "stdout": "",
+                "stderr": rejection_stderr,
+                "exit_code": 126,
+                "agent_visibility_profile": profile,
+                "visible_decision": "force_show",
+            },
+        )
+    except Exception as exc:  # noqa: BLE001 - audit failure must not mask rejection.
+        try:
+            sys.stderr.write(f"hook rejection audit failed: {exc}\n")
+        except Exception:  # noqa: BLE001 - diagnostics must not mask rejection.
+            pass
+        return
+
+
 def main(argv: list[str] | None = None) -> NoReturn:
     args = list(sys.argv[1:] if argv is None else argv)
     normalized_args = _strip_trailing_marker_args(args)
@@ -726,7 +759,9 @@ def main(argv: list[str] | None = None) -> NoReturn:
         sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [legacy-visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
     except HookCommandRejected as exc:
-        sys.stderr.write(f"hook command rejected: {exc}\n")
+        rejection_stderr = f"hook command rejected: {exc}\n"
+        _audit_rejected_command(normalized_args[1], rejection_stderr)
+        sys.stderr.write(rejection_stderr)
         raise SystemExit(126)
 
 

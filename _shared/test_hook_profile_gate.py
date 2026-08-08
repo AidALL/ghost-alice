@@ -446,21 +446,148 @@ class TestHookCommandAllowlist(unittest.TestCase):
 
     def test_cli_rejects_shell_injection_payload(self):
         payload = base64.urlsafe_b64encode(b"/bin/bash -lc 'printf ok'; /tmp/evil").decode("ascii")
-        env = os.environ.copy()
-        env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
+        raw_sentinel = "REJECTED_RAW_STDIN_MUST_NOT_BE_PERSISTED"
+        hook_payload = {
+            "session_id": "s-rejected",
+            "hook_event_name": "PreToolUse",
+            "prompt": raw_sentinel,
+        }
 
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "prompt", "strict", payload],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=False,
-        )
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = os.environ.copy()
+            env["HOME"] = temp_home
+            env["GHOST_ALICE_PLATFORM"] = "codex"
+            env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
 
-        self.assertNotEqual(result.returncode, 0)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "tool-checkpoint",
+                    "strict",
+                    payload,
+                ],
+                input=json.dumps(hook_payload),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            log_path = (
+                Path(temp_home)
+                / ".ghost-alice"
+                / "session-logs"
+                / "codex"
+                / "s-rejected"
+                / "strict-hook-output.jsonl"
+            )
+            serialized_rows = log_path.read_text(encoding="utf-8").splitlines()
+            rows = [json.loads(line) for line in serialized_rows]
+
+        self.assertEqual(result.returncode, 126)
         self.assertIn("rejected", result.stderr.lower())
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row["platform"], "codex")
+        self.assertEqual(row["session_id"], "s-rejected")
+        self.assertEqual(row["hook_id"], "tool-checkpoint")
+        self.assertEqual(row["event"], "PreToolUse")
+        self.assertEqual(row["exit_code"], 126)
+        self.assertEqual(row["stdout"], "")
+        self.assertEqual(row["stderr"], result.stderr)
+        self.assertEqual(row["agent_visibility_profile"], "strict")
+        self.assertEqual(row["visible_decision"], "force_show")
+        self.assertNotIn("stdin", row)
+        self.assertNotIn(raw_sentinel, "\n".join(serialized_rows))
+
+    def test_cli_audits_malformed_base64_rejection(self):
+        hook_payload = {
+            "session_id": "s-malformed",
+            "hook_event_name": "PreToolUse",
+        }
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = os.environ.copy()
+            env["HOME"] = temp_home
+            env["GHOST_ALICE_PLATFORM"] = "codex"
+            env["GHOST_ALICE_AGENT_VISIBILITY"] = "dynamic"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "tool-checkpoint",
+                    "%%%not-base64%%%",
+                ],
+                input=json.dumps(hook_payload),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            log_path = (
+                Path(temp_home)
+                / ".ghost-alice"
+                / "session-logs"
+                / "codex"
+                / "s-malformed"
+                / "strict-hook-output.jsonl"
+            )
+            rows = [
+                json.loads(line)
+                for line in log_path.read_text(encoding="utf-8").splitlines()
+            ]
+
+        self.assertEqual(result.returncode, 126)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["event"], "PreToolUse")
+        self.assertEqual(rows[0]["visible_decision"], "force_show")
+        self.assertIn("payload decode failed", rows[0]["stderr"])
+
+    def test_rejection_audit_failure_preserves_exit_126(self):
+        payload = base64.urlsafe_b64encode(b"/bin/bash; /tmp/evil").decode("ascii")
+        stdin_text = json.dumps(
+            {"session_id": "s-audit-failure", "hook_event_name": "PreToolUse"}
+        )
+        stderr = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {
+                        "HOME": temp_home,
+                        "GHOST_ALICE_PLATFORM": "codex",
+                        "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+                    },
+                    clear=True,
+                ),
+                mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                mock.patch.object(sys, "stderr", stderr),
+                mock.patch.object(
+                    hook_profile_gate.strict_session_log,
+                    "append_event",
+                    side_effect=OSError("audit unavailable"),
+                ) as append_event,
+                self.assertRaises(SystemExit) as cm,
+            ):
+                hook_profile_gate.main(["run", "tool-checkpoint", payload])
+
+        self.assertEqual(cm.exception.code, 126)
+        self.assertIn("hook command rejected", stderr.getvalue())
+        self.assertIn(
+            "hook rejection audit failed: audit unavailable",
+            stderr.getvalue(),
+        )
+        append_event.assert_called_once()
 
     def test_cli_accepts_current_runner_shape_without_visibility_csv(self):
         executable = sys.executable.replace("\\", "/")
