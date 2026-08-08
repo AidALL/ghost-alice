@@ -367,6 +367,35 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
 
         self.assertTrue(command.startswith(install_hooks._quote_command_arg(path_node)))
 
+    def test_installer_prefers_process_node_repl_runtime_over_path_for_claude(self):
+        """The established NODE_REPL_NODE_PATH process override remains supported."""
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            configured_node = root / "configured" / ("node.exe" if os.name == "nt" else "node")
+            configured_node.parent.mkdir(parents=True)
+            configured_node.write_text("# configured node\n", encoding="utf-8")
+            path_node = root / "path" / ("node.exe" if os.name == "nt" else "node")
+            path_node.parent.mkdir(parents=True)
+            path_node.write_text("# path node\n", encoding="utf-8")
+
+            with (
+                patch.object(install_hooks, "_home", return_value=root),
+                patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
+                patch.dict(
+                    os.environ,
+                    {
+                        "GHOST_ALICE_NODE": "",
+                        "NODE_REPL_NODE_PATH": str(configured_node),
+                    },
+                    clear=False,
+                ),
+            ):
+                command = install_hooks._dispatcher_hook_command(
+                    "claude", "PreToolUse", "tool-checkpoint", "[test]", "tool-checkpoint"
+                )
+
+        self.assertTrue(command.startswith(install_hooks._quote_command_arg(configured_node)))
+
     def test_configured_node_runtime_absolute_path_is_allowed_in_hook_payload(self):
         """Configured Node runtimes are valid hook executables even outside fixed roots."""
         with tempfile.TemporaryDirectory() as temp_home:
@@ -2957,6 +2986,99 @@ class TempHomeTestCase(unittest.TestCase):
 class TestInstallHook(TempHomeTestCase):
     """Install behavior tests."""
 
+    def _fake_node(self, directory: str) -> Path:
+        node = self.fake_home / directory / ("node.exe" if os.name == "nt" else "node")
+        node.parent.mkdir(parents=True, exist_ok=True)
+        node.write_text("# fake node\n", encoding="utf-8")
+        return node
+
+    def test_cli_resolves_node_once_and_persists_the_command_runtime(self):
+        self._create_platform_dir("claude")
+        selected_node = self._fake_node("selected")
+        changed_path_node = self._fake_node("changed-path")
+        output = io.StringIO()
+
+        with (
+            patch.object(sys, "argv", ["install_hooks.py", "--platform", "claude"]),
+            patch.object(
+                install_hooks,
+                "_resolve_node_runtime",
+                side_effect=[str(selected_node), str(changed_path_node)],
+            ) as resolver,
+            patch.object(install_hooks, "_path_node_runtime_available", return_value=True),
+            contextlib.redirect_stdout(output),
+        ):
+            result = install_hooks.main()
+
+        settings = self._read_settings("claude")
+        command = _visible_and_runner_payload_text(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        ).replace("\\", "/")
+        config = json.loads(
+            (self.fake_home / ".ghost-alice" / "config.json").read_text(encoding="utf-8")
+        )
+
+        self.assertEqual(result, 0, msg=output.getvalue())
+        self.assertEqual(resolver.call_count, 1)
+        self.assertIn(selected_node.as_posix(), command)
+        self.assertNotIn(changed_path_node.as_posix(), command)
+        self.assertEqual(
+            Path(config["hook_runtime"]["node"]["claude"]).resolve(),
+            selected_node.resolve(),
+        )
+
+    def test_install_registers_runtime_when_current_settings_need_no_write(self):
+        self._create_platform_dir("claude")
+        selected_node = self._fake_node("selected")
+        self.assertEqual(
+            install_hooks.install_hook("claude", node_runtime=selected_node),
+            "installed",
+        )
+        (self.fake_home / ".ghost-alice" / "config.json").unlink()
+
+        result = install_hooks.install_hook("claude", node_runtime=selected_node)
+
+        config = json.loads(
+            (self.fake_home / ".ghost-alice" / "config.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(result, "already")
+        self.assertEqual(
+            Path(config["hook_runtime"]["node"]["claude"]).resolve(),
+            selected_node.resolve(),
+        )
+
+    def test_failed_settings_write_does_not_register_runtime(self):
+        self._create_platform_dir("claude")
+        selected_node = self._fake_node("selected")
+
+        with (
+            patch.object(install_hooks, "_write_settings", side_effect=OSError("write failed")),
+            self.assertRaisesRegex(OSError, "write failed"),
+        ):
+            install_hooks.install_hook("claude", node_runtime=selected_node)
+
+        self.assertFalse((self.fake_home / ".ghost-alice" / "config.json").exists())
+
+    def test_status_uses_registered_runtime_after_path_changes(self):
+        self._create_platform_dir("claude")
+        installed_node = self._fake_node("installed")
+        changed_path_node = self._fake_node("changed-path")
+        self.assertEqual(
+            install_hooks.install_hook("claude", node_runtime=installed_node),
+            "installed",
+        )
+        original_which = shutil.which
+
+        def changed_which(command: str, *args, **kwargs) -> str | None:
+            if command in {"node", "node.exe"}:
+                return str(changed_path_node)
+            return original_which(command, *args, **kwargs)
+
+        with patch.object(install_hooks.shutil, "which", side_effect=changed_which):
+            status = install_hooks.check_status("claude")
+
+        self.assertEqual(status, "installed")
+
     def test_install_into_empty_settings(self):
         """Install hooks into an empty settings file."""
         self._write_settings("claude", {})
@@ -4143,6 +4265,16 @@ class TestDryRun(TempHomeTestCase):
 
         current_content = (self.fake_home / ".claude" / "settings.json").read_text(encoding="utf-8")
         self.assertEqual(original_content, current_content)
+
+    def test_dry_run_does_not_register_selected_node_runtime(self):
+        self._write_settings("claude", {"original": True})
+        node = self.fake_home / "selected" / ("node.exe" if os.name == "nt" else "node")
+        node.parent.mkdir(parents=True)
+        node.write_text("# fake node\n", encoding="utf-8")
+
+        install_hooks.install_hook("claude", dry_run=True, node_runtime=node)
+
+        self.assertFalse((self.fake_home / ".ghost-alice" / "config.json").exists())
 
     def test_dry_run_uninstall_does_not_modify(self):
         """Dry-run removal does not modify files."""

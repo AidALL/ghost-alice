@@ -134,6 +134,17 @@ def _configured_node_runtime_paths(env: dict[str, str]) -> set[Path]:
         configured = _configured_node_runtime_from_value(value if isinstance(value, str) else None)
         if configured is not None:
             paths.add(configured)
+
+    home = _home_from_env(env)
+    config = runtime_config.load_config(env=env, home=home) if home is not None else {}
+    node_registrations = config.get("hook_runtime", {}).get("node", {})
+    if isinstance(node_registrations, dict):
+        for value in node_registrations.values():
+            configured = _configured_node_runtime_from_value(
+                value if isinstance(value, str) else None
+            )
+            if configured is not None:
+                paths.add(configured)
     return paths
 
 

@@ -310,6 +310,87 @@ class TestHookCommandAllowlist(unittest.TestCase):
 
         self.assertEqual(Path(argv[0]).resolve(), node.resolve())
 
+    def test_allows_registered_node_when_path_resolves_different_node(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            registered = root / "installed" / ("node.exe" if os.name == "nt" else "node")
+            registered.parent.mkdir(parents=True)
+            registered.write_text("# installed node\n", encoding="utf-8")
+            path_node = root / "current-path" / ("node.exe" if os.name == "nt" else "node")
+            path_node.parent.mkdir(parents=True)
+            path_node.write_text("# path node\n", encoding="utf-8")
+            hook_profile_gate.runtime_config.save_config(
+                {"hook_runtime": {"node": {"claude": str(registered)}}},
+                home=root,
+            )
+            command = (
+                f'"{registered.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+            )
+            env = {
+                "HOME": str(root),
+                "PATH": str(path_node.parent),
+                "PATHEXT": ".EXE",
+                "GHOST_ALICE_PLATFORM": "claude",
+            }
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(hook_profile_gate.shutil, "which", return_value=str(path_node)),
+            ):
+                argv = hook_profile_gate._validate_shell_command(command)
+
+        self.assertEqual(Path(argv[0]).resolve(), registered.resolve())
+
+    def test_rejects_unregistered_node_outside_current_path(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            unregistered = root / "installed" / ("node.exe" if os.name == "nt" else "node")
+            unregistered.parent.mkdir(parents=True)
+            unregistered.write_text("# unregistered node\n", encoding="utf-8")
+            path_node = root / "current-path" / ("node.exe" if os.name == "nt" else "node")
+            path_node.parent.mkdir(parents=True)
+            path_node.write_text("# path node\n", encoding="utf-8")
+            command = (
+                f'"{unregistered.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+            )
+            env = {
+                "HOME": str(root),
+                "PATH": str(path_node.parent),
+                "PATHEXT": ".EXE",
+                "GHOST_ALICE_PLATFORM": "claude",
+            }
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(hook_profile_gate.shutil, "which", return_value=str(path_node)),
+                self.assertRaises(hook_profile_gate.HookCommandRejected),
+            ):
+                hook_profile_gate._validate_shell_command(command)
+
+    def test_rejects_registered_runtime_not_named_node(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            runtime = root / "installed" / ("python.exe" if os.name == "nt" else "python")
+            runtime.parent.mkdir(parents=True)
+            runtime.write_text("# arbitrary runtime\n", encoding="utf-8")
+            hook_profile_gate.runtime_config.save_config(
+                {"hook_runtime": {"node": {"claude": str(runtime)}}},
+                home=root,
+            )
+            command = (
+                f'"{runtime.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+            )
+
+            with (
+                mock.patch.dict(os.environ, {"HOME": str(root), "PATH": ""}, clear=True),
+                mock.patch.object(hook_profile_gate.shutil, "which", return_value=None),
+                self.assertRaises(hook_profile_gate.HookCommandRejected),
+            ):
+                hook_profile_gate._validate_shell_command(command)
+
     def test_userprofile_locates_configured_node_when_home_is_missing(self):
         with tempfile.TemporaryDirectory() as temp_home:
             root = Path(temp_home)

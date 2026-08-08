@@ -823,11 +823,24 @@ def _quote_command_arg(value: str | Path) -> str:
     return '"' + text.replace('"', '\\"') + '"'
 
 
+def _normalized_node_runtime(value: str | Path | None) -> str | None:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    if candidate.name.lower() not in {"node", "node.exe"} or not candidate.is_file():
+        return None
+    try:
+        return str(candidate.resolve())
+    except OSError:
+        return None
+
+
 def _configured_node_runtime_from_env() -> str | None:
     for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
-        value = os.environ.get(env_name, "").strip().strip('"')
-        if value and Path(value).expanduser().is_file():
-            return str(Path(value).expanduser())
+        configured = _normalized_node_runtime(os.environ.get(env_name))
+        if configured:
+            return configured
     return None
 
 
@@ -849,10 +862,31 @@ def _configured_node_runtime_from_codex_config() -> str | None:
     value = env.get("NODE_REPL_NODE_PATH") if isinstance(env, dict) else None
     if not isinstance(value, str):
         return None
-    candidate = Path(value.strip().strip('"')).expanduser()
-    if candidate.is_file():
-        return str(candidate)
-    return None
+    return _normalized_node_runtime(value)
+
+
+def _registered_node_runtime(platform_key: str | None) -> str | None:
+    if not platform_key:
+        return None
+    config = runtime_config.load_config(env={}, home=_home())
+    node_registrations = config.get("hook_runtime", {}).get("node", {})
+    if not isinstance(node_registrations, dict):
+        return None
+    value = node_registrations.get(platform_key)
+    return _normalized_node_runtime(value if isinstance(value, str) else None)
+
+
+def _persist_node_runtime(platform_key: str, node_runtime: str | Path) -> bool:
+    selected = _normalized_node_runtime(node_runtime)
+    if selected is None:
+        raise RuntimeError(f"Invalid Node.js runtime selected for {platform_key}: {node_runtime}")
+    if _registered_node_runtime(platform_key) == selected:
+        return False
+    runtime_config.save_config(
+        {"hook_runtime": {"node": {platform_key: selected}}},
+        home=_home(),
+    )
+    return True
 
 
 def _path_node_runtime_available() -> bool:
@@ -874,23 +908,43 @@ def _resolve_node_runtime(platform_key: str | None = None) -> str | None:
         configured = _configured_node_runtime_from_codex_config()
         if configured:
             return configured
+    registered = _registered_node_runtime(platform_key)
+    if registered:
+        return registered
     found = shutil.which("node") or shutil.which("node.exe")
-    if found:
-        return found
+    normalized = _normalized_node_runtime(found)
+    if normalized:
+        return normalized
     return _configured_node_runtime_from_codex_config()
 
 
-def _node_runtime_command(platform_key: str | None = None) -> str:
-    runtime = _resolve_node_runtime(platform_key)
+def _node_runtime_command(
+    platform_key: str | None = None,
+    node_runtime: str | Path | None = None,
+) -> str:
+    runtime = (
+        _normalized_node_runtime(node_runtime)
+        if node_runtime is not None
+        else _resolve_node_runtime(platform_key)
+    )
+    if node_runtime is not None and runtime is None:
+        raise RuntimeError(f"Invalid Node.js runtime selected for {platform_key}: {node_runtime}")
     if runtime:
         return _quote_command_arg(runtime)
     return "node"
 
 
-def _dispatcher_hook_command(platform: str, event: str, hook_name: str, marker: str, hook_id: str) -> str:
+def _dispatcher_hook_command(
+    platform: str,
+    event: str,
+    hook_name: str,
+    marker: str,
+    hook_id: str,
+    node_runtime: str | Path | None = None,
+) -> str:
     dispatcher = _resolve_installed_hook_dispatcher()
     parts = [
-        _node_runtime_command(platform),
+        _node_runtime_command(platform, node_runtime),
         _quote_command_arg(dispatcher),
         "--platform",
         platform,
@@ -948,9 +1002,20 @@ def _platform_web_search_entry(platform_key: str, event: str) -> dict[str, Any]:
     return _hook_runner_command_entry("web-search-first", command, WEB_SEARCH_FIRST_MARKER)
 
 
-def _platform_tool_checkpoint_entry(platform_key: str, event: str) -> dict[str, Any]:
+def _platform_tool_checkpoint_entry(
+    platform_key: str,
+    event: str,
+    node_runtime: str | Path | None = None,
+) -> dict[str, Any]:
     if platform_key in {"claude", "codex"}:
-        command = _dispatcher_hook_command(platform_key, event, "tool-checkpoint", TOOL_CHECKPOINT_MARKER, "tool-checkpoint")
+        command = _dispatcher_hook_command(
+            platform_key,
+            event,
+            "tool-checkpoint",
+            TOOL_CHECKPOINT_MARKER,
+            "tool-checkpoint",
+            node_runtime,
+        )
         return _hook_runner_command_entry("tool-checkpoint", command, TOOL_CHECKPOINT_MARKER)
     return _hook_runner_command_entry("tool-checkpoint", TOOL_CHECKPOINT_COMMAND, TOOL_CHECKPOINT_MARKER)
 
@@ -1085,20 +1150,17 @@ PLATFORMS: dict[str, dict[str, Any]] = {
 }
 
 
-def _node_runtime_available(platform_key: str | None = None) -> bool:
-    return bool(_resolve_node_runtime(platform_key))
-
-
-def _ensure_node_runtime_for_hook_install(platform_key: str) -> None:
+def _ensure_node_runtime_for_hook_install(platform_key: str) -> str | None:
     if platform_key not in {"claude", "codex"}:
-        return
+        return None
     if platform_key == "codex" and not _codex_hooks_supported():
-        return
+        return None
     platform = PLATFORMS[platform_key]
     if not platform["detect"]():
-        return
-    if _node_runtime_available(platform_key):
-        return
+        return None
+    node_runtime = _resolve_node_runtime(platform_key)
+    if node_runtime:
+        return node_runtime
     name = platform["name"]
     raise RuntimeError(
         f"Node.js runtime is required for {name} hook enforcement because "
@@ -1967,6 +2029,7 @@ def install_hook(
     dry_run: bool = False,
     addon_sources: Any = (),
     skills_dir: str | Path | None = None,
+    node_runtime: str | Path | None = None,
 ) -> str:
     """Install hooks into a single framework.
 
@@ -1992,6 +2055,13 @@ def install_hook(
     if not platform["detect"]():
         _log(_t(f"  {config_dir} not found. Assuming {name} is not installed, skipping", f"  {config_dir} not found. Assuming {name} is not installed, skipping"))
         return "skipped"
+
+    if node_runtime is None:
+        selected_node_runtime = _ensure_node_runtime_for_hook_install(platform_key)
+    else:
+        selected_node_runtime = _normalized_node_runtime(node_runtime)
+        if selected_node_runtime is None:
+            raise RuntimeError(f"Invalid Node.js runtime selected for {name}: {node_runtime}")
 
     _log(_t(f"  Hook config file: {settings_file}", f"  Hook config file: {settings_file}"))
     settings = _read_settings(settings_file)
@@ -2137,7 +2207,11 @@ def install_hook(
 
     # Install the pre_tool_use hook (tool-checkpoint: enforce narration before tool calls).
     tool_checkpoint_key = _resolve_hook_event("pre_tool_use", platform_key)
-    tool_checkpoint_entry = _platform_tool_checkpoint_entry(platform_key, tool_checkpoint_key)
+    tool_checkpoint_entry = _platform_tool_checkpoint_entry(
+        platform_key,
+        tool_checkpoint_key,
+        selected_node_runtime,
+    )
     tool_checkpoint_command = _entry_command(tool_checkpoint_entry)
     if tool_checkpoint_key not in hooks_obj:
         hooks_obj[tool_checkpoint_key] = []
@@ -2335,9 +2409,13 @@ def install_hook(
             changed = True
 
     if not changed:
+        if not dry_run and selected_node_runtime is not None:
+            _persist_node_runtime(platform_key, selected_node_runtime)
         return "already"
 
     _write_settings(settings_file, settings, dry_run=dry_run)
+    if not dry_run and selected_node_runtime is not None:
+        _persist_node_runtime(platform_key, selected_node_runtime)
     _log(_t("  Hook installation complete", "  Hook installation complete"))
     return "installed"
 
@@ -3060,12 +3138,13 @@ def main() -> int:
             elif args.uninstall:
                 results[key] = uninstall_hook(key, dry_run=args.dry_run)
             else:
-                _ensure_node_runtime_for_hook_install(key)
+                node_runtime = _ensure_node_runtime_for_hook_install(key)
                 results[key] = install_hook(
                     key,
                     dry_run=args.dry_run,
                     addon_sources=args.addon_source,
                     skills_dir=args.skills_dir,
+                    node_runtime=node_runtime,
                 )
         except Exception as e:
             _log(f"ERROR: {PLATFORMS[key]['name']}. {e}")
