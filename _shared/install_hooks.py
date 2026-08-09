@@ -42,6 +42,7 @@ import re
 import shutil
 import sys
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -823,11 +824,30 @@ def _quote_command_arg(value: str | Path) -> str:
     return '"' + text.replace('"', '\\"') + '"'
 
 
+_NODE_RUNTIME_OMITTED = object()
+
+
+def _normalized_node_runtime(value: str | Path | None) -> str | None:
+    text = str(value or "").strip().strip('"')
+    if not text:
+        return None
+    candidate = Path(text).expanduser()
+    try:
+        resolved = candidate.resolve(strict=False)
+    except (OSError, RuntimeError):
+        return None
+    if resolved.name.lower() not in {"node", "node.exe"} or not resolved.is_file():
+        return None
+    if not runtime_config.is_usable_node_runtime(resolved):
+        return None
+    return str(resolved)
+
+
 def _configured_node_runtime_from_env() -> str | None:
     for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
-        value = os.environ.get(env_name, "").strip().strip('"')
-        if value and Path(value).expanduser().is_file():
-            return str(Path(value).expanduser())
+        configured = _normalized_node_runtime(os.environ.get(env_name))
+        if configured:
+            return configured
     return None
 
 
@@ -838,21 +858,46 @@ def _configured_node_runtime_from_codex_config() -> str | None:
     try:
         with config_file.open("rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return None
 
-    env = (
-        data.get("mcp_servers", {})
-        .get("node_repl", {})
-        .get("env", {})
-    )
-    value = env.get("NODE_REPL_NODE_PATH") if isinstance(env, dict) else None
+    mcp_servers = data.get("mcp_servers")
+    if not isinstance(mcp_servers, Mapping):
+        return None
+    node_repl = mcp_servers.get("node_repl")
+    if not isinstance(node_repl, Mapping):
+        return None
+    env = node_repl.get("env")
+    if not isinstance(env, Mapping):
+        return None
+    value = env.get("NODE_REPL_NODE_PATH")
     if not isinstance(value, str):
         return None
-    candidate = Path(value.strip().strip('"')).expanduser()
-    if candidate.is_file():
-        return str(candidate)
-    return None
+    return _normalized_node_runtime(value)
+
+
+def _registered_node_runtime(platform_key: str | None) -> str | None:
+    if not platform_key:
+        return None
+    config = runtime_config.load_config(env={}, home=_home())
+    node_registrations = config.get("hook_runtime", {}).get("node", {})
+    if not isinstance(node_registrations, dict):
+        return None
+    value = node_registrations.get(platform_key)
+    return _normalized_node_runtime(value if isinstance(value, str) else None)
+
+
+def _persist_node_runtime(platform_key: str, node_runtime: str | Path) -> bool:
+    selected = _normalized_node_runtime(node_runtime)
+    if selected is None:
+        raise RuntimeError(f"Invalid Node.js runtime selected for {platform_key}: {node_runtime}")
+    if _registered_node_runtime(platform_key) == selected:
+        return False
+    runtime_config.save_config(
+        {"hook_runtime": {"node": {platform_key: selected}}},
+        home=_home(),
+    )
+    return True
 
 
 def _path_node_runtime_available() -> bool:
@@ -874,23 +919,48 @@ def _resolve_node_runtime(platform_key: str | None = None) -> str | None:
         configured = _configured_node_runtime_from_codex_config()
         if configured:
             return configured
+    registered = _registered_node_runtime(platform_key)
+    if registered:
+        return registered
     found = shutil.which("node") or shutil.which("node.exe")
-    if found:
-        return found
+    normalized = _normalized_node_runtime(found)
+    if normalized:
+        return normalized
     return _configured_node_runtime_from_codex_config()
 
 
-def _node_runtime_command(platform_key: str | None = None) -> str:
-    runtime = _resolve_node_runtime(platform_key)
+def _node_runtime_command(
+    platform_key: str | None = None,
+    node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
+) -> str:
+    if node_runtime is _NODE_RUNTIME_OMITTED:
+        runtime = _resolve_node_runtime(platform_key)
+    elif node_runtime is None:
+        runtime = None
+    else:
+        runtime = _normalized_node_runtime(node_runtime)
+    if (
+        node_runtime is not _NODE_RUNTIME_OMITTED
+        and node_runtime is not None
+        and runtime is None
+    ):
+        raise RuntimeError(f"Invalid Node.js runtime selected for {platform_key}: {node_runtime}")
     if runtime:
         return _quote_command_arg(runtime)
     return "node"
 
 
-def _dispatcher_hook_command(platform: str, event: str, hook_name: str, marker: str, hook_id: str) -> str:
+def _dispatcher_hook_command(
+    platform: str,
+    event: str,
+    hook_name: str,
+    marker: str,
+    hook_id: str,
+    node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
+) -> str:
     dispatcher = _resolve_installed_hook_dispatcher()
     parts = [
-        _node_runtime_command(platform),
+        _node_runtime_command(platform, node_runtime),
         _quote_command_arg(dispatcher),
         "--platform",
         platform,
@@ -948,9 +1018,20 @@ def _platform_web_search_entry(platform_key: str, event: str) -> dict[str, Any]:
     return _hook_runner_command_entry("web-search-first", command, WEB_SEARCH_FIRST_MARKER)
 
 
-def _platform_tool_checkpoint_entry(platform_key: str, event: str) -> dict[str, Any]:
+def _platform_tool_checkpoint_entry(
+    platform_key: str,
+    event: str,
+    node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
+) -> dict[str, Any]:
     if platform_key in {"claude", "codex"}:
-        command = _dispatcher_hook_command(platform_key, event, "tool-checkpoint", TOOL_CHECKPOINT_MARKER, "tool-checkpoint")
+        command = _dispatcher_hook_command(
+            platform_key,
+            event,
+            "tool-checkpoint",
+            TOOL_CHECKPOINT_MARKER,
+            "tool-checkpoint",
+            node_runtime,
+        )
         return _hook_runner_command_entry("tool-checkpoint", command, TOOL_CHECKPOINT_MARKER)
     return _hook_runner_command_entry("tool-checkpoint", TOOL_CHECKPOINT_COMMAND, TOOL_CHECKPOINT_MARKER)
 
@@ -1089,16 +1170,17 @@ def _node_runtime_available(platform_key: str | None = None) -> bool:
     return bool(_resolve_node_runtime(platform_key))
 
 
-def _ensure_node_runtime_for_hook_install(platform_key: str) -> None:
+def _ensure_node_runtime_for_hook_install(platform_key: str) -> str | None:
     if platform_key not in {"claude", "codex"}:
-        return
+        return None
     if platform_key == "codex" and not _codex_hooks_supported():
-        return
+        return None
     platform = PLATFORMS[platform_key]
     if not platform["detect"]():
-        return
-    if _node_runtime_available(platform_key):
-        return
+        return None
+    node_runtime = _resolve_node_runtime(platform_key)
+    if node_runtime:
+        return node_runtime
     name = platform["name"]
     raise RuntimeError(
         f"Node.js runtime is required for {name} hook enforcement because "
@@ -1117,7 +1199,7 @@ def _t(ko: str, en: str) -> str:
     return en
 
 
-def _read_settings(path: Path) -> dict:
+def _read_settings(path: Path, *, backup_corrupt: bool = True) -> dict:
     if not path.exists():
         return {}
     try:
@@ -1125,17 +1207,35 @@ def _read_settings(path: Path) -> dict:
             return json.load(f)
     except json.JSONDecodeError as e:
         _log(_t(f"WARNING: Failed to parse JSON at {path} ({e})", f"WARNING: Failed to parse JSON at {path} ({e})"))
-        _log(_t("  File may be corrupted. Backing up and starting with empty settings.", "  File may be corrupted. Backing up and starting with empty settings."))
-        backup = path.with_suffix(".json.corrupt-bak")
-        shutil.copy2(path, backup)
-        _log(_t(f"  Corrupted file backed up: {backup}", f"  Corrupted file backed up: {backup}"))
+        if backup_corrupt:
+            _log(_t("  File may be corrupted. Backing up and starting with empty settings.", "  File may be corrupted. Backing up and starting with empty settings."))
+            backup = path.with_suffix(".json.corrupt-bak")
+            shutil.copy2(path, backup)
+            _log(_t(f"  Corrupted file backed up: {backup}", f"  Corrupted file backed up: {backup}"))
+        else:
+            _log(_t(
+                "  File may be corrupted. Continuing with empty settings without modifying it.",
+                "  File may be corrupted. Continuing with empty settings without modifying it.",
+            ))
         return {}
     except OSError as e:
         _log(_t(f"WARNING: Failed to read {path} ({e})", f"WARNING: Failed to read {path} ({e})"))
         return {}
 
 
-def _write_settings(path: Path, data: dict, dry_run: bool = False) -> None:
+def _report_saved(path: Path) -> None:
+    try:
+        _log(_t(f"Saved: {path}", f"Saved: {path}"))
+    except Exception:
+        pass
+
+
+def _write_settings(
+    path: Path,
+    data: dict,
+    dry_run: bool = False,
+    report_saved: bool = True,
+) -> None:
     if dry_run:
         _log(_t(f"DRY-RUN: Would write to {path}:", f"DRY-RUN: Would write to {path}:"))
         print(json.dumps(data, indent=2, ensure_ascii=False))
@@ -1146,10 +1246,26 @@ def _write_settings(path: Path, data: dict, dry_run: bool = False) -> None:
         shutil.copy2(path, backup)
         _log(_t(f"Backup created: {backup}", f"Backup created: {backup}"))
         _rotate_backups(path, keep=3)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    _log(_t(f"Saved: {path}", f"Saved: {path}"))
+    runtime_config._atomic_write_json(path, data)
+    if report_saved:
+        _report_saved(path)
+
+
+def _restore_settings_snapshot(
+    path: Path,
+    existed: bool,
+    contents: bytes | None,
+) -> None:
+    if existed:
+        if contents is None:
+            raise RuntimeError(f"Missing rollback snapshot for existing settings file: {path}")
+        runtime_config._atomic_write_bytes(path, contents)
+        return
+    path = Path(path)
+    if path.is_symlink():
+        runtime_config._resolve_symlink_target(path).unlink(missing_ok=True)
+        return
+    path.unlink(missing_ok=True)
 
 
 def _rotate_backups(
@@ -1967,6 +2083,7 @@ def install_hook(
     dry_run: bool = False,
     addon_sources: Any = (),
     skills_dir: str | Path | None = None,
+    node_runtime: str | Path | None = None,
 ) -> str:
     """Install hooks into a single framework.
 
@@ -1993,8 +2110,29 @@ def install_hook(
         _log(_t(f"  {config_dir} not found. Assuming {name} is not installed, skipping", f"  {config_dir} not found. Assuming {name} is not installed, skipping"))
         return "skipped"
 
+    if node_runtime is None:
+        selected_node_runtime = _ensure_node_runtime_for_hook_install(platform_key)
+    else:
+        selected_node_runtime = _normalized_node_runtime(node_runtime)
+        if selected_node_runtime is None:
+            raise RuntimeError(f"Invalid Node.js runtime selected for {name}: {node_runtime}")
+
+    settings_existed = settings_file.exists()
+    settings_snapshot = (
+        settings_file.read_bytes()
+        if settings_existed and not dry_run and selected_node_runtime is not None
+        else None
+    )
+    runtime_config_file = runtime_config.config_path(_home())
+    runtime_config_existed = runtime_config_file.exists()
+    runtime_config_snapshot = (
+        runtime_config_file.read_bytes()
+        if runtime_config_existed and not dry_run and selected_node_runtime is not None
+        else None
+    )
+
     _log(_t(f"  Hook config file: {settings_file}", f"  Hook config file: {settings_file}"))
-    settings = _read_settings(settings_file)
+    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
 
     changed = False
 
@@ -2137,7 +2275,11 @@ def install_hook(
 
     # Install the pre_tool_use hook (tool-checkpoint: enforce narration before tool calls).
     tool_checkpoint_key = _resolve_hook_event("pre_tool_use", platform_key)
-    tool_checkpoint_entry = _platform_tool_checkpoint_entry(platform_key, tool_checkpoint_key)
+    tool_checkpoint_entry = _platform_tool_checkpoint_entry(
+        platform_key,
+        tool_checkpoint_key,
+        selected_node_runtime,
+    )
     tool_checkpoint_command = _entry_command(tool_checkpoint_entry)
     if tool_checkpoint_key not in hooks_obj:
         hooks_obj[tool_checkpoint_key] = []
@@ -2335,9 +2477,45 @@ def install_hook(
             changed = True
 
     if not changed:
+        if not dry_run and selected_node_runtime is not None:
+            _persist_node_runtime(platform_key, selected_node_runtime)
         return "already"
 
-    _write_settings(settings_file, settings, dry_run=dry_run)
+    _write_settings(
+        settings_file,
+        settings,
+        dry_run=dry_run,
+        report_saved=False,
+    )
+    if not dry_run and selected_node_runtime is not None:
+        try:
+            _persist_node_runtime(platform_key, selected_node_runtime)
+        except Exception as persistence_error:
+            rollback_errors: list[Exception] = []
+            try:
+                _restore_settings_snapshot(
+                    settings_file,
+                    settings_existed,
+                    settings_snapshot,
+                )
+            except Exception as rollback_error:
+                rollback_errors.append(rollback_error)
+            try:
+                _restore_settings_snapshot(
+                    runtime_config_file,
+                    runtime_config_existed,
+                    runtime_config_snapshot,
+                )
+            except Exception as rollback_error:
+                rollback_errors.append(rollback_error)
+            if rollback_errors:
+                raise ExceptionGroup(
+                    "Node runtime persistence failed and transaction rollback failed",
+                    [persistence_error, *rollback_errors],
+                )
+            raise
+    if not dry_run:
+        _report_saved(settings_file)
     _log(_t("  Hook installation complete", "  Hook installation complete"))
     return "installed"
 
@@ -2463,7 +2641,7 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     settings_file = platform["hook_file"]()
     if not settings_file.exists():
         return 0
-    settings = _read_settings(settings_file)
+    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
     hooks_obj = settings.get("hooks", {})
     if not isinstance(hooks_obj, dict):
         return 0
@@ -2493,7 +2671,7 @@ def remove_adapter_hook(marker: str, *, platform_key: str, dry_run: bool = False
     settings_file = platform["hook_file"]()
     if not settings_file.exists():
         return 0
-    settings = _read_settings(settings_file)
+    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
     hooks_obj = settings.get("hooks", {})
     if not isinstance(hooks_obj, dict):
         return 0
@@ -2555,7 +2733,7 @@ def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
     settings_file = platform["hook_file"]()
     if not settings_file.exists():
         return 0
-    settings = _read_settings(settings_file)
+    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
     hooks_obj = settings.get("hooks", {})
     if not isinstance(hooks_obj, dict):
         return 0
@@ -2600,7 +2778,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
         return "not_found"
 
     _log(_t(f"  Hook config file: {settings_file}", f"  Hook config file: {settings_file}"))
-    settings = _read_settings(settings_file)
+    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
 
     hooks_obj = settings.get("hooks", {})
     hook_list = hooks_obj.get(hook_key, [])
@@ -2672,7 +2850,10 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
 
 # ── Status Check ──────────────────────────────────────────
 
-def check_status_detail(platform_key: str) -> HookStatus:
+def check_status_detail(
+    platform_key: str,
+    node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
+) -> HookStatus:
     """Return structured hook installation status for a single framework."""
     platform = PLATFORMS[platform_key]
     name = platform["name"]
@@ -2712,9 +2893,14 @@ def check_status_detail(platform_key: str) -> HookStatus:
             missing_reason="config_file_absent",
         )
 
-    settings = _read_settings(settings_file)
+    settings = _read_settings(settings_file, backup_corrupt=False)
     hooks_obj = settings.get("hooks", {})
     hook_list = hooks_obj.get(hook_key, [])
+    selected_node_runtime = (
+        _resolve_node_runtime(platform_key)
+        if node_runtime is _NODE_RUNTIME_OMITTED
+        else node_runtime
+    )
 
     require_dispatcher = False
     prompt_pending_merge_entry = _platform_prompt_pending_merge_entry(platform_key, hook_key)
@@ -2751,7 +2937,11 @@ def check_status_detail(platform_key: str) -> HookStatus:
 
     tool_checkpoint_key = _resolve_hook_event("pre_tool_use", platform_key)
     tool_checkpoint_list = hooks_obj.get(tool_checkpoint_key, [])
-    tool_checkpoint_entry = _platform_tool_checkpoint_entry(platform_key, tool_checkpoint_key)
+    tool_checkpoint_entry = _platform_tool_checkpoint_entry(
+        platform_key,
+        tool_checkpoint_key,
+        selected_node_runtime,
+    )
     tool_checkpoint_present, tool_checkpoint_ok = _hook_marker_match_status(
         tool_checkpoint_list,
         TOOL_CHECKPOINT_MARKER,
@@ -2946,10 +3136,16 @@ def _print_runtime_visibility_guidance() -> None:
     _log("    Hook execution, governance gates, and strict session logging remain unchanged.")
 
 
-def _print_node_runtime_guidance() -> None:
+def _print_node_runtime_guidance(
+    node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
+) -> None:
     if _path_node_runtime_available():
         return
-    configured = _resolve_node_runtime()
+    configured = (
+        _resolve_node_runtime()
+        if node_runtime is _NODE_RUNTIME_OMITTED
+        else node_runtime
+    )
     _log("  Node.js guidance:")
     if configured:
         _log(f"    Current hook install can use configured Node runtime: {configured}")
@@ -3045,6 +3241,7 @@ def main() -> int:
 
     targets = [args.platform] if args.platform else list(PLATFORMS.keys())
     results: dict[str, str | HookStatus] = {}
+    selected_node_runtimes: list[str | None] = []
     has_error = False
 
     for key in targets:
@@ -3056,16 +3253,21 @@ def main() -> int:
             os.environ.pop(HOOK_SHARED_DIR_ENV, None)
         try:
             if args.status:
-                results[key] = check_status_detail(key)
+                node_runtime = _resolve_node_runtime(key)
+                selected_node_runtimes.append(node_runtime)
+                results[key] = check_status_detail(key, node_runtime=node_runtime)
             elif args.uninstall:
                 results[key] = uninstall_hook(key, dry_run=args.dry_run)
             else:
-                _ensure_node_runtime_for_hook_install(key)
+                node_runtime = _ensure_node_runtime_for_hook_install(key)
+                if node_runtime is not None:
+                    selected_node_runtimes.append(node_runtime)
                 results[key] = install_hook(
                     key,
                     dry_run=args.dry_run,
                     addon_sources=args.addon_source,
                     skills_dir=args.skills_dir,
+                    node_runtime=node_runtime,
                 )
         except Exception as e:
             _log(f"ERROR: {PLATFORMS[key]['name']}. {e}")
@@ -3082,7 +3284,10 @@ def main() -> int:
     if not args.uninstall:
         _print_runtime_visibility_status()
         _print_runtime_visibility_guidance()
-        _print_node_runtime_guidance()
+        if selected_node_runtimes:
+            _print_node_runtime_guidance(selected_node_runtimes[-1])
+        else:
+            _print_node_runtime_guidance()
 
     return 1 if has_error else 0
 

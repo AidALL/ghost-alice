@@ -20,6 +20,7 @@ Usage:
 """
 
 import base64
+import builtins
 import concurrent.futures
 import contextlib
 import io
@@ -28,6 +29,7 @@ import os
 import re
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -41,6 +43,41 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_profile_gate
 import install_hooks
+
+
+class _FailAfterPartialWrite:
+    def __init__(self, handle, error: OSError) -> None:
+        self._handle = handle
+        self._error = error
+
+    def __enter__(self):
+        self._handle.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return self._handle.__exit__(exc_type, exc_value, traceback)
+
+    def write(self, value):
+        partial_length = max(1, len(value) // 2)
+        self._handle.write(value[:partial_length])
+        self._handle.flush()
+        raise self._error
+
+    def __getattr__(self, name):
+        return getattr(self._handle, name)
+
+
+def _tree_snapshot(root: Path) -> dict[str, tuple[str, bytes | str]]:
+    snapshot: dict[str, tuple[str, bytes | str]] = {}
+    for candidate in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        relative = candidate.relative_to(root).as_posix()
+        if candidate.is_symlink():
+            snapshot[relative] = ("symlink", os.readlink(candidate))
+        elif candidate.is_dir():
+            snapshot[relative] = ("directory", b"")
+        else:
+            snapshot[relative] = ("file", candidate.read_bytes())
+    return snapshot
 
 
 def _run_hook_command(
@@ -293,6 +330,11 @@ VERSIONED_HOMEBREW_PYTHON_RE = re.compile(
 )
 
 
+def _make_node_executable(node: Path) -> None:
+    if os.name != "nt":
+        node.chmod(node.stat().st_mode | 0o100)
+
+
 def _expected_ghost_alice_skill_names() -> list[str]:
     names = install_hooks._ghost_alice_installed_skill_names()
     if not names:
@@ -308,9 +350,11 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
             configured_node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
             configured_node.parent.mkdir(parents=True, exist_ok=True)
             configured_node.write_text("# configured node\n", encoding="utf-8")
+            _make_node_executable(configured_node)
             path_node = root / "path-runtime" / ("node.exe" if os.name == "nt" else "node")
             path_node.parent.mkdir(parents=True, exist_ok=True)
             path_node.write_text("# path node\n", encoding="utf-8")
+            _make_node_executable(path_node)
             config_toml = root / ".codex" / "config.toml"
             config_toml.parent.mkdir(parents=True, exist_ok=True)
             config_toml.write_text(
@@ -341,9 +385,11 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
             configured_node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
             configured_node.parent.mkdir(parents=True, exist_ok=True)
             configured_node.write_text("# configured node\n", encoding="utf-8")
+            _make_node_executable(configured_node)
             path_node = root / "path-runtime" / ("node.exe" if os.name == "nt" else "node")
             path_node.parent.mkdir(parents=True, exist_ok=True)
             path_node.write_text("# path node\n", encoding="utf-8")
+            _make_node_executable(path_node)
             config_toml = root / ".codex" / "config.toml"
             config_toml.parent.mkdir(parents=True, exist_ok=True)
             config_toml.write_text(
@@ -374,6 +420,7 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
             node = codex_home / "runtime" / ("node.exe" if os.name == "nt" else "node")
             node.parent.mkdir(parents=True, exist_ok=True)
             node.write_text("# fake node\n", encoding="utf-8")
+            _make_node_executable(node)
             config_toml = codex_home / "config.toml"
             config_toml.write_text(
                 "[mcp_servers.node_repl.env]\n"
@@ -2900,6 +2947,12 @@ class TempHomeTestCase(unittest.TestCase):
         """Return the hook config file path for a platform."""
         return install_hooks.PLATFORMS[platform]["hook_file"]()
 
+    def _symlink_file_or_skip(self, link: Path, target: Path) -> None:
+        try:
+            link.symlink_to(target)
+        except (NotImplementedError, OSError) as error:
+            self.skipTest(f"file symlinks unavailable: {error}")
+
     def _codex_config_toml(self) -> Path:
         return self.fake_home / ".codex" / "config.toml"
 
@@ -2940,10 +2993,7 @@ class TempHomeTestCase(unittest.TestCase):
         node = self.fake_home / "codex-runtime" / "bin" / ("node.exe" if os.name == "nt" else "node")
         node.parent.mkdir(parents=True, exist_ok=True)
         node.write_text("# fake node\n", encoding="utf-8")
-        try:
-            node.chmod(0o755)
-        except OSError:
-            pass
+        _make_node_executable(node)
         config_toml = self._codex_config_toml()
         config_toml.parent.mkdir(parents=True, exist_ok=True)
         config_toml.write_text(
@@ -2956,6 +3006,930 @@ class TempHomeTestCase(unittest.TestCase):
 
 class TestInstallHook(TempHomeTestCase):
     """Install behavior tests."""
+
+    def _fake_node(self, directory: str) -> Path:
+        node = self.fake_home / directory / ("node.exe" if os.name == "nt" else "node")
+        node.parent.mkdir(parents=True, exist_ok=True)
+        node.write_text("# fake node\n", encoding="utf-8")
+        _make_node_executable(node)
+        return node
+
+    def _resolve_isolated_node_source(self, source: str, node: Path) -> str | None:
+        codex_config = self._codex_config_toml()
+        codex_config.unlink(missing_ok=True)
+        runtime_config_file = install_hooks.runtime_config.config_path(self.fake_home)
+        runtime_config_file.unlink(missing_ok=True)
+        env = {
+            "CODEX_HOME": str(codex_config.parent),
+            "GHOST_ALICE_NODE": "",
+            "NODE_REPL_NODE_PATH": "",
+        }
+        platform = "claude"
+        if source == "env":
+            env["GHOST_ALICE_NODE"] = str(node)
+        elif source == "codex-config":
+            platform = "codex"
+            codex_config.parent.mkdir(parents=True, exist_ok=True)
+            codex_config.write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+                encoding="utf-8",
+            )
+        elif source == "registration":
+            install_hooks.runtime_config.save_config(
+                {"hook_runtime": {"node": {platform: str(node.resolve())}}},
+                home=self.fake_home,
+            )
+        else:
+            self.fail(f"unknown Node source fixture: {source}")
+
+        with (
+            patch.dict(os.environ, env, clear=False),
+            patch.object(install_hooks.shutil, "which", return_value=None),
+        ):
+            return install_hooks._resolve_node_runtime(platform)
+
+    def test_node_runtime_normalization_uses_shared_usability_predicate(self):
+        node = self._fake_node("shared-usability")
+
+        with patch.object(
+            install_hooks.runtime_config,
+            "is_usable_node_runtime",
+            return_value=False,
+            create=True,
+        ) as usability:
+            normalized = install_hooks._normalized_node_runtime(node)
+
+        self.assertIsNone(normalized)
+        usability.assert_called_once_with(node.resolve())
+
+    @unittest.skipUnless(os.name != "nt", "POSIX execute bits are not enforced on Windows")
+    def test_posix_non_executable_explicit_node_sources_are_rejected(self):
+        for source in ("env", "codex-config", "registration"):
+            with self.subTest(source=source):
+                node = self._fake_node(f"non-executable-{source}")
+                node.chmod(0o600)
+
+                self.assertIsNone(self._resolve_isolated_node_source(source, node))
+
+    @unittest.skipUnless(os.name != "nt", "POSIX execute bits are not enforced on Windows")
+    def test_posix_executable_explicit_node_sources_are_accepted(self):
+        for source in ("env", "codex-config", "registration"):
+            with self.subTest(source=source):
+                node = self._fake_node(f"executable-{source}")
+                node.chmod(0o700)
+
+                resolved = self._resolve_isolated_node_source(source, node)
+
+                self.assertEqual(Path(resolved).resolve(), node.resolve())
+
+    def test_node_runtime_normalization_resolves_before_validating_identity(self):
+        real_node = self._fake_node("real-runtime")
+        runtime_alias = self.fake_home / "runtime-alias"
+        runtime_alias.write_text("simulated link entry\n", encoding="utf-8")
+        resolved_node = real_node.resolve()
+        original_resolve = Path.resolve
+
+        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
+            if candidate == runtime_alias:
+                return resolved_node
+            return original_resolve(candidate, *args, **kwargs)
+
+        with patch.object(Path, "resolve", new=simulated_resolve):
+            normalized = install_hooks._normalized_node_runtime(runtime_alias)
+            renormalized = install_hooks._normalized_node_runtime(normalized)
+
+        self.assertEqual(normalized, str(resolved_node))
+        self.assertEqual(renormalized, normalized)
+
+    def test_node_named_alias_to_different_runtime_is_rejected(self):
+        other_runtime = self.fake_home / "other-runtime" / (
+            "python.exe" if os.name == "nt" else "python"
+        )
+        other_runtime.parent.mkdir(parents=True, exist_ok=True)
+        other_runtime.write_text("# not node\n", encoding="utf-8")
+        node_alias = self.fake_home / "alias" / (
+            "node.exe" if os.name == "nt" else "node"
+        )
+        node_alias.parent.mkdir(parents=True, exist_ok=True)
+        node_alias.write_text("simulated link entry\n", encoding="utf-8")
+        resolved_other_runtime = other_runtime.resolve()
+        original_resolve = Path.resolve
+
+        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
+            if candidate == node_alias:
+                return resolved_other_runtime
+            return original_resolve(candidate, *args, **kwargs)
+
+        with patch.object(Path, "resolve", new=simulated_resolve):
+            self.assertIsNone(install_hooks._normalized_node_runtime(node_alias))
+
+    def test_codex_config_wrong_nested_shapes_fall_back_to_registered_runtime(self):
+        registered_node = self._fake_node("registered")
+        path_node = self._fake_node("path")
+        install_hooks.runtime_config.save_config(
+            {"hook_runtime": {"node": {"codex": str(registered_node)}}},
+            home=self.fake_home,
+        )
+        config_toml = self._codex_config_toml()
+        config_toml.parent.mkdir(parents=True, exist_ok=True)
+        wrong_shapes = {
+            "mcp_servers": 'mcp_servers = "not-a-table"\n',
+            "node_repl": '[mcp_servers]\nnode_repl = "not-a-table"\n',
+            "env": '[mcp_servers.node_repl]\nenv = "not-a-table"\n',
+        }
+        node_env = {
+            "CODEX_HOME": str(config_toml.parent),
+            "GHOST_ALICE_NODE": "",
+            "NODE_REPL_NODE_PATH": "",
+        }
+
+        with (
+            patch.dict(os.environ, node_env, clear=False),
+            patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
+        ):
+            for level, config_text in wrong_shapes.items():
+                with self.subTest(level=level):
+                    config_toml.write_text(config_text, encoding="utf-8")
+                    self.assertIsNone(
+                        install_hooks._configured_node_runtime_from_codex_config()
+                    )
+                    self.assertEqual(
+                        Path(install_hooks._resolve_node_runtime("codex")).resolve(),
+                        registered_node.resolve(),
+                    )
+
+    def test_codex_config_invalid_utf8_falls_back_to_path(self):
+        path_node = self._fake_node("path")
+        config_toml = self._codex_config_toml()
+        config_toml.parent.mkdir(parents=True, exist_ok=True)
+        config_toml.write_bytes(b"\xff")
+        node_env = {
+            "CODEX_HOME": str(config_toml.parent),
+            "GHOST_ALICE_NODE": "",
+            "NODE_REPL_NODE_PATH": "",
+        }
+
+        with (
+            patch.dict(os.environ, node_env, clear=False),
+            patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
+        ):
+            self.assertIsNone(
+                install_hooks._configured_node_runtime_from_codex_config()
+            )
+            resolved = install_hooks._resolve_node_runtime("codex")
+
+        self.assertEqual(Path(resolved).resolve(), path_node.resolve())
+
+    def test_explicit_node_environment_remains_independent_of_malformed_codex_config(self):
+        explicit_node = self._fake_node("explicit")
+        path_node = self._fake_node("path")
+        config_toml = self._codex_config_toml()
+        config_toml.parent.mkdir(parents=True, exist_ok=True)
+        config_toml.write_bytes(b"\xff")
+        node_env = {
+            "CODEX_HOME": str(config_toml.parent),
+            "GHOST_ALICE_NODE": str(explicit_node),
+            "NODE_REPL_NODE_PATH": "",
+        }
+
+        with (
+            patch.dict(os.environ, node_env, clear=False),
+            patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
+        ):
+            resolved = install_hooks._resolve_node_runtime("codex")
+
+        self.assertEqual(Path(resolved).resolve(), explicit_node.resolve())
+
+    def test_node_runtime_command_distinguishes_omitted_from_explicit_none(self):
+        selected_node = self._fake_node("selected")
+
+        with patch.object(
+            install_hooks,
+            "_resolve_node_runtime",
+            return_value=str(selected_node),
+        ) as omitted_resolver:
+            omitted = install_hooks._node_runtime_command("claude")
+
+        with patch.object(
+            install_hooks,
+            "_resolve_node_runtime",
+            return_value=str(selected_node),
+        ) as explicit_resolver:
+            explicit_none = install_hooks._node_runtime_command("claude", None)
+
+        self.assertEqual(omitted, install_hooks._quote_command_arg(selected_node))
+        omitted_resolver.assert_called_once_with("claude")
+        self.assertEqual(explicit_none, "node")
+        explicit_resolver.assert_not_called()
+
+    def test_cli_resolves_node_once_and_persists_the_command_runtime(self):
+        self._create_platform_dir("claude")
+        selected_node = self._fake_node("selected")
+        changed_path_node = self._fake_node("changed-path")
+        output = io.StringIO()
+
+        with (
+            patch.object(sys, "argv", ["install_hooks.py", "--platform", "claude"]),
+            patch.object(
+                install_hooks,
+                "_resolve_node_runtime",
+                side_effect=[
+                    str(selected_node),
+                    str(changed_path_node),
+                    str(changed_path_node),
+                ],
+            ) as resolver,
+            patch.object(install_hooks, "_path_node_runtime_available", return_value=False),
+            contextlib.redirect_stdout(output),
+        ):
+            result = install_hooks.main()
+
+        settings = self._read_settings("claude")
+        command = _visible_and_runner_payload_text(
+            settings["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        ).replace("\\", "/")
+        config_path = self.fake_home / ".ghost-alice" / "config.json"
+
+        self.assertEqual(result, 0, msg=output.getvalue())
+        self.assertEqual(resolver.call_count, 1)
+        self.assertIn(selected_node.as_posix(), command)
+        self.assertNotIn(changed_path_node.as_posix(), command)
+        self.assertTrue(config_path.exists())
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            Path(config["hook_runtime"]["node"]["claude"]).resolve(),
+            selected_node.resolve(),
+        )
+        self.assertIn(f"Current hook install can use configured Node runtime: {selected_node}", output.getvalue())
+
+    def test_cli_status_resolves_missing_node_once_and_reuses_snapshot(self):
+        self._write_settings("claude", {})
+        output = io.StringIO()
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["install_hooks.py", "--platform", "claude", "--status"],
+            ),
+            patch.object(
+                install_hooks,
+                "_resolve_node_runtime",
+                return_value=None,
+            ) as resolver,
+            patch.object(install_hooks, "_path_node_runtime_available", return_value=False),
+            contextlib.redirect_stdout(output),
+        ):
+            result = install_hooks.main()
+
+        self.assertEqual(result, 0, msg=output.getvalue())
+        resolver.assert_called_once_with("claude")
+        self.assertIn("Node.js guidance:", output.getvalue())
+
+    def test_install_registers_runtime_when_current_settings_need_no_write(self):
+        self._create_platform_dir("claude")
+        selected_node = self._fake_node("selected")
+        config_path = self.fake_home / ".ghost-alice" / "config.json"
+        node_env = {
+            "GHOST_ALICE_NODE": str(selected_node),
+            "NODE_REPL_NODE_PATH": "",
+        }
+
+        with patch.dict(os.environ, node_env, clear=False):
+            self.assertEqual(install_hooks.install_hook("claude"), "installed")
+            config_path.unlink(missing_ok=True)
+            result = install_hooks.install_hook("claude")
+
+        self.assertEqual(result, "already")
+        self.assertTrue(config_path.exists())
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            Path(config["hook_runtime"]["node"]["claude"]).resolve(),
+            selected_node.resolve(),
+        )
+
+    def test_failed_settings_write_does_not_register_runtime(self):
+        self._create_platform_dir("claude")
+        selected_node = self._fake_node("selected")
+        node_env = {
+            "GHOST_ALICE_NODE": str(selected_node),
+            "NODE_REPL_NODE_PATH": "",
+        }
+
+        with (
+            patch.dict(os.environ, node_env, clear=False),
+            patch.object(install_hooks, "_write_settings", side_effect=OSError("write failed")),
+            patch.object(install_hooks.runtime_config, "save_config") as save_config,
+            self.assertRaisesRegex(OSError, "write failed"),
+        ):
+            install_hooks.install_hook("claude")
+
+        save_config.assert_not_called()
+        self.assertFalse((self.fake_home / ".ghost-alice" / "config.json").exists())
+
+    def test_successful_settings_write_reports_exact_saved_path(self):
+        settings_file = self._config_file("claude")
+        output = io.StringIO()
+
+        with contextlib.redirect_stdout(output):
+            install_hooks._write_settings(settings_file, {"updated": True})
+
+        self.assertEqual(
+            output.getvalue(),
+            f"  [install_hooks] Saved: {settings_file}\n",
+        )
+
+    def test_settings_write_preserves_existing_symlink_and_target_permissions(self):
+        settings_file = self._config_file("claude")
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        target = self.fake_home / "settings-target" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text('{"keep": true}\n', encoding="utf-8")
+        original_mode = stat.S_IMODE(target.stat().st_mode)
+        self._symlink_file_or_skip(settings_file, target)
+        original_link = os.readlink(settings_file)
+
+        install_hooks._write_settings(settings_file, {"updated": True})
+
+        self.assertTrue(settings_file.is_symlink())
+        self.assertEqual(os.readlink(settings_file), original_link)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"updated": True})
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), original_mode)
+
+    def test_settings_write_uses_runtime_atomic_resolved_destination(self):
+        settings_file = self._config_file("claude")
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        link_entry_bytes = b'{"simulated_link_entry": true}\n'
+        settings_file.write_bytes(link_entry_bytes)
+        target = self.fake_home / "settings-target" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b'{"old_target": true}\n')
+        original_mode = stat.S_IMODE(target.stat().st_mode)
+        original_is_symlink = Path.is_symlink
+        original_resolve = Path.resolve
+
+        def simulated_is_symlink(candidate: Path) -> bool:
+            if candidate == settings_file:
+                return True
+            return original_is_symlink(candidate)
+
+        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
+            if candidate == settings_file:
+                return target
+            return original_resolve(candidate, *args, **kwargs)
+
+        with (
+            patch.object(Path, "is_symlink", new=simulated_is_symlink),
+            patch.object(Path, "resolve", new=simulated_resolve),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            install_hooks._write_settings(settings_file, {"updated": True})
+
+        self.assertEqual(settings_file.read_bytes(), link_entry_bytes)
+        self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"updated": True})
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), original_mode)
+
+    def test_partial_settings_write_failure_preserves_existing_bytes_and_cleans_temp(self):
+        settings_file = self._write_settings("claude", {"keep": "exact"})
+        original_settings = b'{  "keep": "exact"  }\n'
+        settings_file.write_bytes(original_settings)
+        write_error = OSError("partial settings write failed")
+        original_open = builtins.open
+        original_fdopen = os.fdopen
+
+        def failing_open(file, mode="r", *args, **kwargs):
+            handle = original_open(file, mode, *args, **kwargs)
+            if "w" in mode and Path(file) == settings_file:
+                return _FailAfterPartialWrite(handle, write_error)
+            return handle
+
+        def failing_fdopen(fd, *args, **kwargs):
+            return _FailAfterPartialWrite(
+                original_fdopen(fd, *args, **kwargs),
+                write_error,
+            )
+
+        with (
+            patch.object(builtins, "open", side_effect=failing_open),
+            patch.object(
+                install_hooks.runtime_config.os,
+                "fdopen",
+                side_effect=failing_fdopen,
+            ),
+            self.assertRaises(OSError) as raised,
+        ):
+            install_hooks._write_settings(settings_file, {"changed": True})
+
+        self.assertIs(raised.exception, write_error)
+        self.assertEqual(settings_file.read_bytes(), original_settings)
+        self.assertEqual(
+            list(settings_file.parent.glob(f".{settings_file.name}.*.tmp")),
+            [],
+        )
+
+    def test_symlink_settings_write_failure_preserves_link_and_target(self):
+        settings_file = self._config_file("claude")
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        target = self.fake_home / "settings-target" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        original_settings = b'{  "keep": "exact"  }\n'
+        target.write_bytes(original_settings)
+        self._symlink_file_or_skip(settings_file, target)
+        original_link = os.readlink(settings_file)
+        write_error = OSError("partial symlink settings write failed")
+        original_fdopen = os.fdopen
+
+        def failing_fdopen(fd, *args, **kwargs):
+            return _FailAfterPartialWrite(
+                original_fdopen(fd, *args, **kwargs),
+                write_error,
+            )
+
+        with (
+            patch.object(
+                install_hooks.runtime_config.os,
+                "fdopen",
+                side_effect=failing_fdopen,
+            ),
+            patch.object(
+                install_hooks.runtime_config.tempfile,
+                "mkstemp",
+                wraps=tempfile.mkstemp,
+            ) as mkstemp,
+            self.assertRaises(OSError) as raised,
+        ):
+            install_hooks._write_settings(settings_file, {"changed": True})
+
+        self.assertIs(raised.exception, write_error)
+        self.assertTrue(settings_file.is_symlink())
+        self.assertEqual(os.readlink(settings_file), original_link)
+        self.assertEqual(target.read_bytes(), original_settings)
+        self.assertEqual(Path(mkstemp.call_args.kwargs["dir"]), target.parent)
+        self.assertEqual(list(target.parent.glob(f".{target.name}.*.tmp")), [])
+
+    def test_resolved_settings_target_failure_preserves_entry_and_target_bytes(self):
+        settings_file = self._config_file("claude")
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        link_entry_bytes = b'{"simulated_link_entry": true}\n'
+        settings_file.write_bytes(link_entry_bytes)
+        target = self.fake_home / "settings-target" / "settings.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target_bytes = b'{"old_target": true}\n'
+        target.write_bytes(target_bytes)
+        original_is_symlink = Path.is_symlink
+        original_resolve = Path.resolve
+        original_fdopen = os.fdopen
+        write_error = OSError("resolved settings temp write failed")
+
+        def simulated_is_symlink(candidate: Path) -> bool:
+            if candidate == settings_file:
+                return True
+            return original_is_symlink(candidate)
+
+        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
+            if candidate == settings_file:
+                return target
+            return original_resolve(candidate, *args, **kwargs)
+
+        def failing_fdopen(fd, *args, **kwargs):
+            return _FailAfterPartialWrite(
+                original_fdopen(fd, *args, **kwargs),
+                write_error,
+            )
+
+        with (
+            patch.object(Path, "is_symlink", new=simulated_is_symlink),
+            patch.object(Path, "resolve", new=simulated_resolve),
+            patch.object(
+                install_hooks.runtime_config.os,
+                "fdopen",
+                side_effect=failing_fdopen,
+            ),
+            self.assertRaises(OSError) as raised,
+        ):
+            install_hooks._write_settings(settings_file, {"changed": True})
+
+        self.assertIs(raised.exception, write_error)
+        self.assertEqual(settings_file.read_bytes(), link_entry_bytes)
+        self.assertEqual(target.read_bytes(), target_bytes)
+
+    def test_status_uses_registered_runtime_after_path_changes(self):
+        self._create_platform_dir("claude")
+        installed_node = self._fake_node("installed")
+        changed_path_node = self._fake_node("changed-path")
+        node_env = {
+            "GHOST_ALICE_NODE": str(installed_node),
+            "NODE_REPL_NODE_PATH": "",
+        }
+        with patch.dict(os.environ, node_env, clear=False):
+            self.assertEqual(install_hooks.install_hook("claude"), "installed")
+
+        original_which = shutil.which
+
+        def changed_which(command: str, *args, **kwargs) -> str | None:
+            if command in {"node", "node.exe"}:
+                return str(changed_path_node)
+            return original_which(command, *args, **kwargs)
+
+        with (
+            patch.dict(
+                os.environ,
+                {"GHOST_ALICE_NODE": "", "NODE_REPL_NODE_PATH": ""},
+                clear=False,
+            ),
+            patch.object(install_hooks.shutil, "which", side_effect=changed_which),
+        ):
+            status = install_hooks.check_status("claude")
+
+        self.assertEqual(status, "installed")
+
+    def test_status_resolves_missing_node_runtime_exactly_once(self):
+        self._create_platform_dir("claude")
+        selected_node = self._fake_node("installed")
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GHOST_ALICE_NODE": str(selected_node),
+                    "NODE_REPL_NODE_PATH": "",
+                },
+                clear=False,
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(install_hooks.install_hook("claude"), "installed")
+
+        with patch.object(
+            install_hooks,
+            "_resolve_node_runtime",
+            return_value=None,
+        ) as resolver:
+            install_hooks.check_status_detail("claude")
+
+        resolver.assert_called_once_with("claude")
+
+    def test_claude_node_runtime_precedence_keeps_overrides_then_registration(self):
+        ghost_node = self._fake_node("ghost-override")
+        repl_node = self._fake_node("repl-override")
+        registered_node = self._fake_node("registered")
+        path_node = self._fake_node("path")
+        install_hooks.runtime_config.save_config(
+            {"hook_runtime": {"node": {"claude": str(registered_node)}}},
+            home=self.fake_home,
+        )
+
+        cases = (
+            (str(ghost_node), str(repl_node), ghost_node),
+            ("", str(repl_node), repl_node),
+            ("", "", registered_node),
+        )
+        with patch.object(install_hooks.shutil, "which", return_value=str(path_node)):
+            for ghost_value, repl_value, expected in cases:
+                with self.subTest(expected=expected):
+                    with patch.dict(
+                        os.environ,
+                        {
+                            "GHOST_ALICE_NODE": ghost_value,
+                            "NODE_REPL_NODE_PATH": repl_value,
+                        },
+                        clear=False,
+                    ):
+                        resolved = install_hooks._resolve_node_runtime("claude")
+                    self.assertEqual(Path(resolved).resolve(), expected.resolve())
+
+    def test_runtime_persistence_failure_restores_existing_settings(self):
+        settings_file = self._write_settings("claude", {"keep": "exact"})
+        settings_file.write_bytes(b'{  "keep": "exact" }\n')
+        original_settings = settings_file.read_bytes()
+        config_file = install_hooks.runtime_config.config_path(self.fake_home)
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        original_config = b'{  "agent_visibility": {"profile": "minimal"}  }\n'
+        config_file.write_bytes(original_config)
+        selected_node = self._fake_node("selected")
+        persistence_error = OSError("runtime persistence failed")
+        events: list[str] = []
+        output = io.StringIO()
+        original_write_settings = install_hooks._write_settings
+
+        def recording_write_settings(*args, **kwargs):
+            events.append("settings")
+            return original_write_settings(*args, **kwargs)
+
+        def failing_save_config(*args, **kwargs):
+            events.append("runtime")
+            config_file.write_bytes(b'{"hook_runtime":')
+            raise persistence_error
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GHOST_ALICE_NODE": str(selected_node),
+                    "NODE_REPL_NODE_PATH": "",
+                },
+                clear=False,
+            ),
+            patch.object(install_hooks, "_write_settings", side_effect=recording_write_settings),
+            patch.object(install_hooks.runtime_config, "save_config", side_effect=failing_save_config),
+            contextlib.redirect_stdout(output),
+            self.assertRaises(OSError) as raised,
+        ):
+            install_hooks.install_hook("claude")
+
+        self.assertIs(raised.exception, persistence_error)
+        self.assertEqual(events, ["settings", "runtime"])
+        self.assertEqual(settings_file.read_bytes(), original_settings)
+        self.assertEqual(config_file.read_bytes(), original_config)
+        self.assertNotIn("Saved:", output.getvalue())
+
+    def test_broken_symlink_snapshot_is_restored_when_target_parent_is_already_absent(self):
+        settings_file = self._config_file("claude")
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        lexical_entry = b"simulated broken symlink entry"
+        settings_file.write_bytes(lexical_entry)
+        settings_target = self.fake_home / "missing-target-parent" / "settings.json"
+        original_is_symlink = Path.is_symlink
+        original_resolve = Path.resolve
+
+        def simulated_is_symlink(candidate: Path) -> bool:
+            if candidate == settings_file:
+                return True
+            return original_is_symlink(candidate)
+
+        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
+            if candidate == settings_file:
+                return settings_target
+            return original_resolve(candidate, *args, **kwargs)
+
+        with (
+            patch.object(Path, "is_symlink", new=simulated_is_symlink),
+            patch.object(Path, "resolve", new=simulated_resolve),
+        ):
+            install_hooks._restore_settings_snapshot(settings_file, False, None)
+
+        self.assertEqual(settings_file.read_bytes(), lexical_entry)
+        self.assertFalse(settings_target.exists())
+        self.assertFalse(settings_target.parent.exists())
+
+    def test_broken_symlink_snapshot_removes_target_created_during_write(self):
+        settings_file = self._config_file("claude")
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        lexical_entry = b"simulated broken symlink entry"
+        settings_file.write_bytes(lexical_entry)
+        settings_target = self.fake_home / "created-target" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        settings_target.write_bytes(b"created during settings write")
+        original_is_symlink = Path.is_symlink
+        original_resolve = Path.resolve
+
+        def simulated_is_symlink(candidate: Path) -> bool:
+            if candidate == settings_file:
+                return True
+            return original_is_symlink(candidate)
+
+        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
+            if candidate == settings_file:
+                return settings_target
+            return original_resolve(candidate, *args, **kwargs)
+
+        with (
+            patch.object(Path, "is_symlink", new=simulated_is_symlink),
+            patch.object(Path, "resolve", new=simulated_resolve),
+        ):
+            install_hooks._restore_settings_snapshot(settings_file, False, None)
+
+        self.assertEqual(settings_file.read_bytes(), lexical_entry)
+        self.assertFalse(settings_target.exists())
+        self.assertTrue(settings_target.parent.is_dir())
+
+    def test_persistence_failure_after_broken_symlink_target_disappears_reraises_original(self):
+        self._create_platform_dir("claude")
+        settings_file = self._config_file("claude")
+        lexical_entry = b"simulated broken symlink entry"
+        settings_file.write_bytes(lexical_entry)
+        settings_target = self.fake_home / "transient-target" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        selected_node = self._fake_node("selected")
+        persistence_error = OSError("runtime persistence failed")
+        output = io.StringIO()
+        original_exists = Path.exists
+        original_is_symlink = Path.is_symlink
+        original_resolve = Path.resolve
+
+        def simulated_exists(candidate: Path) -> bool:
+            if candidate == settings_file:
+                return False
+            return original_exists(candidate)
+
+        def simulated_is_symlink(candidate: Path) -> bool:
+            if candidate == settings_file:
+                return True
+            return original_is_symlink(candidate)
+
+        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
+            if candidate == settings_file:
+                return settings_target
+            return original_resolve(candidate, *args, **kwargs)
+
+        def failing_save_config(*args, **kwargs):
+            self.assertTrue(settings_target.is_file())
+            settings_target.unlink()
+            settings_target.parent.rmdir()
+            raise persistence_error
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GHOST_ALICE_NODE": str(selected_node),
+                    "NODE_REPL_NODE_PATH": "",
+                },
+                clear=False,
+            ),
+            patch.object(Path, "exists", new=simulated_exists),
+            patch.object(Path, "is_symlink", new=simulated_is_symlink),
+            patch.object(Path, "resolve", new=simulated_resolve),
+            patch.object(
+                install_hooks.runtime_config,
+                "save_config",
+                side_effect=failing_save_config,
+            ),
+            contextlib.redirect_stdout(output),
+            self.assertRaises(BaseException) as raised,
+        ):
+            install_hooks.install_hook("claude")
+
+        self.assertIs(raised.exception, persistence_error)
+        self.assertEqual(settings_file.read_bytes(), lexical_entry)
+        self.assertFalse(settings_target.exists())
+        self.assertFalse(settings_target.parent.exists())
+        self.assertNotIn(f"Saved: {settings_file}", output.getvalue())
+
+    def test_runtime_persistence_failure_restores_symlink_targets_and_topology(self):
+        self._create_platform_dir("claude")
+        settings_file = self._config_file("claude")
+        settings_target = self.fake_home / "settings-target" / "settings.json"
+        settings_target.parent.mkdir(parents=True, exist_ok=True)
+        original_settings = b'{  "keep": "exact"  }\n'
+        settings_target.write_bytes(original_settings)
+        self._symlink_file_or_skip(settings_file, settings_target)
+        original_settings_link = os.readlink(settings_file)
+
+        config_file = install_hooks.runtime_config.config_path(self.fake_home)
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_target = self.fake_home / "runtime-target" / "config.json"
+        config_target.parent.mkdir(parents=True, exist_ok=True)
+        original_config = b'{  "agent_visibility": {"profile": "minimal"}  }\n'
+        config_target.write_bytes(original_config)
+        self._symlink_file_or_skip(config_file, config_target)
+        original_config_link = os.readlink(config_file)
+
+        selected_node = self._fake_node("selected")
+        persistence_error = OSError("runtime persistence failed")
+
+        def failing_save_config(*args, **kwargs):
+            config_file.write_bytes(b'{"hook_runtime":')
+            raise persistence_error
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GHOST_ALICE_NODE": str(selected_node),
+                    "NODE_REPL_NODE_PATH": "",
+                },
+                clear=False,
+            ),
+            patch.object(
+                install_hooks.runtime_config,
+                "save_config",
+                side_effect=failing_save_config,
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaises(OSError) as raised,
+        ):
+            install_hooks.install_hook("claude")
+
+        self.assertIs(raised.exception, persistence_error)
+        self.assertTrue(settings_file.is_symlink())
+        self.assertEqual(os.readlink(settings_file), original_settings_link)
+        self.assertEqual(settings_target.read_bytes(), original_settings)
+        self.assertTrue(config_file.is_symlink())
+        self.assertEqual(os.readlink(config_file), original_config_link)
+        self.assertEqual(config_target.read_bytes(), original_config)
+
+    def test_saved_log_failure_is_nonfatal_after_both_files_commit(self):
+        self._create_platform_dir("claude")
+        settings_file = self._config_file("claude")
+        selected_node = self._fake_node("selected")
+        saved_log_error = OSError("saved log failed")
+        original_log = install_hooks._log
+
+        def failing_saved_log(message: str) -> None:
+            if message == f"Saved: {settings_file}":
+                raise saved_log_error
+            original_log(message)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GHOST_ALICE_NODE": str(selected_node),
+                    "NODE_REPL_NODE_PATH": "",
+                },
+                clear=False,
+            ),
+            patch.object(install_hooks, "_log", side_effect=failing_saved_log),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = install_hooks.install_hook("claude")
+
+        self.assertEqual(result, "installed")
+        self.assertIn("hooks", self._read_settings("claude"))
+        config = install_hooks.runtime_config.load_config(env={}, home=self.fake_home)
+        self.assertEqual(
+            config["hook_runtime"]["node"]["claude"],
+            str(selected_node.resolve()),
+        )
+
+    def test_runtime_persistence_failure_removes_new_settings_file(self):
+        self._create_platform_dir("claude")
+        settings_file = self._config_file("claude")
+        config_file = install_hooks.runtime_config.config_path(self.fake_home)
+        selected_node = self._fake_node("selected")
+        persistence_error = OSError("runtime persistence failed")
+
+        def failing_save_config(*args, **kwargs):
+            config_file.parent.mkdir(parents=True, exist_ok=True)
+            config_file.write_bytes(b'{"hook_runtime":')
+            raise persistence_error
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GHOST_ALICE_NODE": str(selected_node),
+                    "NODE_REPL_NODE_PATH": "",
+                },
+                clear=False,
+            ),
+            patch.object(
+                install_hooks.runtime_config,
+                "save_config",
+                side_effect=failing_save_config,
+            ),
+            self.assertRaises(OSError) as raised,
+        ):
+            install_hooks.install_hook("claude")
+
+        self.assertIs(raised.exception, persistence_error)
+        self.assertFalse(settings_file.exists())
+        self.assertFalse(config_file.exists())
+
+    def test_runtime_persistence_and_settings_rollback_failures_are_both_exposed(self):
+        settings_file = self._write_settings("claude", {"keep": "exact"})
+        selected_node = self._fake_node("selected")
+        persistence_error = OSError("runtime persistence failed")
+        rollback_error = OSError("settings rollback failed")
+        original_atomic_write_bytes = install_hooks.runtime_config._atomic_write_bytes
+        settings_write_count = 0
+
+        def failing_settings_rollback(path, contents):
+            nonlocal settings_write_count
+            if Path(path) == settings_file:
+                settings_write_count += 1
+                if settings_write_count == 2:
+                    raise rollback_error
+            return original_atomic_write_bytes(path, contents)
+
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GHOST_ALICE_NODE": str(selected_node),
+                    "NODE_REPL_NODE_PATH": "",
+                },
+                clear=False,
+            ),
+            patch.object(
+                install_hooks.runtime_config,
+                "save_config",
+                side_effect=persistence_error,
+            ),
+            patch.object(
+                install_hooks.runtime_config,
+                "_atomic_write_bytes",
+                side_effect=failing_settings_rollback,
+            ),
+            self.assertRaises(ExceptionGroup) as raised,
+        ):
+            install_hooks.install_hook("claude")
+
+        self.assertTrue(settings_file.exists())
+        self.assertEqual(len(raised.exception.exceptions), 2)
+        self.assertIs(raised.exception.exceptions[0], persistence_error)
+        self.assertIs(raised.exception.exceptions[1], rollback_error)
 
     def test_install_into_empty_settings(self):
         """Install hooks into an empty settings file."""
@@ -4121,7 +5095,8 @@ class TestCorruptJson(TempHomeTestCase):
         """Install succeeds even with corrupt settings.json."""
         config_dir = self._create_platform_dir("claude")
         settings_file = config_dir / "settings.json"
-        settings_file.write_text("{invalid json", encoding="utf-8")
+        corrupt_bytes = b"{invalid json"
+        settings_file.write_bytes(corrupt_bytes)
 
         result = install_hooks.install_hook("claude")
         self.assertEqual(result, "installed")
@@ -4129,10 +5104,51 @@ class TestCorruptJson(TempHomeTestCase):
         # Confirm that the corrupt file was backed up.
         corrupt_backup = config_dir / "settings.json.corrupt-bak"
         self.assertTrue(corrupt_backup.exists())
+        self.assertEqual(corrupt_backup.read_bytes(), corrupt_bytes)
 
 
 class TestDryRun(TempHomeTestCase):
     """Dry-run tests."""
+
+    def test_dry_run_does_not_register_selected_node_runtime(self):
+        self._write_settings("claude", {"original": True})
+        node = self.fake_home / "selected" / ("node.exe" if os.name == "nt" else "node")
+        node.parent.mkdir(parents=True)
+        node.write_text("# fake node\n", encoding="utf-8")
+        _make_node_executable(node)
+
+        with patch.dict(
+            os.environ,
+            {"GHOST_ALICE_NODE": str(node), "NODE_REPL_NODE_PATH": ""},
+            clear=False,
+        ):
+            install_hooks.install_hook("claude", dry_run=True)
+
+        self.assertFalse((self.fake_home / ".ghost-alice" / "config.json").exists())
+
+    def test_dry_run_with_corrupt_settings_preserves_entire_home_tree(self):
+        config_dir = self._create_platform_dir("claude")
+        settings_file = config_dir / "settings.json"
+        settings_file.write_bytes(b"{invalid json")
+        node = self.fake_home / "selected" / ("node.exe" if os.name == "nt" else "node")
+        node.parent.mkdir(parents=True, exist_ok=True)
+        node.write_text("# fake node\n", encoding="utf-8")
+        _make_node_executable(node)
+        before = _tree_snapshot(self.fake_home)
+
+        with (
+            patch.dict(
+                os.environ,
+                {"GHOST_ALICE_NODE": str(node), "NODE_REPL_NODE_PATH": ""},
+                clear=False,
+            ),
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            result = install_hooks.install_hook("claude", dry_run=True)
+
+        self.assertEqual(result, "installed")
+        self.assertEqual(_tree_snapshot(self.fake_home), before)
+        self.assertFalse((config_dir / "settings.json.corrupt-bak").exists())
 
     def test_dry_run_does_not_modify_file(self):
         """Dry-run mode does not modify files."""

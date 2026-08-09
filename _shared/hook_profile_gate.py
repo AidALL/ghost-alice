@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tomllib
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import NoReturn
 
@@ -36,6 +37,7 @@ SAFE_BARE_COMMAND_RE = re.compile(r"^python3\.[0-9]+$")
 HOOK_PYTHON_SENTINEL = "__GHOST_ALICE_HOOK_PYTHON__"
 SAFE_TRAILING_SUFFIX_RE = re.compile(r"\s*\|\|\s*true\s*(#.*)?\s*$")
 FORBIDDEN_SHELL_OPERATORS = {";", "&&", "|", "||", ">", ">>", "<", "<<"}
+VALID_HOOK_PLATFORMS = {"claude", "codex"}
 
 
 class HookCommandRejected(ValueError):
@@ -96,23 +98,48 @@ def _configured_node_runtime_from_value(value: str | None) -> Path | None:
     if not _is_node_executable(candidate) or not candidate.is_file():
         return None
     try:
-        return candidate.resolve()
+        resolved = candidate.resolve()
     except OSError:
         return None
+    if not runtime_config.is_usable_node_runtime(resolved):
+        return None
+    return resolved
 
 
 def _codex_config_candidates(env: dict[str, str]) -> list[Path]:
-    candidates: list[Path] = []
-    codex_home = env.get("CODEX_HOME", "").strip()
+    codex_home = env.get("CODEX_HOME")
     if codex_home:
-        candidates.append(Path(codex_home).expanduser() / "config.toml")
+        return [Path(codex_home).expanduser() / "config.toml"]
     home = _home_from_env(env)
     if home is not None:
-        candidates.append(home / ".codex" / "config.toml")
-    return candidates
+        return [home / ".codex" / "config.toml"]
+    return []
 
 
-def _configured_node_runtime_paths(env: dict[str, str]) -> set[Path]:
+def _registered_node_runtime_path(
+    env: dict[str, str],
+    active_platform: str | None,
+) -> Path | None:
+    if active_platform not in VALID_HOOK_PLATFORMS:
+        return None
+    home = _home_from_env(env)
+    if home is None:
+        return None
+    config = runtime_config.load_config(env=env, home=home)
+    hook_runtime = config.get("hook_runtime")
+    if not isinstance(hook_runtime, dict):
+        return None
+    registrations = hook_runtime.get("node")
+    if not isinstance(registrations, dict):
+        return None
+    value = registrations.get(active_platform)
+    return _configured_node_runtime_from_value(value if isinstance(value, str) else None)
+
+
+def _configured_node_runtime_paths(
+    env: dict[str, str],
+    active_platform: str | None = None,
+) -> set[Path]:
     paths: set[Path] = set()
     for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
         configured = _configured_node_runtime_from_value(env.get(env_name))
@@ -123,24 +150,62 @@ def _configured_node_runtime_paths(env: dict[str, str]) -> set[Path]:
         try:
             with config_file.open("rb") as handle:
                 data = tomllib.load(handle)
-        except (OSError, tomllib.TOMLDecodeError):
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
             continue
-        env_config = (
-            data.get("mcp_servers", {})
-            .get("node_repl", {})
-            .get("env", {})
-        )
-        value = env_config.get("NODE_REPL_NODE_PATH") if isinstance(env_config, dict) else None
+        mcp_servers = data.get("mcp_servers")
+        if not isinstance(mcp_servers, Mapping):
+            continue
+        node_repl = mcp_servers.get("node_repl")
+        if not isinstance(node_repl, Mapping):
+            continue
+        env_config = node_repl.get("env")
+        if not isinstance(env_config, Mapping):
+            continue
+        value = env_config.get("NODE_REPL_NODE_PATH")
         configured = _configured_node_runtime_from_value(value if isinstance(value, str) else None)
         if configured is not None:
             paths.add(configured)
+
+    registered = _registered_node_runtime_path(env, active_platform)
+    if registered is not None:
+        paths.add(registered)
     return paths
 
 
-def _is_configured_node_runtime(path: Path, env: dict[str, str]) -> bool:
+def _is_configured_node_runtime(
+    path: Path,
+    env: dict[str, str],
+    active_platform: str | None,
+) -> bool:
     if not _is_node_executable(path):
         return False
-    return path in _configured_node_runtime_paths(env)
+    return path in _configured_node_runtime_paths(env, active_platform)
+
+
+def _active_platform_from_argv(argv: list[str]) -> str | None:
+    platform_indexes = [
+        index
+        for index, argument in enumerate(argv[1:], start=1)
+        if argument == "--platform"
+    ]
+    equals_platform_arguments = [
+        argument
+        for argument in argv[1:]
+        if argument.startswith("--platform=")
+    ]
+    if len(platform_indexes) + len(equals_platform_arguments) > 1:
+        raise HookCommandRejected("duplicate hook platform argument rejected")
+    if equals_platform_arguments:
+        raise HookCommandRejected("unsupported hook platform argument form rejected")
+    if not platform_indexes:
+        return None
+    platform_index = platform_indexes[0]
+    if platform_index + 1 >= len(argv):
+        raise HookCommandRejected("invalid hook platform argument rejected")
+    platform = argv[platform_index + 1]
+    if platform not in VALID_HOOK_PLATFORMS:
+        raise HookCommandRejected(f"invalid hook platform argument rejected: {platform}")
+    return platform
 
 
 def _is_path_node_runtime(path: Path, env: dict[str, str]) -> bool:
@@ -152,7 +217,10 @@ def _is_path_node_runtime(path: Path, env: dict[str, str]) -> bool:
         if not resolved:
             continue
         try:
-            if Path(resolved).resolve() == path:
+            if (
+                Path(resolved).resolve() == path
+                and runtime_config.is_usable_node_runtime(path)
+            ):
                 return True
         except OSError:
             continue
@@ -163,6 +231,7 @@ def assert_allowed_command(argv: list[str], allowed_roots: list[str]) -> None:
     if not argv:
         raise HookCommandRejected("empty hook command rejected")
 
+    active_platform = _active_platform_from_argv(argv)
     executable = argv[0]
     if executable in SAFE_BARE_COMMANDS or SAFE_BARE_COMMAND_RE.fullmatch(executable):
         return
@@ -176,7 +245,7 @@ def assert_allowed_command(argv: list[str], allowed_roots: list[str]) -> None:
     except OSError as exc:
         raise HookCommandRejected(f"hook executable cannot be resolved: {executable}") from exc
 
-    if _is_configured_node_runtime(resolved, os.environ):
+    if _is_configured_node_runtime(resolved, os.environ, active_platform):
         return
     if _is_path_node_runtime(resolved, os.environ):
         return
@@ -211,15 +280,16 @@ def _validate_shell_command(command: str) -> list[str]:
     check_command = _strip_allowed_suffix(command)
     if "$(" in check_command or "`" in check_command or "\n" in check_command or "\r" in check_command:
         raise HookCommandRejected("shell substitution or multiline command rejected")
-    lexer = shlex.shlex(check_command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split = True
-    lexer.commenters = "#"
-    if any(token in FORBIDDEN_SHELL_OPERATORS for token in lexer):
-        raise HookCommandRejected("shell control operator rejected")
     try:
+        lexer = shlex.shlex(check_command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        lexer.commenters = "#"
+        tokens = list(lexer)
         argv = shlex.split(check_command, comments=True, posix=True)
     except ValueError as exc:
         raise HookCommandRejected(f"hook command parse failed: {exc}") from exc
+    if any(token in FORBIDDEN_SHELL_OPERATORS for token in tokens):
+        raise HookCommandRejected("shell control operator rejected")
     if argv and argv[0] == HOOK_PYTHON_SENTINEL:
         argv[0] = sys.executable
     assert_allowed_command(argv, default_allowed_roots())
@@ -690,6 +760,65 @@ def run(hook_id: str, payload: str) -> int:
     return result.returncode
 
 
+def _fallback_rejection_audit_platform(env: Mapping[str, str]) -> str:
+    platform = str(env.get("GHOST_ALICE_PLATFORM") or "").strip().lower()
+    return platform if platform in VALID_HOOK_PLATFORMS else "unknown"
+
+
+def _rejection_audit_platform(payload: str, env: Mapping[str, str]) -> str:
+    """Choose an audit namespace without contributing to authorization."""
+    fallback = _fallback_rejection_audit_platform(env)
+    try:
+        command = _strip_allowed_suffix(_decode_payload(payload))
+    except HookCommandRejected:
+        return fallback
+    try:
+        argv = shlex.split(command, comments=True, posix=True)
+    except ValueError:
+        return fallback
+    try:
+        inner_platform = _active_platform_from_argv(argv)
+    except HookCommandRejected:
+        return "unknown"
+    return inner_platform or "unknown"
+
+
+def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str) -> None:
+    env = os.environ
+    stdin_text = _read_stdin()
+    hook_payload = _payload_from_stdin(stdin_text)
+    config = runtime_config.load_config(env=env, home=_home_from_env(env))
+    profile = config["agent_visibility"]["profile"]
+    session_id = strict_session_log.session_id_from_payload(hook_payload, env=env)
+    log_ref = str(strict_session_log.log_path(_home_from_env(env), platform, session_id))
+    item = classify_surface_item(
+        value_key="hook-command-rejection",
+        value_kind="gate",
+        exposure_class="forced",
+        profile=profile,
+        strict_log_ref=log_ref,
+        source_hook=hook_id,
+        value=_one_line(stderr),
+    )
+    strict_session_log.append_event(
+        home=_home_from_env(env),
+        platform=platform,
+        session_id=session_id,
+        event={
+            "hook_id": hook_id,
+            "event": _event_name(hook_payload, env) or "hook-command-rejected",
+            "stdout": "",
+            "stderr": stderr,
+            "exit_code": 126,
+            "agent_visibility_profile": profile,
+            "visible_decision": "force_show",
+            "surface_item": item,
+            "model_surface_output": stderr,
+            "user_surface_output": stderr,
+        },
+    )
+
+
 def _strip_trailing_marker_args(args: list[str]) -> list[str] | None:
     if len(args) in {3, 4}:
         return args
@@ -707,15 +836,29 @@ def main(argv: list[str] | None = None) -> NoReturn:
         sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [legacy-visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
 
+    payload = normalized_args[2] if len(normalized_args) == 3 else normalized_args[3]
     try:
         if len(normalized_args) == 3:
-            raise SystemExit(run(normalized_args[1], normalized_args[2]))
+            raise SystemExit(run(normalized_args[1], payload))
         if len(normalized_args) == 4:
-            raise SystemExit(run(normalized_args[1], normalized_args[3]))
+            raise SystemExit(run(normalized_args[1], payload))
         sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [legacy-visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
     except HookCommandRejected as exc:
-        sys.stderr.write(f"hook command rejected: {exc}\n")
+        rejection_stderr = f"hook command rejected: {exc}\n"
+        sys.stderr.write(rejection_stderr)
+        try:
+            audit_platform = _rejection_audit_platform(payload, os.environ)
+            _append_rejection_audit(
+                normalized_args[1],
+                rejection_stderr,
+                platform=audit_platform,
+            )
+        except Exception as audit_exc:  # noqa: BLE001 - audit is best-effort.
+            try:
+                sys.stderr.write(f"hook rejection audit failed: {audit_exc}\n")
+            except Exception:  # noqa: BLE001 - diagnostics must not mask rejection.
+                pass
         raise SystemExit(126)
 
 

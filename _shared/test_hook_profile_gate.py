@@ -22,9 +22,73 @@ import hook_profile_gate
 import install_hooks
 
 
+def _make_node_executable(node: Path) -> None:
+    if os.name != "nt":
+        node.chmod(node.stat().st_mode | 0o100)
+
+
 def _python_payload_command(args: str) -> str:
     executable = sys.executable.replace("\\", "/")
     return f"{executable} {args}"
+
+
+def _write_node_runtime_config(home: Path, registrations: dict[str, Path]) -> None:
+    for runtime in registrations.values():
+        _make_node_executable(runtime)
+    hook_profile_gate.runtime_config.save_config(
+        {
+            "hook_runtime": {
+                "node": {
+                    platform: str(runtime)
+                    for platform, runtime in registrations.items()
+                }
+            }
+        },
+        home=home,
+    )
+
+
+def _strict_log_path(home: str | Path, platform: str, session_id: str) -> Path:
+    return (
+        Path(home)
+        / ".ghost-alice"
+        / "session-logs"
+        / platform
+        / session_id
+        / "strict-hook-output.jsonl"
+    )
+
+
+def _isolated_node_runtime(root: Path, directory: str = "runtime") -> Path | None:
+    resolved_node = shutil.which("node") or shutil.which("node.exe")
+    if not resolved_node:
+        return None
+    installed_node = Path(resolved_node).resolve()
+    node = root / directory / ("node.exe" if os.name == "nt" else "node")
+    node.parent.mkdir(parents=True)
+    try:
+        os.link(installed_node, node)
+    except OSError:
+        shutil.copy2(installed_node, node)
+    return node
+
+
+def _write_codex_node_config(config_file: Path, node: Path) -> None:
+    _make_node_executable(node)
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(
+        "[mcp_servers.node_repl.env]\n"
+        f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+        encoding="utf-8",
+    )
+
+
+def _node_marker_command(node: Path, marker: Path) -> str:
+    code = (
+        "require('node:fs').writeFileSync("
+        f"{json.dumps(marker.as_posix())}, 'ran')"
+    )
+    return f'"{node.as_posix()}" -e {shlex.quote(code)} -- --platform codex'
 
 
 class TestHookRunnerExecutionGate(unittest.TestCase):
@@ -286,11 +350,101 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
 
 
 class TestHookCommandAllowlist(unittest.TestCase):
+    def test_configured_node_runtime_uses_shared_usability_predicate(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            node = Path(temp_home) / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# fake node runtime\n", encoding="utf-8")
+
+            with mock.patch.object(
+                hook_profile_gate.runtime_config,
+                "is_usable_node_runtime",
+                return_value=False,
+                create=True,
+            ) as usability:
+                configured = hook_profile_gate._configured_node_runtime_from_value(str(node))
+
+        self.assertIsNone(configured)
+        usability.assert_called_once_with(node.resolve())
+
+    @unittest.skipUnless(os.name != "nt", "POSIX execute bits are not enforced on Windows")
+    def test_posix_non_executable_configured_node_sources_are_rejected(self):
+        for source in ("env", "codex-config", "registration"):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                node = root / source / "node"
+                node.parent.mkdir()
+                node.write_text("# fake node runtime\n", encoding="utf-8")
+                node.chmod(0o600)
+                platform = "codex" if source == "codex-config" else "claude"
+                env = {"HOME": str(root), "USERPROFILE": str(root), "PATH": ""}
+                if source == "env":
+                    env["GHOST_ALICE_NODE"] = str(node)
+                elif source == "codex-config":
+                    codex_home = root / ".codex"
+                    env["CODEX_HOME"] = str(codex_home)
+                    config_file = codex_home / "config.toml"
+                    config_file.parent.mkdir(parents=True)
+                    config_file.write_text(
+                        "[mcp_servers.node_repl.env]\n"
+                        f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+                        encoding="utf-8",
+                    )
+                else:
+                    hook_profile_gate.runtime_config.save_config(
+                        {"hook_runtime": {"node": {platform: str(node.resolve())}}},
+                        home=root,
+                    )
+
+                argv = [str(node), "ghost-alice-hook.mjs", "--platform", platform]
+                with (
+                    mock.patch.dict(os.environ, env, clear=True),
+                    mock.patch.object(hook_profile_gate.shutil, "which", return_value=None),
+                    self.assertRaises(hook_profile_gate.HookCommandRejected),
+                ):
+                    hook_profile_gate.assert_allowed_command(argv, [])
+
+    @unittest.skipUnless(os.name != "nt", "POSIX execute bits are not enforced on Windows")
+    def test_posix_executable_configured_node_sources_are_accepted(self):
+        for source in ("env", "codex-config", "registration"):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                node = root / source / "node"
+                node.parent.mkdir()
+                node.write_text("# fake node runtime\n", encoding="utf-8")
+                node.chmod(0o700)
+                platform = "codex" if source == "codex-config" else "claude"
+                env = {"HOME": str(root), "USERPROFILE": str(root), "PATH": ""}
+                if source == "env":
+                    env["GHOST_ALICE_NODE"] = str(node)
+                elif source == "codex-config":
+                    codex_home = root / ".codex"
+                    env["CODEX_HOME"] = str(codex_home)
+                    config_file = codex_home / "config.toml"
+                    config_file.parent.mkdir(parents=True)
+                    config_file.write_text(
+                        "[mcp_servers.node_repl.env]\n"
+                        f"NODE_REPL_NODE_PATH = {json.dumps(node.as_posix())}\n",
+                        encoding="utf-8",
+                    )
+                else:
+                    hook_profile_gate.runtime_config.save_config(
+                        {"hook_runtime": {"node": {platform: str(node.resolve())}}},
+                        home=root,
+                    )
+
+                argv = [str(node), "ghost-alice-hook.mjs", "--platform", platform]
+                with (
+                    mock.patch.dict(os.environ, env, clear=True),
+                    mock.patch.object(hook_profile_gate.shutil, "which", return_value=None),
+                ):
+                    hook_profile_gate.assert_allowed_command(argv, [])
+
     def test_allows_node_runtime_resolved_from_current_path(self):
         with tempfile.TemporaryDirectory() as temp_home:
             root = Path(temp_home)
             node = root / ("node.exe" if os.name == "nt" else "node")
             node.write_text("# path node\n", encoding="utf-8")
+            _make_node_executable(node)
             command = f'"{node.as_posix()}" "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
             env = {
                 "PATH": str(root),
@@ -317,6 +471,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
             node.parent.mkdir(parents=True, exist_ok=True)
             node.write_text("# configured node\n", encoding="utf-8")
+            _make_node_executable(node)
             codex_home.mkdir(parents=True, exist_ok=True)
             (codex_home / "config.toml").write_text(
                 "[mcp_servers.node_repl.env]\n"
@@ -334,6 +489,345 @@ class TestHookCommandAllowlist(unittest.TestCase):
                 argv = hook_profile_gate._validate_shell_command(command)
 
         self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_persisted_node_registration_uses_inner_platform_when_outer_env_conflicts(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / "claude-runtime" / ("node.exe" if os.name == "nt" else "node")
+            node.parent.mkdir(parents=True)
+            node.write_text("# registered claude node\n", encoding="utf-8")
+            path_node = root / "path-runtime" / ("node.exe" if os.name == "nt" else "node")
+            path_node.parent.mkdir(parents=True)
+            path_node.write_text("# different PATH node\n", encoding="utf-8")
+            _write_node_runtime_config(root, {"claude": node})
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform claude"
+            )
+            env = {
+                "HOME": str(root),
+                "GHOST_ALICE_PLATFORM": "codex",
+                "PATH": str(path_node.parent),
+            }
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("shutil.which", return_value=str(path_node)),
+            ):
+                try:
+                    argv = hook_profile_gate._validate_shell_command(command)
+                except hook_profile_gate.HookCommandRejected as exc:
+                    self.fail(f"active-platform registered Node runtime was rejected: {exc}")
+
+        self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_persisted_node_registration_uses_inner_platform_when_outer_env_is_absent(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
+            node.parent.mkdir(parents=True)
+            node.write_text("# registered codex node\n", encoding="utf-8")
+            _write_node_runtime_config(root, {"codex": node})
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex"
+            )
+            env = {"HOME": str(root), "PATH": ""}
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("shutil.which", return_value=None),
+            ):
+                argv = hook_profile_gate._validate_shell_command(command)
+
+        self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_persisted_node_registration_does_not_authorize_other_platform(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / "claude-runtime" / ("node.exe" if os.name == "nt" else "node")
+            node.parent.mkdir(parents=True)
+            node.write_text("# registered claude node\n", encoding="utf-8")
+            _write_node_runtime_config(root, {"claude": node})
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex"
+            )
+            env = {
+                "HOME": str(root),
+                "GHOST_ALICE_PLATFORM": "claude",
+                "PATH": "",
+            }
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("shutil.which", return_value=None),
+                self.assertRaises(hook_profile_gate.HookCommandRejected),
+            ):
+                hook_profile_gate._validate_shell_command(command)
+
+    def test_outer_platform_does_not_authorize_persisted_node_without_inner_platform(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / "claude-runtime" / ("node.exe" if os.name == "nt" else "node")
+            node.parent.mkdir(parents=True)
+            node.write_text("# registered claude node\n", encoding="utf-8")
+            _write_node_runtime_config(root, {"claude": node})
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}"'
+            )
+            env = {
+                "HOME": str(root),
+                "GHOST_ALICE_PLATFORM": "claude",
+                "PATH": "",
+            }
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("shutil.which", return_value=None),
+                self.assertRaises(hook_profile_gate.HookCommandRejected),
+            ):
+                hook_profile_gate._validate_shell_command(command)
+
+    def test_explicit_global_node_sources_remain_platform_independent(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# globally configured node\n", encoding="utf-8")
+            _make_node_executable(node)
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex"
+            )
+
+            for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
+                with self.subTest(env_name=env_name):
+                    env = {
+                        env_name: str(node),
+                        "GHOST_ALICE_PLATFORM": "claude",
+                        "PATH": "",
+                    }
+                    with (
+                        mock.patch.dict(os.environ, env, clear=True),
+                        mock.patch("shutil.which", return_value=None),
+                    ):
+                        argv = hook_profile_gate._validate_shell_command(command)
+
+                    self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_duplicate_inner_platform_arguments_fail_closed(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# globally configured node\n", encoding="utf-8")
+            _make_node_executable(node)
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform claude --platform claude"
+            )
+            env = {"GHOST_ALICE_NODE": str(node), "PATH": ""}
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("shutil.which", return_value=None),
+                self.assertRaisesRegex(
+                    hook_profile_gate.HookCommandRejected,
+                    "duplicate hook platform",
+                ),
+            ):
+                hook_profile_gate._validate_shell_command(command)
+
+    def test_invalid_inner_platform_argument_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# globally configured node\n", encoding="utf-8")
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform other"
+            )
+            env = {"GHOST_ALICE_NODE": str(node), "PATH": ""}
+
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch("shutil.which", return_value=None),
+                self.assertRaisesRegex(
+                    hook_profile_gate.HookCommandRejected,
+                    "invalid hook platform",
+                ),
+            ):
+                hook_profile_gate._validate_shell_command(command)
+
+    def test_equals_and_mixed_platform_forms_fail_closed_with_audit(self):
+        forms = (
+            "--platform=claude",
+            "--platform=codex",
+            "--platform claude --platform=codex",
+            "--platform=claude --platform codex",
+        )
+        for index, platform_args in enumerate(forms):
+            with self.subTest(platform_args=platform_args), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                node = root / ("node.exe" if os.name == "nt" else "node")
+                node.write_text("# globally configured node\n", encoding="utf-8")
+                command = (
+                    f'"{node.as_posix()}" '
+                    f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                    f"{platform_args}"
+                )
+                payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+                session_id = f"s-equals-platform-{index}"
+                stdin_text = json.dumps(
+                    {"session_id": session_id, "hook_event_name": "PreToolUse"}
+                )
+                env = {
+                    "HOME": temp_home,
+                    "USERPROFILE": temp_home,
+                    "GHOST_ALICE_PLATFORM": "codex",
+                    "GHOST_ALICE_NODE": str(node),
+                    "PATH": "",
+                }
+                stderr = io.StringIO()
+
+                with (
+                    mock.patch.dict(os.environ, env, clear=True),
+                    mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                    mock.patch.object(sys, "stderr", stderr),
+                    mock.patch.object(
+                        hook_profile_gate.subprocess,
+                        "run",
+                        return_value=subprocess.CompletedProcess([], 0, "", ""),
+                    ) as child_run,
+                    self.assertRaises(SystemExit) as cm,
+                ):
+                    hook_profile_gate.main(["run", "tool-checkpoint", payload])
+
+                self.assertEqual(cm.exception.code, 126)
+                self.assertIn("hook command rejected:", stderr.getvalue())
+                child_run.assert_not_called()
+                log_path = _strict_log_path(root, "unknown", session_id)
+                self.assertTrue(log_path.is_file(), "equals-form rejection was not audited")
+                row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+                self.assertEqual(row["exit_code"], 126)
+                self.assertEqual(row["visible_decision"], "force_show")
+
+    def test_rejection_audit_uses_validated_inner_platform(self):
+        cases = (
+            ("claude", "codex"),
+            ("codex", None),
+        )
+        for inner_platform, outer_platform in cases:
+            with self.subTest(
+                inner_platform=inner_platform,
+                outer_platform=outer_platform,
+            ), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                node = root / ("node.exe" if os.name == "nt" else "node")
+                node.write_text("# unregistered node\n", encoding="utf-8")
+                command = (
+                    f'"{node.as_posix()}" '
+                    f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                    f"--platform {inner_platform}"
+                )
+                payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+                session_id = f"s-inner-audit-{inner_platform}"
+                env = {
+                    "HOME": temp_home,
+                    "USERPROFILE": temp_home,
+                    "PATH": "",
+                }
+                if outer_platform is not None:
+                    env["GHOST_ALICE_PLATFORM"] = outer_platform
+
+                with (
+                    mock.patch.dict(os.environ, env, clear=True),
+                    mock.patch.object(
+                        sys,
+                        "stdin",
+                        io.StringIO(json.dumps({"session_id": session_id})),
+                    ),
+                    mock.patch.object(sys, "stderr", io.StringIO()),
+                    self.assertRaises(SystemExit) as cm,
+                ):
+                    hook_profile_gate.main(["run", "tool-checkpoint", payload])
+
+                self.assertEqual(cm.exception.code, 126)
+                log_path = _strict_log_path(root, inner_platform, session_id)
+                self.assertTrue(log_path.is_file(), "inner-platform audit log was not created")
+                row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+                self.assertEqual(row["platform"], inner_platform)
+
+    def test_malformed_payload_with_unsupported_outer_platform_audits_under_unknown(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            session_id = "s-unknown-audit-platform"
+            env = {
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
+                "GHOST_ALICE_PLATFORM": "unsupported",
+                "GHOST_ALICE_SESSION_ID": session_id,
+            }
+            stderr = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(sys, "stdin", io.StringIO("")),
+                mock.patch.object(sys, "stderr", stderr),
+                self.assertRaises(SystemExit) as cm,
+            ):
+                hook_profile_gate.main(["run", "tool-checkpoint", "not-base64!"])
+
+            self.assertEqual(cm.exception.code, 126)
+            log_path = _strict_log_path(root, "unknown", session_id)
+            self.assertTrue(log_path.is_file(), "unknown-platform audit log was not created")
+            row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(row["platform"], "unknown")
+
+    def test_unregistered_node_outside_current_path_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = root / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# unregistered node\n", encoding="utf-8")
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform claude"
+            )
+
+            with (
+                mock.patch.dict(os.environ, {"PATH": ""}, clear=True),
+                mock.patch("shutil.which", return_value=None),
+                self.assertRaises(hook_profile_gate.HookCommandRejected),
+            ):
+                hook_profile_gate._validate_shell_command(command)
+
+    def test_configured_runtime_with_non_node_basename_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            runtime = root / ("node-wrapper.exe" if os.name == "nt" else "node-wrapper")
+            runtime.write_text("# not node\n", encoding="utf-8")
+            command = (
+                f'"{runtime.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform claude"
+            )
+
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"GHOST_ALICE_NODE": str(runtime), "PATH": ""},
+                    clear=True,
+                ),
+                mock.patch("shutil.which", return_value=None),
+                self.assertRaises(hook_profile_gate.HookCommandRejected),
+            ):
+                hook_profile_gate._validate_shell_command(command)
 
     def test_allows_system_and_homebrew_binaries(self):
         if os.name == "nt":
@@ -365,21 +859,713 @@ class TestHookCommandAllowlist(unittest.TestCase):
 
     def test_cli_rejects_shell_injection_payload(self):
         payload = base64.urlsafe_b64encode(b"/bin/bash -lc 'printf ok'; /tmp/evil").decode("ascii")
-        env = os.environ.copy()
-        env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
+        with tempfile.TemporaryDirectory() as temp_home:
+            session_id = f"s-shell-injection-{Path(temp_home).name}"
+            real_log_path = _strict_log_path(Path.home(), "unknown", session_id)
+            self.assertFalse(real_log_path.exists())
+            env = os.environ.copy()
+            env["HOME"] = temp_home
+            env["USERPROFILE"] = temp_home
+            env["GHOST_ALICE_PLATFORM"] = "codex"
+            env["GHOST_ALICE_SESSION_ID"] = session_id
+            env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
 
-        result = subprocess.run(
-            [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "prompt", "strict", payload],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=False,
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "prompt", "strict", payload],
+                input=json.dumps({"session_id": session_id}),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            isolated_log_path = _strict_log_path(temp_home, "unknown", session_id)
+            self.assertTrue(isolated_log_path.is_file())
+            self.assertFalse(real_log_path.exists())
+
+        self.assertEqual(result.returncode, 126)
+        self.assertIn("rejected", result.stderr.lower())
+
+    def test_cli_rejects_unterminated_quote_cleanly_without_running_child(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            marker = root / "child-ran.txt"
+            code = (
+                "from pathlib import Path; "
+                f"Path({str(marker)!r}).write_text('ran', encoding='utf-8')"
+            )
+            command = f"{_python_payload_command(f'-c {shlex.quote(code)}')} '"
+            payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+            session_id = f"s-unterminated-quote-{root.name}"
+            stdin_text = json.dumps(
+                {
+                    "session_id": session_id,
+                    "hook_event_name": "PreToolUse",
+                    "tool_input": {"secret": "must-not-be-stored"},
+                }
+            )
+            real_log_path = _strict_log_path(Path.home(), "claude", session_id)
+            self.assertFalse(real_log_path.exists())
+            env = os.environ.copy()
+            env.update({
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
+                "GHOST_ALICE_PLATFORM": "claude",
+                "GHOST_ALICE_SESSION_ID": session_id,
+                "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+            })
+            env.pop("GHOST_ALICE_DISABLED_HOOKS", None)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "tool-checkpoint",
+                    payload,
+                ],
+                input=stdin_text,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(
+                result.stderr,
+                "hook command rejected: hook command parse failed: No closing quotation\n",
+            )
+            self.assertEqual(result.returncode, 126)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertFalse(marker.exists(), "unterminated command unexpectedly ran its child")
+            log_path = _strict_log_path(root, "claude", session_id)
+            self.assertTrue(log_path.is_file(), "unterminated command rejection was not audited")
+            row_text = log_path.read_text(encoding="utf-8").splitlines()[0]
+            row = json.loads(row_text)
+            self.assertEqual(row["platform"], "claude")
+            self.assertEqual(row["exit_code"], 126)
+            self.assertEqual(row["stdout"], "")
+            self.assertEqual(row["visible_decision"], "force_show")
+            self.assertNotIn("stdin", row)
+            self.assertNotIn("must-not-be-stored", row_text)
+            self.assertFalse(real_log_path.exists())
+
+    def test_codex_home_config_is_exclusive_over_default_home_config(self):
+        if not (shutil.which("node") or shutil.which("node.exe")):
+            self.skipTest("Node runtime is required for the CODEX_HOME isolation probe")
+
+        for config_label, config_bytes in (
+            ("empty", b""),
+            ("invalid-utf8", b"\xff\xfe\x80"),
+        ):
+            with self.subTest(config=config_label), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                node = _isolated_node_runtime(root, "inactive-home-runtime")
+                if node is None:
+                    self.skipTest("Node runtime disappeared during the isolation probe")
+                _write_codex_node_config(root / ".codex" / "config.toml", node)
+                codex_home = root / "active-codex-home"
+                codex_home.mkdir()
+                (codex_home / "config.toml").write_bytes(config_bytes)
+                marker = root / f"inactive-home-node-ran-{config_label}.txt"
+                payload = base64.urlsafe_b64encode(
+                    _node_marker_command(node, marker).encode("utf-8")
+                ).decode("ascii")
+                session_id = f"s-codex-home-exclusive-{config_label}-{root.name}"
+                stdin_text = json.dumps(
+                    {
+                        "session_id": session_id,
+                        "hook_event_name": "PreToolUse",
+                        "tool_input": {"secret": "must-not-be-stored"},
+                    }
+                )
+                real_log_path = _strict_log_path(Path.home(), "codex", session_id)
+                self.assertFalse(real_log_path.exists())
+                env = os.environ.copy()
+                env.update({
+                    "HOME": temp_home,
+                    "USERPROFILE": temp_home,
+                    "CODEX_HOME": str(codex_home),
+                    "GHOST_ALICE_PLATFORM": "claude",
+                    "GHOST_ALICE_SESSION_ID": session_id,
+                    "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+                    "PATH": "",
+                })
+                env.pop("GHOST_ALICE_DISABLED_HOOKS", None)
+                env.pop("GHOST_ALICE_NODE", None)
+                env.pop("NODE_REPL_NODE_PATH", None)
+
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).with_name("hook_profile_gate.py")),
+                        "run",
+                        "tool-checkpoint",
+                        payload,
+                    ],
+                    input=stdin_text,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 126, msg=result.stderr)
+                self.assertEqual(
+                    result.stderr,
+                    f"hook command rejected: hook executable outside allowlist: {node.resolve()}\n",
+                )
+                self.assertFalse(marker.exists(), "inactive HOME config authorized its Node")
+                log_path = _strict_log_path(root, "codex", session_id)
+                self.assertTrue(log_path.is_file(), "CODEX_HOME isolation rejection was not audited")
+                row_text = log_path.read_text(encoding="utf-8").splitlines()[0]
+                row = json.loads(row_text)
+                self.assertEqual(row["exit_code"], 126)
+                self.assertEqual(row["stdout"], "")
+                self.assertEqual(row["visible_decision"], "force_show")
+                self.assertNotIn("stdin", row)
+                self.assertNotIn("must-not-be-stored", row_text)
+                self.assertFalse(real_log_path.exists())
+
+    def test_valid_codex_home_config_authorizes_its_node(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            node = _isolated_node_runtime(root, "codex-home-runtime")
+            if node is None:
+                self.skipTest("Node runtime is required for the CODEX_HOME positive probe")
+            codex_home = root / "active-codex-home"
+            _write_codex_node_config(codex_home / "config.toml", node)
+            marker = root / "codex-home-node-ran.txt"
+            payload = base64.urlsafe_b64encode(
+                _node_marker_command(node, marker).encode("utf-8")
+            ).decode("ascii")
+            session_id = f"s-valid-codex-home-{root.name}"
+            real_log_path = _strict_log_path(Path.home(), "codex", session_id)
+            self.assertFalse(real_log_path.exists())
+            env = os.environ.copy()
+            env.update({
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
+                "CODEX_HOME": str(codex_home),
+                "GHOST_ALICE_PLATFORM": "codex",
+                "GHOST_ALICE_SESSION_ID": session_id,
+                "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+                "PATH": "",
+            })
+            env.pop("GHOST_ALICE_DISABLED_HOOKS", None)
+            env.pop("GHOST_ALICE_NODE", None)
+            env.pop("NODE_REPL_NODE_PATH", None)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "tool-checkpoint",
+                    payload,
+                ],
+                input=json.dumps({"session_id": session_id}),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertTrue(marker.is_file(), "valid CODEX_HOME config did not authorize its Node")
+            self.assertFalse(real_log_path.exists())
+
+    def test_default_home_codex_config_is_used_when_codex_home_is_absent_or_empty(self):
+        for codex_home_value in (None, ""):
+            with self.subTest(codex_home=codex_home_value), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                node = _isolated_node_runtime(root, "default-home-runtime")
+                if node is None:
+                    self.skipTest("Node runtime is required for the default-home positive probe")
+                _write_codex_node_config(root / ".codex" / "config.toml", node)
+                marker = root / "default-home-node-ran.txt"
+                payload = base64.urlsafe_b64encode(
+                    _node_marker_command(node, marker).encode("utf-8")
+                ).decode("ascii")
+                session_id = f"s-default-codex-home-{codex_home_value!r}-{root.name}"
+                real_log_path = _strict_log_path(Path.home(), "codex", session_id)
+                self.assertFalse(real_log_path.exists())
+                env = os.environ.copy()
+                env.update({
+                    "HOME": temp_home,
+                    "USERPROFILE": temp_home,
+                    "GHOST_ALICE_PLATFORM": "codex",
+                    "GHOST_ALICE_SESSION_ID": session_id,
+                    "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+                    "PATH": "",
+                })
+                if codex_home_value is None:
+                    env.pop("CODEX_HOME", None)
+                else:
+                    env["CODEX_HOME"] = codex_home_value
+                env.pop("GHOST_ALICE_DISABLED_HOOKS", None)
+                env.pop("GHOST_ALICE_NODE", None)
+                env.pop("NODE_REPL_NODE_PATH", None)
+
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).with_name("hook_profile_gate.py")),
+                        "run",
+                        "tool-checkpoint",
+                        payload,
+                    ],
+                    input=json.dumps({"session_id": session_id}),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                self.assertTrue(marker.is_file(), "default HOME config did not authorize its Node")
+                self.assertFalse(real_log_path.exists())
+
+    def test_invalid_utf8_codex_toml_does_not_block_independent_node_sources(self):
+        resolved_node = shutil.which("node") or shutil.which("node.exe")
+        if not resolved_node:
+            self.skipTest("Node runtime is required for the subprocess authorization probe")
+        installed_node = Path(resolved_node).resolve()
+
+        for source in ("global", "path"):
+            with self.subTest(source=source), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                codex_home = root / ".codex"
+                codex_home.mkdir()
+                (codex_home / "config.toml").write_bytes(b"\xff\xfe\x80")
+                node = root / "runtime" / ("node.exe" if os.name == "nt" else "node")
+                node.parent.mkdir()
+                try:
+                    os.link(installed_node, node)
+                except OSError:
+                    shutil.copy2(installed_node, node)
+                marker = root / f"{source}-node-ran.txt"
+                code = (
+                    "require('node:fs').writeFileSync("
+                    f"{json.dumps(marker.as_posix())}, 'ran')"
+                )
+                command = (
+                    f'"{node.as_posix()}" -e {shlex.quote(code)} '
+                    "-- --platform codex"
+                )
+                payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+                session_id = f"s-invalid-utf8-codex-toml-{source}-{root.name}"
+                real_log_path = _strict_log_path(Path.home(), "codex", session_id)
+                self.assertFalse(real_log_path.exists())
+                env = os.environ.copy()
+                env.update({
+                    "HOME": temp_home,
+                    "USERPROFILE": temp_home,
+                    "GHOST_ALICE_PLATFORM": "codex",
+                    "GHOST_ALICE_SESSION_ID": session_id,
+                    "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+                })
+                env.pop("CODEX_HOME", None)
+                env.pop("GHOST_ALICE_DISABLED_HOOKS", None)
+                env.pop("GHOST_ALICE_NODE", None)
+                env.pop("NODE_REPL_NODE_PATH", None)
+                if source == "global":
+                    env["GHOST_ALICE_NODE"] = str(node)
+                    env["PATH"] = ""
+                else:
+                    env["PATH"] = str(node.parent)
+
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).with_name("hook_profile_gate.py")),
+                        "run",
+                        "tool-checkpoint",
+                        payload,
+                    ],
+                    input=json.dumps({"session_id": session_id}),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 0, msg=result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertTrue(marker.is_file(), f"{source} Node source was not executed")
+                self.assertFalse(real_log_path.exists())
+
+    def test_invalid_utf8_codex_toml_rejects_unregistered_node_cleanly_and_audits(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            codex_home = root / ".codex"
+            codex_home.mkdir()
+            (codex_home / "config.toml").write_bytes(b"\xff\xfe\x80")
+            node = root / "unregistered" / ("node.exe" if os.name == "nt" else "node")
+            node.parent.mkdir()
+            node.write_text("# unregistered node\n", encoding="utf-8")
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex"
+            )
+            payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+            session_id = f"s-invalid-utf8-codex-toml-reject-{root.name}"
+            stdin_text = json.dumps(
+                {
+                    "session_id": session_id,
+                    "hook_event_name": "PreToolUse",
+                    "tool_input": {"secret": "must-not-be-stored"},
+                }
+            )
+            real_log_path = _strict_log_path(Path.home(), "codex", session_id)
+            self.assertFalse(real_log_path.exists())
+            env = os.environ.copy()
+            env.update({
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
+                "GHOST_ALICE_PLATFORM": "claude",
+                "GHOST_ALICE_SESSION_ID": session_id,
+                "GHOST_ALICE_AGENT_VISIBILITY": "strict",
+                "PATH": "",
+            })
+            env.pop("CODEX_HOME", None)
+            env.pop("GHOST_ALICE_DISABLED_HOOKS", None)
+            env.pop("GHOST_ALICE_NODE", None)
+            env.pop("NODE_REPL_NODE_PATH", None)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "tool-checkpoint",
+                    payload,
+                ],
+                input=stdin_text,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 126, msg=result.stderr)
+            self.assertEqual(
+                result.stderr,
+                f"hook command rejected: hook executable outside allowlist: {node.resolve()}\n",
+            )
+            self.assertNotIn("Traceback", result.stderr)
+            log_path = _strict_log_path(root, "codex", session_id)
+            self.assertTrue(log_path.is_file(), "unregistered Node rejection was not audited")
+            row_text = log_path.read_text(encoding="utf-8").splitlines()[0]
+            row = json.loads(row_text)
+            self.assertEqual(row["platform"], "codex")
+            self.assertEqual(row["exit_code"], 126)
+            self.assertEqual(row["stdout"], "")
+            self.assertEqual(row["visible_decision"], "force_show")
+            self.assertNotIn("stdin", row)
+            self.assertNotIn("must-not-be-stored", row_text)
+            self.assertFalse(real_log_path.exists())
+
+    def test_malformed_codex_toml_shapes_reject_cleanly_and_are_audited(self):
+        malformed_shapes = (
+            'mcp_servers = "not-a-table"\n',
+            '[mcp_servers]\nnode_repl = "not-a-table"\n',
+            '[mcp_servers.node_repl]\nenv = "not-a-table"\n',
+        )
+        for index, config_text in enumerate(malformed_shapes):
+            with self.subTest(index=index), tempfile.TemporaryDirectory() as temp_home:
+                root = Path(temp_home)
+                codex_home = root / ".codex"
+                codex_home.mkdir()
+                (codex_home / "config.toml").write_text(config_text, encoding="utf-8")
+                node = root / ("node.exe" if os.name == "nt" else "node")
+                node.write_text("# unregistered node\n", encoding="utf-8")
+                command = (
+                    f'"{node.as_posix()}" '
+                    f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                    "--platform codex"
+                )
+                payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+                session_id = f"s-malformed-toml-{index}-{root.name}"
+                real_log_path = _strict_log_path(Path.home(), "codex", session_id)
+                self.assertFalse(real_log_path.exists())
+                env = os.environ.copy()
+                env.update({
+                    "HOME": temp_home,
+                    "USERPROFILE": temp_home,
+                    "GHOST_ALICE_PLATFORM": "codex",
+                    "GHOST_ALICE_SESSION_ID": session_id,
+                    "PATH": "",
+                })
+                env.pop("GHOST_ALICE_NODE", None)
+                env.pop("NODE_REPL_NODE_PATH", None)
+                env.pop("CODEX_HOME", None)
+
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(Path(__file__).with_name("hook_profile_gate.py")),
+                        "run",
+                        "tool-checkpoint",
+                        payload,
+                    ],
+                    input=json.dumps({"session_id": session_id}),
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env,
+                    check=False,
+                )
+
+                self.assertEqual(result.returncode, 126, msg=result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+                log_path = _strict_log_path(root, "codex", session_id)
+                self.assertTrue(log_path.is_file(), "malformed TOML rejection was not audited")
+                self.assertFalse(real_log_path.exists())
+
+    def test_malformed_codex_toml_does_not_block_explicit_global_node(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            codex_home = root / ".codex"
+            codex_home.mkdir()
+            (codex_home / "config.toml").write_text(
+                'mcp_servers = "not-a-table"\n',
+                encoding="utf-8",
+            )
+            node = root / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# globally configured node\n", encoding="utf-8")
+            _make_node_executable(node)
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex"
+            )
+            env = {
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
+                "GHOST_ALICE_NODE": str(node),
+                "PATH": "",
+            }
+
+            with mock.patch.dict(os.environ, env, clear=True):
+                try:
+                    argv = hook_profile_gate._validate_shell_command(command)
+                except (AttributeError, hook_profile_gate.HookCommandRejected) as exc:
+                    self.fail(f"malformed unrelated Codex config blocked global Node: {exc}")
+
+        self.assertEqual(Path(argv[0]).resolve(), node.resolve())
+
+    def test_invalid_utf8_runtime_config_rejects_cleanly_and_is_audited(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            config_path = root / ".ghost-alice" / "config.json"
+            config_path.parent.mkdir(parents=True)
+            config_path.write_bytes(b"\xff\xfe\x80")
+            node = root / ("node.exe" if os.name == "nt" else "node")
+            node.write_text("# only corrupt registration could authorize this\n", encoding="utf-8")
+            command = (
+                f'"{node.as_posix()}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex"
+            )
+            payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+            session_id = f"s-invalid-utf8-runtime-config-{root.name}"
+            real_log_path = _strict_log_path(Path.home(), "codex", session_id)
+            self.assertFalse(real_log_path.exists())
+            env = os.environ.copy()
+            env.update({
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
+                "GHOST_ALICE_PLATFORM": "claude",
+                "GHOST_ALICE_SESSION_ID": session_id,
+                "PATH": "",
+            })
+            env.pop("GHOST_ALICE_NODE", None)
+            env.pop("NODE_REPL_NODE_PATH", None)
+            env.pop("CODEX_HOME", None)
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "tool-checkpoint",
+                    payload,
+                ],
+                input=json.dumps({"session_id": session_id}),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 126, msg=result.stderr)
+            self.assertNotIn("Traceback", result.stderr)
+            self.assertTrue(result.stderr.startswith("hook command rejected:"))
+            log_path = _strict_log_path(root, "codex", session_id)
+            self.assertTrue(log_path.is_file(), "invalid UTF-8 rejection was not audited")
+            self.assertFalse(real_log_path.exists())
+            row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(row["exit_code"], 126)
+            self.assertEqual(row["visible_decision"], "force_show")
+
+    def test_malformed_payload_rejection_is_sanitized_in_strict_log(self):
+        stdin_text = json.dumps(
+            {
+                "session_id": "s-malformed-rejection",
+                "hook_event_name": "PreToolUse",
+                "tool_input": {"secret": "must-not-be-stored"},
+            }
         )
 
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rejected", result.stderr.lower())
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = {
+                "HOME": temp_home,
+                "GHOST_ALICE_PLATFORM": "codex",
+                "GHOST_ALICE_SESSION_ID": "outer-session",
+            }
+            stderr = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                mock.patch.object(sys, "stderr", stderr),
+                self.assertRaises(SystemExit) as cm,
+            ):
+                hook_profile_gate.main(["run", "tool-checkpoint", "not-base64!"])
+
+            log_path = (
+                Path(temp_home)
+                / ".ghost-alice"
+                / "session-logs"
+                / "codex"
+                / "s-malformed-rejection"
+                / "strict-hook-output.jsonl"
+            )
+            self.assertTrue(log_path.is_file(), "rejection audit log was not created")
+            row_text = log_path.read_text(encoding="utf-8").splitlines()[0]
+            row = json.loads(row_text)
+
+        self.assertEqual(cm.exception.code, 126)
+        self.assertEqual(
+            stderr.getvalue(),
+            "hook command rejected: hook payload decode failed\n",
+        )
+        self.assertEqual(row["hook_id"], "tool-checkpoint")
+        self.assertEqual(row["event"], "PreToolUse")
+        self.assertEqual(row["exit_code"], 126)
+        self.assertEqual(row["stdout"], "")
+        self.assertEqual(row["visible_decision"], "force_show")
+        self.assertEqual(row["surface_item"]["value_key"], "hook-command-rejection")
+        self.assertNotIn("stdin", row)
+        self.assertNotIn("must-not-be-stored", row_text)
+        raw_stdin_digest = "sha256:" + hashlib.sha256(stdin_text.encode("utf-8")).hexdigest()
+        self.assertNotEqual(row["payload_digest"], raw_stdin_digest)
+
+    def test_command_rejection_is_sanitized_in_strict_log(self):
+        command = "/bin/bash -lc 'printf ok'; /tmp/evil"
+        payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+        stdin_text = json.dumps(
+            {
+                "session_id": "s-command-rejection",
+                "hook_event_name": "PreToolUse",
+                "tool_input": {"secret": "must-not-be-stored"},
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = {
+                "HOME": temp_home,
+                "GHOST_ALICE_PLATFORM": "claude",
+            }
+            stderr = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                mock.patch.object(sys, "stderr", stderr),
+                self.assertRaises(SystemExit) as cm,
+            ):
+                hook_profile_gate.main(["run", "tool-checkpoint", payload])
+
+            log_path = (
+                Path(temp_home)
+                / ".ghost-alice"
+                / "session-logs"
+                / "unknown"
+                / "s-command-rejection"
+                / "strict-hook-output.jsonl"
+            )
+            self.assertTrue(log_path.is_file(), "rejection audit log was not created")
+            row_text = log_path.read_text(encoding="utf-8").splitlines()[0]
+            row = json.loads(row_text)
+
+        self.assertEqual(cm.exception.code, 126)
+        self.assertTrue(
+            stderr.getvalue().startswith("hook command rejected: shell control operator rejected\n")
+        )
+        self.assertEqual(row["exit_code"], 126)
+        self.assertEqual(row["stdout"], "")
+        self.assertEqual(row["stderr"], stderr.getvalue())
+        self.assertEqual(row["visible_decision"], "force_show")
+        self.assertEqual(row["surface_item"]["value_key"], "hook-command-rejection")
+        self.assertNotIn("stdin", row)
+        self.assertNotIn("must-not-be-stored", row_text)
+
+    def test_rejection_audit_failure_keeps_original_error_and_exit_code(self):
+        stdin_text = json.dumps(
+            {
+                "session_id": "s-audit-failure",
+                "hook_event_name": "PreToolUse",
+                "tool_input": {"secret": "must-not-be-stored"},
+            }
+        )
+        stderr = io.StringIO()
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"HOME": tempfile.gettempdir(), "GHOST_ALICE_PLATFORM": "codex"},
+                clear=True,
+            ),
+            mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+            mock.patch.object(sys, "stderr", stderr),
+            mock.patch.object(
+                hook_profile_gate.strict_session_log,
+                "append_event",
+                side_effect=OSError("disk full"),
+            ) as append_event,
+            self.assertRaises(SystemExit) as cm,
+        ):
+            hook_profile_gate.main(["run", "tool-checkpoint", "not-base64!"])
+
+        self.assertEqual(cm.exception.code, 126)
+        self.assertEqual(
+            stderr.getvalue().splitlines(),
+            [
+                "hook command rejected: hook payload decode failed",
+                "hook rejection audit failed: disk full",
+            ],
+        )
+        event = append_event.call_args.kwargs["event"]
+        self.assertNotIn("stdin", event)
+        self.assertNotIn("must-not-be-stored", json.dumps(event))
 
     def test_cli_accepts_current_runner_shape_without_visibility_csv(self):
         executable = sys.executable.replace("\\", "/")

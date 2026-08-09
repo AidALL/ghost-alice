@@ -21,6 +21,7 @@ from typing import Sequence
 
 import addon_registry
 import hash_utils
+import runtime_config
 from encoding_guard import validate_repo
 from installer_assets import (
     OWNERSHIP_ABSENT,
@@ -394,39 +395,110 @@ def _skill_layout_audit(skills_root: Path, repo_root: Path) -> list[dict[str, st
     return findings
 
 
+def _normalized_node_runtime(
+    value: str | Path | None,
+    *,
+    require_input_absolute: bool = False,
+) -> Path | None:
+    if not isinstance(value, (str, Path)):
+        return None
+    text = str(value).strip().strip('"')
+    if not text:
+        return None
+    try:
+        candidate = Path(text).expanduser()
+        if require_input_absolute and not candidate.is_absolute():
+            return None
+        resolved = candidate.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not resolved.is_absolute() or not resolved.is_file():
+        return None
+    if resolved.name.lower() not in {"node", "node.exe"}:
+        return None
+    if not runtime_config.is_usable_node_runtime(resolved):
+        return None
+    return resolved
+
+
 def _configured_node_runtime_from_env() -> Path | None:
     for env_name in ("GHOST_ALICE_NODE", "NODE_REPL_NODE_PATH"):
-        value = os.environ.get(env_name, "").strip().strip('"')
-        if not value:
-            continue
-        candidate = Path(value).expanduser()
-        if candidate.is_file():
+        candidate = _normalized_node_runtime(os.environ.get(env_name))
+        if candidate is not None:
             return candidate
     return None
 
 
+def _codex_config_path(codex_config: Path | None = None) -> Path:
+    if codex_config is not None:
+        return codex_config
+    codex_home = os.environ.get("CODEX_HOME")
+    if codex_home:
+        return Path(codex_home).expanduser() / "config.toml"
+    return Path.home() / ".codex" / "config.toml"
+
+
 def _configured_node_runtime_from_codex_config(codex_config: Path | None = None) -> Path | None:
-    config = codex_config or (Path.home() / ".codex" / "config.toml")
+    config = _codex_config_path(codex_config)
     if not config.exists():
         return None
     try:
         with config.open("rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
         return None
 
-    env = (
-        data.get("mcp_servers", {})
-        .get("node_repl", {})
-        .get("env", {})
-    )
-    value = env.get("NODE_REPL_NODE_PATH") if isinstance(env, dict) else None
-    if not isinstance(value, str):
+    if not isinstance(data, dict):
         return None
-    candidate = Path(value.strip().strip('"')).expanduser()
-    if candidate.is_file():
-        return candidate
-    return None
+    mcp_servers = data.get("mcp_servers")
+    if not isinstance(mcp_servers, dict):
+        return None
+    node_repl = mcp_servers.get("node_repl")
+    if not isinstance(node_repl, dict):
+        return None
+    env = node_repl.get("env")
+    if not isinstance(env, dict):
+        return None
+    return _normalized_node_runtime(env.get("NODE_REPL_NODE_PATH"))
+
+
+def _registered_node_runtime_status(
+    platform: str,
+    ghost_alice_root: Path | None = None,
+) -> tuple[str, Path | None]:
+    if platform not in SUPPORTED_PLATFORMS:
+        return "registration-absent", None
+    root = ghost_alice_root or (Path.home() / ".ghost-alice")
+    try:
+        config_path = root.expanduser() / "config.json"
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "config-absent", None
+    except (OSError, RuntimeError, UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        return "config-invalid", None
+    if not isinstance(data, dict):
+        return "config-invalid", None
+
+    if "hook_runtime" not in data:
+        return "registration-absent", None
+    hook_runtime = data["hook_runtime"]
+    if not isinstance(hook_runtime, dict):
+        return "config-invalid", None
+    if "node" not in hook_runtime:
+        return "registration-absent", None
+    node_registrations = hook_runtime["node"]
+    if not isinstance(node_registrations, dict):
+        return "config-invalid", None
+    if platform not in node_registrations:
+        return "registration-absent", None
+
+    resolved = _normalized_node_runtime(
+        node_registrations[platform],
+        require_input_absolute=True,
+    )
+    if resolved is None:
+        return "registration-invalid", None
+    return "registration-valid", resolved
 
 
 def _node_full_capability_guidance() -> str:
@@ -436,7 +508,13 @@ def _node_full_capability_guidance() -> str:
     )
 
 
-def _node_runtime_status(strict: bool, codex_config: Path | None = None) -> tuple[str, str]:
+def _node_runtime_status(
+    strict: bool,
+    codex_config: Path | None = None,
+    *,
+    platform: str | None = None,
+    ghost_alice_root: Path | None = None,
+) -> tuple[str, str]:
     """Report whether the node runtime needed by the tool-checkpoint dispatcher exists.
 
     The PreToolUse gate runs the configured Node runtime with ghost-alice-hook.mjs.
@@ -445,8 +523,28 @@ def _node_runtime_status(strict: bool, codex_config: Path | None = None) -> tupl
     exit as non-blocking, a missing node makes the gate fail open silently, so doctor
     flags it. Under --strict it is an error.
     """
-    if shutil.which("node") or shutil.which("node.exe"):
-        return STATUS_OK, "ok"
+    registration_state, registered_node = (
+        _registered_node_runtime_status(platform, ghost_alice_root)
+        if platform is not None
+        else ("registration-absent", None)
+    )
+    if registration_state == "registration-valid" and registered_node is not None:
+        return (
+            STATUS_OK,
+            f"ok (runtime-config:{platform}:{registered_node}; {_node_full_capability_guidance()})",
+        )
+    if registration_state in {"registration-invalid", "config-invalid"}:
+        status = STATUS_ERROR if strict else STATUS_WARNING
+        source = platform if registration_state == "registration-invalid" else "config"
+        return (
+            status,
+            f"invalid (runtime-config:{source}; {_node_full_capability_guidance()})",
+        )
+
+    for executable_name in ("node", "node.exe"):
+        path_node = _normalized_node_runtime(shutil.which(executable_name))
+        if path_node is not None:
+            return STATUS_OK, "ok"
     env_node = _configured_node_runtime_from_env()
     if env_node:
         return STATUS_OK, f"ok (env:{env_node}; {_node_full_capability_guidance()})"
@@ -861,7 +959,11 @@ def run(args: argparse.Namespace) -> int:
         statuses.append(STATUS_OK)
         print("encoding: ok")
 
-    node_status, node_detail = _node_runtime_status(args.strict)
+    node_status, node_detail = _node_runtime_status(
+        args.strict,
+        platform=args.platform,
+        ghost_alice_root=ghost_alice_root,
+    )
     statuses.append(node_status)
     print(f"node-runtime: {node_detail}")
 
