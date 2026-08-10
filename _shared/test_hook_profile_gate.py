@@ -366,6 +366,222 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertIsNone(configured)
         usability.assert_called_once_with(node.resolve())
 
+    def test_dynamic_node_runtime_rebinds_stale_codex_registration_to_current_config(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            stale_node = root / "codex-runtime" / "stale" / ("node.exe" if os.name == "nt" else "node")
+            current_node = root / "codex-runtime" / "current" / ("node.exe" if os.name == "nt" else "node")
+            path_node = root / "path-runtime" / ("node.exe" if os.name == "nt" else "node")
+            current_node.parent.mkdir(parents=True, exist_ok=True)
+            path_node.parent.mkdir(parents=True, exist_ok=True)
+            current_node.write_text("# current Codex node\n", encoding="utf-8")
+            path_node.write_text("# competing PATH node\n", encoding="utf-8")
+            _make_node_executable(current_node)
+            _make_node_executable(path_node)
+
+            hook_profile_gate.runtime_config.save_config(
+                {"hook_runtime": {"node": {"codex": str(stale_node)}}},
+                home=root,
+            )
+            codex_home = root / ".codex"
+            codex_home.mkdir(parents=True, exist_ok=True)
+            (codex_home / "config.toml").write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(current_node.as_posix())}\n",
+                encoding="utf-8",
+            )
+            command = (
+                f'"{hook_profile_gate.runtime_config.HOOK_NODE_SENTINEL}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex --event PreToolUse --hook tool-checkpoint"
+            )
+            env = {
+                "HOME": str(root),
+                "USERPROFILE": str(root),
+                "CODEX_HOME": str(codex_home),
+                "PATH": str(path_node.parent),
+                "GHOST_ALICE_PLATFORM": "codex",
+            }
+
+            with mock.patch.object(hook_profile_gate.shutil, "which", return_value=str(path_node)):
+                argv = hook_profile_gate._validate_shell_command(command, env=env)
+
+        self.assertEqual(Path(argv[0]).resolve(), current_node.resolve())
+
+    def test_missing_legacy_managed_node_rebinds_to_current_codex_runtime(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            stale_node = (
+                root
+                / "AppData"
+                / "Local"
+                / "OpenAI"
+                / "Codex"
+                / "runtimes"
+                / "cua_node"
+                / "stale"
+                / "bin"
+                / ("node.exe" if os.name == "nt" else "node")
+            )
+            current_node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
+            current_node.parent.mkdir(parents=True, exist_ok=True)
+            current_node.write_text("# current Codex node\n", encoding="utf-8")
+            _make_node_executable(current_node)
+            dispatcher = root / ".ghost-alice" / "hooks" / "ghost-alice-hook.mjs"
+            dispatcher.parent.mkdir(parents=True, exist_ok=True)
+            dispatcher.write_text("// managed dispatcher\n", encoding="utf-8")
+            codex_home = root / ".codex"
+            codex_home.mkdir(parents=True, exist_ok=True)
+            (codex_home / "config.toml").write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(current_node.as_posix())}\n",
+                encoding="utf-8",
+            )
+            session_intent_root = root / "project" / ".tmp" / "session-intent"
+            command = (
+                f'"{stale_node.as_posix()}" "{dispatcher.as_posix()}" '
+                "--platform codex --event PreToolUse --hook tool-checkpoint "
+                "--marker \"[tool-checkpoint] pre-tool-check\" "
+                f'--session-intent-root "{session_intent_root.as_posix()}"'
+            )
+            env = {
+                "HOME": str(root),
+                "USERPROFILE": str(root),
+                "CODEX_HOME": str(codex_home),
+                "GHOST_ALICE_PLATFORM": "codex",
+                "PATH": "",
+            }
+
+            argv = hook_profile_gate._validate_shell_command(command, env=env)
+            unmanaged_dispatcher = root / "other" / "ghost-alice-hook.mjs"
+            unmanaged_dispatcher.parent.mkdir(parents=True, exist_ok=True)
+            unmanaged_dispatcher.write_text("// unmanaged dispatcher\n", encoding="utf-8")
+            tampered_commands = {
+                "dispatcher": command.replace(
+                    dispatcher.as_posix(),
+                    unmanaged_dispatcher.as_posix(),
+                ),
+                "marker": command.replace(
+                    "[tool-checkpoint] pre-tool-check",
+                    "[tool-checkpoint] altered",
+                ),
+            }
+            for field, tampered in tampered_commands.items():
+                with self.subTest(field=field), self.assertRaises(
+                    hook_profile_gate.HookCommandRejected
+                ):
+                    hook_profile_gate._validate_shell_command(tampered, env=env)
+            with self.subTest(field="outer-platform"), self.assertRaisesRegex(
+                hook_profile_gate.HookCommandRejected,
+                "hook platform mismatch",
+            ):
+                hook_profile_gate._validate_shell_command(
+                    command,
+                    env={**env, "GHOST_ALICE_PLATFORM": "claude"},
+                )
+
+        self.assertEqual(Path(argv[0]).resolve(), current_node.resolve())
+
+    def test_dynamic_node_runtime_preserves_registered_claude_priority(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            claude_node = root / "claude-runtime" / ("node.exe" if os.name == "nt" else "node")
+            path_node = root / "path-runtime" / claude_node.name
+            codex_node = root / "codex-runtime" / claude_node.name
+            for node, content in (
+                (claude_node, "# registered Claude node\n"),
+                (path_node, "# competing PATH node\n"),
+                (codex_node, "# Codex fallback node\n"),
+            ):
+                node.parent.mkdir(parents=True, exist_ok=True)
+                node.write_text(content, encoding="utf-8")
+                _make_node_executable(node)
+            _write_node_runtime_config(root, {"claude": claude_node})
+            codex_home = root / ".codex"
+            codex_home.mkdir(parents=True, exist_ok=True)
+            (codex_home / "config.toml").write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(codex_node.as_posix())}\n",
+                encoding="utf-8",
+            )
+            command = (
+                f'"{hook_profile_gate.runtime_config.HOOK_NODE_SENTINEL}" '
+                f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform claude --event PreToolUse --hook tool-checkpoint"
+            )
+            env = {
+                "HOME": str(root),
+                "USERPROFILE": str(root),
+                "CODEX_HOME": str(codex_home),
+                "PATH": str(path_node.parent),
+                "GHOST_ALICE_PLATFORM": "claude",
+            }
+
+            with mock.patch.object(hook_profile_gate.shutil, "which", return_value=str(path_node)):
+                argv = hook_profile_gate._validate_shell_command(command, env=env)
+
+        self.assertEqual(Path(argv[0]).resolve(), claude_node.resolve())
+
+    def test_dynamic_node_runtime_rejects_outer_inner_platform_mismatch(self):
+        command = (
+            f'"{hook_profile_gate.runtime_config.HOOK_NODE_SENTINEL}" '
+            f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+            "--platform claude --event PreToolUse --hook tool-checkpoint"
+        )
+
+        with self.assertRaisesRegex(
+            hook_profile_gate.HookCommandRejected,
+            "hook platform mismatch",
+        ):
+            hook_profile_gate._validate_shell_command(
+                command,
+                env={"GHOST_ALICE_PLATFORM": "codex", "PATH": ""},
+            )
+
+    def test_cached_node_requires_same_underlying_trusted_runtime_file(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            current_node = root / "codex-runtime" / "current" / ("node.exe" if os.name == "nt" else "node")
+            cached_node = root / "codex-runtime" / "cached" / current_node.name
+            copied_node = root / "codex-runtime" / "copied" / current_node.name
+            current_node.parent.mkdir(parents=True, exist_ok=True)
+            cached_node.parent.mkdir(parents=True, exist_ok=True)
+            copied_node.parent.mkdir(parents=True, exist_ok=True)
+            current_node.write_text("# trusted Node bytes\n", encoding="utf-8")
+            _make_node_executable(current_node)
+            os.link(current_node, cached_node)
+            copied_node.write_bytes(current_node.read_bytes())
+            _make_node_executable(copied_node)
+            codex_home = root / ".codex"
+            codex_home.mkdir(parents=True, exist_ok=True)
+            (codex_home / "config.toml").write_text(
+                "[mcp_servers.node_repl.env]\n"
+                f"NODE_REPL_NODE_PATH = {json.dumps(current_node.as_posix())}\n",
+                encoding="utf-8",
+            )
+            env = {
+                "HOME": str(root),
+                "USERPROFILE": str(root),
+                "CODEX_HOME": str(codex_home),
+                "PATH": "",
+            }
+            suffix = (
+                f' "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
+                "--platform codex --event PreToolUse --hook tool-checkpoint"
+            )
+
+            cached_argv = hook_profile_gate._validate_shell_command(
+                f'"{cached_node.as_posix()}"{suffix}',
+                env=env,
+            )
+            with self.assertRaises(hook_profile_gate.HookCommandRejected):
+                hook_profile_gate._validate_shell_command(
+                    f'"{copied_node.as_posix()}"{suffix}',
+                    env=env,
+                )
+
+        self.assertEqual(Path(cached_argv[0]).resolve(), cached_node.resolve())
+
     @unittest.skipUnless(os.name != "nt", "POSIX execute bits are not enforced on Windows")
     def test_posix_non_executable_configured_node_sources_are_rejected(self):
         for source in ("env", "codex-config", "registration"):
@@ -788,6 +1004,31 @@ class TestHookCommandAllowlist(unittest.TestCase):
             self.assertTrue(log_path.is_file(), "unknown-platform audit log was not created")
             row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
             self.assertEqual(row["platform"], "unknown")
+
+    def test_malformed_payload_rejection_uses_positional_platform_for_audit(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            session_id = "s-positional-audit-platform"
+            env = {
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
+                "GHOST_ALICE_SESSION_ID": session_id,
+            }
+            with (
+                mock.patch.dict(os.environ, env, clear=True),
+                mock.patch.object(sys, "stdin", io.StringIO("")),
+                mock.patch.object(sys, "stderr", io.StringIO()),
+                self.assertRaises(SystemExit) as cm,
+            ):
+                hook_profile_gate.main(
+                    ["run", "tool-checkpoint", "codex", "not-base64!"]
+                )
+
+            self.assertEqual(cm.exception.code, 126)
+            log_path = _strict_log_path(root, "codex", session_id)
+            self.assertTrue(log_path.is_file(), "positional-platform audit log was not created")
+            row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+            self.assertEqual(row["platform"], "codex")
 
     def test_unregistered_node_outside_current_path_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_home:
@@ -1739,6 +1980,20 @@ class TestHookCommandAllowlist(unittest.TestCase):
             self.assertEqual(user_stdout, expected)
             self.assertEqual(user_stderr, "")
 
+    def test_empty_noop_object_remains_parseable_on_reduced_surfaces(self):
+        message = "{}\n"
+
+        for surface in ("hidden", "compact", "focused"):
+            with self.subTest(surface=surface):
+                self.assertEqual(
+                    hook_profile_gate._render_user_surface(
+                        {"user_surface": surface, "value_key": "tool-checkpoint"},
+                        message,
+                        "debug-only diagnostic\n",
+                    ),
+                    (message, ""),
+                )
+
     def test_runner_emits_forced_action_denial_after_strict_log_append(self):
         message = '{"decision":"deny","reason":"[tool-checkpoint] required"}'
         code = f"print({message!r})"
@@ -1812,6 +2067,73 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(result.stdout, message + "\n")
         self.assertEqual(row["stdout"].strip(), message)
         self.assertEqual(row["visible_decision"], "force_show")
+
+    def test_runner_preserves_protocol_noop_json_under_minimal_visibility(self):
+        message = "{}"
+        code = f"print({message!r})"
+        payload = base64.urlsafe_b64encode(
+            _python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")
+        ).decode("ascii")
+
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = os.environ.copy()
+            env["HOME"] = temp_home
+            env["GHOST_ALICE_PLATFORM"] = "codex"
+            env["GHOST_ALICE_SESSION_ID"] = "s-protocol-noop"
+            env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "tool-checkpoint",
+                    payload,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, message + "\n")
+        self.assertEqual(result.stderr, "")
+
+    def test_runner_platform_argument_reaches_child_environment(self):
+        code = (
+            "import json, os; "
+            "print(json.dumps({'continue': True, 'systemMessage': "
+            "os.environ.get('GHOST_ALICE_PLATFORM', '')}))"
+        )
+        payload = base64.urlsafe_b64encode(
+            _python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")
+        ).decode("ascii")
+        env = os.environ.copy()
+        env.pop("GHOST_ALICE_PLATFORM", None)
+        env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).with_name("hook_profile_gate.py")),
+                "run",
+                "completion",
+                "codex",
+                payload,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["systemMessage"], "codex")
 
     def test_runner_force_shows_pending_manifest_after_strict_log_append(self):
         message = "routine clean pass already persisted"
