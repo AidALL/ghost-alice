@@ -662,20 +662,50 @@ def _resolve_hook_runner_script() -> str:
     return _resolve_shared_hook_script("hook_profile_gate.py")
 
 
-def _hook_runner_command(hook_id: str, command: str, marker: str) -> str:
+def _hook_runner_command(
+    hook_id: str,
+    command: str,
+    marker: str,
+    *,
+    platform_key: str | None = None,
+) -> str:
     script = _resolve_hook_runner_script()
     if not script:
+        if runtime_config.HOOK_NODE_SENTINEL in command:
+            raise RuntimeError(
+                "dynamic Node hook command requires hook_profile_gate.py"
+            )
         return command
     payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
     normalized = normalize_hook_id(hook_id)
+    runner_args = ["run", normalized]
+    if platform_key is not None:
+        platform = platform_key.strip().lower()
+        if platform not in {"claude", "codex"}:
+            raise ValueError(f"unsupported hook runner platform: {platform_key}")
+        runner_args.append(platform)
+    runner_args.append(payload)
     visible_hint = " ghost-alice-hook.mjs" if "ghost-alice-hook.mjs" in command else ""
     return (
-        f"{_hook_python_invocation(script, 'run', normalized, payload)} "
+        f"{_hook_python_invocation(script, *runner_args)} "
         f"# {marker} [hook-runner:{normalized}]{visible_hint}"
     )
 
-def _hook_runner_command_entry(hook_id: str, command: str, marker: str) -> dict[str, Any]:
-    return _command_entry(_hook_runner_command(hook_id, command, marker))
+def _hook_runner_command_entry(
+    hook_id: str,
+    command: str,
+    marker: str,
+    *,
+    platform_key: str | None = None,
+) -> dict[str, Any]:
+    return _command_entry(
+        _hook_runner_command(
+            hook_id,
+            command,
+            marker,
+            platform_key=platform_key,
+        )
+    )
 
 def _resolve_io_trace_script() -> str:
     """Return the io_trace_hook.py path relative to the install directory."""
@@ -933,21 +963,13 @@ def _node_runtime_command(
     platform_key: str | None = None,
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
 ) -> str:
-    if node_runtime is _NODE_RUNTIME_OMITTED:
-        runtime = _resolve_node_runtime(platform_key)
-    elif node_runtime is None:
-        runtime = None
-    else:
-        runtime = _normalized_node_runtime(node_runtime)
     if (
         node_runtime is not _NODE_RUNTIME_OMITTED
         and node_runtime is not None
-        and runtime is None
+        and _normalized_node_runtime(node_runtime) is None
     ):
         raise RuntimeError(f"Invalid Node.js runtime selected for {platform_key}: {node_runtime}")
-    if runtime:
-        return _quote_command_arg(runtime)
-    return "node"
+    return _quote_command_arg(runtime_config.HOOK_NODE_SENTINEL)
 
 
 def _dispatcher_hook_command(
@@ -1032,7 +1054,12 @@ def _platform_tool_checkpoint_entry(
             "tool-checkpoint",
             node_runtime,
         )
-        return _hook_runner_command_entry("tool-checkpoint", command, TOOL_CHECKPOINT_MARKER)
+        return _hook_runner_command_entry(
+            "tool-checkpoint",
+            command,
+            TOOL_CHECKPOINT_MARKER,
+            platform_key=platform_key,
+        )
     return _hook_runner_command_entry("tool-checkpoint", TOOL_CHECKPOINT_COMMAND, TOOL_CHECKPOINT_MARKER)
 
 

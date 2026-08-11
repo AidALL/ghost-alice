@@ -343,6 +343,51 @@ def _expected_ghost_alice_skill_names() -> list[str]:
 
 
 class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
+    def test_dispatcher_command_uses_dynamic_node_runtime_sentinel(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home)
+            selected_node = root / "versioned-runtime" / ("node.exe" if os.name == "nt" else "node")
+            selected_node.parent.mkdir(parents=True, exist_ok=True)
+            selected_node.write_text("# selected node\n", encoding="utf-8")
+            _make_node_executable(selected_node)
+
+            for platform in ("claude", "codex"):
+                with self.subTest(platform=platform):
+                    command = install_hooks._dispatcher_hook_command(
+                        platform,
+                        "PreToolUse",
+                        "tool-checkpoint",
+                        "[test]",
+                        "tool-checkpoint",
+                        selected_node,
+                    )
+
+                    self.assertTrue(
+                        command.startswith(
+                            install_hooks._quote_command_arg(
+                                install_hooks.runtime_config.HOOK_NODE_SENTINEL
+                            )
+                        )
+                    )
+                    self.assertNotIn(selected_node.as_posix(), command)
+
+    def test_dynamic_node_command_requires_the_profile_gate_runner(self):
+        command = (
+            f'"{install_hooks.runtime_config.HOOK_NODE_SENTINEL}" '
+            '"C:/managed/ghost-alice-hook.mjs" --platform codex'
+        )
+
+        with (
+            patch.object(install_hooks, "_resolve_hook_runner_script", return_value=""),
+            self.assertRaisesRegex(RuntimeError, "dynamic Node hook command requires"),
+        ):
+            install_hooks._hook_runner_command(
+                "tool-checkpoint",
+                command,
+                "[tool-checkpoint] pre-tool-check",
+                platform_key="codex",
+            )
+
     def test_installer_prefers_codex_configured_node_over_path_node(self):
         """The generated hook command must use the runtime trusted by the gate."""
         with tempfile.TemporaryDirectory() as temp_home:
@@ -364,6 +409,7 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
             )
 
             with (
+                patch.object(install_hooks, "_home", return_value=root),
                 patch.object(install_hooks, "_resolve_codex_config_toml", return_value=config_toml),
                 patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
                 patch.dict(
@@ -372,11 +418,9 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
                     clear=False,
                 ),
             ):
-                command = install_hooks._dispatcher_hook_command(
-                    "codex", "PreToolUse", "tool-checkpoint", "[test]", "tool-checkpoint"
-                )
+                selected = install_hooks._resolve_node_runtime("codex")
 
-        self.assertTrue(command.startswith(install_hooks._quote_command_arg(configured_node)))
+        self.assertEqual(Path(selected).resolve(), configured_node.resolve())
 
     def test_installer_preserves_path_node_priority_for_claude(self):
         """Claude hooks stay independent from a concurrently installed Codex runtime."""
@@ -399,6 +443,7 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
             )
 
             with (
+                patch.object(install_hooks, "_home", return_value=root),
                 patch.object(install_hooks, "_resolve_codex_config_toml", return_value=config_toml),
                 patch.object(install_hooks.shutil, "which", return_value=str(path_node)),
                 patch.dict(
@@ -407,11 +452,9 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
                     clear=False,
                 ),
             ):
-                command = install_hooks._dispatcher_hook_command(
-                    "claude", "PreToolUse", "tool-checkpoint", "[test]", "tool-checkpoint"
-                )
+                selected = install_hooks._resolve_node_runtime("claude")
 
-        self.assertTrue(command.startswith(install_hooks._quote_command_arg(path_node)))
+        self.assertEqual(Path(selected).resolve(), path_node.resolve())
 
     def test_configured_node_runtime_absolute_path_is_allowed_in_hook_payload(self):
         """Configured Node runtimes are valid hook executables even outside fixed roots."""
@@ -2930,9 +2973,16 @@ class TempHomeTestCase(unittest.TestCase):
         self.fake_home = Path(self.temp_dir)
         self._patcher = patch.object(install_hooks, "_home", return_value=self.fake_home)
         self._patcher.start()
+        self._hook_shared_patcher = patch.dict(
+            os.environ,
+            {install_hooks.HOOK_SHARED_DIR_ENV: str(Path(install_hooks.__file__).parent)},
+            clear=False,
+        )
+        self._hook_shared_patcher.start()
         # Platform detect functions use the patched _home, so no separate patch is needed.
 
     def tearDown(self):
+        self._hook_shared_patcher.stop()
         self._patcher.stop()
         import shutil
         shutil.rmtree(self.temp_dir, ignore_errors=True)
@@ -3201,27 +3251,32 @@ class TestInstallHook(TempHomeTestCase):
 
         self.assertEqual(Path(resolved).resolve(), explicit_node.resolve())
 
-    def test_node_runtime_command_distinguishes_omitted_from_explicit_none(self):
+    def test_node_runtime_command_uses_sentinel_without_runtime_lookup(self):
         selected_node = self._fake_node("selected")
 
         with patch.object(
             install_hooks,
             "_resolve_node_runtime",
             return_value=str(selected_node),
-        ) as omitted_resolver:
+        ) as resolver:
             omitted = install_hooks._node_runtime_command("claude")
-
-        with patch.object(
-            install_hooks,
-            "_resolve_node_runtime",
-            return_value=str(selected_node),
-        ) as explicit_resolver:
             explicit_none = install_hooks._node_runtime_command("claude", None)
 
-        self.assertEqual(omitted, install_hooks._quote_command_arg(selected_node))
-        omitted_resolver.assert_called_once_with("claude")
-        self.assertEqual(explicit_none, "node")
-        explicit_resolver.assert_not_called()
+        self.assertEqual(
+            omitted,
+            install_hooks._quote_command_arg(install_hooks.runtime_config.HOOK_NODE_SENTINEL),
+        )
+        self.assertEqual(
+            explicit_none,
+            install_hooks._quote_command_arg(install_hooks.runtime_config.HOOK_NODE_SENTINEL),
+        )
+        resolver.assert_not_called()
+
+        with self.assertRaisesRegex(RuntimeError, "Invalid Node.js runtime"):
+            install_hooks._node_runtime_command(
+                "claude",
+                selected_node.with_name("missing-node"),
+            )
 
     def test_cli_resolves_node_once_and_persists_the_command_runtime(self):
         self._create_platform_dir("claude")
@@ -3253,7 +3308,8 @@ class TestInstallHook(TempHomeTestCase):
 
         self.assertEqual(result, 0, msg=output.getvalue())
         self.assertEqual(resolver.call_count, 1)
-        self.assertIn(selected_node.as_posix(), command)
+        self.assertIn(install_hooks.runtime_config.HOOK_NODE_SENTINEL, command)
+        self.assertNotIn(selected_node.as_posix(), command)
         self.assertNotIn(changed_path_node.as_posix(), command)
         self.assertTrue(config_path.exists())
         config = json.loads(config_path.read_text(encoding="utf-8"))
@@ -4204,10 +4260,103 @@ class TestInstallHook(TempHomeTestCase):
                 command = _visible_and_runner_payload_text(
                     settings["hooks"][pre_tool_key][0]["hooks"][0]["command"]
                 )
-                self.assertIn(configured_node.as_posix(), command)
-                self.assertNotIn("node C:/", command)
+                self.assertIn(install_hooks.runtime_config.HOOK_NODE_SENTINEL, command)
+                self.assertNotIn(configured_node.as_posix(), command)
+                runtime = install_hooks.runtime_config.load_config(env={}, home=self.fake_home)
+                self.assertEqual(
+                    Path(runtime["hook_runtime"]["node"][platform]).resolve(),
+                    configured_node.resolve(),
+                )
                 self.assertIn("For full capability, install Node.js:", output.getvalue())
                 self.assertIn("https://nodejs.org/en/download", output.getvalue())
+
+    @unittest.skipUnless(os.name == "nt", "System32 hook smoke is Windows-specific")
+    def test_installed_tool_checkpoint_hooks_run_from_system32_for_both_platforms(self):
+        node = shutil.which("node.exe") or shutil.which("node")
+        if not node:
+            self.skipTest("node is required to execute the installed hook dispatcher")
+        system32 = Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32"
+        if not system32.is_dir():
+            self.skipTest(f"System32 directory is unavailable: {system32}")
+
+        intent_root = self.fake_home / "session-intent"
+        source_shared = Path(install_hooks.__file__).parent
+        hook_env = os.environ.copy()
+        hook_env.update({
+            "HOME": str(self.fake_home),
+            "USERPROFILE": str(self.fake_home),
+            "CODEX_HOME": str(self.fake_home / ".codex"),
+            "CLAUDE_CONFIG_DIR": str(self.fake_home / ".claude"),
+            install_hooks.HOOK_SHARED_DIR_ENV: str(source_shared),
+            "GHOST_ALICE_AGENT_VISIBILITY": "minimal",
+            "GHOST_ALICE_NODE": "",
+            "NODE_REPL_NODE_PATH": "",
+        })
+        hook_env.pop("GHOST_ALICE_PLATFORM", None)
+
+        with (
+            patch.dict(os.environ, hook_env, clear=True),
+            patch.object(install_hooks, "_session_intent_root", return_value=intent_root),
+            patch.object(install_hooks, "_codex_hooks_supported", return_value=True),
+        ):
+            for platform in ("claude", "codex"):
+                with self.subTest(platform=platform):
+                    self._create_platform_dir(platform)
+                    self.assertEqual(
+                        install_hooks.install_hook(platform, node_runtime=node),
+                        "installed",
+                    )
+                    settings = self._read_settings(platform)
+                    pre_tool = install_hooks._resolve_hook_event("pre_tool_use", platform)
+                    command = next(
+                        hook["command"]
+                        for entry in settings["hooks"][pre_tool]
+                        for hook in entry.get("hooks", [])
+                        if install_hooks.TOOL_CHECKPOINT_MARKER in hook.get("command", "")
+                    )
+                    session_id = f"s-system32-{platform}"
+                    _write_session_intent_preflight(
+                        self.fake_home,
+                        platform,
+                        session_id,
+                        session_intent_root=intent_root,
+                    )
+                    _write_downstream_gate(
+                        self.fake_home,
+                        platform,
+                        session_id,
+                        "allow",
+                        session_intent_root=intent_root,
+                    )
+                    request = json.dumps({
+                        "session_id": session_id,
+                        "hook_event_name": "PreToolUse",
+                        "tool_name": "Read",
+                        "tool_input": {"file_path": "README.md"},
+                        "cwd": str(system32),
+                    })
+
+                    results = [
+                        subprocess.run(
+                            command,
+                            shell=True,
+                            cwd=system32,
+                            input=request,
+                            capture_output=True,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            env=hook_env,
+                            check=False,
+                        )
+                        for _ in range(2)
+                    ]
+
+                    for result in results:
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        json.loads(result.stdout)
+                        self.assertEqual(result.stderr, "")
+                    self.assertEqual(json.loads(results[-1].stdout), {})
 
     def test_agent_visibility_env_does_not_change_generated_hook_command(self):
         hook_key = install_hooks._resolve_hook_event("on_user_prompt", "claude")

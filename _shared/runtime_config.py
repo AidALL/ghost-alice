@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 VALID_AGENT_VISIBILITY_PROFILES = {"strict", "dynamic", "minimal"}
+HOOK_NODE_SENTINEL = "__GHOST_ALICE_HOOK_NODE__"
 DEFAULT_CONFIG = {
     "schema_version": "ghost-alice-config.v1",
     "agent_visibility": {"profile": "dynamic"},
