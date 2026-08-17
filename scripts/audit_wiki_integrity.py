@@ -51,8 +51,7 @@ class Finding:
 
 
 def link_target_to_slug(raw: str) -> str | None:
-    """Resolve a markdown link target to a wiki page slug, or None if not a
-    wiki-internal page link (external, image, same-page anchor, or nested path)."""
+    'Resolve a markdown link target to a wiki page slug, or None if not a\n    wiki-internal page link (external, image, same-page anchor, or nested path).'
     target = raw.strip()
     if not target:
         return None

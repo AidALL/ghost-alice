@@ -6,11 +6,14 @@ Run: python3 -m pytest _shared/test_p2_extras.py -q
 
 from __future__ import annotations
 
+import errno
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
@@ -20,6 +23,38 @@ import addon_installer as ai  # noqa: E402
 import addon_registry as reg  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import installer_assets as iassets  # noqa: E402
+import install_transaction as txn  # noqa: E402
+
+
+def _windows_symlink_privilege_error() -> OSError:
+    error = OSError(errno.EPERM, "file symlink privilege unavailable")
+    error.winerror = 1314
+    return error
+
+
+def _create_test_directory_link(test_case: unittest.TestCase, source: Path, link: Path) -> str:
+    mode = txn._create_directory_link(source, link)
+    try:
+        test_case.assertIn(mode, {"junction", "symlink"})
+        if mode == "junction":
+            test_case.assertTrue(un._is_reparse_point(link))
+    except Exception:
+        un._symlink_safe_remove(link)
+        raise
+    return mode
+
+
+def _create_test_windows_junction(test_case: unittest.TestCase, source: Path, link: Path) -> str:
+    test_case.assertEqual(sys.platform, "win32")
+    with mock.patch.object(txn.os, "symlink", side_effect=_windows_symlink_privilege_error()):
+        mode = txn._create_directory_link(source, link)
+    try:
+        test_case.assertEqual(mode, "junction")
+        test_case.assertTrue(un._is_reparse_point(link))
+    except Exception:
+        un._symlink_safe_remove(link)
+        raise
+    return mode
 
 
 def _sidecar(addon_id, *, provided=None, depends_on_core=None):
@@ -68,19 +103,21 @@ class MarkerV2Test(unittest.TestCase):
         self.assertEqual(iassets.classify_skill_root(d).ownership, iassets.OWNERSHIP_GHOST_ALICE_MANAGED)
 
     def test_classify_symlink_ignores_expected_addon_id(self):
-        # Contract: symlink-mode targets carry no marker, so classify proves
-        # ownership from the link target (repo-relative), NOT from expected_addon_id.
+        # Contract: symlink-mode targets carry no marker, so classify proves ownership from the link target (repo-relative), NOT from expected_addon_id.
         repo = self.root / "repo"
         src = repo / "noop"
         src.mkdir(parents=True)
         (src / "SKILL.md").write_text("body", encoding="utf-8")
         link = self.root / "skills" / "noop"
         link.parent.mkdir(parents=True)
-        link.symlink_to(src, target_is_directory=True)
-        # expected_addon_id is irrelevant for a symlink; the link-to-repo wins.
-        result = iassets.classify_skill_root(link, expected_addon_id="anything", repo_root=repo)
-        self.assertEqual(result.ownership, iassets.OWNERSHIP_GHOST_ALICE_MANAGED)
-        self.assertEqual(result.reason, "symlink-to-repo")
+        mode = _create_test_directory_link(self, src, link)
+        try:
+            # expected_addon_id is irrelevant for a directory link; the link-to-repo wins.
+            result = iassets.classify_skill_root(link, expected_addon_id="anything", repo_root=repo)
+            self.assertEqual(result.ownership, iassets.OWNERSHIP_GHOST_ALICE_MANAGED)
+            self.assertEqual(result.reason, f"{mode}-to-repo")
+        finally:
+            un._symlink_safe_remove(link)
 
     def test_classify_marker_without_addon_id_fails_closed(self):
         # a v1-style marker (no addon_id) cannot prove addon ownership -> fail closed
@@ -133,8 +170,7 @@ class CollisionTest(unittest.TestCase):
                          [("noop", "addon", "other")])
 
     def test_same_addon_reinstall_clean_is_not_a_collision(self):
-        # Same addon owns dest AND the live target still hash-matches the sidecar
-        # -> a clean update, not a collision.
+        # Same addon owns dest AND the live target still hash-matches the sidecar -> a clean update, not a collision.
         import hash_utils  # noqa: PLC0415
         dest = self.skills / "noop"
         dest.mkdir()
@@ -147,10 +183,51 @@ class CollisionTest(unittest.TestCase):
         targets = ai.load_addon_targets([FIXTURE_ROOT])  # addon_id 'noop' owns dest already
         self.assertEqual(ai.detect_collisions(targets, skills_dir=self.skills, addons_dir=self.addons), [])
 
+    def test_recorded_copy_rejects_mocked_live_symlink_mode(self):
+        import hash_utils  # noqa: PLC0415
+        source = self.root / "incoming" / "noop"
+        source.mkdir(parents=True)
+        (source / "SKILL.md").write_text("incoming", encoding="utf-8")
+        dest = self.skills / "noop"
+        dest.mkdir()
+        (dest / "SKILL.md").write_text("recorded", encoding="utf-8")
+        recorded = hash_utils.hash_target(str(dest), "copy")
+        reg.write_record(_sidecar("noop", provided=[{
+            "kind": "skill", "name": "noop", "target": str(dest), "ownership": "addon",
+            "install_mode": "copy", "content_hash": recorded, "marker": "", "metadata": {}}]),
+            addons_dir=self.addons)
+        target = ai.AddonTarget(name="noop", source=source, addon_id="noop", addon_version="1.0.0",
+                                origin="addon:noop", platforms=("claude",), depends_on_core=(),
+                                secrets=(), tags=())
+        with mock.patch.object(ai, "_detect_install_mode", return_value="symlink"):
+            collisions = ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons)
+        self.assertEqual([item["owner"] for item in collisions], ["addon-drift"])
+
+    def test_stale_recorded_copy_rejects_mocked_live_junction_mode(self):
+        import hash_utils  # noqa: PLC0415
+        old_source = self.root / "old" / "noop"
+        source = self.root / "incoming" / "noop"
+        dest = self.skills / "noop"
+        old_source.mkdir(parents=True)
+        source.mkdir(parents=True)
+        dest.mkdir()
+        (old_source / "SKILL.md").write_text("old", encoding="utf-8")
+        (source / "SKILL.md").write_text("incoming", encoding="utf-8")
+        (dest / "SKILL.md").write_text("incoming", encoding="utf-8")
+        stale = hash_utils.hash_target(str(old_source), "copy")
+        reg.write_record(_sidecar("noop", provided=[{
+            "kind": "skill", "name": "noop", "target": str(dest), "ownership": "addon",
+            "install_mode": "copy", "content_hash": stale, "marker": "", "metadata": {}}]),
+            addons_dir=self.addons)
+        target = ai.AddonTarget(name="noop", source=source, addon_id="noop", addon_version="1.0.0",
+                                origin="addon:noop", platforms=("claude",), depends_on_core=(),
+                                secrets=(), tags=())
+        with mock.patch.object(ai, "_detect_install_mode", return_value="junction"):
+            collisions = ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons)
+        self.assertEqual([item["owner"] for item in collisions], ["addon-drift"])
+
     def test_same_addon_drift_is_a_collision(self):
-        # H1: same addon owns dest but the LIVE target drifted from the recorded
-        # content_hash (user edited the installed copy) -> must be flagged so the
-        # install aborts and the user's change is preserved, never clobbered.
+        # H1: same addon owns dest but the LIVE target drifted from the recorded content_hash (user edited the installed copy) -> must be flagged so the install aborts and the user's change is preserved, never clobbered.
         import hash_utils  # noqa: PLC0415
         dest = self.skills / "noop"
         dest.mkdir()
@@ -167,28 +244,28 @@ class CollisionTest(unittest.TestCase):
                          [("noop", "addon-drift", "noop")])
 
     def test_same_addon_skill_symlink_to_install_source_is_clean(self):
-        # wedge fix: a skill symlink already pointing at THIS install's source is the
-        # installer's own re-point, NOT user drift -- even if the recorded hash is stale.
+        # wedge fix: a skill symlink already pointing at THIS install's source is the installer's own re-point, NOT user drift -- even if the recorded hash is stale.
         import hash_utils  # noqa: PLC0415
         src_b = self.root / "srcB" / "noop"
         src_b.mkdir(parents=True)
         (src_b / "SKILL.md").write_text("x", encoding="utf-8")
         dest = self.skills / "noop"
-        dest.symlink_to(src_b)  # live symlink -> srcB (the source we are installing from)
-        stale = hash_utils.hash_target(str(self.root / "srcA" / "noop"), "symlink")  # recorded = link->srcA
-        reg.write_record(_sidecar("noop", provided=[{
-            "kind": "skill", "name": "noop", "target": str(dest), "ownership": "addon",
-            "install_mode": "symlink", "content_hash": stale, "marker": "", "metadata": {}}]),
-            addons_dir=self.addons)
-        target = ai.AddonTarget(name="noop", source=src_b, addon_id="noop", addon_version="1.0.0",
-                                origin="addon:noop", platforms=("claude",), depends_on_core=(),
-                                secrets=(), tags=())
-        self.assertEqual(ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons), [])
+        mode = _create_test_directory_link(self, src_b, dest)
+        try:
+            stale = hash_utils.hash_target(str(self.root / "srcA" / "noop"), mode)  # recorded = link->srcA
+            reg.write_record(_sidecar("noop", provided=[{
+                "kind": "skill", "name": "noop", "target": str(dest), "ownership": "addon",
+                "install_mode": mode, "content_hash": stale, "marker": "", "metadata": {}}]),
+                addons_dir=self.addons)
+            target = ai.AddonTarget(name="noop", source=src_b, addon_id="noop", addon_version="1.0.0",
+                                    origin="addon:noop", platforms=("claude",), depends_on_core=(),
+                                    secrets=(), tags=())
+            self.assertEqual(ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons), [])
+        finally:
+            un._symlink_safe_remove(dest)
 
     def test_same_addon_copy_equal_to_install_source_is_clean_with_stale_sidecar(self):
-        # The installed copy can already match the incoming addon source while the
-        # sidecar hash is stale from a failed or manual sidecar rewrite. Reinstall
-        # must repair the sidecar instead of classifying unchanged bytes as drift.
+        # The installed copy can already match the incoming addon source while the sidecar hash is stale from a failed or manual sidecar rewrite. Reinstall must repair the sidecar instead of classifying unchanged bytes as drift.
         import hash_utils  # noqa: PLC0415
         src_old = self.root / "src-old" / "noop"
         src_new = self.root / "src-new" / "noop"
@@ -211,10 +288,7 @@ class CollisionTest(unittest.TestCase):
         self.assertEqual(ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons), [])
 
     def test_legacy_same_addon_symlink_without_sidecar_is_not_a_collision(self):
-        # A pre-sidecar addon install may leave only a symlink in .claude/skills.
-        # If the symlink target's addon.json proves the same addon id and skill
-        # mapping, the installer should treat it as an update path, not as an
-        # arbitrary domain skill.
+        # A pre-sidecar addon install may leave only a symlink in .claude/skills. If the symlink target's addon.json proves the same addon id and skill mapping, the installer should treat it as an update path, not as an arbitrary domain skill.
         old_addon = self.root / "old-autopilot" / "addons" / "autopilot-mode"
         new_addon = self.root / "new-autopilot" / "addons" / "autopilot-mode"
         old_skill = old_addon / "skill"
@@ -255,12 +329,14 @@ class CollisionTest(unittest.TestCase):
             tags=(),
         )
         dest = self.skills / "autopilot-mode"
-        dest.symlink_to(old_skill)
-
-        self.assertEqual(
-            ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons),
-            [],
-        )
+        _create_test_directory_link(self, old_skill, dest)
+        try:
+            self.assertEqual(
+                ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons),
+                [],
+            )
+        finally:
+            un._symlink_safe_remove(dest)
 
     def test_same_addon_skill_symlink_to_foreign_dir_is_drift(self):
         # user repointed the symlink elsewhere -> still drift (must not be cleared).
@@ -272,21 +348,23 @@ class CollisionTest(unittest.TestCase):
         src_b.mkdir(parents=True)
         (src_b / "SKILL.md").write_text("x", encoding="utf-8")
         dest = self.skills / "noop"
-        dest.symlink_to(foreign)
-        stale = hash_utils.hash_target(str(src_b), "symlink")
-        reg.write_record(_sidecar("noop", provided=[{
-            "kind": "skill", "name": "noop", "target": str(dest), "ownership": "addon",
-            "install_mode": "symlink", "content_hash": stale, "marker": "", "metadata": {}}]),
-            addons_dir=self.addons)
-        target = ai.AddonTarget(name="noop", source=src_b, addon_id="noop", addon_version="1.0.0",
-                                origin="addon:noop", platforms=("claude",), depends_on_core=(),
-                                secrets=(), tags=())
-        cols = ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons)
-        self.assertEqual([c["owner"] for c in cols], ["addon-drift"])
+        mode = _create_test_directory_link(self, foreign, dest)
+        try:
+            stale = hash_utils.hash_target(str(src_b), mode)
+            reg.write_record(_sidecar("noop", provided=[{
+                "kind": "skill", "name": "noop", "target": str(dest), "ownership": "addon",
+                "install_mode": mode, "content_hash": stale, "marker": "", "metadata": {}}]),
+                addons_dir=self.addons)
+            target = ai.AddonTarget(name="noop", source=src_b, addon_id="noop", addon_version="1.0.0",
+                                    origin="addon:noop", platforms=("claude",), depends_on_core=(),
+                                    secrets=(), tags=())
+            cols = ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons)
+            self.assertEqual([c["owner"] for c in cols], ["addon-drift"])
+        finally:
+            un._symlink_safe_remove(dest)
 
     def test_safe_provision_rejects_lexical_dotdot(self):
-        # _safe_provision must enforce lexical ".." containment itself (not rely on caller).
-        # Escape to a NON-existent path outside base so the clobber-guard cannot mask it.
+        # _safe_provision must enforce lexical ".." containment itself (not rely on caller). Escape to a NON-existent path outside base so the clobber-guard cannot mask it.
         base = self.root / "base"
         base.mkdir()
         outside = self.root / "new_evil.md"  # does not exist yet
@@ -308,6 +386,29 @@ class CollisionTest(unittest.TestCase):
         targets = ai.load_addon_targets([FIXTURE_ROOT])
         cols = ai.detect_collisions(targets, skills_dir=self.skills, addons_dir=self.addons)
         self.assertEqual([c["owner"] for c in cols], ["addon-drift"])
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows junction coverage")
+    def test_repair_replaces_dangling_junction_with_managed_link(self):
+        source = self.root / "source"
+        source.mkdir()
+        (source / "SKILL.md").write_text("managed", encoding="utf-8")
+        missing_target = self.root / "missing-target"
+        missing_target.mkdir()
+        dest = self.skills / "noop"
+        _create_test_windows_junction(self, missing_target, dest)
+        missing_target.rmdir()
+        try:
+            self.assertTrue(os.path.lexists(dest))
+            self.assertFalse(dest.exists())
+            with mock.patch.object(txn.os, "symlink", side_effect=_windows_symlink_privilege_error()):
+                mode = ai._repair_skill_target(source, dest, "junction")
+            self.assertEqual(mode, "junction")
+            self.assertEqual(ai._detect_install_mode(dest), "junction")
+            self.assertEqual((dest / "SKILL.md").read_text(encoding="utf-8"), "managed")
+        finally:
+            if os.path.lexists(dest):
+                un._symlink_safe_remove(dest)
+        self.assertTrue(source.exists())
 
     def test_cli_detect_collisions_exit_2(self):
         (self.skills / "noop").mkdir()
@@ -346,8 +447,7 @@ class DependentsTest(unittest.TestCase):
         self.assertEqual(rc2, 0)
 
     def test_cli_dependents_fails_closed_on_skipped_sidecar(self):
-        # M6: an UNREADABLE / future-major sidecar might itself depend_on_core the
-        # core skill. scan_records skips it -> we must block (rc=2), not fail open.
+        # M6: an UNREADABLE / future-major sidecar might itself depend_on_core the core skill. scan_records skips it -> we must block (rc=2), not fail open.
         self.addons.mkdir(parents=True, exist_ok=True)
         (self.addons / "corruptdep.json").write_text("{ not valid json", encoding="utf-8")
         rc = un.main(["--dependents", "nobody", "--addons-dir", str(self.addons)])

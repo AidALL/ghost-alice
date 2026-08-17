@@ -3,7 +3,7 @@
     {
       "id": "claude",
       "state": "native",
-      "supported_assets": ["CLAUDE.md", "skills", "settings.json hooks"],
+      "supported_assets": ["repo-local CLAUDE.md -> @AGENTS.md", "installed-global CLAUDE_CONFIG_DIR/CLAUDE.md managed bootstrap", "skills", "settings.json hooks"],
       "unsupported_surfaces": [],
       "install_or_onramp": "bash install.sh --platform claude",
       "verification_commands": ["python3 scripts/validate_entrypoints.py --json"],

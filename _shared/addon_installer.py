@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from typing import Any, Iterable
 
 import addon_registry
 import hash_utils
+from addon_uninstall import _symlink_safe_remove
+from install_transaction import _create_directory_link
 
 
 ADDONS_MANIFEST = "addons-manifest.json"
@@ -23,13 +26,9 @@ ADDON_MANIFEST = "addon.json"
 ADDON_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _SEMVER_RE = re.compile(r"^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})$")
 
-# Tier-2 addon hooks (plan Phase 4) may ONLY observe; events that can block or
-# alter control flow / governance gates are rejected fail-closed. PostToolUse and
-# SessionStart observe; PreToolUse can block a tool, Stop can block completion, and
-# UserPromptSubmit can alter intent -- none are permitted for addons.
+# Tier-2 addon hooks (plan Phase 4) may ONLY observe; events that can block or alter control flow / governance gates are rejected fail-closed. PostToolUse and SessionStart observe; PreToolUse can block a tool, Stop can block completion, and UserPromptSubmit can alter intent -- none are permitted for addons.
 ALLOWED_ADDON_HOOK_EVENTS = frozenset({"post_tool_use", "on_session_start"})
-# Reserved core hook ids an addon hook id must not collide with (the runner
-# namespaces used by the core hook suite).
+# Reserved core hook ids an addon hook id must not collide with (the runner namespaces used by the core hook suite).
 RESERVED_CORE_HOOK_IDS = frozenset({
     "prompt", "pending-merge-prompt", "session-intent", "web-search-first",
     "tool-checkpoint", "completion", "session-start", "io-trace",
@@ -108,8 +107,7 @@ class AddonTarget:
     tags: tuple[str, ...]
     min_core_version: str = "0.0.0"
     addon_root: Path | None = None
-    # Addon-level extras shared by every skill target in the addon. Commands are
-    # Claude-only slash-command files; resources are addon data files.
+    # Addon-level extras shared by every skill target in the addon. Commands are Claude-only slash-command files; resources are addon data files.
     commands: tuple[tuple[str, str], ...] = ()
     resources: tuple[tuple[str, str], ...] = ()
     # observational hooks (plan Phase 4): (hook_id, event_intent, script_abs_path).
@@ -319,9 +317,7 @@ def _render_adapter_template(
     field: str,
 ) -> str:
     where = f"{context}: " if context is not None else ""
-    # Safe substitution: honor only the two whitelisted placeholders. A
-    # leftover brace means an unsupported field; str.format attribute/index
-    # access (e.g. {x.__class__}, {0}) is never reachable.
+    # Safe substitution: honor only the two whitelisted placeholders. A leftover brace means an unsupported field; str.format attribute/index access (e.g. {x.__class__}, {0}) is never reachable.
     rendered = template.replace("{adapter_id}", adapter_id).replace("{hook_id}", hook_id)
     if "{" in rendered or "}" in rendered:
         raise AddonManifestError(
@@ -424,8 +420,7 @@ def _validate_privileged_adapter_script_rel(
         raise AddonManifestError(
             f"{where}privileged adapter {adapter_id!r} script for {event!r} must be a contained path"
         )
-    # A backslash is never valid in a contained POSIX adapter path; rejecting
-    # it closes the posix-evasion where "..\\..\\x" is a single rel.part.
+    # A backslash is never valid in a contained POSIX adapter path; rejecting it closes the posix-evasion where "..\\..\\x" is a single rel.part.
     if "\\" in script_rel:
         raise AddonManifestError(
             f"{where}privileged adapter {adapter_id!r} script for {event!r} must be a contained path"
@@ -635,11 +630,7 @@ def load_addon_targets(
                 "depends_on_core",
                 addon_manifest_path,
             )
-            # depends_on_core enforcement: a declared core dependency must exist in the known core skill set,
-            # else fail closed BEFORE any file operation. Enforced only when the core
-            # set is provided (install-time collision detection passes --core-skill);
-            # an omitted depends_on_core normalizes to [] (via _string_list) and never
-            # hard-fails, per the cross-cutting contract.
+            # depends_on_core enforcement: a declared core dependency must exist in the known core skill set, else fail closed BEFORE any file operation. Enforced only when the core set is provided (install-time collision detection passes --core-skill); an omitted depends_on_core normalizes to [] (via _string_list) and never hard-fails, per the cross-cutting contract.
             if core_names:
                 for dep in depends_on_core:
                     if dep not in core_names:
@@ -701,8 +692,7 @@ def load_addon_targets(
                     raise AddonManifestError(
                         f"{addon_manifest_path}: addon hook {hook_id!r} event {event!r} is not permitted; "
                         f"addon hooks may only observe ({', '.join(sorted(ALLOWED_ADDON_HOOK_EVENTS))}) -- "
-                        "control-flow events (Stop / on_agent_stop / UserPromptSubmit / on_user_prompt / "
-                        "pre_tool_use) are rejected")
+                        "control-flow events (Stop / on_agent_stop / UserPromptSubmit / on_user_prompt / " "pre_tool_use) are rejected")
                 script_rel = _require_string(hook.get("script"), "hooks[].script", addon_manifest_path)
                 if "/bin/sh" in script_rel or any(ch in script_rel for ch in (";", "|", "&", "`", "$", "\n")):
                     raise AddonManifestError(
@@ -761,9 +751,7 @@ def load_addon_targets(
                 )
                 if not (skill_dir / "SKILL.md").is_file():
                     raise AddonManifestError(f"{addon_manifest_path}: missing SKILL.md for {skill_name!r}")
-                # Fail closed at load if a requested adapter's core-owned script is
-                # missing from the skill source, matching hooks/commands/resources which
-                # all verify existence here instead of deferring to provision time.
+                # Fail closed at load if a requested adapter's core-owned script is missing from the skill source, matching hooks/commands/resources which all verify existence here instead of deferring to provision time.
                 for _adapter_id in privileged_adapters_by_skill.get(skill_name, ()):
                     _adapter_spec = _privileged_adapter_spec(
                         _adapter_id, allowlist=privileged_adapter_allowlist, context=addon_manifest_path
@@ -830,8 +818,7 @@ def build_sidecar_record(
     if target.secrets:
         record["secrets"] = list(target.secrets)
     if target.hooks:
-        # Top-level (not provided[]) so the provided[] schema + doctor hash audit
-        # stay filesystem-only; uninstall reads these markers to remove the hooks.
+        # Top-level (not provided[]) so the provided[] schema + doctor hash audit stay filesystem-only; uninstall reads these markers to remove the hooks.
         record["hooks"] = [
             {"hook_id": hook_id, "event": event, "marker": f"[addon:{target.addon_id}] {hook_id}"}
             for hook_id, event, _script in target.hooks
@@ -933,9 +920,7 @@ def write_addon_sidecars(
                 if t.addon_id == addon_id
             ]
         else:
-            # Coverage invariant is about SKILLS: every installed skill must be
-            # recorded. command/resource entries are addon-level extras and are
-            # not subject to the skill-name match.
+            # Coverage invariant is about SKILLS: every installed skill must be recorded. command/resource entries are addon-level extras and are not subject to the skill-name match.
             provided_names = {
                 e.get("name") for e in provided
                 if isinstance(e, dict) and e.get("kind") == "skill"
@@ -979,8 +964,7 @@ def detect_collisions(
     targets = list(targets)  # iterated twice (skill targets, then command/resource extras)
 
     def _norm(path_value: str | Path) -> str:
-        # Normalize the LOCATION (parent dir resolved) so /tmp vs /private/tmp etc.
-        # do not cause a same-addon reinstall to look like a collision.
+        # Normalize the LOCATION (parent dir resolved) so /tmp vs /private/tmp etc. do not cause a same-addon reinstall to look like a collision.
         candidate = Path(path_value)
         try:
             return str(candidate.parent.resolve() / candidate.name)
@@ -1004,23 +988,14 @@ def detect_collisions(
             continue
         owner_id, recorded_hash, recorded_mode = owned.get(_norm(dest), (None, "", "missing"))
         if owner_id == target.addon_id:
-            # Same addon already owns this dest. Allow the update ONLY if the live
-            # target still matches the recorded content_hash; otherwise the user
-            # drifted it (edited copy / repointed link) and overwriting would
-            # destroy their change, so flag same-addon drift and abort.
+            # Same addon already owns this dest. Allow the update ONLY if the live target still matches the recorded content_hash; otherwise the user drifted it (edited copy / repointed link) and overwriting would destroy their change, so flag same-addon drift and abort.
             if _same_addon_target_is_clean(dest, recorded_hash, recorded_mode):
                 continue
-            # Copy-mode targets can be in a recoverable stale-sidecar state: the
-            # installed bytes already match the incoming addon source, but the
-            # sidecar still records an older hash. Reinstalling is then a no-op
-            # for content and lets write-sidecars repair the registry.
+            # Copy-mode targets can be in a recoverable stale-sidecar state: the installed bytes already match the incoming addon source, but the sidecar still records an older hash. Reinstalling is then a no-op for content and lets write-sidecars repair the registry.
             if _same_addon_copy_matches_source(dest, target.source, recorded_hash, recorded_mode):
                 continue
-            # A skill symlink already pointing at THIS install's source is the
-            # installer's own (re)target, not a user edit -- not drift. This unwedges
-            # a prior failed reinstall that re-pointed the symlink before the sidecar
-            # hash could be updated. A symlink pointing ELSEWHERE is still user drift.
-            if dest.is_symlink() and _resolves_to(dest, target.source):
+            # A skill directory link already pointing at THIS install's source is the installer's own (re)target, not a user edit -- not drift. This unwedges a prior failed reinstall that re-pointed the link before the sidecar hash could be updated. A link pointing ELSEWHERE is still user drift.
+            if _detect_install_mode(dest) in {"symlink", "junction"} and _resolves_to(dest, target.source):
                 continue
             collisions.append({
                 "name": target.name, "dest": str(dest), "owner": "addon-drift",
@@ -1031,7 +1006,7 @@ def detect_collisions(
             owner = "core"
         elif owner_id is not None:
             owner = "addon"
-        elif _legacy_same_addon_symlink_is_safe(dest, target):
+        elif _legacy_same_addon_link_is_safe(dest, target):
             continue
         elif (dest / "SKILL.md").exists():
             owner = "domain"
@@ -1039,11 +1014,7 @@ def detect_collisions(
             owner = "user"
         collisions.append({"name": target.name, "dest": str(dest), "owner": owner, "owner_addon_id": owner_id})
 
-    # Command/resource extras share the same ownership map (their provided[]
-    # entries are in `owned`), but their dests live outside skills_dir, so they
-    # must be collision-checked here at preflight too -- BEFORE hooks/skills are
-    # mutated. A non-owned pre-existing extra dest that only fails at provision
-    # time would orphan an already-installed addon skill + hook with no sidecar.
+    # Command/resource extras share the same ownership map (their provided[] entries are in `owned`), but their dests live outside skills_dir, so they must be collision-checked here at preflight too -- BEFORE hooks/skills are mutated. A non-owned pre-existing extra dest that only fails at provision time would orphan an already-installed addon skill + hook with no sidecar.
     commands_root = Path(claude_commands_dir) if claude_commands_dir else None
     resources_root = Path(resources_dir) if resources_dir else None
     for target in targets:
@@ -1076,6 +1047,8 @@ def _same_addon_target_is_clean(dest: Path, recorded_hash: str, recorded_mode: s
     """
     if not recorded_hash or recorded_mode in ("", "missing"):
         return False
+    if _detect_install_mode(dest) != recorded_mode:
+        return False
     try:
         return hash_utils.hash_target(str(dest), recorded_mode) == recorded_hash
     except Exception:
@@ -1091,7 +1064,7 @@ def _same_addon_copy_matches_source(
     """True when a stale sidecar points at an installed copy equal to source."""
     if not recorded_hash or recorded_mode != "copy":
         return False
-    if dest.is_symlink() or not dest.exists() or not source.exists():
+    if _detect_install_mode(dest) != "copy" or not source.exists():
         return False
     try:
         return hash_utils.hash_target(str(dest), "copy") == hash_utils.hash_target(str(source), "copy")
@@ -1107,9 +1080,9 @@ def _resolves_to(dest: Path, source: Path) -> bool:
         return False
 
 
-def _legacy_same_addon_symlink_is_safe(dest: Path, target: AddonTarget) -> bool:
-    """Allow pre-sidecar same-addon symlinks to be updated by the addon installer."""
-    if not dest.is_symlink():
+def _legacy_same_addon_link_is_safe(dest: Path, target: AddonTarget) -> bool:
+    """Allow pre-sidecar same-addon directory links to be updated by the addon installer."""
+    if _detect_install_mode(dest) not in {"symlink", "junction"}:
         return False
     try:
         legacy_skill = dest.resolve(strict=True)
@@ -1169,9 +1142,7 @@ def _render_json(targets: list[AddonTarget]) -> str:
 
 
 def _render_shell(targets: list[AddonTarget]) -> str:
-    # name|source|addon_id. The installer keeps name|source for generic target
-    # iteration and uses the trailing addon_id only to attribute copy-mode
-    # ownership markers for copied addon targets.
+    # name|source|addon_id. The installer keeps name|source for generic target iteration and uses the trailing addon_id only to attribute copy-mode ownership markers for copied addon targets.
     return "\n".join(f"{target.name}|{target.source}|{target.addon_id}" for target in targets)
 
 
@@ -1195,6 +1166,13 @@ def build_parser() -> argparse.ArgumentParser:
 def _detect_install_mode(dest: Path) -> str:
     if dest.is_symlink():
         return "symlink"
+    if os.name == "nt":
+        try:
+            attrs = getattr(os.lstat(dest), "st_file_attributes", 0)
+        except OSError:
+            attrs = 0
+        if attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+            return "junction"
     if dest.exists():
         return "copy"
     return "missing"
@@ -1234,29 +1212,22 @@ def _existing_extra_targets(addon_id: str, addons_dir: str | Path | None) -> dic
 
 
 def _safe_provision(src: str, base: Path, dest: Path, owned: dict[str, tuple[str, str]]) -> None:
-    """Copy ``src`` to ``dest`` under ``base`` without following symlinks or clobbering.
+    """Copy ``src`` to ``dest`` under ``base`` without following directory links or clobbering.
 
-    Security (addon review): the original code did a bare ``shutil.copyfile`` which (a)
-    silently overwrote any pre-existing file and (b) wrote THROUGH a symlink at the
-    dest leaf/parent, letting an addon escape the containment dir and overwrite
-    arbitrary files. This refuses any symlink in the chain base->dest, refuses to
-    clobber a path this addon does not already own, and writes atomically (temp +
-    os.replace) so a write can never traverse a symlink.
+    Security (addon review): the original code did a bare ``shutil.copyfile`` which (a) silently overwrote any pre-existing file and (b) wrote through a symlink at the destination leaf or parent, letting an addon escape the containment directory and overwrite arbitrary files. This refuses any symlink or junction in the chain from ``base`` to ``dest``, refuses to clobber a path this addon does not already own, and writes atomically with a temporary file plus ``os.replace`` so a write can never traverse a directory link.
     """
-    # Lexical containment FIRST (do not delegate to the caller): collapse ".." and
-    # require dest to stay under base, so _safe_provision is self-sufficient even if a
-    # future caller forgets its own _within() check.
+    # Lexical containment FIRST (do not delegate to the caller): collapse ".." and require dest to stay under base, so _safe_provision is self-sufficient even if a future caller forgets its own _within() check.
     base_norm = Path(os.path.normpath(str(base)))
     dest_norm = Path(os.path.normpath(str(dest)))
     if dest_norm != base_norm and base_norm not in dest_norm.parents:
         raise AddonManifestError(f"refusing to provision outside base: {dest}")
-    if base.is_symlink():
-        raise AddonManifestError(f"refusing to provision through a symlink at {base}")
+    if _detect_install_mode(base) in {"symlink", "junction"}:
+        raise AddonManifestError(f"refusing to provision through a directory link at {base}")
     cur = base
     for part in dest.relative_to(base).parts:
         cur = cur / part
-        if cur.is_symlink():
-            raise AddonManifestError(f"refusing to provision through a symlink at {cur}")
+        if _detect_install_mode(cur) in {"symlink", "junction"}:
+            raise AddonManifestError(f"refusing to provision through a directory link at {cur}")
     if os.path.lexists(dest):
         proof = owned.get(os.path.normpath(str(dest)))
         if not dest.is_file() or proof is None:
@@ -1357,12 +1328,7 @@ def _resolve_adapter_hooks(
     skills_dir: str | Path | None = None,
     privileged_adapter_allowlist: dict[str, dict[str, Any]] | None = None,
 ) -> Iterable[dict[str, Any]]:
-    """Single source of truth for resolving a target's privileged adapter
-    hooks. iter_privileged_adapter_hook_specs (install wiring) and
-    build_privileged_adapter_provided_entries (sidecar ownership record) both
-    consume this, so the installed hook and its uninstall-time ownership record
-    cannot drift. Trusts no addon-supplied event/script/marker/runner value.
-    """
+    "Single source of truth for resolving a target's privileged adapter\n    hooks. iter_privileged_adapter_hook_specs (install wiring) and\n    build_privileged_adapter_provided_entries (sidecar ownership record) both\n    consume this, so the installed hook and its uninstall-time ownership record\n    cannot drift. Trusts no addon-supplied event/script/marker/runner value.\n    "
     context = target.addon_root / ADDON_MANIFEST if target.addon_root else target.source / ADDON_MANIFEST
     script_base = target.source
     if skills_dir is not None:
@@ -1466,8 +1432,8 @@ def _normalized_location(path: Path) -> str:
 def _target_is_missing_or_dangling(path: Path) -> bool:
     if not os.path.lexists(path):
         return True
-    if path.is_symlink() and not path.exists():
-        path.unlink()
+    if _detect_install_mode(path) in {"symlink", "junction"} and not path.exists():
+        _symlink_safe_remove(path)
         return True
     return False
 
@@ -1536,8 +1502,7 @@ def _repair_skill_target(src: Path, dest: Path, install_mode: str) -> str:
     dest.parent.mkdir(parents=True, exist_ok=True)
     if install_mode in {"symlink", "junction"}:
         try:
-            dest.symlink_to(src, target_is_directory=True)
-            return "symlink"
+            return _create_directory_link(src, dest)
         except OSError:
             pass
     shutil.copytree(src, dest)

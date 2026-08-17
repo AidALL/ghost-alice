@@ -34,10 +34,7 @@ installer는 세 layer로 볼 수 있다.
 | Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | platforms와 targets를 resolve하고, skills와 hooks를 install하고, install state를 record하고, local edits를 protect하고, status를 report한다 |
 | Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | installed skills, platform hook config, Codex bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, uninstall reports를 보관한다 |
 
-중요한 mental model은 "file을 copy하고 끝"이 아니다. installer는 stateful
-governance synchronizer다. installed asset을 update하고, hook contract를
-verify하고, user-modified installed file을 보존하고, status, doctor, update,
-uninstall path가 무엇이 일어났는지 판단할 수 있도록 state를 남긴다.
+중요한 mental model은 "file을 copy하고 끝"이 아니다. installer는 stateful governance synchronizer다. installed asset을 update하고, hook contract를 verify하고, user-modified installed file을 보존하고, status, doctor, update, uninstall path가 무엇이 일어났는지 판단할 수 있도록 state를 남긴다.
 
 ## Install Flow
 
@@ -51,9 +48,7 @@ shell entrypoint
 -> status/report output
 ```
 
-`install.cmd`는 Windows wrapper일 뿐이다. 실질적인 Windows path는
-`install.ps1`이다. Unix-like environment에서는 `install.sh`가 shell entry
-path를 소유하고 필요할 때 Bash로 다시 진입한다.
+`install.cmd`는 Windows wrapper일 뿐이다. 실질적인 Windows path는 `install.ps1`이다. Unix-like environment에서는 `install.sh`가 shell entry path를 소유하고 필요할 때 Bash로 다시 진입한다.
 
 ## Platform Surfaces
 
@@ -63,10 +58,7 @@ path를 소유하고 필요할 때 Bash로 다시 진입한다.
 | Codex | `~/.agents/skills/`, `~/.codex/AGENTS.md`, `~/.codex/hooks.json`, `~/.codex/config.toml` |
 | Shared state | `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
 
-Claude Code는 native skill invocation과 hook permissions를 expose할 수 있다.
-Codex는 같은 skill surface를 expose하지 않으므로 installer는 Codex bootstrap과
-hook config도 설치해 required gate가 `SKILL.md` read record와 hook payload로
-audit 가능하도록 한다.
+Claude Code는 native skill invocation과 hook permissions를 expose할 수 있다. Codex는 같은 skill surface를 expose하지 않으므로 installer는 Codex bootstrap과 hook config도 설치해 required gate가 `SKILL.md` read record와 hook payload로 audit 가능하도록 한다.
 
 ## State And Safety Model
 

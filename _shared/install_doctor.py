@@ -13,7 +13,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +20,7 @@ from typing import Sequence
 
 import addon_registry
 import hash_utils
+from project_runtime import project_runtime
 import runtime_config
 from encoding_guard import validate_repo
 from installer_assets import (
@@ -46,6 +46,7 @@ STATUS_RANK = {
     STATUS_WARNING: 1,
     STATUS_ERROR: 2,
 }
+CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
 SUPPORTED_PLATFORMS = ("claude", "codex")
 NODE_JS_DOWNLOAD_URL = "https://nodejs.org/en/download"
 RUNTIME_SHARED_FILES = (
@@ -745,7 +746,12 @@ def _runtime_validator_golden_status(runtime_shared: Path) -> tuple[str, str]:
     return STATUS_OK, "golden-pass"
 
 
-def _runtime_session_intent_golden_status(runtime_shared: Path, platform: str) -> tuple[str, str]:
+def _runtime_session_intent_golden_status(
+    runtime_shared: Path,
+    platform: str,
+    *,
+    repo_root: Path | str | None = None,
+) -> tuple[str, str]:
     hook = runtime_shared / "session_intent_analyzer_hook.py"
     if not hook.exists():
         return STATUS_ERROR, "hook-missing"
@@ -754,9 +760,10 @@ def _runtime_session_intent_golden_status(runtime_shared: Path, platform: str) -
         "session_id": "doctor-runtime-golden",
         "prompt": "runtime session intent golden",
     })
-    with tempfile.TemporaryDirectory() as tmp:
-        root = Path(tmp) / "session-intent"
-        proc = subprocess.run(
+    owning_root = Path(repo_root).resolve() if repo_root else CODE_OWNER_ROOT
+    with project_runtime(owning_root, "install-doctor-session-intent") as runtime:
+        root = runtime.work_dir / "session-intent"
+        proc = runtime.run(
             [
                 sys.executable,
                 str(hook),
@@ -771,6 +778,8 @@ def _runtime_session_intent_golden_status(runtime_shared: Path, platform: str) -
                 "--root",
                 str(root),
             ],
+            cwd=owning_root,
+            runner=subprocess.run,
             input=payload,
             capture_output=True,
             text=True,
@@ -792,9 +801,7 @@ def _runtime_session_intent_golden_status(runtime_shared: Path, platform: str) -
         if not pointer.exists():
             system_message = str(data.get("systemMessage") or "")
             if LEDGER_UNAVAILABLE_DEGRADE in system_message:
-                # The intent-audit surface is the governance input anchor; an
-                # install without it must not read as fully healthy. WARNING,
-                # not ERROR: the absent-ledger degrade is documented behavior.
+                # The intent-audit surface is the governance input anchor; an install without it must not read as fully healthy. WARNING, not ERROR: the absent-ledger degrade is documented behavior.
                 return STATUS_WARNING, "ledger-unavailable-degraded"
             return STATUS_ERROR, "current-session-not-written"
     return STATUS_OK, "golden-pass"
@@ -834,7 +841,11 @@ def _runtime_core_audit(
         "kind": "golden-hook-test",
         "reason": golden_detail,
     })
-    session_status, session_detail = _runtime_session_intent_golden_status(runtime_shared, platform)
+    session_status, session_detail = _runtime_session_intent_golden_status(
+        runtime_shared,
+        platform,
+        repo_root=source_shared.parent,
+    )
     findings.append({
         "status": session_status,
         "name": "session-intent",
@@ -882,8 +893,7 @@ def run(args: argparse.Namespace) -> int:
               f"({finding['kind']}): {finding['reason']}")
 
     if args.skills_root is not None:
-        # Informational management view: classify every live skills-dir entry.
-        # Read-only and status-neutral (it does not change overall health).
+        # Informational management view: classify every live skills-dir entry. Read-only and status-neutral (it does not change overall health).
         core_names = {asset_id for asset_id, _ in args.target if asset_id != "_shared"}
         live_owners = _live_dir_ownership(args.skills_root, core_names, ghost_alice_root / "addons" / args.platform)
         print(f"live-dir: {len(live_owners)} entries")

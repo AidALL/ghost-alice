@@ -4,17 +4,13 @@
 #  2. Bootstrap (~/.codex/AGENTS.md) and hook configs refresh
 #  3. snapshot.json is updated for merge-companion
 #
-# Fires automatically after `git pull` (or any successful merge) and keeps
-# copy-mode skill installations in sync with the repository.
+# Fires automatically after `git pull` (or any successful merge) and keeps copy-mode skill installations in sync with the repository.
 #
 # Symlink / junction platforms (Claude Code) are already live
 # after the merge. Their installed entries point back at the repo, so a.
 # git pull updates them for free and this hook does nothing.
 #
-# Codex uses copy mode on every platform so user edits in ~/.agents/skills can
-# be protected by snapshot/diff before replacement. After a pull its on-disk
-# skill files are stale. This hook re-runs `install.sh --platform codex` when
-# Codex is installed.
+# Codex uses copy mode on every platform so user edits in ~/.agents/skills can be protected by snapshot/diff before replacement. After a pull its on-disk skill files are stale. This hook re-runs `install.sh --platform codex` when Codex is installed.
 #
 # Design notes:
 # - No `set -e`. A hook failure must never mask a successful `git pull`.

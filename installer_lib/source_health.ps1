@@ -169,7 +169,5 @@ function Initialize-GitHooks {
             Write-Warn "Failed to set core.hooksPath" "Failed to set core.hooksPath"
         }
     }
-    # Windows filesystem does not honor chmod; Git tracks the executable bit
-    # via the index. hooks/post-merge must be committed once with the exec
-    # bit set, after which Git restores it on every checkout.
+    # Windows filesystem does not honor chmod; Git tracks the executable bit via the index. hooks/post-merge must be committed once with the exec bit set, after which Git restores it on every checkout.
 }

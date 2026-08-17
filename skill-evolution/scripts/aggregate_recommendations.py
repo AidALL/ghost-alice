@@ -132,9 +132,7 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
             "decision": "necessity-gate",
         })
 
-    # Objective default ordering only: most recurring first, then most recent,
-    # then id. No fabricated composite weight. The consuming model judges
-    # priority by reasoning over the signals (occurrences, sessions, recency).
+    # Objective default ordering only: most recurring first, then most recent, then id. No fabricated composite weight. The consuming model judges priority by reasoning over the signals (occurrences, sessions, recency).
     recommendations.sort(key=lambda item: item["id"])
     recommendations.sort(key=lambda item: item["last_seen"] or "", reverse=True)
     recommendations.sort(key=lambda item: item["session_count"], reverse=True)

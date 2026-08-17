@@ -15,8 +15,7 @@ import task_router_reminder_hook as trh
 
 
 class DegradedLedgerFailClosedTests(unittest.TestCase):
-    """H5: a degraded-ledger marker must withhold routing release instead of
-    letting the silent-allow invariant ride a stale lineage anchor."""
+    'H5: a degraded-ledger marker must withhold routing release instead of\n    letting the silent-allow invariant ride a stale lineage anchor.'
 
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
@@ -60,10 +59,7 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.assertIn("unreadable-marker", message)
 
     def test_producer_marker_path_matches_consumer_lookup(self) -> None:
-        # Cross-module seam: the analyzer hook WRITES the marker with its own
-        # session-key derivation; this consumer LOOKS IT UP with resolve_session_id.
-        # If the two ever diverge, fail-closed silently stops working — the exact
-        # drift class that produced the N2 intent-root divergence.
+        # Cross-module seam: the analyzer hook WRITES the marker with its own session-key derivation; this consumer LOOKS IT UP with resolve_session_id. If the two ever diverge, fail-closed silently stops working — the exact drift class that produced the N2 intent-root divergence.
         import shutil
         import subprocess
         base = Path(tempfile.mkdtemp())
@@ -95,9 +91,7 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.assertIn("ledger is degraded", message)
 
     def test_producer_marker_path_matches_consumer_lookup_with_equals_session_id(self) -> None:
-        # Session ids may contain platform-produced separators. Producer and
-        # consumer sanitizers must agree, or the degraded-ledger marker is
-        # written under one directory and looked up under another.
+        # Session ids may contain platform-produced separators. Producer and consumer sanitizers must agree, or the degraded-ledger marker is written under one directory and looked up under another.
         import shutil
         import subprocess
         base = Path(tempfile.mkdtemp())

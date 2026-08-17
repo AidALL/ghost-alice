@@ -17,6 +17,21 @@ sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 import addon_installer as ai  # noqa: E402
 import addon_registry as reg  # noqa: E402
+import addon_uninstall as un  # noqa: E402
+import hash_utils  # noqa: E402
+import install_transaction as txn  # noqa: E402
+
+
+def _create_test_directory_link(test_case: unittest.TestCase, source: Path, link: Path) -> str:
+    mode = txn._create_directory_link(source, link)
+    try:
+        test_case.assertIn(mode, {"junction", "symlink"})
+        if mode == "junction":
+            test_case.assertTrue(un._is_reparse_point(link))
+    except Exception:
+        un._symlink_safe_remove(link)
+        raise
+    return mode
 
 
 def _addon_source_without_min_core(temp_dir: str) -> Path:
@@ -202,8 +217,9 @@ class HardeningTest(unittest.TestCase):
         target = ai.load_addon_targets([FIXTURE_ROOT])[0]
         rec = ai.build_sidecar_record(target, platform="claude", installed_at="t",
                                       provided=[{"kind": "skill", "name": "noop", "target": "/d"}])
-        self.assertTrue(rec["source"].endswith("addons/noop"))
-        self.assertFalse(rec["source"].endswith("skill"))
+        source = Path(rec["source"])
+        self.assertEqual(source, FIXTURE_ROOT / "addons" / "noop")
+        self.assertNotEqual(source.name, "skill")
 
 
 class CliWriteSidecarsTest(unittest.TestCase):
@@ -213,19 +229,23 @@ class CliWriteSidecarsTest(unittest.TestCase):
             skills.mkdir()
             addons = Path(tmp) / "addons"
             src = FIXTURE_ROOT / "addons" / "noop" / "skill"
-            (skills / "noop").symlink_to(src)  # simulate the install.sh symlink
-            rc = ai.main([
-                "write-sidecars", "--source", str(FIXTURE_ROOT), "--platform", "claude",
-                "--addons-dir", str(addons), "--skills-dir", str(skills), "--installed-at", "t",
-            ])
-            self.assertEqual(rc, 0)
-            rec = reg.read_record("noop", addons_dir=addons)
-            self.assertEqual(rec["addon_id"], "noop")
-            self.assertEqual(rec["min_core_version"], "0.1.0")
-            self.assertEqual(rec["provided"][0]["name"], "noop")
-            self.assertEqual(rec["provided"][0]["install_mode"], "symlink")
-            self.assertEqual(rec["provided"][0]["target"], str(skills / "noop"))
-            self.assertTrue(rec["provided"][0]["content_hash"])  # real hash, not placeholder
+            link = skills / "noop"
+            mode = _create_test_directory_link(self, src, link)
+            try:
+                rc = ai.main([
+                    "write-sidecars", "--source", str(FIXTURE_ROOT), "--platform", "claude",
+                    "--addons-dir", str(addons), "--skills-dir", str(skills), "--installed-at", "t",
+                ])
+                self.assertEqual(rc, 0)
+                rec = reg.read_record("noop", addons_dir=addons)
+                self.assertEqual(rec["addon_id"], "noop")
+                self.assertEqual(rec["min_core_version"], "0.1.0")
+                self.assertEqual(rec["provided"][0]["name"], "noop")
+                self.assertEqual(rec["provided"][0]["install_mode"], mode)
+                self.assertEqual(rec["provided"][0]["target"], str(link))
+                self.assertEqual(rec["provided"][0]["content_hash"], hash_utils.hash_target(str(link), mode))
+            finally:
+                un._symlink_safe_remove(link)
 
     def test_cli_missing_install_is_marked_missing(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -248,32 +268,36 @@ class CliWriteSidecarsTest(unittest.TestCase):
             skills.mkdir()
             addons.mkdir()
             src = FIXTURE_ROOT / "addons" / "noop" / "skill"
-            (skills / "noop").symlink_to(src)
-            existing = {
-                "schema_version": "9.0",
-                "addon_id": "noop",
-                "addon_version": "9.9.9",
-                "source": "/future",
-                "platform": "claude",
-                "owner": "addon",
-                "origin": "addon:noop",
-                "depends_on_core": [],
-                "min_core_version": "9.9.9",
-                "installed_at": "future",
-                "provided": [],
-                "future_field": {"keep": "me"},
-            }
-            sidecar = addons / "noop.json"
-            sidecar.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            before = sidecar.read_text(encoding="utf-8")
+            link = skills / "noop"
+            _create_test_directory_link(self, src, link)
+            try:
+                existing = {
+                    "schema_version": "9.0",
+                    "addon_id": "noop",
+                    "addon_version": "9.9.9",
+                    "source": "/future",
+                    "platform": "claude",
+                    "owner": "addon",
+                    "origin": "addon:noop",
+                    "depends_on_core": [],
+                    "min_core_version": "9.9.9",
+                    "installed_at": "future",
+                    "provided": [],
+                    "future_field": {"keep": "me"},
+                }
+                sidecar = addons / "noop.json"
+                sidecar.write_text(json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                before = sidecar.read_text(encoding="utf-8")
 
-            rc = ai.main([
-                "write-sidecars", "--source", str(FIXTURE_ROOT), "--platform", "claude",
-                "--addons-dir", str(addons), "--skills-dir", str(skills), "--installed-at", "t",
-            ])
+                rc = ai.main([
+                    "write-sidecars", "--source", str(FIXTURE_ROOT), "--platform", "claude",
+                    "--addons-dir", str(addons), "--skills-dir", str(skills), "--installed-at", "t",
+                ])
 
-            self.assertNotEqual(rc, 0)
-            self.assertEqual(sidecar.read_text(encoding="utf-8"), before)
+                self.assertNotEqual(rc, 0)
+                self.assertEqual(sidecar.read_text(encoding="utf-8"), before)
+            finally:
+                un._symlink_safe_remove(link)
 
     def test_cli_preserves_existing_higher_minor_unknown_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -282,32 +306,36 @@ class CliWriteSidecarsTest(unittest.TestCase):
             skills.mkdir()
             addons.mkdir()
             src = FIXTURE_ROOT / "addons" / "noop" / "skill"
-            (skills / "noop").symlink_to(src)
-            existing = {
-                "schema_version": "1.5",
-                "addon_id": "noop",
-                "addon_version": "0.1.0",
-                "source": str(FIXTURE_ROOT / "addons" / "noop"),
-                "platform": "claude",
-                "owner": "addon",
-                "origin": "addon:noop",
-                "depends_on_core": [],
-                "min_core_version": "0.0.0",
-                "installed_at": "old",
-                "provided": [],
-                "future_field": {"keep": "me"},
-            }
-            (addons / "noop.json").write_text(
-                json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            link = skills / "noop"
+            _create_test_directory_link(self, src, link)
+            try:
+                existing = {
+                    "schema_version": "1.5",
+                    "addon_id": "noop",
+                    "addon_version": "0.1.0",
+                    "source": str(FIXTURE_ROOT / "addons" / "noop"),
+                    "platform": "claude",
+                    "owner": "addon",
+                    "origin": "addon:noop",
+                    "depends_on_core": [],
+                    "min_core_version": "0.0.0",
+                    "installed_at": "old",
+                    "provided": [],
+                    "future_field": {"keep": "me"},
+                }
+                (addons / "noop.json").write_text(
+                    json.dumps(existing, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-            rc = ai.main([
-                "write-sidecars", "--source", str(FIXTURE_ROOT), "--platform", "claude",
-                "--addons-dir", str(addons), "--skills-dir", str(skills), "--installed-at", "t",
-            ])
+                rc = ai.main([
+                    "write-sidecars", "--source", str(FIXTURE_ROOT), "--platform", "claude",
+                    "--addons-dir", str(addons), "--skills-dir", str(skills), "--installed-at", "t",
+                ])
 
-            self.assertEqual(rc, 0)
-            rec = reg.read_record("noop", addons_dir=addons)
-            self.assertEqual(rec.get("future_field"), {"keep": "me"})
+                self.assertEqual(rc, 0)
+                rec = reg.read_record("noop", addons_dir=addons)
+                self.assertEqual(rec.get("future_field"), {"keep": "me"})
+            finally:
+                un._symlink_safe_remove(link)
 
 
 if __name__ == "__main__":

@@ -86,6 +86,13 @@ def validate_record(record: dict[str, Any], repo_root: Path) -> list[str]:
         if "event" not in haystack or "firing proof" not in haystack:
             errors.append(f"{adapter_id}: must distinguish hook event config from runtime firing proof")
 
+    if adapter_id == "claude":
+        assets = " ".join(str(item) for item in record.get("supported_assets", [])).lower()
+        if "repo-local" not in assets or "installed-global" not in assets:
+            errors.append(
+                "claude: supported_assets must distinguish repo-local imports from the installed-global bootstrap"
+            )
+
     for source_doc in record.get("source_docs", []):
         if isinstance(source_doc, str) and not (repo_root / source_doc).is_file():
             errors.append(f"{adapter_id}: source_doc missing: {source_doc}")

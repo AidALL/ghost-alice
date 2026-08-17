@@ -40,6 +40,7 @@ ENTRYPOINT_SKILLS = {
 SSOT_RULES_FILE = "AGENTS.md"
 SSOT_IMPORT_FILES = ["CLAUDE.md"]
 PLATFORM_PORTS = [
+    "platforms/claude/CLAUDE.md",
     "platforms/codex/AGENTS.md",
 ]
 
@@ -146,7 +147,7 @@ def extract_rule_headers(text: str) -> dict[int, str]:
 
 
 def check_platform_ports(repo: Path, findings: list[Finding]) -> None:
-    """Check that platform port files include rules 0-7 and stay synchronized with SSOT AGENTS.md."""
+    """Check that global platform ports include every numbered SSOT rule."""
     ssot_path = repo / SSOT_RULES_FILE
     ssot_rules: dict[int, str] = {}
     if ssot_path.is_file():

@@ -10,6 +10,7 @@ session gate SSOT는 `skill-catalog/session-gates.json`이다. 이 문서는 hum
 - [Session Intent Ledger Contract](#session-intent-ledger-contract)
 - [Runtime Hook Graph Contract](#runtime-hook-graph-contract)
 - [Dynamic Focus Contract](#dynamic-focus-contract)
+- [Routing Surface Contract](#routing-surface-contract)
 - [Work-Impact Projection Contract](#work-impact-projection-contract)
 - [Runtime Checkpoints](#runtime-checkpoints)
 - [tool-checkpoint Visible Surface](#tool-checkpoint-visible-surface)
@@ -33,7 +34,7 @@ session gate SSOT는 `skill-catalog/session-gates.json`이다. 이 문서는 hum
 
 ## Turn Routing Contract
 
-session-intent-analyzer intake가 first다. pending-merge precheck 이후 session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out한다. current-lineage block gate가 없으면 session-intent preflight 뒤 task-router가 release된다. allow turn에서는 `downstream-gates.json`이 없을 수 있으며, current-lineage model block이 기록되지 않았다면 그 absence는 silent allow다. flow를 `task-router → session-intent-analyzer`, linear `session-intent-analyzer → skill-evolution → jailbreak-detector → task-router` chain, 또는 jailbreak-detector downstream gate를 bypass하는 task-router로 설명하면 contract violation이다.
+session-intent-analyzer intake가 user-input governance graph 안에서 first다. hook pending-merge result는 그 전에 consume한다. hook evidence가 없으면 manual fallback은 actionable work 전에 끝나며 `clarification-only` 또는 `direct-response`에서만 defer할 수 있다. session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out한다. current-lineage block gate가 없으면 session-intent preflight 뒤 task-router가 release된다. allow turn에서는 `downstream-gates.json`이 없을 수 있으며, current-lineage model block이 기록되지 않았다면 그 absence는 silent allow다. flow를 `task-router → session-intent-analyzer`, linear `session-intent-analyzer → skill-evolution → jailbreak-detector → task-router` chain, 또는 jailbreak-detector downstream gate를 bypass하는 task-router로 설명하면 contract violation이다.
 
 `task-router`는 일이 커 보일 때만 쓰는 classifier가 아니다. user input이 감지된 모든 turn에서 session-intent-analyzer intake와 jailbreak-detector downstream gate 이후, downstream work 또는 tool call 전에 적용한다.
 
@@ -68,7 +69,7 @@ runtime smoke는 `docs/ko/policies/live-smoke-regression.md`를 따른다. 이 p
 First-entry intake invariant:
 
 - every user input은 먼저 session-intent intake path에 연결된다.
-- pending-merge precheck 이후 session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out한다. task-router는 session-intent preflight와 current-lineage block gate absence 이후에만 따른다.
+- hook pending-merge result 이후 session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out한다. task-router는 session-intent preflight와 current-lineage block gate absence 이후에만 따른다. missing manual result는 work 전에 resolve하며 `clarification-only` 또는 `direct-response`에서만 defer한다.
 - `skill-evolution`은 session-intent-analyzer의 report-only terminal branch이며 task-router로 feed하지 않는다.
 - missing `current-session.json`, `intent-state.json`, hook payload, preflight evidence, semantic delta evidence는 first entry deny reason이 아니다.
 - missing session-intent evidence는 intake/bootstrap이 run 또는 continue되어야 한다는 뜻이지 tool-checkpoint가 absence에서 risk를 infer할 수 있다는 뜻이 아니다.
@@ -76,9 +77,9 @@ First-entry intake invariant:
 
 ## Runtime Hook Graph Contract
 
-pending-merge precheck는 user-input governance graph가 시작되기 전에 run한다. 이는 pre-routing/session-start layer이며 `session-intent-analyzer`, `skill-evolution`, `jailbreak-detector`, `tool-checkpoint`가 여는 downstream gate가 아니다. undecided entry가 있으면 runtime은 `merge-companion`을 먼저 surface해야 하지만 user-explicit defer/skip은 해당 entry를 undecided로 남긴 채 계속 진행할 수 있다.
+Hook pending-merge precheck is a pre-routing/session-start layer. hook evidence가 없으면 manual fallback은 actionable downstream work 전에 끝나며 no-work terminal route (`clarification-only` 또는 `direct-response`)만 이를 defer할 수 있다. known undecided entry가 있으면 runtime은 `merge-companion`을 먼저 surface해야 하지만 user-explicit defer/skip은 해당 entry를 undecided로 남긴 채 계속 진행할 수 있다.
 
-pending-merge precheck가 clean이거나 user가 명시적으로 defer한 뒤 user-input governance graph는 user intent first, downstream gate state second, tool-stage tool-checkpoint third 순서로 정렬된다.
+user-input governance graph는 user intent first, downstream gate state second, tool-stage tool-checkpoint third 순서로 정렬된다. known pending result는 graph 밖에서 먼저 처리하고 missing manual result는 pre-work requirement로 유지한다.
 
 `tool-checkpoint`는 PreToolUse/BeforeTool checkpoint이며 user-input intake order의 일부가 아니다. surfaced될 때 visible control schema에는 `hook-stage: PreToolUse`와 `meaning: tool-call retry checkpoint, not user-input intake`가 함께 있어야 한다.
 
@@ -97,7 +98,19 @@ Dynamic focus control은 session gate contract의 일부다. work는 semantic at
 - macro: integrated output, SSOT alignment, user constraint alignment, cross-document logic
 - meta: task necessity, task definition, scope expansion, premise validity
 
-mismatch가 나타나면 runtime procedure는 cause를 포함하는 가장 작은 layer를 reopen한다. larger premise 또는 integrated logic이 틀렸으면 macro 또는 meta를 repair한다. atomic output 또는 local sub-task가 틀렸으면 micro 또는 meso를 repair한다. `calls`는 static and sparse 상태로 남으며 repeated focus movement, scope reopen point handling, re-verification loops는 procedure와 runtime verification에 속한다.
+mismatch가 나타나면 runtime procedure는 cause를 포함하는 가장 작은 layer를 reopen한다. larger premise 또는 integrated logic이 틀렸으면 macro 또는 meta를 repair한다. atomic output 또는 local sub-task가 틀렸으면 micro 또는 meso를 repair한다. `calls`는 static and sparse 상태로 남는다. A checkpoint runs only while a live uncertainty exists and its possible outcomes can change the next decision. Stop the sequence when a checkpoint produces no relevant state delta or when further checking displaces the primary objective.
+
+## Routing Surface Contract
+
+`task-router`는 current turn의 reusable work judgment를 소유하고, accepted session intent에서 `primary-request`, `causal-axis`, `response-order`를 보존한다. `session-intent-analyzer`는 semantic facts와 accumulated decisions를 기록하며 competing routing scale을 만들지 않는다.
+
+The user's terminal objective outranks investigative means. investigation, provenance reconstruction, artifact preservation, worktree inspection은 user가 deliverable로 explicit하게 요청하지 않는 한 means다. Do not let a means replace, narrow, or expand the terminal objective.
+
+`response-mode: clarification-only`는 current conversation에 essential referent 또는 decisive input이 없어 answer나 safe action을 시작할 수 없는 terminal route다. Intake and routing still run internally. Ask only for the minimum decisive information. context를 guess하기 위해 files, repositories, manifests, tools, credentials, external state를 inspect하지 않는다. manual pending-merge check는 next actionable turn까지 defer한다. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging은 active 상태로 남는다. the content already resolves the question이거나 user가 lookup/status check를 요청했거나 explicit assumption으로 bounded answer가 가능하면 이 route를 사용하지 않는다.
+
+`response-mode: direct-response`는 file change, side effect, current-state lookup, tool call, fresh verification 없이 current input과 conversation만으로 resolved content를 답할 수 있는 no-work terminal route다. `response-order: resolved-intent-first`를 사용한다. Route classification precedes evidence planning. causal premise 자체는 inspection request가 아니고 verification burden은 current-state referent를 만들 수 없다. explicit inspection request 또는 conversation에서 이미 established된 referent만 local diagnosis를 허용한다. explicit correction 또는 non-goal을 먼저 accept하고, superseded means보다 terminal objective를 우선하며, current repository나 machine을 inspect하지 않고 general explanation 또는 stable low-risk how-to를 답한다. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. general why/how question에 나온 technical state는 active workspace에 대한 evidence가 아니라 explanation topic으로 취급한다. Do not validate or rebut that premise before explaining. first-person, past-cause, deictic wording, tense, technical-state language, ambient context, tool availability은 question을 workspace에 bind하지 않으며, user가 workspace를 identify하거나 workspace evidence를 제공하거나 exact diagnosis/inspection을 명시적으로 요청할 때만 workspace가 target이 된다. Intake and routing still run internally; strict hook logging은 active다. missing manual pending-merge check를 defer하고 downstream skill을 load하지 않으며, decision-relevant caveat 최대 하나와 resolved content만 emit한다. `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, `[io-trace]`를 emit하지 않는다. current/version-specific fact, support/regression claim, high-risk advice, lookup, inspection, modification, verification request는 normal route를 사용한다.
+
+`routing-surface`의 `change-depth`, `focus-layer`, `verification-complexity`는 English canonical enum을 그대로 사용한다. unknown, ambiguous, contradictory value는 fuller surface로 fail closed하고 existing scope reopen point를 통해 focus를 reopen한다.
 
 ## Work-Impact Projection Contract
 
@@ -115,7 +128,7 @@ Work-Impact Projection은 hook-internal value를 다음 work decision을 바꾸�
 
 Ghost-ALICE OS documents는 English canonical narrative + English control surface를 default coordination contract로 사용한다. reader-facing documentation tree가 pair를 expose하는 곳에는 Korean paired counterpart를 둔다. field names, enum values, literal tokens, gate schemas, allowed/forbidden values는 English로 유지하고 번역하지 않는다.
 
-first commentary는 다음 block을 포함해야 한다.
+first commentary는 normal route에서 다음 block을 포함해야 하며 no-work terminal route는 control block을 emit하지 않는다.
 
 ```text
 [gate-state]
@@ -148,7 +161,11 @@ final response가 executed work의 complete, fixed, successful, freshly verified
 
 `acceptance-criteria`는 user intent, locked decisions, boundary-contract에서 추출한 verifiable criteria다. `claim-evidence-map`은 closure claim을 criterion과 fresh evidence에 연결한다. `unverified`가 `none`이 아니면 completion 또는 success가 settled된 것처럼 말하지 않는다. finalized `[completion-check]`는 `verdict: pass | fail`과 `unverified: none`을 사용한다. unverified item이 있으면 finalizing하지 말고 prose로 partial state와 remaining verification을 보고한다. Installed Stop completion hooks는 executed-work closure claim에 `[completion-check]`를 요구하고 routine non-closure response는 allow한다.
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check]. executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 current turn에서 `verification-before-completion`을 load/call하고, fresh verification을 run/read한 뒤에만 `skill-call: verification-before-completion (this turn)`가 있는 `[completion-check]`를 쓴다. If any step is missing or out of order, the completion-check is invalid.
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
+
+Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check. Verification output does not create a new obligation to verify the verification.
+
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. 해당 claim 전에 current turn에서 `verification-before-completion`을 load/call하고, decision-relevant fresh verification을 run/read한 뒤에만 `skill-call: verification-before-completion (this turn)`가 있는 `[completion-check]`를 쓴다. If any step is missing or out of order, the completion-check is invalid.
 
 `skill-call:` line은 그 skill workflow가 current turn에서 실제로 실행됐다는 record다. Claude Code에서는 visible Skill call 이후에만 쓴다. Codex처럼 visible Skill tool이 없는 환경에서는 current turn에 해당 skill의 `SKILL.md`를 실제로 읽고 workflow를 따른 뒤에만 쓴다.
 
@@ -186,7 +203,7 @@ same ref의 simple polling은 output을 영원히 반복하라는 의무가 아�
 ## Notes
 
 - recommendations는 casual opinions가 아니라 verification이 필요한 claims로 취급한다.
-- 같은 session에서 방금 inspect했더라도 fresh verification을 skip하지 않는다.
+- relevant state와 criterion이 unchanged이면 existing evidence를 reuse하고, 그 age를 밝히되 current-turn verification으로 relabel하지 않는다.
 - each turn마다 `task-router`를 reapply한다.
 - `task-router`는 `boundary-contract` 필요 여부만 결정한다. allowed-surface, file names, test-purpose는 `boundary-contract`가 소유한다.
 - task-router가 `boundary-contract: required`를 output하면 next required gate는 boundary-contract다.

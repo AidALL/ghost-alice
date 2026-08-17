@@ -20,11 +20,7 @@ from typing import Any
 
 MAX_LINES = 10000
 
-# Best-effort neutral extraction of a shell row's operation + file target, so the
-# autopilot continuation signal can render it platform-neutrally (e.g. "read
-# <path>") instead of leaking a per-runtime command string. The raw command is
-# still stored in `pattern` (the audit log is never reduced); `op`/`path` are an
-# additive structured view. Extraction is conservative and never executes input.
+# Best-effort neutral extraction of a shell row's operation + file target, so the autopilot continuation signal can render it platform-neutrally (e.g. "read <path>") instead of leaking a per-runtime command string. The raw command is still stored in `pattern` (the audit log is never reduced); `op`/`path` are an additive structured view. Extraction is conservative and never executes input.
 _SHELL_READ_VERBS = {"cat", "less", "more", "head", "tail", "type", "get-content", "gc"}
 _SHELL_WRITE_VERBS = {"tee", "set-content", "out-file", "add-content"}
 _SHELL_SEARCH_VERBS = {"grep", "rg", "egrep", "fgrep", "select-string", "findstr", "sls"}
@@ -79,11 +75,7 @@ def _classify_shell_verb(token: str) -> str:
 
 
 def _shell_op_and_path(command: str) -> tuple[str, str]:
-    # Scan every token, not just the first: agents often lead with a variable
-    # assignment or a subshell (e.g. `$path = "..."; $lines = Get-Content $path`),
-    # so the recognized verb is not token[0]. Destructive/network/mixed shell
-    # commands stay unstructured so continuation messages preserve the raw
-    # command instead of misrepresenting it as a simple file read.
+    # Scan every token, not just the first: agents often lead with a variable assignment or a subshell (e.g. `$path = "..."; $lines = Get-Content $path`), so the recognized verb is not token[0]. Destructive/network/mixed shell commands stay unstructured so continuation messages preserve the raw command instead of misrepresenting it as a simple file read.
     ops: list[str] = []
     for token in command.split():
         classified = _classify_shell_verb(token)
@@ -226,11 +218,7 @@ def _rotate(path: Path) -> None:
 
 
 def _ledger_dir_candidates() -> list[Path]:
-    # Mirrors session_intent_analyzer_hook: repo checkout first, then skill
-    # install locations. The runtime tree ships only _shared, so the
-    # repo-relative candidate always misses there; without the skill-install
-    # candidates this hook would fall back to a hardcoded legacy root and
-    # silently diverge from the ledger's repo-aware default root.
+    # Mirrors session_intent_analyzer_hook: repo checkout first, then skill install locations. The runtime tree ships only _shared, so the repo-relative candidate always misses there; without the skill-install candidates this hook would fall back to a hardcoded legacy root and silently diverge from the ledger's repo-aware default root.
     home = _home()
     candidates = [
         Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts",

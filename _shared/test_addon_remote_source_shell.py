@@ -19,6 +19,8 @@ import textwrap
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -132,7 +134,8 @@ def _hook_commands(settings_path: Path) -> list[str]:
 
 class RemoteAddonSourceLifecycleTest(unittest.TestCase):
     def test_git_url_addon_source_installs_runs_and_uninstalls_adapter_hook(self):
-        if not shutil.which("bash"):
+        bash = _find_test_bash()
+        if not bash:
             self.skipTest("bash required")
         if not shutil.which("git"):
             self.skipTest("git required")
@@ -157,7 +160,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
 
             def run(*args: str) -> subprocess.CompletedProcess[str]:
                 return subprocess.run(
-                    [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args],
+                    [bash, str(REPO_ROOT / "install.sh"), *args],
                     cwd=REPO_ROOT,
                     env=env,
                     capture_output=True,
@@ -217,7 +220,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
         zsh = shutil.which("zsh")
         if not zsh:
             self.skipTest("zsh required")
-        if not shutil.which("bash"):
+        if not _find_test_bash():
             self.skipTest("bash required")
         if not shutil.which("git"):
             self.skipTest("git required")
@@ -298,7 +301,8 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             self.assertNotIn("[adapter:autopilot-mode]", status.stdout + status.stderr)
 
     def test_bad_git_ref_fails_before_installing_remote_addon_targets(self):
-        if not shutil.which("bash"):
+        bash = _find_test_bash()
+        if not bash:
             self.skipTest("bash required")
         if not shutil.which("git"):
             self.skipTest("git required")
@@ -321,7 +325,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
 
             install = subprocess.run(
                 [
-                    shutil.which("bash"),
+                    bash,
                     str(REPO_ROOT / "install.sh"),
                     "--platform", "claude",
                     "--addon-source", remote_url,
@@ -344,7 +348,8 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             self.assertFalse((claude / "settings.json").exists())
 
     def test_local_addon_source_rejects_addon_tag_without_install_side_effects(self):
-        if not shutil.which("bash"):
+        bash = _find_test_bash()
+        if not bash:
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
@@ -367,7 +372,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
 
             install = subprocess.run(
                 [
-                    shutil.which("bash"),
+                    bash,
                     str(REPO_ROOT / "install.sh"),
                     "--platform", "claude",
                     "--addon-source", str(addon),

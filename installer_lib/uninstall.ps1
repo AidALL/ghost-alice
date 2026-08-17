@@ -172,7 +172,12 @@ function Invoke-InstallDoctor {
             $CodexBootstrapMarker, $CodexManagedBlockBegin, $CodexManagedBlockEnd
         )
     } elseif ($Platform -eq "claude") {
-        $pyArgs += @("--hook-config", (Join-Path (Resolve-ClaudeHome) "settings.json"))
+        $claudeRule = Join-Path (Resolve-ClaudeHome) "CLAUDE.md"
+        $pyArgs += @(
+            "--hook-config", (Join-Path (Resolve-ClaudeHome) "settings.json"),
+            "--global-rule", "claude-bootstrap", $claudeRule,
+            $ClaudeBootstrapMarker, $ClaudeManagedBlockBegin, $ClaudeManagedBlockEnd
+        )
     }
 
     $sharedSrc = Join-Path $ScriptDir "_shared"
@@ -416,7 +421,11 @@ function Invoke-Uninstall {
         $removed++
     }
 
-    if ($Platform -eq "codex" -and (Remove-CodexBootstrapIfUnused -SkillsRoot $SkillsDir)) {
+    if ($Platform -eq "claude") {
+        if (Remove-ClaudeBootstrapIfUnused -SkillsRoot $SkillsDir) {
+            $removed++
+        }
+    } elseif ($Platform -eq "codex" -and (Remove-CodexBootstrapIfUnused -SkillsRoot $SkillsDir)) {
         $removed++
     }
 
@@ -458,11 +467,7 @@ function Invoke-UninstallCleanup {
 
 function Invoke-AllAddonUninstallsBeforeFull {
     # PowerShell mirror of bash _uninstall_all_addons_before_full (uninstall.sh):
-    # finish any interrupted addon uninstall, then remove every installed addon via
-    # the hash-gated per-addon path (commands + resources allowed roots) BEFORE the
-    # cleanup wipes the sidecar registry that points at them. Returns $true only if
-    # all addons cleared; $false if any was preserved for manual review (drift /
-    # user-modified target), so the full uninstall must halt instead of clobbering.
+    # finish any interrupted addon uninstall, then remove every installed addon via the hash-gated per-addon path (commands + resources allowed roots) BEFORE the cleanup wipes the sidecar registry that points at them. Returns $true only if all addons cleared; $false if any was preserved for manual review (drift / user-modified target), so the full uninstall must halt instead of clobbering.
     $py = Find-PythonExe
     if (-not $py) { return $true }
     $userHome = Resolve-UserHome

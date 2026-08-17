@@ -1994,6 +1994,20 @@ class TestHookCommandAllowlist(unittest.TestCase):
                     (message, ""),
                 )
 
+    def test_explicit_continue_noop_remains_parseable_on_reduced_surfaces(self):
+        message = '{"continue": true, "systemMessage": ""}\n'
+
+        for surface in ("hidden", "compact", "focused"):
+            with self.subTest(surface=surface):
+                self.assertEqual(
+                    hook_profile_gate._render_user_surface(
+                        {"user_surface": surface, "value_key": "adapter-autopilot-mode-continue"},
+                        message,
+                        "debug-only diagnostic\n",
+                    ),
+                    (message, ""),
+                )
+
     def test_runner_emits_forced_action_denial_after_strict_log_append(self):
         message = '{"decision":"deny","reason":"[tool-checkpoint] required"}'
         code = f"print({message!r})"

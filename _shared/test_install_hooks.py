@@ -1008,9 +1008,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("decision", payload)
 
     def test_claude_stop_hook_blocks_completion_claim_with_invalid_body(self):
-        # Completion-body-validation invariant: verification skill loaded, but the [completion-check] body is
-        # incomplete (no [io-trace]/acceptance-criteria/claim-evidence-map).
-        # The strengthened Claude Stop gate must block, matching the .mjs validator.
+        # Completion-body-validation invariant: verification skill loaded, but the [completion-check] body is incomplete (no [io-trace]/acceptance-criteria/claim-evidence-map). The strengthened Claude Stop gate must block, matching the .mjs validator.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1055,10 +1053,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("io-trace", payload["reason"])
 
     def test_claude_stop_hook_validates_only_final_response(self):
-        # Regression: AskUserQuestion answers / tool results are NOT real user prompts,
-        # so the turn boundary does not reset on them. The hook must validate only the
-        # FINAL response, not concatenate completion-checks from earlier responses in
-        # the span (which made it re-extract a stale/invalid earlier block and block).
+        # Regression: AskUserQuestion answers / tool results are NOT real user prompts, so the turn boundary does not reset on them. The hook must validate only the FINAL response, not concatenate completion-checks from earlier responses in the span (which made it re-extract a stale/invalid earlier block and block).
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1124,8 +1119,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("decision", payload)
 
     def test_claude_stop_hook_allows_explanatory_final_response_without_completion_check(self):
-        # Stop hooks keep the completion gate alive without turning every routine
-        # explanatory final response into a completion-check retry loop.
+        # Stop hooks keep the completion gate alive without turning every routine explanatory final response into a completion-check retry loop.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1751,8 +1745,7 @@ class TestMessageLanguage(unittest.TestCase):
                 self.assertFalse((shared_dir / filename).exists())
 
     def test_dispatcher_install_copies_companion_modules(self):
-        # Dispatcher companion-module invariant: the dispatcher imports a relative .mjs module; the installer
-        # must copy it alongside, or the installed enforcer fails ERR_MODULE_NOT_FOUND.
+        # Dispatcher companion-module invariant: the dispatcher imports a relative .mjs module; the installer must copy it alongside, or the installed enforcer fails ERR_MODULE_NOT_FOUND.
         prev_home = os.environ.get("HOME")
         with tempfile.TemporaryDirectory() as temp_home:
             os.environ["HOME"] = temp_home
@@ -3052,6 +3045,48 @@ class TempHomeTestCase(unittest.TestCase):
             encoding="utf-8",
         )
         return node
+
+    def _create_addon_source(self, skill_name: str = "autopilot-mode") -> Path:
+        """Create a manifest-verified addon source with one Claude skill target."""
+        source = self.fake_home / "addon-source"
+        addon_dir = source / "addons" / skill_name
+        skill_dir = addon_dir / "skill"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            f"name: {skill_name}\n"
+            'description: "Fixture addon skill."\n'
+            "---\n",
+            encoding="utf-8",
+        )
+        (source / "addons-manifest.json").write_text(
+            json.dumps({
+                "manifest_version": 1,
+                "addons": [{
+                    "id": skill_name,
+                    "path": f"addons/{skill_name}",
+                    "min_core_version": "0.1.0",
+                    "tags": ["test"],
+                }],
+            }),
+            encoding="utf-8",
+        )
+        (addon_dir / "addon.json").write_text(
+            json.dumps({
+                "addon_version": "0.1.0",
+                "addon_id": skill_name,
+                "skills": [{
+                    "name": skill_name,
+                    "source": "skill",
+                    "skill_dir": "skill",
+                }],
+                "platforms": ["claude"],
+                "depends_on_core": [],
+                "secrets": [],
+            }),
+            encoding="utf-8",
+        )
+        return source
 
 
 class TestInstallHook(TempHomeTestCase):
@@ -4397,6 +4432,58 @@ class TestInstallHook(TempHomeTestCase):
             1,
         )
 
+    def test_install_adds_only_manifest_verified_addon_skill_permissions(self):
+        """Claude permissions include verified addon targets, not arbitrary installed dirs."""
+        addon_source = self._create_addon_source()
+        unverified_skill = self.fake_home / ".agents" / "skills" / "unverified-addon"
+        unverified_skill.mkdir(parents=True)
+        (unverified_skill / "SKILL.md").write_text("# unverified\n", encoding="utf-8")
+        self._write_settings("claude", {
+            "permissions": {"allow": ["Skill(custom-local-skill)"]},
+        })
+
+        result = install_hooks.install_hook("claude", addon_sources=[addon_source])
+
+        self.assertEqual(result, "installed")
+        allow = self._read_settings("claude")["permissions"]["allow"]
+        self.assertIn("Skill(verification-before-completion)", allow)
+        self.assertIn("Skill(autopilot-mode)", allow)
+        self.assertIn("Skill(custom-local-skill)", allow)
+        self.assertNotIn("Skill(unverified-addon)", allow)
+        self.assertEqual(allow.count("Skill(autopilot-mode)"), 1)
+
+        self.assertEqual(
+            install_hooks.install_hook("claude", addon_sources=[addon_source]),
+            "already",
+        )
+        status = install_hooks.check_status_detail(
+            "claude",
+            addon_sources=[addon_source],
+        )
+        self.assertEqual(status.status_token, "HOOK_INSTALLED_OK")
+        self.assertIn(
+            "skill-permission:autopilot-mode",
+            status.details["installed"],
+        )
+
+    def test_permission_discovery_does_not_trust_unverified_installed_tree(self):
+        """An installed directory cannot become a managed permission without a manifest."""
+        addon_source = self._create_addon_source()
+        unverified_skill = self.fake_home / ".agents" / "skills" / "unverified-addon"
+        unverified_skill.mkdir(parents=True)
+        (unverified_skill / "SKILL.md").write_text("# unverified\n", encoding="utf-8")
+
+        with patch.object(
+            install_hooks,
+            "_discover_ghost_alice_skill_names_from_catalog",
+            return_value=[],
+        ):
+            permissions = install_hooks._claude_ghost_alice_skill_permissions(
+                [addon_source]
+            )
+
+        self.assertEqual(permissions, ["Skill(autopilot-mode)"])
+
     def test_install_preserves_non_managed_bash_permissions(self):
         """The installer does not remove unmanaged Bash allow rules."""
         self._write_settings("claude", {
@@ -4542,6 +4629,22 @@ class TestCheckStatus(TempHomeTestCase):
 
         result = install_hooks.check_status("claude")
         self.assertEqual(result, "installed")
+
+    def test_status_reports_missing_verified_addon_skill_permission(self):
+        """Status reports drift when a managed addon Skill permission is removed."""
+        addon_source = self._create_addon_source()
+        self._write_settings("claude", {})
+        result = install_hooks.install_hook("claude")
+        self.assertEqual(result, "installed")
+
+        status = install_hooks.check_status_detail(
+            "claude",
+            addon_sources=[addon_source],
+        )
+
+        self.assertEqual(status.status_token, "HOOK_MISSING")
+        self.assertEqual(status.legacy_status, "missing")
+        self.assertIn("skill-permission:autopilot-mode", status.details["missing"])
 
     def test_status_detail_reports_drift_when_marker_exists_but_command_differs(self):
         """Marker presence with command mismatch is command drift, not absence."""
@@ -5631,9 +5734,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self.assertNotIn(result.stdout.lstrip()[:1], ("[", "{"))
 
     def test_claude_stop_hook_emits_valid_json(self):
-        # With no transcript (empty input) there is no completion claim, so the
-        # claim-only gate allows. However, it must still emit valid JSON. The block path's.
-        # valid JSON is covered by test_claude_stop_hook_blocks_without_actual_verification_skill_load.
+        # With no transcript (empty input) there is no completion claim, so the claim-only gate allows. However, it must still emit valid JSON. The block path's. valid JSON is covered by test_claude_stop_hook_blocks_without_actual_verification_skill_load.
         result = _run_hook_command(install_hooks.STOP_HOOK_COMMAND)
         self.assertEqual(result.returncode, 0)
         payload = json.loads(result.stdout)

@@ -98,8 +98,7 @@ class TestIoTraceHook(unittest.TestCase):
         self.assertIn("Get-Content", row["pattern"])
 
     def test_bash_row_extracts_op_from_assignment_led_one_liner(self):
-        # Loop-found gap: agents lead with a variable assignment, so the verb is
-        # not token[0]. The scan must still find `Get-Content` -> op=read + path.
+        # Loop-found gap: agents lead with a variable assignment, so the verb is not token[0]. The scan must still find `Get-Content` -> op=read + path.
         raw = json.dumps({
             "session_id": "s-bash3",
             "tool_name": "Bash",
@@ -329,12 +328,7 @@ class TestIoTraceHook(unittest.TestCase):
 
 class TestSessionIntentRootResolution(unittest.TestCase):
     def test_runtime_copy_resolves_ledger_root_from_skill_install(self):
-        # N2: the runtime tree ships only _shared, so the repo-relative ledger
-        # candidate never exists there. The hook must resolve the real ledger
-        # from a skill install location and use its repo-aware default_root,
-        # instead of silently falling back to the legacy ~/.ghost-alice root
-        # (which diverges from where the ledger actually writes in repo
-        # sessions). Runs in a subprocess so no cached module can mask it.
+        # N2: the runtime tree ships only _shared, so the repo-relative ledger candidate never exists there. The hook must resolve the real ledger from a skill install location and use its repo-aware default_root, instead of silently falling back to the legacy ~/.ghost-alice root (which diverges from where the ledger actually writes in repo sessions). Runs in a subprocess so no cached module can mask it.
         repo_shared = Path(__file__).resolve().parent
         repo_root = repo_shared.parent
         real_ledger = repo_root / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"

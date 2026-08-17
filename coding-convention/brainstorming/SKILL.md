@@ -90,8 +90,7 @@ Understand the project:
 - Prefer multiple-choice questions when possible, but open-ended questions are fine too.
 - One question per message. If a topic needs more exploration, split it into several questions.
 - Focus on understanding the objective, constraints, and success criteria.
-- When you need to confirm the user's intent, verify your understood weighting, scope, and residual possibilities rather than a simple choice.
-  Example: "The core cause I understand is X, and is it correct to leave Y and Z as residual possibilities?"
+- When you need to confirm the user's intent, verify your understood weighting, scope, and residual possibilities rather than a simple choice. Example: "The core cause I understand is X, and is it correct to leave Y and Z as residual possibilities?"
 - When the user gives a concrete example, ask about the judgment criteria the example reveals rather than the example itself.
 
 Explore approaches:
@@ -158,12 +157,12 @@ Implementation:
 
 ## Core Principles
 
-One question at a time. Do not overwhelm with several questions.
-Prefer multiple choice. It is easier to answer than open-ended.
-Remove YAGNI relentlessly. Strip unnecessary features from every design.
-Explore alternatives. Always present 2 to 3 approaches before settling.
-Incremental verification. Present the design, get approval, then proceed.
-Stay flexible. If something is unclear, go back to clarify.
+- One question at a time. Do not overwhelm with several questions.
+- Prefer multiple choice. It is easier to answer than open-ended.
+- Remove YAGNI relentlessly. Strip unnecessary features from every design.
+- Explore alternatives. Always present 2 to 3 approaches before settling.
+- Incremental verification. Present the design, get approval, then proceed.
+- Stay flexible. If something is unclear, go back to clarify.
 
 ## Visual Companion
 
@@ -181,8 +180,8 @@ Decide per question:
 
 Even after the user accepts, decide whether to use the browser or the terminal for each question. The test: is it easier for the user to see than to read?
 
-Use the browser. Visual content: mockups, wireframes, layout comparisons, architecture diagrams, side-by-side visual designs.
-Use the terminal. Text content: requirement questions, conceptual choices, trade-off lists, A/B/C/D text options, scope decisions.
+- Use the browser. Visual content: mockups, wireframes, layout comparisons, architecture diagrams, side-by-side visual designs.
+- Use the terminal. Text content: requirement questions, conceptual choices, trade-off lists, A/B/C/D text options, scope decisions.
 
 A question about a UI topic is not automatically a visual question. "What does personality mean in this context?" is a conceptual question, use the terminal. "Which wizard layout is better?" is a visual question, use the browser.
 

@@ -93,8 +93,8 @@ Non-Responsibilities
 - Does not produce output (layer 2 does that)
 - Does not make verification or debugging decisions (performs only complexity classification and domain identification)
 
-Input: one to several lines of natural language
-Output: a subtask graph (node = task, edge = dependency), each node's semantic calling candidates + task-complexity-level-1/2/3 complexity + domain
+- Input: one to several lines of natural language
+- Output: a subtask graph (node = task, edge = dependency), each node's semantic calling candidates + task-complexity-level-1/2/3 complexity + domain
 
 ### Layer 2: Simultaneous Synthesis of Production, Verification, and Debugging (Compose)
 
@@ -102,14 +102,15 @@ Responsibilities
 - Calls production skills and verification skills together at each node of the graph
 - The debugging protocol steps in when the requester gets stuck during production (a non-coder demo failure) or the system gets stuck (a code error)
 - Debugging branches by mode according to the requester profile. Coder mode (systematic-debugging) and non-coder mode (screenshot and natural-language extraction + one change at a time)
-- Operates as closed-loop reasoning that repeatedly compares the intermediate state against the schema, the SSOT, the evidence, and the constraints
+- A checkpoint runs only while a live uncertainty exists and its possible outcomes can change the next decision.
+- Stop the sequence when a checkpoint produces no relevant state delta or when further checking displaces the primary objective.
 - When node production finishes, passes the result to layer 3
 
 Non-Responsibilities
 - Does not apply consensus rules (layer 3 does that)
 - Does not redo decomposition (follows the layer 1 result)
 
-Core principle: production skills and verification skills go into the same catalog as equals. A verification skill's frontmatter description also works as a detection input. However, the runtime's re-verification loop itself is not entirely placed on the calls graph.
+Core principle: production skills and verification skills go into the same catalog as equals. A verification skill's frontmatter description also works as a detection input. The calls graph stays sparse; bounded checkpoints and their stop decisions remain runtime procedure.
 
 ### Layer 3: Consensus and Gate (Consensus & Gate)
 
@@ -124,8 +125,8 @@ Non-Responsibilities
 - Does not modify the production itself (modification is the layer 2 debugging loop)
 - Does not apply consensus rules uniformly regardless of domain (follows the domain policy)
 
-Fixed zone: number of agents. Verification-complexity-level-1 exempt (no round entry), verification-complexity-level-2 fixed at 3, verification-complexity-level-3 fixed at 3 + dynamic selection of 2 from an expansion pool of 4 = 5. Consensus rule. Unanimity (default) / majority / weighted, caller-specified. Termination condition. Convergence judgment after round >= 5, round ceiling 50.
-Undecided zone: the human-gate trigger policy. This is set in a separate policy document.
+- Fixed zone: number of agents. Verification-complexity-level-1 exempt (no round entry), verification-complexity-level-2 fixed at 3, verification-complexity-level-3 fixed at 3 + dynamic selection of 2 from an expansion pool of 4 = 5. Consensus rule. Unanimity (default) / majority / weighted, caller-specified. Termination condition. Convergence judgment follows each complete independent cycle and stops when no decision-relevant uncertainty remains and another round cannot produce a relevant state delta, with a finite safety cap of 50 rounds.
+- Undecided zone: the human-gate trigger policy. This is set in a separate policy document.
 
 ### Layer 4: Governance and Contribution (Governance & Contribution)
 
@@ -227,7 +228,7 @@ This chapter records the design decisions reflected in the current implementatio
 ### Consensus Protocol
 - Number of agents: verification-complexity-level-1 exempt, verification-complexity-level-2 fixed at 3 (internal-logic, external-fact, internal-fact), verification-complexity-level-3 at 5 (fixed 3 + dynamic selection of 2 from a pool of 4). Pool: external-logic, edge-case, prior-art, incentive
 - Consensus rule: unanimity (default) / majority / weighted. Caller-specified, unanimity when unspecified
-- Adversarial round termination condition: convergence judgment after round >= 5, round ceiling 50, a checkpoint every 5 rounds (SSOT re-comparison, no mediation)
+- Adversarial round termination condition: after each complete 3-5-agent cycle, stop when no decision-relevant uncertainty remains and another round cannot produce a relevant state delta. Do not continue only to satisfy a round-count minimum. Unresolved disagreement fails closed to meta-judge/human escalation. A finite safety cap of 50 rounds remains
 - Action on consensus failure: the meta-judge writes a deadlock-report and passes it to a human. The meta-judge has no decision authority
 - Implementation: adversarial-verification/SKILL.md
 

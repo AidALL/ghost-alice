@@ -9,7 +9,9 @@
 - [Standard Input](#standard-input)
 - [Target Runtimes](#target-runtimes)
 - [Expected Signals](#expected-signals)
+- [Verification Layers](#verification-layers)
 - [Smoke Record](#smoke-record)
+- [Blind Behavior Record](#blind-behavior-record)
 - [Failure Triage](#failure-triage)
 - [Automated Verification Boundary](#automated-verification-boundary)
 
@@ -57,6 +59,17 @@ Antigravity adapter가 없으면 그 smoke item은 inconclusive로 기록한다.
 - `[io-trace]`: 읽은 file, 실행한 command, load한 skill이 auditable하게 남는다.
 - pending merge precheck: hook evidence가 있으면 hook-verified reuse로 분기하고, 없으면 current platform manifest를 직접 inspect한다.
 
+## Verification Layers
+
+| Layer | Purpose | Subject visibility | Release role |
+| --- | --- | --- | --- |
+| Skill pressure RED/GREEN | 공개된 pressure에서 작성된 methodology가 behavior를 바꾸는지 확인한다. | skill과 pressure purpose가 보인다. | authoring evidence이며 installed-behavior release evidence가 아니다. |
+| Governance smoke | hook, gate, process health, required control-surface marker를 확인한다. | governance request와 marker가 보인다. | runtime plumbing evidence이며 AI behavior judgment가 아니다. |
+| Automated blind screening | fresh session의 installed subject를 held-out authentic prompt로 평가한다. | prompt와 ordinary runtime context만 보인다. | 반복 가능한 behavior screening이다. purpose, rubric, expected answer, pass criteria, prior output, experiment label은 evaluator-private 상태로 남는다. |
+| Manual clean-terminal acceptance | canonical install 뒤 사람이 새 terminal에서 held-out case를 실행한다. | authentic request만 subject에 전달한다. | final live acceptance gate다. Computer Use로 이 terminal을 자동화하지 않는다. |
+
+Automated blind screening은 direct process만 사용한다. controller packet과 subject packet을 구조적으로 분리하고, separate evaluator가 verdict를 반환할 때까지 subject output을 memory에만 유지한다. controller가 sealed case file을 직접 load하고 exact loaded bytes의 digest와 validated case의 canonical hash를 계산하며 caller가 공급한 freshness, isolation, digest field를 거부한다. installed provenance는 `~/.ghost-alice/install-state/<platform>.json`의 schema-version-1 installer state에서만 가져오며 caller나 subject self-attestation은 provenance가 아니다.
+
 ## Smoke Record
 
 repo에 record를 저장할 때는 `tmp/` 또는 local scratch만 쓴다. remote Wiki나 user home settings는 mutate하지 않는다.
@@ -94,6 +107,16 @@ output_file:
 reasons:
 ```
 
+## Blind Behavior Record
+
+Blind record는 governance-smoke summary와 별도 schema를 사용한다. case id/hash, exact-file suite digest, source/version, installed provenance, mode, verdict/dimensions, sanitized reason, minimal process status인 `exit_code`와 `timed_out`만 포함할 수 있다. raw prompt, rubric, expected answer, subject response나 full transcript, raw stdout/stderr log, pass criteria, prior output, experiment label, credential, evaluator-private note를 저장하지 않는다.
+
+Persisted dimension key는 constrained opaque id를 사용한다. private criterion text를 durable dimension key로 사용하지 않는다.
+
+`_shared/blind_behavior.py`가 dedicated automated screening path다. blind evaluation을 `_shared/live_agent_smoke.py`의 mode로 추가하지 않는다. controller는 loaded case와 evaluator-private type을 검증한 뒤 subject execution을 `_shared/fresh_agent_session.py`에 위임한다. 이 owner만 Claude no-persistence 또는 Codex ephemeral command를 구성하고 resume/session argument를 거부하며 empty run cwd를 만든다. subject stdin에는 authentic prompt만 보내고 case/private argv를 추가하지 않는다. ordinary runtime value와 설정된 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`만 전달하며 rubric, purpose, expected-answer, controller-private environment value는 제거한다. response와 private state는 separate evaluator process에 전달한다.
+
+Subject/evaluator timeout, non-zero exit, empty subject response, malformed evaluator output, invalid evaluator state, overall/dimension disagreement는 모두 fail-closed 처리하며 conduct-feedback candidate를 만들지 않는다. Evaluator-confirmed behavioral failure만 exactly one canonical report-only candidate를 만든다. optional record write는 atomic하며 sanitized record만 저장한다.
+
 ## Failure Triage
 
 | Symptom | Judgment | Next action |
@@ -113,6 +136,4 @@ reasons:
 
 ## Automated Verification Boundary
 
-Runtime smoke records는 manual evidence이며 keyword-presence unit test target이 아니다.
-static hook payload와 gate wording contract는 `scripts/check_skill_gate_contract.py`, `scripts/validate_entrypoints.py`, `_shared.test_install_hooks`가 cover한다.
-`_shared/live_agent_smoke.py`는 process-level evidence를 classify하고 Codex fresh-session smoke case를 실행할 수 있지만, 이 policy와 design documents에 대한 adversarial review를 대체하지 않는다.
+Runtime smoke records는 manual evidence이며 keyword-presence unit test target이 아니다. static hook payload와 gate wording contract는 `scripts/check_skill_gate_contract.py`, `scripts/validate_entrypoints.py`, `_shared.test_install_hooks`가 cover한다. `_shared/live_agent_smoke.py`는 process-level evidence를 classify하고 Codex fresh-session smoke case를 실행할 수 있지만, 이 policy와 design documents에 대한 adversarial review를 대체하지 않는다. Automated blind screening은 evidence를 강화하지만 human-operated clean-terminal final acceptance gate를 대체하지 않는다.

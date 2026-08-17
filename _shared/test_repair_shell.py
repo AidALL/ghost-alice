@@ -19,6 +19,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+from _shared.addon_uninstall import _is_reparse_point, _symlink_safe_remove
+from _shared.install_transaction import _create_directory_link
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 
@@ -37,14 +41,15 @@ def _python_311() -> bool:
 
 class RepairTest(unittest.TestCase):
     def setUp(self):
-        if not shutil.which("bash"):
+        self.bash = _find_test_bash()
+        if not self.bash:
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
 
     def _run(self, env, *args):
         return subprocess.run(
-            [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+            [self.bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, check=False)
 
@@ -57,10 +62,10 @@ class RepairTest(unittest.TestCase):
             install = self._run(env, "--platform", "claude", "task-router")
             self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             skill = Path(home) / ".claude" / "skills" / "task-router"
-            self.assertTrue(skill.is_symlink())
+            self.assertTrue(skill.is_symlink() or _is_reparse_point(skill))
 
             # 1) target went missing -> repair must re-provision it
-            skill.unlink()
+            _symlink_safe_remove(skill)
             self.assertFalse(os.path.lexists(skill))
             repair = self._run(env, "--platform", "claude", "--repair")
             self.assertEqual(repair.returncode, 0, msg=repair.stderr + repair.stdout)
@@ -68,13 +73,13 @@ class RepairTest(unittest.TestCase):
                             + repair.stderr + repair.stdout)
 
             # 2) user replaced the managed slot with their own dir -> repair must NOT clobber it
-            skill.unlink()
+            _symlink_safe_remove(skill)
             skill.mkdir()
             (skill / "USER_FILE").write_text("mine\n", encoding="utf-8")
             repair2 = self._run(env, "--platform", "claude", "--repair")
             self.assertTrue((skill / "USER_FILE").exists(),
                             msg="repair clobbered a user-owned slot: " + repair2.stderr + repair2.stdout)
-            self.assertFalse(skill.is_symlink())  # still the user's dir, not re-symlinked
+            self.assertFalse(skill.is_symlink() or _is_reparse_point(skill))  # still the user's dir, not re-symlinked
 
     def test_repair_fixes_dangling_shared(self):
         with tempfile.TemporaryDirectory() as home:
@@ -84,10 +89,12 @@ class RepairTest(unittest.TestCase):
             install = self._run(env, "--platform", "claude", "task-router")
             self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             shared = Path(home) / ".claude" / "skills" / "_shared"
-            # a DANGLING _shared symlink is functionally missing (every skill resolves
-            # shared modules through it) -> repair must restore it, not silently skip.
-            shared.unlink()
-            shared.symlink_to(Path(home) / "nonexistent-target")
+            # a DANGLING _shared symlink is functionally missing (every skill resolves shared modules through it) -> repair must restore it, not silently skip.
+            _symlink_safe_remove(shared)
+            missing_target = Path(home) / "nonexistent-target"
+            missing_target.mkdir()
+            _create_directory_link(missing_target, shared)
+            shutil.rmtree(missing_target)
             self.assertFalse(shared.exists())  # dangling
             repair = self._run(env, "--platform", "claude", "--repair")
             self.assertEqual(repair.returncode, 0, msg=repair.stderr + repair.stdout)

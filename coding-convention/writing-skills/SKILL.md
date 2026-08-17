@@ -181,8 +181,8 @@ No writing a skill without a failing test
 
 This applies both to new skills and to modifying existing skills.
 
-Wrote the skill first and tested after? Delete it. Start over.
-Modified the skill but did not test it? Same violation.
+- Wrote the skill first and tested after? Delete it. Start over.
+- Modified the skill but did not test it? Same violation.
 
 No exceptions:
 - Not even a simple addition.
@@ -217,8 +217,7 @@ For detailed test methods, see references/skill-testing-guide.md.
 
 For reinforcement patterns that block rationalization escape routes (bulletproofing). Pressure scenarios, counter-example collections, blocking the "this is different" excuse, STOP gates, repeated injection, and so on. See references/bulletproofing-skills.md.
 
-For exact examples, counter-examples, and the authoring procedure in
-Condition-Skill-Output form, see references/condition-skill-output-detailed.md.
+For exact examples, counter-examples, and the authoring procedure in Condition-Skill-Output form, see references/condition-skill-output-detailed.md.
 
 ## Red Flags. Signs to Stop and Start Over.
 

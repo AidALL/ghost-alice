@@ -456,11 +456,7 @@ def _home_from_env(env: dict[str, str]) -> Path | None:
 def _read_stdin() -> str:
     if sys.stdin.isatty():
         return ""
-    # Read the raw byte buffer and decode UTF-8 explicitly. Claude Code sends the
-    # hook payload as UTF-8 JSON, but the default stdin encoding on Windows is
-    # cp949/cp1252, so a bare sys.stdin.read() would mis-decode non-ASCII (Korean)
-    # text into mojibake/lone-surrogates at this outer boundary before it reaches
-    # any inner hook. errors="replace" keeps a stray byte from crashing the gate.
+    # Read the raw byte buffer and decode UTF-8 explicitly. Claude Code sends the hook payload as UTF-8 JSON, but the default stdin encoding on Windows is cp949/cp1252, so a bare sys.stdin.read() would mis-decode non-ASCII (Korean) text into mojibake/lone-surrogates at this outer boundary before it reaches any inner hook. errors="replace" keeps a stray byte from crashing the gate.
     buffer = getattr(sys.stdin, "buffer", None)
     if buffer is not None:
         try:
@@ -785,17 +781,17 @@ def _render_model_surface(item: dict[str, object], stdout: str, stderr: str) -> 
     return f"{value_key}: {value}" if value else f"{value_key} observed"
 
 
-def _is_empty_hook_noop_json(stdout: str) -> bool:
+def _is_hook_noop_json(stdout: str) -> bool:
     try:
         value = json.loads(stdout)
     except (json.JSONDecodeError, TypeError):
         return False
-    return isinstance(value, dict) and not value
+    return value == {} or value == {"continue": True, "systemMessage": ""}
 
 
 def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> tuple[str, str]:
     level = str(item.get("user_surface") or "")
-    if _is_empty_hook_noop_json(stdout):
+    if _is_hook_noop_json(stdout):
         return (stdout, "" if level in {"hidden", "compact", "focused"} else stderr)
     value_key = str(item.get("value_key") or "surface-item")
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
@@ -838,8 +834,7 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
     argv = _validate_shell_command(command, env=env)
     stdin_text = _read_stdin()
     child_env = dict(env)
-    # subprocess.run encodes the pipe as UTF-8 below; Python children must
-    # decode the same bytes independently of the Windows console code page.
+    # subprocess.run encodes the pipe as UTF-8 below; Python children must decode the same bytes independently of the Windows console code page.
     child_env["PYTHONIOENCODING"] = "utf-8"
     started = time.perf_counter()
     result = subprocess.run(

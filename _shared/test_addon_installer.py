@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -185,8 +186,7 @@ class AddonInstallerTest(unittest.TestCase):
         }), encoding="utf-8")
 
     def test_depends_on_core_absent_from_core_set_is_rejected(self) -> None:
-        # depends_on_core enforcement: a declared depends_on_core not in the known core skill set
-        # must fail closed at load time (decorative contract -> enforced contract).
+        # depends_on_core enforcement: a declared depends_on_core not in the known core skill set must fail closed at load time (decorative contract -> enforced contract).
         from addon_installer import AddonManifestError, load_addon_targets
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir)
@@ -204,8 +204,7 @@ class AddonInstallerTest(unittest.TestCase):
             self.assertEqual([t.name for t in targets], ["needsskill"])
 
     def test_depends_on_core_not_enforced_without_core_set(self) -> None:
-        # When no core list is provided, the check cannot run -> must not raise
-        # (enforcement only fires where the core set is known).
+        # When no core list is provided, the check cannot run -> must not raise (enforcement only fires where the core set is known).
         from addon_installer import load_addon_targets
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir)
@@ -216,10 +215,7 @@ class AddonInstallerTest(unittest.TestCase):
     _RICH_FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 
     def test_detect_collisions_flags_unowned_command_extra(self) -> None:
-        # Preflight must catch a command/resource extra whose dest already exists
-        # and is NOT owned by the installing addon. Otherwise the collision only
-        # surfaces at provision time (after hooks/skills are written), orphaning
-        # an installed addon skill + hook with no sidecar to uninstall.
+        # Preflight must catch a command/resource extra whose dest already exists and is NOT owned by the installing addon. Otherwise the collision only surfaces at provision time (after hooks/skills are written), orphaning an installed addon skill + hook with no sidecar to uninstall.
         from addon_installer import detect_collisions, load_addon_targets
         targets = load_addon_targets([str(self._RICH_FIXTURE)], platform="claude")
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -330,7 +326,8 @@ class AddonInstallerTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            installed_skill = Path(temp_home) / ".claude" / "skills" / "noop" / "SKILL.md"
+            installed_root = Path(temp_home) / ".claude" / "skills" / "noop"
+            installed_skill = installed_root / "SKILL.md"
             self.assertTrue(installed_skill.exists(), msg=result.stderr + result.stdout)
 
             state_path = Path(temp_home) / ".ghost-alice" / "install-state" / "claude.json"
@@ -338,8 +335,7 @@ class AddonInstallerTest(unittest.TestCase):
             target_names = {target["target_name"] for target in state["targets"]}
             self.assertIn("noop", target_names)
 
-            # End-to-end: the install path wrote the per-addon sidecar (T1.3),
-            # platform-scoped under addons/<platform>/ (review M5).
+            # End-to-end: the install path wrote the per-addon sidecar (T1.3), platform-scoped under addons/<platform>/ (review M5).
             sidecar = Path(temp_home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
             self.assertTrue(sidecar.exists(), msg=result.stderr + result.stdout)
             record = json.loads(sidecar.read_text(encoding="utf-8"))
@@ -349,8 +345,16 @@ class AddonInstallerTest(unittest.TestCase):
             provided_names = {p["name"] for p in record["provided"]}
             self.assertIn("noop", provided_names)
             noop_entry = next(p for p in record["provided"] if p["name"] == "noop")
-            self.assertEqual(noop_entry["install_mode"], "symlink")
-            self.assertTrue(noop_entry["content_hash"])
+            attrs = getattr(os.lstat(installed_root), "st_file_attributes", 0)
+            if installed_root.is_symlink():
+                physical_mode = "symlink"
+            elif attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+                physical_mode = "junction"
+            else:
+                physical_mode = "copy"
+            self.assertEqual(noop_entry["install_mode"], physical_mode)
+            from hash_utils import hash_target
+            self.assertEqual(noop_entry["content_hash"], hash_target(installed_root, physical_mode))
 
             # F1 end-to-end: the SAME-run sidecar must be reflected in install-state attribution.
             state_noop = next(t for t in state["targets"] if t["target_name"] == "noop")

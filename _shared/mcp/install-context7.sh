@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Ghost-ALICE - Context7 MCP install script
 #
-# Context7 is a RAG MCP that injects current official library docs into LLM context.
-# Register this MCP in Claude Code. The API key is optional and raises the rate limit when present.
+# Context7 is a RAG MCP that injects current official library docs into LLM context. Register this MCP in Claude Code. The API key is optional and raises the rate limit when present.
 #
 # Usage:
 #   bash _shared/mcp/install-context7.sh                       # Use no key or an env var

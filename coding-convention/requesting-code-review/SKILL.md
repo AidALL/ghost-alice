@@ -7,11 +7,7 @@ compatibility:
 
 # Requesting Code Review
 
-Dispatch the `code-reviewer` subagent to catch issues before they accumulate.
-The reviewer receives only the context prepared for evaluation. It never
-receives the session history. This keeps the reviewer focused on the work
-output rather than on your thought process, and preserves your own context for
-follow-up work.
+Dispatch the `code-reviewer` subagent to catch issues before they accumulate. The reviewer receives only the context prepared for evaluation. It never receives the session history. This keeps the reviewer focused on the work output rather than on your thought process, and preserves your own context for follow-up work.
 
 ○ Core principle: review early, review often
 ## Contents

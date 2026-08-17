@@ -323,9 +323,7 @@ function startServer() {
   }, 60 * 1000);
   lifecycleCheck.unref();
 
-  // Validate owner PID at startup. If it's already dead, the PID resolution
-  // was wrong (common on WSL, Tailscale SSH, and cross-user scenarios).
-  // Disable monitoring and rely on the idle timeout instead.
+  // Validate owner PID at startup. If it's already dead, the PID resolution was wrong (common on WSL, Tailscale SSH, and cross-user scenarios). Disable monitoring and rely on the idle timeout instead.
   if (ownerPid) {
     try { process.kill(ownerPid, 0); }
     catch (e) {

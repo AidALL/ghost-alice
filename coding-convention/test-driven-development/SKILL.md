@@ -34,12 +34,9 @@ compatibility:
 
 ## Overview
 
-TDD starts after the target behavior is known. Write the test first, see the
-failure with your own eyes, then write the minimal code that makes it pass.
+TDD starts after the target behavior is known. Write the test first, see the failure with your own eyes, then write the minimal code that makes it pass.
 
-If the premise, data flow, target module, or desired behavior is still unknown,
-do discovery or an implementation proof first. Once the contract is clear,
-freeze it with regression tests before claiming completion.
+If the premise, data flow, target module, or desired behavior is still unknown, do discovery or an implementation proof first. Once the contract is clear, freeze it with regression tests before claiming completion.
 
 ○ Core principles
 
@@ -59,14 +56,11 @@ freeze it with regression tests before claiming completion.
 - The premise, data flow, target surface, or desired behavior is unknown.
 - The work is a one-off prototype, spike, or proof used to discover the contract.
 - The user explicitly instructs implementation first with immediate verification.
-- Code-generator output or configuration-only edits make a failing behavioral test
-  inapplicable.
+- Code-generator output or configuration-only edits make a failing behavioral test inapplicable.
 
-In these cases, run discovery or the proof under a bounded contract, then write
-regression tests for the discovered behavior before completion or merge.
+In these cases, run discovery or the proof under a bounded contract, then write regression tests for the discovered behavior before completion or merge.
 
-If the target behavior is known and the thought "let me skip TDD just this once"
-comes up, stop. That is rationalization.
+If the target behavior is known and the thought "let me skip TDD just this once" comes up, stop. That is rationalization.
 
 ## Applicability gate
 
@@ -74,11 +68,9 @@ Before invoking RED-first TDD, answer these questions.
 
 - What exact behavior should fail before the fix?
 - Which production path will the test exercise?
-- Is the expected behavior independent of the implementation you are about to
-  write?
+- Is the expected behavior independent of the implementation you are about to write?
 
-If any answer is unknown, the next step is discovery, root-cause tracing, or an
-implementation proof. Do not invent a test around an unresolved premise.
+If any answer is unknown, the next step is discovery, root-cause tracing, or an implementation proof. Do not invent a test around an unresolved premise.
 
 ## The Iron Law
 
@@ -86,8 +78,7 @@ implementation proof. Do not invent a test around an unresolved premise.
 For TDD-applicable work, do not write production code without a failing test.
 ```
 
-Did you write code before the test even though the behavior contract was already
-known? Delete it. Start over from the beginning.
+Did you write code before the test even though the behavior contract was already known? Delete it. Start over from the beginning.
 
 □ No exceptions after the applicability gate passes
 
@@ -250,15 +241,11 @@ Things to confirm
 A rerun is useful evidence only when it can fail because of the latest change.
 
 - Rerun the previously failing test after the fix.
-- Rerun directly impacted tests for adjacent production paths, shared helpers,
-  fixtures, schema, installer/runtime state, or public API you changed.
+- Rerun directly impacted tests for adjacent production paths, shared helpers, fixtures, schema, installer/runtime state, or public API you changed.
 - Do not repeat broad passing suites just because they are available.
-- Broaden to a larger suite only when a risk signal exists, such as a shared
-  dependency, changed environment, flaky-test check, generated artifact, or
-  cross-platform/runtime surface.
+- Broaden to a larger suite only when a risk signal exists, such as a shared dependency, changed environment, flaky-test check, generated artifact, or cross-platform/runtime surface.
 
-If a broad suite already passed before the latest narrow fix, keep that result
-as context. Re-run it only when the latest change can invalidate that evidence.
+If a broad suite already passed before the latest narrow fix, keep that result as context. Re-run it only when the latest change can invalidate that evidence.
 
 ### REFACTOR: clean up
 
@@ -324,9 +311,7 @@ For TDD-applicable work, TDD is the pragmatism.
 - It documents the behavior (the test shows how to use the code)
 - It makes refactoring possible (change freely, and the test catches any break)
 
-The "pragmatic" shortcut after the behavior contract is known = debugging in
-production = slower. Before the contract is known, discovery or a bounded proof
-is the pragmatic step.
+The "pragmatic" shortcut after the behavior contract is known = debugging in production = slower. Before the contract is known, discovery or a bounded proof is the pragmatic step.
 
 □ "An after-the-fact test achieves the same goal. It is the spirit, not the form"
 
@@ -334,10 +319,7 @@ No. An after-the-fact test answers "what does this code do?" A test-first answer
 
 An after-the-fact test is biased toward the implementation. It checks what you built, not what was required. It verifies only the edge cases you remembered, not the edge cases you discovered.
 
-A test-first forces edge-case discovery before implementation when the intended
-behavior is known. A 30-minute after-the-fact test ≠ TDD in that case. When the
-premise was unknown, convert the discovered behavior into regression tests
-before claiming completion.
+A test-first forces edge-case discovery before implementation when the intended behavior is known. A 30-minute after-the-fact test ≠ TDD in that case. When the premise was unknown, convert the discovered behavior into regression tests before claiming completion.
 
 ## Common rationalizations
 
@@ -371,10 +353,7 @@ before claiming completion.
 - "TDD is dogma, I am pragmatic"
 - "This case is different, so..."
 
-If one of the items above appears after the applicability gate passed, delete
-the code and start over with TDD. If the applicability gate did not pass, finish
-the discovery/proof under a bounded contract and then add regression tests for
-the discovered behavior.
+If one of the items above appears after the applicability gate passed, delete the code and start over with TDD. If the applicability gate did not pass, finish the discovery/proof under a bounded contract and then add regression tests for the discovered behavior.
 
 ## Example: bug fix
 
@@ -428,16 +407,13 @@ Confirm before declaring the work complete.
 - [ ] Each known-contract test failed for the expected reason (a missing feature, not a typo)
 - [ ] Any discovery/proof work was converted into regression coverage before completion
 - [ ] You wrote the minimal code that makes each test pass
-- [ ] Verification scope matches the latest change: previously failing test
-      first, directly impacted tests next, broader suites only with a risk
-      signal
+- [ ] Verification scope matches the latest change: previously failing test first, directly impacted tests next, broader suites only with a risk signal
 - [ ] All tests pass
 - [ ] The output is clean (no errors or warnings)
 - [ ] The tests use the real code (mocks only when unavoidable)
 - [ ] Edge cases and error paths are covered
 
-Even one applicable item left unchecked? You either skipped TDD or left
-discovery unconverted into regression coverage. Fix that before completion.
+Even one applicable item left unchecked? You either skipped TDD or left discovery unconverted into regression coverage. Fix that before completion.
 
 ## When you are stuck
 
@@ -450,12 +426,9 @@ discovery unconverted into regression coverage. Fix that before completion.
 
 ## Debugging integration
 
-Found a bug with a clear reproduction contract? Write a failing test that
-reproduces it. Follow the TDD cycle. The test proves the fix and prevents the
-regression.
+Found a bug with a clear reproduction contract? Write a failing test that reproduces it. Follow the TDD cycle. The test proves the fix and prevents the regression.
 
-If the reproduction contract is not clear, trace it first, then write the
-regression test before completion.
+If the reproduction contract is not clear, trace it first, then write the regression test before completion.
 
 ## Test anti-patterns
 

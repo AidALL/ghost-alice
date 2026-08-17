@@ -191,7 +191,11 @@ _run_install_doctor() {
       )
       ;;
     claude)
-      args+=(--hook-config "$(resolve_claude_home)/settings.json")
+      args+=(
+        --hook-config "$(resolve_claude_home)/settings.json"
+        --global-rule "claude-bootstrap" "$(resolve_claude_home)/CLAUDE.md"
+        "$CLAUDE_BOOTSTRAP_MARKER" "$CLAUDE_MANAGED_BLOCK_BEGIN" "$CLAUDE_MANAGED_BLOCK_END"
+      )
       ;;
   esac
 
@@ -245,10 +249,7 @@ run_doctor() {
   echo "$(t "Installer doctor (${SKILLS_DIR}):" "Installer doctor (${SKILLS_DIR}):")"
   local rc=0
 
-  # Self-heal like the uninstall path: finish any interrupted addon uninstall.
-  # A marker left behind afterwards means the uninstall is genuinely stuck (e.g.
-  # a user-modified target kept for manual review), so doctor must surface it
-  # instead of reporting overall ok.
+  # Self-heal like the uninstall path: finish any interrupted addon uninstall. A marker left behind afterwards means the uninstall is genuinely stuck (e.g. a user-modified target kept for manual review), so doctor must surface it instead of reporting overall ok.
   _resume_pending_addon_uninstalls
   local addons_dir="${HOME}/.ghost-alice/addons/${PLATFORM}"
   if [ -d "$addons_dir" ]; then
@@ -270,8 +271,7 @@ _resume_pending_addon_uninstalls() {
   py="$(_find_python_runtime || true)"
   [ -n "$py" ] || return 0
   [ -d "${HOME}/.ghost-alice/addons/${PLATFORM}" ] || return 0
-  # Capture output: a failed pending-uninstall resume is a recovery operation
-  # whose diagnostics must survive, not vanish into /dev/null.
+  # Capture output: a failed pending-uninstall resume is a recovery operation whose diagnostics must survive, not vanish into /dev/null.
   log="${HOME}/.ghost-alice/addon-resume.log"
   "$py" "${SCRIPT_DIR}/_shared/addon_uninstall.py" --resume-pending \
     --addons-dir "${HOME}/.ghost-alice/addons/${PLATFORM}" --skills-dir "$SKILLS_DIR" \
@@ -300,10 +300,7 @@ uninstall() {
     arg_index=$((arg_index + 1))
   done
 
-  # Snapshot which requested addons exist (sidecar or pending .removing marker)
-  # BEFORE resume runs. An addon that resume finishes for us must count as
-  # removed, not as a spurious unknown-addon failure when the explicit pass below
-  # then finds nothing.
+  # Snapshot which requested addons exist (sidecar or pending .removing marker) BEFORE resume runs. An addon that resume finishes for us must count as removed, not as a spurious unknown-addon failure when the explicit pass below then finds nothing.
   local _adir="${HOME}/.ghost-alice/addons/${PLATFORM}"
   _promote_bare_installed_addon_ids "${_adir}"
   local known_before=" "
@@ -337,9 +334,7 @@ uninstall() {
       if [ "$arc" -eq 0 ]; then
         removed=$((removed + 1))
       elif [ "$arc" -eq 1 ]; then
-        # rc 1 = not-found. If a pending uninstall for this addon existed before
-        # resume, resume already completed it -> success; otherwise it was never
-        # installed -> a real failure the caller must see.
+        # rc 1 = not-found. If a pending uninstall for this addon existed before resume, resume already completed it -> success; otherwise it was never installed -> a real failure the caller must see.
         case "$known_before" in
           *" $aid "*) removed=$((removed + 1)) ;;
           *) failed=$((failed + 1)); warn "$(t "Addon ${aid}: not installed (nothing to remove)" "Addon ${aid}: not installed (nothing to remove)")" ;;
@@ -398,9 +393,18 @@ uninstall() {
     removed=$((removed + 1))
   fi
 
-  if [ "$PLATFORM" = "codex" ] && remove_codex_bootstrap_if_unused "${SKILLS_DIR}"; then
-    removed=$((removed + 1))
-  fi
+  case "$PLATFORM" in
+    claude)
+      if remove_claude_bootstrap_if_unused "${SKILLS_DIR}"; then
+        removed=$((removed + 1))
+      fi
+      ;;
+    codex)
+      if remove_codex_bootstrap_if_unused "${SKILLS_DIR}"; then
+        removed=$((removed + 1))
+      fi
+      ;;
+  esac
 
   if [ "$removed" -eq 0 ]; then
     info "$(t 'No skills to remove.' 'No skills to remove.')"
@@ -440,11 +444,7 @@ run_uninstall_cleanup() {
 }
 
 _uninstall_all_addons_before_full() {
-  # Full uninstall must not orphan addon commands/resources (addon review): the
-  # install-state cleanup classifies skill-root dirs only and leaves command/
-  # resource FILES behind. Remove every installed addon via the hash-gated
-  # per-addon path (with the commands + resources allowed roots) BEFORE the
-  # cleanup wipes the sidecar registry that points at them.
+  # Full uninstall must not orphan addon commands/resources (addon review): the install-state cleanup classifies skill-root dirs only and leaves command/resource FILES behind. Remove every installed addon via the hash-gated per-addon path (with the commands + resources allowed roots) BEFORE the cleanup wipes the sidecar registry that points at them.
   local py adir sidecar aid failed=0
   py="$(_find_python_runtime || true)"
   [ -n "$py" ] || return 0

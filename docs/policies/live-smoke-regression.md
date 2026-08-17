@@ -9,7 +9,9 @@ This procedure runs the same small request in real agent runtimes to verify that
 - [Standard Input](#standard-input)
 - [Target Runtimes](#target-runtimes)
 - [Expected Signals](#expected-signals)
+- [Verification Layers](#verification-layers)
 - [Smoke Record](#smoke-record)
+- [Blind Behavior Record](#blind-behavior-record)
 - [Failure Triage](#failure-triage)
 - [Automated Verification Boundary](#automated-verification-boundary)
 
@@ -57,6 +59,17 @@ Each smoke record captures whether these signals were observed:
 - `[io-trace]`: files read, commands run, and skills loaded remain auditable.
 - pending merge precheck: branch to hook-verified reuse when hook evidence exists; otherwise inspect the current platform manifest directly.
 
+## Verification Layers
+
+| Layer | Purpose | Subject visibility | Release role |
+| --- | --- | --- | --- |
+| Skill pressure RED/GREEN | Check whether written methodology changes behavior under disclosed pressure. | The skill and pressure purpose are visible. | Authoring evidence only; never installed-behavior release evidence. |
+| Governance smoke | Check hooks, gates, process health, and required control-surface markers. | The governance request and markers are visible. | Runtime plumbing evidence, not an AI behavior judgment. |
+| Automated blind screening | Evaluate an installed subject on a held-out authentic prompt in a fresh session. | Only the prompt and ordinary runtime context are visible. | Repeatable behavior screening; evaluator purpose, rubric, expected answer, pass criteria, prior output, and experiment label stay private. |
+| Manual clean-terminal acceptance | A human runs the held-out case in a newly opened terminal after canonical installation. | Only the authentic request is given to the subject. | Final live acceptance gate. Computer Use must not automate this terminal. |
+
+Automated blind screening uses only direct-process transport. Its controller and subject packets are structurally separate, and subject output stays in memory until a separate evaluator returns a verdict. Missing or invalid evaluator state is a non-pass. The controller loads the sealed case file itself, computes a digest of the exact loaded bytes plus a canonical hash of the validated case, and rejects caller-supplied freshness, isolation, or digest fields. Installed provenance comes only from the schema-version-1 installer state at `~/.ghost-alice/install-state/<platform>.json`; caller or subject self-attestation is not provenance.
+
 ## Smoke Record
 
 When storing a record in the repo, use only `tmp/` or local scratch. Do not mutate the remote Wiki or user home settings.
@@ -94,6 +107,16 @@ output_file:
 reasons:
 ```
 
+## Blind Behavior Record
+
+The blind record is a separate schema from the governance-smoke summary. It may contain only the case id/hash, exact-file suite digest, source/version, installed provenance, mode, verdict/dimensions, sanitized reason, and minimal process status (`exit_code` and `timed_out`). Do not store the raw prompt, rubric, expected answer, subject response or full transcript, raw stdout/stderr logs, pass criteria, prior output, experiment label, credentials, or evaluator-private notes.
+
+Persisted dimension keys are constrained opaque ids. Criterion text remains evaluator-private and is never used as a durable dimension key.
+
+`_shared/blind_behavior.py` is the dedicated automated screening path; blind evaluation is not a mode of `_shared/live_agent_smoke.py`. The controller validates the loaded case and evaluator-private types, then delegates subject execution to `_shared/fresh_agent_session.py`, which alone constructs the Claude no-persistence or Codex ephemeral command, rejects resume/session arguments, and creates the empty run cwd. It sends only the authentic prompt over subject stdin, adds no case/private argv, and passes only ordinary runtime values plus `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when configured; rubric, purpose, expected-answer, and controller-private environment values are stripped. The controller holds the response in memory and sends it plus private state to a separate evaluator process.
+
+Subject or evaluator timeout, non-zero exit, empty subject response, malformed evaluator output, invalid evaluator state, and overall/dimension disagreement all fail closed and emit no conduct-feedback candidate. Only an evaluator-confirmed behavioral failure emits exactly one canonical report-only candidate. An optional record write is atomic and persists only the sanitized record, never the candidate or controller-private material.
+
 ## Failure Triage
 
 | Symptom | Judgment | Next action |
@@ -113,6 +136,4 @@ reasons:
 
 ## Automated Verification Boundary
 
-Runtime smoke records are manual evidence, not a keyword-presence unit test target.
-Static hook payload and gate wording contracts are covered by `scripts/check_skill_gate_contract.py`, `scripts/validate_entrypoints.py`, and `_shared.test_install_hooks`.
-`_shared/live_agent_smoke.py` may classify process-level evidence and run Codex fresh-session smoke cases, but it does not replace adversarial review of the output against this policy and the design documents.
+Runtime smoke records are manual evidence, not a keyword-presence unit test target. Static hook payload and gate wording contracts are covered by `scripts/check_skill_gate_contract.py`, `scripts/validate_entrypoints.py`, and `_shared.test_install_hooks`. `_shared/live_agent_smoke.py` may classify process-level evidence and run Codex fresh-session smoke cases, but it does not replace adversarial review of the output against this policy and the design documents. Automated blind screening strengthens that evidence but does not replace the human-operated clean-terminal final acceptance gate.

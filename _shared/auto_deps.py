@@ -70,8 +70,7 @@ def _needs_break_system_packages() -> bool:
     except Exception:
         pass
 
-    # Add the flag defensively for system Python even when the marker is absent.
-    # Some distributions reject installs without exposing the marker.
+    # Add the flag defensively for system Python even when the marker is absent. Some distributions reject installs without exposing the marker.
     if platform.system() in ("Linux", "Darwin"):
         # Add it for system Python under /usr.
         if sys.executable.startswith(("/usr/bin", "/usr/local/bin")):

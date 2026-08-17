@@ -60,7 +60,6 @@
     "Codex AGENTS.md bootstrap block updated",
     "Codex AGENTS.md bootstrap removed",
     "Codex AGENTS.md is user-owned; wrote proposed file instead: ${result#proposed:}",
-    "Codex bootstrap source missing: $CODEX_BOOTSTRAP_SOURCE",
     "Codex hooks are unavailable in this runtime; skipping.",
     "Commands sync failed (continuing)",
     "Common commands:",

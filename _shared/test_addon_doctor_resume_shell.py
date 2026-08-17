@@ -15,6 +15,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+from _shared.addon_uninstall import _symlink_safe_remove
+from _shared.install_transaction import _create_directory_link
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 
@@ -33,7 +37,8 @@ def _python_311() -> bool:
 
 class DoctorResumeTest(unittest.TestCase):
     def setUp(self):
-        if not shutil.which("bash"):
+        self.bash = _find_test_bash()
+        if not self.bash:
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
@@ -46,7 +51,7 @@ class DoctorResumeTest(unittest.TestCase):
 
     def _run(self, env, *args):
         return subprocess.run(
-            [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+            [self.bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, check=False)
 
@@ -60,8 +65,7 @@ class DoctorResumeTest(unittest.TestCase):
             marker.write_text('{"addon_id":"noop","stage":"removing","targets":["noop"]}',
                               encoding="utf-8")
             doctor = self._run(env, "--platform", "claude", "--doctor")
-            # A clean (hash-matching) pending uninstall is completed by doctor:
-            # marker cleared, sidecar removed.
+            # A clean (hash-matching) pending uninstall is completed by doctor: marker cleared, sidecar removed.
             self.assertFalse(marker.exists(), msg="doctor did not resume the pending marker: "
                              + doctor.stderr + doctor.stdout)
             self.assertFalse(sidecar.exists())
@@ -78,8 +82,8 @@ class DoctorResumeTest(unittest.TestCase):
             other = Path(home) / "user-noop"
             other.mkdir()
             (other / "SKILL.md").write_text("user", encoding="utf-8")
-            skill.unlink()
-            skill.symlink_to(other)
+            _symlink_safe_remove(skill)
+            _create_directory_link(other, skill)
             marker.write_text('{"addon_id":"noop","stage":"removing","targets":["noop"]}',
                               encoding="utf-8")
             doctor = self._run(env, "--platform", "claude", "--doctor")

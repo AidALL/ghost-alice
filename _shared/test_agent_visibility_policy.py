@@ -223,9 +223,7 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
         self.assertEqual(decision["reason"], "forced-routing-surface")
 
     def test_mechanical_pending_merge_overrides_routing_surface_no(self):
-        # invariant A union: the model's routing-surface judges no forced
-        # visibility, but a hook-mechanical structured-state flag is present.
-        # The mechanical signal must still force the surface open.
+        # invariant A union: the model's routing-surface judges no forced visibility, but a hook-mechanical structured-state flag is present. The mechanical signal must still force the surface open.
         decision = agent_visibility_policy.decide(
             profile="dynamic",
             hook_id="hook-reminder",
@@ -251,9 +249,7 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
         self.assertEqual(decision["reason"], "forced-pending-merge")
 
     def test_mechanical_security_boundary_forces_show(self):
-        # invariant A union: a current-lineage downstream block surfaces as the
-        # security_boundary structured-state flag and must force the surface,
-        # even when the model-side routing-surface says forced visibility is no.
+        # invariant A union: a current-lineage downstream block surfaces as the security_boundary structured-state flag and must force the surface, even when the model-side routing-surface says forced visibility is no.
         decision = agent_visibility_policy.decide(
             profile="minimal",
             hook_id="hook-reminder",
@@ -325,8 +321,7 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
 
 
 class TestLedgerDegradeForcedVisibility(unittest.TestCase):
-    # M9: a degraded intent-audit surface must not depend on the profile
-    # default to reach the user.
+    # M9: a degraded intent-audit surface must not depend on the profile default to reach the user.
 
     def _decide(self, message: str) -> dict:
         return agent_visibility_policy.decide(
@@ -341,8 +336,7 @@ class TestLedgerDegradeForcedVisibility(unittest.TestCase):
 
     def test_broken_ledger_degrade_is_forced_under_minimal(self):
         decision = self._decide(
-            "Ledger module present but failed to load non-blockingly; "
-            "continue without raw prompt persistence."
+            "Ledger module present but failed to load non-blockingly; " "continue without raw prompt persistence."
         )
         self.assertEqual(decision.get("visible_decision"), "force_show")
 

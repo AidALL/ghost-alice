@@ -357,8 +357,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             order.append(criterion_id)
         merged[criterion_id] = criterion
 
-    # Existing persisted criteria are trusted, including a "met" status set by
-    # mark_acceptance_criterion_met (the sole legitimate "met" writer).
+    # Existing persisted criteria are trusted, including a "met" status set by mark_acceptance_criterion_met (the sole legitimate "met" writer).
     existing_items = existing if isinstance(existing, list) else [existing]
     for item in existing_items:
         criterion = normalize_acceptance_criterion(item)
@@ -376,8 +375,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
                 criterion["met_at"] = met_at
         store(criterion["id"], criterion)
 
-    # Incoming raw deltas may not assert "met": the status only transitions
-    # through mark_acceptance_criterion_met. Admission may still be promoted.
+    # Incoming raw deltas may not assert "met": the status only transitions through mark_acceptance_criterion_met. Admission may still be promoted.
     incoming_items = incoming if isinstance(incoming, list) else [incoming]
     for item in incoming_items:
         criterion = normalize_acceptance_criterion(item)
@@ -393,9 +391,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
                 criterion["met_at"] = prior["met_at"]
             incoming_admitted = item.get("admitted") if isinstance(item, dict) else None
             if not isinstance(incoming_admitted, bool):
-                # No explicit boolean admission: admission is sticky and can be
-                # upgraded by a newly contract-bound source, but a present-but-
-                # invalid field (e.g. null) must never silently drop it.
+                # No explicit boolean admission: admission is sticky and can be upgraded by a newly contract-bound source, but a present-but-invalid field (e.g. null) must never silently drop it.
                 criterion["admitted"] = bool(prior["admitted"]) or bool(criterion["admitted"])
         else:
             criterion["status"] = "unmet"

@@ -8,12 +8,16 @@ import tempfile
 import unittest
 from glob import glob
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _installer_source import installer_bash_source, installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "_shared"))
+import uninstall_cleanup as cleanup
+
 UNINSTALL_CLEANUP = REPO_ROOT / "_shared" / "uninstall_cleanup.py"
 INSTALL_SH = REPO_ROOT / "install.sh"
 INSTALL_PS1 = REPO_ROOT / "install.ps1"
@@ -160,6 +164,24 @@ def _write_manifest(
 
 
 class UninstallCleanupTest(unittest.TestCase):
+    def test_claude_global_rule_cleanup_has_one_reported_owner(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            claude_home = root / "custom-claude"
+            rule_file = claude_home / "CLAUDE.md"
+            claude_home.mkdir(parents=True)
+            rule_file.write_text("# Ghost-ALICE Claude Bootstrap\n<!-- Ghost-ALICE managed block begin: claude-bootstrap -->\nmanaged\n<!-- Ghost-ALICE managed block end: claude-bootstrap -->\nuser rule\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"HOME": str(root), "CLAUDE_CONFIG_DIR": str(claude_home)}):
+                dry_run = cleanup._global_rule_item("claude", confirm=False)
+                self.assertIsNotNone(dry_run)
+                self.assertEqual(dry_run["action"], "would-remove-global-rule")
+                confirmed = cleanup._global_rule_item("claude", confirm=True)
+            self.assertEqual(confirmed["action"], "removed-global-rule")
+            self.assertEqual(rule_file.read_text(encoding="utf-8").strip(), "user rule")
+
+        self.assertNotIn("remove_claude_bootstrap || return 1", installer_bash_source())
+        self.assertNotIn('$Platform -eq "claude" -and -not (Remove-ClaudeBootstrap)', installer_ps1_source())
+
     def run_cleanup(
         self,
         root: Path,
@@ -456,8 +478,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(support["install-rollbacks"]["action"], "removed")
 
     def test_confirm_removes_addon_sidecars(self) -> None:
-        # Full uninstall must clean the per-addon sidecar registry; otherwise
-        # orphan ~/.ghost-alice/addons/*.json survive a full uninstall (C-ORPHAN-3).
+        # Full uninstall must clean the per-addon sidecar registry; otherwise orphan ~/.ghost-alice/addons/*.json survive a full uninstall (C-ORPHAN-3).
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")

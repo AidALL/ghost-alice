@@ -17,4 +17,4 @@ jobs:
         with:
           node-version: "24"
       - run: python scripts/check_skill_gate_contract.py
-      - run: python -m unittest scripts.tests.test_check_skill_gate_contract scripts.tests.test_validate_entrypoints
+      - run: python scripts/run_installer_compat_tests.py --group skill-gate-contract

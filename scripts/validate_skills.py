@@ -45,8 +45,7 @@ BODY_TOKEN_SOFT_LIMIT = 5000  # Phase 2-2: rough line count x 10 estimate.
 INLINE_CODE_BLOCK_SOFT_LIMIT = 50  # Phase 2-5: a larger SKILL.md body code block suggests progressive disclosure drift.
 REFERENCE_TOC_LIMIT = 300
 
-# Phase 3-1: Detect Critical Rules / Warnings / Common Mistakes style sections.
-# Match when a keyword appears anywhere in a header line such as `## ...`.
+# Phase 3-1: Detect Critical Rules / Warnings / Common Mistakes style sections. Match when a keyword appears anywhere in a header line such as `## ...`.
 CRITICAL_SECTION_PATTERN = re.compile(
     r"(?mi)^#{2,}[^\n]*("
     r"critical|gotcha|warnings?|failure\s*modes?|failure\s*patterns?|common\s*mistakes?|common\s*failures?|red\s*flags?|pitfall|caveat|troubleshoot|"
@@ -336,9 +335,7 @@ def validate_phase4_references(skill_md: Path, issues: list[Issue]) -> None:
                         )
                     )
 
-            # 4-2: Absolute file links are forbidden inside references/.
-            # Flag only Markdown links `](/abs/path.ext)` that include a file extension.
-            # URL site-relative paths such as /en/docs/... are not files and are excluded.
+            # 4-2: Absolute file links are forbidden inside references/. Flag only Markdown links `](/abs/path.ext)` that include a file extension. URL site-relative paths such as /en/docs/... are not files and are excluded.
             for m in re.finditer(r"\]\((/[^)]+)\)", ref_text):
                 target = m.group(1)
                 if target.startswith("//"):
@@ -678,11 +675,7 @@ def validate_catalog_schema_contract(repo_root: Path, issues: list[Issue]) -> No
 
 
 def detect_escape_hatch(repo_root: Path) -> set[str]:
-    """
-    Detect escape hatches from environment variables or PR title/labels.
-    CI receives them through GITHUB_PR_TITLE and GITHUB_PR_LABELS.
-    Locally, detect them from the latest commit message.
-    """
+    '\n    Detect escape hatches from environment variables or PR title/labels.\n    CI receives them through GITHUB_PR_TITLE and GITHUB_PR_LABELS.\n    Locally, detect them from the latest commit message.\n    '
     import os
 
     hatches: set[str] = set()

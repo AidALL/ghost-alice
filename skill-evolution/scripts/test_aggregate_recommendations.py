@@ -67,8 +67,7 @@ class AggregateRecommendationsTests(unittest.TestCase):
         self.assertEqual(top["last_seen"], "2026-06-05T00:00:00Z")
         self.assertEqual(top["sources"], ["inferred", "user-explicit"])
         self.assertEqual(result["recommendations"][1]["id"], "b")
-        # no fabricated composite weight: the model judges priority from the
-        # objective signals, the code does not bake a magic score
+        # no fabricated composite weight: the model judges priority from the objective signals, the code does not bake a magic score
         self.assertNotIn("priority_score", top)
 
     def test_empty_root_returns_no_recommendations(self) -> None:

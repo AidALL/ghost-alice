@@ -1,8 +1,6 @@
 # official-docs structure guide
 
-This directory holds only public contributor-facing governance documentation.
-The public distribution does not include verbatim snapshots of external documents, private integration analysis, internal planning documents,
-or long-form philosophy notes.
+This directory holds only public contributor-facing governance documentation. The public distribution does not include verbatim snapshots of external documents, private integration analysis, internal planning documents, or long-form philosophy notes.
 
 ## External Source Policy
 

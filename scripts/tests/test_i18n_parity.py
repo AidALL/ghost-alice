@@ -219,8 +219,7 @@ class TestI18nParityBaseline(unittest.TestCase):
         if not os.path.exists(_BASELINE_PATH):
             self.fail(
                 f"Baseline fixture missing: {_BASELINE_PATH}\n"
-                "Run  python3 -c \"from scripts.tests.test_i18n_parity import generate_baseline; generate_baseline()\"  "
-                "from the worktree root, then commit the result."
+                "Run  python3 -c \"from scripts.tests.test_i18n_parity import generate_baseline; generate_baseline()\"  " "from the worktree root, then commit the result."
             )
         with open(_BASELINE_PATH, encoding="utf-8") as fh:
             return json.load(fh)

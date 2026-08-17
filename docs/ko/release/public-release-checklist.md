@@ -9,6 +9,7 @@
 - [Include](#include)
 - [Exclude](#exclude)
 - [Pre-Export Checks](#pre-export-checks)
+- [Installed Behavior Gates](#installed-behavior-gates)
 - [License And Provenance Gates](#license-and-provenance-gates)
 - [Sensitive String Scan](#sensitive-string-scan)
 - [GitHub Community File Check](#github-community-file-check)
@@ -71,8 +72,9 @@ clean export를 만들기 전에 private working repo에서 실행한다.
 git status --short
 python3 scripts/validate_public_surfaces.py
 python3 scripts/check_skill_gate_contract.py
-python3 -m unittest discover -s _shared -p 'test_*.py'
-python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+python3 scripts/check_prose_wrapping.py
+python3 scripts/run_installer_compat_tests.py --group shared-all
+python3 scripts/run_installer_compat_tests.py --group scripts-all
 ```
 
 installer-heavy release에서는 다음도 실행한다.
@@ -81,6 +83,19 @@ installer-heavy release에서는 다음도 실행한다.
 python3 scripts/run_installer_compat_tests.py
 python3 scripts/validate_platform_adapters.py
 ```
+
+## Installed Behavior Gates
+
+hook, gate, control-surface marker를 검증하려면 `docs/ko/policies/live-smoke-regression.md`의 evaluator-visible governance live smoke를 실행한다. 이 smoke는 runtime-plumbing evidence이며 blind behavior gate를 충족하지 않는다.
+
+candidate가 canonical하게 install되고 installer-owned manifest가 있는 disposable environment에서 installed subject별로 separate blind fresh-session controller를 한 번씩 실행한다. sealed case와 trusted evaluator placeholder를 release-owned path 또는 command로 바꾸며 evaluator-private material을 subject command나 environment에 넣지 않는다.
+
+```bash
+python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform claude --subject-command '["claude"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-claude.json
+python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform codex --subject-command '["codex"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-codex.json
+```
+
+두 command 모두 exit zero여야 하며 sanitized record에 `verdict=pass`, expected installed platform provenance, controller-computed suite digest가 있어야 한다. prompt, rubric, purpose, expected answer, subject response, evaluator-private text는 record에 없어야 한다. 한 platform의 pass는 다른 platform을 cover하지 않으며 automated blind result도 human-operated clean-terminal acceptance gate를 대체하지 않는다.
 
 ## License And Provenance Gates
 

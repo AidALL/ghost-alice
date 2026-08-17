@@ -19,8 +19,7 @@ VERIFICATION_SKILL = "verification-before-completion"
 
 
 def _read_hook_input() -> dict[str, Any]:
-    # Decode stdin as UTF-8 explicitly (Windows default is cp949/cp1252), so a
-    # non-ASCII transcript_path or inline message is not mis-decoded.
+    # Decode stdin as UTF-8 explicitly (Windows default is cp949/cp1252), so a non-ASCII transcript_path or inline message is not mis-decoded.
     try:
         buffer = getattr(sys.stdin, "buffer", None)
         if buffer is not None:
@@ -118,11 +117,7 @@ def _verification_skill_loaded_this_turn(entries: list[dict[str, Any]]) -> bool:
 
 
 def _assistant_text_this_turn(entries: list[dict[str, Any]]) -> str:
-    # Validate the FINAL response only: the last assistant message, which is the one
-    # that triggered this stop. AskUserQuestion answers and tool results are not real
-    # user prompts, so a "since last user prompt" span would concatenate the
-    # completion-checks of several earlier responses and re-validate a stale one
-    # (causing repeated false blocks).
+    # Validate the FINAL response only: the last assistant message, which is the one that triggered this stop. AskUserQuestion answers and tool results are not real user prompts, so a "since last user prompt" span would concatenate the completion-checks of several earlier responses and re-validate a stale one (causing repeated false blocks).
     for entry in reversed(entries):
         message = entry.get("message")
         if not isinstance(message, dict) or message.get("role") != "assistant":
@@ -167,12 +162,7 @@ def _block_payload(reason: str) -> dict[str, Any]:
 
 def _standalone_retry_guidance() -> str:
     return (
-        "Retry by writing a complete standalone final answer that includes the requested answer payload again. "
-        "Begin with the user's requested answer, not with the verification process. "
-        "Required control block format overrides any requested line-count limit. "
-        "Write [completion-check] and [io-trace] as canonical multi-line blocks, not inline one-line summaries. "
-        "Do not output a correction-only note. "
-        "Do not refer to a previous answer with phrases such as above, earlier, already provided, or previously."
+        "Retry by writing a complete standalone final answer that includes the requested answer payload again. " "Begin with the user's requested answer, not with the verification process. " "Required control block format overrides any requested line-count limit. " "Write [completion-check] and [io-trace] as canonical multi-line blocks, not inline one-line summaries. " "Do not output a correction-only note. " "Do not refer to a previous answer with phrases such as above, earlier, already provided, or previously."
     )
 
 
@@ -204,9 +194,7 @@ def main() -> int:
         return 0
 
     skill_loaded = args.platform == "codex" or _verification_skill_loaded_this_turn(entries)
-    # Completion-body-validation invariant: Stop validates executed-work closure
-    # claims and explicit completion-check blocks. Routine explanations are not
-    # forced through verification-before-completion.
+    # Completion-body-validation invariant: Stop validates executed-work closure claims and explicit completion-check blocks. Routine explanations are not forced through verification-before-completion.
     body_issue = validate_completion_text(final_text, require_completion_check=True)
     has_completion_marker = looks_like_completion_claim(final_text)
 
@@ -219,13 +207,7 @@ def main() -> int:
         reason = body_issue
     elif not skill_loaded:
         reason = (
-            "completion-reminder: verification-before-completion is an always-on completion lifecycle gate. "
-            "Before the final response, call the Claude Code Skill tool with input "
-            '{"skill": "verification-before-completion"} in this turn. '
-            "Do not ask the user whether to use the skill; invoke it directly. "
-            "Then perform the fresh evidence check, and only then write [completion-check] with "
-            "skill-call: verification-before-completion (this turn). Do not infer this from task-router, "
-            "metadata, prior context, or evidence-only status inspection."
+            "completion-reminder: verification-before-completion is an always-on completion lifecycle gate. " "Before the final response, call the Claude Code Skill tool with input " '{"skill": "verification-before-completion"} in this turn. ' "Do not ask the user whether to use the skill; invoke it directly. " "Then perform the fresh evidence check, and only then write [completion-check] with " "skill-call: verification-before-completion (this turn). Do not infer this from task-router, " "metadata, prior context, or evidence-only status inspection."
         )
     else:
         reason = body_issue

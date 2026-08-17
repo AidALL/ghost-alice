@@ -203,16 +203,17 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertIn("Get-Content -LiteralPath $childOutputFile", auto_branch)
         self.assertNotIn("*>> $script:InstallReportLogFile", auto_branch)
 
-    def test_auto_progress_uses_short_platform_suffix_and_wide_bar(self) -> None:
+    def test_auto_progress_uses_one_semantic_common_target_formatter(self) -> None:
         install_sh = installer_bash_source()
         install_ps1 = installer_ps1_source()
 
         self.assertIn('report_progress_bar "$done_count" "$total_count" 30', install_sh)
-        self.assertIn('report_progress_bar "$done_count" "$total_count" 20', install_sh)
         self.assertIn("count_auto_common_targets", install_sh)
         self.assertIn("report_read_weighted_common_target_progress", install_sh)
         self.assertIn("report_auto_animate_common_target_progress_line", install_sh)
-        self.assertIn("report_live_common_target_progress_line", install_sh)
+        self.assertIn("report_common_target_progress_line", install_sh)
+        self.assertNotIn("report_live_common_target_progress_line", install_sh)
+        self.assertNotIn("report_live_common_target_suffix", install_sh)
         self.assertNotIn('"${plat} ${platform_index}/${auto_platform_count}"', install_sh)
         auto_branch = install_sh[
             install_sh.index("# auto/default:") : install_sh.index('if [ "$PROMPT_PLATFORM" -eq 1 ]')
@@ -323,12 +324,13 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             expected_common_targets = _skill_target_count("task-router") + 1
             skill_sync_line = f"  [2/5] Skill sync          [{expected_common_targets}] common targets"
             initial_line = (
-                f"        Common targets [--------------------] "
-                f"[0/{expected_common_targets}] synced"
+                f"        Common targets      [------------------------------] "
+                f"[0/{expected_common_targets}] common targets synced"
             )
             final_line = (
-                f"\r\x1b[2K        Common targets [####################] "
-                f"[{expected_common_targets}/{expected_common_targets}] all platforms"
+                f"\r\x1b[2K        Common targets      [##############################] "
+                f"[{expected_common_targets}/{expected_common_targets}] "
+                "common targets synced on all platforms"
             )
             self.assertEqual(return_code, 0, msg=output)
             self.assertEqual(output.count("Ghost-ALICE OS installation Process Report"), 1)
@@ -342,7 +344,6 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertIn(final_line, output)
             live_lines = _printable_live_progress_lines(output)
             self.assertTrue(live_lines, msg=output)
-            self.assertLessEqual(max(len(line) for line in live_lines), 80, msg=live_lines)
             self.assertLess(output.index(initial_line), output.rindex(final_line))
             self.assertIn("  [5/5] Verification        ok", output)
 

@@ -7,10 +7,7 @@ compatibility:
 
 # compact-handoff
 
-compact-handoff preserves task continuity before or after context compaction. It
-does not trigger automatic compaction, add hooks, or create background
-summaries. It only defines the quality bar for a handoff that a human or future
-agent can safely resume.
+compact-handoff preserves task continuity before or after context compaction. It does not trigger automatic compaction, add hooks, or create background summaries. It only defines the quality bar for a handoff that a human or future agent can safely resume.
 ## Contents
 
 - [When To Use](#when-to-use)
@@ -25,14 +22,11 @@ agent can safely resume.
 
 - Context is long enough that work state may be lost.
 - Another session or agent must continue the implementation.
-- Test results, changed files, remaining work, forbidden surfaces, or rollback
-  paths need to survive compaction.
+- Test results, changed files, remaining work, forbidden surfaces, or rollback paths need to survive compaction.
 
 ## Pre-Compaction Record
 
-Write a short handoff with these fields, then validate it with
-`scripts/compact_handoff.py <handoff-file> --json`. If validation returns
-`status=fail`, fix the handoff before compacting.
+Write a short handoff with these fields, then validate it with `scripts/compact_handoff.py <handoff-file> --json`. If validation returns `status=fail`, fix the handoff before compacting.
 
 ```text
 [compact-handoff]
@@ -64,11 +58,8 @@ Write a short handoff with these fields, then validate it with
 
 - All 8 required fields must exist.
 - Secret-like values fail validation. The validator must not print raw values.
-- Handoffs that touch live config such as `~/.claude/settings.json`,
-  `~/.codex/hooks.json`, `~/.codex/config.toml`, or `~/.agents/skills/` need a
-  concrete rollback path.
-- `tests-run: not run` or `pending` produces a warning. That warning does not
-  block compaction, but it blocks completion claims.
+- Handoffs that touch live config such as `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.codex/config.toml`, or `~/.agents/skills/` need a concrete rollback path.
+- `tests-run: not run` or `pending` produces a warning. That warning does not block compaction, but it blocks completion claims.
 
 ## Warnings
 

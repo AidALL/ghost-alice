@@ -32,7 +32,7 @@ The installer has three layers.
 | --- | --- | --- |
 | Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | Parse platform-specific flags, normalize encoding/runtime setup, and enter the Python-backed installer path |
 | Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | Resolve platforms and targets, install skills and hooks, record install state, protect local edits, and report status |
-| Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | Hold installed skills, platform hook config, Codex bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, and uninstall reports |
+| Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | Hold installed skills, platform hook config, Claude and Codex global bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, and uninstall reports |
 
 The important mental model is not "copy files, then done." The installer is a stateful governance synchronizer. It updates installed assets, verifies hook contracts, preserves user-modified installed files, and writes enough state for status, doctor, update, and uninstall paths to reason about what happened.
 
@@ -54,11 +54,11 @@ shell entrypoint
 
 | Platform | Installed surfaces |
 | --- | --- |
-| Claude Code | `~/.claude/skills/`, `~/.claude/settings.json`, Claude command wrappers |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`, `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Claude command wrappers |
 | Codex | `~/.agents/skills/`, `~/.codex/AGENTS.md`, `~/.codex/hooks.json`, `~/.codex/config.toml` |
 | Shared state | `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
 
-Claude Code can expose native skill invocation and hook permissions. Codex does not expose the same skill surface, so the installer also installs a Codex bootstrap and hook config that make required gates auditable through `SKILL.md` read records and hook payloads.
+Claude Code can expose native skill invocation and hook permissions, but those surfaces do not replace a global instruction port for sessions outside the repository. The installer therefore merges the managed block from `platforms/claude/CLAUDE.md` into the Claude config directory. Codex does not expose the same skill surface, so its separate bootstrap and hook config make required gates auditable through `SKILL.md` read records and hook payloads. Both global rule files preserve text outside their managed blocks; a markerless user-owned destination receives a `.ghost-alice-proposed` file instead of an overwrite.
 
 ## State And Safety Model
 

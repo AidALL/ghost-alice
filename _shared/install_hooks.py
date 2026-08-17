@@ -97,11 +97,7 @@ class HookStatus:
     details: dict[str, Any]
     missing_reason: str | None = None
     unsupported: bool = False
-    # True when hook files are present but their runtime event semantics are not
-    # yet confirmed by a live smoke run. Per docs/policies/platform-adapter-compliance.md,
-    # Codex stays instruction-backed (pending smoke evidence) rather than being
-    # reported as native runtime-verified. This does not change install behavior;
-    # it only keeps the status report honest about unverified event semantics.
+    # True when hook files are present but their runtime event semantics are not yet confirmed by a live smoke run. Per docs/policies/platform-adapter-compliance.md, Codex stays instruction-backed (pending smoke evidence) rather than being reported as native runtime-verified. This does not change install behavior; it only keeps the status report honest about unverified event semantics.
     pending_smoke_evidence: bool = False
 
 # ── Hook Payload Definitions ──────────────────────────────
@@ -238,11 +234,7 @@ def _pending_merge_precheck_command(
 # 1. User input pre-hook: run only the pending-merge precheck first.
 PROMPT_PENDING_MERGE_MARKER = "[merge-companion] prompt-check"
 PROMPT_PENDING_MERGE_INTERNAL = (
-    "merge-companion prompt-check: Check only the current platform pending-merge manifest "
-    "before the user-input governance graph continues. "
-    "If this hook reports undecided entries, surface merge-companion first; "
-    "a user-explicit defer/skip may continue with the entry still undecided. "
-    "If there is no pending warning, treat merge-companion-precheck as clean and do not run an extra shell manifest check."
+    "merge-companion prompt-check: Check only the current platform pending-merge manifest " "before the user-input governance graph continues. " "If this hook reports undecided entries, surface merge-companion first; " "a user-explicit defer/skip may continue with the entry still undecided. " "If there is no pending warning, treat merge-companion-precheck as clean and do not run an extra shell manifest check."
 )
 
 
@@ -410,15 +402,7 @@ SESSION_INTENT_ENTRY_CODEX = {
 # 2. Work-stop hook: verification-before-completion reminder.
 STOP_HOOK_MARKER = "[completion-reminder] AGENTS.md"
 STOP_HOOK_INTERNAL = (
-    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. "
-    "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. "
-    "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. "
-    "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. "
-    "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. "
-    "On visible Skill surfaces such as Claude Code Skill, actually load "
-    "verification-before-completion before writing skill-call: verification-before-completion. "
-    "Do not infer verification from task-router, metadata, prior context, or routing notes. "
-    "Do not claim skill-call: verification-before-completion unless verification-before-completion was actually loaded this turn."
+    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. " "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. " "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. " "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. " "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. " "On visible Skill surfaces such as Claude Code Skill, actually load " "verification-before-completion before writing skill-call: verification-before-completion. " "Do not infer verification from task-router, metadata, prior context, or routing notes. " "Do not claim skill-call: verification-before-completion unless verification-before-completion was actually loaded this turn."
 )
 STOP_HOOK_MESSAGE = _localized_bridge(
     STOP_HOOK_INTERNAL,
@@ -471,9 +455,7 @@ STOP_HOOK_ENTRY_CODEX = {
 # 3. Session-start hook: automatic merge-companion check (pending-merge-session-start layer).
 SESSION_START_MARKER = "[merge-companion] session-check"
 SESSION_START_INTERNAL = (
-    "merge-companion session-check: This Ghost-ALICE hook checks only the current platform pending-merge manifest. "
-    "If this hook reports undecided entries, run merge-companion. Missing, empty, fully decided, or invalid JSON manifests pass silently; "
-    "do not run a second shell check just to prove clean."
+    "merge-companion session-check: This Ghost-ALICE hook checks only the current platform pending-merge manifest. " "If this hook reports undecided entries, run merge-companion. Missing, empty, fully decided, or invalid JSON manifests pass silently; " "do not run a second shell check just to prove clean."
 )
 
 
@@ -504,8 +486,7 @@ SESSION_START_ENTRY_CODEX = {
 }
 
 # 4. User input hook (auxiliary): require web search before external tool claims (rule 10).
-# This is an agent governance hook with the same shape as the task-router hook.
-# It injects text on every user input to require community signal checks before external tool claims.
+# This is an agent governance hook with the same shape as the task-router hook. It injects text on every user input to require community signal checks before external tool claims.
 WEB_SEARCH_FIRST_MARKER = "[web-search-first]"
 WEB_SEARCH_FIRST_INTERNAL = (
     "web-search-first: AGENTS.md Rule 10. Before factual claims about external tools, libraries, CLIs, SDKs, frameworks, versions, or platform behavior, cross-check at least three community sources with WebSearch. Official docs alone are not enough for runtime behavior."
@@ -620,28 +601,30 @@ def _print_addon_target_summary(addon_sources: list[str], platform: str | None =
     return 0
 
 
-def _discover_ghost_alice_skill_names_from_installed_tree() -> list[str]:
-    root = _home() / ".agents" / "skills"
-    if not root.exists():
-        return []
-    names: set[str] = set()
-    for skill_md in root.glob("*/SKILL.md"):
-        name = skill_md.parent.name
-        if name.startswith(".") or name == "_shared":
-            continue
-        names.add(name)
-    return sorted(names)
-
-
 def _ghost_alice_installed_skill_names() -> list[str]:
-    names = _discover_ghost_alice_skill_names_from_catalog()
-    if names:
-        return names
-    return _discover_ghost_alice_skill_names_from_installed_tree()
+    """Return core skill names from the managed catalog only.
+
+    The legacy function name is retained for internal callers, but arbitrary directories under an installed skills root are not an authority for Claude Skill permissions.
+    """
+    return _discover_ghost_alice_skill_names_from_catalog()
 
 
-def _claude_ghost_alice_skill_permissions() -> list[str]:
-    return [f"Skill({name})" for name in _ghost_alice_installed_skill_names()]
+def _verified_addon_skill_names(addon_sources: Any, platform_key: str) -> list[str]:
+    """Return names from manifest-validated addon targets for one platform."""
+    if not addon_sources:
+        return []
+    targets = load_addon_targets(
+        list(addon_sources),
+        core_skill_names=_discover_ghost_alice_skill_names_from_catalog(),
+        platform=platform_key,
+    )
+    return sorted({target.name for target in targets})
+
+
+def _claude_ghost_alice_skill_permissions(addon_sources: Any = ()) -> list[str]:
+    names = set(_ghost_alice_installed_skill_names())
+    names.update(_verified_addon_skill_names(addon_sources, "claude"))
+    return [f"Skill({name})" for name in sorted(names)]
 
 
 def _is_stale_legacy_checkout_path_permission(item: Any) -> bool:
@@ -723,8 +706,7 @@ IO_TRACE_ENTRY = {
 
 # ── Semantic Intent -> Platform Event Name Mapping ────────
 #
-# Each platform uses different event names for hooks with the same intent.
-# Add only a mapping in this table when adding a new platform.
+# Each platform uses different event names for hooks with the same intent. Add only a mapping in this table when adding a new platform.
 #
 # Notes:
 #   - claude/codex: UserPromptSubmit fires once when user input is submitted.
@@ -2079,7 +2061,10 @@ def _remove_all_ghost_alice_hooks(hooks_obj: dict[str, Any]) -> int:
     return removed
 
 
-def _ensure_claude_ghost_alice_skill_permissions(settings: dict[str, Any]) -> bool:
+def _ensure_claude_ghost_alice_skill_permissions(
+    settings: dict[str, Any],
+    addon_sources: Any = (),
+) -> bool:
     permissions = settings.get("permissions")
     if not isinstance(permissions, dict):
         permissions = {}
@@ -2094,7 +2079,7 @@ def _ensure_claude_ghost_alice_skill_permissions(settings: dict[str, Any]) -> bo
     allow[:] = [item for item in allow if not _is_stale_legacy_checkout_path_permission(item)]
     existing = {item for item in allow if isinstance(item, str)}
     changed = len(allow) != original_len
-    for rule in _claude_ghost_alice_skill_permissions():
+    for rule in _claude_ghost_alice_skill_permissions(addon_sources):
         if rule in existing:
             continue
         allow.append(rule)
@@ -2164,7 +2149,7 @@ def install_hook(
     changed = False
 
     if platform_key == "claude":
-        if _ensure_claude_ghost_alice_skill_permissions(settings):
+        if _ensure_claude_ghost_alice_skill_permissions(settings, addon_sources):
             _log(_t("  Updated Ghost-ALICE Skill permissions", "  Updated Ghost-ALICE Skill permissions"))
             changed = True
 
@@ -2266,8 +2251,7 @@ def install_hook(
         _log(_t("  session-intent-analyzer hook added", "  session-intent-analyzer hook added"))
         changed = True
 
-    # Install the web-search-first hook (rule 10: web search before external tool claims).
-    # Separate entry on the same UserPromptSubmit event; injects text alongside the task-router reminder.
+    # Install the web-search-first hook (rule 10: web search before external tool claims). Separate entry on the same UserPromptSubmit event; injects text alongside the task-router reminder.
     web_search_entry = _platform_web_search_entry(platform_key, hook_key)
     web_search_command = _entry_command(web_search_entry)
     removed = _remove_stale_hook_entries(
@@ -2429,15 +2413,11 @@ def install_hook(
     elif platform_key in {"claude", "codex"}:
         _log(_t("  io_trace_hook.py not found. Skipping io-trace hook", "  io_trace_hook.py not found. Skipping io-trace hook"))
 
-    # Tier-2 observational addon hooks (plan Phase 4), wired AFTER the core suite.
-    # When addon_sources is empty this loop runs zero times, so a core-only install
-    # stays byte-identical (no entry added, `changed` untouched).
+    # Tier-2 observational addon hooks (plan Phase 4), wired AFTER the core suite. When addon_sources is empty this loop runs zero times, so a core-only install stays byte-identical (no entry added, `changed` untouched).
     for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
         event_name = _resolve_hook_event(event_intent, platform_key)
         marker = f"[addon:{addon_id}] {hook_id}"
-        # The generated command embeds "{marker} [hook-runner:...]", so the marker is
-        # always followed by a space. Matching on "marker " makes removal exact and
-        # prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
+        # The generated command embeds "{marker} [hook-runner:...]", so the marker is always followed by a space. Matching on "marker " makes removal exact and prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
         match_marker = marker + " "
         inner = _hook_python_command(script_path, payload=True)
         entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker)
@@ -2445,10 +2425,7 @@ def install_hook(
         if event_name not in hooks_obj:
             hooks_obj[event_name] = []
         ev_list = hooks_obj[event_name]
-        # Prune only a STALE prior version of THIS managed addon hook -- proven by
-        # the exact marker + [hook-runner:] token + matching runner argv, the same
-        # ownership predicate remove_addon_hook uses. A user hook that merely
-        # contains the marker substring (no runner proof) is never deleted here.
+        # Prune only a STALE prior version of THIS managed addon hook -- proven by the exact marker + [hook-runner:] token + matching runner argv, the same ownership predicate remove_addon_hook uses. A user hook that merely contains the marker substring (no runner proof) is never deleted here.
         if _remove_hook_commands_by_command(
             ev_list,
             lambda cmd, m=marker, exp=command: cmd != exp and _is_exact_addon_hook_command(cmd, m),
@@ -2461,9 +2438,7 @@ def install_hook(
         else:
             _log(_t(f"  {event_name} addon hook already exists: {marker}", f"  {event_name} addon hook already exists: {marker}"))
 
-    # Privileged adapters (plan Phase P5) are core-owned: manifests request adapter
-    # ids only, while the concrete event/script/marker/runner namespace comes from
-    # addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
+    # Privileged adapters (plan Phase P5) are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
     privileged_adapter_specs = _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir)
     if platform_key == "claude" and any(spec.get("adapter_id") == "autopilot-mode" for spec in privileged_adapter_specs):
         removed = _remove_legacy_autopilot_hook_entries(hooks_obj)
@@ -2549,9 +2524,7 @@ def install_hook(
 
 # ── Uninstall ─────────────────────────────────────────────
 
-# A well-formed addon hook marker -- the ONLY shape remove_addon_hook will act on.
-# This makes the function structurally incapable of stripping a core/peer hook even
-# if handed a forged/tampered marker (addon review: forged-sidecar gate-subversion).
+# A well-formed addon hook marker -- the ONLY shape remove_addon_hook will act on. This makes the function structurally incapable of stripping a core/peer hook even if handed a forged/tampered marker (addon review: forged-sidecar gate-subversion).
 _ADDON_HOOK_MARKER_RE = re.compile(
     r"^\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] (?P<hook_id>[a-z][a-z0-9-]*)$"
 )
@@ -2636,8 +2609,7 @@ def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str]
         elif not removed_from_entry:
             kept.append(entry)
         else:
-            # All commands in this entry were managed addon commands; remove the
-            # now-empty entry instead of leaving a no-op hook container behind.
+            # All commands in this entry were managed addon commands; remove the now-empty entry instead of leaving a no-op hook container behind.
             pass
     hooks_list[:] = kept
     return removed
@@ -2672,10 +2644,7 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     hooks_obj = settings.get("hooks", {})
     if not isinstance(hooks_obj, dict):
         return 0
-    # Ownership proof: remove only the command generated by _hook_runner_command().
-    # A user hook can contain the marker text, or even a fake [hook-runner:] token;
-    # it is not ours unless the comment carries the exact generated marker/runner
-    # signature and argv invokes the same normalized hook id.
+    # Ownership proof: remove only the command generated by _hook_runner_command(). A user hook can contain the marker text, or even a fake [hook-runner:] token; it is not ours unless the comment carries the exact generated marker/runner signature and argv invokes the same normalized hook id.
     total = 0
     for event_list in hooks_obj.values():
         if isinstance(event_list, list):
@@ -2858,9 +2827,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
     if _hook_already_exists(pt_list, IO_TRACE_MARKER):
         total_removed += _remove_hook_entries(pt_list, IO_TRACE_MARKER)
 
-    # Full uninstall also strips every MANAGED addon observational hook (plan Phase 4)
-    # and every MANAGED privileged adapter hook (Phase P5), so neither a drifted
-    # addon hook nor an adapter hook is ever left firing live after a full uninstall.
+    # Full uninstall also strips every MANAGED addon observational hook (plan Phase 4) and every MANAGED privileged adapter hook (Phase P5), so neither a drifted addon hook nor an adapter hook is ever left firing live after a full uninstall.
     for ev_list in hooks_obj.values():
         if isinstance(ev_list, list):
             total_removed += _remove_managed_addon_entries(ev_list)
@@ -2880,6 +2847,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
 def check_status_detail(
     platform_key: str,
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
+    addon_sources: Any = (),
 ) -> HookStatus:
     """Return structured hook installation status for a single framework."""
     platform = PLATFORMS[platform_key]
@@ -3037,17 +3005,25 @@ def check_status_detail(
         "session-start": (session_start_present, session_start_ok),
         "io-trace": (io_trace_present, io_trace_ok),
     }
+    if platform_key == "claude":
+        permissions = settings.get("permissions")
+        allow = permissions.get("allow", []) if isinstance(permissions, dict) else []
+        allowed_rules = (
+            {item for item in allow if isinstance(item, str)}
+            if isinstance(allow, list)
+            else set()
+        )
+        for skill_name in _verified_addon_skill_names(addon_sources, platform_key):
+            permission = f"Skill({skill_name})"
+            present = permission in allowed_rules
+            required[f"skill-permission:{skill_name}"] = (present, present)
     missing = [label for label, (present, ok) in required.items() if not present]
     drifted = [label for label, (present, ok) in required.items() if present and not ok]
     incomplete = missing + drifted
 
     if not incomplete:
         if platform_key == "codex":
-            # Codex hook files are wired, but its hook event semantics are not
-            # confirmed by a live runtime smoke. Stay instruction-backed rather than
-            # report native runtime-verified. legacy_status stays "installed" so the
-            # installer flow and legacy string API are unchanged; only the report
-            # surface and the structured flag are made honest.
+            # Codex hook files are wired, but its hook event semantics are not confirmed by a live runtime smoke. Stay instruction-backed rather than report native runtime-verified. legacy_status stays "installed" so the installer flow and legacy string API are unchanged; only the report surface and the structured flag are made honest.
             _log(_t(
                 f"  {name}: hook files installed (instruction-backed, pending runtime smoke evidence)",
                 f"  {name}: hook files installed (instruction-backed, pending runtime smoke evidence)",
@@ -3103,7 +3079,7 @@ def check_status_detail(
     )
 
 
-def check_status(platform_key: str) -> str:
+def check_status(platform_key: str, addon_sources: Any = ()) -> str:
     """Return hook installation status through the legacy string API.
 
     Return values:
@@ -3112,7 +3088,7 @@ def check_status(platform_key: str) -> str:
       "skipped"   - framework is not installed
       "unsupported" - current runtime does not support hooks
     """
-    return check_status_detail(platform_key).legacy_status
+    return check_status_detail(platform_key, addon_sources=addon_sources).legacy_status
 
 
 # ── Result Summary Output ─────────────────────────────────
@@ -3149,16 +3125,13 @@ def _print_runtime_visibility_guidance() -> None:
     _log("    Default profile is dynamic unless --visibility overrides it.")
     _log("    --agent-visibility remains accepted for compatibility.")
     _log(
-        "    Profiles adjust user-facing governance message volume only; "
-        "they do not disable hooks or gates."
+        "    Profiles adjust user-facing governance message volume only; " "they do not disable hooks or gates."
     )
     _log(
-        "    Use /visibility to inspect, or /visibility strict, /visibility dynamic, "
-        "or /visibility minimal to change it in trusted Codex sessions."
+        "    Use /visibility to inspect, or /visibility strict, /visibility dynamic, " "or /visibility minimal to change it in trusted Codex sessions."
     )
     _log(
-        "    Claude Code: /visibility strict|dynamic|minimal; "
-        "all platforms: python3 _shared/agent_visibility_cli.py show|set <profile>."
+        "    Claude Code: /visibility strict|dynamic|minimal; " "all platforms: python3 _shared/agent_visibility_cli.py show|set <profile>."
     )
     _log("    Hook execution, governance gates, and strict session logging remain unchanged.")
 
@@ -3282,7 +3255,11 @@ def main() -> int:
             if args.status:
                 node_runtime = _resolve_node_runtime(key)
                 selected_node_runtimes.append(node_runtime)
-                results[key] = check_status_detail(key, node_runtime=node_runtime)
+                results[key] = check_status_detail(
+                    key,
+                    node_runtime=node_runtime,
+                    addon_sources=args.addon_source,
+                )
             elif args.uninstall:
                 results[key] = uninstall_hook(key, dry_run=args.dry_run)
             else:

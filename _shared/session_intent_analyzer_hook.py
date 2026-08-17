@@ -56,20 +56,14 @@ try:
     )
     _LEDGER_IMPORT_BROKEN = False
 except ImportError as _ledger_exc:
-    # ImportError naming the ledger module itself means it is genuinely absent
-    # (skill uninstalled, mid-reinstall, or relocated) -> degrade as "unavailable".
-    # An ImportError naming a DIFFERENT module means the ledger is present but a
-    # transitive dependency is broken -> flag as broken, not absent. Either way
-    # degrade gracefully instead of crashing at import time.
+    # ImportError naming the ledger module itself means it is genuinely absent (skill uninstalled, mid-reinstall, or relocated) -> degrade as "unavailable". An ImportError naming a DIFFERENT module means the ledger is present but a transitive dependency is broken -> flag as broken, not absent. Either way degrade gracefully instead of crashing at import time.
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
     resolve_session_id = None
     _LEDGER_IMPORT_BROKEN = getattr(_ledger_exc, "name", None) not in (None, "session_intent_ledger")
 except Exception:
-    # Present but broken at import (syntax error, a failing transitive dependency).
-    # Still degrade non-blockingly, but flag it as broken so main() reports a
-    # distinct message instead of silently labelling a real defect "unavailable".
+    # Present but broken at import (syntax error, a failing transitive dependency). Still degrade non-blockingly, but flag it as broken so main() reports a distinct message instead of silently labelling a real defect "unavailable".
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
@@ -78,11 +72,7 @@ except Exception:
 
 
 DEFAULT_INTERNAL = (
-    "session-intent-analyzer: Observe every user input by recording an input digest, "
-    "current-session pointer, and digest-only intake status. "
-    "Agents add semantic summaries, constraints, and decisions only when intent materially changes. "
-    "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
-    "Use the ledger as context for skill-evolution and jailbreak-detector."
+    "session-intent-analyzer: Observe every user input by recording an input digest, " "current-session pointer, and digest-only intake status. " "Agents add semantic summaries, constraints, and decisions only when intent materially changes. " "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. " "Use the ledger as context for skill-evolution and jailbreak-detector."
 )
 LEDGER_UNAVAILABLE_DEGRADE = (
     "Ledger dependency unavailable non-blockingly; continue without raw prompt persistence."
@@ -91,18 +81,14 @@ LEDGER_WRITE_FAILED_DEGRADE = (
     "Ledger write failed non-blockingly; continue without raw prompt persistence."
 )
 LEDGER_BROKEN_DEGRADE = (
-    "Ledger module present but failed to load non-blockingly; "
-    "continue without raw prompt persistence."
+    "Ledger module present but failed to load non-blockingly; " "continue without raw prompt persistence."
 )
 DEGRADE_MARKER_FILE = "ledger-degraded.json"
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.=-]+")
 
 
 def _safe_component(value: Any) -> str:
-    # Must stay character-identical to task_router_reminder_hook.safe_path_component:
-    # the router rebuilds this path itself to find the degrade marker, so any
-    # charset/normalization drift silently hides the marker (fail-open) -- the
-    # exact cross-module-drift class this marker exists to prevent.
+    # Must stay character-identical to task_router_reminder_hook.safe_path_component: the router rebuilds this path itself to find the degrade marker, so any charset/normalization drift silently hides the marker (fail-open) -- the exact cross-module-drift class this marker exists to prevent.
     text = str(value or "unknown").strip()
     text = _SAFE_COMPONENT_RE.sub("-", text)
     text = re.sub(r"^[.-]+|[.-]+$", "", text)
@@ -110,8 +96,7 @@ def _safe_component(value: Any) -> str:
 
 
 def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> Path:
-    # Session component mirrors task_router_reminder_hook.resolve_session_id
-    # candidate order so producer and consumer key the same directory.
+    # Session component mirrors task_router_reminder_hook.resolve_session_id candidate order so producer and consumer key the same directory.
     pointer_session = ""
     try:
         pointer = json.loads(
@@ -137,10 +122,7 @@ def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> 
 
 
 def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], reason: str) -> None:
-    # Durable, ledger-independent record that THIS turn's input was NOT
-    # observed, so freshness consumers (task-router reminder, gate lineage
-    # checks) can fail closed instead of riding a stale anchor. Best-effort:
-    # the audit marker must never break the hook itself.
+    # Durable, ledger-independent record that THIS turn's input was NOT observed, so freshness consumers (task-router reminder, gate lineage checks) can fail closed instead of riding a stale anchor. Best-effort: the audit marker must never break the hook itself.
     try:
         path = _degrade_marker_path(root, platform, payload)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -168,8 +150,7 @@ def _clear_degrade_marker(root: Path, platform: str, payload: dict[str, Any]) ->
 
 
 def read_payload() -> dict[str, Any]:
-    # Hook runners send JSON as UTF-8. Read raw bytes so the Windows console
-    # code page cannot turn non-ASCII input into lone surrogate characters.
+    # Hook runners send JSON as UTF-8. Read raw bytes so the Windows console code page cannot turn non-ASCII input into lone surrogate characters.
     buffer = getattr(sys.stdin, "buffer", None)
     try:
         data = buffer.read() if buffer is not None else sys.stdin.read()
@@ -256,12 +237,7 @@ def main(argv: list[str] | None = None) -> int:
             for func in (resolve_session_id, build_input_observation, record_turn)
         )
         if not ledger_available:
-            # Distinguish a genuinely absent ledger from one that is installed but
-            # broken at import, so a real defect is not silently mislabeled
-            # "unavailable". Both remain non-blocking (rc 0). A BROKEN ledger also
-            # leaves a durable degrade marker so freshness consumers fail closed
-            # instead of riding the frozen lineage anchor; an ABSENT ledger is the
-            # documented baseline and stays marker-free.
+            # Distinguish a genuinely absent ledger from one that is installed but broken at import, so a real defect is not silently mislabeled "unavailable". Both remain non-blocking (rc 0). A BROKEN ledger also leaves a durable degrade marker so freshness consumers fail closed instead of riding the frozen lineage anchor; an ABSENT ledger is the documented baseline and stays marker-free.
             if _LEDGER_IMPORT_BROKEN:
                 _write_degrade_marker(ledger_root, args.platform, payload, "ledger-broken")
             message = message + " " + (

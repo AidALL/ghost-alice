@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 # Ghost-ALICE shared secrets loader for bash
 #
-# All skills and scripts retrieve login information such as API keys, tokens,
-# passwords, and email credentials through the same path. Once a value is
-# registered, later calls retrieve it automatically instead of prompting each time.
+# All skills and scripts retrieve login information such as API keys, tokens, passwords, and email credentials through the same path. Once a value is registered, later calls retrieve it automatically instead of prompting each time.
 #
 # Location: ~/.ghost-alice/secrets.env (mode 600)
 # Format: KEY=value (.env style)

@@ -11,11 +11,13 @@ Run: python3 -m pytest _shared/test_addon_commands_resources.py -q
 
 from __future__ import annotations
 
+import errno
 import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
@@ -23,6 +25,26 @@ sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 import addon_installer as ai  # noqa: E402
 import addon_registry as reg  # noqa: E402
+from addon_uninstall import _symlink_safe_remove  # noqa: E402
+from install_transaction import _create_directory_link  # noqa: E402
+
+
+def _windows_symlink_privilege_error() -> OSError:
+    error = OSError(errno.EPERM, "file symlink privilege unavailable")
+    error.winerror = 1314
+    return error
+
+
+def _create_windows_junction(test_case: unittest.TestCase, source: Path, link: Path) -> None:
+    test_case.assertEqual(sys.platform, "win32")
+    with mock.patch("install_transaction.os.symlink", side_effect=_windows_symlink_privilege_error()):
+        mode = _create_directory_link(source, link)
+    try:
+        test_case.assertEqual(mode, "junction")
+        test_case.assertEqual(ai._detect_install_mode(link), "junction")
+    except Exception:
+        _symlink_safe_remove(link)
+        raise
 
 
 class ResolutionTest(unittest.TestCase):
@@ -141,11 +163,29 @@ class ExtrasSecurityTest(unittest.TestCase):
             "--installed-at", "t", "--claude-commands-dir", str(self.commands),
             "--resources-dir", str(self.resources)])
 
+    def _symlink_file_or_skip(self, link: Path, target: Path) -> None:
+        try:
+            link.symlink_to(target)
+        except NotImplementedError as error:
+            self.skipTest(f"file symlinks unavailable: {error}")
+        except OSError as error:
+            unsupported = {errno.EACCES, errno.EPERM, errno.ENOSYS, errno.ENOTSUP, getattr(errno, "EOPNOTSUPP", errno.ENOTSUP)}
+            if error.errno not in unsupported and getattr(error, "winerror", None) != 1314:
+                raise
+            self.skipTest(f"file symlinks unavailable: {error}")
+
+    def test_file_symlink_helper_reraises_unrelated_oserror(self):
+        error = OSError(errno.EIO, "fixture failure")
+        with mock.patch.object(Path, "symlink_to", side_effect=error), mock.patch.object(self, "skipTest", return_value=None):
+            with self.assertRaises(OSError) as raised:
+                self._symlink_file_or_skip(self.root / "link", self.root / "target")
+        self.assertIs(raised.exception, error)
+
     def test_refuses_symlink_leaf_command_no_write_through(self):
         self.commands.mkdir(parents=True)
         victim = self.root / "victim.txt"
         victim.write_text("ORIG\n", encoding="utf-8")
-        (self.commands / "richcmd.md").symlink_to(victim)
+        self._symlink_file_or_skip(self.commands / "richcmd.md", victim)
         self.assertNotEqual(self._write(), 0)
         self.assertEqual(victim.read_text(encoding="utf-8"), "ORIG\n")  # never written through
 
@@ -153,7 +193,7 @@ class ExtrasSecurityTest(unittest.TestCase):
         self.commands.mkdir(parents=True)
         victim = self.root / "tmp-victim.txt"
         victim.write_text("ORIG\n", encoding="utf-8")
-        (self.commands / ".richcmd.md.provision.tmp").symlink_to(victim)
+        self._symlink_file_or_skip(self.commands / ".richcmd.md.provision.tmp", victim)
         self.assertEqual(self._write(), 0)
         self.assertEqual(victim.read_text(encoding="utf-8"), "ORIG\n")
 
@@ -168,19 +208,39 @@ class ExtrasSecurityTest(unittest.TestCase):
         base.mkdir(parents=True)
         victim = self.root / "rvictim.txt"
         victim.write_text("ORIG\n", encoding="utf-8")
-        (base / "ref.txt").symlink_to(victim)
+        self._symlink_file_or_skip(base / "ref.txt", victim)
         self.assertNotEqual(self._write(), 0)
         self.assertEqual(victim.read_text(encoding="utf-8"), "ORIG\n")
 
-    def test_refuses_symlinked_resource_base_no_escape(self):
-        # the resources/<addon_id> base itself pre-planted as a symlink to an
-        # external dir must be refused, not provisioned through (base symlink guard).
+    @unittest.skipUnless(sys.platform == "win32", "Windows junction coverage")
+    def test_refuses_junction_resource_base_no_escape(self):
         escape = self.root / "escape_dir"
         escape.mkdir()
         self.resources.mkdir(parents=True)
-        (self.resources / "rich").symlink_to(escape, target_is_directory=True)
-        self.assertNotEqual(self._write(), 0)
-        self.assertFalse((escape / "ref.txt").exists())  # nothing written into the escape dir
+        base = self.resources / "rich"
+        _create_windows_junction(self, escape, base)
+        try:
+            rc = self._write()
+            self.assertFalse((escape / "ref.txt").exists())
+            self.assertNotEqual(rc, 0)
+        finally:
+            _symlink_safe_remove(base)
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows junction coverage")
+    def test_refuses_nested_junction_resource_no_escape(self):
+        source = RICH / "addons" / "rich" / "resources" / "ref.txt"
+        base = self.resources / "rich"
+        base.mkdir(parents=True)
+        escape = self.root / "nested_escape"
+        escape.mkdir()
+        nested = base / "nested"
+        _create_windows_junction(self, escape, nested)
+        try:
+            with self.assertRaises(ai.AddonManifestError):
+                ai._safe_provision(str(source), base, nested / "ref.txt", {})
+            self.assertFalse((escape / "ref.txt").exists())
+        finally:
+            _symlink_safe_remove(nested)
 
     def test_reinstall_overwrites_own_extras(self):
         self.assertEqual(self._write(), 0)

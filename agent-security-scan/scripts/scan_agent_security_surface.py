@@ -376,8 +376,9 @@ def resolve_config_path(text: str, home: Path) -> Path | None:
         if text.startswith(prefix):
             suffix = text[len(prefix) :]
             return (home_resolved / suffix).resolve(strict=False)
-    if text.startswith("/"):
-        return Path(text).expanduser().resolve(strict=False)
+    candidate = Path(text).expanduser()
+    if text.startswith("/") or candidate.is_absolute():
+        return candidate.resolve(strict=False)
     return None
 
 
@@ -401,7 +402,7 @@ def broad_filesystem_roots(config: dict[str, Any], home: Path) -> list[str]:
         if (
             resolved == home_resolved
             or resolved == home_resolved.parent
-            or resolved == Path("/")
+            or resolved.parent == resolved
             or str(resolved) in DOCKER_SOCKET_PATHS
         ):
             broad.append(str(resolved))

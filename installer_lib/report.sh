@@ -174,22 +174,6 @@ report_common_target_progress_line() {
   printf '] [%s/%s] %s' "$done_count" "$total_count" "$suffix"
 }
 
-report_live_common_target_suffix() {
-  local suffix="${1:-common targets synced}"
-  case "$suffix" in
-    *"on all platforms"*) printf '%s' "all platforms" ;;
-    "common targets synced"|"") printf '%s' "synced" ;;
-    *) printf '%s' "$suffix" ;;
-  esac
-}
-
-report_live_common_target_progress_line() {
-  local done_count="$1" total_count="$2" suffix="${3:-common targets synced}"
-  printf '        Common targets ['
-  report_progress_bar "$done_count" "$total_count" 20
-  printf '] [%s/%s] %s' "$done_count" "$total_count" "$(report_live_common_target_suffix "$suffix")"
-}
-
 report_target_operation_progress_line() {
   local done_count="$1" total_count="$2" suffix="${3:-pending}"
   printf '        Sync ['
@@ -208,7 +192,7 @@ report_auto_update_target_operation_progress_line() {
 
 report_auto_update_common_target_progress_line() {
   report_clear_current_line
-  report_live_common_target_progress_line "$@"
+  report_common_target_progress_line "$@"
 }
 
 report_auto_animate_target_operation_progress_line() {
@@ -292,7 +276,7 @@ report_print_auto_start() {
   printf '%s\n' "  [1/5] Preflight           ok"
   report_common_skill_sync_line "$common_targets"
   printf '\n'
-  report_live_common_target_progress_line 0 "$common_targets"
+  report_common_target_progress_line 0 "$common_targets"
 }
 
 report_print_auto_full() {

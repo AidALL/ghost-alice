@@ -15,8 +15,7 @@ Delegate each task to a specialized agent with an isolated context. Make the ins
 
 ○ Core principle
 
-A fresh subagent per task plus a two-stage review (spec then quality) supports
-focused work and faster correction.
+A fresh subagent per task plus a two-stage review (spec then quality) supports focused work and faster correction.
 ## Contents
 
 - [When to Use](#when-to-use)

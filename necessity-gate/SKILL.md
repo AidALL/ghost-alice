@@ -6,23 +6,18 @@ compatibility:
 ---
 
 <SUBAGENT-STOP>
-If this agent was dispatched to perform only a specific subtask, skip this
-skill.
+If this agent was dispatched to perform only a specific subtask, skip this skill.
 </SUBAGENT-STOP>
 
 <EXTREMELY-IMPORTANT>
-Do not bypass this gate by expert judgment. If the work "obviously" seems
-needed, still run the gate. This friction protects novice-day and bad-day agent
-behavior.
+Do not bypass this gate by expert judgment. If the work "obviously" seems needed, still run the gate. This friction protects novice-day and bad-day agent behavior.
 
 Starting a new task without this gate is a rule violation.
 </EXTREMELY-IMPORTANT>
 
 # necessity-gate
 
-necessity-gate checks whether a new task, file, audit cycle, skill change, or
-follow-up is justified by real evidence and recovery value. It blocks padding,
-speculative cleanup, manufactured follow-ups, and scope creep.
+necessity-gate checks whether a new task, file, audit cycle, skill change, or follow-up is justified by real evidence and recovery value. It blocks padding, speculative cleanup, manufactured follow-ups, and scope creep.
 ## Contents
 
 - [Triggers](#triggers)
@@ -58,8 +53,7 @@ The gate is considered passed only when a reason is recorded:
 
 - `user-directed: <quote>` for explicit user instructions
 - reference to a previously approved task and substep
-- retry inside an already approved loop, where verification-before-completion
-  absorbs the check
+- retry inside an already approved loop, where verification-before-completion absorbs the check
 
 No silent pass is allowed.
 
@@ -73,14 +67,11 @@ Write one concrete sentence for the proposed work. Do not use vague phrasing.
 
 Choose exactly one:
 
-- `reproducible`: a test fails, a command errors, or the user repeatedly reports
-  the same symptom
+- `reproducible`: a test fails, a command errors, or the user repeatedly reports the same symptom
 - `evidenced`: logs, files, schemas, or dependencies show a mismatch
-- `speculative`: the reason is "maybe", "cleaner", "could be useful", or
-  expert preference
+- `speculative`: the reason is "maybe", "cleaner", "could be useful", or expert preference
 
-`speculative` defaults to reject unless later evaluation is exceptionally
-strong.
+`speculative` defaults to reject unless later evaluation is exceptionally strong.
 
 ### 3. Assess Harm If Skipped
 
@@ -88,16 +79,13 @@ Use one of these harm shapes:
 
 - system breakage
 - explicit user request unmet
-- future work cost accumulation, which is always suspect and is treated together
-  with speculative
+- future work cost accumulation, which is always suspect and is treated together with speculative
 
 "The output would look cleaner" is not harm.
 
 ### 4. Assess Regression Risk
 
-Consider whether the work touches a working system, is relied on by other
-skills or runtime paths, is hard to recover, or creates more scope expansion.
-If risk is written as zero, re-evaluate; true zero is rare.
+Consider whether the work touches a working system, is relied on by other skills or runtime paths, is hard to recover, or creates more scope expansion. If risk is written as zero, re-evaluate; true zero is rare.
 
 ### 5. Decide
 
@@ -132,15 +120,11 @@ Record the decision and reasoning.
 | "Clean up other places at once" | batch creep | reject |
 | "Make the docs look richer" | aesthetic padding | reject |
 
-This table is not exhaustive. The threshold is that work without clear evidence
-or a user directive defaults to reject.
+This table is not exhaustive. The threshold is that work without clear evidence or a user directive defaults to reject.
 
 ## Relationship To Verification
 
-necessity-gate is an initialization-event gate. It runs when work is first
-defined or when a loop discovers a new subtask. Inside an already approved loop,
-verification-before-completion handles the "did this step actually work"
-question.
+necessity-gate is an initialization-event gate. It runs when work is first defined or when a loop discovers a new subtask. Inside an already approved loop, verification-before-completion handles the "did this step actually work" question.
 
 ## What This Gate Does Not Block
 

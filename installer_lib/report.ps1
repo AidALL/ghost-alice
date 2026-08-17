@@ -156,14 +156,31 @@ function Format-CommonTargetProgressLine {
         [string]$Suffix = "common targets synced"
     )
 
-    # In-place (`r) refresh leaves a stale tail when the previous frame was longer
-    # (e.g. "...synced" overwritten by "...For X [1/2]" renders "[1/2]nced"). The suffix length
-    # varies ("For X [i/n]" vs "common targets synced on all platforms"), so right-pad to a fixed
-    # width so a shorter line fully overwrites the previous one. ANSI clear-EOL is not used because
-    # Windows PowerShell 5.1 does not guarantee VT support. Only this progress line is printed to
-    # the live console (detailed logs go to the file), so the padding is safe.
-    $line = ("        Common targets      [{0}] [{1}/{2}] {3}" -f (Format-ProgressBar -DoneCount $DoneCount -TotalCount $TotalCount), $DoneCount, $TotalCount, $Suffix)
-    return $line.PadRight(110)
+    return ("        Common targets      [{0}] [{1}/{2}] {3}" -f (Format-ProgressBar -DoneCount $DoneCount -TotalCount $TotalCount), $DoneCount, $TotalCount, $Suffix)
+}
+
+$script:CommonTargetProgressFrameWidth = 0
+
+function Write-CommonTargetProgressFrame {
+    param(
+        [int]$DoneCount,
+        [int]$TotalCount,
+        [string]$Suffix = "common targets synced"
+    )
+
+    $line = Format-CommonTargetProgressLine -DoneCount $DoneCount -TotalCount $TotalCount -Suffix $Suffix
+    [Console]::Write("`r")
+    if ($script:CommonTargetProgressFrameWidth -gt $line.Length) {
+        [Console]::Write(" " * $script:CommonTargetProgressFrameWidth)
+        [Console]::Write("`r")
+    }
+    [Console]::Write($line)
+    $script:CommonTargetProgressFrameWidth = $line.Length
+}
+
+function Complete-CommonTargetProgressFrame {
+    [Console]::WriteLine()
+    $script:CommonTargetProgressFrameWidth = 0
 }
 
 function Write-AutoAnimateCommonTargetProgress {
@@ -175,12 +192,7 @@ function Write-AutoAnimateCommonTargetProgress {
         [int]$StepDelayMs = 20
     )
 
-    # PowerShell tween corresponding to shell report.sh's report_auto_animate_target_operation_progress_line.
-    # Instead of jumping the milestone count in one shot (0->25->50), it redraws From+1..To one cell at a time
-    # to create a smooth roll-up like macOS. Like the caller, it overwrites in place (`r) + fixed width
-    # (Format-CommonTargetProgressLine PadRight). ANSI clear-EOL is not used because Windows
-    # PowerShell 5.1/conhost does not guarantee VT by default. Start-Sleep resolution is
-    # bound to the Windows timer (~15.6ms), so 20ms effectively becomes ~16-31ms frames, which is enough for animation.
+    # PowerShell tween corresponding to shell report.sh's report_auto_animate_target_operation_progress_line. Instead of jumping the milestone count in one shot (0->25->50), it redraws From+1..To one cell at a time to create a smooth roll-up like macOS. Start-Sleep resolution is bound to the Windows timer (~15.6ms), so 20ms effectively becomes ~16-31ms frames, which is enough for animation.
     $from = $FromCount
     $to = $ToCount
     if ($from -lt 0) { $from = 0 }
@@ -188,8 +200,7 @@ function Write-AutoAnimateCommonTargetProgress {
     if ($to -gt $TotalCount) { $to = $TotalCount }
 
     for ($completed = $from + 1; $completed -le $to; $completed++) {
-        [Console]::Write("`r")
-        [Console]::Write((Format-CommonTargetProgressLine -DoneCount $completed -TotalCount $TotalCount -Suffix $Suffix))
+        Write-CommonTargetProgressFrame -DoneCount $completed -TotalCount $TotalCount -Suffix $Suffix
         if ($completed -lt $to) {
             Start-Sleep -Milliseconds $StepDelayMs
         }
@@ -303,7 +314,8 @@ function Write-InstallReportAutoStart {
     Write-Host "Progress"
     Write-Host "  [1/5] Preflight           ok"
     Write-Host (Format-CommonSkillSyncLine -CommonTargets $CommonTargets)
-    [Console]::Write((Format-CommonTargetProgressLine -DoneCount 0 -TotalCount $CommonTargets))
+    $script:CommonTargetProgressFrameWidth = 0
+    Write-CommonTargetProgressFrame -DoneCount 0 -TotalCount $CommonTargets
 }
 
 function Write-InstallReportEvent {

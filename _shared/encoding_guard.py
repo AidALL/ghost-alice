@@ -117,8 +117,7 @@ def _decode_utf8(path: Path, raw: bytes) -> tuple[str | None, EncodingIssue | No
             path=path,
             code="invalid-utf8",
             message=(
-                "expected UTF-8 or UTF-8 with BOM. Re-save this semantic asset as UTF-8 "
-                "before installing."
+                "expected UTF-8 or UTF-8 with BOM. Re-save this semantic asset as UTF-8 " "before installing."
             ),
             byte_offset=exc.start,
         )

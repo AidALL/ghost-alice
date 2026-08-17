@@ -128,24 +128,24 @@ Return: a summary of what was found and what was fixed.
 
 ## Common Mistakes
 
-Too broad: "Fix all tests" - the agent gets lost
-Specific: "Fix agent-tool-abort.test.ts" - a focused scope
+- Too broad: "Fix all tests" - the agent gets lost
+- Specific: "Fix agent-tool-abort.test.ts" - a focused scope
 
-No context: "Fix the race condition" - the agent does not know the location
-With context: paste the error message and the test name
+- No context: "Fix the race condition" - the agent does not know the location
+- With context: paste the error message and the test name
 
-No constraints: the agent can refactor everything
-With constraints: "Do not change production code" or "Fix only the tests"
+- No constraints: the agent can refactor everything
+- With constraints: "Do not change production code" or "Fix only the tests"
 
-Vague output: "Fix it" - you do not know what changed
-Specific: "Return a summary of the root cause and the changes"
+- Vague output: "Fix it" - you do not know what changed
+- Specific: "Return a summary of the root cause and the changes"
 
 ## When Not to Use
 
-Related failures: fixing one may fix the others. Investigate them together first.
-Full context needed: when the understanding has to look at the whole system
-Exploratory debugging: when you do not yet know what is broken
-Shared state: when the agents could interfere (editing the same file, using the same resource)
+- Related failures: fixing one may fix the others. Investigate them together first.
+- Full context needed: when the understanding has to look at the whole system
+- Exploratory debugging: when you do not yet know what is broken
+- Shared state: when the agents could interfere (editing the same file, using the same resource)
 
 ## Key Benefits
 

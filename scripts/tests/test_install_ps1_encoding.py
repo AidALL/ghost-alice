@@ -25,7 +25,11 @@ class InstallPs1EncodingTest(unittest.TestCase):
         ps1 = installer_ps1_source()
         block_helper = GLOBAL_RULE_BLOCKS.read_text(encoding="utf-8")
 
-        self.assertIn("Get-Content -LiteralPath $CodexBootstrapSource -Raw -Encoding UTF8", ps1)
+        self.assertIn(
+            '$script:CodexBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\\codex\\AGENTS.md"',
+            ps1,
+        )
+        self.assertIn('"--source", $CodexBootstrapSource', ps1)
         self.assertIn("global_rule_blocks.py", ps1)
         self.assertIn('encoding="utf-8-sig"', block_helper)
         self.assertIn('encoding="utf-8"', block_helper)

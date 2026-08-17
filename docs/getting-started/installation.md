@@ -2,16 +2,12 @@
 
 Language: English | [Korean](../ko/getting-started/installation.md)
 
-This guide is the command reference for installing, updating, checking, and
-repairing Ghost-ALICE OS. Public guidance uses OS-native entrypoints with the
-same long flag surface.
+This guide is the command reference for installing, updating, checking, and repairing Ghost-ALICE OS. Public guidance uses OS-native entrypoints with the same long flag surface.
 
 - macOS, Linux, WSL, or Git Bash: `bash install.sh ...`
 - Windows Command Prompt or PowerShell: `.\install.cmd ...`
 
-On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+
-installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`.
-This handles PowerShell execution policy blocks and does not change the user or machine execution policy.
+On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`. This handles PowerShell execution policy blocks and does not change the user or machine execution policy.
 
 ## Contents
 
@@ -48,8 +44,7 @@ cd %USERPROFILE%\ghost-alice
 
 ## Install Official Addons
 
-Official addons use short aliases and install from the Ghost-ALICE core
-checkout.
+Official addons use short aliases and install from the Ghost-ALICE core checkout.
 
 macOS, Linux, WSL, or Git Bash:
 
@@ -63,13 +58,9 @@ Windows Command Prompt or PowerShell:
 .\install.cmd --addon autopilot
 ```
 
-Windows Command Prompt and PowerShell use the same official alias through
-`.\install.cmd --addon autopilot`.
+Windows Command Prompt and PowerShell use the same official alias through `.\install.cmd --addon autopilot`.
 
-Run this from the Ghost-ALICE core checkout. Normal users do not clone the
-autopilot addon repository or run an installer inside that repository; the core
-installer fetches the official addon package. This install example is not a full runtime compatibility claim; read the addon repository `compatibility-matrix.json`
-before making one.
+Run this from the Ghost-ALICE core checkout. Normal users do not clone the autopilot addon repository or run an installer inside that repository; the core installer fetches the official addon package. This install example is not a full runtime compatibility claim; read the addon repository `compatibility-matrix.json` before making one.
 
 To install the official addon for one platform only, add `--platform`:
 
@@ -81,9 +72,7 @@ bash install.sh --platform codex --addon autopilot
 .\install.cmd --platform codex --addon autopilot
 ```
 
-Addon-specific behavior, state files, pause/resume controls, and removal details
-live in each addon repository. The core checkout owns the common install
-command.
+Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository. The core checkout owns the common install command.
 
 ## Official Addon List
 
@@ -113,8 +102,7 @@ bash install.sh --addon-source /path/to/addon-repo
 .\install.cmd --addon-source C:\path\to\addon-repo
 ```
 
-For git URL addon sources, `--addon-tag` selects the branch or tag to clone into
-the local addon source cache.
+For git URL addon sources, `--addon-tag` selects the branch or tag to clone into the local addon source cache.
 
 ## Install One Platform
 
@@ -135,8 +123,7 @@ bash install.sh --prompt-platform
 
 ## Check Status
 
-Doctor is a read-only strict diagnostic. Use it before changing a suspicious
-install.
+Doctor is a read-only strict diagnostic. Use it before changing a suspicious install.
 
 ```bash
 bash install.sh --doctor
@@ -152,8 +139,7 @@ The healthy target is `overall: ok`.
 
 ## Update
 
-Update the local clone through the installer so source-local edits are stashed
-before a fast-forward.
+Update the local clone through the installer so source-local edits are stashed before a fast-forward.
 
 ```bash
 cd ~/ghost-alice
@@ -165,16 +151,13 @@ cd %USERPROFILE%\ghost-alice
 .\install.cmd --update-source
 ```
 
-If the checkout is too old to receive that option because raw `git pull` is
-already blocked by local changes, use the bootstrap updater.
+If the checkout is too old to receive that option because raw `git pull` is already blocked by local changes, use the bootstrap updater.
 
 ```bash
 cd ~/ghost-alice && git fetch origin main && git show FETCH_HEAD:scripts/bootstrap-source-update.sh | /bin/bash -s --
 ```
 
-If source update stops with conflicts, divergent branches, or non-fast-forward
-state, do not rerun the installer repeatedly. Follow
-[troubleshooting](./troubleshooting.md) first.
+If source update stops with conflicts, divergent branches, or non-fast-forward state, do not rerun the installer repeatedly. Follow [troubleshooting](./troubleshooting.md) first.
 
 Then rerun the installer.
 
@@ -209,9 +192,7 @@ bash install.sh --status
 
 ### Agent Visibility Profile
 
-The default profile is `dynamic`. The profile controls how much governance
-surface is shown to the user; it does not disable hooks, strict-grade logs, or
-Work-Impact Projection.
+The default profile is `dynamic`. The profile controls how much governance surface is shown to the user; it does not disable hooks, strict-grade logs, or Work-Impact Projection.
 
 | Profile | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |
@@ -219,34 +200,25 @@ Work-Impact Projection.
 | dynamic | `bash install.sh --visibility dynamic` | `.\install.cmd --visibility dynamic` |
 | minimal | `bash install.sh --visibility minimal` | `.\install.cmd --visibility minimal` |
 
-`--agent-visibility` remains an accepted compatibility alias. Prefer
-`--visibility` in new docs and commands.
+`--agent-visibility` remains an accepted compatibility alias. Prefer `--visibility` in new docs and commands.
 
 ### Slash Commands By Platform
 
-Claude Code treats slash commands as a first-class feature. Codex supports
-built-in slash commands and a custom prompt path, but stable Ghost-ALICE profile
-changes should use `_shared/agent_visibility_cli.py` when a trusted runtime
-command is not available.
+Claude Code treats slash commands as a first-class feature. Codex supports built-in slash commands and a custom prompt path, but stable Ghost-ALICE profile changes should use `_shared/agent_visibility_cli.py` when a trusted runtime command is not available.
 
 ### Python Contract
 
-The installer requires Python 3.11 or newer. If Python 3.11+ is missing, it
-attempts automatic preparation where possible.
+The installer requires Python 3.11 or newer. If Python 3.11+ is missing, it attempts automatic preparation where possible.
 
 - macOS: if Homebrew is available, `brew install python3`
 - Linux / WSL: available package managers such as `apt-get`, `dnf`, `yum`, or `pacman`
 - Windows: `winget`, `choco`, then `scoop`
 
-If Python 3.11+ is still unavailable, installation stops and prints manual
-recovery guidance.
+If Python 3.11+ is still unavailable, installation stops and prints manual recovery guidance.
 
 ### Node.js Contract
 
-Claude Code and Codex hook-enabled installs require Node.js on `PATH` because
-the `tool-checkpoint` PreToolUse gate runs `ghost-alice-hook.mjs`. The installer
-blocks hook installation when the target platform is present but `node` is
-unavailable.
+Claude Code and Codex hook-enabled installs require Node.js on `PATH` because the `tool-checkpoint` PreToolUse gate runs `ghost-alice-hook.mjs`. The installer blocks hook installation when the target platform is present but `node` is unavailable.
 
 ### Platform Update Behavior
 
@@ -258,9 +230,7 @@ unavailable.
 | Codex | Windows | copy | `~/.agents/skills/` | no |
 | All platforms | Git Bash on Windows | copy fallback | varies | no |
 
-Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and
-`scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are
-installer-managed runtime surfaces, so rerun the installer when they change.
+Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are installer-managed runtime surfaces, so rerun the installer when they change.
 
 ### Installed Surfaces
 
@@ -273,24 +243,25 @@ A full install deploys:
 - platform hook settings
 - Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
 - Claude Code permission allowlist
+- Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` global bootstrap
 - Codex `~/.codex/AGENTS.md` bootstrap
 - support state for install-state, pending merges, install rollbacks, and uninstall reports
 
+The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving adjacent user text. If the destination is a markerless user-owned file, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
+
 ### merge-companion
 
-When an update detects user-modified installed files, the installer isolates
-those candidates in a pending merge queue.
+When an update detects user-modified installed files, the installer isolates those candidates in a pending merge queue.
 
 - manifest: `~/.ghost-alice/pending-merges/<platform>/manifest.json`
 - backup: `~/.ghost-alice/pending-merges/<platform>/`
 - install state: `~/.ghost-alice/install-state/<platform>.json`
 
-On the next Claude/Codex session, if pending entries exist, `merge-companion`
-asks whether each should be merged, discarded, or deferred.
+On the next Claude/Codex session, if pending entries exist, `merge-companion` asks whether each should be merged, discarded, or deferred.
 
 ## Uninstall
 
-Uninstall uses the installer-owned install-state manifest.
+Uninstall uses the installer-owned install-state manifest and removes only the Ghost-ALICE managed block from the platform global rule file. User-authored text remains in place.
 
 ```bash
 bash install.sh --uninstall
@@ -304,8 +275,6 @@ See [uninstall cleanup](./uninstall.md) for the full cleanup contract.
 
 ## Troubleshooting
 
-When an update is blocked during `git pull`, a merge conflict, or an installer
-rerun, start with [troubleshooting](./troubleshooting.md).
+When an update is blocked during `git pull`, a merge conflict, or an installer rerun, start with [troubleshooting](./troubleshooting.md).
 
-The same recovery playbook is mirrored in the GitHub Wiki
-`install-troubleshooting` page for people who cannot pull the repo yet.
+The same recovery playbook is mirrored in the GitHub Wiki `install-troubleshooting` page for people who cannot pull the repo yet.

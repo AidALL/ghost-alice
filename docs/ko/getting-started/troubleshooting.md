@@ -44,9 +44,7 @@ bash install.sh --update-source
 
 이 command는 source의 tracked/untracked 변경을 `git stash`에 저장하고, checkout을 fast-forward한 뒤, 그 stash를 직접 확인하도록 남긴다.
 
-Windows에서는 같은 installer path에 `.\install.cmd`를 사용한다. PowerShell이
-`cannot be loaded because running scripts is disabled`를 표시하면 wrapper가
-`-NoProfile -ExecutionPolicy Bypass`로 PowerShell을 호출하고 사용자 또는 머신 execution policy를 변경하지 않는다.
+Windows에서는 같은 installer path에 `.\install.cmd`를 사용한다. PowerShell이 `cannot be loaded because running scripts is disabled`를 표시하면 wrapper가 `-NoProfile -ExecutionPolicy Bypass`로 PowerShell을 호출하고 사용자 또는 머신 execution policy를 변경하지 않는다.
 
 raw `git pull`이 이미 막혀서 checkout이 `--update-source`를 받지 못하면 bootstrap one-command update를 쓴다.
 

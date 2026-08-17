@@ -168,6 +168,10 @@ CODEX_BOOTSTRAP_MARKER="# Ghost-ALICE Codex Bootstrap"
 CODEX_MANAGED_BLOCK_BEGIN="<!-- Ghost-ALICE managed block begin: codex-bootstrap -->"
 CODEX_MANAGED_BLOCK_END="<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
 CODEX_BOOTSTRAP_SOURCE="${SCRIPT_DIR}/platforms/codex/AGENTS.md"
+CLAUDE_BOOTSTRAP_MARKER="# Ghost-ALICE Claude Bootstrap"
+CLAUDE_MANAGED_BLOCK_BEGIN="<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
+CLAUDE_MANAGED_BLOCK_END="<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
+CLAUDE_BOOTSTRAP_SOURCE="${SCRIPT_DIR}/platforms/claude/CLAUDE.md"
 SESSION_GATE_CONTRACT_SOURCE="${SCRIPT_DIR}/skill-catalog/session-gates.json"
 
 # ── Command sync (skills.json SSOT, multi-platform) ────────
@@ -209,8 +213,7 @@ assert_session_gate_contract
 
 
 # Python bootstrap and guidance when Python is missing (v1.3.0 removed node.js/bash fallbacks).
-# Keep install.sh-level bootstrap messages ASCII English to avoid encoding corruption.
-# User-facing messages are emitted by install_hooks.py under Python UTF-8.
+# Keep install.sh-level bootstrap messages ASCII English to avoid encoding corruption. User-facing messages are emitted by install_hooks.py under Python UTF-8.
 
 
 
@@ -377,9 +380,7 @@ normalize_official_addon_shortcuts() {
 
 normalize_official_addon_shortcuts || exit 1
 
-# Default install: when no platform is specified, install to all detected tools.
-# Plain full uninstall also detects platform homes and install-state manifests for full cleanup.
-# Read-only, diagnostics, and partial removal commands keep the single-platform default (claude).
+# Default install: when no platform is specified, install to all detected tools. Plain full uninstall also detects platform homes and install-state manifests for full cleanup. Read-only, diagnostics, and partial removal commands keep the single-platform default (claude).
 if [ "$PLATFORM_EXPLICIT" -eq 0 ] && [ "$PROMPT_PLATFORM" -eq 0 ] && [ "$CLEANUP_PENDING" -eq 0 ] && [ "$LIST_ADDONS" -eq 0 ] && [ "$UPDATE_SOURCE" -eq 0 ]; then
   case "${ARGS[0]:-}" in
     ""|--help|-h|--list|-l|--status|-s|--doctor|--uninstall|--remove|-u|--sync-commands|--check-commands|--*)
@@ -430,9 +431,7 @@ if [ "$UPDATE_SOURCE" -eq 1 ]; then
   exit $?
 fi
 
-# auto/default: detect ~/.claude and ~/.codex, then recurse per platform.
-# Auto child installs are separate install path operations, not a duplicate install.
-# Legacy-readable log shape: [auto] (${platform_index}/${#detected[@]}) <platform>
+# auto/default: detect ~/.claude and ~/.codex, then recurse per platform. Auto child installs are separate install path operations, not a duplicate install. Legacy-readable log shape: [auto] (${platform_index}/${#detected[@]}) <platform>
 if [ "$AUTO_DETECT" -eq 1 ]; then
   detected=()
   while IFS= read -r plat; do
@@ -450,8 +449,7 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   [ "$VERBOSE" -eq 1 ] && verbose_args+=(--verbose)
   if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
     prepare_addon_sources || exit 1
-    # Prepared addon git sources are forwarded to child installs as local cache
-    # paths; the tag has already been applied by the parent checkout.
+    # Prepared addon git sources are forwarded to child installs as local cache paths; the tag has already been applied by the parent checkout.
     ADDON_TAGS=()
   fi
   addon_args=()

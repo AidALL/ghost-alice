@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-06-21T11:12:15Z",
+  "generated_at": "2026-08-17T07:21:39Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -248,7 +248,7 @@
     {
       "name": "using-coding-convention",
       "path": "coding-convention/using-coding-convention/SKILL.md",
-      "description": "Use at the start of every coding or development conversation. Defines how to find and invoke coding-convention family skills. Requires relevant skills before any response, including clarification questions.",
+      "description": "Use at the start of every coding or development conversation. Defines how to find and invoke coding-convention family skills.",
       "family": "coding-convention",
       "governance_class": "governance-subskill",
       "compatibility": [

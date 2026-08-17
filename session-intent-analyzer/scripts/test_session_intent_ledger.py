@@ -488,9 +488,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base)]},
         )
-        # Re-recording with a contract-bound source admits the criterion even
-        # without an explicit admitted field (source-based admission, matching
-        # first-record behavior).
+        # Re-recording with a contract-bound source admits the criterion even without an explicit admitted field (source-based admission, matching first-record behavior).
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base, source="user-explicit")]},

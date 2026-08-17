@@ -26,12 +26,7 @@ STALE_PATTERNS = [
     "test " + LEGACY_TERM,
 ]
 
-# Legacy skill names intentionally referenced for deprecated-install cleanup,
-# NOT stale current usages. install.sh keeps DEPRECATED_INSTALLED_SKILLS to remove
-# old installs by their original directory name; install.ps1 mirrors that list; and
-# test_installer_default_auto.py verifies the cleanup. These references must keep the
-# old name to find and remove old installs, so they are exempt term-by-term here.
-# (Built from LEGACY_TERM so this file does not trip its own scan.)
+# Legacy skill names intentionally referenced for deprecated-install cleanup, NOT stale current usages. install.sh keeps DEPRECATED_INSTALLED_SKILLS to remove old installs by their original directory name; install.ps1 mirrors that list; and test_installer_default_auto.py verifies the cleanup. These references must keep the old name to find and remove old installs, so they are exempt term-by-term here. (Built from LEGACY_TERM so this file does not trip its own scan.)
 ALLOWED_TERM_OCCURRENCES = {
     "install.sh": {LEGACY_TERM + "-security-scan"},
     "install.ps1": {LEGACY_TERM + "-security-scan"},
@@ -65,6 +60,8 @@ def _source_files_from_worktree(root: Path) -> list[str]:
 
 
 def source_files(root: Path = ROOT) -> list[str]:
+    if not (root / ".git").exists():
+        return _source_files_from_worktree(root)
     result = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
         cwd=root,
@@ -101,8 +98,7 @@ class StaleGovernanceTerminologyTests(unittest.TestCase):
             try:
                 text = path.read_text(encoding="utf-8")
             except (UnicodeDecodeError, OSError):
-                # Skip files that are not decodable text, or that are tracked in
-                # the index but absent on disk (e.g. a deletion not yet staged).
+                # Skip files that are not decodable text, or that are tracked in the index but absent on disk (e.g. a deletion not yet staged).
                 continue
             allowed_terms = ALLOWED_TERM_OCCURRENCES.get(rel_path, set())
             for pattern in STALE_PATTERNS:

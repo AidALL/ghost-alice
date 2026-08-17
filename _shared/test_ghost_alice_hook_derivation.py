@@ -119,9 +119,7 @@ class DerivationTests(unittest.TestCase):
         self.assertNotIn("permissionDecision", out.stdout)
 
     def test_existing_block_gate_not_clobbered_and_stale_allows(self) -> None:
-        # A prior block gate (e1) is on disk; this turn the model recorded allow and
-        # the latest event is e2. derive must NOT clobber the gate; the enforcer must
-        # treat the prior block gate as stale -> no deny.
+        # A prior block gate (e1) is on disk; this turn the model recorded allow and the latest event is e2. derive must NOT clobber the gate; the enforcer must treat the prior block gate as stale -> no deny.
         self.write_state({"decision": "allow", "risk_flags": [], "input_event_id": "sha256:e2"})
         self.write_event("sha256:e2")
         self.write_gate({

@@ -5,6 +5,7 @@ Run: python3 -m pytest _shared/test_addon_privileged_adapters.py -q
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import json
 import os
 import shutil
@@ -22,6 +23,7 @@ import addon_registry as reg  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import hash_utils  # noqa: E402
 import install_hooks  # noqa: E402
+import install_transaction  # noqa: E402
 
 
 def _adapter_spec(
@@ -63,6 +65,18 @@ def _write_allowlist(path: Path, *, trust_owner: str, adapters: dict) -> None:
         }),
         encoding="utf-8",
     )
+
+
+@contextmanager
+def _directory_link(source: Path, link: Path):
+    install_mode = install_transaction._create_directory_link(source, link)
+    if not (link.is_symlink() or un._is_reparse_point(link)):
+        raise AssertionError("production link helper did not create a directory link")
+    try:
+        yield install_mode
+    finally:
+        if link.is_symlink() or un._is_reparse_point(link):
+            un._symlink_safe_remove(link)
 
 
 def _make_adapter_addon(
@@ -280,27 +294,27 @@ class PrivilegedAdapterSidecarTest(unittest.TestCase):
             src = _make_adapter_addon(root)
             skills = root / "skills"
             skills.mkdir()
-            (skills / "pilot-skill").symlink_to(src / "addons" / "pilot" / "skill", target_is_directory=True)
-            addons = root / "addons-state"
-            with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
-                rc = ai.main([
-                    "write-sidecars",
-                    "--source", str(src),
-                    "--platform", "claude",
-                    "--addons-dir", str(addons),
-                    "--skills-dir", str(skills),
-                    "--installed-at", "t",
-                ])
-            self.assertEqual(rc, 0)
-            record = reg.read_record("pilot", addons_dir=addons)
-            adapters = [p for p in record["provided"] if p["kind"] == "adapter"]
-            self.assertEqual(len(adapters), 1)
-            entry = adapters[0]
-            self.assertEqual(entry["name"], "p5-demo")
-            self.assertEqual(entry["marker"], "[adapter:p5-demo] p5-hook")
-            self.assertEqual(entry["metadata"]["event"], "post_tool_use")
-            self.assertEqual(entry["metadata"]["hook_id"], "p5-hook")
-            self.assertEqual(entry["content_hash"], hash_utils.hash_target(entry["target"], "copy"))
+            with _directory_link(src / "addons" / "pilot" / "skill", skills / "pilot-skill"):
+                addons = root / "addons-state"
+                with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+                    rc = ai.main([
+                        "write-sidecars",
+                        "--source", str(src),
+                        "--platform", "claude",
+                        "--addons-dir", str(addons),
+                        "--skills-dir", str(skills),
+                        "--installed-at", "t",
+                    ])
+                self.assertEqual(rc, 0)
+                record = reg.read_record("pilot", addons_dir=addons)
+                adapters = [p for p in record["provided"] if p["kind"] == "adapter"]
+                self.assertEqual(len(adapters), 1)
+                entry = adapters[0]
+                self.assertEqual(entry["name"], "p5-demo")
+                self.assertEqual(entry["marker"], "[adapter:p5-demo] p5-hook")
+                self.assertEqual(entry["metadata"]["event"], "post_tool_use")
+                self.assertEqual(entry["metadata"]["hook_id"], "p5-hook")
+                self.assertEqual(entry["content_hash"], hash_utils.hash_target(entry["target"], "copy"))
 
     def test_copy_mode_adapter_script_resolution_allows_symlinked_skill_root(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -321,18 +335,17 @@ class PrivilegedAdapterSidecarTest(unittest.TestCase):
                 else:
                     target.write_text(child.read_text(encoding="utf-8"), encoding="utf-8")
             alias_root = root / "alias"
-            alias_root.symlink_to(root / "real", target_is_directory=True)
+            with _directory_link(root / "real", alias_root):
+                hooks = ai.iter_privileged_adapter_hook_specs(
+                    targets,
+                    skills_dir=alias_root / "skills",
+                    privileged_adapter_allowlist=_adapter_allowlist(),
+                )
 
-            hooks = ai.iter_privileged_adapter_hook_specs(
-                targets,
-                skills_dir=alias_root / "skills",
-                privileged_adapter_allowlist=_adapter_allowlist(),
-            )
-
-            self.assertEqual(len(hooks), 1)
-            script = Path(hooks[0]["script"])
-            self.assertTrue(script.is_file())
-            self.assertIn("adapters/p5_demo.py", script.as_posix())
+                self.assertEqual(len(hooks), 1)
+                script = Path(hooks[0]["script"])
+                self.assertTrue(script.is_file())
+                self.assertIn("adapters/p5_demo.py", script.as_posix())
 
 
 class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
@@ -377,9 +390,7 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
         self.assertEqual(install_hooks.remove_adapter_hook("[addon:pilot] obs", platform_key="claude"), 0)
 
     def test_full_uninstall_removes_adapter_hook(self):
-        # Full uninstall (install.sh --uninstall -> install_hooks.py --uninstall ->
-        # uninstall_hook) must strip managed [adapter:...] hooks, not only addon hooks,
-        # so a privileged adapter hook never survives a completed full uninstall.
+        # Full uninstall (install.sh --uninstall -> install_hooks.py --uninstall -> uninstall_hook) must strip managed [adapter:...] hooks, not only addon hooks, so a privileged adapter hook never survives a completed full uninstall.
         src = _make_adapter_addon(self.tmp)
         with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
             self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]), "installed")
@@ -412,43 +423,43 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
         skills = self.tmp / ".claude" / "skills"
         skills.mkdir(parents=True)
         dest = skills / "pilot-skill"
-        dest.symlink_to(skill_src, target_is_directory=True)
-        with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
-            install_hooks.install_hook("claude", addon_sources=[str(src)])
-            provided = [{
-                "kind": "skill",
-                "name": "pilot-skill",
-                "target": str(dest),
-                "ownership": "addon",
-                "install_mode": "symlink",
-                "content_hash": hash_utils.hash_target(str(dest), "symlink"),
-                "marker": "",
-                "metadata": {},
-            }]
-            provided.extend(ai.build_privileged_adapter_provided_entries(
-                ai.load_addon_targets([src], platform="claude"),
-                skills_dir=skills,
-            )["pilot"])
-        addons = self.tmp / ".ghost-alice" / "addons" / "claude"
-        reg.write_record(
-            ai.build_sidecar_record(
-                ai.load_addon_targets(
-                    [src],
+        with _directory_link(skill_src, dest) as install_mode:
+            with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+                install_hooks.install_hook("claude", addon_sources=[str(src)])
+                provided = [{
+                    "kind": "skill",
+                    "name": "pilot-skill",
+                    "target": str(dest),
+                    "ownership": "addon",
+                    "install_mode": install_mode,
+                    "content_hash": hash_utils.hash_target(str(dest), install_mode),
+                    "marker": "",
+                    "metadata": {},
+                }]
+                provided.extend(ai.build_privileged_adapter_provided_entries(
+                    ai.load_addon_targets([src], platform="claude"),
+                    skills_dir=skills,
+                )["pilot"])
+            addons = self.tmp / ".ghost-alice" / "addons" / "claude"
+            reg.write_record(
+                ai.build_sidecar_record(
+                    ai.load_addon_targets(
+                        [src],
+                        platform="claude",
+                        privileged_adapter_allowlist=_adapter_allowlist(),
+                    )[0],
                     platform="claude",
-                    privileged_adapter_allowlist=_adapter_allowlist(),
-                )[0],
-                platform="claude",
-                installed_at="t",
-                provided=provided,
-            ),
-            addons_dir=addons,
-        )
+                    installed_at="t",
+                    provided=provided,
+                ),
+                addons_dir=addons,
+            )
 
-        result = un.uninstall_addon("pilot", addons_dir=addons, allowed_roots=[skills], platform="claude")
+            result = un.uninstall_addon("pilot", addons_dir=addons, allowed_roots=[skills], platform="claude")
 
-        self.assertEqual(result["status"], "removed")
-        self.assertTrue(script.is_file(), msg="adapter source script must not be deleted by uninstall")
-        self.assertFalse(any("[adapter:p5-demo] p5-hook" in command for command in self._commands()))
+            self.assertEqual(result["status"], "removed")
+            self.assertTrue(script.is_file(), msg="adapter source script must not be deleted by uninstall")
+            self.assertFalse(any("[adapter:p5-demo] p5-hook" in command for command in self._commands()))
 
     def test_partial_uninstall_keeps_skill_target_but_processes_adapter_hook_entry(self):
         src = _make_adapter_addon(self.tmp)
@@ -456,45 +467,45 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
         skills = self.tmp / ".claude" / "skills"
         skills.mkdir(parents=True)
         dest = skills / "pilot-skill"
-        dest.symlink_to(skill_src, target_is_directory=True)
-        with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
-            install_hooks.install_hook("claude", addon_sources=[str(src)])
-            provided = [{
-                "kind": "skill",
-                "name": "pilot-skill",
-                "target": str(dest),
-                "ownership": "addon",
-                "install_mode": "symlink",
-                "content_hash": "drifted",
-                "marker": "",
-                "metadata": {},
-            }]
-            provided.extend(ai.build_privileged_adapter_provided_entries(
-                ai.load_addon_targets([src], platform="claude"),
-                skills_dir=skills,
-            )["pilot"])
-        addons = self.tmp / ".ghost-alice" / "addons" / "claude"
-        reg.write_record(
-            ai.build_sidecar_record(
-                ai.load_addon_targets(
-                    [src],
+        with _directory_link(skill_src, dest) as install_mode:
+            with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+                install_hooks.install_hook("claude", addon_sources=[str(src)])
+                provided = [{
+                    "kind": "skill",
+                    "name": "pilot-skill",
+                    "target": str(dest),
+                    "ownership": "addon",
+                    "install_mode": install_mode,
+                    "content_hash": "drifted",
+                    "marker": "",
+                    "metadata": {},
+                }]
+                provided.extend(ai.build_privileged_adapter_provided_entries(
+                    ai.load_addon_targets([src], platform="claude"),
+                    skills_dir=skills,
+                )["pilot"])
+            addons = self.tmp / ".ghost-alice" / "addons" / "claude"
+            reg.write_record(
+                ai.build_sidecar_record(
+                    ai.load_addon_targets(
+                        [src],
+                        platform="claude",
+                        privileged_adapter_allowlist=_adapter_allowlist(),
+                    )[0],
                     platform="claude",
-                    privileged_adapter_allowlist=_adapter_allowlist(),
-                )[0],
-                platform="claude",
-                installed_at="t",
-                provided=provided,
-            ),
-            addons_dir=addons,
-        )
+                    installed_at="t",
+                    provided=provided,
+                ),
+                addons_dir=addons,
+            )
 
-        result = un.uninstall_addon("pilot", addons_dir=addons, allowed_roots=[skills], platform="claude")
+            result = un.uninstall_addon("pilot", addons_dir=addons, allowed_roots=[skills], platform="claude")
 
-        self.assertEqual(result["status"], "partial")
-        self.assertTrue(dest.exists(), msg="drifted skill target must stay for manual review")
-        self.assertTrue(any(item["action"] == "manual-review" for item in result["items"]))
-        self.assertTrue(any(item.get("kind") == "adapter" for item in result["items"]))
-        self.assertFalse(any("[adapter:p5-demo] p5-hook" in command for command in self._commands()))
+            self.assertEqual(result["status"], "partial")
+            self.assertTrue(dest.exists(), msg="drifted skill target must stay for manual review")
+            self.assertTrue(any(item["action"] == "manual-review" for item in result["items"]))
+            self.assertTrue(any(item.get("kind") == "adapter" for item in result["items"]))
+            self.assertFalse(any("[adapter:p5-demo] p5-hook" in command for command in self._commands()))
 
 
 class PrivilegedAdapterCodexHookLifecycleTest(unittest.TestCase):

@@ -15,6 +15,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+from _shared.addon_uninstall import _is_reparse_point, _symlink_safe_remove
+from _shared.install_transaction import _create_directory_link
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 
@@ -33,7 +37,8 @@ def _python_311() -> bool:
 
 class DriftProtectTest(unittest.TestCase):
     def test_reinstall_over_drifted_target_aborts_and_preserves(self):
-        if not shutil.which("bash"):
+        bash = _find_test_bash()
+        if not bash:
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
@@ -44,7 +49,7 @@ class DriftProtectTest(unittest.TestCase):
 
             def run(*args):
                 return subprocess.run(
-                    [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 
@@ -57,8 +62,8 @@ class DriftProtectTest(unittest.TestCase):
             user_dir = Path(home) / "my-noop"
             user_dir.mkdir()
             (user_dir / "SKILL.md").write_text("# USER OWNED\n", encoding="utf-8")
-            skill.unlink()
-            skill.symlink_to(user_dir)
+            _symlink_safe_remove(skill)
+            _create_directory_link(user_dir, skill)
 
             second = run("--platform", "claude", "--addon-source", str(FIXTURE),
                          "--skip-source-health", "task-router")
@@ -66,7 +71,7 @@ class DriftProtectTest(unittest.TestCase):
             self.assertNotEqual(second.returncode, 0,
                                 msg="reinstall over drift must abort: " + second.stderr + second.stdout)
             # The user's drifted link must be untouched.
-            self.assertTrue(skill.is_symlink())
+            self.assertTrue(skill.is_symlink() or _is_reparse_point(skill))
             self.assertEqual(os.path.realpath(skill), os.path.realpath(user_dir))
             self.assertEqual((skill / "SKILL.md").read_text(encoding="utf-8"), "# USER OWNED\n")
 

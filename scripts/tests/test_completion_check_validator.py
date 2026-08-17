@@ -30,8 +30,7 @@ def _load_validator():
 MOD = _load_validator()
 
 
-# A fully-valid completion-check response. Used as the baseline that returns
-# None, and mutated per-test to trigger one deny condition at a time.
+# A fully-valid completion-check response. Used as the baseline that returns None, and mutated per-test to trigger one deny condition at a time.
 VALID_TEXT = """\
 The change is complete and all tests pass.
 
@@ -66,9 +65,7 @@ class LooksLikeCompletionClaimTest(unittest.TestCase):
         self.assertTrue(MOD.looks_like_completion_claim("[completion-check]\n- x"))
 
     def test_keyword_in_prose_without_marker_is_not_a_claim(self) -> None:
-        # Claim detection is marker-only: prose completion keywords and generic
-        # success-criteria phrases do NOT make a claim. Only the explicit
-        # [completion-check] marker does. The model declares its own claims.
+        # Claim detection is marker-only: prose completion keywords and generic success-criteria phrases do NOT make a claim. Only the explicit [completion-check] marker does. The model declares its own claims.
         self.assertFalse(MOD.looks_like_completion_claim("The build is done."))
         self.assertFalse(MOD.looks_like_completion_claim("work complete"))
         self.assertFalse(MOD.looks_like_completion_claim("I recommend option A."))
@@ -78,8 +75,7 @@ class LooksLikeCompletionClaimTest(unittest.TestCase):
         self.assertFalse(MOD.looks_like_completion_claim("Here is some neutral text about cats."))
 
     def test_done_only_inside_control_blocks_is_not_a_claim(self) -> None:
-        # No [completion-check] marker -> not a claim (marker-only detection). The "done"
-        # words inside other control blocks are irrelevant; only the marker counts.
+        # No [completion-check] marker -> not a claim (marker-only detection). The "done" words inside other control blocks are irrelevant; only the marker counts.
         text = (
             "[tool-checkpoint]\n"
             "- verification-before-completion: done\n"
@@ -207,8 +203,7 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         self.assertIsNone(MOD.validate_completion_text(""))
 
     def test_missing_completion_check_block(self) -> None:
-        # Marker present but the [completion-check] block is empty (next header follows
-        # immediately). Marker-only detection flags it as a claim; the empty body is rejected.
+        # Marker present but the [completion-check] block is empty (next header follows immediately). Marker-only detection flags it as a claim; the empty body is rejected.
         reason = MOD.validate_completion_text(
             "I did the work.\n[completion-check]\n[io-trace]\n- skills-loaded: [x]\n"
         )
@@ -255,8 +250,7 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         self.assertIn("skills-loaded", reason)
 
     def test_compact_form_without_acceptance_criteria_is_accepted(self) -> None:
-        # Compact form: no acceptance-criteria enumeration, but the claim-evidence-map
-        # still binds each claim to evidence and a verdict.
+        # Compact form: no acceptance-criteria enumeration, but the claim-evidence-map still binds each claim to evidence and a verdict.
         text = VALID_TEXT.replace(
             "  - C1: validator enforces the completion contract [source: user-explicit]\n"
             "  - C2: stdlib only [source: user-explicit]\n",

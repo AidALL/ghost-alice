@@ -25,10 +25,7 @@ compatibility:
 
 ## Overview
 
-Write a comprehensive implementation plan assuming the engineer has no context
-on the codebase. Document everything they need to know. For each task: the
-files to touch, the code, the tests, the docs worth checking, and how to test.
-Give the whole plan as bite-sized tasks. DRY, YAGNI, TDD, and frequent commits.
+Write a comprehensive implementation plan assuming the engineer has no context on the codebase. Document everything they need to know. For each task: the files to touch, the code, the tests, the docs worth checking, and how to test. Give the whole plan as bite-sized tasks. DRY, YAGNI, TDD, and frequent commits.
 
 Assume the engineer is a capable developer but knows almost nothing about our toolset or problem domain. Assume they do not know good test design well.
 

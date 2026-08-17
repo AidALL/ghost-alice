@@ -90,9 +90,7 @@ try {
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-# Capture the installer's own directory once. install.ps1 dot-sources installer_lib/*.ps1;
-# inside a dot-sourced function $PSScriptRoot resolves to installer_lib/, so functions use
-# $script:GhostAliceRoot (captured here = repo root) for repo-relative paths.
+# Capture the installer's own directory once. install.ps1 dot-sources installer_lib/*.ps1; inside a dot-sourced function $PSScriptRoot resolves to installer_lib/, so functions use $script:GhostAliceRoot (captured here = repo root) for repo-relative paths.
 $script:GhostAliceRoot = $PSScriptRoot
 
 $ErrorActionPreference = "Stop"
@@ -224,6 +222,10 @@ $script:CodexBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\codex
 $script:CodexBootstrapMarker = "# Ghost-ALICE Codex Bootstrap"
 $script:CodexManagedBlockBegin = "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->"
 $script:CodexManagedBlockEnd = "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
+$script:ClaudeBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\claude\CLAUDE.md"
+$script:ClaudeBootstrapMarker = "# Ghost-ALICE Claude Bootstrap"
+$script:ClaudeManagedBlockBegin = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
+$script:ClaudeManagedBlockEnd = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
 
 
 
@@ -246,8 +248,7 @@ $script:CodexManagedBlockEnd = "<!-- Ghost-ALICE managed block end: codex-bootst
 
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-# Dot-source installer_lib modules. Function definitions live in installer_lib/*.ps1 and are
-# sourced here (before any top-level call) so install.ps1 stays a thin entrypoint.
+# Dot-source installer_lib modules. Function definitions live in installer_lib/*.ps1 and are sourced here (before any top-level call) so install.ps1 stays a thin entrypoint.
 Get-ChildItem -Path (Join-Path $script:GhostAliceRoot 'installer_lib') -Filter '*.ps1' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { . $_.FullName }
 $null = Assert-SessionGateContract
 $script:SkillsDir = Resolve-SkillsDir $Platform
@@ -389,9 +390,7 @@ Resolve-OfficialAddonShortcuts
 if ($ListAddons){ Show-Addons; return }
 if ($UpdateSource) { Update-SourceCheckout; return }
 
-# Default install: when no platform is specified, install to all detected tools.
-# Plain full uninstall also detects platform homes and install-state manifests for full cleanup.
-# Inspection, diagnostics, and partial removal commands keep the single-platform default (claude).
+# Default install: when no platform is specified, install to all detected tools. Plain full uninstall also detects platform homes and install-state manifests for full cleanup. Inspection, diagnostics, and partial removal commands keep the single-platform default (claude).
 $Auto = $false
 $hasInspectionCommand = $Help -or $List -or $ListAddons -or $Status -or $Doctor
 $PlainFullUninstall = $Uninstall -and (-not $Skills -or $Skills.Count -eq 0)
@@ -478,8 +477,7 @@ function Get-AutoCommonTargetCount {
     return $common
 }
 
-# auto/default: detect ~/.claude and ~/.codex, then recurse per platform.
-# Auto child installs are separate install path operations, not a duplicate install.
+# auto/default: detect ~/.claude and ~/.codex, then recurse per platform. Auto child installs are separate install path operations, not a duplicate install.
 if ($Auto) {
     $detected = Get-DetectedPlatforms
     if ($detected.Count -eq 0) {
@@ -618,9 +616,8 @@ if ($Auto) {
         if (Test-LiveCounterEnabled) {
             Write-AutoAnimateCommonTargetProgress -FromCount $autoDisplayedTargets -ToCount $autoSyncedTargets -TotalCount $autoCommonTargets -Suffix "common targets synced on all platforms"
             $autoDisplayedTargets = $autoSyncedTargets
-            [Console]::Write("`r")
-            [Console]::Write((Format-CommonTargetProgressLine -DoneCount $autoSyncedTargets -TotalCount $autoCommonTargets -Suffix "common targets synced on all platforms"))
-            [Console]::WriteLine()
+            Write-CommonTargetProgressFrame -DoneCount $autoSyncedTargets -TotalCount $autoCommonTargets -Suffix "common targets synced on all platforms"
+            Complete-CommonTargetProgressFrame
             Write-InstallReportTail -PlatformLabel $platformLabel -Visibility $visibility
         } else {
             Write-InstallReportAutoFull `

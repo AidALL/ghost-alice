@@ -134,10 +134,7 @@ class AddonHookInstallTest(unittest.TestCase):
                             for e in self._settings()["hooks"]["PostToolUse"] for h in e.get("hooks", [])))
 
     def test_addon_install_preserves_unmanaged_marker_substring_hook(self):
-        # A user hook whose command merely CONTAINS the addon marker substring,
-        # but carries no [hook-runner:] ownership proof, must survive the addon
-        # stale-prune at install time (parity with remove_addon_hook's exact
-        # ownership predicate). Substring-only pruning would delete user data.
+        # A user hook whose command merely CONTAINS the addon marker substring, but carries no [hook-runner:] ownership proof, must survive the addon stale-prune at install time (parity with remove_addon_hook's exact ownership predicate). Substring-only pruning would delete user data.
         user_cmd = "echo audit [addon:hookaddon] obs run >> ~/mylog"
         (self.claude / "settings.json").write_text(json.dumps({
             "hooks": {"PostToolUse": [{"hooks": [{"type": "command", "command": user_cmd}]}]}
@@ -215,8 +212,7 @@ class AddonHookSecurityTest(AddonHookInstallTest):
                    for e in ev for h in e.get("hooks", []))
 
     def test_remove_addon_hook_refuses_core_marker(self):
-        # a marker that is not a well-formed [addon:<id>] <hook_id> must be refused,
-        # so it can NEVER strip a core governance hook (forged-sidecar defense).
+        # a marker that is not a well-formed [addon:<id>] <hook_id> must be refused, so it can NEVER strip a core governance hook (forged-sidecar defense).
         install_hooks.install_hook("claude", addon_sources=[])
         self.assertTrue(self._core_completion_present())
         for forged in ("[completion-reminder] AGENTS.md", "[session-intent-analyzer]",
@@ -245,8 +241,7 @@ class AddonHookSecurityTest(AddonHookInstallTest):
                         msg="forged sidecar hook marker removed the core completion gate")
 
     def test_remove_addon_hook_ignores_non_managed_entry(self):
-        # a non-managed hook whose command merely CONTAINS the addon marker string
-        # (no [hook-runner:] dispatcher) is NOT ours -> must never be removed.
+        # a non-managed hook whose command merely CONTAINS the addon marker string (no [hook-runner:] dispatcher) is NOT ours -> must never be removed.
         install_hooks.install_hook("claude", addon_sources=[])
         s = self._settings()
         s["hooks"].setdefault("PostToolUse", []).append(

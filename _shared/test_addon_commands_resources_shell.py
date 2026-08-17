@@ -17,6 +17,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 
@@ -33,32 +35,9 @@ def _python_311() -> bool:
     return False
 
 
-def _test_bash() -> str | None:
-    candidate = shutil.which("bash")
-    if not candidate:
-        return None
-    try:
-        probe = subprocess.run(
-            [candidate, "-lc", "printf ok"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    except OSError:
-        # which() returned a path that cannot actually be launched (Store alias
-        # stub, stale PATH entry, or a non-PE shim). Degrade to "no working bash"
-        # so the test SKIPS rather than ERRORing on an exec-time OSError.
-        return None
-    if probe.returncode == 0 and probe.stdout == "ok":
-        return candidate
-    return None
-
-
 class CommandResourceLifecycleTest(unittest.TestCase):
     def test_install_doctor_uninstall_command_and_resource(self):
-        bash = _test_bash()
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("working bash required")
         if not _python_311():
@@ -119,7 +98,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             self.assertFalse(any("[addon:rich]" in c for c in post_after), msg="addon hook orphaned after uninstall")
 
     def test_full_uninstall_removes_command_and_resource(self):
-        bash = _test_bash()
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("working bash required")
         if not _python_311():
@@ -148,7 +127,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             self.assertFalse(resource.exists(), msg="full uninstall orphaned the addon resource")
 
     def test_full_uninstall_fails_and_preserves_sidecar_when_addon_extra_modified(self):
-        bash = _test_bash()
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("working bash required")
         if not _python_311():

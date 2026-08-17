@@ -34,7 +34,7 @@ jobs:
         run: python3 scripts/check_skill_gate_contract.py
 
       - name: Run shared unit tests
-        run: python3 -m unittest discover -s _shared -p 'test_*.py'
+        run: python3 scripts/run_installer_compat_tests.py --group shared-all
 
       - name: Install Codex skills for installed-copy terminology scan
         env:
@@ -46,7 +46,7 @@ jobs:
       - name: Run script unit tests
         env:
           GHOST_ALICE_INSTALLED_SKILLS_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.agents/skills
-        run: python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+        run: python3 scripts/run_installer_compat_tests.py --group scripts-all
 
       - name: Validate platform adapters
         run: python3 scripts/validate_platform_adapters.py

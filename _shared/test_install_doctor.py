@@ -9,8 +9,10 @@ non-blocking, so the gate would silently fail open.
 """
 
 import contextlib
+import inspect
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -1071,9 +1073,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         self.assertTrue(any(f["reason"] == "runner-not-runtime-core" for f in findings))
 
     def test_session_intent_golden_flags_missing_ledger_dependency_as_warning(self):
-        # First-layer install: no intent-audit capability at all must not read
-        # as fully healthy — the ledger is the governance input anchor. WARNING
-        # (documented degrade), not OK, not ERROR.
+        # First-layer install: no intent-audit capability at all must not read as fully healthy — the ledger is the governance input anchor. WARNING (documented degrade), not OK, not ERROR.
         hook = self.runtime / "session_intent_analyzer_hook.py"
         hook.write_text(
             "import json\n"
@@ -1088,6 +1088,70 @@ class RuntimeCoreAuditTest(unittest.TestCase):
 
         self.assertEqual(status, install_doctor.STATUS_WARNING)
         self.assertEqual(detail, "ledger-unavailable-degraded")
+
+    def test_session_intent_golden_uses_repo_local_child_temp(self):
+        hook = self.runtime / "session_intent_analyzer_hook.py"
+        hook.write_text("# subprocess replaced by focused test runner\n", encoding="utf-8")
+        calls = []
+
+        def run_process(command, **kwargs):
+            calls.append((command, kwargs))
+            ledger_root = Path(command[command.index("--root") + 1])
+            pointer = ledger_root / "claude" / "current-session.json"
+            pointer.parent.mkdir(parents=True)
+            pointer.write_text("{}\n", encoding="utf-8")
+            return install_doctor.subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps({"continue": True}),
+                "",
+            )
+
+        repo_root = Path(__file__).resolve().parents[1]
+        hostile = r"C:\Users\Public\Documents\ESTsoft\CreatorTemp"
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TEMP": hostile,
+                "TMP": hostile,
+                "TMPDIR": hostile,
+                "PYTHONPYCACHEPREFIX": hostile,
+            },
+            clear=False,
+        ), mock.patch.object(install_doctor.subprocess, "run", run_process):
+            parent_before = {
+                key: os.environ[key]
+                for key in ("TEMP", "TMP", "TMPDIR", "PYTHONPYCACHEPREFIX")
+            }
+            self.assertIn(
+                "repo_root",
+                inspect.signature(
+                    install_doctor._runtime_session_intent_golden_status
+                ).parameters,
+            )
+            status, detail = install_doctor._runtime_session_intent_golden_status(
+                self.runtime,
+                "claude",
+                repo_root=repo_root,
+            )
+            self.assertEqual(
+                {
+                    key: os.environ[key]
+                    for key in ("TEMP", "TMP", "TMPDIR", "PYTHONPYCACHEPREFIX")
+                },
+                parent_before,
+            )
+
+        self.assertEqual((status, detail), (install_doctor.STATUS_OK, "golden-pass"))
+        self.assertEqual(len(calls), 1)
+        command, kwargs = calls[0]
+        self.assertEqual(Path(kwargs["cwd"]).resolve(), repo_root.resolve())
+        run_root = Path(kwargs["env"]["TMPDIR"]).parent
+        self.assertTrue(run_root.is_relative_to(repo_root / ".tmp"))
+        self.assertTrue(
+            Path(command[command.index("--root") + 1]).is_relative_to(run_root)
+        )
+        self.assertFalse(run_root.exists())
 
     def test_session_intent_golden_rejects_pointerless_write_failure(self):
         hook = self.runtime / "session_intent_analyzer_hook.py"

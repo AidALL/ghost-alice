@@ -17,6 +17,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 
@@ -35,7 +37,8 @@ def _python_311() -> bool:
 
 class PendingResumeOrderTest(unittest.TestCase):
     def test_reinstall_with_pending_marker_keeps_installed_skill(self):
-        if not shutil.which("bash"):
+        bash = _find_test_bash()
+        if not bash:
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
@@ -46,7 +49,7 @@ class PendingResumeOrderTest(unittest.TestCase):
 
             def run(*args):
                 return subprocess.run(
-                    [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 
@@ -67,8 +70,7 @@ class PendingResumeOrderTest(unittest.TestCase):
                          "--skip-source-health", "task-router")
             self.assertEqual(second.returncode, 0, msg=second.stderr + second.stdout)
 
-            # The just-installed skill must survive, the marker must be cleared,
-            # and the sidecar must still describe a present skill (consistent state).
+            # The just-installed skill must survive, the marker must be cleared, and the sidecar must still describe a present skill (consistent state).
             self.assertTrue(os.path.lexists(skill),
                             msg="reinstall deleted the freshly installed skill: " + second.stderr + second.stdout)
             self.assertFalse(marker.exists(), msg="pending marker not cleared")

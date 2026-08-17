@@ -112,10 +112,7 @@ def _symlink_safe_remove(path: Path) -> None:
         path.unlink()  # POSIX/real symlink: remove the link, NEVER the target
         return
     if os.name == "nt" and _is_reparse_point(path):
-        # Windows junction or directory reparse point (e.g. an MSYS/Git-bash
-        # directory symlink): is_symlink() is False and shutil.rmtree refuses on
-        # a link. Remove the link itself with rmdir (dir reparse), falling back to
-        # unlink (file reparse) -- never the resolved target.
+        # Windows junction or directory reparse point (e.g. an MSYS/Git-bash directory symlink): is_symlink() is False and shutil.rmtree refuses on a link. Remove the link itself with rmdir (dir reparse), falling back to unlink (file reparse) -- never the resolved target.
         try:
             os.rmdir(path)
         except OSError:
@@ -163,8 +160,7 @@ def _process_target(entry: dict[str, Any], *, allowed_roots: list[Path], confirm
 def _prune_install_state(addon_id: str, *, addons_dir: str | os.PathLike[str], platform: str) -> None:
     """Drop the removed addon's targets from the platform install-state manifest so
     --status/--doctor do not report the now-absent paths as errors."""
-    # addons_dir is ~/.ghost-alice/addons/<platform>, so climb TWO levels to
-    # ~/.ghost-alice before descending into install-state.
+    # addons_dir is ~/.ghost-alice/addons/<platform>, so climb TWO levels to ~/.ghost-alice before descending into install-state.
     state_path = Path(addons_dir).parent.parent / "install-state" / f"{platform}.json"
     try:
         data = json.loads(state_path.read_text(encoding="utf-8"))
@@ -337,9 +333,7 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -
         if not isinstance(spec, dict):
             continue
         hook_id = spec.get("hook_id")
-        # Re-derive the marker from the VALIDATED record addon_id + a charset-checked
-        # hook_id; never trust spec["marker"] (a tampered sidecar could forge a core
-        # marker). A bad hook_id is skipped -> it can never address a non-addon hook.
+        # Re-derive the marker from the VALIDATED record addon_id + a charset-checked hook_id; never trust spec["marker"] (a tampered sidecar could forge a core marker). A bad hook_id is skipped -> it can never address a non-addon hook.
         if not isinstance(hook_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(hook_id):
             continue
         marker_str = f"[addon:{addon_id}] {hook_id}"
@@ -426,10 +420,7 @@ def uninstall_addon(
             raise not_found from None  # no sidecar and no marker -> genuinely not found
         return {"addon_id": addon_id, "status": "resumed-noop", "items": []}
     except addon_registry.RegistryError as exc:
-        # Unreadable/corrupt/future-major sidecar (e.g. unsupported schema, identity
-        # mismatch). Never crash the uninstall or the resume loop, and never delete
-        # an asset we cannot attribute: preserve the sidecar + marker untouched and
-        # surface a non-removed status so automation/doctor flag it for manual review.
+        # Unreadable/corrupt/future-major sidecar (e.g. unsupported schema, identity mismatch). Never crash the uninstall or the resume loop, and never delete an asset we cannot attribute: preserve the sidecar + marker untouched and surface a non-removed status so automation/doctor flag it for manual review.
         return {"addon_id": addon_id, "status": "error",
                 "reason": f"sidecar unreadable: {exc}", "items": []}
 
@@ -437,15 +428,7 @@ def uninstall_addon(
     if confirm:
         _write_marker(marker, addon_id, provided)  # intent marker BEFORE any removal
 
-    # Adapter entries are intentionally excluded from the hash-gated file
-    # removal below. A privileged adapter's script lives inside its owning skill
-    # directory, so the skill target is the file deletion unit and the adapter
-    # entry is an install-time integrity/ownership snapshot (T0.3), not a second
-    # uninstall-time delete gate. If the skill target is fully removable, its
-    # own hash gate covers the adapter script along with the rest of the skill
-    # tree. If the skill target is blocked for manual review, the script stays
-    # with it. In both cases only the adapter HOOK is removed here, by exact
-    # marker, via _adapter_hook_items.
+    # Adapter entries are intentionally excluded from the hash-gated file removal below. A privileged adapter's script lives inside its owning skill directory, so the skill target is the file deletion unit and the adapter entry is an install-time integrity/ownership snapshot (T0.3), not a second uninstall-time delete gate. If the skill target is fully removable, its own hash gate covers the adapter script along with the rest of the skill tree. If the skill target is blocked for manual review, the script stays with it. In both cases only the adapter HOOK is removed here, by exact marker, via _adapter_hook_items.
     file_targets = [entry for entry in provided if entry.get("kind") != "adapter"]
     items = [_process_target(entry, allowed_roots=allowed_roots, confirm=confirm) for entry in file_targets]
     blocked = [item for item in items if item["action"] in _BLOCKED_ACTIONS]
@@ -456,14 +439,11 @@ def uninstall_addon(
         report["has_pending_marker"] = marker.exists()
         return report
     if blocked:
-        # Keep sidecar + .removing marker for retry/manual review, but disable
-        # the addon's managed hook commands. Hook ownership is proven by exact
-        # marker + hook-runner signature, so removing them does not risk user data.
+        # Keep sidecar + .removing marker for retry/manual review, but disable the addon's managed hook commands. Hook ownership is proven by exact marker + hook-runner signature, so removing them does not risk user data.
         hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
         return {"addon_id": addon_id, "status": "partial", "items": items + hook_items}
 
-    # Fully removable: strip the addon's observational hooks from the platform
-    # config (plan Phase 4) before deleting the sidecar that records their markers.
+    # Fully removable: strip the addon's observational hooks from the platform config (plan Phase 4) before deleting the sidecar that records their markers.
     hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
     addon_registry.remove_record(addon_id, addons_dir=addons_dir)  # sidecar deleted LAST
     _prune_install_state(addon_id, addons_dir=addons_dir, platform=platform)
@@ -535,9 +515,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.dependents:
-        # Fail closed: an unreadable sidecar could itself declare depends_on_core
-        # on this skill, so it must BLOCK the core uninstall instead of being
-        # silently treated as absence.
+        # Fail closed: an unreadable sidecar could itself declare depends_on_core on this skill, so it must BLOCK the core uninstall instead of being silently treated as absence.
         records, skipped = addon_registry.scan_records(addons_dir=args.addons_dir)
         deps = sorted({
             record["addon_id"]

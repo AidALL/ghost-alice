@@ -14,6 +14,7 @@ compatibility:
 - [Relayed Verdicts And Absence Claims](#relayed-verdicts-and-absence-claims)
 - [Hard Finalization Order](#hard-finalization-order)
 - [Gate Function](#gate-function)
+- [Evidence Selection And Stop Gate](#evidence-selection-and-stop-gate)
 - [Completion-Check Format](#completion-check-format)
 - [Common Failures](#common-failures)
 - [Red Flags](#red-flags)
@@ -28,7 +29,7 @@ compatibility:
 
 ## Overview
 
-Completion without fresh evidence is not efficiency. It is a lie.
+A new closure claim without decision-relevant fresh evidence is not efficiency. It is a lie.
 
 Core principles:
 
@@ -39,10 +40,14 @@ Core principles:
 ## Iron Law
 
 ```text
-Do not claim completion without fresh verification evidence from this turn.
+Do not claim a new current-turn closure without decision-relevant fresh verification from this turn.
 ```
 
-If the verification command or inspection did not run in this message, do not claim that it passed.
+Explaining unchanged prior work is not a new closure claim. Cite the existing evidence and its age instead of rerunning unchanged work merely because another message arrived.
+
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
+
+If a verification command or inspection did not run in this message, do not claim that it freshly passed in this message.
 
 ## Acceptance Criteria Iron Law
 
@@ -56,34 +61,21 @@ Evidence such as link checks, lint, diff checks, or passing tests proves complet
 
 ## Relayed Verdicts And Absence Claims
 
-A verdict you relay or endorse is your own claim. Agreeing with, confirming, or
-passing through a third party's finding -- a reviewer, a prior agent, another
-turn, a memory -- puts it in the `claim-evidence-map` as YOUR claim with YOUR
-fresh evidence; inheriting the source's verdict is not evidence. This holds for
-every item, including LOW-severity ones -- severity does not lower the bar.
+A verdict you endorse as current is your own claim. Put it in the `claim-evidence-map`. If the relevant state may have changed, gather fresh evidence; inheriting a source's verdict is not evidence. If the task is only to explain an unchanged prior result, cite the existing evidence and its age without recreating it. Severity does not lower the bar.
 
-An absence claim -- "no test exists", "X is not enforced", "nothing handles
-this" -- is never proven by reasoning or by the source's say-so. It needs a
-fresh `grep`/read this turn that would surface the thing if present; cite that
-search as the evidence.
+An absence claim -- "no test exists", "X is not enforced", "nothing handles this" -- is never proven by reasoning or by a source's say-so. For a new or possibly changed absence claim, use a targeted current search that would surface the thing if present. Reuse a relevant prior search only when the searched state and criterion are unchanged, and state its age.
 
-A verdict stated only in prose, outside the `claim-evidence-map`, escapes this
-gate. If you assert it, map it.
+A verdict stated only in prose, outside the `claim-evidence-map`, escapes this gate. If you assert it, map it.
 
 ## Hard Finalization Order
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check]
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]
 
-Before any executed-work completion, fix, success, or fresh-verification claim,
-perform the steps below in this exact order:
+Before any executed-work completion, fix, success, or fresh-verification claim, perform the steps below in this exact order:
 
-1. Load or call `verification-before-completion` for the current turn. On
-   Claude Code, this means the visible Skill call. On Codex, this means reading
-   this current `SKILL.md` and following its workflow.
-2. Extract the acceptance criteria and run the fresh verification that can prove
-   or disprove each intended final claim.
-3. Only after the skill is loaded and the fresh evidence is read, write
-   `[completion-check]` with `skill-call: verification-before-completion (this turn)`.
+1. Load or call `verification-before-completion` for the current turn. On Claude Code, this means the visible Skill call. On Codex, this means reading this current `SKILL.md` and following its workflow.
+2. Extract the acceptance criteria and run the decision-relevant fresh verification that can prove or disprove each intended final claim.
+3. Only after the skill is loaded and the fresh evidence is read, write `[completion-check]` with `skill-call: verification-before-completion (this turn)`.
 
 If any step is missing or out of order, the completion-check is invalid.
 
@@ -93,14 +85,23 @@ Before claiming any state as satisfied:
 
 1. Criterion: extract `acceptance-criteria` from the user intent and contract.
 2. Mapping: connect each claim you plan to make to one criterion.
-3. Evidence target: identify the command, file, source locator, or tool output that can prove each criterion.
-4. Execution: run the check fresh from the beginning.
-5. Reading: read the full output, exit code, and failure count.
-6. Judgment: decide whether the output supports the criterion and claim.
-7. Unverified handling: keep any unsupported criterion in `unverified`.
-8. Claim: state only the range that was actually verified.
+3. Uncertainty: name the live uncertainty and the next decision each possible outcome can change.
+4. Evidence target: identify the command, file, source locator, or tool output that can prove each criterion.
+5. Execution: run the smallest decision-relevant check when the uncertainty gate requires fresh evidence.
+6. Reading: read the full output, exit code, and failure count.
+7. Judgment: decide whether the output supports the criterion and claim.
+8. Unverified handling: keep any unsupported criterion in `unverified`.
+9. Claim: state only the range that was actually verified.
 
 Skipping any step is not verification. It is a lie.
+
+## Evidence Selection And Stop Gate
+
+Current accessible behavior or content is the default direct evidence for semantic claims. Hash or provenance evidence is appropriate when the criterion is artifact identity, integrity, drift, merge safety, or reproducibility. Do not use hash equality, byte identity, cache history, or repository lineage as a proxy for current semantic behavior.
+
+Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check.
+
+Verification output does not create a new obligation to verify the verification. Stop when a repeated check produces no relevant state delta, or when further checking would displace the user's primary objective. Resume only after a state change, new error, mismatch, contradiction, instability, or explicit request.
 
 ## Completion-Check Format
 
@@ -135,8 +136,8 @@ Only emit a finalized `[completion-check]` when every listed criterion has a `pa
 | Regression test works | Red-green evidence when TDD requires it | A test that passed once |
 | Agent completed the work | VCS diff plus independent verification | The agent's success report |
 | Requirements satisfied | Claim-evidence map for each acceptance criterion | Tests pass alone, links pass alone, or diff exists alone |
-| Relayed/endorsed review verdict | Your own fresh grep/read for that item, mapped in claim-evidence-map | The reviewer's verdict, or your agreement with it, alone |
-| Absence claim ("no test/code exists", "not enforced") | A fresh grep/read this turn that would surface it if present | Reasoning, prior context, or the source's say-so |
+| Relayed/endorsed review verdict | Current behavior evidence when state may have changed; otherwise the relevant existing evidence with its age | The reviewer's verdict, or your agreement with it, alone |
+| Absence claim ("no test/code exists", "not enforced") | A targeted current search when absence may have changed; otherwise the relevant existing search with its age | Reasoning or the source's say-so |
 
 ## Red Flags
 
@@ -144,7 +145,7 @@ Stop before claiming success when any of these appear:
 
 - "should", "probably", or "seems to"
 - satisfaction language before verification
-- commit, push, PR creation, or final response without fresh checks
+- a new closure, commit, push, or PR claim without decision-relevant checks
 - trusting another agent's success report
 - relying on partial verification
 - wanting to finish because the work feels close
@@ -159,7 +160,7 @@ Stop before claiming success when any of these appear:
 | "I am confident." | Confidence is not evidence. |
 | "Just this once." | No exception. |
 | "Lint passed." | Lint is not a compiler or a requirement map. |
-| "Another agent said it succeeded." | Verify independently. |
+| "Another agent said it succeeded." | Endorse it only with decision-relevant evidence; reuse unchanged evidence with its age. |
 | "Partial checks are enough." | Partial checks prove only the checked criteria. |
 | "The wording is different, so the rule does not apply." | Completion implications still count. |
 
@@ -192,7 +193,7 @@ Re-read the user intent and contract -> write acceptance criteria -> verify each
 Agent delegation:
 
 ```text
-Read the agent report -> inspect the actual diff or artifact -> run the relevant check -> report actual state.
+Read the agent report -> inspect current accessible behavior when needed -> apply the uncertainty gate -> run only a decision-relevant check -> report the supported state.
 ```
 
 ## Why It Matters
@@ -277,9 +278,9 @@ Apply this skill immediately before:
 
 - any completion or success claim
 - any recommendation or choice that claims finished work or verified results
-- any positive status judgment
+- any new current-turn positive status judgment
 - commit, push, PR creation, or branch finishing
-- moving on from a delegated agent result
+- endorsing a delegated agent result as current after relevant state may have changed
 - reporting tests, lint, build, scans, or review as sufficient
 
 The rule covers exact words, paraphrases, implications, and tone that suggests the work is complete.
@@ -290,9 +291,10 @@ Before finalizing, ask:
 
 - What are the acceptance criteria?
 - Which closure claims am I about to make?
-- Which fresh evidence proves each claim?
+- Does each new closure claim require fresh evidence, or is relevant unchanged evidence sufficient?
+- What live uncertainty and next decision can the check change?
 - Did I read the full output and exit status?
 - Is anything still unverified?
 - Does any claim require web-search evidence or an evaluator artifact?
 
-There is no shortcut. Run the check, read the output, map the claim, then speak.
+Map the claim, apply the uncertainty gate, run a check only when its outcomes can change the decision, read the output, then speak.

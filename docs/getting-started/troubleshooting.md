@@ -44,9 +44,7 @@ bash install.sh --update-source
 
 This command saves source-local tracked and untracked changes in `git stash`, fast-forwards the checkout, and leaves the stash for explicit review.
 
-On Windows, use `.\install.cmd` for the same installer path. If PowerShell
-shows `cannot be loaded because running scripts is disabled`, the wrapper
-invokes PowerShell with `-NoProfile -ExecutionPolicy Bypass` and does not change the user or machine execution policy.
+On Windows, use `.\install.cmd` for the same installer path. If PowerShell shows `cannot be loaded because running scripts is disabled`, the wrapper invokes PowerShell with `-NoProfile -ExecutionPolicy Bypass` and does not change the user or machine execution policy.
 
 If raw `git pull` is already blocked before the checkout can receive `--update-source`, use the bootstrap one-command update:
 

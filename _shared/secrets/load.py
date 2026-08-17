@@ -31,8 +31,7 @@ Lookup order for every function:
     3) prompt (interactive environments only; get_or_prompt only)
 """
 
-# Keep the filename as load.py so the module name does not collide with the
-# stdlib `secrets` module; callers distinguish it by import path.
+# Keep the filename as load.py so the module name does not collide with the stdlib `secrets` module; callers distinguish it by import path.
 
 from __future__ import annotations
 

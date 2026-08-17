@@ -63,6 +63,10 @@ jobs:
         run: |
           python3 scripts/validate_public_surfaces.py
 
+      - name: Check Markdown prose wrapping
+        run: |
+          python3 scripts/check_prose_wrapping.py
+
       - name: installer compatibility matrix
         run: |
           python3 scripts/run_installer_compat_tests.py
@@ -71,10 +75,11 @@ jobs:
         if: always()
         run: |
           echo "## Validation results" >> $GITHUB_STEP_SUMMARY
-          python3 scripts/validate_skills.py --json > /tmp/result.json || true
+          mkdir -p .tmp
+          python3 scripts/validate_skills.py --json > .tmp/skill-validation-result.json || true
           python3 -c "
           import json
-          d = json.load(open('/tmp/result.json'))
+          d = json.load(open('.tmp/skill-validation-result.json'))
           print(f\"- Skill count: {d['skill_count']}\")
           print(f\"- ERROR: {d['error_count']}\")
           print(f\"- WARNING: {d['warning_count']}\")

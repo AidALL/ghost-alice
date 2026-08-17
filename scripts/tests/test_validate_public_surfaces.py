@@ -281,8 +281,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         self.assertNotIn(":hover", text)
         self.assertNotIn(".support-card:hover", text)
         self.assertIn(
-            "This is the inventory layer: core governance checkpoints first, then workflow "
-            "and domain packs that run on top.",
+            "This is the inventory layer: core governance checkpoints first, then workflow " "and domain packs that run on top.",
             text,
         )
         self.assertNotIn('class="mechanism-grid"', text)

@@ -26,48 +26,43 @@ Ghost-ALICE OS is an agent governance operating layer that manages the work boun
 
 ## Operating Model
 
-- Do not conclude a complex task in one pass. Repeatedly compare the current state against the schema, the SSOT, the evidence, and the constraints. When a mismatch appears, fix it or hand it to a human.
+- Do not conclude a complex task without decision-relevant checkpoints. A checkpoint runs only while a live uncertainty exists and its possible outcomes can change the next decision. When a mismatch appears, fix it or hand it to a human.
 - The focus scope is not fixed and does not expand in only one direction. It moves back and forth across micro, meso, macro, and meta according to the mismatch location and the verification burden. When a large premise or logic is wrong, fix the higher scope. When a small work output is wrong, fix that lower unit.
 - Do not judge complexity by tool count alone. Look at the verification burden as a whole, including source selection, source-to-target mapping, format and schema constraints, and recovery cost.
 - Follow the sufficient change principle. Minimal change is not a golden rule. It is one option chosen when the problem cause, structure, and impact surface are local.
-- Handle task-complexity-level-1 work with light confirmation. For task-complexity-level-2 and above, use checkpoint-based re-verification by default, and for task-complexity-level-3, treat the re-verification loop itself as the body of the work.
+- Handle task-complexity-level-1 work with light confirmation. For task-complexity-level-2 and above, use a bounded checkpoint plan. Level 3 may require several independent checks, but each one must map to a live uncertainty and a decision it can change.
 - After session-intent and downstream gate context are available, task-router emits a reusable routing-surface for work complexity, focus, verification burden, boundary need, and forced visibility. Session intent records semantic facts and decisions; governance surface consumers read the routing-surface instead of creating a competing complexity scale.
-- `calls` expresses only static and sparse relationships. Repeated loops such as re-reviewing intermediate state, re-fetching evidence, and fixing mismatches are handled by the body procedure and the runtime.
+- `calls` expresses only static and sparse relationships. The body procedure and runtime handle decision-relevant checkpoints and mismatch repair. Stop the sequence when a checkpoint produces no relevant state delta or when further checking displaces the primary objective.
 - For structured data (manifest, JSON, config, schema), do not summarize by guessing field names. Check the keys and types first and summarize only with fields that actually exist. If a guessed field turns out null, that is not evidence of absence; it means you read it wrong, so read the actual schema again.
 - For detailed definitions, follow this document's operating model and `architecture.md`.
 
 ## Work-Impact Projection
 
-Work-Impact Projection classifies hook-internal values by whether they change
-the work boundary, focus layer, verification burden, or recovery path.
-Stable contract phrase: change the work boundary, focus layer, verification burden, or recovery.
+Work-Impact Projection classifies hook-internal values by whether they change the work boundary, focus layer, verification burden, or recovery path. Stable contract phrase: change the work boundary, focus layer, verification burden, or recovery.
 
 - Hook execution and the strict audit log are never reduced.
-- `agent_visibility.profile` selects the user-screen verbosity only; it does
-  not gate hook execution, strict logging, or work-impact classification.
-- Forced/risk/gate values and failed verification always break through as
-  user surface forced and model hint full.
-- Routine/debug values remain full in the strict log, but they do not become a
-  separate reasoning-policy axis. They are omitted from model hints unless
-  they change focus, boundary, verification, or recovery.
-- Unknown, ambiguous, or failed values fail closed to fuller surface and reopen
-  focus through the routing/scope-reopen path.
-- Goal: only values that can change the next work decision affect focus,
-  boundary, verification, or recovery. Token reduction is a consequence, not a
-  metric.
+- `agent_visibility.profile` selects the user-screen verbosity only; it does not gate hook execution, strict logging, or work-impact classification.
+- Forced/risk/gate values and failed verification always break through as user surface forced and model hint full.
+- Routine/debug values remain full in the strict log, but they do not become a separate reasoning-policy axis. They are omitted from model hints unless they change focus, boundary, verification, or recovery.
+- Unknown, ambiguous, or failed values fail closed to fuller surface and reopen focus through the routing/scope-reopen path.
+- Goal: only values that can change the next work decision affect focus, boundary, verification, or recovery. Token reduction is a consequence, not a metric.
 
 ## First-Entry Contract
 
 When a user turn begins, apply the execution contract below before any long explanation.
 
-1. Resolve the pending-merge precheck first.
+1. Reuse a hook-provided pending-merge result first; without one, finish the manual fallback before actionable work, except for a no-work terminal route (`clarification-only` or `direct-response`).
 2. Connect the `session-intent-analyzer` intake.
 3. Fix the `jailbreak-detector/downstream-gates` state.
 4. Run `task-router`.
-5. Leave `[gate-state]` in the first commentary.
+5. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
 6. Surface a `[tool-checkpoint]` once for the user-input tool batch. The hook still checks every tool call; repeated calls in the same session input lineage do not repeat the user-facing checkpoint text unless state changes. Always carry at least `intent` and `why` on the surfaced block. Add `procedure` when it changes the next work decision or clarifies a non-routine step. Add `contract-ref` and `contract-check` when a boundary-contract is active. Add `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong` only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful. For a read-only call with no active boundary-contract and no forced signal, `intent` and `why` are sufficient.
 
 `tool-checkpoint` is not user-input intake. It is a tool-stage `PreToolUse`/`BeforeTool` retry checkpoint. Its field tiers follow the observable tool kind and the recorded boundary/forced state, not a self-judgment that the call is safe, and the gate itself is never skipped.
+
+Clarification-only surface contract: use `response-mode: clarification-only` only when an essential referent or decisive input is missing and neither the current turn nor existing conversation context supports an answer or safe action. Intake and routing still run internally. Ask only for the minimum decisive information, normally one concise question. Do not inspect files, repositories, manifests, tools, credentials, or external state to guess the missing context. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging remains active. This exception is unavailable when the content already resolves the question, the user requested a lookup or status check, or a bounded answer can be given with an explicit assumption.
+
+Direct-response surface contract: use `response-mode: direct-response` only when the current input and conversation fully support a bounded answer without file changes, external side effects, current-state lookup, tools, or fresh verification. Route classification precedes evidence planning. A causal premise is not an inspection request, and verification burden cannot create a current-state referent. Only an explicit inspection request or an established conversational referent authorizes local diagnosis. Accept an explicit correction or non-goal first, preserve the terminal objective over superseded means, and answer a general explanation or stable low-risk how-to without inspecting the current repository or machine. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence about the active workspace. Do not validate or rebut that premise before explaining. First-person, past-cause, deictic wording, tense, technical-state language, ambient context, and tool availability do not bind the question to the workspace; only an identified workspace, supplied workspace evidence, or an explicit request for exact diagnosis or inspection does. Emit only the resolved content, with at most one decision-relevant caveat; do not emit `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, or `[io-trace]`. Intake, security review, routing, and strict hook logging remain active. Current or version-specific facts, support or regression claims, high-risk advice, lookup, inspection, modification, and verification requests use a normal route.
 
 ## Mandatory Rules
 
@@ -79,14 +74,13 @@ This procedure is a quality-maintenance device that the user confirmed across re
 
 When there is user input: 1. the `session-intent-analyzer` intake is connected first. 2. Then `jailbreak-detector` gets the chance to make a security judgment on the current input, and on a current-lineage block it carries the decision to `downstream-gates.json`. 3. If there is no block gate, treat it as a silent allow and then call the `task-router` skill. 4. task-router must run after the session-intent-analyzer intake and the jailbreak-detector downstream gate, and before downstream work or a tool call. Check its applicability regardless of domain, including coding, documentation, research, and chores.
 
-The normal order is `pending-merge precheck -> session-intent-analyzer -> jailbreak-detector/downstream-gates -> task-router -> downstream/tool-checkpoint`. Describing it as `task-router -> session-intent-analyzer`, or arranging the execution order so that it skips passing through the detector, is a rule violation.
-Here `tool-checkpoint` is not a user-input intake step. It is a tool-stage `PreToolUse` checkpoint. When it is surfaced, place `hook-stage: PreToolUse` and `meaning: tool-call retry checkpoint, not user-input intake` together.
+The normal order is `pending-merge precheck -> session-intent-analyzer -> jailbreak-detector/downstream-gates -> task-router -> downstream/tool-checkpoint`. Describing it as `task-router -> session-intent-analyzer`, or arranging the execution order so that it skips passing through the detector, is a rule violation. Here `tool-checkpoint` is not a user-input intake step. It is a tool-stage `PreToolUse` checkpoint. When it is surfaced, place `hook-stage: PreToolUse` and `meaning: tool-call retry checkpoint, not user-input intake` together.
 
 task-router scans skill descriptions to match output, verification, and lifecycle skills, records the matching result, and then starts the work. When a skill does not apply, record briefly why it is not a target.
 
 Do not skip this gate based only on the agent's own judgment, such as "already routed on a previous input", "the same domain", "a simple follow-up", or "the user told me to hurry". When there is user input, apply this gate.
 
-Runtime checkpoint: leave the block below in the first commentary.
+Runtime checkpoint: leave the block below in the first commentary for every normal route; no-work terminal routes emit no control block.
 
 ```text
 [gate-state]
@@ -123,11 +117,13 @@ Leave the block below when the final response claims executed work is complete, 
 
 The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each closure claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
 
-The `claim-evidence-map` (each claim bound to fresh evidence and a `pass | fail` verdict, with `unverified: none`) is the always-required honesty core. The separate `acceptance-criteria` enumeration is conditional: when the session-intent ledger records no semantic intent delta for the turn, the `[completion-check]` may use a compact form that omits the `acceptance-criteria` block, since the criterion enumeration would only duplicate the claim-evidence-map. When intent materially changed this turn (the ledger recorded a semantic delta), use the full form with `acceptance-criteria` and bind every claim to a criterion id. This is a content-level reduction driven by the recorded delta, not a self-judgment that verification can be skipped, and the claim-evidence honesty core is never dropped.
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check]. Before claiming executed work is complete, fixed, successful, or freshly verified, load or call `verification-before-completion` for the current turn, run and read the fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
+Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check. Verification output does not create a new obligation to verify the verification.
 
-Final message surface contract: when a final user surface includes an executed-work closure claim or explicit `[completion-check]`, close in the order `[completion-check]` -> a short summary -> `[io-trace]`. Otherwise, routine explanations can close with a short summary and `[io-trace]` only. Use `[gate-state]` only on the opening surface early in the turn, and do not attach it again after `[completion-check]`. Keep the summary short, with only the conclusion and the key evidence. Tool calls (Bash, Read, and so on) appearing folded in the UI are not a defect, so do not do separate work to reduce raw command exposure. The target of surface brevity is the final user commentary, not the folded tool blocks.
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. Before making that claim, load or call `verification-before-completion` for the current turn, run and read the decision-relevant fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
+
+Final message surface contract: when a final user surface includes an executed-work closure claim or explicit `[completion-check]`, close in the order `[completion-check]` -> a short summary -> `[io-trace]`. Otherwise, routine explanations can close with a short summary and `[io-trace]` only. A no-work terminal response emits only its concise clarification or resolved content and no control block. Use `[gate-state]` only on the opening surface early in a normal route, and do not attach it again after `[completion-check]`. Keep the summary short, with only the conclusion and the key evidence. Tool calls (Bash, Read, and so on) appearing folded in the UI are not a defect, so do not do separate work to reduce raw command exposure. The target of surface brevity is the final user commentary, not the folded tool blocks.
 
 The `skill-call:` line is a factual record that the relevant skill workflow was actually performed in the current turn through that platform's skill execution mechanism. On a platform with a visible Skill call surface, such as Claude Code, record it only after the actual call. On a platform without a visible Skill tool, such as Codex, record it only when the skill's `SKILL.md` was actually read and the procedure was followed.
 
@@ -139,7 +135,7 @@ Points to follow in an environment without a Codex visible Skill surface:
 
 ### 0-A. merge-companion Self-Check Gate (pending-merge prose-rule layer)
 
-Immediately after every user input, and before the session-intent-analyzer intake and rule 0 (the task-router call), check the following.
+Immediately after every user input, first reuse any hook-provided pending-merge result. A manual fallback check must finish before actionable work begins, but it may be deferred through a no-work terminal response because that route starts no work.
 
 1. Identify the current platform:
    - Claude Code: `claude`
@@ -147,12 +143,12 @@ Immediately after every user input, and before the session-intent-analyzer intak
 2. Check whether the current turn or the session-start hook output contains a current platform pending-merge precheck result.
 3. If the hook reported an undecided entry, surface `merge-companion` first and show the status and options to the user. If the user explicitly defers or skips, that pending merge can be left as `decided=false` while returning to rule 0 (task-router).
 4. If the hook issued no pending warning and provided a contract that it performed the current platform precheck, record `merge-companion-precheck: clean (hook-verified)` and do not run an additional shell manifest check.
-5. If there is no hook evidence or the environment is hookless or manual, inspect the `~/.ghost-alice/pending-merges/<current platform>/manifest.json` file directly.
+5. If there is no hook evidence or the environment is hookless or manual, inspect the `~/.ghost-alice/pending-merges/<current platform>/manifest.json` file directly before a normal route starts downstream work. If task-router classifies the input as `clarification-only` or `direct-response`, defer that manual inspection until the next actionable turn.
 6. On direct inspection, if there is an undecided entry, surface `merge-companion` first. An explicit user defer or skip can pass through, and if the manifest itself is absent, `entries` is empty, or JSON parsing fails, it passes (omit even a one-line notice, a silent clean pass).
 
-This gate is checked before task-router. Because pending-merge handling is a user-asset protection area, it is looked at before general routing. Looking first means looking first; it does not mean forcing a merge or discard decision.
+Hook-provided pending state is checked before task-router. The manual fallback still precedes actionable downstream work, but it does not justify probing user state when the only valid response is a clarification question.
 
-Runtime checkpoint: record the 0-A check result in the [gate-state] block of the first commentary.
+Runtime checkpoint: record the 0-A check result in the [gate-state] block of the first normal commentary; a no-work terminal response emits no control block.
 
 ```text
 [gate-state]
@@ -189,7 +185,7 @@ The hook's digest-only observation is evidence of intake completion. A semantic 
 
 The consumers of this ledger are `skill-evolution` and `jailbreak-detector`. `skill-evolution` interprets the tool sequence together with the change in user intent, and `jailbreak-detector` compares the current input summary against the accumulated intent and constraints. The deterministic hard-block rule is a narrow regression guard for explicit, high-confidence attack signals, and it is not a proof that every jailbreak is blocked. A gate block derives only from the meaning judgment that the model recorded (`model_security_decision`). Progressive jailbreak resistance across multiple turns depends on the quality of the intent summary, correction, and accumulation in `session-intent-analyzer` and on the quality of the accumulated-constraint comparison in `jailbreak-detector`.
 
-The pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins. After this precheck is clean or surfacing ends through an explicit user defer or skip, the runtime hook graph fixes the session intent ledger state first. User input -> the `session-intent-analyzer` hook records the digest, the session ledger, and the `current-session.json` pointer and allows -> `skill-evolution` and `jailbreak-detector` consume the same session temp files -> `skill-evolution` terminates as a report-only branch -> `jailbreak-detector` records `model_security_decision` in the ledger and carries only a current-lineage block to `downstream-gates.json` -> the task-router reminder hook confirms the session-intent preflight and the absence of a current-lineage block and releases with a silent allow -> `task-router` reads the session-intent ledger and performs only atomic meaning decomposition and the routing decision -> the tool-stage `tool-checkpoint` looks at the current-lineage block gate. If `opened=false` or `decision=block`, it denies. An absent gate or any other state is a silent allow. `tool-checkpoint` does not use tool-call identity, payload content, or audit, log, and correlation metadata as decision input. Audit, log, and correlation metadata stay outside the decision body. `tool-checkpoint` is a `PreToolUse` checkpoint and is not user-input intake.
+Hook pending-merge precheck is a pre-routing/session-start layer. When hook evidence is absent, the manual fallback still completes before actionable downstream work; only a no-work terminal route may defer it because no work begins. The runtime hook graph fixes the session intent ledger state first. User input -> the `session-intent-analyzer` hook records the digest, the session ledger, and the `current-session.json` pointer and allows -> `skill-evolution` and `jailbreak-detector` consume the same session temp files -> `skill-evolution` terminates as a report-only branch -> `jailbreak-detector` records `model_security_decision` in the ledger and carries only a current-lineage block to `downstream-gates.json` -> the task-router reminder hook confirms the session-intent preflight and the absence of a current-lineage block and releases with a silent allow -> `task-router` reads the session-intent ledger and performs only atomic meaning decomposition and the routing decision -> the tool-stage `tool-checkpoint` looks at the current-lineage block gate. If `opened=false` or `decision=block`, it denies. An absent gate or any other state is a silent allow. `tool-checkpoint` does not use tool-call identity, payload content, or audit, log, and correlation metadata as decision input. Audit, log, and correlation metadata stay outside the decision body. `tool-checkpoint` is a `PreToolUse` checkpoint and is not user-input intake.
 
 Prohibited:
 - storing the raw prompt
@@ -283,7 +279,7 @@ Lookup priority (the helper handles it automatically): env var -> `~/.ghost-alic
 
 ### 9. io-trace Transparency Rule
 
-Output an `[io-trace]` block at the end of every turn's response. This block summarizes all file I/O and external access performed in that turn so the user can audit it immediately.
+Output an `[io-trace]` block at the end of every normal response. A no-work terminal response (`clarification-only` or `direct-response`) emits no control block and permits no downstream file, tool, credential, or external-state access. Strict hook logging remains active for the exception.
 
 ```
 [io-trace]
@@ -316,7 +312,7 @@ Code-level reinforcement: `_shared/io_trace_hook.py` records automatically to `~
 
 ### 10. Mandatory Web Search Before External Tool Claims
 
-Immediately before a factual claim about an external tool, library, CLI, SDK, framework, version, or platform behavior, cross-check community reports with at least three WebSearch queries. Citing official docs alone is treated as an "unverified echo".
+Immediately before a material factual claim about an external tool, library, CLI, SDK, framework, version, or platform behavior, cross-check community reports with at least three WebSearch queries when the claim is current or version-specific, concerns support, removal, regression, or live runtime state, is disputed or high-risk, or the user explicitly requests verification. Citing official docs alone is treated as an "unverified echo" for those claims. Stable, low-risk, non-current general guidance on a `direct-response` route is exempt; give the bounded instruction without claiming fresh runtime verification, and mention uncertainty only when it could change the answer.
 
 Scope (Category B and C claims):
 

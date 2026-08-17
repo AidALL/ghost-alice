@@ -34,6 +34,8 @@ REQUIRED_CONTRACT_KEYS = {
     "before_completion",
     "before_commit_push",
     "on_task_definition",
+    "routing_surface",
+    "terminal_routes",
 }
 
 REQUIRED_PATTERNS = {
@@ -60,7 +62,8 @@ REQUIRED_PATTERNS = {
         "Required gate skills are not complete unless the actual `SKILL.md` file was read",
         "Read the relevant `SKILL.md` before marking a required gate done",
         "Runtime Hook Graph Contract",
-        "Pending-merge precheck runs before the user-input governance graph begins",
+        "Hook pending-merge precheck is a pre-routing/session-start layer",
+        "manual fallback still completes before actionable downstream work",
         "intent-state.json is update-plus-accumulate state",
         "downstream-gates.json",
         "skill-evolution is report-only and self-terminating",
@@ -84,6 +87,20 @@ REQUIRED_PATTERNS = {
         "scope reopen point",
         "Routing Surface Contract",
         "routing-surface",
+        "primary-request",
+        "causal-axis",
+        "response-mode",
+        "response-order",
+        "clarification-only",
+        "direct-response",
+        "resolved-intent-first",
+        "Ambient working directory",
+        "Do not validate or rebut that premise",
+        "Route classification precedes evidence planning",
+        "Intake and routing still run internally",
+        "minimum decisive information",
+        "terminal objective outranks",
+        "Do not let a means replace, narrow, or expand",
         "task-router owns the reusable work judgment",
         "session-intent-analyzer records semantic facts and accumulated decisions",
         "governance surface policy consumes routing-surface",
@@ -110,7 +127,8 @@ REQUIRED_PATTERNS = {
         "skill-call:",
         "A required gate skill is not satisfied by a metadata-only match",
         "must read the `SKILL.md`",
-        "The pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins",
+        "Hook pending-merge precheck is a pre-routing/session-start layer",
+        "manual fallback still completes before actionable downstream work",
         "explicit user defer or skip",
         "downstream-gates.json",
         "current-lineage block gate",
@@ -124,6 +142,12 @@ REQUIRED_PATTERNS = {
         "the mismatch location and the verification burden",
         "micro, meso, macro, and meta",
         "task-router emits a reusable routing-surface",
+        "clarification-only",
+        "direct-response",
+        "Ambient working directory",
+        "Do not validate or rebut that premise",
+        "Route classification precedes evidence planning",
+        "Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`",
     ],
     "platforms/codex/AGENTS.md": [
         "Session Gate Contract",
@@ -146,7 +170,8 @@ REQUIRED_PATTERNS = {
         "After the session-intent-analyzer intake and the jailbreak-detector downstream gate, read `~/.agents/skills/task-router/SKILL.md`",
         "A required gate skill is not satisfied by a metadata-only match",
         "Always read the skill's `SKILL.md` before marking a required gate as complete",
-        "The pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins",
+        "Hook pending-merge precheck is a pre-routing/session-start layer",
+        "manual fallback still completes before actionable downstream work",
         "explicit user defer or skip",
         "downstream-gates.json",
         "hook-stage: PreToolUse",
@@ -162,39 +187,38 @@ REQUIRED_PATTERNS = {
         "the mismatch location and the verification burden",
         "micro, meso, macro, and meta",
         "task-router emits a reusable routing-surface",
+        "clarification-only",
+        "direct-response",
+        "minimum decisive information",
+        "Ambient working directory",
+        "Do not validate or rebut that premise",
+        "Route classification precedes evidence planning",
+    ],
+    "platforms/claude/CLAUDE.md": [
+        "clarification-only",
+        "direct-response",
+        "minimum decisive information",
+        "Ambient working directory",
+        "Do not validate or rebut that premise",
+        "Route classification precedes evidence planning",
+        "Intake and routing still run internally",
+        "Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`",
     ],
     "install.ps1": [
         "session-gates.json",
-        "boundary-contract: required",
-        "English canonical narrative + English control surface",
+        "platforms\\codex\\AGENTS.md",
         "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace",
-        "pending-merge precheck",
-        "explicit user defer/skip",
-        "downstream-gates.json",
     ],
     "install.sh": [
         "session-gates.json",
-        "boundary-contract: required",
-        "English canonical narrative + English control surface",
+        "platforms/codex/AGENTS.md",
         "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace",
-        "pending-merge precheck",
-        "explicit user defer/skip",
-        "downstream-gates.json",
     ],
     "_shared/global_rule_blocks.py": [
-        "boundary-contract: required",
-        "English canonical narrative + English control surface",
-        "[tool-checkpoint]",
-        "pending-merge precheck",
-        "explicit user defer/skip",
-        "downstream-gates.json",
-        "same session input lineage",
-        "new user input, current-lineage block/deny, mismatch",
-        "current-lineage block gate",
-        "silent allow",
-        "tool-call identity",
-        "payload content",
-        "outside the decision body",
+        "CODEX_SPEC",
+        "render_codex_bootstrap",
+        "apply_codex_bootstrap",
+        "codex-merge",
     ],
     "README.md": [
         "skill-catalog/session-gates.json",
@@ -230,6 +254,14 @@ REQUIRED_PATTERNS = {
         "skill-call:",
         "routing-surface",
         "intent-relation",
+        "response-mode",
+        "clarification-only",
+        "direct-response",
+        "resolved-intent-first",
+        "minimum decisive information",
+        "Ambient working directory",
+        "Do not validate or rebut that premise",
+        "Route classification precedes evidence planning",
         "change-depth",
         "focus-layer",
         "verification-complexity",
@@ -256,7 +288,7 @@ REQUIRED_PATTERNS = {
         "stop-conditions",
         "next-allowed-actions",
         "Scope changes need renegotiation in both directions",
-        "Never\n  shrink or grow the committed scope silently",
+        "Never shrink or grow the committed scope silently",
     ],
     "_shared/install_hooks.py": [
         "TOOL_CHECKPOINT_MARKER",
@@ -316,6 +348,11 @@ REQUIRED_PATTERNS = {
         "do not bypass it from the agent's judgment alone",
         "leave a short reason for the skip",
         "finished work, verified results, or a decision that materially changes the user's next action",
+        "clarification-only",
+        "direct-response",
+        "no-work terminal route",
+        "exits before a development turn begins",
+        "Prose paragraphs stay on one physical source line unless a semantic, syntax, Markdown-structural, or protocol boundary requires a newline.",
         "Scope changes already belong to boundary-contract",
         "Stop and renew or confirm before changing the committed scope",
     ],
@@ -339,8 +376,7 @@ REQUIRED_PATTERNS = {
     ],
     ".github/workflows/skill-gate-contract.yml": [
         "python scripts/check_skill_gate_contract.py",
-        "python -m unittest scripts.tests.test_check_skill_gate_contract",
-        "scripts.tests.test_validate_entrypoints",
+        "python scripts/run_installer_compat_tests.py --group skill-gate-contract",
     ],
 }
 
@@ -678,6 +714,71 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
             )
         )
 
+    routing_surface = contract.get("routing_surface", {})
+    if not isinstance(routing_surface, dict):
+        routing_surface = {}
+    required_routing_values = {
+        "response_mode": ("normal", "clarification-only", "direct-response"),
+        "response_order": ("clarification-question-only", "resolved-intent-first"),
+        "next_required": ("user-input",),
+    }
+    for field, required_values in required_routing_values.items():
+        values = routing_surface.get(field, [])
+        for required_value in required_values:
+            if required_value not in values:
+                issues.append(
+                    ContractIssue(
+                        "ERROR",
+                        str(contract_path),
+                        f"routing_surface.{field} must include {required_value}",
+                    )
+                )
+
+    terminal_routes = contract.get("terminal_routes", {})
+    clarification_route = terminal_routes.get("clarification-only", {}) if isinstance(terminal_routes, dict) else {}
+    clarification_contract = {
+        "owner": "task-router",
+        "manual_pending_merge": "defer-until-next-actionable-turn",
+        "downstream_work": "none",
+        "user_surface": "minimum-decisive-information-only",
+        "strict_logging": "active",
+    }
+    if not isinstance(clarification_route, dict):
+        clarification_route = {}
+    for field, expected in clarification_contract.items():
+        if clarification_route.get(field) != expected:
+            issues.append(
+                ContractIssue(
+                    "ERROR",
+                    str(contract_path),
+                    f"clarification-only terminal route must set {field}={expected}",
+                )
+            )
+
+    direct_route = terminal_routes.get("direct-response", {}) if isinstance(terminal_routes, dict) else {}
+    direct_contract = {
+        "owner": "task-router",
+        "manual_pending_merge": "defer-until-next-actionable-turn",
+        "downstream_work": "none",
+        "user_surface": "resolved-content-only",
+        "strict_logging": "active",
+        "ambient_context": "not-user-referent-or-inspection-authority",
+        "premise_handling": "explain-before-current-state-validation",
+        "evidence_planning": "after-route-classification",
+        "local_diagnosis_authority": "explicit-request-or-established-referent",
+    }
+    if not isinstance(direct_route, dict):
+        direct_route = {}
+    for field, expected in direct_contract.items():
+        if direct_route.get(field) != expected:
+            issues.append(
+                ContractIssue(
+                    "ERROR",
+                    str(contract_path),
+                    f"direct-response terminal route must set {field}={expected}",
+                )
+            )
+
     conditional_gates = contract.get("conditional_gates", [])
     if not any(gate.get("id") == "boundary-contract" for gate in conditional_gates if isinstance(gate, dict)):
         issues.append(
@@ -743,11 +844,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
             continue
         text = _read_text(path)
         if rel_path in ("install.sh", "install.ps1"):
-            # install.sh / install.ps1 are modularized: function definitions (and the
-            # governance contract strings they carry, e.g. the codex bootstrap block)
-            # now live in installer_lib/*.sh and installer_lib/*.ps1. Validate the
-            # combined installer source so required patterns are found regardless of
-            # which module now holds them.
+            # install.sh / install.ps1 are modularized: function definitions (and the governance contract strings they carry, e.g. the codex bootstrap block) now live in installer_lib/*.sh and installer_lib/*.ps1. Validate the combined installer source so required patterns are found regardless of which module now holds them.
             ext = ".sh" if rel_path == "install.sh" else ".ps1"
             lib_dir = root / "installer_lib"
             if lib_dir.is_dir():

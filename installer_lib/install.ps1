@@ -235,7 +235,7 @@ function Invoke-InstallHooks {
     if ($visibility) {
         $pyArgs += @("--visibility", $visibility)
     }
-    if ($Action -eq "install" -and $AddonSource -and $AddonSource.Count -gt 0) {
+    if ($Action -ne "uninstall" -and $AddonSource -and $AddonSource.Count -gt 0) {
         Prepare-AddonSources
         foreach ($source in @($AddonSource)) {
             $pyArgs += @("--addon-source", $source)
@@ -600,8 +600,7 @@ function Invoke-WriteOwnershipMarker {
     foreach ($target in (Get-InstallTargetsForSkillNames -SkillNames $SkillNames -ExtraTargets $ExtraTargets)) {
         $dest = Join-Path $SkillsRoot $target.Name
         $mode = Get-InstallStateMode -Path $dest -CopyOnly:$CopyOnly
-        # Addon-provided skills carry AddonId so the marker is attributed to the
-        # addon (owner=addon), enabling classify (plan task T2.9/C-THREAD-1).
+        # Addon-provided skills carry AddonId so the marker is attributed to the addon (owner=addon), enabling classify (plan task T2.9/C-THREAD-1).
         $addonId = if ($target.PSObject.Properties['AddonId']) { [string]$target.AddonId } else { "" }
         if ($addonId) {
             $markerArgs += @("--addon-target", $target.Name, $dest, $mode, $addonId)
@@ -1047,7 +1046,9 @@ function Invoke-Install {
             }
         }
 
-        if ($Platform -eq "codex") {
+        if ($Platform -eq "claude") {
+            Invoke-LoggedIfCompact { Set-ClaudeBootstrap }
+        } elseif ($Platform -eq "codex") {
             Invoke-LoggedIfCompact { Set-CodexBootstrap }
         }
 

@@ -27,30 +27,23 @@ HookKind = Literal["prompt-check", "hook-reminder", "session-check"]
 
 _CLEAN_USER_COPY: dict[HookKind, str] = {
     "prompt-check": (
-        "Check pending merges before the user-input governance graph continues in the current conversation. "
-        "If this hook does not report a pending warning, treat the current platform merge-companion precheck "
-        "as clean without an extra shell check."
+        "Check pending merges before the user-input governance graph continues in the current conversation. " "If this hook does not report a pending warning, treat the current platform merge-companion precheck " "as clean without an extra shell check."
     ),
     "hook-reminder": (
-        "Use task-router first in the current conversation. If this hook does not report a "
-        "pending warning, treat the current platform merge-companion precheck as clean "
-        "without an extra shell check."
+        "Use task-router first in the current conversation. If this hook does not report a " "pending warning, treat the current platform merge-companion precheck as clean " "without an extra shell check."
     ),
     "session-check": (
-        "At session start, this hook checks the current platform pending merge state. If this hook does "
-        "not report a pending warning, treat it as clean without an extra shell check."
+        "At session start, this hook checks the current platform pending merge state. If this hook does " "not report a pending warning, treat it as clean without an extra shell check."
     ),
 }
 
 
 _CLEAN_TECH_COPY: dict[HookKind, str] = {
     "prompt-check": (
-        "The Ghost-ALICE prompt-check hook checks ~/.ghost-alice/pending-merges/<platform>/manifest.json "
-        "at runtime. Pending entries are reported in this same hook output."
+        "The Ghost-ALICE prompt-check hook checks ~/.ghost-alice/pending-merges/<platform>/manifest.json " "at runtime. Pending entries are reported in this same hook output."
     ),
     "hook-reminder": (
-        "The Ghost-ALICE foreground hook checks ~/.ghost-alice/pending-merges/<platform>/manifest.json "
-        "at runtime. Pending entries are reported in this same hook output."
+        "The Ghost-ALICE foreground hook checks ~/.ghost-alice/pending-merges/<platform>/manifest.json " "at runtime. Pending entries are reported in this same hook output."
     ),
     "session-check": (
         "Missing, empty, fully decided, or unparsable manifests are treated as a silent clean pass."
@@ -207,8 +200,7 @@ def _visibility_json_payload(input_payload: dict[str, Any]) -> str | None:
             return json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False)
 
     reason = (
-        "Unknown Ghost-ALICE visibility command. "
-        "Use /visibility, /visibility strict, /visibility dynamic, or /visibility minimal."
+        "Unknown Ghost-ALICE visibility command. " "Use /visibility, /visibility strict, /visibility dynamic, or /visibility minimal."
     )
     return json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False)
 

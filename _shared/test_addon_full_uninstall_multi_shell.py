@@ -23,6 +23,10 @@ import sys
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+from _shared.addon_uninstall import _is_reparse_point, _symlink_safe_remove
+from _shared.install_transaction import _create_directory_link
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
 DUMMY = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
@@ -41,7 +45,8 @@ def _python_311() -> bool:
 
 class FullUninstallMultiAddonDriftTest(unittest.TestCase):
     def test_full_uninstall_halts_on_one_drifted_addon_preserving_it(self):
-        if not shutil.which("bash"):
+        bash = _find_test_bash()
+        if not bash:
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
@@ -52,7 +57,7 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
 
             def run(*args):
                 return subprocess.run(
-                    [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=240, check=False)
 
@@ -66,16 +71,16 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
             core_skill = Path(home) / ".claude" / "skills" / "task-router"
             rich_side = Path(home) / ".ghost-alice" / "addons" / "claude" / "rich.json"
             noop_side = Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
-            self.assertTrue(rich_skill.is_symlink(), msg="rich install precondition")
-            self.assertTrue(noop_skill.is_symlink(), msg="noop install precondition")
+            self.assertTrue(rich_skill.is_symlink() or _is_reparse_point(rich_skill), msg="rich install precondition")
+            self.assertTrue(noop_skill.is_symlink() or _is_reparse_point(noop_skill), msg="noop install precondition")
             self.assertTrue(core_skill.exists(), msg="core task-router install precondition")
 
             # User drifts ONE addon: re-point richskill at their own dir.
             user_dir = Path(home) / "my-rich"
             user_dir.mkdir()
             (user_dir / "SKILL.md").write_text("# USER OWNED\n", encoding="utf-8")
-            rich_skill.unlink()
-            rich_skill.symlink_to(user_dir)
+            _symlink_safe_remove(rich_skill)
+            _create_directory_link(user_dir, rich_skill)
 
             # FULL uninstall (no --addon).
             full = run("--platform", "claude", "--uninstall")
@@ -84,7 +89,7 @@ class FullUninstallMultiAddonDriftTest(unittest.TestCase):
             self.assertNotEqual(full.returncode, 0,
                                 msg="full uninstall must halt when an addon is drifted: " + full.stderr + full.stdout)
             # Drifted addon preserved (link + user content + sidecar).
-            self.assertTrue(rich_skill.is_symlink(), msg="drifted rich skill link must be preserved")
+            self.assertTrue(rich_skill.is_symlink() or _is_reparse_point(rich_skill), msg="drifted rich skill link must be preserved")
             self.assertEqual(os.path.realpath(rich_skill), os.path.realpath(user_dir))
             self.assertEqual((rich_skill / "SKILL.md").read_text(encoding="utf-8"), "# USER OWNED\n")
             self.assertTrue(rich_side.exists(), msg="drifted addon sidecar must survive for manual review")

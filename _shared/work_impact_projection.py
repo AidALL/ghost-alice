@@ -31,10 +31,7 @@ USER_SURFACES = ("hidden", "compact", "focused", "full", "forced")
 MODEL_SURFACES = ("omitted", "marker", "digest", "focused", "full")
 PROFILES = {"strict", "dynamic", "minimal"}
 
-# exposure_class -> {profile -> (user_surface, model_surface_hint)} for the
-# non-forced, non-fail-closed cases. User surface follows the visibility
-# profile. Model surface hints follow work impact, so they do not vary by
-# profile for routine/focused/essential values.
+# exposure_class -> {profile -> (user_surface, model_surface_hint)} for the non-forced, non-fail-closed cases. User surface follows the visibility profile. Model surface hints follow work impact, so they do not vary by profile for routine/focused/essential values.
 _TABLE: dict[str, dict[str, tuple[str, str]]] = {
     "essential": {"dynamic": ("full", "full"), "minimal": ("focused", "full")},
     "focused": {"dynamic": ("focused", "digest"), "minimal": ("compact", "digest")},
@@ -44,8 +41,7 @@ _TABLE: dict[str, dict[str, tuple[str, str]]] = {
 
 # forced/risk/gate and failed verification reach both surfaces at the top.
 _FORCED = ("forced", "full")
-# fail-closed for unknown classification or unknown profile: full on both, but
-# not the "forced" must-not-suppress flag (that is reserved for real risk).
+# fail-closed for unknown classification or unknown profile: full on both, but not the "forced" must-not-suppress flag (that is reserved for real risk).
 _FULL_FULL = ("full", "full")
 
 

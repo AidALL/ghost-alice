@@ -25,15 +25,15 @@ One round consists of the following sequence (there is no physical ordering, but
 - Phase B is Human-proponent response.
   - Read every attack from Phase A and submit response evidence
   - If there is no response or it merely repeats existing evidence, reject accumulates
-- Phase C is Checkpoint (every 5 rounds).
-  - Every 5 rounds (round 5, 10, 15, ...), re-check the claim-card and evidence-list against the SSOT
-  - When a mismatch is found, provide it as attack material to the next-round agents. The checkpoint does not judge
+- Phase C is Decision-relevant checkpoint and audit.
+  - Run the deterministic sycophancy audit every round, and re-check the claim-card and evidence-list against the SSOT only when new evidence, a schema change, or a detected mismatch can affect the verdict
+  - When a decision-relevant mismatch is found, provide it as attack material to the next-round agents. The checkpoint does not judge
   - Switch to verdict=escalate only when the evidence has been deleted from the SSOT or the schema has changed
   - The checkpoint does not mediate. A judgment such as "both sides have a point" is forbidden. Perform fact-checking only
-  - In rounds that are not a multiple of 5, skip this phase
+  - If no decision-relevant uncertainty and no relevant state delta remains after the audit, apply convergence and stop. Do not continue only to satisfy a round-count minimum
 - Phase D is Round close record.
   - Record the Phase A, Phase B, and Phase C utterances in the rounds-log
-  - Check the convergence condition (only after round >= 5)
+  - Check the convergence condition immediately after the complete independent attack cycle
 
 ○ parallel vs sequential
 - Dispatching Phase A as parallel subagents forces independent utterance with no mutual reference. This is ideal

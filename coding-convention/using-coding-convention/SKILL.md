@@ -1,6 +1,6 @@
 ---
 name: using-coding-convention
-description: Use at the start of every coding or development conversation. Defines how to find and invoke coding-convention family skills. Requires relevant skills before any response, including clarification questions.
+description: Use at the start of every coding or development conversation. Defines how to find and invoke coding-convention family skills.
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -17,6 +17,8 @@ If a skill may apply, check it first even when the workflow looks heavier than t
 
 <USE-CONTRACT>
 If there is even a one percent (1%) chance that a coding-convention family skill applies to the next action, load that skill first. After loading it, if the skill does not fit the current request, record that fact and continue.
+
+A task-router no-work terminal route (`clarification-only` or `direct-response`) exits before a development turn begins and does not load this skill. The next actionable user input runs routing again.
 </USE-CONTRACT>
 ## Contents
 
@@ -56,7 +58,7 @@ Use the host runtime's real skill surface when it exists.
 
 ## Core Rule
 
-Before any response, clarification question, file read, shell command, code edit, plan, review, recommendation, or status judgment, ask whether a coding-convention family skill applies.
+After task-router begins a normal development route, before any response, clarification question, file read, shell command, code edit, plan, review, recommendation, or status judgment, ask whether a coding-convention family skill applies.
 
 If there is any chance that a skill applies, load it first. If it does not fit after loading, record the skip reason and continue.
 
@@ -74,10 +76,9 @@ The first commentary in a development turn must include:
 
 Before any claim that executed work is complete, fixed, successful, or freshly verified, emit:
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check].
-Load or call `verification-before-completion` for this turn first, run and read
-the fresh verification second, and only then write `[completion-check]`. If any
-step is missing or out of order, the completion-check is invalid.
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. Load or call `verification-before-completion` for this turn first, run and read the decision-relevant fresh verification second, and only then write `[completion-check]`. If any step is missing or out of order, the completion-check is invalid.
+
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
 
 ```text
 [completion-check]
@@ -130,7 +131,7 @@ Stop and load the relevant skill when any of these thoughts appear.
 | "The formal workflow is too much." | The workflow exists to preserve user intent, work scope, and verification quality. |
 | "I will only do this one small action first." | Check applicability before the action. |
 | "A recommendation is not work." | Recommendations and choices are claims and require verification. |
-| "I just checked this in the previous turn." | New user input reopens routing and verification. |
+| "I just checked this in the previous turn." | New user input reopens routing. Reuse unchanged evidence; reverify only on a state, criterion, error, contradiction, instability, or explicit-request trigger. |
 | "Let me skim the codebase first." | The skill tells you how to skim. Check first. |
 | "Let me gather information first." | The skill tells you how to gather information. |
 | "I do not really need a formal skill here." | If a skill exists, use it. |
@@ -220,14 +221,9 @@ Read the relevant skill's own `SKILL.md` for trigger details and output format.
 
 ## Material Recommendations And Choices
 
-Advice, selected options, status judgments, and "this is correct" statements need fresh evidence when they claim finished work, verified results, or a decision that materially changes the user's next action.
+Advice about finished work, verified results, or a decision that materially changes the user's next action is a verification-routing signal. Route a new closure claim, verified-result claim, or recommendation that materially changes the user's next action to `verification-before-completion`. That skill owns evidence selection, evidence reuse, stop conditions, and the final completion format; this entrypoint does not duplicate those rules.
 
-Verification scope matters: prefer the previously failing test and directly impacted tests after a fix. Do not repeat broad passing suites unless a risk signal shows that the latest change can invalidate the earlier result.
-
-- Re-check evidence on each user turn.
-- Do not recommend from memory alone when the recommendation changes scope, verification, recovery, or the user's next action.
-- Do not treat "just checked" as current-turn verification.
-- Map executed-work closure and verification claims to a criterion and fresh evidence before finalizing.
+Prose paragraphs stay on one physical source line unless a semantic, syntax, Markdown-structural, or protocol boundary requires a newline.
 
 ## Final Self-Check
 

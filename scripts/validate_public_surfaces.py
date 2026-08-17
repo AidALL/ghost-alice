@@ -18,8 +18,7 @@ from typing import Any
 
 PUBLIC_SKILL_NAME_ALIASES = {}
 
-# These names belong to addon skills installed through --addon-source.
-# The core repo must not check them in as .claude/commands wrappers.
+# These names belong to addon skills installed through --addon-source. The core repo must not check them in as .claude/commands wrappers.
 ADDON_COMMAND_WRAPPERS_FORBIDDEN_IN_CORE_REPO = {
     "cardnews-automation",
     "company-profile",

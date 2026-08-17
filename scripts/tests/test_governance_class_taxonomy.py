@@ -6,8 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-# These are allowed addon skills, but must not be checked into the core catalog
-# or install roots. Addon installation uses --addon-source.
+# These are allowed addon skills, but must not be checked into the core catalog or install roots. Addon installation uses --addon-source.
 ADDON_SKILLS_FORBIDDEN_IN_CORE_CATALOG = {
     "cardnews-automation",
     "company-profile",

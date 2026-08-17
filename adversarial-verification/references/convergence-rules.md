@@ -20,10 +20,12 @@ This document defines the detailed rules for the convergence conditions of the a
 |------|------|------|
 | accept | consensus rule passed + attacks exhausted | return Step 5 result |
 | reject | claim defense failed | return Step 5 result |
-| judge-deadlock | 50-round stalemate | invoke Step 4.5 meta-judge |
+| judge-deadlock | finite-cap or no-delta disagreement | invoke Step 4.5 meta-judge |
 | partial | new attack points still emerging | continue rounds |
 
-The convergence judgment is performed once at the end of each round (after Phase C), starting from round >= 5.
+The convergence judgment is performed once at the end of each complete independent attack cycle, after the decision-relevant checkpoint and audit.
+
+Stop when no decision-relevant uncertainty remains and another round cannot produce a relevant state delta. Do not continue only to satisfy a round-count minimum.
 
 ---
 
@@ -31,16 +33,12 @@ The convergence judgment is performed once at the end of each round (after Phase
 
 All conditions must be satisfied at the same time (AND).
 
-1. round >= 5
-2. for 2 consecutive prior rounds, every agent declared "axis-attack: no attack point"
-3. for 2 consecutive prior rounds, every agent declared "meta-attack: no meta attack"
+1. every assigned agent completed the same full attack cycle independently
+2. every agent declared "axis-attack: no attack point"
+3. every agent declared "meta-attack: no meta attack", or no prior-round utterance existed as an eligible meta-attack target
 4. the agent judgments pass the caller-specified consensus rule (unanimous / majority / weighted). When unspecified, the default is unanimous
-5. sycophancy audit passed (0 violations in that round)
-
-○ Why 2 consecutive rounds
-- 1 round of "no attack point" could be chance or a lapse in focus
-- 2 consecutive rounds is a signal that "there really is nothing to attack"
-- No need to raise it to 3 or more rounds. 2 is the minimum confidence interval
+5. sycophancy audit passed with 0 violations in that round
+6. no unresolved decision-relevant uncertainty remains and another round cannot produce a relevant state delta
 
 ○ Consensus rule selection
 - The consensus rule applies one of unanimous / majority / weighted according to domain policy
@@ -54,12 +52,12 @@ All conditions must be satisfied at the same time (AND).
 
 Any one of the following (OR).
 
-1. the same attack for 2 consecutive rounds + no new-evidence response
+1. a decisive attack remains unresolved, the proponent supplies no decision-relevant new evidence, and the applicable consensus rule supports rejection
 2. all items in the claim's evidence-list eliminated (judged in Step 1)
 3. the human-proponent explicitly withdraws the claim
 
 ○ Same-attack judgment
-- the same agent attacks the same target-claim-id with the same attack-type for 2 consecutive rounds
+- the same agent attacks the same target-claim-id with the same attack-type without adding a decision-relevant distinction
 - the attack-content is semantically identical (paraphrase allowed, core argument identical)
 - for the semantic-identity judgment, see "Semantic Duplication Judgment" below
 
@@ -74,28 +72,27 @@ Any one of the following (OR).
 
 Any one of the following (OR). When triggered, call the Step 4.5 meta-judge.
 
-1. round = 50 reached, with convergence-accept / reject still not triggered
-2. round >= 5 and every agent declared "no attack point" but the final-verdict is split
+1. the finite safety cap of 50 rounds is reached with convergence-accept / reject still not triggered
+2. every agent declared "no attack point", no relevant state delta remains, and the final-verdict is split
   - example: agent-C-internal-logic is accept, agent-C-external-fact is fixed at reject, with no new attack on either side
   - in this case no new attack emerges, so running more rounds is meaningless
-  - however, even in this case it must be at least round >= 5 to trigger
-3. the human-proponent response is "none" for 3 consecutive rounds and the agent judgments are split
+3. the human-proponent cannot supply a response or new evidence, the agent judgments are split, and no identified next check can change the state
   - the absence of a response is one form of deadlock
 
 ○ When the deadlock triggers
 - condition 1: at the end of round 50
-- condition 2: immediately after that state holds for 1 round (the round in which no attack point + split judgment is confirmed)
-- condition 3: after confirmation across 3 consecutive rounds
+- conditions 2 and 3: immediately after the no-delta split state is established
+
+Unresolved disagreement fails closed to the meta-judge and human escalation; it never becomes acceptance through elapsed rounds.
 
 ---
 
 ## convergence-partial Detailed Conditions
 
-- round >= 5
-- 1 or more of the agents is still raising a new attack point (the declarers of "no attack point" are not all of them)
-- the final-verdict is split
+- one or more agents is still raising a decision-relevant new attack point, or new evidence changes the surviving-claim, assumptions, or guarantee boundary
+- the named uncertainty can change the next verdict or required action
 
-In this state no convergence judgment is made, and it proceeds to the next round. Up to the round cap of 50.
+In this state no terminal convergence judgment is made, and it proceeds to the next round under the finite safety cap of 50 rounds.
 
 ---
 
@@ -141,8 +138,7 @@ The criterion that distinguishes "same attack" from "new attack". If this judgme
 
 - an agent can change its final-verdict mid-round
 - example: accept at round 5, reject at round 6
-- in this case the convergence count resets (the 2-consecutive-round condition starts over)
-- changing the judgment is free, but it becomes a cause of longer rounds
+- a judgment change is a relevant state delta; continue only when it reopens a named uncertainty that another round can resolve
 
 ### human-proponent absent mode
 
@@ -155,14 +151,13 @@ The criterion that distinguishes "same attack" from "new attack". If this judgme
 
 - on a 3-round cumulative failure of the sycophancy audit, replace the agent
 - the replaced agent is spawned anew. The previous agent's utterance record is kept, but its final-verdict is voided
-- the convergence count resets after the replacement point
-- the replacement itself is not a reason to extend the rounds
+- re-run the replaced axis against the current state, but do not extend unrelated axes only because replacement occurred
 
-### Immediate convergence at round 5
+### Immediate convergence after a complete attack cycle
 
-- if the convergence conditions are met at the end of round 5, converge immediately
-- even in this case rounds 1 through 4 cannot be skipped. At verification-complexity-level-2 and above, "only 3 rounds for a simple claim" is prohibited
-- at verification-complexity-level-2 and above, the minimum of 5 is guaranteed absolutely. A verification-complexity-level-1 claim is not a target of adversarial rounds
+- if the convergence conditions are met at the end of the first complete independent attack cycle, converge immediately
+- every assigned agent must participate, so level 2 still uses 3 independent agents and level 3 still uses 5 independent agents
+- if an attack or response changes the evidence, surviving-claim, assumptions, or guarantee boundary, continue only to test that changed state
 
 ### Request to exceed the round cap of 50
 

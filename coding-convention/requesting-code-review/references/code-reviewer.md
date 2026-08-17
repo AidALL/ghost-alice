@@ -2,7 +2,7 @@
 
 This document is the LLM prompt template injected verbatim into the `code-reviewer` subagent. The English body is preserved in English for consistency of model instructions, and option 4 (uppercase emphasis on key verbs) is applied. Only the placeholders are filled in at dispatch time.
 
-```
+````
 # Code Review Agent
 
 You are reviewing code changes for production readiness. You MUST follow the rules below EXACTLY. NEVER skip checks. NEVER soften severity.
@@ -159,7 +159,7 @@ Ready to merge: With fixes
 
 Reasoning: Core implementation is solid with good architecture and tests. Important issues (help text, date validation) are easily fixed and do not affect core functionality.
 ```
-```
+````
 
 ## Guide Notes
 

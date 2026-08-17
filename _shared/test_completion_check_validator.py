@@ -311,8 +311,7 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
         )
 
     def test_hypothetical_lead_does_not_exempt_asserted_main_clause(self):
-        # A conditional preamble before a comma must not exempt the asserted
-        # claim that follows it (BUG #2).
+        # A conditional preamble before a comma must not exempt the asserted claim that follows it (BUG #2).
         self.assertTrue(
             v.requires_completion_check("If you're curious, I fixed the bug and all tests pass.")
         )
@@ -330,8 +329,7 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
         )
 
     def test_goal_lead_governs_comma_separated_list(self):
-        # A goal/enumeration lead governs the whole sentence, so a comma-separated
-        # goal list does not block on a later list item.
+        # A goal/enumeration lead governs the whole sentence, so a comma-separated goal list does not block on a later list item.
         self.assertFalse(
             v.requires_completion_check("Goal: all tests pass, lint is clean, docs updated.")
         )
@@ -351,8 +349,7 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
         )
 
     def test_indented_completion_header_does_not_crash(self):
-        # An indented header must not raise IndexError (BUG #3); it returns a
-        # deny-reason string or None, never an exception.
+        # An indented header must not raise IndexError (BUG #3); it returns a deny-reason string or None, never an exception.
         indented = (
             "   [completion-check]\n"
             "- verification-before-completion: done\n"
@@ -369,8 +366,7 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
 
 
 class TestKoreanNegatedStatusNotABlock(unittest.TestCase):
-    """Korean negation is post-verbal; stripping only the negation particle left
-    the closure word intact and false-blocked an honest 'not complete' report."""
+    "Korean negation is post-verbal; stripping only the negation particle left\n    the closure word intact and false-blocked an honest 'not complete' report."
 
     def test_korean_post_verbal_negation_is_not_a_claim(self):
         for phrase in (
@@ -427,9 +423,7 @@ class TestHonestNegativeStatusNotABlock(unittest.TestCase):
 
 
 class TestGateStatePlacement(unittest.TestCase):
-    # Stop validation receives the final assistant message, not necessarily the
-    # opening commentary where [gate-state] is surfaced. Enforce placement only
-    # when the block is present in the validated text.
+    # Stop validation receives the final assistant message, not necessarily the opening commentary where [gate-state] is surfaced. Enforce placement only when the block is present in the validated text.
 
     def test_completion_surface_without_gate_state_is_allowed_in_hook_mode(self):
         text = _final_text("completion", "summary", "io")

@@ -19,6 +19,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+try:
+    from _shared.project_runtime import ProjectRuntime, project_runtime
+except ModuleNotFoundError:  # Direct execution from the installed _shared directory.
+    from project_runtime import ProjectRuntime, project_runtime
+
 
 STATUS_PASS = "pass"
 STATUS_FAIL = "fail"
@@ -44,31 +49,21 @@ SMOKE_CASES: dict[str, SmokeCase] = {
     "readme-first-lines": SmokeCase(
         case_id="readme-first-lines",
         prompt=(
-            "Read the first 10 lines of README.md using a read-only local "
-            "command, summarize what Ghost-ALICE OS is in one paragraph, "
-            "apply verification-before-completion before any completion "
-            "claim, and include [io-trace]. Do not edit files."
+            "Read the first 10 lines of README.md using a read-only local " "command, summarize what Ghost-ALICE OS is in one paragraph, " "apply verification-before-completion before any completion " "claim, and include [io-trace]. Do not edit files."
         ),
         required_markers=("[gate-state]", "[io-trace]"),
     ),
     "install-doctor-read": SmokeCase(
         case_id="install-doctor-read",
         prompt=(
-            "Read _shared/install_doctor.py using a simple read-only full-file "
-            "command such as `Get-Content _shared/install_doctor.py -Raw`; avoid "
-            "shell-side filtering or formatting for the target file. "
-            "Summarize in at most 4 lines what runtime-core doctor drift "
-            "detection covers, citing concrete code symbols as evidence. "
-            "Do not edit files. Include [io-trace]."
+            "Read _shared/install_doctor.py using a simple read-only full-file " "command such as `Get-Content _shared/install_doctor.py -Raw`; avoid " "shell-side filtering or formatting for the target file. " "Summarize in at most 4 lines what runtime-core doctor drift " "detection covers, citing concrete code symbols as evidence. " "Do not edit files. Include [io-trace]."
         ),
         required_markers=("[gate-state]", "[io-trace]"),
     ),
     "completion-check-readme": SmokeCase(
         case_id="completion-check-readme",
         prompt=(
-            "Read the first 10 lines of README.md, make a brief completion "
-            "claim only after fresh verification-before-completion, and "
-            "include both [completion-check] and [io-trace]. Do not edit files."
+            "Read the first 10 lines of README.md, make a brief completion " "claim only after fresh verification-before-completion, and " "include both [completion-check] and [io-trace]. Do not edit files."
         ),
         required_markers=("[completion-check]", "[io-trace]"),
     ),
@@ -87,10 +82,7 @@ FAILURE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 INVALID_HARNESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "contradictory-tool-constraint",
-        # Anchored to the agent's OWN voice (first person) so that prose which
-        # merely describes a shell/tool restriction (e.g. summarizing a policy
-        # or doctor behaviour) is not misread as an invalid harness. The Korean
-        # self-report phrases are already specific enough to stand alone.
+        # Anchored to the agent's OWN voice (first person) so that prose which merely describes a shell/tool restriction (e.g. summarizing a policy or doctor behaviour) is not misread as an invalid harness. The Korean self-report phrases are already specific enough to stand alone.
         re.compile(
             r"\b(?:i|we)\b[^.\n]{0,100}(?:shell|command|tool)[^.\n]{0,60}"
             r"(?:forbid|forbidden|not allowed|prohibit|disabled)"
@@ -102,9 +94,7 @@ INVALID_HARNESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
     (
         "read-method-unavailable",
-        # First-person inability to read/access, or an explicit "no read tool"
-        # statement. A third-person mention ("the doctor could not read X") in an
-        # otherwise-successful answer is not an invalid harness.
+        # First-person inability to read/access, or an explicit "no read tool" statement. A third-person mention ("the doctor could not read X") in an otherwise-successful answer is not an invalid harness.
         re.compile(
             r"\b(?:i|we)\b[^.\n]{0,40}"
             r"(?:cannot|can't|could not|couldn't|unable to|not able to|failed to)\s+"
@@ -116,9 +106,7 @@ INVALID_HARNESS_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-# CLI/harness errors (unknown flag, version skew) are not governance failures of
-# the agent. They are matched on the runtime log and reported as invalid-harness
-# so an operator fixes the harness/CLI, not the agent.
+# CLI/harness errors (unknown flag, version skew) are not governance failures of the agent. They are matched on the runtime log and reported as invalid-harness so an operator fixes the harness/CLI, not the agent.
 HARNESS_ERROR_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("cli-arg-rejected", re.compile(r"error:\s+(?:unexpected|unrecognized|invalid)\s+(?:argument|option|subcommand)", re.IGNORECASE)),
     ("cli-arg-rejected", re.compile(r"unexpected argument\s+.+\s+found", re.IGNORECASE)),
@@ -173,9 +161,7 @@ def classify_smoke_result(
     if timed_out:
         fail_reasons.append("timeout")
 
-    # A CLI/harness error (unknown flag, version skew) is not a governance
-    # failure. Detect it on the runtime log and report invalid-harness, before
-    # the exit-code/fail logic so a nonzero exit cannot mask it.
+    # A CLI/harness error (unknown flag, version skew) is not a governance failure. Detect it on the runtime log and report invalid-harness, before the exit-code/fail logic so a nonzero exit cannot mask it.
     if not timed_out:
         harness_reasons: list[str] = []
         for reason, pattern in HARNESS_ERROR_PATTERNS:
@@ -189,11 +175,7 @@ def classify_smoke_result(
     elif exit_code not in (None, 0):
         fail_reasons.append(f"exit-code:{exit_code}")
 
-    # A run that exited 0, produced non-empty output, and emitted every required
-    # governance marker is a completed governed task. Only a recovered Codex tool
-    # router diagnostic is treated as transient; hook failures, tracebacks, cache
-    # failures, and panics remain fatal because they can invalidate the governance
-    # surface even when the agent produced final text.
+    # A run that exited 0, produced non-empty output, and emitted every required governance marker is a completed governed task. Only a recovered Codex tool router diagnostic is treated as transient; hook failures, tracebacks, cache failures, and panics remain fatal because they can invalidate the governance surface even when the agent produced final text.
     recovered_ok = (
         exit_code == 0
         and not timed_out
@@ -203,9 +185,7 @@ def classify_smoke_result(
         and all(marker in output_text for marker in markers)
     )
 
-    # Runtime-error patterns are scanned against the runtime LOG only, never the
-    # agent's own answer text, so an agent that legitimately quotes an error
-    # string in its summary is not false-failed.
+    # Runtime-error patterns are scanned against the runtime LOG only, never the agent's own answer text, so an agent that legitimately quotes an error string in its summary is not false-failed.
     for reason, pattern in FAILURE_PATTERNS:
         if (
             _contains_pattern(pattern, runtime_log)
@@ -293,21 +273,38 @@ def codex_exec_help_text(
     *,
     cwd: Path,
     timeout_seconds: int = 15,
+    runtime: ProjectRuntime | None = None,
 ) -> str:
     """Return `codex exec --help` output, or empty text if probing fails."""
 
     try:
-        completed = subprocess.run(
-            [*codex_command, "exec", "--help"],
-            cwd=str(cwd),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=timeout_seconds,
-            check=False,
-        )
+        if runtime is None:
+            with project_runtime(cwd, "live-smoke-help") as owned_runtime:
+                completed = owned_runtime.run(
+                    [*codex_command, "exec", "--help"],
+                    cwd=cwd,
+                    runner=subprocess.run,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=timeout_seconds,
+                    check=False,
+                )
+        else:
+            completed = runtime.run(
+                [*codex_command, "exec", "--help"],
+                cwd=cwd,
+                runner=subprocess.run,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                check=False,
+            )
     except (OSError, subprocess.TimeoutExpired):
         return ""
     return completed.stdout or ""
@@ -318,6 +315,7 @@ def codex_supports_hook_trust(
     *,
     cwd: Path,
     timeout_seconds: int = 15,
+    runtime: ProjectRuntime | None = None,
 ) -> bool:
     """Detect whether the installed Codex exec command accepts hook-trust bypass."""
 
@@ -325,6 +323,7 @@ def codex_supports_hook_trust(
         codex_command,
         cwd=cwd,
         timeout_seconds=timeout_seconds,
+        runtime=runtime,
     )
 
 
@@ -380,13 +379,37 @@ def run_codex_case(
             "output_file": None,
         }
 
+    with project_runtime(repo_root, f"live-smoke-{case.case_id}") as runtime:
+        return _run_resolved_codex_case(
+            case=case,
+            repo_root=repo_root,
+            log_root=log_root,
+            codex_command=codex_command,
+            timeout_seconds=timeout_seconds,
+            runtime=runtime,
+        )
+
+
+def _run_resolved_codex_case(
+    *,
+    case: SmokeCase,
+    repo_root: Path,
+    log_root: Path,
+    codex_command: list[str],
+    timeout_seconds: int,
+    runtime: ProjectRuntime,
+) -> dict[str, object]:
     run_dir = log_root / _timestamp() / f"codex-{case.case_id}"
     run_dir.mkdir(parents=True, exist_ok=True)
     log_file = run_dir / "agent.log"
     output_file = run_dir / "last-message.txt"
     summary_file = run_dir / "summary.json"
 
-    hook_trust_supported = codex_supports_hook_trust(codex_command, cwd=repo_root)
+    hook_trust_supported = codex_supports_hook_trust(
+        codex_command,
+        cwd=repo_root,
+        runtime=runtime,
+    )
     command = build_codex_exec_command(
         codex_command=codex_command,
         repo_root=repo_root,
@@ -399,9 +422,10 @@ def run_codex_case(
     timed_out = False
     log_text = ""
     try:
-        completed = subprocess.run(
+        completed = runtime.run(
             command,
-            cwd=str(repo_root),
+            cwd=repo_root,
+            runner=subprocess.run,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -430,6 +454,8 @@ def run_codex_case(
         output_exists=output_file.exists(),
         required_markers=case.required_markers,
     )
+    if classification.status != STATUS_PASS:
+        runtime.preserve(f"smoke-status:{classification.status}")
 
     summary: dict[str, object] = {
         "platform": "codex",

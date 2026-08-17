@@ -18,6 +18,9 @@ PENDING_MANIFEST_WRITER = REPO_ROOT / "_shared" / "pending_manifest_writer.py"
 CODEX_MARKER = "# Ghost-ALICE Codex Bootstrap"
 CODEX_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->"
 CODEX_BLOCK_END = "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
+CLAUDE_MARKER = "# Ghost-ALICE Claude Bootstrap"
+CLAUDE_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
+CLAUDE_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
 
 
 def _extract_bash_function(source: str, name: str) -> str:
@@ -669,16 +672,62 @@ class InstallStatusContractTest(unittest.TestCase):
             self.assertIn("codex-bootstrap", result.stdout)
             self.assertIn("managed-block-present", result.stdout)
 
+    def test_doctor_does_not_count_markerless_claude_file_or_proposal_as_installed(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo = self._valid_encoding_root(root)
+            claude_rules = root / ".claude" / "CLAUDE.md"
+            claude_rules.parent.mkdir(parents=True)
+            claude_rules.write_text("# user rules\n", encoding="utf-8")
+            claude_rules.with_name("CLAUDE.md.ghost-alice-proposed").write_text(
+                f"{CLAUDE_MARKER}\n{CLAUDE_BLOCK_BEGIN}\nmanaged\n{CLAUDE_BLOCK_END}\n",
+                encoding="utf-8",
+            )
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(INSTALL_DOCTOR),
+                    "--platform",
+                    "claude",
+                    "--repo-root",
+                    str(repo),
+                    "--encoding-root",
+                    str(repo),
+                    "--ghost-alice-root",
+                    str(root / ".ghost-alice"),
+                    "--global-rule",
+                    "claude-bootstrap",
+                    str(claude_rules),
+                    CLAUDE_MARKER,
+                    CLAUDE_BLOCK_BEGIN,
+                    CLAUDE_BLOCK_END,
+                ],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertNotIn("global-rule: ok", result.stdout)
+            self.assertIn("global-rule: warning", result.stdout)
+            self.assertIn("claude-bootstrap", result.stdout)
+            self.assertIn("user-owned markerless-existing-rule-file", result.stdout)
+
     def test_installers_wire_status_and_doctor_to_common_cli(self) -> None:
         sh = installer_bash_source()
         self.assertIn("_run_install_doctor", sh)
         self.assertIn("--doctor", sh)
         self.assertIn("install_doctor.py", sh)
         self.assertIn("--global-rule", sh)
+        self.assertIn("CLAUDE_MANAGED_BLOCK_BEGIN", sh)
         self.assertIn("CODEX_MANAGED_BLOCK_BEGIN", sh)
         self.assertIn('_run_install_doctor "status"', _extract_bash_function(sh, "check_status"))
         self.assertIn('_run_install_hooks "status" "$PLATFORM"', _extract_bash_function(sh, "check_status"))
         sh_doctor = _extract_bash_function(sh, "_run_install_doctor")
+        self.assertIn('--global-rule "claude-bootstrap"', sh_doctor)
         self.assertIn('--encoding-root "$SCRIPT_DIR"', sh_doctor)
         self.assertIn('--encoding-root "$skills_dir"', sh_doctor)
         self.assertIn("--install-state-manifest", sh_doctor)
@@ -704,10 +753,12 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn("function Invoke-InstallDoctor", ps1)
         self.assertIn("install_doctor.py", ps1)
         self.assertIn("--global-rule", ps1)
+        self.assertIn("$ClaudeManagedBlockBegin", ps1)
         self.assertIn("$CodexManagedBlockBegin", ps1)
         self.assertIn("if ($Doctor)", ps1)
         self.assertIn('Invoke-InstallDoctor -Mode "status"', _extract_powershell_function(ps1, "Show-Status"))
         ps_doctor = _extract_powershell_function(ps1, "Invoke-InstallDoctor")
+        self.assertIn('"--global-rule", "claude-bootstrap"', ps_doctor)
         self.assertIn('"--encoding-root", $ScriptDir', ps_doctor)
         self.assertIn('"--encoding-root", $SkillsRoot', ps_doctor)
         self.assertIn("--install-state-manifest", ps_doctor)
@@ -732,11 +783,39 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn('$visibility = "dynamic"', powershell_hooks)
         self.assertIn('"--visibility", $visibility', powershell_hooks)
 
+    def test_status_and_doctor_forward_selected_addon_sources_to_hook_status(self) -> None:
+        bash_hooks = _extract_bash_function(installer_bash_source(), "_run_install_hooks")
+        self.assertIn('if [ "$action" != "uninstall" ]; then', bash_hooks)
+        self.assertIn('args+=(--addon-source "$_addon_src")', bash_hooks)
+
+        bash_status = _extract_bash_function(installer_bash_source(), "check_status")
+        bash_doctor = _extract_bash_function(installer_bash_source(), "run_doctor")
+        self.assertIn('_run_install_hooks "status" "$PLATFORM"', bash_status)
+        self.assertIn('_run_install_hooks "status" "$PLATFORM"', bash_doctor)
+
+        powershell_hooks = _extract_powershell_function(
+            installer_ps1_source(),
+            "Invoke-InstallHooks",
+        )
+        self.assertIn('$Action -ne "uninstall"', powershell_hooks)
+        self.assertIn('$pyArgs += @("--addon-source", $source)', powershell_hooks)
+
+        powershell_status = _extract_powershell_function(
+            installer_ps1_source(),
+            "Show-Status",
+        )
+        powershell_doctor = _extract_powershell_function(
+            installer_ps1_source(),
+            "Show-Doctor",
+        )
+        expected_call = 'Invoke-InstallHooks -Action "status" -TargetPlatform $Platform'
+        self.assertIn(expected_call, powershell_status)
+        self.assertIn(expected_call, powershell_doctor)
+
     def test_installers_write_empty_pending_merge_manifest_after_snapshot(self) -> None:
         sh = installer_bash_source()
         bash_writer = _extract_bash_function(sh, "_write_empty_pending_manifest_if_missing")
-        # The empty-manifest payload now lives in the extracted _shared writer module;
-        # the bash function delegates to it.
+        # The empty-manifest payload now lives in the extracted _shared writer module; the bash function delegates to it.
         self.assertIn("pending_manifest_writer.py", bash_writer)
         writer_py = PENDING_MANIFEST_WRITER.read_text(encoding="utf-8")
         self.assertIn('"version": 1', writer_py)

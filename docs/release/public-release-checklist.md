@@ -9,6 +9,7 @@ This checklist prepares a clean Ghost-ALICE OS public repository snapshot withou
 - [Include](#include)
 - [Exclude](#exclude)
 - [Pre-Export Checks](#pre-export-checks)
+- [Installed Behavior Gates](#installed-behavior-gates)
 - [License And Provenance Gates](#license-and-provenance-gates)
 - [Sensitive String Scan](#sensitive-string-scan)
 - [GitHub Community File Check](#github-community-file-check)
@@ -70,8 +71,9 @@ Run from the private working repo before creating the clean export.
 git status --short
 python3 scripts/validate_public_surfaces.py
 python3 scripts/check_skill_gate_contract.py
-python3 -m unittest discover -s _shared -p 'test_*.py'
-python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+python3 scripts/check_prose_wrapping.py
+python3 scripts/run_installer_compat_tests.py --group shared-all
+python3 scripts/run_installer_compat_tests.py --group scripts-all
 ```
 
 For installer-heavy releases, also run:
@@ -80,6 +82,19 @@ For installer-heavy releases, also run:
 python3 scripts/run_installer_compat_tests.py
 python3 scripts/validate_platform_adapters.py
 ```
+
+## Installed Behavior Gates
+
+Run the evaluator-visible governance live smoke from `docs/policies/live-smoke-regression.md` to verify hooks, gates, and control-surface markers. This smoke is runtime-plumbing evidence and does not satisfy the blind behavior gate.
+
+In a disposable environment with the candidate installed canonically and its installer-owned manifest present, run the separate blind fresh-session controller once for each installed subject. Replace the sealed case and trusted evaluator placeholders with release-owned paths or commands; do not put evaluator-private material in the subject command or environment.
+
+```bash
+python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform claude --subject-command '["claude"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-claude.json
+python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform codex --subject-command '["codex"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-codex.json
+```
+
+Both commands must exit zero and produce sanitized records with `verdict=pass`, the expected installed platform provenance, the controller-computed suite digest, and no prompt, rubric, purpose, expected answer, subject response, or evaluator-private text. A pass from one platform does not cover the other, and neither automated blind result replaces the human-operated clean-terminal acceptance gate.
 
 ## License And Provenance Gates
 

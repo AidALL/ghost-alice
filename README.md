@@ -26,12 +26,7 @@ cd %USERPROFILE%\ghost-alice
 .\install.cmd
 ```
 
-Public install guidance uses OS-native entrypoints with the same long flag
-surface. Windows uses `.\install.cmd ...`; macOS, Linux, WSL, and Git Bash use
-`bash install.sh ...`.
-`install.cmd` keeps the Windows native wrapper path, Python 3.11+ installer
-contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`; this
-handles PowerShell execution policy blocks and does not change the user or machine execution policy.
+Public install guidance uses OS-native entrypoints with the same long flag surface. Windows uses `.\install.cmd ...`; macOS, Linux, WSL, and Git Bash use `bash install.sh ...`. `install.cmd` keeps the Windows native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`; this handles PowerShell execution policy blocks and does not change the user or machine execution policy.
 
 ## Official Addons
 
@@ -118,8 +113,7 @@ Public surface validation:
 python3 scripts/validate_public_surfaces.py
 ```
 
-Session gate contract validation checks the repository contract in
-`skill-catalog/session-gates.json` and the user-facing policy surfaces:
+Session gate contract validation checks the repository contract in `skill-catalog/session-gates.json` and the user-facing policy surfaces:
 
 ```bash
 python scripts/check_skill_gate_contract.py
@@ -134,6 +128,4 @@ python3 scripts/run_installer_compat_tests.py --group public-surface-contract
 
 ## License
 
-Ghost-ALICE OS project-owned source code and documentation are licensed under
-the Apache License, Version 2.0. See [LICENSE](./LICENSE), [NOTICE](./NOTICE),
-and [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+Ghost-ALICE OS project-owned source code and documentation are licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE), [NOTICE](./NOTICE), and [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).

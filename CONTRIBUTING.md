@@ -92,20 +92,11 @@ bash install.sh --status
 
 ## Contribution License
 
-Unless you clearly mark a submission as "Not a Contribution", contributions
-submitted through issues, pull requests, discussions, or other project-managed
-channels are submitted for inclusion in Ghost-ALICE OS under the Apache License,
-Version 2.0.
+Unless you clearly mark a submission as "Not a Contribution", contributions submitted through issues, pull requests, discussions, or other project-managed channels are submitted for inclusion in Ghost-ALICE OS under the Apache License, Version 2.0.
 
-Do not submit code, documentation, images, datasets, generated content, or
-reference material unless you have the right to contribute it under terms
-compatible with this project. If your change includes third-party material,
-identify the source, license, copyright notice, and local path in the pull
-request.
+Do not submit code, documentation, images, datasets, generated content, or reference material unless you have the right to contribute it under terms compatible with this project. If your change includes third-party material, identify the source, license, copyright notice, and local path in the pull request.
 
-This project does not currently require a separate CLA or DCO sign-off. If that
-policy changes, it must be documented before maintainers require it for new
-pull requests.
+This project does not currently require a separate CLA or DCO sign-off. If that policy changes, it must be documented before maintainers require it for new pull requests.
 
 ## Validation Commands
 
@@ -114,8 +105,8 @@ Run the focused checks that match your change. For a public-readiness or release
 ```bash
 python3 scripts/validate_public_surfaces.py
 python3 scripts/check_skill_gate_contract.py
-python3 -m unittest discover -s _shared -p 'test_*.py'
-python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+python3 scripts/run_installer_compat_tests.py --group shared-all
+python3 scripts/run_installer_compat_tests.py --group scripts-all
 ```
 
 For installer and platform changes, also run:
@@ -131,10 +122,7 @@ Windows installer changes should include PowerShell-oriented validation where po
 .\install.ps1 -Doctor
 ```
 
-The Wiki lives in a separate repository (`<repo>.wiki.git`), so changes there are
-not covered by the repo test suites. When you edit Wiki pages, clone the wiki and
-run the report-only structural audit against your checkout. It flags broken
-internal links and missing English/Korean page pairs only; it does not judge prose.
+The Wiki lives in a separate repository (`<repo>.wiki.git`), so changes there are not covered by the repo test suites. When you edit Wiki pages, clone the wiki and run the report-only structural audit against your checkout. It flags broken internal links and missing English/Korean page pairs only; it does not judge prose.
 
 ```bash
 git clone https://github.com/AidALL/ghost-alice.wiki.git /tmp/ga-wiki
@@ -155,9 +143,7 @@ Each pull request should include:
 
 For governance behavior changes, include the relevant gate or hook surface, such as `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, or `SessionStart`.
 
-Keep pull requests focused. Separate unrelated documentation, installer, hook,
-and skill behavior changes unless the coupling is part of the problem being
-fixed.
+Keep pull requests focused. Separate unrelated documentation, installer, hook, and skill behavior changes unless the coupling is part of the problem being fixed.
 
 ## Public Boundary Rules
 

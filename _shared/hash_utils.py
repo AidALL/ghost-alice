@@ -10,11 +10,7 @@ import hashlib
 import os
 from pathlib import Path
 
-# The Ghost-ALICE ownership marker (installer_assets.GHOST_ALICE_MARKER_FILENAME)
-# carries a per-install installed_at timestamp, so it changes on every reinstall.
-# It is our own bookkeeping, not addon content, and must be excluded from the
-# content hash; otherwise a copy-mode target's recorded hash drifts from its live
-# hash across reinstalls and falsely trips the same-addon drift gate (review H1).
+# The Ghost-ALICE ownership marker (installer_assets.GHOST_ALICE_MARKER_FILENAME) carries a per-install installed_at timestamp, so it changes on every reinstall. It is our own bookkeeping, not addon content, and must be excluded from the content hash; otherwise a copy-mode target's recorded hash drifts from its live hash across reinstalls and falsely trips the same-addon drift gate (review H1).
 _MANAGED_MARKER_FILENAME = ".ghost-alice-install.json"
 _PYTHON_CACHE_DIR = "__pycache__"
 

@@ -20,7 +20,7 @@ from installer_assets import (
     OWNERSHIP_USER_MODIFIED_MANAGED,
     classify_skill_root,
 )
-from global_rule_blocks import remove_codex_bootstrap
+from global_rule_blocks import remove_claude_bootstrap, remove_codex_bootstrap
 from install_hooks import uninstall_hook
 
 REMOVABLE_TARGET_OWNERSHIPS = {
@@ -877,6 +877,9 @@ def _global_rule_item(platform: str, *, confirm: bool) -> dict[str, Any] | None:
     if platform == "codex":
         path = _codex_home() / "AGENTS.md"
         remover = remove_codex_bootstrap
+    elif platform == "claude":
+        path = _claude_home() / "CLAUDE.md"
+        remover = remove_claude_bootstrap
     else:
         return None
 

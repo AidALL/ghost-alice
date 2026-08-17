@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -23,6 +24,7 @@ sys.path.insert(0, str(REPO_ROOT / "merge-companion" / "scripts"))
 
 import addon_registry as reg  # noqa: E402
 import install_hooks  # noqa: E402
+import install_transaction  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import hash_utils  # noqa: E402
 from snapshot import capture_snapshot, load_snapshot  # noqa: E402
@@ -36,22 +38,33 @@ class UninstallTestBase(unittest.TestCase):
         self.addons = self.root / ".ghost-alice" / "addons" / "claude"
         self.skills = self.root / ".claude" / "skills"
         self.src = self.root / "src"
+        self._install_modes = {}
 
     def tearDown(self):
         self._tmp.cleanup()
 
+    def _provision_target(self, src, dest):
+        try:
+            return install_transaction._create_directory_link(src, dest)
+        except OSError:
+            shutil.copytree(src, dest)
+            return "copy"
+
     def _install(self, addon_id, names):
         self.skills.mkdir(parents=True, exist_ok=True)
         provided = []
+        modes = {}
         for name in names:
             src = self.src / addon_id / name
             src.mkdir(parents=True, exist_ok=True)
             (src / "SKILL.md").write_text("x", encoding="utf-8")
             dest = self.skills / name
-            dest.symlink_to(src)
+            mode = self._provision_target(src, dest)
+            modes[name] = mode
+            self._install_modes[dest] = mode
             provided.append({
                 "kind": "skill", "name": name, "target": str(dest), "ownership": "addon",
-                "install_mode": "symlink", "content_hash": hash_utils.hash_target(str(dest), "symlink"),
+                "install_mode": mode, "content_hash": hash_utils.hash_target(str(dest), mode),
                 "marker": "", "metadata": {},
             })
         reg.write_record({
@@ -60,6 +73,7 @@ class UninstallTestBase(unittest.TestCase):
             "origin": f"addon:{addon_id}", "depends_on_core": [], "min_core_version": "0.0.0",
             "installed_at": "t", "provided": provided,
         }, addons_dir=self.addons)
+        return modes
 
     def _write_sidecar(self, addon_id, provided):
         reg.write_record({
@@ -97,17 +111,16 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertEqual(reg.read_all_ids(addons_dir=self.addons), ["beta"])
 
     def test_removes_only_via_symlink_not_target(self):
-        self._install("alpha", ["one"])
+        modes = self._install("alpha", ["one"])
+        if modes["one"] == "copy":
+            self.skipTest("directory link capability is required")
         src = self.src / "alpha" / "one"
         self._uninstall("alpha")
         self.assertFalse(os.path.lexists(self.skills / "one"))
-        self.assertTrue(src.exists())  # symlink target (addon source) NOT deleted
+        self.assertTrue(src.exists())  # link target (addon source) NOT deleted
 
     def test_drifted_copy_target_is_preserved(self):
-        # copy-mode target whose content drifted since install -> hash mismatch
-        # -> must NOT be removed (real content could be lost). Drift protection
-        # stays in force for any modified managed target (copy or re-pointed
-        # symlink): a drifted target is preserved as manual-review, not removed.
+        # copy-mode target whose content drifted since install -> hash mismatch -> must NOT be removed (real content could be lost). Drift protection stays in force for any modified managed target (copy or re-pointed symlink): a drifted target is preserved as manual-review, not removed.
         self.skills.mkdir(parents=True, exist_ok=True)
         dest = self.skills / "one"
         dest.mkdir()
@@ -126,7 +139,7 @@ class CoreUninstallTest(UninstallTestBase):
 
     def test_missing_target_marked_missing(self):
         self._install("alpha", ["one", "gone"])
-        (self.skills / "gone").unlink()  # remove one target out of band
+        un._symlink_safe_remove(self.skills / "gone")  # remove one target out of band
         result = self._uninstall("alpha")
         self.assertEqual(result["status"], "removed")  # missing is not a block
         actions = {i["name"]: i["action"] for i in result["items"]}
@@ -277,10 +290,9 @@ class CoreUninstallTest(UninstallTestBase):
 class ResumeTest(UninstallTestBase):
     def test_resume_finishes_after_crash(self):
         self._install("alpha", ["one", "two"])
-        # simulate a crash AFTER the marker was written and one target removed,
-        # but BEFORE the sidecar was deleted.
+        # simulate a crash AFTER the marker was written and one target removed, but BEFORE the sidecar was deleted.
         self._marker("alpha").write_text('{"addon_id":"alpha","stage":"removing"}', encoding="utf-8")
-        (self.skills / "one").unlink()
+        un._symlink_safe_remove(self.skills / "one")
         results = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills], platform="claude")
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]["status"], "removed")
@@ -320,7 +332,8 @@ class SecurityTest(UninstallTestBase):
     def test_install_mode_missing_never_deletes(self):
         self.skills.mkdir(parents=True, exist_ok=True)
         dest = self.skills / "x"
-        dest.symlink_to(self.root / "src")  # a real link on disk
+        self.src.mkdir()
+        self._provision_target(self.src, dest)
         # tampered: install_mode 'missing' + content_hash 'missing' would match the hash gate
         self._write_sidecar("alpha", [{
             "kind": "skill", "name": "x", "target": str(dest), "ownership": "addon",
@@ -330,9 +343,7 @@ class SecurityTest(UninstallTestBase):
         self.assertTrue(os.path.lexists(dest))  # NOT deleted
 
     def test_empty_content_hash_fails_closed(self):
-        # copy-mode target with no recorded content_hash: ownership is unprovable
-        # and there is real content to lose, so it must fail closed (preserved).
-        # (Symlink mode is exempt because unlinking the link is non-destructive.)
+        # copy-mode target with no recorded content_hash: ownership is unprovable and there is real content to lose, so it must fail closed (preserved). (Symlink mode is exempt because unlinking the link is non-destructive.)
         self.skills.mkdir(parents=True, exist_ok=True)
         dest = self.skills / "x"
         dest.mkdir()
@@ -397,11 +408,16 @@ class UninstallScenarioGapTest(UninstallTestBase):
     def _repoint(self, name):
         """Re-point an installed skill symlink at a user dir -> recorded hash drifts."""
         dest = self.skills / name
+        if self._install_modes.get(dest) == "copy":
+            self.skipTest("directory link capability is required")
         other = self.src / "user-dir" / name
         other.mkdir(parents=True, exist_ok=True)
         (other / "SKILL.md").write_text("user", encoding="utf-8")
-        dest.unlink()
-        dest.symlink_to(other)
+        un._symlink_safe_remove(dest)
+        try:
+            self._install_modes[dest] = install_transaction._create_directory_link(other, dest)
+        except OSError as exc:
+            self.skipTest(f"directory link capability is required: {exc}")
         return dest
 
     # A4: a user re-pointed (drifted) symlink is preserved as manual-review, not removed.

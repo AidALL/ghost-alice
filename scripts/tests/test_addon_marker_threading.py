@@ -22,10 +22,7 @@ from _installer_source import installer_ps1_source  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKER_CLI = REPO_ROOT / "_shared" / "installer_assets_cli.py"
-# Append (do not insert at 0): keep scripts/tests at sys.path[0] so unittest
-# discover resolves the scripts/tests copy of a basename that also exists under
-# _shared (e.g. test_completion_check_validator.py). Inserting _shared at 0
-# shadows that copy and breaks `unittest discover -s scripts/tests` in CI.
+# Append (do not insert at 0): keep scripts/tests at sys.path[0] so unittest discover resolves the scripts/tests copy of a basename that also exists under _shared (e.g. test_completion_check_validator.py). Inserting _shared at 0 shadows that copy and breaks `unittest discover -s scripts/tests` in CI.
 sys.path.append(str(REPO_ROOT / "_shared"))
 
 from installer_assets import (  # noqa: E402

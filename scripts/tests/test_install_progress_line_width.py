@@ -35,18 +35,8 @@ def _find_test_bash() -> str | None:
     return None
 
 
-class CommonTargetProgressLineFixedWidth(unittest.TestCase):
-    """Guard against in-place progress-line residue regressions.
-
-    Format-CommonTargetProgressLine receives suffixes with very different lengths
-    ("For X [i/n]" at 16 characters versus "common targets synced on all platforms" at 38).
-    The install.ps1 caller writes a carriage return and overwrites without clearing,
-    so short frames can leave tails from earlier long frames unless the formatter pads
-    to a fixed width independent of suffix length.
-    """
-
-    def test_formatter_pads_to_fixed_width_source(self) -> None:
-        # Static guard: catch padding removal even without pwsh.
+class CommonTargetProgressLineUsesSemanticLength(unittest.TestCase):
+    def test_formatter_does_not_pad_to_a_character_count(self) -> None:
         source = REPORT_PS1.read_text(encoding="utf-8")
         match = re.search(
             r"function Format-CommonTargetProgressLine\b.*?\n\}",
@@ -57,19 +47,16 @@ class CommonTargetProgressLineFixedWidth(unittest.TestCase):
             match, "Format-CommonTargetProgressLine definition not found"
         )
         body = match.group(0)
-        self.assertIn(
-            "PadRight",
-            body,
-            "fixed-width padding (PadRight) was removed; in-place progress-line residue risk",
-        )
+        self.assertNotIn("PadRight", body)
+        self.assertNotIn("fixed width", body.lower())
 
     @unittest.skipUnless(shutil.which("pwsh"), "pwsh not installed")
-    def test_formatter_returns_fixed_width_runtime(self) -> None:
-        def width(suffix: str) -> int:
+    def test_formatter_preserves_the_full_suffix_without_padding(self) -> None:
+        def line(suffix: str) -> str:
             script = (
                 f". '{REPORT_PS1.as_posix()}'; "
-                f"(Format-CommonTargetProgressLine -DoneCount 25 -TotalCount 25 "
-                f"-Suffix '{suffix}').Length"
+                f"Format-CommonTargetProgressLine -DoneCount 25 -TotalCount 25 "
+                f"-Suffix '{suffix}'"
             )
             result = subprocess.run(
                 ["pwsh", "-NoProfile", "-Command", script],
@@ -77,36 +64,63 @@ class CommonTargetProgressLineFixedWidth(unittest.TestCase):
                 text=True,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            return int(result.stdout.strip().splitlines()[-1])
+            return result.stdout.strip().splitlines()[-1]
 
-        short = width("For claude [1/2]")
-        long_suffix = width("common targets synced on all platforms")
-        mid = width("common targets synced")
-        self.assertEqual(
-            short,
-            long_suffix,
-            "progress-line length varies by suffix; in-place residue regression",
+        short = line("For claude [1/2]")
+        long_line = line("common targets synced on all platforms")
+        self.assertTrue(short.endswith("For claude [1/2]"), short)
+        self.assertTrue(
+            long_line.endswith("common targets synced on all platforms"), long_line
         )
-        self.assertEqual(short, mid, "progress line is not fixed width; in-place residue regression")
+        self.assertNotEqual(len(short), len(long_line))
+
+    @unittest.skipUnless(shutil.which("pwsh"), "pwsh not installed")
+    def test_live_frame_clears_a_longer_previous_suffix(self) -> None:
+        script = (
+            f". '{REPORT_PS1.as_posix()}'; "
+            "Write-CommonTargetProgressFrame -DoneCount 1 -TotalCount 2 -Suffix 'a deliberately longer progress suffix'; "
+            "Write-CommonTargetProgressFrame -DoneCount 2 -TotalCount 2 -Suffix 'done'; "
+            "Complete-CommonTargetProgressFrame"
+        )
+        result = subprocess.run(["pwsh", "-NoProfile", "-Command", script], capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr.decode("utf-8", errors="replace"))
+
+        rendered: list[str] = []
+        cursor = 0
+        for character in result.stdout.decode("utf-8", errors="replace"):
+            if character == "\r":
+                cursor = 0
+            elif character == "\n":
+                break
+            else:
+                if cursor == len(rendered):
+                    rendered.append(character)
+                else:
+                    rendered[cursor] = character
+                cursor += 1
+        expected = "        Common targets      [##############################] [2/2] done"
+        self.assertEqual("".join(rendered).rstrip(), expected)
 
 
-class BashLiveCommonTargetProgressLineWidth(unittest.TestCase):
-    """Guard against wrapped live progress frames in standard 80-column terminals."""
-
-    def test_live_formatter_exists_source(self) -> None:
+class BashCommonTargetProgressLineUsesSemanticLength(unittest.TestCase):
+    def test_live_updates_reuse_the_semantic_formatter(self) -> None:
         source = REPORT_SH.read_text(encoding="utf-8")
 
-        self.assertIn("report_live_common_target_progress_line()", source)
-        self.assertIn('report_progress_bar "$done_count" "$total_count" 20', source)
+        self.assertNotIn("report_live_common_target_progress_line()", source)
+        self.assertNotIn("report_live_common_target_suffix()", source)
+        self.assertIn(
+            'report_common_target_progress_line "$@"',
+            source,
+        )
 
-    def test_live_formatter_stays_within_80_columns_runtime(self) -> None:
+    def test_formatter_preserves_the_full_suffix_runtime(self) -> None:
         bash_exe = _find_test_bash()
         if not bash_exe:
             self.skipTest("No non-WSL bash executable available for report.sh runtime test")
 
         script = (
             f"source '{REPORT_SH.as_posix()}'; "
-            "report_live_common_target_progress_line 26 26 "
+            "report_common_target_progress_line 26 26 "
             "'common targets synced on all platforms'"
         )
         result = subprocess.run(
@@ -119,10 +133,9 @@ class BashLiveCommonTargetProgressLineWidth(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         line = result.stdout
-        self.assertLessEqual(len(line), 80, line)
         self.assertIn("Common targets", line)
         self.assertIn("[26/26]", line)
-        self.assertIn("all platforms", line)
+        self.assertTrue(line.endswith("common targets synced on all platforms"), line)
 
 
 if __name__ == "__main__":

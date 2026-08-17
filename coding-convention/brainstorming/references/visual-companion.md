@@ -270,19 +270,19 @@ If `$STATE_DIR/events` does not exist, the user did not interact with the browse
 
 ## Design Tips
 
-Match fidelity to the question: a wireframe for layout, a refinement question for refinement.
-Explain the question on each page: not "is this right?" but "which layout looks more professional?"
-Iterate before proceeding: if the feedback changes the current screen, write a new version.
-At most 2-4 options per screen.
-Use real content when it matters: for a photo portfolio, use real images (Unsplash). Placeholder content hides design problems.
-Keep mockups simple: focus on layout and structure, not pixel-perfect design.
+- Match fidelity to the question: a wireframe for layout, a refinement question for refinement.
+- Explain the question on each page: not "is this right?" but "which layout looks more professional?"
+- Iterate before proceeding: if the feedback changes the current screen, write a new version.
+- At most 2-4 options per screen.
+- Use real content when it matters: for a photo portfolio, use real images (Unsplash). Placeholder content hides design problems.
+- Keep mockups simple: focus on layout and structure, not pixel-perfect design.
 
 ## Filename Convention
 
-Use meaningful names: `platform.html`, `visual-style.html`, `layout.html`
-Do not reuse filenames: each screen is a new file.
-Iteration: add a version suffix, `layout-v2.html`, `layout-v3.html`.
-The server serves the most recent file by modification time.
+- Use meaningful names: `platform.html`, `visual-style.html`, `layout.html`
+- Do not reuse filenames: each screen is a new file.
+- Iteration: add a version suffix, `layout-v2.html`, `layout-v3.html`.
+- The server serves the most recent file by modification time.
 
 ## Cleanup
 

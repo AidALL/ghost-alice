@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Tests for live agent smoke result classification."""
 
+import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -11,6 +14,49 @@ import live_agent_smoke
 
 
 class LiveAgentSmokeClassificationTest(unittest.TestCase):
+    def test_help_probe_uses_repo_local_child_temp_without_mutating_parent(self):
+        calls = []
+
+        def run_process(command, **kwargs):
+            calls.append((command, kwargs))
+            return subprocess.CompletedProcess(command, 0, "usage: codex exec", "")
+
+        hostile = r"C:\Users\Public\Documents\ESTsoft\CreatorTemp"
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TEMP": hostile,
+                "TMP": hostile,
+                "TMPDIR": hostile,
+                "PYTHONPYCACHEPREFIX": hostile,
+            },
+            clear=False,
+        ), mock.patch.object(live_agent_smoke.subprocess, "run", run_process):
+            parent_before = {
+                key: os.environ[key]
+                for key in ("TEMP", "TMP", "TMPDIR", "PYTHONPYCACHEPREFIX")
+            }
+            output = live_agent_smoke.codex_exec_help_text(
+                ["codex.cmd"],
+                cwd=Path.cwd(),
+            )
+            self.assertEqual(
+                {
+                    key: os.environ[key]
+                    for key in ("TEMP", "TMP", "TMPDIR", "PYTHONPYCACHEPREFIX")
+                },
+                parent_before,
+            )
+
+        self.assertEqual(output, "usage: codex exec")
+        self.assertEqual(len(calls), 1)
+        _, kwargs = calls[0]
+        self.assertIn("env", kwargs)
+        run_root = Path(kwargs["env"]["TMPDIR"]).parent
+        self.assertTrue(run_root.is_relative_to(Path.cwd() / ".tmp"))
+        self.assertEqual(Path(kwargs["cwd"]).resolve(), Path.cwd().resolve())
+        self.assertFalse(run_root.exists())
+
     def test_windows_resolver_prefers_cmd_for_bare_codex(self):
         def fake_which(name):
             return {
@@ -206,8 +252,7 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
         self.assertIn("missing-marker:[gate-state]", result.reasons)
 
     def test_third_person_could_not_read_in_answer_is_not_invalid_harness(self):
-        # A successful answer that incidentally describes some tool's behaviour
-        # ("the doctor could not read X") must not be flagged invalid-harness.
+        # A successful answer that incidentally describes some tool's behaviour ("the doctor could not read X") must not be flagged invalid-harness.
         result = live_agent_smoke.classify_smoke_result(
             exit_code=0,
             timed_out=False,
@@ -249,8 +294,7 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
         self.assertIn("read-method-unavailable", result.reasons)
 
     def test_first_person_was_not_able_or_failed_to_read_is_invalid_harness(self):
-        # First-person genuine inability in varied phrasing must still be caught
-        # (anchored to the agent's voice, so third-person prose stays a pass).
+        # First-person genuine inability in varied phrasing must still be caught (anchored to the agent's voice, so third-person prose stays a pass).
         for phrase in (
             "I was not able to read the file in this sandbox.",
             "I failed to read the file because the shell tool was unavailable.",
@@ -277,9 +321,7 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
         self.assertIn("full-file", prompt)
 
     def test_recovered_runtime_error_with_full_surface_passes(self):
-        # exit 0 + all required markers + non-empty output = completed governed
-        # task; a recovered (timestamped) tool-router-error in the runtime log
-        # must not false-fail it (the agent.log still preserves the line).
+        # exit 0 + all required markers + non-empty output = completed governed task; a recovered (timestamped) tool-router-error in the runtime log must not false-fail it (the agent.log still preserves the line).
         result = live_agent_smoke.classify_smoke_result(
             exit_code=0,
             timed_out=False,

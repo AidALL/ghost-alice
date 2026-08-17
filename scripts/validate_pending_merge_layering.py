@@ -200,9 +200,7 @@ def check_layer(c: LayerCheck) -> tuple[bool, str]:
         return False, f"{c.layer}: file missing. {c.file}"
     text = c.file.read_text(encoding="utf-8")
     if c.file.name in ("install.sh", "install.ps1"):
-        # install.sh / install.ps1 are modularized; tail/installer content may now live
-        # in installer_lib/*.sh and installer_lib/*.ps1. Scan the combined installer
-        # source so install.sh / install.ps1 layer checks find the content.
+        # install.sh / install.ps1 are modularized; tail/installer content may now live in installer_lib/*.sh and installer_lib/*.ps1. Scan the combined installer source so install.sh / install.ps1 layer checks find the content.
         ext = ".sh" if c.file.name == "install.sh" else ".ps1"
         lib_dir = c.file.parent / "installer_lib"
         if lib_dir.is_dir():

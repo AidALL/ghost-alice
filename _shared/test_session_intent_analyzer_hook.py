@@ -207,16 +207,14 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
 
 
 class LedgerDependencyDegradeTests(unittest.TestCase):
-    """The hook degrades non-blockingly and distinguishes an ABSENT ledger from a
-    PRESENT-but-broken one, instead of crashing or conflating the two."""
+    'The hook degrades non-blockingly and distinguishes an ABSENT ledger from a\n    PRESENT-but-broken one, instead of crashing or conflating the two.'
 
     def setUp(self) -> None:
         self.base = pathlib.Path(tempfile.mkdtemp(prefix="sia-degrade-"))
         self.addCleanup(lambda: shutil.rmtree(self.base, ignore_errors=True))
         shared = self.base / "_shared"
         shared.mkdir(parents=True)
-        # Copy the hook so its REPO_ROOT has no sibling ledger; resolution must
-        # fall to the home/CLAUDE_CONFIG_DIR candidates we control.
+        # Copy the hook so its REPO_ROOT has no sibling ledger; resolution must fall to the home/CLAUDE_CONFIG_DIR candidates we control.
         self.hook = shared / "session_intent_analyzer_hook.py"
         shutil.copy2(SCRIPT, self.hook)
         self.home = self.base / "home"
@@ -265,9 +263,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         return self.root / "codex" / "s-degrade" / "ledger-degraded.json"
 
     def test_broken_ledger_writes_durable_degrade_marker(self) -> None:
-        # H5: a BROKEN ledger must leave a ledger-independent marker so
-        # freshness consumers (task-router reminder) fail closed instead of
-        # riding the frozen lineage anchor.
+        # H5: a BROKEN ledger must leave a ledger-independent marker so freshness consumers (task-router reminder) fail closed instead of riding the frozen lineage anchor.
         self._put_ledger("raise RuntimeError('boom at import')\n")
         result = self._run()
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -276,8 +272,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.assertEqual(marker["reason"], "ledger-broken")
 
     def test_absent_ledger_writes_no_marker(self) -> None:
-        # ABSENT is the documented baseline degrade; it must stay marker-free
-        # so intentionally ledger-less setups are not routed fail-closed.
+        # ABSENT is the documented baseline degrade; it must stay marker-free so intentionally ledger-less setups are not routed fail-closed.
         result = self._run()
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertFalse(self._marker().exists())
@@ -296,12 +291,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
 
 
 class TestDegradeMarkerPathParity(unittest.TestCase):
-    # Cross-module drift guard: the analyzer WRITES the degrade marker and the
-    # task-router reminder REBUILDS the same path to read it. Any charset or
-    # normalization drift between the two safe-component implementations hides
-    # the marker from the consumer (silent fail-open), so pin them equal over a
-    # hostile input set -- including '=' (base64-ish ids), consecutive unsafe
-    # runs, edge dots/dashes, over-long ids, non-ASCII, and empties.
+    # Cross-module drift guard: the analyzer WRITES the degrade marker and the task-router reminder REBUILDS the same path to read it. Any charset or normalization drift between the two safe-component implementations hides the marker from the consumer (silent fail-open), so pin them equal over a hostile input set -- including '=' (base64-ish ids), consecutive unsafe runs, edge dots/dashes, over-long ids, non-ASCII, and empties.
 
     @staticmethod
     def _load(name: str):

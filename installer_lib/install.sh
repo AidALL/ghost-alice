@@ -657,10 +657,7 @@ _repair_addon_targets() {
 }
 
 run_repair() {
-  # The mutating reconciliation path. Unlike --doctor (read-only), it
-  # re-provisions MISSING managed targets, but it classifies ownership before ever
-  # replacing anything: an occupied slot that is not a clean Ghost-ALICE managed
-  # target (a user/domain dir, or drift) is LEFT UNTOUCHED, never clobbered.
+  # The mutating reconciliation path. Unlike --doctor (read-only), it re-provisions MISSING managed targets, but it classifies ownership before ever replacing anything: an occupied slot that is not a clean Ghost-ALICE managed target (a user/domain dir, or drift) is LEFT UNTOUCHED, never clobbered.
   echo ""
   info "$(t 'Installer repair: re-provisioning missing managed targets...' 'Installer repair: re-provisioning missing managed targets...')"
   local py copy_only=0 repaired=0 kept=0
@@ -673,10 +670,7 @@ run_repair() {
     copy_only=1
   fi
 
-  # _shared is the most critical target -- every managed skill resolves shared
-  # modules through it. A dangling symlink ([ ! -e ] is true, [ -L ] is true) is
-  # functionally missing, so it must be re-provisioned too (addon review), while an
-  # occupied non-clean _shared (user dir / drift) is classified and left untouched.
+  # _shared is the most critical target -- every managed skill resolves shared modules through it. A dangling symlink ([ ! -e ] is true, [ -L ] is true) is functionally missing, so it must be re-provisioned too (addon review), while an occupied non-clean _shared (user dir / drift) is classified and left untouched.
   local shared="${SKILLS_DIR}/_shared"
   if [ ! -e "$shared" ]; then
     install_shared "${SKILLS_DIR}" "$copy_only"  # absent or dangling -> restore
@@ -718,8 +712,7 @@ _check_addon_collisions() {
   local py
   py="$(_find_python_runtime || true)"
   if [ -z "$py" ]; then
-    # Addons were requested but collision detection cannot run: fail closed
-    # rather than installing over an unknown owner.
+    # Addons were requested but collision detection cannot run: fail closed rather than installing over an unknown owner.
     error "$(t 'Python 3.11+ not found; cannot check addon collisions; aborting install' 'Python 3.11+ not found; cannot check addon collisions; aborting install')"
     exit 1
   fi
@@ -816,9 +809,8 @@ _run_install_hooks() {
         uninstall) args+=(--uninstall) ;;
         status)    args+=(--status) ;;
       esac
-      # Forward addon sources so observational addon hooks install after core hooks
-      # (plan Phase 4). Empty on a core-only run -> args[] stays byte-identical.
-      if [ "$action" = "install" ]; then
+      # Install and status share the same manifest-verified addon inventory so status can diagnose missing addon permissions and hooks.
+      if [ "$action" != "uninstall" ]; then
         local _addon_src
         for _addon_src in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"}; do
           args+=(--addon-source "$_addon_src")
@@ -941,10 +933,7 @@ install() {
     fi
   fi
 
-  # Finish any interrupted prior uninstall BEFORE installing. If a leftover
-  # <addon>.json.removing marker is resumed AFTER install, it deletes the addon we
-  # just installed, leaving sidecar-present/skill-missing. Running it first
-  # completes the old removal and frees the name before collision detection.
+  # Finish any interrupted prior uninstall BEFORE installing. If a leftover <addon>.json.removing marker is resumed AFTER install, it deletes the addon we just installed, leaving sidecar-present/skill-missing. Running it first completes the old removal and frees the name before collision detection.
   run_logged_if_compact _resume_pending_addon_uninstalls || true
 
   _check_addon_collisions
@@ -1061,9 +1050,10 @@ install() {
     print_skill_sync_summary "$skill_target_total" "$support_target_total" "$sync_installed" "$sync_updated" "$sync_skipped" "$sync_mode_label"
   fi
 
-  if [ "$PLATFORM" = "codex" ]; then
-    run_logged_if_compact ensure_codex_bootstrap "${SKILLS_DIR}"
-  fi
+  case "$PLATFORM" in
+    claude) run_logged_if_compact ensure_claude_bootstrap "${SKILLS_DIR}" ;;
+    codex) run_logged_if_compact ensure_codex_bootstrap "${SKILLS_DIR}" ;;
+  esac
   if ! install_compact_output_enabled; then
     info "$(t "[3/5] Runtime config: platform=${PLATFORM}, visibility=${visibility}" "[3/5] Runtime config: platform=${PLATFORM}, visibility=${visibility}")"
 

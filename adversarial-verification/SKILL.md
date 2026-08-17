@@ -8,13 +8,9 @@ compatibility:
 
 # adversarial-verification
 
-adversarial-verification validates claims by making independent agents attack
-the claim, the evidence, and each other's reasoning. It is a cross-cutting
-governance engine, not a domain-specific optional helper.
+adversarial-verification validates claims by making independent agents attack the claim, the evidence, and each other's reasoning. It is a cross-cutting governance engine, not a domain-specific optional helper.
 
-Use it when a claim carries real evidence burden: legal, financial, research,
-grant, patent, investor relations, prior-art, numeric, novelty, consistency, or
-source-grounded statements.
+Use it when a claim carries real evidence burden: legal, financial, research, grant, patent, investor relations, prior-art, numeric, novelty, consistency, or source-grounded statements.
 ## Contents
 
 - [Core Principles](#core-principles)
@@ -36,24 +32,13 @@ source-grounded statements.
 
 ## Core Principles
 
-1. Easy convergence is suspicious. For
-   `verification-complexity-level-2` and above, do not check convergence before
-   round 5.
-2. There is no mediator during normal rounds. Agents attack, respond, and
-   checkpoint against the claim card and evidence. A meta-judge appears only at
-   deadlock.
-3. Concessions must be evidence-bound. The only valid concession shape is:
-   "my evidence X was specifically defeated by opposing evidence Y."
-4. Three agents are the minimum for attack diversity. Two agents collapse too
-   easily into attacker/defender roles.
-5. Mixed agent verdicts default to deadlock/escalation unless the configured
-   consensus rule is satisfied.
-6. This skill is cross-cutting and injected by the governance layer. A domain
-   skill does not choose whether to use it. Any claim that carries a
-   verification grade must pass through this skill, and the choice belongs to
-   the governance layer.
-7. Cost is controlled at the entry gate, not by weakening the adversarial round
-   once a claim is admitted.
+1. Easy convergence is suspicious, so every assigned agent must complete the independent attack cycle before convergence is checked; after that cycle, continue only while a decision-relevant uncertainty remains and another round can produce a relevant state delta. Do not continue only to satisfy a round-count minimum.
+2. There is no mediator during normal rounds. Agents attack, respond, and checkpoint against the claim card and evidence. A meta-judge appears only at deadlock.
+3. Concessions must be evidence-bound. The only valid concession shape is: "my evidence X was specifically defeated by opposing evidence Y."
+4. Three agents are the minimum for attack diversity. Two agents collapse too easily into attacker/defender roles.
+5. Unresolved disagreement fails closed to deadlock/escalation unless the configured consensus rule is satisfied.
+6. This skill is cross-cutting and injected by the governance layer. A domain skill does not choose whether to use it. Any claim that carries a verification grade must pass through this skill, and the choice belongs to the governance layer.
+7. Cost is controlled at the entry gate, not by weakening the adversarial round once a claim is admitted.
 
 ## Position In The System
 
@@ -63,8 +48,7 @@ Caller responsibilities:
 - provide evidence and source locators
 - provide schema or SSOT context when needed
 - decide which claims carry verification burden
-- inject external-tool web-search requirements when Category B or C claims are
-  present
+- inject external-tool web-search requirements when Category B or C claims are present
 
 This skill responsibilities:
 
@@ -81,10 +65,8 @@ This skill responsibilities:
 - `schema-context`: caller-provided schema or SSOT snapshot
 - `verification-complexity`: `level-1-simple | level-2-evidence-required | level-3-high-stakes`
 - `domain-axes`: applicable domain axes
-- `consensus-rule`: optional, `unanimity | majority | weighted`; default is
-  `unanimity`
-- `upstream-note`: optional note about prior search, experiment, or
-  normalization scope
+- `consensus-rule`: optional, `unanimity | majority | weighted`; default is `unanimity`
+- `upstream-note`: optional note about prior search, experiment, or normalization scope
 
 ## Output Shape
 
@@ -103,9 +85,7 @@ Admit a claim if any condition is true:
 - claim has verification metadata marked required or recommended
 - claim includes external documents, legal conditions, or numeric claims
 - claim references information outside caller-approved source context
-- claim asserts guarantees, state-of-the-art status, theory, component
-  compatibility, novelty, prior-art difference, reproducibility, or
-  experimental effect
+- claim asserts guarantees, state-of-the-art status, theory, component compatibility, novelty, prior-art difference, reproducibility, or experimental effect
 
 Reject or bypass adversarial rounds when:
 
@@ -114,12 +94,9 @@ Reject or bypass adversarial rounds when:
 - the claim is only a plan, question, or non-assertive statement
 - caller-internal calculation makes external comparison irrelevant
 
-For `level-1-simple`, perform evidence precheck only. Return `accept` when
-evidence exists, otherwise `reject` or `escalate`.
+For `level-1-simple`, perform evidence precheck only. Return `accept` when evidence exists, otherwise `reject` or `escalate`.
 
-For the other bypass conditions, a self-identical fixed fact, a plan or
-non-assertive statement, or a caller-internal calculation, return `accept`
-immediately with zero rounds.
+For the other bypass conditions, a self-identical fixed fact, a plan or non-assertive statement, or a caller-internal calculation, return `accept` immediately with zero rounds.
 
 ## Step 1: Normalize Claim Card
 
@@ -142,17 +119,13 @@ Evidence precheck:
 - Empty `evidence-list` means `verdict=reject`.
 - Inaccessible evidence is removed.
 - If all evidence is removed, return `reject`.
-- If `claim-type` is `theoretical`, `composition`, or `prior-art` and
-  `guarantees`, `assumptions`, or `non-guarantees` are missing, return
-  `escalate`.
+- If `claim-type` is `theoretical`, `composition`, or `prior-art` and `guarantees`, `assumptions`, or `non-guarantees` are missing, return `escalate`.
 - If `abstraction-level` is unclear, return `escalate`.
 
 Source-locator requirements:
 
-- Web source: `accessible_url`, finding/value, and
-  `source-locator.source_type=web`.
-- Local or attached source: `file_path` or filename, `page`, `region`, and
-  `locator_note` when needed.
+- Web source: `accessible_url`, finding/value, and `source-locator.source_type=web`.
+- Local or attached source: `file_path` or filename, `page`, `region`, and `locator_note` when needed.
 - `region` enum: `top | middle | bottom | n/a`.
 - Numeric values, tables, figures, and source claims need exact locators.
 
@@ -171,8 +144,7 @@ Source-locator requirements:
 - `agent-C-prior-art`
 - `agent-C-incentive`
 
-Each agent must attack from its axis or explicitly declare "no attack point".
-Silence is not allowed. Agents may attack other agents' verdicts from any axis.
+Each agent must attack from its axis or explicitly declare "no attack point". Silence is not allowed. Agents may attack other agents' verdicts from any axis.
 
 For a research claim, each agent especially checks:
 
@@ -185,83 +157,61 @@ For a research claim, each agent especially checks:
 ## Step 3: Adversarial Rounds
 
 - One round means every agent speaks once against the same round context.
-- Each response contains an attack on the claim or "no attack point", plus
-  optional meta-attack on previous agent claims.
-- The human proponent or caller may add evidence after each round. If no
-  response is available, the initial evidence stays fixed.
-- Rounds 1-4 are mandatory for level 2 and above.
-- From round 5, apply convergence rules.
-- Stop at round 50 and escalate.
-- Every 5 rounds, checkpoint the claim-card and evidence-list against schema
-  and SSOT. The checkpoint does not mediate; it only feeds mismatches back into
-  the next attack round. Switch the verdict to `escalate` only when a serious
-  mismatch appears, such as evidence deleted from the SSOT or a changed schema.
+- Each response contains an attack on the claim or "no attack point", plus optional meta-attack on previous agent claims.
+- The human proponent or caller may add evidence after each round. If no response is available, the initial evidence stays fixed.
+- Run one complete independent attack cycle, then apply the convergence rules immediately.
+- Continue only while a live decision-relevant uncertainty exists and another attack, response, or evidence check can produce a relevant state delta. Do not continue only to satisfy a round-count minimum.
+- Use a finite safety cap of 50 rounds; at the cap, stop and escalate.
+- Checkpoint the claim-card and evidence-list against schema and SSOT when new evidence, a changed schema, or a detected mismatch can affect the verdict or surviving-claim. The checkpoint does not mediate; it only feeds a decision-relevant mismatch into the next attack round. Switch the verdict to `escalate` when evidence was deleted from the SSOT or the schema changed materially.
 
-Common checkpoint each round, before the attacks:
+Decision-relevant checkpoint when triggered, before the attacks:
 
-- Re-collate the claim-card against the evidence-list and confirm no locator,
-  guarantee, or assumption went missing.
-- After a proponent response, check whether the new evidence actually changes
-  the surviving-claim or the required-assumptions. If it does not, treat the
-  round as no new evidence.
-- If the same attack repeats, do not just reword it. Shrink the claim-card or
-  switch to escalation.
+- Re-collate the claim-card against the evidence-list and confirm no locator, guarantee, or assumption went missing.
+- After a proponent response, check whether the new evidence actually changes the surviving-claim or the required-assumptions. If it does not, treat the round as no new evidence.
+- If the same attack repeats, do not just reword it. Shrink the claim-card or switch to escalation.
 
 The full speech constraints live in `references/round-protocol.md`.
 
 ## Step 4: Convergence
 
-- `convergence-accept`: two consecutive rounds where all agents report no new
-  attack point and no meta-attack, and the consensus rule passes.
-- `convergence-reject`: the same attack repeats for two consecutive rounds and
-  the proponent gives no new evidence or only repeats existing evidence.
-- `convergence-judge-deadlock`: round 50 is reached, or agents report no new
-  attack point but verdicts still conflict.
-- `convergence-partial`: new attack points still exist; continue rounds.
+- `convergence-accept`: every assigned agent completed the independent attack cycle, all report no new attack point or eligible meta-attack, the consensus rule passes, and no unresolved decision-relevant uncertainty or relevant state delta remains.
+- `convergence-reject`: a decisive attack remains unanswered, the proponent supplies no decision-relevant new evidence, and the applicable consensus rule supports rejection.
+- `convergence-judge-deadlock`: the finite safety cap is reached, or agents report no new attack point and no relevant state delta while verdicts still conflict.
+- `convergence-partial`: a named decision-relevant uncertainty remains and another round can produce a relevant state delta; continue rounds.
 
-"No attack point" means no semantically novel attack remains, not that an agent
-is unwilling to attack further.
+Unresolved disagreement fails closed to `convergence-judge-deadlock`; never spend no-op rounds hoping a split verdict changes without new evidence or attack material.
+
+"No attack point" means no semantically novel attack remains, not that an agent is unwilling to attack further.
 
 No majority vote is used unless the caller explicitly configured it.
 
 ## Step 4.5: Meta-Judge
 
-The meta-judge appears only at deadlock and has no decision authority. At the
-round cap it must appear, because silently escalating a deadlock without it
-abdicates the verdict duty. It writes a `deadlock-report`:
+The meta-judge appears only at deadlock and has no decision authority. At the round cap it must appear, because silently escalating a deadlock without it abdicates the verdict duty. It writes a `deadlock-report`:
 
 - agreed subclaims
 - unresolved subclaims
 - one-sentence issue summary for each deadlock
 - final supporting evidence by side
 - final attack by side
-- deadlock cause: missing evidence, evidence interpretation, domain expertise,
-  value judgment, or other
+- deadlock cause: missing evidence, evidence interpretation, domain expertise, value judgment, or other
 - information or human judgment needed
 
-Allowed meta-judge wording: "Issue X is deadlocked. Support uses evidence Y.
-Opposition attacks with Z. Cause is W. Human decision required."
+Allowed meta-judge wording: "Issue X is deadlocked. Support uses evidence Y. Opposition attacks with Z. Cause is W. Human decision required."
 
-After the deadlock-report, the verdict becomes `escalate-human`. The caller
-relays the report to a human and records the final accept or reject. This skill
-does not collect the human decision; the human interface is the caller's
-responsibility.
+After the deadlock-report, the verdict becomes `escalate-human`. The caller relays the report to a human and records the final accept or reject. This skill does not collect the human decision; the human interface is the caller's responsibility.
 
 ## Step 5: Return Result
 
-For `accept`, return the surviving claim, required assumptions, guarantee
-boundary, and rounds log.
+For `accept`, return the surviving claim, required assumptions, guarantee boundary, and rounds log.
 
 For `reject`, return retracted claims and rejection reasons.
 
-For `escalate`, return structured escalation issues and required missing fields
-or decisions.
+For `escalate`, return structured escalation issues and required missing fields or decisions.
 
 ## External Tool Claim Web Search
 
-For Category B or C claims about external tools, libraries, CLIs, SDKs,
-frameworks, versions, or platform behavior, inject this requirement into every
-adversarial agent prompt:
+For Category B or C claims about external tools, libraries, CLIs, SDKs, frameworks, versions, or platform behavior, inject this requirement into every adversarial agent prompt:
 
 ```text
 Identify Category B/C external-tool claims. For each, run at least three
@@ -274,9 +224,7 @@ Without this injection, the adversarial result is not trusted for those claims.
 
 ## Evaluator Artifact Contract
 
-For `verification-complexity-level-3` and higher, external governance logic
-absorption, or RAG/evaluator-based candidate promotion, apply
-`docs/policies/evaluator-artifact-contract.md`.
+For `verification-complexity-level-3` and higher, external governance logic absorption, or RAG/evaluator-based candidate promotion, apply `docs/policies/evaluator-artifact-contract.md`.
 
 Required artifact set:
 
@@ -286,9 +234,7 @@ Required artifact set:
 - `candidate-playbook.md`
 - `verifier-result.json`
 
-Read-only evaluator passes do not modify installed assets. Do not promote a
-candidate without an accepted verifier result. At least one rejected candidate
-must exist to prove the verifier can say no.
+Read-only evaluator passes do not modify installed assets. Do not promote a candidate without an accepted verifier result. At least one rejected candidate must exist to prove the verifier can say no.
 
 ## References
 
@@ -300,9 +246,8 @@ must exist to prove the verifier can say no.
 
 - Do not skip Step 0; otherwise cost explodes.
 - `verification-complexity-level-1` never enters adversarial rounds.
-- Do not use fewer than 5 rounds for level 2 or higher convergence checks.
+- Do not continue only to satisfy a round-count minimum; stop or escalate as soon as the decision-relevant convergence gate resolves.
 - Do not assign two agents to the same axis.
 - Agent agreement is not truth if speech constraints were ignored.
-- Separate `guarantees` and `non-guarantees` or the round becomes wording
-  debate.
+- Separate `guarantees` and `non-guarantees` or the round becomes wording debate.
 - Do not mix theory, experiment, and system guarantees in one claim.

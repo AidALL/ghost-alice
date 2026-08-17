@@ -17,6 +17,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
@@ -38,7 +40,7 @@ def _python_311() -> bool:
 
 class CodexCopyModeMarkerTest(unittest.TestCase):
     def test_copy_mode_addon_marker_is_addon_attributed(self):
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
         if not _python_311():

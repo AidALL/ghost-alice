@@ -1,9 +1,6 @@
 # `_shared/secrets` - shared secrets loader
 
-Ghost-ALICE scripts and skills use this helper as the single entry point for
-credentials such as API keys, tokens, passwords, and account emails. Register a
-value once, then retrieve it through the helper instead of hard-coding it in
-project files.
+Ghost-ALICE scripts and skills use this helper as the single entry point for credentials such as API keys, tokens, passwords, and account emails. Register a value once, then retrieve it through the helper instead of hard-coding it in project files.
 ## Contents
 
 - [Storage](#storage)
@@ -104,13 +101,11 @@ Common key examples:
 | `EXAMPLE_SERVICE_TOKEN` | Placeholder for a third-party service token | Service account settings |
 | `EXAMPLE_ACCOUNT_EMAIL` | Placeholder for a service account email | Service account settings |
 
-Add project-specific keys in private deployment documentation, not in the public
-core docs.
+Add project-specific keys in private deployment documentation, not in the public core docs.
 
 ## Cautions
 
 - `secrets.env` is plaintext. Keep it only on a trusted personal or organization-managed machine. Do not put it on a shared server.
 - Never commit it to git. The helper does not block this automatically, so take care yourself.
 - The helper keeps permissions at 600 even after saving, but right after editing manually, run `chmod 600 ~/.ghost-alice/secrets.env` once.
-- OS Keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) is
-  not supported at present. This is a decision to lower the barrier to entry for non-coding users. It will be implemented separately if it becomes necessary.
+- OS Keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) is not supported at present. This is a decision to lower the barrier to entry for non-coding users. It will be implemented separately if it becomes necessary.

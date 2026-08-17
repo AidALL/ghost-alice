@@ -49,7 +49,8 @@
       "manifest_path": "~/.ghost-alice/pending-merges/<platform>/manifest.json",
       "platforms": ["claude", "codex"],
       "on_missing_or_empty": "silent-pass",
-      "priority": "before-task-router"
+      "priority": "before-task-router-when-known",
+    "manual_fallback_priority": "before-actionable-work-except-no-work-terminal-routes"
     }
   ],
   "domain_routes": {
@@ -69,5 +70,44 @@
   ],
   "on_task_definition": [
     "necessity-gate"
-  ]
+  ],
+  "routing_surface": {
+    "response_mode": [
+      "normal",
+      "clarification-only",
+      "direct-response"
+    ],
+    "response_order": [
+      "causal-answer-first-after-necessary-evidence",
+      "imperative-result-first-after-necessary-work",
+      "clarification-question-only",
+      "resolved-intent-first"
+    ],
+    "next_required": [
+      "boundary-contract",
+      "skill",
+      "none",
+      "user-input"
+    ]
+  },
+  "terminal_routes": {
+    "clarification-only": {
+      "owner": "task-router",
+      "manual_pending_merge": "defer-until-next-actionable-turn",
+      "downstream_work": "none",
+      "user_surface": "minimum-decisive-information-only",
+      "strict_logging": "active"
+    },
+    "direct-response": {
+      "owner": "task-router",
+      "manual_pending_merge": "defer-until-next-actionable-turn",
+      "downstream_work": "none",
+      "user_surface": "resolved-content-only",
+      "strict_logging": "active",
+      "ambient_context": "not-user-referent-or-inspection-authority",
+      "premise_handling": "explain-before-current-state-validation",
+      "evidence_planning": "after-route-classification",
+      "local_diagnosis_authority": "explicit-request-or-established-referent"
+    }
+  }
 }

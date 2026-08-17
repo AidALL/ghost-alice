@@ -20,7 +20,12 @@ def valid_records() -> list[dict[str, object]]:
         {
             "id": "claude",
             "state": "native",
-            "supported_assets": ["CLAUDE.md", "skills", "settings.json hooks"],
+            "supported_assets": [
+                "repo-local CLAUDE.md -> @AGENTS.md",
+                "installed-global CLAUDE_CONFIG_DIR/CLAUDE.md managed bootstrap",
+                "skills",
+                "settings.json hooks",
+            ],
             "unsupported_surfaces": [],
             "install_or_onramp": "bash install.sh --platform claude",
             "verification_commands": ["python3 scripts/validate_entrypoints.py --json"],
@@ -86,6 +91,18 @@ class PlatformAdapterValidatorTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("codex", result.stdout + result.stderr)
         self.assertIn("native", result.stdout + result.stderr)
+
+    def test_claude_must_distinguish_repo_local_import_from_installed_global_bootstrap(self) -> None:
+        records = valid_records()
+        records[0]["supported_assets"] = [
+            "repo-local CLAUDE.md -> @AGENTS.md",
+            "skills",
+            "settings.json hooks",
+        ]
+        result = self.run_validator(self.write_fixture(records))
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("installed-global", result.stdout + result.stderr)
 
     def test_codex_must_distinguish_event_config_from_runtime_firing(self) -> None:
         records = valid_records()

@@ -16,6 +16,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 
@@ -34,7 +36,7 @@ def _python_311() -> bool:
 
 class PlatformScopedSidecarTest(unittest.TestCase):
     def test_same_addon_two_platforms_keeps_both_sidecars(self):
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
         if not _python_311():
@@ -68,8 +70,8 @@ class PlatformScopedSidecarTest(unittest.TestCase):
             self.assertEqual(claude_rec["platform"], "claude")
             self.assertEqual(codex_rec["platform"], "codex")
             # Each record points at its own platform's installed target.
-            self.assertIn(".claude/skills/noop", claude_rec["provided"][0]["target"])
-            self.assertIn(".agents/skills/noop", codex_rec["provided"][0]["target"])
+            self.assertEqual(Path(claude_rec["provided"][0]["target"]), Path(home) / ".claude" / "skills" / "noop")
+            self.assertEqual(Path(codex_rec["provided"][0]["target"]), Path(home) / ".agents" / "skills" / "noop")
             # Both platform skills are actually present on disk.
             self.assertTrue(os.path.lexists(Path(home) / ".claude" / "skills" / "noop"))
             self.assertTrue(os.path.lexists(Path(home) / ".agents" / "skills" / "noop"))

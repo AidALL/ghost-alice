@@ -179,11 +179,7 @@ def _forced_reason(
     ):
         return "forced-action-denial"
 
-    # A degraded intent-audit surface (ledger broken at import, or a real write
-    # failure) must not depend on the profile default to reach the user: the
-    # turn's input digest was lost from the audit trail. The intentionally
-    # ABSENT ledger baseline is not forced (documented degrade, install-level
-    # visibility handled by the doctor).
+    # A degraded intent-audit surface (ledger broken at import, or a real write failure) must not depend on the profile default to reach the user: the turn's input digest was lost from the audit trail. The intentionally ABSENT ledger baseline is not forced (documented degrade, install-level visibility handled by the doctor).
     if _text_contains_any(
         text,
         ("ledger module present but failed to load", "ledger write failed"),

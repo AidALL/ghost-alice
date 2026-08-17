@@ -13,6 +13,8 @@ import sys
 import unittest
 from pathlib import Path
 
+from _shared.test_addon_installer import _find_test_bash
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 
@@ -31,7 +33,7 @@ def _python_311() -> bool:
 
 class ShellUninstallAddonTest(unittest.TestCase):
     def test_install_then_uninstall_addon(self):
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
         if not _python_311():
@@ -62,7 +64,7 @@ class ShellUninstallAddonTest(unittest.TestCase):
             self.assertFalse(sidecar.exists(), msg=uninstall.stderr + uninstall.stdout)
 
     def test_bare_addon_id_uninstalls_addon(self):
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
         if not _python_311():
@@ -93,7 +95,7 @@ class ShellUninstallAddonTest(unittest.TestCase):
             self.assertFalse(sidecar.exists(), msg=uninstall.stderr + uninstall.stdout)
 
     def test_bare_addon_id_resumes_pending_marker(self):
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
         if not _python_311():
@@ -125,7 +127,7 @@ class ShellUninstallAddonTest(unittest.TestCase):
             self.assertFalse(marker.exists(), msg=uninstall.stderr + uninstall.stdout)
 
     def test_bare_addon_id_mixed_with_core_skill_removes_both(self):
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
         if not _python_311():
@@ -157,7 +159,7 @@ class ShellUninstallAddonTest(unittest.TestCase):
                              msg=uninstall.stderr + uninstall.stdout)
 
     def test_addon_flag_without_value_errors_not_full_uninstall(self):
-        bash = shutil.which("bash")
+        bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
         if not _python_311():

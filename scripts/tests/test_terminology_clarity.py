@@ -15,6 +15,7 @@ BASE_SCAN_PATHS = [
     "docs",
     "jailbreak-detector",
     "merge-companion",
+    "platforms/claude/CLAUDE.md",
     "platforms/codex/AGENTS.md",
     "scripts",
     "skill-catalog",

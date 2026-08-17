@@ -173,8 +173,7 @@ def _validate_record(record: Any) -> str:
     if missing:
         raise SchemaValidationError(f"record for {addon_id!r} missing fields: {missing}")
     major, _minor = _parse_schema_version(record.get("schema_version"))
-    # We only ever WRITE the major version we understand. A future-major record
-    # handed to us to write is a bug; reject it fail-closed.
+    # We only ever WRITE the major version we understand. A future-major record handed to us to write is a bug; reject it fail-closed.
     if major != SUPPORTED_MAJOR:
         raise UnsupportedSchemaVersion(
             f"cannot write schema major {major} (supported {SUPPORTED_MAJOR})"

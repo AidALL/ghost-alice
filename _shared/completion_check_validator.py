@@ -26,27 +26,18 @@ _CONTROL_BLOCKS = frozenset(
     {"tool-checkpoint", "gate-state", "task-router", "boundary-contract", "io-trace"}
 )
 
-# Block header `^\[([a-z0-9-]+)\]`, case-insensitive. The position variant
-# tolerates leading whitespace so an indented header is still located, keeping it
-# consistent with extract_control_block (which matches on the stripped line). A
-# mismatch here previously yielded zero positions for an indented header and
-# crashed the position lookup with IndexError.
+# Block header `^\[([a-z0-9-]+)\]`, case-insensitive. The position variant tolerates leading whitespace so an indented header is still located, keeping it consistent with extract_control_block (which matches on the stripped line). A mismatch here previously yielded zero positions for an indented header and crashed the position lookup with IndexError.
 _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
 _BLOCK_HEADER_POSITION_RE = re.compile(r"^[ \t]*\[([a-z0-9-]+)\]", re.I | re.M)
 
-# Split on \r?\n only; splitlines() would also split on other Unicode line
-# boundaries, which we do not want here.
+# Split on \r?\n only; splitlines() would also split on other Unicode line boundaries, which we do not want here.
 _NEWLINE_SPLIT_RE = re.compile(r"\r?\n")
 
-# Explicit claim detection is marker-only ([completion-check]). Mandatory final
-# block mode also uses a narrow executed-work closure detector so routine
-# explanations do not become completion-check retry loops.
+# Explicit claim detection is marker-only ([completion-check]). Mandatory final block mode also uses a narrow executed-work closure detector so routine explanations do not become completion-check retry loops.
 
 _VERIFICATION_DONE_RE = re.compile(r"-\s*verification-before-completion:\s*done\b")
 _SKILL_CALL_RE = re.compile(r"-\s*skill-call:\s*([^\n]+)")
-# skills-loaded accepts three equivalent serializations (inline CSV, flow-list
-# `[...]`, or a nested bullet list). The header line is matched here; token
-# extraction and nested-list collection happen in extract_skills_loaded().
+# skills-loaded accepts three equivalent serializations (inline CSV, flow-list `[...]`, or a nested bullet list). The header line is matched here; token extraction and nested-list collection happen in extract_skills_loaded().
 _SKILLS_LOADED_HEADER_RE = re.compile(r"^\s*-?\s*skills-loaded\s*:\s*(.*)$", re.I)
 _ZERO_WIDTH_RE = re.compile("[​‌‍‎‏﻿]")
 
@@ -79,14 +70,10 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
     re.compile(r"(?:완료|수정|구현|해결|반영)(?:했|했습니다|했다|함|됐|되었습니다)|(?:끝냈|고쳤)(?:습니다|다)"),
 )
 
-# Spans that are quotation or code, not the model's own assertion. Stripped
-# before executed-work detection so illustrative output, quoted user text, and
-# fenced examples do not trigger a spurious completion-check demand.
+# Spans that are quotation or code, not the model's own assertion. Stripped before executed-work detection so illustrative output, quoted user text, and fenced examples do not trigger a spurious completion-check demand.
 _FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`]*`")
-# Single-quoted spans only count when the quotes sit on word boundaries, so an
-# ordinary contraction apostrophe (won't, don't, y'all) is not mistaken for a
-# quotation delimiter and does not swallow a real claim between two contractions.
+# Single-quoted spans only count when the quotes sit on word boundaries, so an ordinary contraction apostrophe (won't, don't, y'all) is not mistaken for a quotation delimiter and does not swallow a real claim between two contractions.
 _QUOTED_SPAN_RE = re.compile(
     "(?<![A-Za-z0-9])'[^'\n]*'(?![A-Za-z0-9])"
     "|\"[^\"\n]*\""
@@ -94,11 +81,9 @@ _QUOTED_SPAN_RE = re.compile(
     "|“[^”\n]*”"
 )
 
-# Executed-work detection runs per clause. Two lead families are exempt, with
-# different governance scope:
+# Executed-work detection runs per clause. Two lead families are exempt, with different governance scope:
 #   - GOAL / enumeration leads (goal, acceptance criteria, todo, next steps,
-#     plan, ...) introduce a list and govern the WHOLE sentence, so a
-#     comma-separated goal list ("Goal: tests pass, lint is clean") is exempt.
+# plan, ...) introduce a list and govern the WHOLE sentence, so a comma-separated goal list ("Goal: tests pass, lint is clean") is exempt.
 #   - CONDITIONAL leads (if, once, when, ...) govern only their own protasis, so
 #     the asserted main clause after the comma ("If you're curious, I fixed it")
 #     is still checked.
@@ -133,10 +118,7 @@ _NEGATED_CLOSURE_RE = re.compile(
     r"passed|green|clean|succeed|succeeded)\b"
     r"|\bnot\s+there\s+yet\b|\bnot\s+yet\b"
     r"|아직|않았|않은|않고"
-    # Korean negation is post-verbal ("완료되지 않았다" = is NOT complete), so the
-    # closure word survives if only the negation particle is removed. Match the
-    # closure word together with its trailing negation so the whole span is
-    # stripped and the executed-work pattern no longer sees a bare "작업...완료".
+    # Korean negation is post-verbal ("완료되지 않았다" = is NOT complete), so the closure word survives if only the negation particle is removed. Match the closure word together with its trailing negation so the whole span is stripped and the executed-work pattern no longer sees a bare "작업...완료".
     r"|(?:완료|끝냈|끝남|고쳤|해결|반영|통과|성공|깨끗)"
     r"[^\n.!?;,]{0,6}(?:않|안\s|아니|아닙|하지\s*못|되지\s*못|못했|못했다|못했습니다|볼\s*수[^\n.!?;,]{0,8}없)",
     re.I,
@@ -373,8 +355,7 @@ def validate_completion_evidence_map(completion_check):
     for entry in entries:
         if full_form:
             criterion = entry.get("criterion") or ""
-            # An entry may reference one or more acceptance ids (comma/space separated);
-            # every referenced id must be a known acceptance-criteria id.
+            # An entry may reference one or more acceptance ids (comma/space separated); every referenced id must be a known acceptance-criteria id.
             criterion_ids = [token for token in re.split(r"[,\s]+", criterion.strip()) if token]
             if not criterion_ids or any(token not in acceptance_id_set for token in criterion_ids):
                 return "Every claim-evidence-map entry must reference an acceptance-criteria criterion id."
@@ -385,9 +366,7 @@ def validate_completion_evidence_map(completion_check):
             return "Every claim-evidence-map entry must include verdict: pass | fail | unverified."
         if verdict == "unverified":
             return (
-                "A finalized [completion-check] cannot contain an 'unverified' verdict. "
-                "Verify the claim to pass/fail, or report partial state in prose "
-                "without a [completion-check] block."
+                "A finalized [completion-check] cannot contain an 'unverified' verdict. " "Verify the claim to pass/fail, or report partial state in prose " "without a [completion-check] block."
             )
 
     unverified_section = extract_top_level_field_section(completion_check, "unverified")
@@ -395,8 +374,7 @@ def validate_completion_evidence_map(completion_check):
         return "[completion-check] must include an unverified section."
     if not section_is_none(unverified_section):
         return (
-            "A finalized [completion-check] requires the unverified section to be 'none'. "
-            "If items remain unverified, report partial state in prose instead of finalizing."
+            "A finalized [completion-check] requires the unverified section to be 'none'. " "If items remain unverified, report partial state in prose instead of finalizing."
         )
     return None
 
@@ -471,11 +449,7 @@ def extract_skills_loaded(io_trace):
             inline = inline[1:-1]
         if inline.strip():
             return _split_skill_tokens(inline)
-        # Nested form: collect indented bullet lines. Blank-line gaps and
-        # non-bullet prose lines under the header are tolerated (skipped), so the
-        # list is not truncated by a stray blank line or an introductory line.
-        # Collection stops at the next top-level `- field:` entry or a
-        # non-indented line that is neither blank nor a bullet.
+        # Nested form: collect indented bullet lines. Blank-line gaps and non-bullet prose lines under the header are tolerated (skipped), so the list is not truncated by a stray blank line or an introductory line. Collection stops at the next top-level `- field:` entry or a non-indented line that is neither blank nor a bullet.
         tokens = []
         for nxt in lines[index + 1:]:
             if not nxt.strip():
@@ -508,25 +482,21 @@ def validate_completion_text(text, *, require_completion_check=False):
     if not looks_like_completion_claim(text):
         if require_completion_check and requires_completion_check(text):
             return (
-                "Completion or success claims about executed work require a "
-                "[completion-check] block with fresh verification evidence."
+                "Completion or success claims about executed work require a " "[completion-check] block with fresh verification evidence."
             )
         return None
 
     completion_check = extract_control_block(text, "completion-check")
     if not completion_check:
         return (
-            "Completion or success claims about executed work require a "
-            "[completion-check] block with fresh evidence."
+            "Completion or success claims about executed work require a " "[completion-check] block with fresh evidence."
         )
 
     completion_positions = find_control_block_positions(text, "completion-check")
     if not completion_positions:
-        # Header body was extracted but no position was located (e.g. an unusual
-        # header form). Treat as a missing marker rather than crashing.
+        # Header body was extracted but no position was located (e.g. an unusual header form). Treat as a missing marker rather than crashing.
         return (
-            "Completion or success claims about executed work require a "
-            "[completion-check] block with fresh evidence."
+            "Completion or success claims about executed work require a " "[completion-check] block with fresh evidence."
         )
     first_completion = completion_positions[0]
     gate_state_positions = find_control_block_positions(text, "gate-state")
@@ -546,8 +516,7 @@ def validate_completion_text(text, *, require_completion_check=False):
             [
                 "verification-reminder: emitted.",
                 "Run verification-before-completion before claiming completion.",
-                "Do not claim a verification skill-call unless the verification skill "
-                "was actually loaded this turn.",
+                "Do not claim a verification skill-call unless the verification skill " "was actually loaded this turn.",
             ]
         )
 
@@ -558,12 +527,10 @@ def validate_completion_text(text, *, require_completion_check=False):
     skills_loaded = extract_skills_loaded(io_trace)
     if not any(_skill_name(skill) == "verification-before-completion" for skill in skills_loaded):
         return (
-            "The [io-trace] skills-loaded list should include verification-before-completion "
-            "when completion-check claims that skill-call."
+            "The [io-trace] skills-loaded list should include verification-before-completion " "when completion-check claims that skill-call."
         )
 
-    # Validate every completion-check block, not just the first, so a malformed
-    # later block cannot pass by hiding behind a valid earlier one.
+    # Validate every completion-check block, not just the first, so a malformed later block cannot pass by hiding behind a valid earlier one.
     for block in extract_all_control_blocks(text, "completion-check"):
         reason = validate_completion_evidence_map(block)
         if reason:

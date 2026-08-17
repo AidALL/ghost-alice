@@ -57,8 +57,7 @@ codex_prefers_copy_install() {
     return 1
   fi
 
-  # Codex uses ~/.agents/skills as user-editable semantic assets. Copy mode
-  # keeps local edits in the install target so preflight diff can protect them.
+  # Codex uses ~/.agents/skills as user-editable semantic assets. Copy mode keeps local edits in the install target so preflight diff can protect them.
   return 0
 }
 

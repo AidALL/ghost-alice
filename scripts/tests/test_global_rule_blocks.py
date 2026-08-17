@@ -1,4 +1,6 @@
 import importlib.util
+import inspect
+import re
 import sys
 import tempfile
 import unittest
@@ -27,6 +29,86 @@ def _load_global_rule_blocks():
 
 
 class GlobalRuleBlockTest(unittest.TestCase):
+    def test_claude_bootstrap_is_created_when_destination_is_missing(self) -> None:
+        blocks = _load_global_rule_blocks()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source-CLAUDE.md"
+            dest = root / "config" / "CLAUDE.md"
+            source.write_text("# Ghost-ALICE Claude Bootstrap\n\nmanaged v1\n", encoding="utf-8")
+
+            result = blocks.apply_claude_bootstrap(source, dest)
+
+            self.assertEqual(result.status, "updated")
+            body = dest.read_text(encoding="utf-8")
+            self.assertTrue(body.startswith(blocks.CLAUDE_BOOTSTRAP_MARKER))
+            self.assertIn(blocks.CLAUDE_MANAGED_BLOCK_BEGIN, body)
+            self.assertIn("managed v1", body)
+
+    def test_markerless_claude_rules_write_proposed_without_touching_existing(self) -> None:
+        blocks = _load_global_rule_blocks()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source-CLAUDE.md"
+            dest = root / "CLAUDE.md"
+            proposed = root / "CLAUDE.md.ghost-alice-proposed"
+            source.write_text("# Ghost-ALICE Claude Bootstrap\n\nmanaged v2\n", encoding="utf-8")
+            dest.write_text("# user local rules\n\nkeep me\n", encoding="utf-8")
+
+            result = blocks.apply_claude_bootstrap(source, dest, proposed_path=proposed)
+
+            self.assertEqual(result.status, "proposed")
+            self.assertEqual(dest.read_text(encoding="utf-8"), "# user local rules\n\nkeep me\n")
+            proposed_body = proposed.read_text(encoding="utf-8")
+            self.assertIn(blocks.CLAUDE_MANAGED_BLOCK_BEGIN, proposed_body)
+            self.assertIn("managed v2", proposed_body)
+
+    def test_existing_claude_managed_block_is_replaced_and_user_text_is_preserved(self) -> None:
+        blocks = _load_global_rule_blocks()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "source-CLAUDE.md"
+            dest = root / "CLAUDE.md"
+            source.write_text("# Ghost-ALICE Claude Bootstrap\n\nmanaged v2\n", encoding="utf-8")
+            dest.write_text(
+                "# Ghost-ALICE Claude Bootstrap\n"
+                f"{blocks.CLAUDE_MANAGED_BLOCK_BEGIN}\n"
+                "managed v1\n"
+                f"{blocks.CLAUDE_MANAGED_BLOCK_END}\n"
+                "\n# user appendix\nkeep me\n",
+                encoding="utf-8",
+            )
+
+            result = blocks.apply_claude_bootstrap(source, dest)
+
+            self.assertEqual(result.status, "updated")
+            body = dest.read_text(encoding="utf-8")
+            self.assertIn("managed v2", body)
+            self.assertNotIn("managed v1", body)
+            self.assertIn("# user appendix\nkeep me\n", body)
+
+    def test_remove_claude_managed_block_preserves_user_text(self) -> None:
+        blocks = _load_global_rule_blocks()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            dest = root / "CLAUDE.md"
+            dest.write_text(
+                "# Ghost-ALICE Claude Bootstrap\n"
+                f"{blocks.CLAUDE_MANAGED_BLOCK_BEGIN}\n"
+                "managed rules\n"
+                f"{blocks.CLAUDE_MANAGED_BLOCK_END}\n"
+                "\n# user appendix\nkeep me\n",
+                encoding="utf-8",
+            )
+
+            result = blocks.remove_claude_bootstrap(dest)
+
+            self.assertEqual(result.status, "updated")
+            body = dest.read_text(encoding="utf-8")
+            self.assertNotIn(blocks.CLAUDE_MANAGED_BLOCK_BEGIN, body)
+            self.assertNotIn("managed rules", body)
+            self.assertIn("# user appendix\nkeep me\n", body)
+
     def test_markerless_codex_agents_writes_proposed_without_touching_existing(self) -> None:
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -120,13 +202,26 @@ class GlobalRuleBlockTest(unittest.TestCase):
             self.assertNotIn("managed rules", body)
             self.assertIn("# user appendix\nkeep me\n", body)
 
-    def test_codex_hookless_fallback_preserves_concise_tool_checkpoint_surface(self) -> None:
+    def test_codex_source_owns_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
-        body = blocks.CODEX_HOOKLESS_FALLBACK_BLOCK
+        source = (REPO_ROOT / "platforms" / "codex" / "AGENTS.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertFalse(hasattr(blocks, "CODEX_HOOKLESS_FALLBACK_BLOCK"))
+        for renderer in (
+            blocks.render_codex_managed_block,
+            blocks.render_codex_bootstrap,
+            blocks.merge_codex_bootstrap_text,
+            blocks.apply_codex_bootstrap,
+        ):
+            self.assertNotIn("hookless_fallback", inspect.signature(renderer).parameters)
 
-        self.assertIn("hook-enforced", body)
+        body = blocks.render_codex_bootstrap(source)
+
+        self.assertEqual(body.count("## Codex Hookless Fallback"), 1)
+        self.assertNotIn("## Codex Hook Enforcement And Hookless Fallback", body)
+        self.assertEqual(body.count("If hooks are disabled in the Codex session"), 1)
         self.assertIn("`[tool-checkpoint]`", body)
-        self.assertIn("Hook timing enforcement does not weaken the semantic gate", body)
         self.assertIn("rejected-alternatives", body)
         self.assertIn("unverified-premises", body)
         self.assertIn("failure-mode-if-wrong", body)
@@ -134,30 +229,82 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertNotIn("recovery-cost", body)
         self.assertNotIn("recovery-note", body)
         self.assertNotIn("compact `[tool-checkpoint]`", body)
-        self.assertIn("hookless/manual fallback", body)
         self.assertIn("[tool-checkpoint:batch]", body)
         self.assertIn("[tool-checkpoint:continuation]", body)
         self.assertIn("user-input tool batch", body)
         self.assertIn("same session input lineage", body)
-        self.assertIn("connects acceptance criteria to fresh evidence", body)
         self.assertIn("new user input, current-lineage block/deny, mismatch", body)
-        self.assertIn("Do not infer whether an action is safe from tool-call identity or payload content", body)
-        self.assertIn("session-intent-analyzer digest/ledger/current-session pointer", body)
-        self.assertIn("current-lineage block only carried to downstream-gates.json", body)
-        self.assertIn("decision depends only on the current-lineage block gate and the silent allow invariant", body)
+        self.assertIn(
+            "Do not infer whether an action is safe from tool-call identity or payload content",
+            body,
+        )
+        self.assertIn(
+            "decision depends only on the current-lineage block gate and the silent allow invariant",
+            body,
+        )
+
+    def test_claude_source_owns_rules_zero_through_twelve_and_one_hookless_fallback(self) -> None:
+        blocks = _load_global_rule_blocks()
+        ssot = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        source = (REPO_ROOT / "platforms" / "claude" / "CLAUDE.md").read_text(
+            encoding="utf-8"
+        )
+
+        heading_pattern = re.compile(r"(?m)^###\s*(\d+)\.\s*(.+)$")
+        self.assertEqual(
+            {int(number): title.strip() for number, title in heading_pattern.findall(ssot)},
+            {int(number): title.strip() for number, title in heading_pattern.findall(source)},
+        )
+        self.assertTrue(source.startswith(blocks.CLAUDE_BOOTSTRAP_MARKER))
+        self.assertFalse(hasattr(blocks, "CLAUDE_HOOKLESS_FALLBACK_BLOCK"))
+        for renderer in (
+            blocks.render_claude_managed_block,
+            blocks.render_claude_bootstrap,
+            blocks.merge_claude_bootstrap_text,
+            blocks.apply_claude_bootstrap,
+        ):
+            self.assertNotIn("hookless_fallback", inspect.signature(renderer).parameters)
+
+        body = blocks.render_claude_bootstrap(source)
+
+        self.assertEqual(body.count("## Claude Hookless Fallback"), 1)
+        self.assertEqual(body.count("If hooks are disabled in the Claude session"), 1)
+        self.assertIn("`session-intent-analyzer`", body)
+        self.assertIn("`jailbreak-detector`", body)
+        self.assertIn("`task-router`", body)
+        self.assertIn("`[completion-check]`", body)
+        self.assertIn("`[io-trace]`", body)
 
     def test_installers_route_global_rule_files_through_block_helper(self) -> None:
         sh = installer_bash_source()
         self.assertIn("global_rule_blocks.py", sh)
+        self.assertIn("claude-merge", sh)
+        self.assertIn("claude-remove", sh)
+        self.assertIn("ensure_claude_bootstrap", sh)
+        self.assertIn("remove_claude_bootstrap_if_unused", sh)
+        self.assertIn('claude) run_logged_if_compact ensure_claude_bootstrap "${SKILLS_DIR}"', sh)
+        self.assertNotIn("remove_claude_bootstrap || return 1", sh)
         self.assertIn("codex-merge", sh)
         self.assertIn("codex-remove", sh)
         self.assertNotIn('get_codex_bootstrap_content > "$agents_path"', sh)
+        self.assertNotIn("get_codex_bootstrap_content()", sh)
+        self.assertNotIn("--hookless-fallback", sh)
 
         ps1 = installer_ps1_source()
         self.assertIn("global_rule_blocks.py", ps1)
+        self.assertIn('"claude-merge"', ps1)
+        self.assertIn('"claude-remove"', ps1)
+        self.assertIn("function Set-ClaudeBootstrap", ps1)
+        self.assertIn("function Remove-ClaudeBootstrapIfUnused", ps1)
+        self.assertIn("Invoke-LoggedIfCompact { Set-ClaudeBootstrap }", ps1)
+        self.assertIn("Remove-ClaudeBootstrapIfUnused -SkillsRoot $SkillsDir", ps1)
+        self.assertNotIn('$Platform -eq "claude" -and -not (Remove-ClaudeBootstrap)', ps1)
         self.assertIn('"codex-merge"', ps1)
         self.assertIn('"codex-remove"', ps1)
         self.assertNotIn("[System.IO.File]::WriteAllText($agentsPath, $content", ps1)
+        self.assertNotIn("function Get-CodexBootstrapContent", ps1)
+        self.assertNotIn("function Get-CodexHooklessFallbackBlock", ps1)
+        self.assertNotIn("--hookless-fallback", ps1)
 
 
 if __name__ == "__main__":

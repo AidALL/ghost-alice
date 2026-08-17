@@ -8,6 +8,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Use this section for changes that have landed after the latest tagged public release.
 
+## [0.2.2] - 2026-08-17
+
+### Added
+
+- Added a managed Claude global bootstrap with installer, status, refresh, proposal, and uninstall parity so fresh sessions outside a repository receive the same Ghost-ALICE contract as Codex.
+- Added repository-local child-process runtimes plus controller-sealed purpose-hidden blind screening and one-shot Claude/Codex session transports for post-install behavioral evaluation.
+
+### Changed
+
+- Routing and verification now preserve the primary request and causal response order, rank the terminal objective above investigative means, and stop revalidation when no live uncertainty, decision effect, or state change remains.
+- Direct-response routing now classifies before evidence planning, so a general causal premise cannot become a current-workspace diagnosis through first-person wording, ambient repository state, or verification burden.
+- Claude managed skill permissions now include manifest-verified addon targets while preserving user entries, and status surfaces missing managed addon permissions without trusting arbitrary installed directories.
+- Test, installer-smoke, doctor, and live-session scratch state now stays under the owning repository's `.tmp` tree; successful runs clean up and failed runs preserve a reported diagnostic path.
+- Installer progress output now preserves semantic fields without character-count padding or an 80-column special formatter.
+- Long `shared-all` and `scripts-all` release and CI runs now report verbose method-level progress instead of remaining silent until the full serial suite exits.
+- Source prose no longer uses display-width hard wrapping, and the release gate rejects newly introduced width-only Markdown wrapping while preserving structural, syntax, and protocol boundaries.
+- Adversarial verification now stops after a complete independent cycle when decision-relevant uncertainty and state cease changing, while preserving independent attack roles, unanimity, fail-closed disagreement, and the finite safety cap.
+
+### Fixed
+
+- Preserved both empty-object and explicit continue/no-message hook protocol JSON across reduced visibility profiles.
+- Prevented current-result explanations from recursively reopening verification merely because a new user turn arrived.
+- Detected Windows directory junction installs as `junction` instead of `copy`, required live and recorded install modes to agree, rejected base and descendant junction write-through, and repaired dangling junctions through the shared link owners.
+- Treated `SystemExit(None)`, `SystemExit(0)`, and `SystemExit(False)` as successful project-runtime exits so successful command wrappers clean their repository-local scratch directories while failure exits preserve diagnostics.
+- Accepted native Windows absolute paths and filesystem roots in the agent security surface scanner instead of rejecting them through POSIX-only normalization.
+- Preserved configured Claude and Codex homes in fresh blind sessions while keeping evaluator-only rubric and purpose data out of the subject process.
+- Capped fresh Claude and Codex Git ancestor discovery at the run root so repository-local scratch remains visible and recoverable without turning the parent release worktree into subject evidence.
+- Cleared stale PowerShell progress-frame suffixes without restoring fixed-width padding, and moved Claude full-uninstall global-rule removal into the shared machine-readable cleanup report.
+- Restored filesystem discovery for source scans rooted below an ignored parent worktree when the requested root has no Git metadata.
+
+### Removed
+
+- Removed duplicate Codex hookless-fallback renderers and their dead shell/PowerShell bootstrap helpers; the platform bootstrap remains the canonical installed source.
+
 ## [0.2.1] - 2026-07-01
 
 ### Added

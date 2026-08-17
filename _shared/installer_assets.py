@@ -212,8 +212,7 @@ def classify_skill_root(
     asset_id = expected_asset_id or path.name
 
     if path.is_symlink():
-        # Symlink contract: ownership comes from the link target; expected_addon_id
-        # is intentionally not consulted (no marker exists on a symlink).
+        # Symlink contract: ownership comes from the link target; expected_addon_id is intentionally not consulted (no marker exists on a symlink).
         return _classify_repo_link(path, asset_id=asset_id, repo_root=repo_root, link_kind="symlink")
 
     if not path.exists():
@@ -247,8 +246,7 @@ def classify_skill_root(
 
     marker_addon_id = marker.get("addon_id")
     if expected_addon_id is not None and marker_addon_id != expected_addon_id:
-        # Fail closed: a marker whose addon_id is absent (None) or differs cannot
-        # prove the caller's addon owns this copy-mode skill.
+        # Fail closed: a marker whose addon_id is absent (None) or differs cannot prove the caller's addon owns this copy-mode skill.
         reason = "marker-addon-mismatch" if marker_addon_id is not None else "marker-addon-unattributed"
         return AssetClassification(path, KIND_SKILL_ROOT, asset_id, OWNERSHIP_CONFLICT, reason, marker)
 

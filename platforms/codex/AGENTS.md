@@ -35,17 +35,21 @@ The SSOT is the repository root `AGENTS.md`. This file is a summary synchronized
 
 When a user turn begins in a Codex session, apply the execution contract below before any long explanation.
 
-1. Resolve the pending-merge precheck first.
+1. Reuse a hook-provided pending-merge result first; without one, finish the manual fallback before actionable work, except for a no-work terminal route (`clarification-only` or `direct-response`).
 2. Connect the `session-intent-analyzer` intake.
 3. Fix the `jailbreak-detector/downstream-gates` state.
 4. Run `task-router`.
-5. Leave `[gate-state]` in the first commentary.
+5. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
 6. Surface a `[tool-checkpoint]` once for the user-input tool batch. The hook still checks every tool call; repeated calls in the same session input lineage do not repeat the user-facing checkpoint text unless state changes.
 
 `tool-checkpoint` is not user-input intake. It is a tool-stage `PreToolUse` retry checkpoint.
 
 - hook-stage: PreToolUse
 - meaning: tool-call retry checkpoint, not user-input intake
+
+Clarification-only surface contract: use `response-mode: clarification-only` only when an essential referent or decisive input is missing and the current conversation supports neither an answer nor a safe action. Intake and routing still run internally. Ask only for the minimum decisive information. Do not inspect files, repositories, manifests, tools, credentials, or external state to guess the context. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging remains active. Do not use this route when the content already resolves the question, the user requested a lookup or status check, or a bounded answer can be given with an explicit assumption.
+
+Direct-response surface contract: use `response-mode: direct-response` only when the current input and conversation fully support a bounded answer without file changes, external side effects, current-state lookup, tools, or fresh verification. Route classification precedes evidence planning. A causal premise is not an inspection request, and verification burden cannot create a current-state referent. Only an explicit inspection request or an established conversational referent authorizes local diagnosis. Accept an explicit correction or non-goal first, preserve the terminal objective over superseded means, and answer a general explanation or stable low-risk how-to without inspecting the current repository or machine. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence about the active workspace. Do not validate or rebut that premise before explaining. First-person, past-cause, deictic wording, tense, technical-state language, ambient context, and tool availability do not bind the question to the workspace; only an identified workspace, supplied workspace evidence, or an explicit request for exact diagnosis or inspection does. Emit only the resolved content, with at most one decision-relevant caveat; do not emit `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, or `[io-trace]`. Intake, security review, routing, and strict hook logging remain active. Current or version-specific facts, support or regression claims, high-risk advice, lookup, inspection, modification, and verification requests use a normal route.
 
 ## Install Locations
 
@@ -80,7 +84,7 @@ If hooks are disabled in the Codex session, if the session is before hook review
 - Do not infer whether an action is safe from tool-call identity or payload content. The decision depends only on the current-lineage block gate and the silent allow invariant.
 - Gate schemas such as `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, and `[io-trace]` follow the English canonical narrative + English control surface principle.
 - When a final response claims executed work is complete, fixed, successful, or freshly verified, leave a `[completion-check]` block that connects acceptance criteria with fresh evidence.
-- Leave an `[io-trace]` block at the end of the response.
+- Leave an `[io-trace]` block at the end of every normal response; a no-work terminal route emits only its concise clarification or resolved content.
 - If you omit any of these, fill it in immediately and then continue.
 
 ## Session Gate Contract
@@ -95,7 +99,7 @@ The session gate SSOT is the repository `skill-catalog/session-gates.json` and `
 - Before commit or push: `finishing-a-development-branch`
 - Immediately after task-router routes `boundary-contract: required`: `boundary-contract`
 
-Always leave the block below in the first commentary.
+Leave the block below in the first commentary for every normal route; no-work terminal routes emit no control block.
 
 ```text
 [gate-state]
@@ -132,7 +136,11 @@ Leave the block below when the final response claims executed work is complete, 
 
 The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each closure claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
 
-Hard sequence: skill load/call -> fresh verification -> [completion-check]. Before claiming executed work is complete, fixed, successful, or freshly verified, load or call `verification-before-completion` for the current turn, run and read the fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
+
+Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check. Verification output does not create a new obligation to verify the verification.
+
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. Before making that claim, load or call `verification-before-completion` for the current turn, run and read the decision-relevant fresh verification, and only then write `[completion-check]` with `skill-call: verification-before-completion (this turn)`. If any step is missing or out of order, the completion-check is invalid.
 
 The `skill-call:` line is a factual record that the relevant skill workflow was actually performed in the current turn. Because Codex has no visible Skill tool, considering a skill as a routing candidate from the skill description and metadata exposed to the system is not a `skill-call:`. Record it only when the skill's `SKILL.md` was actually read and the procedure was followed.
 
@@ -148,7 +156,7 @@ Points to follow in an environment without a Codex visible Skill surface:
 
 This procedure is a quality-maintenance device that the user confirmed across repeated work. Realigning the goal, constraints, output, and verification criteria on every user input preserves the user intent, the work scope, and the verification quality. If the agent skips it based only on a judgment of "a simple follow-up" or "the procedure is excessive", it can lead to stale routing and insufficient verification.
 
-In every conversation, after the session-intent-analyzer intake and the jailbreak-detector downstream gate, and before downstream work or a tool call, call the `task-router` skill. Check its applicability regardless of domain, including coding, documentation, research, and chores.
+In every conversation, after the session-intent-analyzer intake and the jailbreak-detector downstream gate, and before downstream work or a tool call, call the `task-router` skill. Check its applicability regardless of domain, including coding, documentation, research, and chores. A missing manual pending-merge result may be deferred only through a no-work terminal route; a normal route resolves it before downstream work.
 
 In Codex the skill description and metadata are exposed in the system context, but that alone is not treated as satisfying the required gate. After the session-intent-analyzer intake and the jailbreak-detector downstream gate, read `~/.agents/skills/task-router/SKILL.md` and perform the `task-router` workflow to scan the skill descriptions loaded into the system. task-router is a consumer of the session-intent and jailbreak gate context, and it does not own raw user intent, the ledger, the jailbreak decision, the downstream gate state, or tool permission. Record the output, verification, and lifecycle skill matching results, then start the work. If that turn requires additional gates such as `using-coding-convention`, `systematic-debugging`, `test-driven-development`, `verification-before-completion`, or `finishing-a-development-branch`, you must also read that skill's `SKILL.md`. Record every `SKILL.md` read in the `files-read` of `[io-trace]` with an absolute path. A metadata-only match is not a file read and is not a `skills-loaded` entry. Do not skip this gate.
 
@@ -162,7 +170,7 @@ The hook's digest-only observation is evidence of intake completion. A semantic 
 
 This ledger is the input context for `skill-evolution` and `jailbreak-detector`. Do not store the raw prompt, the full conversation, tool output, system or developer instructions, or raw secrets. Promoting long-term memory without user approval is also prohibited. The deterministic hard-block rule is a narrow regression guard for explicit, high-confidence attack signals, and it is not a proof that every jailbreak is blocked. A gate block derives only from the meaning judgment that the model recorded (`model_security_decision`). Progressive jailbreak resistance across multiple turns depends on the quality of the intent summary, correction, and accumulation in `session-intent-analyzer` and on the quality of the accumulated-constraint comparison in `jailbreak-detector`.
 
-The pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins. After this precheck is clean or surfacing ends through an explicit user defer or skip, the runtime hook graph fixes the session intent ledger state first. User input -> the `session-intent-analyzer` hook records the digest, the session ledger, and the `current-session.json` pointer and allows -> `skill-evolution` and `jailbreak-detector` consume the same session temp files -> `skill-evolution` terminates as a report-only branch -> `jailbreak-detector` records `model_security_decision` in the ledger and carries only a current-lineage block to `downstream-gates.json` -> the task-router reminder hook confirms the session-intent preflight and the absence of a current-lineage block and releases with a silent allow -> `task-router` reads the session-intent ledger and performs only atomic meaning decomposition and the routing decision -> the tool-stage `tool-checkpoint` looks at the current-lineage block gate. If `opened=false` or `decision=block`, it denies. An absent gate or any other state is a silent allow. `tool-checkpoint` does not use tool-call identity, payload content, or audit, log, and correlation metadata as decision input. Audit, log, and correlation metadata stay outside the decision body. `tool-checkpoint` is a `PreToolUse` checkpoint and is not user-input intake.
+Hook pending-merge precheck is a pre-routing/session-start layer. When hook evidence is absent, the manual fallback still completes before actionable downstream work; only a no-work terminal route (`clarification-only` or `direct-response`) may defer it because no work begins. The runtime hook graph fixes the session intent ledger state first. User input -> the `session-intent-analyzer` hook records the digest, the session ledger, and the `current-session.json` pointer and allows -> `skill-evolution` and `jailbreak-detector` consume the same session temp files -> `skill-evolution` terminates as a report-only branch -> `jailbreak-detector` records `model_security_decision` in the ledger and carries only a current-lineage block to `downstream-gates.json` -> the task-router reminder hook confirms the session-intent preflight and the absence of a current-lineage block and releases with a silent allow -> `task-router` reads the session-intent ledger and performs only atomic meaning decomposition and the routing decision -> the tool-stage `tool-checkpoint` looks at the current-lineage block gate. If `opened=false` or `decision=block`, it denies. An absent gate or any other state is a silent allow. `tool-checkpoint` does not use tool-call identity, payload content, or audit, log, and correlation metadata as decision input. Audit, log, and correlation metadata stay outside the decision body. `tool-checkpoint` is a `PreToolUse` checkpoint and is not user-input intake.
 
 ### 1. Mandatory Official Spec Verification After Writing or Modifying a Skill
 
@@ -193,7 +201,7 @@ The response language follows the user's input language. Answer in English for E
 
 In every conversation that begins coding or development work, including writing or modifying a skill, call the `coding-convention/using-coding-convention` entry point first. Call it if there is even a one percent chance it applies. If it does not fit the situation after the call, drop it then. Because Codex loads skills natively, follow the instructions of `using-coding-convention`.
 
-Treat recommendations, option proposals, and status judgments as claims subject to verification. Even for something just confirmed in the same session, pass the gate again on a new turn.
+Treat recommendations, option proposals, and status judgments as claims subject to verification. A new turn reruns routing, but it reuses unchanged evidence and reopens verification only after a relevant state, criterion, error, contradiction, instability, or explicit-request trigger.
 
 ### 6. Write/Edit Code File Gate
 
@@ -220,7 +228,7 @@ The helper handles the lookup priority automatically: env var -> `~/.ghost-alice
 
 ### 9. io-trace Transparency Rule
 
-Output an `[io-trace]` block at the end of every turn's response. This block summarizes all file I/O and external access performed in that turn so the user can audit it immediately.
+Output an `[io-trace]` block at the end of every normal response. A no-work terminal response (`clarification-only` or `direct-response`) emits no control block and permits no downstream file, tool, credential, or external-state access. Strict hook logging remains active for the exception.
 
 ```
 [io-trace]
@@ -264,20 +272,20 @@ The `${CLAUDE_SKILL_DIR}` variable in SKILL.md is a Claude Code only variable. I
 
 ## Pending Skill Merge Self-Check (pending-merge bootstrap self-check layer, surface-first rule)
 
-Immediately after every session start, and before writing the first commentary, do the following.
+At session start, reuse hook precheck evidence before writing a normal first commentary. A manual fallback is required before actionable work, with the narrow no-work terminal-route deferral below.
 
 1. Check whether the current turn or the session-start hook output contains a codex pending-merge precheck result.
 2. If the hook reported an undecided entry, surface merge-companion first and show the status and options to the user.
 3. If the hook issued no pending warning and provided a contract that it performed the current platform precheck, record `merge-companion-precheck: clean (hook-verified)` and do not run an additional shell manifest check.
-4. If there is no hook evidence or the environment is hookless or manual, inspect `~/.ghost-alice/pending-merges/codex/manifest.json` directly.
-5. On direct inspection, if there is an undecided entry, surface merge-companion first. If the user explicitly defers or skips, you can continue with that pending merge left as `decided=false`. If the manifest itself is absent, every entry is `decided=true`, or JSON parsing fails, it passes (omit even a one-line notice).
+4. If there is no hook evidence or the environment is hookless or manual, inspect `~/.ghost-alice/pending-merges/codex/manifest.json` directly before actionable work. If task-router terminates the turn as `clarification-only` or `direct-response`, defer that manual check until the next actionable turn.
+5. On direct inspection, if there is an undecided entry, surface merge-companion first. An explicit user defer or skip can continue with that pending merge left as `decided=false`. If the manifest itself is absent, every entry is `decided=true`, or JSON parsing fails, it passes (omit even a one-line notice).
 6. Skip it only when the user explicitly instructs a "merge-companion self-check exemption".
 
-This is a prose layer that operates in parallel with the SessionStart hook (session-start layer) and the UserPromptSubmit hook payload (user-prompt layer). If the hook already performed the current platform precheck, reuse that result, and if the hook failed or the environment is hookless, check directly. Surfacing first means surfacing first; it does not mean forcing a merge or discard decision.
+This is a prose layer that operates in parallel with the SessionStart hook (session-start layer) and the UserPromptSubmit hook payload (user-prompt layer). Reuse a hook result. Without one, check directly before normal work, but do not probe state merely to answer with the minimum clarification. Surfacing first means surfacing first; it does not mean forcing a merge or discard decision.
 
 ### 10. Mandatory Web Search Before External Tool Claims
 
-Immediately before a factual claim about an external tool, library, CLI, SDK, framework, version, or platform behavior, cross-check community reports with at least three WebSearch queries. Citing official docs alone is treated as an "unverified echo".
+Immediately before a material factual claim about an external tool, library, CLI, SDK, framework, version, or platform behavior, cross-check community reports with at least three WebSearch queries when the claim is current or version-specific, concerns support, removal, regression, or live runtime state, is disputed or high-risk, or the user explicitly requests verification. Citing official docs alone is treated as an "unverified echo" for those claims. Stable, low-risk, non-current general guidance on a `direct-response` route is exempt; give the bounded instruction without claiming fresh runtime verification.
 
 Scope (Category B and C claims):
 - "X works / does not work as Y"

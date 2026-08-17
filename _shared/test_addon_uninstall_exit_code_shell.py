@@ -19,6 +19,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
+sys.path.insert(0, str(REPO_ROOT / "_shared"))
+
+import addon_uninstall  # noqa: E402
+import install_transaction  # noqa: E402
+from _shared.test_addon_installer import _find_test_bash  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -42,12 +47,20 @@ class UninstallExitCodeTest(unittest.TestCase):
 
     def _run(self, env, *args):
         return subprocess.run(
-            [shutil.which("bash"), str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+            [self.bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, check=False)
 
+    def _replace_link(self, link, target):
+        addon_uninstall._symlink_safe_remove(link)
+        try:
+            install_transaction._create_directory_link(Path(target), link)
+        except OSError as exc:
+            self.skipTest(f"directory link capability is required: {exc}")
+
     def setUp(self):
-        if not shutil.which("bash"):
+        self.bash = _find_test_bash()
+        if not self.bash:
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
@@ -62,9 +75,7 @@ class UninstallExitCodeTest(unittest.TestCase):
             self.assertNotEqual(res.returncode, 0, msg="unknown addon must fail: " + res.stderr + res.stdout)
 
     def test_resume_completed_uninstall_is_success_not_false_failure(self):
-        # A prior partial uninstall left a .removing marker; the next uninstall's
-        # resume completes it. The explicit pass then finds nothing, but the addon
-        # IS gone -> must report success (rc 0), not a false failure.
+        # A prior partial uninstall left a .removing marker; the next uninstall's resume completes it. The explicit pass then finds nothing, but the addon IS gone -> must report success (rc 0), not a false failure.
         with tempfile.TemporaryDirectory() as home:
             env = self._env(home)
             install = self._run(env, "--platform", "claude", "--addon-source", str(FIXTURE),
@@ -72,18 +83,19 @@ class UninstallExitCodeTest(unittest.TestCase):
             self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             skill = Path(home) / ".claude" / "skills" / "noop"
             sidecar = Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
-            orig = os.readlink(skill)
+            try:
+                orig = os.readlink(skill)
+            except OSError:
+                self.skipTest("link-mode install is required")
             # drift -> first uninstall yields partial, leaving a .removing marker
             other = Path(home) / "user-noop"
             other.mkdir()
             (other / "SKILL.md").write_text("user", encoding="utf-8")
-            skill.unlink()
-            skill.symlink_to(other)
+            self._replace_link(skill, other)
             self._run(env, "--platform", "claude", "--uninstall", "--addon", "noop")
             self.assertTrue(sidecar.with_name("noop.json.removing").exists())
             # restore the link so the hash matches again, then re-run uninstall
-            skill.unlink()
-            skill.symlink_to(orig)
+            self._replace_link(skill, orig)
             res = self._run(env, "--platform", "claude", "--uninstall", "--addon", "noop")
             self.assertEqual(res.returncode, 0,
                              msg="resume-completed uninstall must be success: " + res.stderr + res.stdout)
@@ -98,13 +110,11 @@ class UninstallExitCodeTest(unittest.TestCase):
             self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             skill = Path(home) / ".claude" / "skills" / "noop"
             self.assertTrue(os.path.lexists(skill))
-            # Drift the installed symlink so its hash no longer matches the sidecar
-            # -> uninstall yields manual-review (partial), which must be nonzero.
+            # Drift the installed symlink so its hash no longer matches the sidecar -> uninstall yields manual-review (partial), which must be nonzero.
             other = Path(home) / "user-noop"
             other.mkdir()
             (other / "SKILL.md").write_text("user", encoding="utf-8")
-            skill.unlink()
-            skill.symlink_to(other)
+            self._replace_link(skill, other)
             res = self._run(env, "--platform", "claude", "--uninstall", "--addon", "noop")
             self.assertNotEqual(res.returncode, 0, msg="partial/manual-review must fail: " + res.stderr + res.stdout)
             # and the drifted target must be preserved (not clobbered).

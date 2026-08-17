@@ -26,12 +26,7 @@ cd %USERPROFILE%\ghost-alice
 .\install.cmd
 ```
 
-공개 install guidance는 OS-native entrypoint와 같은 long flag surface를 사용한다.
-Windows는 `.\install.cmd ...`를 쓰고 macOS, Linux, WSL, Git Bash는
-`bash install.sh ...`를 쓴다.
-`install.cmd`는 Windows native wrapper path, Python 3.11+ installer contract,
-UTF-8 console setup, `-NoProfile -ExecutionPolicy Bypass`를 유지한다.
-PowerShell execution policy block을 처리하지만 사용자 또는 머신 execution policy를 변경하지 않는다.
+공개 install guidance는 OS-native entrypoint와 같은 long flag surface를 사용한다. Windows는 `.\install.cmd ...`를 쓰고 macOS, Linux, WSL, Git Bash는 `bash install.sh ...`를 쓴다. `install.cmd`는 Windows native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, `-NoProfile -ExecutionPolicy Bypass`를 유지한다. PowerShell execution policy block을 처리하지만 사용자 또는 머신 execution policy를 변경하지 않는다.
 
 ## Official Addons
 
@@ -118,8 +113,7 @@ Public surface validation:
 python3 scripts/validate_public_surfaces.py
 ```
 
-Session gate contract validation은 repository contract인
-`skill-catalog/session-gates.json`과 user-facing policy surface를 검사한다.
+Session gate contract validation은 repository contract인 `skill-catalog/session-gates.json`과 user-facing policy surface를 검사한다.
 
 ```bash
 python scripts/check_skill_gate_contract.py
@@ -134,6 +128,4 @@ python3 scripts/run_installer_compat_tests.py --group public-surface-contract
 
 ## License
 
-Ghost-ALICE OS project-owned source code와 documentation은 Apache License,
-Version 2.0으로 license된다. [LICENSE](./LICENSE), [NOTICE](./NOTICE),
-[THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)를 본다.
+Ghost-ALICE OS project-owned source code와 documentation은 Apache License, Version 2.0으로 license된다. [LICENSE](./LICENSE), [NOTICE](./NOTICE), [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)를 본다.

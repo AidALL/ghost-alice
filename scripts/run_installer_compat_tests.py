@@ -4,10 +4,8 @@
 from __future__ import annotations
 
 import argparse
-import os
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -15,6 +13,10 @@ from typing import Sequence
 
 PYTHON_RUNTIME_CONTRACT = "sys.version_info >= (3, 11)"
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from _shared.project_runtime import project_runtime
 
 
 @dataclass(frozen=True)
@@ -29,6 +31,26 @@ def _py(*args: str) -> tuple[str, ...]:
 
 
 TEST_GROUPS: tuple[TestGroup, ...] = (
+    TestGroup(
+        "shared-all",
+        "all shared runtime unit tests",
+        _py("-m", "unittest", "discover", "-v", "-s", "_shared", "-p", "test_*.py"),
+    ),
+    TestGroup(
+        "scripts-all",
+        "all script unit tests",
+        _py("-m", "unittest", "discover", "-v", "-s", "scripts/tests", "-p", "test_*.py"),
+    ),
+    TestGroup(
+        "skill-gate-contract",
+        "session gate contract and entrypoint unit tests",
+        _py(
+            "-m",
+            "unittest",
+            "scripts.tests.test_check_skill_gate_contract",
+            "scripts.tests.test_validate_entrypoints",
+        ),
+    ),
     TestGroup(
         "merge-companion-v2",
         "snapshot v2 and diff collector compatibility",
@@ -130,15 +152,6 @@ def _selected_groups(names: Sequence[str]) -> list[TestGroup]:
     return [by_name[name] for name in names]
 
 
-def _env() -> dict[str, str]:
-    env = os.environ.copy()
-    env.setdefault(
-        "PYTHONPYCACHEPREFIX",
-        str(Path(tempfile.gettempdir()) / "ghost-alice-installer-compat-pycache"),
-    )
-    return env
-
-
 def _list_groups() -> None:
     for group in TEST_GROUPS:
         print(f"{group.name}: {' '.join(group.command)}")
@@ -149,13 +162,18 @@ def run(groups: Sequence[TestGroup]) -> int:
     if runtime_rc:
         return runtime_rc
 
-    env = _env()
-    for group in groups:
-        print(f"== {group.name}: {group.description}", flush=True)
-        result = subprocess.run(group.command, cwd=REPO_ROOT, env=env, check=False)
-        if result.returncode != 0:
-            print(f"FAILED {group.name}: exit {result.returncode}", file=sys.stderr)
-            return result.returncode
+    with project_runtime(REPO_ROOT, "installer-compat-tests") as runtime:
+        for group in groups:
+            print(f"== {group.name}: {group.description}", flush=True)
+            result = runtime.run(
+                group.command,
+                cwd=REPO_ROOT,
+                runner=subprocess.run,
+                check=False,
+            )
+            if result.returncode != 0:
+                print(f"FAILED {group.name}: exit {result.returncode}", file=sys.stderr)
+                return result.returncode
     return 0
 
 

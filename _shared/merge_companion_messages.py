@@ -17,36 +17,25 @@ PendingMessageContext = Literal[
 
 _USER_COPY: Dict[PendingMessageContext, str] = {
     "install_tail": (
-        "During the agent tool update, your local changes were backed up instead of being "
-        "overwritten. The next time you open Claude/Codex, please ask "
-        "'Please review backed-up changes.'"
+        "During the agent tool update, your local changes were backed up instead of being " "overwritten. The next time you open Claude/Codex, please ask " "'Please review backed-up changes.'"
     ),
     "session_start": (
-        "This conversation is a new session. Backed-up personal changes from a previous "
-        "agent tool update may still be unresolved. In this conversation, please ask "
-        "'Please review backed-up changes.' to review what to keep or discard."
+        "This conversation is a new session. Backed-up personal changes from a previous " "agent tool update may still be unresolved. In this conversation, please ask " "'Please review backed-up changes.' to review what to keep or discard."
     ),
     "prompt_submit": (
-        "There may still be unresolved backed-up changes. In the current conversation, "
-        "please ask 'Please review backed-up changes.' to choose keep, discard, or later."
+        "There may still be unresolved backed-up changes. In the current conversation, " "please ask 'Please review backed-up changes.' to choose keep, discard, or later."
     ),
     "git_pre_push": (
-        "There are unresolved backed-up changes. Review them before sending this work to "
-        "the remote repository. The default setting does not block push."
+        "There are unresolved backed-up changes. Review them before sending this work to " "the remote repository. The default setting does not block push."
     ),
     "readme": (
-        "This is the backup folder guide. During the agent tool update, your local changes "
-        "were copied here instead of being overwritten. If an AI chat is already open, "
-        "please ask 'Please review backed-up changes.' Otherwise, open a new chat and ask the same thing."
+        "This is the backup folder guide. During the agent tool update, your local changes " "were copied here instead of being overwritten. If an AI chat is already open, " "please ask 'Please review backed-up changes.' Otherwise, open a new chat and ask the same thing."
     ),
 }
 
 
 _TECH_COPY = (
-    "merge-companion treats entries with decided=false in "
-    "~/.ghost-alice/pending-merges/<platform>/manifest.json as pending. source_path is the "
-    "original file and backup_path is the isolated backup. Missing, empty, or unparsable "
-    "manifests pass silently."
+    "merge-companion treats entries with decided=false in " "~/.ghost-alice/pending-merges/<platform>/manifest.json as pending. source_path is the " "original file and backup_path is the isolated backup. Missing, empty, or unparsable " "manifests pass silently."
 )
 
 

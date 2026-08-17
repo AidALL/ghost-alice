@@ -121,9 +121,7 @@ class SourceHealthGateTest(unittest.TestCase):
         remote = temp_root / "origin.git"
         remote.mkdir()
         _git(remote, "init", "--bare")
-        # Pin the bare remote's default branch to 'main' so clones, pushes, and
-        # origin/main lookups work regardless of the system git init.defaultBranch
-        # (which is 'master' when unset). symbolic-ref is portable across git versions.
+        # Pin the bare remote's default branch to 'main' so clones, pushes, and origin/main lookups work regardless of the system git init.defaultBranch (which is 'master' when unset). symbolic-ref is portable across git versions.
         _git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
 
         repo = temp_root / "work"

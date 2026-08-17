@@ -1,7 +1,6 @@
 # Skill Official Spec Compliance Verification Checklist
 
-This document defines the verification process that must be passed after writing or modifying a skill. There are no exceptions.
-When you create a new skill or modify an existing skill, you must pass this entire checklist before moving on to the testing stage.
+This document defines the verification process that must be passed after writing or modifying a skill. There are no exceptions. When you create a new skill or modify an existing skill, you must pass this entire checklist before moving on to the testing stage.
 
 Basis documents
 - AGENTS.md is the project skill writing and modification contract.

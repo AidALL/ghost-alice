@@ -15,10 +15,7 @@ from typing import Any
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1] / ".tmp" / "session-intent"
 DEFAULT_INTERNAL = (
-    "hook-reminder: task-router waits until session-intent preflight exists and no current-lineage block gate is recorded. "
-    "Absent downstream-gates.json means silent allow unless a current-lineage model block is recorded. "
-    "After release, read the ledger, decompose accepted intent into atomic meaning units, choose focus-layer micro|meso|macro|meta "
-    "plus scope-reopen target on mismatch, then assign output, verification, lifecycle, and boundary skills before downstream work/tool calls."
+    "hook-reminder: task-router waits until session-intent preflight exists and no current-lineage block gate is recorded. " "Absent downstream-gates.json means silent allow unless a current-lineage model block is recorded. " "After release, read the ledger, decompose accepted intent into atomic meaning units, choose focus-layer micro|meso|macro|meta " "plus scope-reopen target on mismatch, then assign output, verification, lifecycle, and boundary skills before downstream work/tool calls."
 )
 
 
@@ -137,15 +134,10 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
     session_id = resolve_session_id(root, platform, payload)
     if session_id == "unknown":
         return (
-            "hook-reminder: task-router withheld until session-intent-analyzer writes current-session.json "
-            "and the current-lineage block check can run. Do not run task-router yet."
+            "hook-reminder: task-router withheld until session-intent-analyzer writes current-session.json " "and the current-lineage block check can run. Do not run task-router yet."
         )
 
-    # Fail-closed on a degraded ledger: when session-intent-analyzer could not
-    # record the latest input (broken import or write failure), the "latest
-    # event" anchor is stale, so releasing routing here would ride a previous
-    # turn's lineage. The marker is cleared by the analyzer hook on the next
-    # successful observation.
+    # Fail-closed on a degraded ledger: when session-intent-analyzer could not record the latest input (broken import or write failure), the "latest event" anchor is stale, so releasing routing here would ride a previous turn's lineage. The marker is cleared by the analyzer hook on the next successful observation.
     degrade_marker = session_dir(root, platform, session_id) / "ledger-degraded.json"
     if degrade_marker.exists():
         reason = "degraded"
@@ -158,8 +150,7 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
         return (
             "hook-reminder: task-router withheld: the session-intent ledger is degraded "
             f"({reason}) and the latest input was NOT recorded, so current-lineage checks "
-            "would ride a stale anchor. Fail closed: repair the session-intent ledger "
-            "(fix the broken dependency or reinstall the skill) before routing."
+            "would ride a stale anchor. Fail closed: repair the session-intent ledger " "(fix the broken dependency or reinstall the skill) before routing."
         )
 
     gate = gate_state(root, platform, session_id)
