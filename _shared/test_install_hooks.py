@@ -5749,6 +5749,29 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self.assertNotIn("decision", payload)
         self.assertNotIn("systemMessage", payload)
 
+    def test_codex_wrapped_stop_hook_preserves_bare_continue_json_under_minimal_visibility(self):
+        env = os.environ.copy()
+        env["HOME"] = str(self.fake_home)
+        env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
+        command = install_hooks._entry_command(
+            install_hooks._platform_stop_hook_entry("codex", "Stop")
+        )
+
+        result = _run_hook_command(
+            command,
+            input_text=json.dumps({
+                "session_id": "s-codex-wrapped-stop",
+                "hook_event_name": "Stop",
+                "last_assistant_message": "Here is why the hook emitted that message.",
+            }),
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertEqual(result.stdout.lstrip()[:1], "{", msg=result.stdout)
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload, {"continue": True})
+
     def test_codex_stop_hook_blocks_completion_claim_missing_completion_check(self):
         result = _run_hook_command(
             install_hooks.STOP_HOOK_COMMAND_CODEX,

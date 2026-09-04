@@ -786,7 +786,14 @@ def _is_hook_noop_json(stdout: str) -> bool:
         value = json.loads(stdout)
     except (json.JSONDecodeError, TypeError):
         return False
-    return value == {} or value == {"continue": True, "systemMessage": ""}
+    if value == {}:
+        return True
+    return (
+        isinstance(value, dict)
+        and value.get("continue") is True
+        and set(value).issubset({"continue", "systemMessage"})
+        and value.get("systemMessage", "") == ""
+    )
 
 
 def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> tuple[str, str]:
