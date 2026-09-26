@@ -6,17 +6,27 @@ Dependencies: Python 3.11+ standard library only.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import os
 import pathlib
+import re
+import shlex
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = pathlib.Path(__file__).resolve().with_name("session_intent_analyzer_hook.py")
+RECEIPT_START = "[session-intent-receipt]"
+RECEIPT_END = "[/session-intent-receipt]"
+
+
+def receipt_from(message: str) -> dict:
+    return json.loads(message.split(RECEIPT_START, 1)[1].split(RECEIPT_END, 1)[0])
 
 
 class SessionIntentAnalyzerHookTests(unittest.TestCase):
@@ -30,10 +40,17 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         payload: dict,
         *args: str,
         child_io_encoding: str | None = None,
+        session_env: str | None = None,
+        native_session_env: str | None = None,
     ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["HOME"] = str(self.tmp_home)
         env.pop("GHOST_ALICE_SESSION_ID", None)
+        env.pop("CODEX_THREAD_ID", None)
+        if native_session_env:
+            env["CODEX_THREAD_ID"] = native_session_env
+        if session_env:
+            env["GHOST_ALICE_SESSION_ID"] = session_env
         if child_io_encoding:
             env["PYTHONIOENCODING"] = child_io_encoding
         return subprocess.run(
@@ -56,6 +73,90 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             env=env,
             check=False,
         )
+
+    def test_success_receipt_binds_actual_paths_and_observed_input_without_prompt(self) -> None:
+        prompt = "private receipt test token=not-a-real-secret"
+        result = self.run_hook({"session_id": "s-receipt", "prompt": prompt})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertEqual(set(payload), {"continue", "systemMessage", "hookSpecificOutput"})
+        self.assertEqual(payload["hookSpecificOutput"], {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": payload["systemMessage"],
+        })
+        self.assertIn(RECEIPT_START, payload["systemMessage"])
+        receipt = receipt_from(payload["systemMessage"])
+        state = self.ledger_root / "codex" / "s-receipt" / "intent-state.json"
+        events = state.with_name("intent-events.jsonl")
+        event = json.loads(events.read_text().splitlines()[0])
+        self.assertEqual(receipt, {
+            "schema_version": "session-intent-observation-receipt.v1",
+            "intake_status": "observed",
+            "ledger_root": str(self.ledger_root.resolve()),
+            "platform": "codex",
+            "session_id": "s-receipt",
+            "state_path": str(state.resolve()),
+            "events_path": str(events.resolve()),
+            "input_event_id": event["event_id"],
+        })
+        self.assertNotIn(prompt, result.stdout)
+        self.assertNotIn("not-a-real-secret", result.stdout)
+        self.assertIn("--root", payload["systemMessage"])
+        self.assertIn("--session-id", payload["systemMessage"])
+        self.assertIn("Do not create an alternate ledger", payload["systemMessage"])
+
+    def test_receipt_native_session_wins_pointer_and_env_and_uses_safe_paths(self) -> None:
+        self.run_hook({"session_id": "old-pointer", "prompt": "prior"})
+        session_id = "../native/" + "x" * 200
+        result = self.run_hook(
+            {"session_id": session_id, "prompt": "current"}, session_env="other-env"
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        message = json.loads(result.stdout)["systemMessage"]
+        self.assertIn(RECEIPT_START, message)
+        receipt = receipt_from(message)
+        self.assertEqual(receipt["session_id"], ("native-" + "x" * 200)[:120])
+        state = pathlib.Path(receipt["state_path"])
+        self.assertTrue(state.is_file())
+        self.assertEqual(state.parent.name, receipt["session_id"])
+        self.assertEqual(state.parents[2], self.ledger_root.resolve())
+        self.assertFalse((self.ledger_root / "codex" / "other-env").exists())
+
+    def test_receipt_stays_with_completed_observation_when_other_session_moves_pointer(self) -> None:
+        hook = TestDegradeMarkerPathParity._load("session_intent_analyzer_hook")
+        real_record_turn = hook.record_turn
+
+        def record_then_interleave(**kwargs):
+            paths = real_record_turn(**kwargs)
+            real_record_turn(
+                root=self.ledger_root, platform="codex", session_id="concurrent-session",
+                raw_user_input="unrelated input", intent_delta=None, source="hook",
+            )
+            return paths
+
+        output = io.StringIO()
+        with patch.object(hook, "read_payload", return_value={"session_id": "native-session", "prompt": "current"}), \
+                patch.object(hook, "record_turn", side_effect=record_then_interleave), \
+                patch.object(hook.sys, "stdout", output):
+            result = hook.main(["--root", str(self.ledger_root), "--format", "json"])
+        self.assertEqual(result, 0)
+        message = json.loads(output.getvalue())["systemMessage"]
+        self.assertIn(RECEIPT_START, message)
+        receipt = receipt_from(message)
+        pointer = json.loads((self.ledger_root / "codex" / "current-session.json").read_text())
+        self.assertEqual(pointer["session_id"], "concurrent-session")
+        self.assertEqual(receipt["session_id"], "native-session")
+        event = json.loads(pathlib.Path(receipt["events_path"]).read_text().splitlines()[0])
+        self.assertEqual(receipt["input_event_id"], event["event_id"])
+
+    def test_write_failure_emits_no_observed_receipt(self) -> None:
+        self.ledger_root.parent.mkdir(parents=True)
+        self.ledger_root.write_text("not a directory")
+        result = self.run_hook({"session_id": "s-failure", "prompt": "current"})
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        message = json.loads(result.stdout)["systemMessage"]
+        self.assertIn("Ledger write failed", message)
+        self.assertNotIn(RECEIPT_START, message)
 
     def test_hook_decodes_utf8_stdin_before_hashing_korean_prompt(self) -> None:
         prompt = "상태 확인"
@@ -122,6 +223,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(payload["continue"], True)
 
         session_dir = self.ledger_root / "codex" / "s-empty-payload"
+        self.assertNotIn(RECEIPT_START, payload["systemMessage"])
         self.assertFalse((session_dir / "intent-events.jsonl").exists())
         self.assertFalse((session_dir / "intent-state.json").exists())
         self.assertFalse((self.ledger_root / "codex" / "current-session.json").exists())
@@ -188,6 +290,66 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertNotIn("secret-token", events_text)
         self.assertNotIn("ignore previous", events_text)
 
+    def test_native_session_observation_and_receipt_writer_ignore_foreign_pointer(self) -> None:
+        seeded = self.run_hook({"session_id": "foreign", "prompt": "foreign input"})
+        self.assertEqual(seeded.returncode, 0, seeded.stderr)
+        foreign_events = self.ledger_root / "codex/foreign/intent-events.jsonl"
+        before = foreign_events.read_bytes()
+        result = self.run_hook({"prompt": "native input"},
+                               native_session_env="native", session_env="stale-override")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = receipt_from(json.loads(result.stdout)["systemMessage"])
+        self.assertEqual(receipt["session_id"], "native")
+        self.assertEqual(foreign_events.read_bytes(), before)
+        env = dict(os.environ, CODEX_THREAD_ID="native", GHOST_ALICE_SESSION_ID="stale-override")
+        ledger = SCRIPT.parents[1] / "session-intent-analyzer/scripts/session_intent_ledger.py"
+        written = subprocess.run([
+            sys.executable, str(ledger), "--root", receipt["ledger_root"],
+            "--platform", receipt["platform"], "--session-id", receipt["session_id"],
+            "--delta-json", '{"current_goal":"native goal"}',
+        ], env=env, capture_output=True, text=True, check=False)
+        self.assertEqual(written.returncode, 0, written.stderr)
+        state = json.loads(pathlib.Path(receipt["state_path"]).read_text())
+        self.assertEqual(state["current_goal"], "native goal")
+        events = [json.loads(line) for line in pathlib.Path(receipt["events_path"]).read_text().splitlines()]
+        observed_events = [row for row in events if row["event"] == "user-input-observed"]
+        self.assertEqual(observed_events[-1]["event_id"], receipt["input_event_id"])
+
+    def test_payload_identity_precedes_native_thread_for_hook_observation(self) -> None:
+        result = self.run_hook({"session_id": "payload", "prompt": "input"},
+                               native_session_env="native", session_env="generic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(receipt_from(json.loads(result.stdout)["systemMessage"])["session_id"], "payload")
+        self.assertFalse((self.ledger_root / "codex/native").exists())
+
+    def test_documented_security_write_uses_receipt_without_host_environment(self) -> None:
+        skill = SCRIPT.parents[1] / "jailbreak-detector/SKILL.md"
+        command = re.search(r"```bash\n(.*?)```", skill.read_text(), re.S).group(1)
+        ledger = SCRIPT.parents[1] / "session-intent-analyzer/scripts/session_intent_ledger.py"
+        for platform in ("codex", "claude"):
+            with self.subTest(platform=platform):
+                observed = self.run_hook({"session_id": "security", "prompt": "current input"},
+                                         "--platform", platform)
+                self.assertEqual(observed.returncode, 0, observed.stderr)
+                receipt = receipt_from(json.loads(observed.stdout)["systemMessage"])
+                rendered = command
+                for key, value in receipt.items():
+                    rendered = rendered.replace("<receipt." + key + ">", str(value))
+                rendered = rendered.replace("<latest event_id>", receipt["input_event_id"])
+                argv = shlex.split(rendered.replace("\\\n", ""))
+                self.assertEqual(pathlib.Path(argv[0]).name, "session_intent_ledger.py")
+                env = os.environ.copy()
+                for name in ("CODEX_THREAD_ID", "GHOST_ALICE_SESSION_ID", "GHOST_ALICE_SESSION_INTENT_ROOT"):
+                    env.pop(name, None)
+                env["HOME"] = str(self.tmp_home)
+                result = subprocess.run([sys.executable, str(ledger), *argv[1:]],
+                                        env=env, cwd=self.tmp_home, capture_output=True, text=True, check=False)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                state = json.loads(pathlib.Path(receipt["state_path"]).read_text())
+                decision = state["model_security_decision"]
+                self.assertEqual(decision["decision"], "block")
+                self.assertEqual(decision["input_event_id"], receipt["input_event_id"])
+
     def test_hook_uses_current_session_pointer_when_payload_lacks_session_id(self) -> None:
         first = self.run_hook({
             "sessionId": "s-existing",
@@ -250,6 +412,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("dependency unavailable", message)
         self.assertNotIn("present but failed", message)
+        self.assertNotIn(RECEIPT_START, message)
 
     def test_present_but_broken_ledger_degrades_as_broken(self) -> None:
         self._put_ledger("raise RuntimeError('boom at import')\n")
@@ -258,6 +421,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("present but failed to load", message)
         self.assertNotIn("dependency unavailable", message)
+        self.assertNotIn(RECEIPT_START, message)
 
     def _marker(self) -> pathlib.Path:
         return self.root / "codex" / "s-degrade" / "ledger-degraded.json"

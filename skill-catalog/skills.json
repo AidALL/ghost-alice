@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-08-17T07:21:39Z",
+  "generated_at": "2026-09-26T15:20:55Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -105,7 +105,7 @@
     {
       "name": "finishing-a-development-branch",
       "path": "coding-convention/finishing-a-development-branch/SKILL.md",
-      "description": "Use when implementation is complete, tests have passed, and the integration path must be chosen. Presents and executes structured options for finishing a development branch.",
+      "description": "Use when implementation is ready for integration, when the user asks to merge or publish a pull request, or when the branch finishing path remains undecided.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [
@@ -115,6 +115,10 @@
         {
           "type": "soft",
           "target": "using-git-worktrees"
+        },
+        {
+          "type": "soft",
+          "target": "requesting-code-review"
         }
       ]
     },
@@ -161,7 +165,7 @@
     {
       "name": "requesting-code-review",
       "path": "coding-convention/requesting-code-review/SKILL.md",
-      "description": "Use after completing work, implementing major functionality, or before merge. Dispatches a code-reviewer subagent to verify the work against requirements. Review early and often.",
+      "description": "Use after completing major functionality, before merging, or when a pull request has new commits, automated findings, or unresolved review threads.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [

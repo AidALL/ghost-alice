@@ -57,7 +57,7 @@ POSIX_HOOK_PYTHON_LAUNCHER = (
     'for py in "${GHOST_ALICE_PYTHON:-}" python3 python '
     "/opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3 /bin/python3 "
     "/opt/homebrew/bin/python3.[0-9]* /usr/local/bin/python3.[0-9]* "
-    "/usr/bin/python3.[0-9]* /bin/python3.[0-9]*; do "
+    "/usr/bin/python3.[0-9]* /bin/python3.[0-9]* __GHOST_ALICE_INSTALL_PYTHON__; do "
     '[ -n "$py" ] || continue; '
     'if command -v "$py" >/dev/null 2>&1 || [ -x "$py" ]; then '
     f'"$py" -c "{PYTHON_VERSION_CHECK_CODE}" >/dev/null 2>&1 && exec "$py" "$@"; '
@@ -142,10 +142,16 @@ def _hook_python_invocation(*args: str | Path) -> str:
     if os.name == "nt" or sys.platform.startswith("win"):
         python = sys.executable.replace("\\", "/")
         return " ".join([_quote_static_arg(python), *quoted_args])
+    # Installation already requires this interpreter to be Python 3.11+.
+    # Keep runtime discovery first so a removed/versioned install runtime is
+    # not a permanent pin, but retain it for GUI hosts with a narrower PATH.
+    launcher = POSIX_HOOK_PYTHON_LAUNCHER.replace(
+        "__GHOST_ALICE_INSTALL_PYTHON__", _quote_posix_arg(sys.executable)
+    )
     return " ".join([
         "/bin/sh",
         "-c",
-        _quote_posix_arg(POSIX_HOOK_PYTHON_LAUNCHER),
+        _quote_posix_arg(launcher),
         "ghost-alice-python",
         *quoted_args,
     ])
@@ -348,7 +354,9 @@ SESSION_INTENT_INTERNAL = (
     "Use the ledger as context for skill-evolution and jailbreak-detector. "
     "skill-evolution is a report-only branch that terminates. jailbreak-detector records model_security_decision in the ledger; only current-lineage block decisions are carried to downstream-gates.json, and absent current block means silent allow. "
     "Capture trigger: when this input corrects the agent's prior behavior or understanding, record a compressed conduct_feedback entry (id, failure_pattern, corrective_rule, source=user-explicit, status=open) with session_intent_ledger.py so skill-evolution and the /evolution backlog surface it. "
-    "Basis for the correction judgment: a mismatch the input asserts between the agent's prior action/claim and the ledger's accumulated goal, constraints, non_goals, decisions, and acceptance_criteria. This is the same input-vs-accumulated comparison jailbreak-detector applies for security, not keyword matching; typical mismatches are under-delivery, wrong scope, a wrong assumption, a rejected output, or an arbitrary choice. Do not skip this; model discretion alone has proven unreliable."
+    "Basis for the correction judgment: a mismatch the input asserts between the agent's prior action/claim and the applicable goal, constraints, non_goals, decisions, and acceptance_criteria, not keyword matching. A direct assertion or clear contextual rejection supports user-explicit feedback even without a raw transcript. "
+    "Evidence boundary: read supplied prior context before attributing a mismatch. New constraints, reminders, changed requirements, or refreshing a formerly valid result do not alone establish prior misconduct; record them as intent fields. Use source=inferred only for an actually observed behavior gap, not a hypothetical future violation or buggy task code. If no mismatch is supported, leave feedback absent. Increment occurrence_count only for another supported correction, not a repeated boundary or reread lesson."
+    " Boundary provenance: timestamps on decisions do not date undated restrictions. Active status, admitted criteria, and recorded past edits alone do not prove a conflicting restriction was replaced. Resolve a boundary from the current user instruction or supplied conversation/event evidence; a clear current instruction needs no formal revocation phrase or renewed approval. With only conflicting snapshot fields, do not invent earlier/later ordering or authorize a disputed change; identify the conflict and continue uncontested work. Missing files and missing authorization are distinct."
 )
 
 
@@ -1594,7 +1602,12 @@ def _is_ghost_alice_hook_command(command: str) -> bool:
     return any(marker in command for marker in GHOST_ALICE_HOOK_MARKERS)
 
 
-def _codex_trusted_hook_state_entries(settings_file: Path, settings: dict[str, Any]) -> dict[str, str]:
+def _codex_trusted_hook_state_entries(
+    settings_file: Path,
+    settings: dict[str, Any],
+    *,
+    verified_addon_commands: set[tuple[str, str]] | None = None,
+) -> dict[str, str]:
     hooks_obj = settings.get("hooks")
     if not isinstance(hooks_obj, dict):
         return {}
@@ -1613,7 +1626,11 @@ def _codex_trusted_hook_state_entries(settings_file: Path, settings: dict[str, A
                 if not isinstance(hook, dict) or hook.get("type") != "command":
                     continue
                 command = hook.get("command", "")
-                if not isinstance(command, str) or not _is_ghost_alice_hook_command(command):
+                if not isinstance(command, str):
+                    continue
+                if not _is_ghost_alice_hook_command(command) and (
+                    event_name, command
+                ) not in (verified_addon_commands or set()):
                     continue
                 key = _codex_hook_state_key(settings_file, event_name, group_index, handler_index)
                 entries[key] = _codex_command_hook_hash(event_name, group, hook)
@@ -1852,8 +1869,12 @@ def _ensure_codex_hook_trust_state(
     settings_file: Path,
     settings: dict[str, Any],
     dry_run: bool = False,
+    *,
+    verified_addon_commands: set[tuple[str, str]] | None = None,
 ) -> bool:
-    state_entries = _codex_trusted_hook_state_entries(settings_file, settings)
+    state_entries = _codex_trusted_hook_state_entries(
+        settings_file, settings, verified_addon_commands=verified_addon_commands,
+    )
     if not state_entries:
         return False
 
@@ -2413,6 +2434,9 @@ def install_hook(
     elif platform_key in {"claude", "codex"}:
         _log(_t("  io_trace_hook.py not found. Skipping io-trace hook", "  io_trace_hook.py not found. Skipping io-trace hook"))
 
+    # Trust only exact event/command pairs produced by verified addon sources in
+    # this install; marker text in pre-existing user hooks is not authority.
+    verified_addon_commands: set[tuple[str, str]] = set()
     # Tier-2 observational addon hooks (plan Phase 4), wired AFTER the core suite. When addon_sources is empty this loop runs zero times, so a core-only install stays byte-identical (no entry added, `changed` untouched).
     for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
         event_name = _resolve_hook_event(event_intent, platform_key)
@@ -2422,6 +2446,7 @@ def install_hook(
         inner = _hook_python_command(script_path, payload=True)
         entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker)
         command = _entry_command(entry)
+        verified_addon_commands.add((event_name, command))
         if event_name not in hooks_obj:
             hooks_obj[event_name] = []
         ev_list = hooks_obj[event_name]
@@ -2455,6 +2480,7 @@ def install_hook(
         inner = _hook_python_command(spec["script"], payload=True)
         entry = _hook_runner_command_entry(spec["runner_id"], inner, marker)
         command = _entry_command(entry)
+        verified_addon_commands.add((event_name, command))
         if event_name not in hooks_obj:
             hooks_obj[event_name] = []
         ev_list = hooks_obj[event_name]
@@ -2475,7 +2501,10 @@ def install_hook(
             changed = True
         if _ensure_codex_project_trusted(dry_run=dry_run):
             changed = True
-        if _ensure_codex_hook_trust_state(settings_file, settings, dry_run=dry_run):
+        if _ensure_codex_hook_trust_state(
+            settings_file, settings, dry_run=dry_run,
+            verified_addon_commands=verified_addon_commands,
+        ):
             changed = True
 
     if not changed:

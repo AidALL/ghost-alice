@@ -445,6 +445,7 @@
       </a>
       <nav class="nav" aria-label="Primary">
         <a href="#get-started">Get started</a>
+        <a href="#latest-release">0.3.0</a>
         <a href="#official-addons">Addons</a>
         <a href="#routes">Docs</a>
         <a href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a>
@@ -464,7 +465,7 @@
     <section class="hero" id="get-started">
       <div class="wrap hero-grid">
         <div class="hero-copy">
-          <div class="eyebrow">Agent governance layer</div>
+          <div class="eyebrow">Agent governance layer · 0.3.0</div>
           <h1 class="sr-only">Ghost-ALICE OS</h1>
           <div class="hero-logo-lockup">
             <img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS">
@@ -480,19 +481,50 @@
         <div class="hero-visual">
           <div class="quick-panel">
             <div class="panel-head">
-              <span>Quick start</span>
-              <button class="copy-btn" type="button" data-copy="# macOS / Linux / WSL&#10;git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice&#10;cd ~/ghost-alice&#10;bash install.sh --addon autopilot&#10;&#10;# Windows Command Prompt / PowerShell&#10;git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice&#10;cd %USERPROFILE%\ghost-alice&#10;.\install.cmd --addon autopilot">Copy</button>
+              <span>Quick start · Core</span>
+              <button class="copy-btn" type="button" data-copy="# macOS / Linux / WSL&#10;git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice&#10;cd ~/ghost-alice&#10;bash install.sh&#10;&#10;# Windows Command Prompt&#10;git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice&#10;cd %USERPROFILE%\ghost-alice&#10;.\install.cmd">Copy</button>
             </div>
             <pre><code># macOS / Linux / WSL
 git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice
 cd ~/ghost-alice
-bash install.sh --addon autopilot
+bash install.sh
 
-# Windows Command Prompt / PowerShell
+# Windows Command Prompt
 git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice
 cd %USERPROFILE%\ghost-alice
-.\install.cmd --addon autopilot</code></pre>
+.\install.cmd</code></pre>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="latest-release">
+      <div class="wrap">
+        <div class="section-head">
+          <h2>Core + Autopilot 0.3.0</h2>
+          <p class="section-note">A coordinated release for recorded intent and approved continuation. Both projects remain open source under Apache-2.0.</p>
+        </div>
+        <div class="grid">
+          <div class="card">
+            <h3>Keep corrections in context</h3>
+            <p>Intent snapshots preserve active decisions and recorded scope alongside accumulated constraints. A revised goal does not silently discard the remaining boundaries.</p>
+            <a href="./policies/session-gate-matrix.html">Read the intent contract</a>
+          </div>
+          <div class="card">
+            <h3>Bind work to its session</h3>
+            <p>Current-session checks prevent ledger writes and autonomous continuation from borrowing another session's context. Autopilot checks intent before applying pending receipts or plans.</p>
+            <a href="./release/2026-09-26-release-notes.html">Read the 0.3.0 changes</a>
+          </div>
+          <div class="card">
+            <h3>Connect an explicit host</h3>
+            <p>The agent-runtime Stop-adapter contract requires an explicit platform, session ID, and absolute intent root. Your host provides model inference, tool execution, and event dispatch.</p>
+            <a href="https://github.com/AidALL/ghost-alice-autopilot#session-intent-bridge">Read the adapter contract</a>
+          </div>
+        </div>
+        <p class="section-note">Recommended, jointly verified pair: core 0.3.0 and Autopilot 0.3.0. The addon's technical minimum remains core 0.2.2. Model interpretation can still be wrong; review the <a href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">documented support and verification limits</a>.</p>
+        <div class="actions">
+          <a class="btn" href="https://github.com/AidALL/ghost-alice/releases/tag/v0.3.0">Core release</a>
+          <a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases/tag/v0.3.0">Autopilot release</a>
         </div>
       </div>
     </section>
@@ -501,7 +533,7 @@ cd %USERPROFILE%\ghost-alice
       <div class="wrap">
         <div class="section-head">
           <h2>Addons</h2>
-          <p class="section-note">Use official aliases when they fit. Bring your own addon repository for custom, tenant, or local development work with the same installer entrypoint.</p>
+          <p class="section-note">Autopilot is optional: add it to the core install when you need approved autonomous continuation. Custom, tenant, or local development addons use the same installer entrypoint.</p>
         </div>
         <table class="addon-table">
           <thead>
@@ -515,7 +547,7 @@ cd %USERPROFILE%\ghost-alice
           <tbody>
             <tr>
 	              <td>official: autopilot</td>
-	              <td>Continue explicitly approved autonomous runs one work item at a time.</td>
+	              <td>Continue approved work one item at a time, checking current intent and completion evidence before moving on.</td>
 	              <td><code>bash install.sh --addon autopilot</code><br><code>.\install.cmd --addon autopilot</code></td>
 	              <td><a href="https://github.com/AidALL/ghost-alice-autopilot">AidALL/ghost-alice-autopilot</a></td>
 	            </tr>
@@ -549,7 +581,7 @@ cd %USERPROFILE%\ghost-alice
           </div>
           <div class="card">
             <h3>Compatibility</h3>
-            <p>Bash-first installer command surface expectations across Codex and Claude Code.</p>
+            <p>Native installer entrypoints and supported hook surfaces for Codex and Claude Code. Addon runtime coverage is documented separately.</p>
             <a href="./policies/installer-platform-compatibility-matrix.html">Open matrix</a>
           </div>
           <div class="card">
@@ -581,8 +613,8 @@ cd %USERPROFILE%\ghost-alice
           <h3>Gate interaction map</h3>
           <p>This is the inventory layer: core governance checkpoints first, then workflow and domain packs that run on top. Quality floor as root rule means agent authority follows verified state, not forward momentum.</p>
           <div class="gate-flow-grid">
-            <div class="gate-flow-cell"><span>intent delta</span>session-intent-analyzer records the current goal, constraints, and criteria.</div>
-            <div class="gate-flow-cell"><span>derived gate judgments</span>governance consumers compare request state before execution.</div>
+            <div class="gate-flow-cell"><span>intent delta</span>session-intent-analyzer records goals, constraints, criteria, active decisions, and scope.</div>
+            <div class="gate-flow-cell"><span>derived gate judgments</span>governance consumers reconcile user corrections with the current request and preserved boundaries before execution.</div>
             <div class="gate-flow-cell"><span>boundary</span>boundary-contract locks allowed and prohibited surfaces.</div>
             <div class="gate-flow-cell"><span>checkpoint</span>tool-checkpoint guards the execution surface.</div>
             <div class="gate-flow-cell"><span>focus</span>Dynamic focus can move through micro, meso, macro, and meta scopes at the scope reopen point.</div>
@@ -614,7 +646,7 @@ cd %USERPROFILE%\ghost-alice
   </main>
 
   <footer>
-    <div class="wrap">Ghost-ALICE OS. Agent governance operating layer.</div>
+    <div class="wrap">Ghost-ALICE OS 0.3.0. Agent governance operating layer. <a href="https://github.com/AidALL/ghost-alice/blob/main/LICENSE">Apache-2.0</a>.</div>
   </footer>
 
   <script>

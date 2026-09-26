@@ -18,6 +18,7 @@ Dependencies: Python 3.11+ standard library only; node on PATH.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import shutil
 import subprocess
@@ -85,6 +86,49 @@ class DerivationTests(unittest.TestCase):
             check=True,
         )
 
+    def test_native_codex_identity_carries_block_without_payload_sid(self) -> None:
+        for platform, payload, blocked in (("codex", {}, True), ("codex", {"session_id": "foreign"}, False), ("claude", {}, False)):
+            with self.subTest(platform=platform, payload=payload):
+                session_dir = self.tmp / platform / "native"
+                session_dir.mkdir(parents=True, exist_ok=True)
+                (session_dir / "intent-state.json").write_text(json.dumps({
+                    "schema_version": "session-intent-ledger.v1", "platform": platform, "session_id": "native",
+                    "model_security_decision": {"decision": "block", "risk_flags": ["scope-drift"], "input_event_id": "e-native"},
+                }))
+                (session_dir / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-native"}) + "\n")
+                (self.tmp / platform / "current-session.json").write_text(json.dumps({"schema_version": "session-intent-current.v1", "session_id": "foreign"}))
+                gate_path = session_dir / "downstream-gates.json"
+                gate_path.unlink(missing_ok=True)
+                env = dict(os.environ, HOME=str(self.tmp / "home"), CODEX_THREAD_ID="native", GHOST_ALICE_SESSION_ID="foreign")
+                out = subprocess.run(["node", str(HOOK), "--platform", platform, "--event", "PreToolUse",
+                                      "--hook", "tool-checkpoint", "--session-intent-root", str(self.tmp)],
+                                     input=json.dumps({"tool_name": "Bash", **payload}), env=env,
+                                     capture_output=True, text=True, check=False)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertEqual(gate_path.exists(), blocked, out.stdout)
+                response = json.loads(out.stdout)
+                self.assertEqual(response.get("hookSpecificOutput", {}).get("permissionDecision") == "deny", blocked, out.stdout)
+                if blocked:
+                    gate = json.loads(gate_path.read_text())
+                    self.assertEqual(gate["decision"], "block")
+                    self.assertEqual(gate["input_event_id"], "e-native")
+
+    def test_native_reminder_does_not_recommend_foreign_pointer_state(self) -> None:
+        session_dir = self.tmp / "codex/native"
+        session_dir.mkdir(parents=True)
+        (session_dir / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-native"}) + "\n")
+        (self.tmp / "codex/current-session.json").write_text(json.dumps({
+            "schema_version": "session-intent-current.v1", "session_id": "foreign",
+            "state_path": str(self.tmp / "codex/foreign/intent-state.json"),
+        }))
+        out = subprocess.run(["node", str(HOOK), "--platform", "codex", "--hook", "hook-reminder",
+                              "--session-intent-root", str(self.tmp)],
+                             input=json.dumps({}), env=dict(os.environ, CODEX_THREAD_ID="native", GHOST_ALICE_SESSION_ID=""),
+                             capture_output=True, text=True, check=False)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn(str(session_dir / "intent-state.json"), out.stdout)
+        self.assertNotIn(str(self.tmp / "codex/foreign/intent-state.json"), out.stdout)
+
     def test_block_decision_matching_lineage_writes_block_and_denies(self) -> None:
         self.write_state({"decision": "block", "risk_flags": ["credential-reveal"], "input_event_id": "sha256:e1"})
         self.write_event("sha256:e1")
@@ -95,6 +139,37 @@ class DerivationTests(unittest.TestCase):
         self.assertIn("credential-reveal", gate["rules"])
         self.assertIn("permissionDecision", out.stdout)
         self.assertIn("deny", out.stdout)
+
+    def test_current_block_denies_when_gate_persistence_fails(self) -> None:
+        for platform in ("codex", "claude"):
+            with self.subTest(platform=platform):
+                session = self.tmp / platform / "write-failure"
+                session.mkdir(parents=True)
+                (session / "intent-state.json").write_text(json.dumps({
+                    "schema_version": "session-intent-ledger.v1", "platform": platform, "session_id": "write-failure",
+                    "model_security_decision": {"decision": "block", "risk_flags": ["scope-drift"], "input_event_id": "e-current"},
+                }))
+                (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-current"}) + "\n")
+                (session / "downstream-gates.json").mkdir()
+                out = subprocess.run(["node", str(HOOK), "--platform", platform, "--event", "PreToolUse",
+                                      "--hook", "tool-checkpoint", "--session-intent-root", str(self.tmp)],
+                                     input=json.dumps({"session_id": "write-failure", "tool_name": "Bash"}),
+                                     capture_output=True, text=True, check=False)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                response = json.loads(out.stdout)
+                self.assertEqual(response.get("hookSpecificOutput", {}).get("permissionDecision"), "deny", out.stdout)
+                self.assertIn("persistence", response["hookSpecificOutput"]["permissionDecisionReason"])
+                self.assertIn("persistence", out.stderr)
+
+    def test_unwritable_gate_does_not_invent_block_for_absent_or_stale_decision(self) -> None:
+        self.write_event("e-current")
+        self.gate_path().mkdir()
+        for record in (None, {"decision": "allow", "input_event_id": "e-current"}, {"decision": "block", "input_event_id": "e-old"}):
+            with self.subTest(record=record):
+                self.write_state(record)
+                out = self.run_pretool()
+                self.assertNotIn("permissionDecision", out.stdout)
+                self.assertEqual(out.stderr, "")
 
     def test_allow_decision_does_not_write_gate(self) -> None:
         self.write_state({"decision": "allow", "risk_flags": [], "input_event_id": "sha256:e1"})

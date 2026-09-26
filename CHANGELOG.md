@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Use this section for changes that have landed after the latest tagged public release.
 
+## [0.3.0] - 2026-09-26
+
+### Changed
+
+- Aligned the Ghost-ALICE OS and Ghost-ALICE Autopilot public release numbers at `0.3.0`. The Autopilot technical minimum remains core `0.2.2`; using the coordinated `0.3.0` pair provides the current intent and continuation fixes together.
+- Preserved active decision bodies and the latest recorded scope in ledger snapshots and downstream routing/evolution context, while retaining accumulated constraints for reconciliation.
+- Grounded conduct feedback in user-asserted or observed prior mismatches, distinguished new restrictions from corrections, and required evidence before assigning chronology to conflicting intent boundaries.
+- Updated English and Korean public guidance, with professional polite Korean README prose and explicit compatibility limits.
+- Required workflow-derived local preflight before publication and separate current-head CI and GitHub review reconciliation before integration, including inline and earlier relevant findings.
+
+### Fixed
+
+- Bound semantic CLI writes to the native session and completed intake receipt instead of a shared current-session pointer, preventing concurrent sessions from writing into another conversation's ledger.
+- Aligned Codex hook session resolution with its native thread identity and made manual security-decision writes use explicit session coordinates.
+- Preserved a verified current tool block when downstream-gate persistence fails, without changing absent, stale, or allow decisions.
+- Delivered digest-only intake receipts through model context and preserved hook JSON control fields when reducing user-facing messages.
+- Registered only verified installed addon event/command pairs as trusted hooks and retained a validated installation-time Python interpreter as the final runtime fallback.
+
+### Validation
+
+- Exercised installed ledger consumers and separately reviewed scope conflict, current authorization, and correction attribution. Private replay metrics are omitted from public release claims; these checks do not establish general intent-understanding accuracy.
+- The coordinated Autopilot update restores valid `agent-runtime` receipt cases while preserving current-intent checks and one-time receipt consumption. Public regression sources are linked from the release notes.
+- See the [release notes](docs/release/2026-09-26-release-notes.md) for evidence categories and limits. The project license remains Apache-2.0.
+
 ## [0.2.2] - 2026-08-17
 
 ### Added

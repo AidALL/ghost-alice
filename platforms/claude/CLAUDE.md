@@ -129,7 +129,12 @@ After writing or modifying a skill, complete Phase 1 through Phase 5 of `officia
 
 ### 2. Language Tone Rule
 
-Match the user's language. English and other languages use their formal register. Korean proposals, official letters, reports, and similar outputs use plain declarative style; honorific and casual-banmal endings are prohibited.
+The response language follows the user's input language. English and other languages use their formal register. Explicit user instructions about tone take precedence over these defaults.
+
+- Reader-facing Korean project documentation, including README files, installation guides, website copy, and release notes, uses a consistent respectful, polite style.
+- Korean proposals, official letters, government project documents, reports, and skill instructions default to plain declarative style unless the user requests a different register.
+- Casual banmal endings are not the default for either category.
+- English canonical skill instructions and control fields remain in English; this tone policy does not translate protocol tokens.
 
 ### 3. Progressive Disclosure Principle
 

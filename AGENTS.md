@@ -209,13 +209,12 @@ Verification process:
 
 ### 2. Language Tone Rule
 
-The response language follows the user's input language. Answer in English for English input and in Japanese for Japanese input. Apply the tone rule below only when writing Korean outputs, such as proposals, official letters, government project documents, and Korean reports.
+The response language follows the user's input language. English and other languages use their formal register. Explicit user instructions about tone take precedence over these defaults.
 
-Korean outputs unify to the plain declarative style.
-
-- Honorific endings are prohibited.
-- Casual banmal endings are prohibited.
-- English skills, English outputs, and other-language outputs are not subject to this rule and use that language's formal register.
+- Reader-facing Korean project documentation, including README files, installation guides, website copy, and release notes, uses a consistent respectful, polite style.
+- Korean proposals, official letters, government project documents, reports, and skill instructions default to plain declarative style unless the user requests a different register.
+- Casual banmal endings are not the default for either category.
+- English canonical skill instructions and control fields remain in English; this tone policy does not translate protocol tokens.
 
 ### 3. Progressive Disclosure Principle
 

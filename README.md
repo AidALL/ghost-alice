@@ -8,6 +8,18 @@ Ghost-ALICE OS is an agent governance layer for AI work. It keeps intent, bounda
 
 It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It is the operating layer that makes agent work auditable before the agent claims completion.
 
+## Version 0.3.0
+
+[Website](https://aidall.github.io/ghost-alice/) · [Release notes](./docs/release/2026-09-26-release-notes.md) · [Core release](https://github.com/AidALL/ghost-alice/releases/tag/v0.3.0) · [Autopilot release](https://github.com/AidALL/ghost-alice-autopilot/releases/tag/v0.3.0)
+
+Ghost-ALICE core and the official Autopilot addon share the 0.3.0 release version. Use core 0.3.0 with Autopilot 0.3.0 for the recommended, jointly verified pair; the addon's technical minimum remains core 0.2.2. Both projects remain open source under Apache-2.0.
+
+- Intent snapshots preserve active decisions and the recorded scope alongside accumulated constraints, helping consumers interpret user corrections without treating a newer goal as blanket permission.
+- Current-session binding prevents a hook or write from silently selecting another session's ledger. Recorded scope and correction feedback supply context; they do not grant execution authority.
+- Autopilot checks the current intent before applying pending completion receipts or plans. Its explicit `agent-runtime` contract requires a platform, session ID, and absolute intent root; the host still provides model inference, tool execution, and event dispatch.
+
+These changes strengthen the recorded-intent and continuation contract. They do not guarantee correct interpretation by every model; platform support and verification limits remain documented in the [Autopilot compatibility matrix](https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json).
+
 ## Quick Start
 
 macOS, Linux, WSL, or Git Bash:
@@ -18,7 +30,7 @@ cd ~/ghost-alice
 bash install.sh
 ```
 
-Windows Command Prompt or PowerShell:
+Windows Command Prompt:
 
 ```cmd
 git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice

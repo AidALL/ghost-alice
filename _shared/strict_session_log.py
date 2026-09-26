@@ -57,12 +57,16 @@ def log_path(home: Path | None, platform: str, session_id: str) -> Path:
     )
 
 
-def session_id_from_payload(payload: dict[str, Any], env: dict[str, str] | None = None) -> str:
+def session_id_from_payload(
+    payload: dict[str, Any], env: dict[str, str] | None = None, *, platform: str | None = None,
+) -> str:
     source_env = env or {}
     raw = (
         payload.get("session_id")
         or payload.get("sessionId")
         or payload.get("conversation_id")
+        or payload.get("thread_id")
+        or (source_env.get("CODEX_THREAD_ID") if (platform or source_env.get("GHOST_ALICE_PLATFORM")) == "codex" else None)
         or source_env.get("GHOST_ALICE_SESSION_ID")
     )
     return safe_component(str(raw) if raw is not None else None)

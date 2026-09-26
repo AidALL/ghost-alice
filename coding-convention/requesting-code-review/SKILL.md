@@ -1,6 +1,6 @@
 ---
 name: requesting-code-review
-description: Use after completing work, implementing major functionality, or before merge. Dispatches a code-reviewer subagent to verify the work against requirements. Review early and often.
+description: Use after completing major functionality, before merging, or when a pull request has new commits, automated findings, or unresolved review threads.
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -14,6 +14,7 @@ Dispatch the `code-reviewer` subagent to catch issues before they accumulate. Th
 
 - [When to Request a Review](#when-to-request-a-review)
 - [How to Request](#how-to-request)
+- [Remote Pull Request Review Gate](#remote-pull-request-review-gate)
 - [Example](#example)
 - [Workflow Integration](#workflow-integration)
 - [Red Flags](#red-flags)
@@ -54,12 +55,36 @@ Placeholders
 - `{HEAD_SHA}`: the ending commit.
 - `{DESCRIPTION}`: a short summary.
 
+For a change being prepared for push or amend, include the actual workflow/job inventory and local preflight evidence from `finishing-a-development-branch` Step 1: all relevant locally executable CI equivalents, tested tree, runtime versions, and unavoidable runner differences. A focused subset is not the full preflight. A reviewer should identify missing checks, not treat an unexplained local pass as CI parity. Changes after those checks invalidate affected results; repeat them before publishing the replacement, without adding skip flags or weakening CI.
+
 □ 3. Respond to the feedback
 
 - Critical issues: fix immediately
 - Important issues: fix before proceeding
 - Minor issues: note for later
 - If the reviewer is wrong, push back (with evidence)
+
+## Remote Pull Request Review Gate
+
+A local reviewer and passing CI do not establish that remote review is complete. Conversely, a clean review does not establish successful CI. When the work has a pull request, perform this gate before integration, including a direct fast-forward push to the base branch. Use the provider API or its authenticated CLI (`gh` for GitHub); a checks summary alone is insufficient.
+
+1. Read the PR's current head SHA and the configured or requested review sources. Fetch every page of submitted reviews, inline comments, PR conversation summaries, and review threads with their resolution state. Include automation results delivered as comments or reactions, not only formal approvals. Read relevant outstanding findings from earlier PRs in this change's lineage, including merged PRs, when their affected code is still present; do not turn this into an unrelated repository-wide audit.
+2. Bind the review result to the current head. Record each source's reviewed commit, completion state, and findings. Pending, unavailable, stale, or unidentifiable results are not a clean review. An empty comment list is not proof that a requested reviewer finished. If no remote reviewer is configured or requested, record that fact after inspection rather than inventing a new required service.
+3. Reconcile each finding with the current implementation and the user's actual requirements. Reproduce a plausible bug, fix a valid issue, or record evidence for rejecting an incorrect or superseded finding. A bot's priority label is not authority to override user instructions. Unresolved threads require an explicit disposition; a dismissed review, resolved thread, or merged earlier PR does not by itself prove that its underlying issue was fixed.
+4. After a fix, amend, rebase, or squash changes the head, reread the remote state and obtain the required review for that head. Preserve earlier findings until current code and evidence resolve them. Request or retrigger a review through the configured workflow when needed and already authorized; this skill does not independently authorize posting comments or messages. Continue useful authorized fixes while review is pending, and report an unavailable review honestly instead of silently substituting CI or local review.
+5. Immediately before integration, read the head, review state, and applicable remote CI results again. Integrate only the reconciled head, with no unaddressed valid blocking findings, all required reviews complete, and successful applicable remote CI for that exact head. Local equivalents, an older green SHA, pending jobs, or silently skipped required jobs do not satisfy remote CI. If the head moved, return to step 2 and repeat affected local preflight before another push. Follow any explicit user decision to waive or change review requirements, but report the resulting limitation and never label an unperformed review clean.
+
+Record a compact result with the PR URL, head SHA, review sources and completion evidence, finding dispositions with code/test evidence, unresolved items, and integration decision. A provider's successful merge response is not retrospective evidence that this gate ran.
+
+| Temptation | Required response |
+| --- | --- |
+| CI passed and the local reviewer approved | Read remote reviews, comments, and unresolved threads before merging. |
+| Focused tests passed; the remote runner can find the rest | Inventory the actual workflows and run every relevant local equivalent before push; record only unavoidable runner gaps. |
+| Remote review is clean, so pending CI is enough | Wait for successful applicable CI on the exact head; review and CI prove different things. |
+| The old PR is merged, or the comment is outdated | Check whether the finding still applies to current code; carry it forward until reconciled. |
+| The bot was quiet after the amend | Confirm completion for the new head; silence or a review of the old SHA is insufficient. |
+| The bot demands behavior contrary to the user | Evaluate and reject it with evidence; do not implement it blindly. |
+| The user already said to merge | Finish the required checks and merge without asking them to select the workflow again. |
 
 ## Example
 

@@ -112,6 +112,7 @@ def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> 
         payload.get("sessionId"),
         payload.get("conversation_id"),
         payload.get("thread_id"),
+        os.environ.get("CODEX_THREAD_ID") if _safe_component(platform) == "codex" else None,
         os.environ.get("GHOST_ALICE_SESSION_ID"),
         pointer_session,
     ):
@@ -198,13 +199,51 @@ def extract_prompt(payload: dict[str, Any]) -> str:
     )
 
 
+def observation_receipt(paths: dict[str, Path], observation: dict[str, Any]) -> str:
+    """Bind the semantic writer to this completed observation, not a mutable pointer."""
+    state_path = Path(paths["state"]).resolve()
+    events_path = Path(paths["events"]).resolve()
+    receipt = {
+        "schema_version": "session-intent-observation-receipt.v1",
+        "intake_status": "observed",
+        "ledger_root": str(state_path.parents[2]),
+        "platform": state_path.parents[1].name,
+        "session_id": state_path.parent.name,
+        "state_path": str(state_path),
+        "events_path": str(events_path),
+        "input_event_id": observation["input_event_id"],
+    }
+    return (
+        "\n[session-intent-receipt]\n"
+        + json.dumps(receipt, ensure_ascii=True, separators=(",", ":"))
+        + "\n[/session-intent-receipt]\n"
+        "For a semantic delta, use session_intent_ledger.py with this receipt's exact "
+        "--root ledger_root, --platform platform, and --session-id session_id. "
+        "Use state_path for downstream intent context. Do not select another ledger from "
+        "a later current-session pointer or an installed script's default root. "
+        "This receipt confirms input observation only; it grants no additional permission "
+        "and does not claim a semantic delta was recorded. If writing to this ledger is "
+        "not permitted or fails, report semantic persistence as failed. "
+        "Do not create an alternate ledger, move historical ledgers, or expand permissions "
+        "to bypass the failure."
+    )
+
+
 def render_payload(output_format: str, message: str, ledger_root: Path) -> str:
     if output_format == "json":
-        return json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False)
+        # systemMessage is a host UI warning, not the model context channel.
+        return json.dumps({
+            "continue": True,
+            "systemMessage": message,
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": message,
+            },
+        }, ensure_ascii=False)
     return "\n".join([
         f"Internal instruction: {message}",
-        "User: Session intent is tracked without storing raw prompts.",
-        f"Tech: intent-state.json and intent-events.jsonl are updated under {ledger_root}.",
+        "User: Session intent tracking does not store raw prompts.",
+        f"Tech: Configured ledger root: {ledger_root}.",
         "",
     ])
 
@@ -257,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
                     session_id=session_id,
                     raw_user_input=prompt,
                 )
-                record_turn(
+                paths = record_turn(
                     root=ledger_root,
                     platform=args.platform,
                     session_id=session_id,
@@ -267,6 +306,7 @@ def main(argv: list[str] | None = None) -> int:
                     observation=observation,
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
+                message += observation_receipt(paths, observation)
     except Exception:
         _write_degrade_marker(ledger_root, args.platform, payload, "ledger-write-failed")
         message = message + " " + LEDGER_WRITE_FAILED_DEGRADE

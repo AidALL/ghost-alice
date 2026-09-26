@@ -2,18 +2,20 @@
 
 언어: [🇺🇸 English](../README.md) | 🇰🇷 한국어
 
-Ghost-ALICE OS 문서는 reader가 보는 layer에서 영어와 한국어 두 갈래로 둔다. 기본 entry는 English이고, 한국어 문서는 `docs/ko/` 아래에 영어 문서와 같은 디렉터리 구조로 둔다.
+Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다. 저장소의 기본 안내는 영어이며, 한국어 문서는 `docs/ko/` 아래에서 영어 문서와 같은 디렉터리 구조로 관리합니다.
 
-쌍을 이루는 문서는 모두 상단에 language switch를 둔다. 영어 문서에서는 English가 plain text, Korean이 link이고, 한국어 문서에서는 그 반대다.
+쌍을 이루는 문서는 상단에서 언어를 전환하실 수 있습니다. 영어 문서에서는 한국어 링크를, 한국어 문서에서는 영어 링크를 제공합니다.
+
+현재 버전을 맞춘 공개 릴리스는 Ghost-ALICE OS `0.3.0`과 Ghost-ALICE Autopilot `0.3.0`입니다. 의도·세션·연속 실행 변경과 검증 범위는 [릴리스 노트](./release/2026-09-26-release-notes.md)에서 확인하실 수 있습니다.
 
 ## Start Here
 
-1. 설치와 업데이트는 [getting-started/installation.md](./getting-started/installation.md)를 본다.
-2. update가 막혔으면 [getting-started/troubleshooting.md](./getting-started/troubleshooting.md)를 본다.
-3. repository map은 [reference/repository-structure.md](./reference/repository-structure.md)를 본다.
-4. installer architecture는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 본다.
-5. 공개 질문은 [SUPPORT.md](../../SUPPORT.md)와 GitHub Issues를 사용한다.
-6. 비공개 vulnerability report는 [SECURITY.md](../../SECURITY.md)를 따른다.
+1. 설치와 업데이트는 [getting-started/installation.md](./getting-started/installation.md)를 확인해 주세요.
+2. 업데이트가 막히면 [getting-started/troubleshooting.md](./getting-started/troubleshooting.md)를 확인해 주세요.
+3. 저장소 구조는 [reference/repository-structure.md](./reference/repository-structure.md)를 확인해 주세요.
+4. 설치기 구조는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 확인해 주세요.
+5. 공개 질문은 [SUPPORT.md](../../SUPPORT.md)와 GitHub Issues를 이용해 주세요.
+6. 비공개 취약점 보고는 [SECURITY.md](../../SECURITY.md)의 안내를 따라 주세요.
 
 ## Documentation Layout
 
@@ -45,14 +47,15 @@ Ghost-ALICE OS 문서는 reader가 보는 layer에서 영어와 한국어 두 �
 | Platform adapter compliance | [../policies/platform-adapter-compliance.md](../policies/platform-adapter-compliance.md) | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) |
 | Live smoke regression | [../policies/live-smoke-regression.md](../policies/live-smoke-regression.md) | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [../policies/evaluator-artifact-contract.md](../policies/evaluator-artifact-contract.md) | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) |
+| Current release notes | [../release/2026-09-26-release-notes.md](../release/2026-09-26-release-notes.md) | [release/2026-09-26-release-notes.md](./release/2026-09-26-release-notes.md) |
 | Public release checklist | [../release/public-release-checklist.md](../release/public-release-checklist.md) | [release/public-release-checklist.md](./release/public-release-checklist.md) |
 | Planning policy | [../plans/README.md](../plans/README.md) | [plans/README.md](./plans/README.md) |
 
 ## Update Rule
 
-1. English default page를 먼저 수정한다.
-2. reader-facing meaning, path, command, policy가 바뀌면 같은 change에서 Korean counterpart를 수정한다.
-3. CLI flags, paths, hook names, skill names, enum values, schema fields는 literal로 유지한다.
-4. 주변 설명만 번역하고 executable token은 보존한다.
-5. English 문서는 English 문서끼리, Korean 문서는 counterpart가 있을 때 Korean counterpart끼리 링크한다.
-6. user-facing document가 추가, 이동, pairing될 때 이 map을 갱신한다.
+1. 기본 영문 페이지를 먼저 수정해 주세요.
+2. 사용자에게 전달되는 의미, 경로, 명령, 정책이 바뀌면 같은 변경에서 한국어 대응 문서도 수정해 주세요.
+3. CLI 옵션, 경로, 훅 이름, 스킬 이름, 열거 값, 스키마 필드는 원래 표기를 유지해 주세요.
+4. 주변 설명만 번역하고 실행에 사용되는 토큰은 보존해 주세요.
+5. 영어 문서는 영어 문서로 연결하고, 한국어 문서는 대응 문서가 있으면 한국어 문서로 연결해 주세요.
+6. 사용자용 문서를 추가하거나 이동하거나 언어별 대응 문서를 만들 때 이 문서 목록도 갱신해 주세요.

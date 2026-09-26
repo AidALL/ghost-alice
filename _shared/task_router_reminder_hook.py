@@ -69,6 +69,7 @@ def resolve_session_id(root: Path, platform: str, payload: dict[str, Any]) -> st
         payload.get("sessionId"),
         payload.get("conversation_id"),
         payload.get("thread_id"),
+        os.environ.get("CODEX_THREAD_ID") if safe_path_component(platform) == "codex" else None,
         os.environ.get("GHOST_ALICE_SESSION_ID"),
         pointer.get("session_id"),
         "",

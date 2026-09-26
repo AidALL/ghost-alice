@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
-import { deriveDownstreamGateFromDecision } from "./derive_downstream_gate.mjs";
+import { deriveDownstreamGateFromDecision, DownstreamGatePersistenceError } from "./derive_downstream_gate.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -199,6 +199,7 @@ function inputSessionId(platform, input, root = "", fallback = "") {
     input.sessionId,
     input.conversation_id,
     input.thread_id,
+    platform === "codex" ? process.env.CODEX_THREAD_ID : "",
     process.env.GHOST_ALICE_SESSION_ID,
     readCurrentSessionPointer(platform, root),
     fallback,
@@ -410,7 +411,7 @@ function taskRouterReminderMessage(platform, input, root = "") {
       return `hook-reminder: task-router withheld until session-intent-analyzer writes current-session.json for session ${sessionId}. Continue intake/bootstrap; do not run task-router yet.`;
     }
     const pointer = readJsonFile(currentSessionPointerPath(platform, root), {});
-    const statePath = firstNonEmpty(pointer && pointer.schema_version === "session-intent-current.v1" ? pointer.state_path : "", path.join(sessionDirPath, "intent-state.json"));
+    const statePath = firstNonEmpty(pointer && pointer.schema_version === "session-intent-current.v1" && safePathComponent(pointer.session_id) === sessionId ? pointer.state_path : "", path.join(sessionDirPath, "intent-state.json"));
     return taskRouterReleaseMessage(sessionId, statePath, path.join(sessionDirPath, "downstream-gates.json"), "absent");
   }
   if (gate.stale) {
@@ -422,7 +423,7 @@ function taskRouterReminderMessage(platform, input, root = "") {
   }
 
   const pointer = readJsonFile(currentSessionPointerPath(platform, root), {});
-  const statePath = firstNonEmpty(pointer && pointer.schema_version === "session-intent-current.v1" ? pointer.state_path : "", path.join(sessionDirPath, "intent-state.json"));
+  const statePath = firstNonEmpty(pointer && pointer.schema_version === "session-intent-current.v1" && safePathComponent(pointer.session_id) === sessionId ? pointer.state_path : "", path.join(sessionDirPath, "intent-state.json"));
   return taskRouterReleaseMessage(sessionId, statePath, path.join(sessionDirPath, "downstream-gates.json"), "present-nonblock");
 }
 
@@ -524,7 +525,19 @@ try {
   if (hook === "tool-checkpoint" && (event === "BeforeTool" || event === "PreToolUse")) {
     const gateSession = inputSessionId(platform, input, args["session-intent-root"], "");
     if (gateSession && gateSession !== "unknown") {
-      deriveDownstreamGateFromDecision(sessionIntentDir(platform, gateSession, args["session-intent-root"]), platform, gateSession);
+      try {
+        deriveDownstreamGateFromDecision(sessionIntentDir(platform, gateSession, args["session-intent-root"]), platform, gateSession);
+      } catch (error) {
+        if (!(error instanceof DownstreamGatePersistenceError)) {
+          throw error;
+        }
+        process.stderr.write(`[ghost-alice-hook] ${error.message}\n`);
+        if (toolCheckpointEnforcementEnabled(platform)) {
+          const reason = `${downstreamGateDenialReason(error.gate)} Downstream gate persistence failed; the current model block remains in force.`;
+          emit(denialPayload(platform, event, message, reason));
+          process.exit(0);
+        }
+      }
     }
     const decision = toolCheckpointDecision(platform, input, args["session-intent-root"]);
     if (decision && decision.deny) {

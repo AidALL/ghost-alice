@@ -70,6 +70,8 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 
 ## Phase 5: Language/tone verification (Ghost-ALICE OS project only)
 
+This phase applies to canonical skill instructions and their accessory guidance. Reader-facing Korean project documentation (README files, installation guides, website copy, and release notes) follows the polite documentation register in `AGENTS.md`; it is not rejected for honorific endings. Explicit user tone instructions take precedence over defaults.
+
 | # | Item | Criterion | Verification method | Automatic |
 | --- | --- | --- | --- | :---: |
 | 5-1 | plain declarative unification | use the plain declarative style | detection of casual conversational endings in the body is not implemented (high false-positive rate) | manual |
@@ -85,7 +87,7 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 2. Count the lines of the SKILL.md body and check Phase 2
 3. Scan the SKILL.md structure and check Phase 3
 4. Check Phase 4 against accessory files such as references/ and scripts/
-5. Run the Phase 5 language verification against all .md files
+5. Run the Phase 5 language verification against skill instruction .md files within the scope stated above
 6. Compile the violating items into a list and report to the user
 7. Re-verify after fixing the violating items
 8. Proceed to the testing stage once all items pass

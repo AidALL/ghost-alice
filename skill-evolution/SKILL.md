@@ -10,6 +10,9 @@ compatibility:
 skill-evolution reads io-trace JSONL and produces evolution candidate reports for repeated tool, workflow, and sequence patterns. If a session-intent ledger is provided, it uses the intent summary to explain why the tool sequence occurred.
 
 This skill is report-only. It does not edit skills, install hooks, promote memory, or create new automation.
+
+Intent context preserves `active_decisions` and `latest_scope` from the ledger so a correction's meaning reaches both the report and its candidates. Superseded decisions are excluded. The preserved context does not change candidate triage or authorize execution; accumulated constraints and non-goals remain visible for reconciliation.
+
 ## Contents
 
 - [When To Use](#when-to-use)

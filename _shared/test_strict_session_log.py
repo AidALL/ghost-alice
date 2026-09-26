@@ -42,6 +42,16 @@ class TestStrictSessionLogPath(unittest.TestCase):
 
         self.assertEqual(session_id, "s-123")
 
+    def test_native_codex_log_identity_preserves_payload_and_platform_precedence(self):
+        env = {"GHOST_ALICE_PLATFORM": "codex", "CODEX_THREAD_ID": "native", "GHOST_ALICE_SESSION_ID": "generic"}
+        self.assertEqual(strict_session_log.session_id_from_payload({}, env), "native")
+        self.assertEqual(strict_session_log.session_id_from_payload({"session_id": "payload"}, env), "payload")
+        self.assertEqual(strict_session_log.session_id_from_payload({"thread_id": "thread"}, env), "thread")
+        self.assertEqual(strict_session_log.session_id_from_payload({}, {**env, "GHOST_ALICE_PLATFORM": "claude"}), "generic")
+        without_platform = {key: value for key, value in env.items() if key != "GHOST_ALICE_PLATFORM"}
+        self.assertEqual(strict_session_log.session_id_from_payload({}, without_platform, platform="codex"), "native")
+        self.assertEqual(strict_session_log.session_id_from_payload({}, without_platform, platform="claude"), "generic")
+
     def test_append_event_records_digest_without_raw_payload(self):
         path = strict_session_log.append_event(
             home=self.home,

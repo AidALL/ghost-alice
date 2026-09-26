@@ -325,9 +325,6 @@ def _visible_and_runner_payload_text(command: str) -> str:
 
 
 VERSIONED_HOMEBREW_PYTHON = "/opt/homebrew/opt/python@3.14/bin/python3.14"
-VERSIONED_HOMEBREW_PYTHON_RE = re.compile(
-    r"/opt/homebrew/(?:opt/python@\d+\.\d+/bin/python\d+\.\d+|bin/python\d+\.\d+)"
-)
 
 
 def _make_node_executable(node: Path) -> None:
@@ -3556,7 +3553,8 @@ class TestInstallHook(TempHomeTestCase):
         self.assertTrue(settings_file.is_symlink())
         self.assertEqual(os.readlink(settings_file), original_link)
         self.assertEqual(target.read_bytes(), original_settings)
-        self.assertEqual(Path(mkstemp.call_args.kwargs["dir"]), target.parent)
+        # macOS exposes the same temporary directory through /var and /private/var.
+        self.assertEqual(Path(mkstemp.call_args.kwargs["dir"]).resolve(), target.parent.resolve())
         self.assertEqual(list(target.parent.glob(f".{target.name}.*.tmp")), [])
 
     def test_resolved_settings_target_failure_preserves_entry_and_target_bytes(self):
@@ -4935,6 +4933,64 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             trusted_hash = hook_state[key]["trusted_hash"]
             self.assertRegex(trusted_hash, r"^sha256:[0-9a-f]{64}$")
 
+    def test_install_codex_trusts_verified_addons_without_trusting_marker_lookalikes(self):
+        from test_addon_hooks import _make_addon
+        from test_addon_hooks_install import _make_autopilot_adapter_addon
+
+        self._create_platform_dir("codex")
+        adapter = _make_autopilot_adapter_addon(self.fake_home)
+        observer = _make_addon(self.fake_home, [{
+            "id": "obs", "event": "post_tool_use", "script": "hooks/obs.py",
+        }])
+        user_commands = {
+            "Stop": "echo user # [adapter:autopilot-mode] continue [hook-runner:adapter-autopilot-mode-continue]",
+            "PostToolUse": "echo user # [addon:hookaddon] obs [hook-runner:obs]",
+        }
+        settings_file = self._write_settings("codex", {"hooks": {
+            event: [{"hooks": [{"type": "command", "command": command}]}]
+            for event, command in user_commands.items()
+        }})
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            install_hooks.install_hook("codex", addon_sources=[str(adapter), str(observer)])
+        settings = self._read_settings("codex")
+        state = tomllib.loads(self._codex_config_toml().read_text())["hooks"]["state"]
+        verified_count = 0
+        for event, label in (("Stop", "stop"), ("PostToolUse", "post_tool_use")):
+            for group_index, group in enumerate(settings["hooks"][event]):
+                for handler_index, hook in enumerate(group["hooks"]):
+                    key = f"{settings_file.as_posix()}:{label}:{group_index}:{handler_index}"
+                    command = hook["command"]
+                    if command == user_commands[event]:
+                        self.assertNotIn(key, state, "marker text is not installation authority")
+                    elif "[adapter:" in command or "[addon:" in command:
+                        verified_count += 1
+                        self.assertIn(key, state, "installed addon hook must be runnable without trust bypass")
+                        self.assertEqual(state[key]["trusted_hash"],
+                                         install_hooks._codex_command_hook_hash(event, group, hook))
+        self.assertEqual(verified_count, 2)
+
+    def test_codex_addon_reinstall_repairs_missing_trust_without_rewriting_hooks(self):
+        from test_addon_hooks_install import _make_autopilot_adapter_addon
+
+        self._create_platform_dir("codex")
+        adapter = _make_autopilot_adapter_addon(self.fake_home)
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            install_hooks.install_hook("codex", addon_sources=[str(adapter)])
+            hooks_file = self._config_file("codex")
+            settings_bytes = hooks_file.read_bytes()
+            key = f"{hooks_file.as_posix()}:stop:1:0"
+            config_file = self._codex_config_toml()
+            header = f"[hooks.state.{json.dumps(key)}]"
+            config_file.write_text(re.sub(
+                rf"(?ms)^{re.escape(header)}\n.*?(?=^\[|\Z)", "", config_file.read_text(),
+            ))
+            self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "installed")
+            self.assertIn(key, tomllib.loads(config_file.read_text())["hooks"]["state"])
+            self.assertEqual(hooks_file.read_bytes(), settings_bytes)
+            config_bytes = config_file.read_bytes()
+            self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "already")
+            self.assertEqual(config_file.read_bytes(), config_bytes)
+
     def test_install_codex_trusts_current_project_config_layer(self):
         """Codex install marks the Ghost-ALICE project config layer as trusted."""
         self._create_platform_dir("codex")
@@ -4962,8 +5018,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self.assertNotIn("raw_config", data)
         self.assertNotIn("content", data)
 
-    def test_install_codex_hook_commands_do_not_embed_versioned_homebrew_python(self):
-        """Installed hook commands resolve Python at runtime instead of pinning one Homebrew minor."""
+    def test_install_codex_hook_commands_keep_discovery_before_install_python_fallback(self):
+        """A captured Homebrew minor is only a fallback, not a permanent runtime pin."""
         if os.name == "nt":
             self.skipTest("POSIX Homebrew path regression does not apply on Windows")
         self._create_platform_dir("codex")
@@ -4983,9 +5039,50 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
                     command = hook.get("command", "")
                     command_surfaces.append(_visible_and_runner_payload_text(command))
 
-        installed_text = "\n".join(command_surfaces)
-        self.assertNotIn(VERSIONED_HOMEBREW_PYTHON, installed_text)
-        self.assertIsNone(VERSIONED_HOMEBREW_PYTHON_RE.search(installed_text))
+        for command in command_surfaces:
+            self.assertIn(VERSIONED_HOMEBREW_PYTHON, command)
+            self.assertLess(command.index("${GHOST_ALICE_PYTHON:-}"), command.index(VERSIONED_HOMEBREW_PYTHON))
+            self.assertLess(command.index("/bin/python3.[0-9]*"), command.index(VERSIONED_HOMEBREW_PYTHON))
+
+    @unittest.skipIf(os.name == "nt", "POSIX launcher only")
+    def test_hook_python_invocation_retains_install_runtime_outside_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            # Shell metacharacters are valid filename bytes, not instructions.
+            runtime = root / "python with 'quotes' $HOME $(touch injected)"
+            runtime.symlink_to(sys.executable)
+            hook_script = root / "hook.py"
+            hook_script.write_text("print('fallback-probe')\n", encoding="utf-8")
+            with patch.object(install_hooks.sys, "executable", str(runtime)):
+                command = install_hooks._hook_python_invocation(hook_script)
+            result = subprocess.run(
+                ["/bin/sh", "-c", command],
+                cwd=root,
+                env={"PATH": "/usr/bin:/bin", "HOME": str(root)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(result.stdout, "fallback-probe\n")
+            launcher = shlex.split(command)[2]
+            self.assertIn(install_hooks._quote_posix_arg(str(runtime)), launcher)
+            self.assertFalse((root / "injected").exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX launcher only")
+    def test_hook_python_override_still_precedes_install_runtime(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            override = root / "override-python"
+            override.symlink_to(sys.executable)
+            hook_script = root / "hook.py"
+            hook_script.write_text("import sys; print(sys.executable)\n", encoding="utf-8")
+            command = install_hooks._hook_python_invocation(hook_script)
+            result = subprocess.run(
+                ["/bin/sh", "-c", command],
+                env={"PATH": "/usr/bin:/bin", "HOME": str(root), "GHOST_ALICE_PYTHON": str(override)},
+                capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(result.returncode, 0, msg=result.stderr)
+            self.assertEqual(Path(result.stdout.strip()), override)
 
     def test_hook_python_invocation_resolves_compatible_python_from_runtime_path(self):
         if os.name == "nt":
@@ -5031,7 +5128,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             )
 
             self.assertEqual(result.returncode, 0, msg=result.stderr)
-            self.assertNotIn(VERSIONED_HOMEBREW_PYTHON, command)
             self.assertEqual(called.read_text(encoding="utf-8").splitlines(), [str(hook_script), "--flag"])
 
     def test_install_codex_preserves_existing_hook_state_when_trusting_hooks(self):

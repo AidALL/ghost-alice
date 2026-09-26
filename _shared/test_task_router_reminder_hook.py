@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import task_router_reminder_hook as trh
@@ -57,6 +58,18 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         message = trh.reminder_message("base", self.root, self.platform, self.payload)
         self.assertIn("withheld", message)
         self.assertIn("unreadable-marker", message)
+
+    def test_native_identity_degrade_marker_withholds_despite_foreign_pointer(self) -> None:
+        import session_intent_analyzer_hook as analyzer
+        pointer = self.root / "codex/current-session.json"
+        pointer.write_text(json.dumps({"schema_version": "session-intent-current.v1", "session_id": "foreign"}))
+        payload = {"prompt": "native input without payload session id"}
+        with patch.dict(os.environ, {"CODEX_THREAD_ID": self.session, "GHOST_ALICE_SESSION_ID": "stale"}):
+            analyzer._write_degrade_marker(self.root, "codex", payload, "ledger-write-failed")
+            self.assertTrue((self.session_dir / "ledger-degraded.json").exists())
+            message = trh.reminder_message("base", self.root, "codex", payload)
+        self.assertIn("ledger is degraded", message)
+        self.assertNotIn("silent allow", message)
 
     def test_producer_marker_path_matches_consumer_lookup(self) -> None:
         # Cross-module seam: the analyzer hook WRITES the marker with its own session-key derivation; this consumer LOOKS IT UP with resolve_session_id. If the two ever diverge, fail-closed silently stops working — the exact drift class that produced the N2 intent-root divergence.

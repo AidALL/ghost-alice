@@ -26,6 +26,8 @@ bash install.sh --addon autopilot
 | --- | --- | --- | --- |
 | autopilot | 명시적 승인 이후 privileged autonomous adapter로 검증된 work item을 이어서 진행한다. | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
+버전을 맞춘 권장 조합은 core `0.3.0`과 Autopilot `0.3.0`입니다. Autopilot의 기술적 최소 core 버전은 계속 `0.2.2`이며, 최신 세션 의도 처리와 연속 실행 수정을 함께 사용하시려면 같은 릴리스 조합을 사용해 주세요. 제품 릴리스 번호가 애드온 호환성 표를 대신하지는 않습니다. 변경 내용과 검증 범위는 [0.3.0 릴리스 노트](../release/2026-09-26-release-notes.md)에서 확인하실 수 있습니다.
+
 ## Custom, Tenant, And Local Development Addons
 
 addon이 official alias가 아니면 `--addon-source`로 명시적 path 또는 URL에서 설치한다. source는 local directory, fork, tenant 전용 package, 개발 중인 checkout이 될 수 있다.

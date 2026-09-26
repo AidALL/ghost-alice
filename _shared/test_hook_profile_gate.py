@@ -92,6 +92,32 @@ def _node_marker_command(node: Path, marker: Path) -> str:
 
 
 class TestHookRunnerExecutionGate(unittest.TestCase):
+    def test_rejection_audit_uses_known_platform_without_platform_environment(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            env = dict(os.environ, HOME=temporary, CODEX_THREAD_ID="native", GHOST_ALICE_SESSION_ID="generic")
+            env.pop("GHOST_ALICE_PLATFORM", None)
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(hook_profile_gate, "_read_stdin", return_value="{}"):
+                hook_profile_gate._append_rejection_audit("tool-checkpoint", "rejected command", platform="codex")
+            log = _strict_log_path(temporary, "codex", "native")
+            row = json.loads(log.read_text().splitlines()[0])
+            self.assertEqual(row["session_id"], "native")
+            self.assertEqual(row["platform"], "codex")
+            self.assertFalse(_strict_log_path(temporary, "codex", "generic").exists())
+
+    def test_native_codex_block_is_visible_without_payload_session(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for platform in ("codex", "claude"):
+                session = root / platform / "native"
+                session.mkdir(parents=True)
+                (root / platform / "current-session.json").write_text(json.dumps({"schema_version": "session-intent-current.v1", "session_id": "foreign"}))
+                (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-native"}) + "\n")
+                (session / "downstream-gates.json").write_text(json.dumps({"schema_version": "downstream-gates.v1", "gate": "jailbreak-detector", "decision": "block", "input_event_id": "e-native"}))
+            env = {"GHOST_ALICE_SESSION_INTENT_ROOT": str(root), "CODEX_THREAD_ID": "native", "GHOST_ALICE_SESSION_ID": "foreign"}
+            self.assertTrue(hook_profile_gate._has_current_downstream_block(env, {}, "codex"))
+            self.assertFalse(hook_profile_gate._has_current_downstream_block(env, {"session_id": "foreign"}, "codex"))
+            self.assertFalse(hook_profile_gate._has_current_downstream_block(env, {}, "claude"))
+
     def test_runner_normalizes_child_stdio_to_utf8(self):
         code = (
             "import hashlib, json, sys; "
@@ -350,6 +376,12 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
 
 
 class TestHookCommandAllowlist(unittest.TestCase):
+    def setUp(self):
+        # These synthetic sessions must not inherit the test runner's native Codex ID.
+        native_identity = mock.patch.dict(os.environ, {"CODEX_THREAD_ID": ""})
+        native_identity.start()
+        self.addCleanup(native_identity.stop)
+
     def test_configured_node_runtime_uses_shared_usability_predicate(self):
         with tempfile.TemporaryDirectory() as temp_home:
             node = Path(temp_home) / ("node.exe" if os.name == "nt" else "node")
@@ -2330,6 +2362,77 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         self.assertIn("task-router", prompt.stdout)
         self.assertEqual(session_start.returncode, 0)
         self.assertIn("merge-companion", session_start.stdout)
+
+
+class TestHookProtocolSurface(unittest.TestCase):
+    def test_visibility_preserves_model_context_and_control_fields(self):
+        protocols = [
+            {"continue": True, "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "[session-intent-receipt] session-a [/session-intent-receipt]",
+            }},
+            {"decision": "block", "reason": "Continue the approved work."},
+            {"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": "The current gate is blocked.",
+            }},
+            {"continue": False, "stopReason": "Stop requested."},
+        ]
+        for protocol in protocols:
+            for surface in ("hidden", "compact", "focused", "full", "forced"):
+                with self.subTest(protocol=protocol, surface=surface):
+                    original = {**protocol, "systemMessage": "Routine user notice."}
+                    output, _ = hook_profile_gate._render_user_surface(
+                        {"user_surface": surface, "value_key": "test-hook"},
+                        json.dumps(original) + "\n", "",
+                    )
+                    decoded = json.loads(output)
+                    decoded.pop("systemMessage", None)
+                    self.assertEqual(decoded, protocol)
+
+    def test_visibility_reduces_only_protocol_user_warning(self):
+        for surface, expected in (
+            ("hidden", None),
+            ("compact", "test-hook observed"),
+            ("focused", "test-hook: First line. Second line."),
+        ):
+            with self.subTest(surface=surface):
+                output, error = hook_profile_gate._render_user_surface(
+                    {"user_surface": surface, "value_key": "test-hook"},
+                    json.dumps({"continue": True, "systemMessage": "First line.\nSecond line."}),
+                    "debug-only diagnostic\n",
+                )
+                decoded = json.loads(output)
+                self.assertIs(decoded["continue"], True)
+                self.assertEqual(decoded.get("systemMessage"), expected)
+                self.assertEqual(error, "")
+
+    def test_runner_preserves_additional_context_across_visibility_profiles(self):
+        hook_output = {
+            "continue": True,
+            "systemMessage": "routine clean pass already persisted",
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "Use the observed session-a ledger receipt.",
+            },
+        }
+        raw = json.dumps(hook_output)
+        command = _python_payload_command(f"-c {shlex.quote(f'print({raw!r})')}")
+        payload = base64.urlsafe_b64encode(command.encode()).decode()
+        for profile in ("strict", "dynamic", "minimal"):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as home:
+                env = {**os.environ, "HOME": home, "GHOST_ALICE_PLATFORM": "codex",
+                       "GHOST_ALICE_AGENT_VISIBILITY": profile}
+                result = subprocess.run(
+                    [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")),
+                     "run", "prompt", payload],
+                    input=json.dumps({"session_id": "session-a", "hook_event_name": "UserPromptSubmit"}),
+                    text=True, capture_output=True, env=env, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"], hook_output["hookSpecificOutput"])
+                row = json.loads(_strict_log_path(home, "codex", "session-a").read_text().splitlines()[0])
+                self.assertEqual(json.loads(row["stdout"]), hook_output)
 
 
 if __name__ == "__main__":

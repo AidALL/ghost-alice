@@ -80,6 +80,8 @@ Addon-specific behavior, state files, pause/resume controls, and removal details
 | --- | --- | --- | --- | --- |
 | autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
+The coordinated release pair is core `0.3.0` and Autopilot `0.3.0`. Autopilot retains a technical minimum of core `0.2.2`; use the coordinated pair for the current session-intent and continuation fixes. Product release numbers do not replace the addon compatibility matrix. See the [0.3.0 release notes](../release/2026-09-26-release-notes.md) for what changed and what was verified.
+
 ## Install One Official Addon To One Platform
 
 ```bash
@@ -215,6 +217,8 @@ The installer requires Python 3.11 or newer. If Python 3.11+ is missing, it atte
 - Windows: `winget`, `choco`, then `scoop`
 
 If Python 3.11+ is still unavailable, installation stops and prints manual recovery guidance.
+
+On macOS and other POSIX hosts, installed hooks try `GHOST_ALICE_PYTHON` first, then Python from the runtime `PATH` and common installation locations, and finally the interpreter used by the installer. Each candidate must pass the Python 3.11+ check. This final fallback lets a desktop app run hooks even when its `PATH` omits the installer's Python directory. It does not change the host's global Python or `PATH`; rerun the installer if that interpreter moves and no other candidate is available.
 
 ### Node.js Contract
 

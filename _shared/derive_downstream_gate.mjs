@@ -10,6 +10,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
+export class DownstreamGatePersistenceError extends Error {
+  constructor(gate, cause) {
+    super("Downstream gate persistence failed after a current model block was verified.", { cause });
+    this.name = "DownstreamGatePersistenceError";
+    this.gate = gate;
+  }
+}
+
 function readJsonFile(filePath, fallback) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -92,6 +100,10 @@ export function deriveDownstreamGateFromDecision(sessionDir, platform, sessionId
     input_char_count: (latestEvent && latestEvent.input_char_count) || 0,
     updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
   };
-  writeJsonFile(path.join(sessionDir, "downstream-gates.json"), gate);
+  try {
+    writeJsonFile(path.join(sessionDir, "downstream-gates.json"), gate);
+  } catch (error) {
+    throw new DownstreamGatePersistenceError(gate, error);
+  }
   return gate;
 }

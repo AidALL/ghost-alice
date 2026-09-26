@@ -572,6 +572,7 @@ def _resolve_session_id(root: Path, platform: str, payload: dict[str, object], e
         payload.get("sessionId"),
         payload.get("conversation_id"),
         payload.get("thread_id"),
+        env.get("CODEX_THREAD_ID") if _safe_path_component(platform) == "codex" else None,
         env.get("GHOST_ALICE_SESSION_ID"),
         pointer.get("session_id"),
         "",
@@ -801,6 +802,26 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
     if _is_hook_noop_json(stdout):
         return (stdout, "" if level in {"hidden", "compact", "focused"} else stderr)
     value_key = str(item.get("value_key") or "surface-item")
+    if level in {"hidden", "compact", "focused"}:
+        try:
+            protocol = json.loads(stdout)
+        except (json.JSONDecodeError, TypeError):
+            protocol = None
+        if isinstance(protocol, dict) and protocol.keys() & {
+            "continue", "stopReason", "suppressOutput", "systemMessage",
+            "decision", "hookSpecificOutput",
+        }:
+            # stdout is also the platform's machine protocol. Visibility may
+            # reduce its user warning, never model context or control fields.
+            warning = protocol.get("systemMessage")
+            if level == "hidden":
+                protocol.pop("systemMessage", None)
+            elif isinstance(warning, str) and warning:
+                protocol["systemMessage"] = (
+                    f"{value_key} observed" if level == "compact"
+                    else f"{value_key}: {_one_line(warning)}"
+                )
+            return (json.dumps(protocol, ensure_ascii=False) + "\n", "")
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
     if level == "hidden":
         return ("", "")
@@ -876,8 +897,8 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
         exit_code=result.returncode,
         context=context,
     )
-    session_id = strict_session_log.session_id_from_payload(hook_payload, env=env)
     platform = env.get("GHOST_ALICE_PLATFORM", "unknown")
+    session_id = strict_session_log.session_id_from_payload(hook_payload, env=env, platform=platform)
     log_ref = str(strict_session_log.log_path(_home_from_env(env), platform, session_id))
     item = _surface_item_for_result(
         hook_id=hook_id,
@@ -945,7 +966,7 @@ def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str) -> None
     hook_payload = _payload_from_stdin(stdin_text)
     config = runtime_config.load_config(env=env, home=_home_from_env(env))
     profile = config["agent_visibility"]["profile"]
-    session_id = strict_session_log.session_id_from_payload(hook_payload, env=env)
+    session_id = strict_session_log.session_id_from_payload(hook_payload, env=env, platform=platform)
     log_ref = str(strict_session_log.log_path(_home_from_env(env), platform, session_id))
     item = classify_surface_item(
         value_key="hook-command-rejection",
