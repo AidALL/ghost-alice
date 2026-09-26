@@ -96,6 +96,10 @@ Use the current intent summary and downstream gate context first. The raw user i
 
 This step performs atomic meaning decomposition from the accepted session intent context.
 
+Reconcile the current goal, latest scope, active decisions, accumulated constraints/non-goals, and acceptance criteria before selecting an action category. An accumulated list can retain an earlier turn's restriction. A supported explicit user revision resolves only the named exception; other restrictions remain. Do not silently redefine an edit request as analysis because an older restriction remains in a list, or treat a newer goal as automatic permission. When the context cannot resolve the conflict, identify the conflicting boundary and ask only for that missing decision; proceed with uncontroversial work where possible. Existing explicit authorization that resolves the conflict does not need another approval.
+
+Do not invent the chronology of a boundary. A timestamp on a decision does not date an undated restriction; active status, admitted criteria, and reports of prior edits alone do not establish that the restriction was later replaced. Distinguish a current user instruction or supplied conversation/event evidence from a compressed current_goal label. A clear current instruction can authorize a bounded change without formal revocation wording. If only conflicting snapshot fields are available, keep that conflict unresolved rather than calling one field initial or outdated without evidence. Ask about the contested authority only; missing task files are a separate issue.
+
 Identify the user's primary request, whether a question or instruction, before adjacent detail. Preserve a causal axis only when the request asks about a cause or relationship; do not invent one for an imperative request. At pre-tool routing, do not fabricate or require an unsupported answer. Preserve the request for downstream output, which leads with the supported causal answer or completed imperative result after the necessary evidence or work.
 
 Extract:

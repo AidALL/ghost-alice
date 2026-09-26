@@ -801,6 +801,26 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
     if _is_hook_noop_json(stdout):
         return (stdout, "" if level in {"hidden", "compact", "focused"} else stderr)
     value_key = str(item.get("value_key") or "surface-item")
+    if level in {"hidden", "compact", "focused"}:
+        try:
+            protocol = json.loads(stdout)
+        except (json.JSONDecodeError, TypeError):
+            protocol = None
+        if isinstance(protocol, dict) and protocol.keys() & {
+            "continue", "stopReason", "suppressOutput", "systemMessage",
+            "decision", "hookSpecificOutput",
+        }:
+            # stdout is also the platform's machine protocol. Visibility may
+            # reduce its user warning, never model context or control fields.
+            warning = protocol.get("systemMessage")
+            if level == "hidden":
+                protocol.pop("systemMessage", None)
+            elif isinstance(warning, str) and warning:
+                protocol["systemMessage"] = (
+                    f"{value_key} observed" if level == "compact"
+                    else f"{value_key}: {_one_line(warning)}"
+                )
+            return (json.dumps(protocol, ensure_ascii=False) + "\n", "")
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
     if level == "hidden":
         return ("", "")

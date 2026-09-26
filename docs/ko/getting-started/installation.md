@@ -216,6 +216,8 @@ Installer는 Python 3.11 이상을 요구한다. Python 3.11+가 없으면 가�
 
 Python 3.11+가 여전히 없으면 installation을 멈추고 manual recovery guidance를 출력한다.
 
+macOS와 다른 POSIX host의 설치된 hook은 `GHOST_ALICE_PYTHON`, 실행 환경의 `PATH`와 일반 설치 위치, installer가 사용한 interpreter 순서로 탐색한다. 각 후보는 Python 3.11+ 검사를 통과해야 한다. 마지막 fallback은 desktop app의 `PATH`에 installer의 Python 디렉터리가 없어도 hook을 실행할 수 있게 한다. host의 전역 Python이나 `PATH`는 변경하지 않는다. 해당 interpreter가 이동했고 다른 후보도 없으면 installer를 다시 실행한다.
+
 ### Node.js Contract
 
 Claude Code와 Codex hook-enabled install은 `tool-checkpoint` PreToolUse gate가 `ghost-alice-hook.mjs`를 실행하기 때문에 `PATH`의 Node.js를 요구한다. target platform이 있는데 `node`가 없으면 installer는 hook installation을 막는다.

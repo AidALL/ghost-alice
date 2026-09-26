@@ -7,12 +7,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import pathlib
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -54,7 +56,73 @@ class SessionIntentLedgerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmpdir = pathlib.Path(tempfile.mkdtemp(prefix="session-intent-ledger-test-"))
         self.addCleanup(lambda: shutil.rmtree(self.tmpdir, ignore_errors=True))
+        # Unit-test subprocesses are standalone unless a test supplies host identity.
+        identity = patch.dict(os.environ, {"CODEX_THREAD_ID": "", "GHOST_ALICE_SESSION_ID": ""})
+        identity.start()
+        self.addCleanup(identity.stop)
         self.ledger = load_module()
+
+    def run_cli(self, root, *args, identity=None):
+        env = dict(os.environ)
+        env.update(identity or {})
+        return subprocess.run(
+            [sys.executable, str(LEDGER), "--root", str(root), *args],
+            capture_output=True, text=True, encoding="utf-8", env=env, check=False,
+        )
+
+    def test_cli_native_identity_rejects_other_session_before_any_write(self) -> None:
+        root = self.tmpdir / "ledger"
+        self.ledger.record_turn(root=root, platform="codex", session_id="other-session",
+                                intent_delta={"current_goal": "other session must remain unchanged"})
+        before = {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        result = self.run_cli(root, "--session-id", "other-session", "--delta-json",
+                              '{"current_goal":"wrong-session contamination"}', "--snapshot",
+                              identity={"CODEX_THREAD_ID": "native-session"})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("session identity mismatch", result.stderr)
+        self.assertEqual(before, {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()})
+
+    def test_cli_native_identity_without_explicit_id_wins_shared_pointer_and_override(self) -> None:
+        root = self.tmpdir / "ledger"
+        self.ledger.write_current_session_pointer(root, "codex", "unrelated-pointer")
+        result = self.run_cli(root, "--delta-json", '{"current_goal":"native goal"}',
+                              identity={"CODEX_THREAD_ID": "native-session", "GHOST_ALICE_SESSION_ID": "stale-override"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((root / "codex/native-session/intent-state.json").is_file())
+        self.assertFalse((root / "codex/unrelated-pointer/intent-state.json").exists())
+        self.assertFalse((root / "codex/stale-override/intent-state.json").exists())
+
+    def test_cli_matching_native_safe_id_can_write(self) -> None:
+        root = self.tmpdir / "ledger"
+        native = "../native/" + "x" * 200
+        safe = ("native-" + "x" * 200)[:120]
+        result = self.run_cli(root, "--session-id", safe, "--delta-json", '{"current_goal":"same session"}',
+                              identity={"CODEX_THREAD_ID": native})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads((root / "codex" / safe / "intent-state.json").read_text())["current_goal"], "same session")
+
+    def test_cli_configured_session_binds_when_native_identity_is_unavailable(self) -> None:
+        root = self.tmpdir / "ledger"
+        mismatch = self.run_cli(root, "--platform", "claude", "--session-id", "other",
+                                "--delta-json", '{"current_goal":"wrong"}',
+                                identity={"GHOST_ALICE_SESSION_ID": "configured"})
+        self.assertNotEqual(mismatch.returncode, 0)
+        self.assertFalse(root.exists())
+        result = self.run_cli(root, "--platform", "claude", "--delta-json", '{"current_goal":"bound"}',
+                              identity={"GHOST_ALICE_SESSION_ID": "configured"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((root / "claude/configured/intent-state.json").is_file())
+
+    def test_cli_native_bound_session_can_read_other_historical_snapshot_without_writing(self) -> None:
+        root = self.tmpdir / "ledger"
+        self.ledger.record_turn(root=root, platform="codex", session_id="historical",
+                                intent_delta={"current_goal": "historical context"})
+        before = {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        result = self.run_cli(root, "--session-id", "historical", "--snapshot",
+                              identity={"CODEX_THREAD_ID": "native-session"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["current_goal"], "historical context")
+        self.assertEqual(before, {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()})
 
     def test_conduct_feedback_merges_by_id(self) -> None:
         state = self.ledger.default_state("codex", "session-cf")
@@ -343,6 +411,67 @@ class SessionIntentLedgerTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["acceptance_criteria"], state["acceptance_criteria"])
 
+    def test_snapshot_cli_preserves_corrected_scope_without_granting_authority(self) -> None:
+        root = self.tmpdir / "ledger"
+        self.ledger.record_turn(
+            root=root, platform="codex", session_id="scope-correction",
+            intent_delta={
+                "constraints": ["Keep unrelated files unchanged"],
+                "non_goals": ["Edit configuration during diagnosis", "Publish externally"],
+                "decisions": [{"id": "diagnosis-only", "summary": "Inspect configuration without editing"}],
+                "model_security_decision": {
+                    "decision": "block", "reason": "An unrelated operation is blocked",
+                    "risk_flags": ["outside-current-boundary"],
+                },
+            },
+        )
+        scope = {"allowed": ["Repair the diagnosed configuration"], "prohibited": ["Publish externally"]}
+        paths = self.ledger.record_turn(
+            root=root, platform="codex", session_id="scope-correction",
+            intent_delta={
+                "supersedes": ["diagnosis-only"],
+                "decisions": [{"id": "repair-approved", "source": "user-explicit",
+                               "summary": "The user now authorizes the diagnosed configuration repair"}],
+                "latest_scope": scope,
+            },
+        )
+        before = paths["state"].read_bytes()
+        completed = subprocess.run(
+            [sys.executable, str(LEDGER), "--root", str(root), "--platform", "codex",
+             "--session-id", "scope-correction", "--snapshot"],
+            check=True, capture_output=True, text=True,
+        )
+        snapshot = json.loads(completed.stdout)
+        self.assertIn("active_decisions", snapshot)
+        self.assertEqual([d["id"] for d in snapshot["active_decisions"]], ["repair-approved"])
+        self.assertEqual(snapshot["active_decisions"][0]["source"], "user-explicit")
+        self.assertIn("configuration repair", snapshot["active_decisions"][0]["summary"])
+        self.assertEqual(snapshot["decision_count"], 1)
+        self.assertEqual(snapshot["latest_scope"], scope)
+        self.assertEqual(snapshot["constraints"], ["Keep unrelated files unchanged"])
+        self.assertEqual(snapshot["non_goals"], ["Edit configuration during diagnosis", "Publish externally"])
+        self.assertEqual(snapshot["model_security_decision"]["decision"], "block")
+        self.assertEqual(paths["state"].read_bytes(), before)
+
+    def test_snapshot_scope_context_is_detached_from_state(self) -> None:
+        state = self.ledger.default_state("codex", "scope-copy")
+        state["decisions"] = [{"id": "repair", "summary": "Repair approved", "evidence": {"kind": "user-explicit"}}]
+        state["latest_scope"] = {"allowed": ["configuration"]}
+        snapshot = self.ledger.consumer_snapshot(state)
+        self.assertIn("active_decisions", snapshot)
+        snapshot["active_decisions"][0]["evidence"]["kind"] = "changed"
+        snapshot["latest_scope"]["allowed"].append("external-publish")
+        self.assertEqual(state["decisions"][0]["evidence"]["kind"], "user-explicit")
+        self.assertEqual(state["latest_scope"], {"allowed": ["configuration"]})
+
+    def test_snapshot_legacy_state_does_not_invent_scope(self) -> None:
+        for latest_scope in (None, "not a scope object"):
+            state = {"decisions": [{"id": "retired", "superseded": True}], "latest_scope": latest_scope}
+            snapshot = self.ledger.consumer_snapshot(state)
+            self.assertEqual(snapshot.get("active_decisions"), [])
+            self.assertEqual(snapshot.get("latest_scope"), {})
+            self.assertEqual(snapshot["decision_count"], 0)
+
     def test_acceptance_criteria_carry_status_and_admission_by_source(self) -> None:
         root = self.tmpdir / "ledger"
         paths = self.ledger.record_turn(
@@ -596,7 +725,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             "s-pointer",
         )
 
-    def test_cli_delta_without_session_id_uses_current_session_pointer(self) -> None:
+    def test_cli_unbound_delta_cannot_select_session_from_shared_pointer(self) -> None:
         root = self.tmpdir / "ledger"
         self.ledger.write_current_session_pointer(root, "codex", "s-pointer")
         delta = {"current_goal": "join semantic delta into the pointer session"}
@@ -613,16 +742,16 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 json.dumps(delta, ensure_ascii=False),
                 "--snapshot",
             ],
-            check=True,
+            check=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
             encoding="utf-8",
         )
 
-        snapshot = json.loads(completed.stdout)
-        self.assertEqual(snapshot["current_goal"], "join semantic delta into the pointer session")
-        self.assertTrue((root / "codex" / "s-pointer" / "intent-state.json").exists())
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("--session-id is required", completed.stderr)
+        self.assertFalse((root / "codex" / "s-pointer" / "intent-state.json").exists())
         self.assertFalse((root / "codex" / "unknown" / "intent-state.json").exists())
 
     def test_cli_snapshot_without_input_or_delta_is_read_only(self) -> None:
@@ -677,6 +806,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 str(root),
                 "--platform",
                 "codex",
+                "--session-id",
+                "s-delta-snapshot",
                 "--delta-json",
                 json.dumps(delta, ensure_ascii=False),
                 "--snapshot",

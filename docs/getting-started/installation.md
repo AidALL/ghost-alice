@@ -216,6 +216,8 @@ The installer requires Python 3.11 or newer. If Python 3.11+ is missing, it atte
 
 If Python 3.11+ is still unavailable, installation stops and prints manual recovery guidance.
 
+On macOS and other POSIX hosts, installed hooks try `GHOST_ALICE_PYTHON` first, then Python from the runtime `PATH` and common installation locations, and finally the interpreter used by the installer. Each candidate must pass the Python 3.11+ check. This final fallback lets a desktop app run hooks even when its `PATH` omits the installer's Python directory. It does not change the host's global Python or `PATH`; rerun the installer if that interpreter moves and no other candidate is available.
+
 ### Node.js Contract
 
 Claude Code and Codex hook-enabled installs require Node.js on `PATH` because the `tool-checkpoint` PreToolUse gate runs `ghost-alice-hook.mjs`. The installer blocks hook installation when the target platform is present but `node` is unavailable.

@@ -2332,5 +2332,76 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         self.assertIn("merge-companion", session_start.stdout)
 
 
+class TestHookProtocolSurface(unittest.TestCase):
+    def test_visibility_preserves_model_context_and_control_fields(self):
+        protocols = [
+            {"continue": True, "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "[session-intent-receipt] session-a [/session-intent-receipt]",
+            }},
+            {"decision": "block", "reason": "Continue the approved work."},
+            {"hookSpecificOutput": {
+                "hookEventName": "PreToolUse", "permissionDecision": "deny",
+                "permissionDecisionReason": "The current gate is blocked.",
+            }},
+            {"continue": False, "stopReason": "Stop requested."},
+        ]
+        for protocol in protocols:
+            for surface in ("hidden", "compact", "focused", "full", "forced"):
+                with self.subTest(protocol=protocol, surface=surface):
+                    original = {**protocol, "systemMessage": "Routine user notice."}
+                    output, _ = hook_profile_gate._render_user_surface(
+                        {"user_surface": surface, "value_key": "test-hook"},
+                        json.dumps(original) + "\n", "",
+                    )
+                    decoded = json.loads(output)
+                    decoded.pop("systemMessage", None)
+                    self.assertEqual(decoded, protocol)
+
+    def test_visibility_reduces_only_protocol_user_warning(self):
+        for surface, expected in (
+            ("hidden", None),
+            ("compact", "test-hook observed"),
+            ("focused", "test-hook: First line. Second line."),
+        ):
+            with self.subTest(surface=surface):
+                output, error = hook_profile_gate._render_user_surface(
+                    {"user_surface": surface, "value_key": "test-hook"},
+                    json.dumps({"continue": True, "systemMessage": "First line.\nSecond line."}),
+                    "debug-only diagnostic\n",
+                )
+                decoded = json.loads(output)
+                self.assertIs(decoded["continue"], True)
+                self.assertEqual(decoded.get("systemMessage"), expected)
+                self.assertEqual(error, "")
+
+    def test_runner_preserves_additional_context_across_visibility_profiles(self):
+        hook_output = {
+            "continue": True,
+            "systemMessage": "routine clean pass already persisted",
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": "Use the observed session-a ledger receipt.",
+            },
+        }
+        raw = json.dumps(hook_output)
+        command = _python_payload_command(f"-c {shlex.quote(f'print({raw!r})')}")
+        payload = base64.urlsafe_b64encode(command.encode()).decode()
+        for profile in ("strict", "dynamic", "minimal"):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as home:
+                env = {**os.environ, "HOME": home, "GHOST_ALICE_PLATFORM": "codex",
+                       "GHOST_ALICE_AGENT_VISIBILITY": profile}
+                result = subprocess.run(
+                    [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")),
+                     "run", "prompt", payload],
+                    input=json.dumps({"session_id": "session-a", "hook_event_name": "UserPromptSubmit"}),
+                    text=True, capture_output=True, env=env, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["hookSpecificOutput"], hook_output["hookSpecificOutput"])
+                row = json.loads(_strict_log_path(home, "codex", "session-a").read_text().splitlines()[0])
+                self.assertEqual(json.loads(row["stdout"]), hook_output)
+
+
 if __name__ == "__main__":
     unittest.main()

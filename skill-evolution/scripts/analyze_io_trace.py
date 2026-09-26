@@ -11,6 +11,7 @@ import json
 import re
 import sys
 from collections import Counter, defaultdict
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ EMPTY_INTENT_CONTEXT: dict[str, Any] = {
     "non_goals": [],
     "open_questions": [],
     "decision_count": 0,
+    "active_decisions": [],
+    "latest_scope": {},
     "risk_flags": [],
     "consumer_hints": {},
     "conduct_feedback": [],
@@ -308,6 +311,7 @@ def load_intent_context(path: Path | None) -> dict[str, Any] | None:
         return None
     decisions = [item for item in value.get("decisions", []) if isinstance(item, dict)]
     active_decisions = [item for item in decisions if not item.get("superseded")]
+    latest_scope = value.get("latest_scope")
     context = dict(EMPTY_INTENT_CONTEXT)
     context.update({
         "schema_version": value.get("schema_version", EMPTY_INTENT_CONTEXT["schema_version"]),
@@ -317,6 +321,8 @@ def load_intent_context(path: Path | None) -> dict[str, Any] | None:
         "non_goals": list(value.get("non_goals", [])),
         "open_questions": list(value.get("open_questions", [])),
         "decision_count": len(active_decisions),
+        "active_decisions": deepcopy(active_decisions),
+        "latest_scope": deepcopy(latest_scope) if isinstance(latest_scope, dict) else {},
         "risk_flags": list(value.get("risk_flags", [])),
         "consumer_hints": dict(value.get("consumer_hints", {})),
         "conduct_feedback": [item for item in value.get("conduct_feedback", []) if isinstance(item, dict)],

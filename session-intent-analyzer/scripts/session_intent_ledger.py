@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import uuid
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -711,6 +712,7 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
         state = state_or_path
     decisions = [item for item in state.get("decisions", []) if isinstance(item, dict)]
     active_decisions = [item for item in decisions if not item.get("superseded")]
+    latest_scope = state.get("latest_scope")
     return {
         "schema_version": SCHEMA_VERSION,
         "current_goal": state.get("current_goal", ""),
@@ -720,6 +722,8 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
         "open_questions": list(state.get("open_questions", [])),
         "acceptance_criteria": list(state.get("acceptance_criteria", [])),
         "decision_count": len(active_decisions),
+        "active_decisions": deepcopy(active_decisions),
+        "latest_scope": deepcopy(latest_scope) if isinstance(latest_scope, dict) else {},
         "risk_flags": list(state.get("risk_flags", [])),
         "consumer_hints": dict(state.get("consumer_hints", {})),
         "conduct_feedback": list(state.get("conduct_feedback", [])),
@@ -737,7 +741,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Update or read a session intent ledger.")
     parser.add_argument("--root", default=str(default_root()), help="ledger root")
     parser.add_argument("--platform", default="codex", help="agent platform")
-    parser.add_argument("--session-id", default="", help="session identifier")
+    parser.add_argument("--session-id", default="", help="session identifier; required for writes without a bound host session")
     parser.add_argument("--input", default=None, help="raw input to hash only; never persisted")
     parser.add_argument("--delta-json", default=None, help="intent delta JSON")
     parser.add_argument("--snapshot", action="store_true", help="emit consumer snapshot")
@@ -752,12 +756,37 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(delta, dict):
             raise SystemExit("--delta-json must decode to an object")
     root = Path(args.root)
+    read_only = args.snapshot and args.input is None and delta is None
+    # A platform-wide pointer can move while two sessions are active. Native
+    # identity binds CLI mutations; an explicit historical snapshot remains a
+    # supported read-only operation. Keep the library's explicit-session API
+    # independent of the environment for adapters and offline processing.
+    bound_session = ""
+    if safe_component(args.platform) == "codex":
+        bound_session = safe_component(os.environ.get("CODEX_THREAD_ID"), "")
+    if not bound_session:
+        bound_session = safe_component(os.environ.get("GHOST_ALICE_SESSION_ID"), "")
+    explicit_session = safe_component(args.session_id, "")
+    if not read_only:
+        if bound_session and explicit_session and explicit_session != bound_session:
+            raise SystemExit(
+                "session identity mismatch: --session-id does not match the bound host session; "
+                f"use --session-id {bound_session}. No ledger was written. "
+                "Do not unset or replace host identity to bypass this check."
+            )
+        if not bound_session and not explicit_session:
+            raise SystemExit(
+                "--session-id is required for writes without a bound host session. "
+                "Use the current hook receipt or an explicitly selected standalone session; "
+                "current-session.json is a shared discovery hint, not a write identity. "
+                "No ledger was written."
+            )
     session_id = resolve_session_id(
         root=root,
         platform=args.platform,
-        explicit=args.session_id,
+        explicit=explicit_session or bound_session,
     )
-    if args.snapshot and args.input is None and delta is None:
+    if read_only:
         paths = session_paths(root, args.platform, session_id)
         state = load_state(paths["state"], platform=args.platform, session_id=session_id)
         print(json.dumps(consumer_snapshot(state), ensure_ascii=False, indent=2, sort_keys=True))

@@ -62,9 +62,9 @@ class InstallCmdWrapperTest(unittest.TestCase):
             README_KO: [
                 "Windows Command Prompt 또는 PowerShell:",
                 ".\\install.cmd",
-                "PowerShell execution policy",
+                "PowerShell 호출에는",
                 "`-NoProfile -ExecutionPolicy Bypass`",
-                "사용자 또는 머신 execution policy를 변경하지 않는다",
+                "사용자나 시스템에 저장된 실행 정책은 변경하지 않습니다",
             ],
             INSTALLATION_DOC: [
                 ".\\install.cmd",
@@ -508,12 +508,12 @@ class InstallCmdWrapperTest(unittest.TestCase):
             ],
             README_KO: [
                 "## Official Addons",
-                "official addon은 core checkout에서 alias로 설치한다",
+                "Ghost-ALICE 폴더에서 짧은 이름으로 설치하실 수 있습니다",
                 "bash install.sh --addon autopilot",
-                "autopilot repository는 core installer가 소비하는 addon package",
-                "full runtime compatibility claim이 아니다",
+                "Autopilot은 Ghost-ALICE 설치기로 설치하는 애드온 패키지입니다",
+                "모든 실행 환경과의 호환성을 보장하지는 않습니다",
                 "compatibility-matrix.json",
-                "addon-specific detail은 addon repository에 둔다",
+                "애드온별 동작 방식, 상태 파일, 일시 정지·재개 방법, 제거 절차는 해당 애드온 저장소에서 확인해 주세요",
             ],
             INSTALLATION_DOC: [
                 "## Install Official Addons",

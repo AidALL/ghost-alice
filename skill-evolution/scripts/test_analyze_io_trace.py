@@ -306,6 +306,42 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         self.assertEqual(instincts["tool:read"]["decision"], "observe-more")
         self.assertNotIn("events", json.dumps(result, ensure_ascii=False))
 
+    def test_corrected_scope_reaches_report_candidates_without_changing_triage(self) -> None:
+        rows = [{"session": "scope-correction", "tool": "Read", "path": "/repo/config.json"}]
+        state = {
+            "current_goal": "Repair a diagnosed configuration issue",
+            "constraints": ["Keep unrelated files unchanged"],
+            "non_goals": ["Edit configuration during diagnosis", "Publish externally"],
+            "decisions": [
+                {"id": "diagnosis-only", "summary": "Inspect only", "superseded": True},
+                {"id": "repair-approved", "source": "user-explicit", "summary": "Repair is now authorized"},
+            ],
+        }
+        baseline = self.run_analyzer(rows, "--min-count", "1", "--intent-ledger", str(self.write_intent_state(state)))
+        state["latest_scope"] = {"allowed": ["Repair configuration"], "prohibited": ["Publish externally"]}
+        path = self.write_intent_state(state)
+        before = path.read_bytes()
+        report = self.run_analyzer(rows, "--min-count", "1", "--intent-ledger", str(path))
+        context = report["intent_context"]
+        self.assertIn("active_decisions", context)
+        self.assertEqual(context["active_decisions"], [state["decisions"][1]])
+        self.assertEqual(context["latest_scope"], state["latest_scope"])
+        self.assertEqual(context["decision_count"], 1)
+        self.assertEqual(context["constraints"], state["constraints"])
+        self.assertEqual(context["non_goals"], state["non_goals"])
+        for candidate in report["instincts"]:
+            self.assertEqual(candidate["intent_context"]["active_decisions"], context["active_decisions"])
+            self.assertEqual(candidate["intent_context"]["latest_scope"], context["latest_scope"])
+        self.assertEqual([(i["id"], i["decision"]) for i in report["instincts"]],
+                         [(i["id"], i["decision"]) for i in baseline["instincts"]])
+        self.assertEqual(path.read_bytes(), before)
+
+    def test_legacy_intent_context_does_not_invent_decisions_or_scope(self) -> None:
+        for scope in (None, "not a scope object"):
+            report = self.run_analyzer([], "--intent-ledger", str(self.write_intent_state({"latest_scope": scope})))
+            self.assertEqual(report["intent_context"].get("active_decisions"), [])
+            self.assertEqual(report["intent_context"].get("latest_scope"), {})
+
     def test_missing_intent_ledger_keeps_io_trace_only_output(self) -> None:
         rows = [
             {
