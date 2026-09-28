@@ -198,7 +198,9 @@ class PrivilegedAdapterAllowlistRootTest(unittest.TestCase):
         spec = allowlist["autopilot-mode"]
         self.assertEqual(spec["allowed_addon_id"], "autopilot-mode")
         self.assertEqual(spec["expected_skill_name"], "autopilot-mode")
-        self.assertEqual(spec["events"], ["on_agent_stop"])
+        self.assertEqual(spec["events"], ["pre_tool_use", "on_agent_stop"])
+        self.assertEqual(spec["script_rel_by_event"]["pre_tool_use"], "adapters/autopilot_pretool.py")
+        self.assertEqual(spec["hook_id_by_event"]["pre_tool_use"], "prepare-origin")
         self.assertEqual(spec["args_policy"], "no_args")
 
     def test_core_allowlist_data_file_enables_adapter_without_engine_constant_patch(self):

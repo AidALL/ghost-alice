@@ -8,6 +8,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Use this section for changes that have landed after the latest tagged public release.
 
+## [0.4.0] - 2026-09-28
+
+### Changed
+
+- Coordinate Core and Autopilot 0.4.0 and require Core 0.4.0 for the addon's shared SQLite runtime.
+- Move authoritative session/run state and ordered events into transactions; retain validated legacy imports and explicit exports.
+- Bind approval and completion evidence to exact session/input identity and unchanged criterion definitions.
+
+### Fixed
+
+- Preserve exact protected-file timestamps and original completion evidence through recovery.
+- Provide preparation/publication guidance before the first final answer and avoid repeating successful business checks solely for bookkeeping.
+- Preserve substantive answers and evidence-led judgments during Stop recovery.
+- Include both adapter events in install fixtures and execute file-guard regressions in unittest-based CI.
+
+### Validation
+
+- Preserve the delivered implementation's selected evaluation results and historical failure records; do not generalize them to all model behavior.
+- Use repository CI for release verification. See the [release notes](docs/release/2026-09-28-release-notes.md) for migration and evidence limits.
+
 ## [0.3.0] - 2026-09-26
 
 ### Changed

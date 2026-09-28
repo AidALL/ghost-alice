@@ -45,10 +45,24 @@ _TOP_LEVEL_FIELD_RE = re.compile(r"^-\s*[A-Za-z0-9_-]+\s*:")
 # Acceptance-criteria id: a leading `- <id>:` on each line.
 _ACCEPTANCE_ID_RE = re.compile(r"^\s*-\s*([A-Za-z0-9_.=-]+)\s*:", re.M)
 # Claim-evidence entry field patterns, case-insensitive.
-_CLAIM_RE = re.compile(r"^\s*-\s*claim\s*:\s*(.+?)\s*$", re.I)
-_ENTRY_FIELD_RE = re.compile(r"^\s*(criterion|evidence|verdict)\s*:\s*(.+?)\s*$", re.I)
-# A `- none` line, case-insensitive.
-_NONE_LINE_RE = re.compile(r"^-\s*none\b", re.I)
+_CLAIM_RE = re.compile(r"^\s*-\s*claim\s*:\s*(.*?)\s*$", re.I)
+_ENTRY_FIELD_RE = re.compile(r"^\s*(criterion|evidence|verdict)\s*:\s*(.*?)\s*$", re.I)
+# Exactly `none` or `- none`, case-insensitive; never a prefix of pending work.
+_NONE_LINE_RE = re.compile(r"^(?:-\s*)?none\s*$", re.I)
+
+# A completion noun is not an executed-work assertion (e.g. "작업 완료 시간",
+# "작업 간 완료 의존관계"). Require an assertive predicate, or a bare status at
+# clause end. The Korean boundary prevents a past stem inside a hypothetical
+# modifier ("완료했을 때") from becoming an assertion.
+_KOREAN_ASSERTED_END = (
+    r"(?:했(?:습니다|어요|다|음|고|으며)?|하였(?:습니다|다|음)|"
+    r"됐(?:습니다|어요|다|음|고)?|되었(?:습니다|다|음|고)|되었습니다|"
+    r"함|됨|입니다|임)(?![가-힣])"
+)
+_KOREAN_STATUS_END = (
+    r"(?:" + _KOREAN_ASSERTED_END
+    + r"|\s*(?:된\s*상태|상태)(?:입니다|다|임)(?![가-힣])|(?=\s*(?:$|;)))"
+)
 
 _VALID_VERDICTS = ("pass", "fail", "unverified")
 _EXECUTED_WORK_CLAIM_PATTERNS = (
@@ -65,9 +79,9 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
     ),
     re.compile(r"\b(?:all\s+)?tests?\s+(?:pass|passed|green)\b", re.I),
     re.compile(r"\b(?:build|lint|typecheck|test\s+suite)\s+(?:succeeded|passed|is\s+clean)\b", re.I),
-    re.compile(r"(?:작업|변경|수정|구현|요청|이슈|버그).{0,12}(?:완료|끝냈|끝남|고쳤|해결|반영)"),
-    re.compile(r"(?:테스트|빌드|린트|타입체크).{0,12}(?:통과|성공|깨끗)"),
-    re.compile(r"(?:완료|수정|구현|해결|반영)(?:했|했습니다|했다|함|됐|되었습니다)|(?:끝냈|고쳤)(?:습니다|다)"),
+    re.compile(r"(?:작업|변경|수정|구현|요청|이슈|버그).{0,12}(?:완료|끝남|해결|반영)" + _KOREAN_STATUS_END),
+    re.compile(r"(?:테스트|빌드|린트|타입체크).{0,12}(?:통과|성공|깨끗)" + _KOREAN_STATUS_END),
+    re.compile(r"(?:완료|수정|구현|해결|반영)" + _KOREAN_ASSERTED_END + r"|(?:끝냈|고쳤)(?:습니다|다)"),
 )
 
 # Spans that are quotation or code, not the model's own assertion. Stripped before executed-work detection so illustrative output, quoted user text, and fenced examples do not trigger a spurious completion-check demand.
@@ -264,7 +278,7 @@ def requires_completion_check(text):
 
 
 def extract_top_level_field_section(block, field_name):
-    """Return the indented body under a top-level `- field_name:` line.
+    """Return the inline value and indented body of `- field_name:`.
 
     Collects lines after the field header until the next top-level
     `- something:` line, then strips surrounding whitespace.
@@ -278,7 +292,10 @@ def extract_top_level_field_section(block, field_name):
             break
     if start < 0:
         return ""
-    kept = []
+    # An inline value and an indented value express the same field. Keep both
+    # if supplied so an inline "none" cannot hide an unresolved nested item.
+    inline = field_pattern.sub("", lines[start], count=1).strip()
+    kept = [inline] if inline else []
     for index in range(start + 1, len(lines)):
         if _TOP_LEVEL_FIELD_RE.search(lines[index]):
             break
@@ -289,7 +306,7 @@ def extract_top_level_field_section(block, field_name):
 
 
 def section_is_none(section):
-    """True only when every meaningful line is a `- none` line.
+    """True only when every meaningful line is exactly `none` or `- none`.
 
     An empty section returns False.
     """
@@ -310,26 +327,66 @@ def extract_acceptance_criteria_ids(completion_check):
     return ids
 
 
+def _split_entry_fields(line):
+    """Split explicit semicolon fields, preserving quoted command/evidence text.
+
+    Only recognized field labels introduce a new field; other semicolons remain
+    literal evidence. No missing claim, evidence, criterion or verdict is inferred.
+    """
+    parts = []
+    start = 0
+    quote = None
+    escaped = False
+    for index, char in enumerate(line):
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\" and quote:
+            escaped = True
+            continue
+        if quote:
+            if char == quote:
+                quote = None
+            continue
+        if char in ('"', "'", "`"):
+            # Apostrophes inside words are not quotation delimiters.
+            if char != "'" or index == 0 or not line[index - 1].isalnum():
+                quote = char
+            continue
+        if char == ";" and re.match(r"\s*(?:criterion|evidence|verdict)\s*:", line[index + 1:], re.I):
+            parts.append(line[start:index])
+            start = index + 1
+    parts.append(line[start:])
+    return parts
+
+
 def extract_claim_evidence_entries(completion_check):
     """Parse claim-evidence-map into a list of dict entries.
 
-    Each entry begins on a `- claim:` line; subsequent `criterion:`,
-    `evidence:`, and `verdict:` lines attach to the current entry.
+    Each entry begins with `- claim:`; subsequent `criterion:`, `evidence:`,
+    and `verdict:` fields attach to it on separate lines or after semicolons.
     """
     section = extract_top_level_field_section(completion_check, "claim-evidence-map")
     entries = []
     current = None
-    for line in _split_lines(section):
-        claim = _CLAIM_RE.match(line)
-        if claim:
-            current = {"claim": claim.group(1).strip()}
-            entries.append(current)
-            continue
-        if current is None:
-            continue
-        field = _ENTRY_FIELD_RE.match(line)
-        if field:
-            current[field.group(1).lower()] = field.group(2).strip()
+    for raw_line in _split_lines(section):
+        for line in _split_entry_fields(raw_line):
+            claim = _CLAIM_RE.match(line)
+            if claim:
+                current = {"claim": claim.group(1).strip()}
+                entries.append(current)
+                continue
+            if re.match(r"^\s*-\s*\S", line):
+                current = {"_invalid": "Every claim-evidence-map entry must begin with an explicit claim."}
+                entries.append(current)
+                continue
+            field = _ENTRY_FIELD_RE.match(line)
+            if field and current is not None:
+                key = field.group(1).lower()
+                if key in current:
+                    current["_invalid"] = "Claim-evidence-map entries must not contain duplicate fields."
+                else:
+                    current[key] = field.group(2).strip()
     return entries
 
 
@@ -345,6 +402,10 @@ def validate_completion_evidence_map(completion_check):
 
     Returns a deny-reason string on the first failure, else None.
     """
+    for name in ("acceptance-criteria", "claim-evidence-map", "unverified"):
+        headers = re.findall(r"^-\s*" + re.escape(name) + r"\s*:", completion_check, re.I | re.M)
+        if len(headers) > 1:
+            return f"[completion-check] must not contain duplicate {name} sections."
     entries = extract_claim_evidence_entries(completion_check)
     if len(entries) == 0:
         return "[completion-check] must include non-empty claim-evidence-map."
@@ -353,17 +414,27 @@ def validate_completion_evidence_map(completion_check):
     acceptance_id_set = set(acceptance_ids)
     full_form = len(acceptance_ids) > 0
     for entry in entries:
+        if entry.get("_invalid"):
+            return entry["_invalid"]
+        if not entry.get("claim"):
+            return "Every claim-evidence-map entry must include a non-empty claim."
         if full_form:
             criterion = entry.get("criterion") or ""
-            # An entry may reference one or more acceptance ids (comma/space separated); every referenced id must be a known acceptance-criteria id.
-            criterion_ids = [token for token in re.split(r"[,\s]+", criterion.strip()) if token]
+            # Every explicitly referenced ID must be declared, regardless of the list delimiter.
+            criterion_ids = [token for token in re.split(r"[,;\s]+", criterion.strip()) if token]
             if not criterion_ids or any(token not in acceptance_id_set for token in criterion_ids):
                 return "Every claim-evidence-map entry must reference an acceptance-criteria criterion id."
         if not entry.get("evidence"):
             return "Every claim-evidence-map entry must include evidence."
         verdict = entry.get("verdict", "").lower()
-        if verdict not in _VALID_VERDICTS:
+        if not verdict:
             return "Every claim-evidence-map entry must include verdict: pass | fail | unverified."
+        if verdict not in _VALID_VERDICTS:
+            return (
+                "Invalid verdict value in claim-evidence-map. Write verdict: pass or verdict: fail "
+                "on its own line, without punctuation, quotes, or commentary. If the claim is "
+                "unverified, report partial state without a finalized [completion-check]."
+            )
         if verdict == "unverified":
             return (
                 "A finalized [completion-check] cannot contain an 'unverified' verdict. " "Verify the claim to pass/fail, or report partial state in prose " "without a [completion-check] block."
@@ -382,12 +453,12 @@ def validate_completion_evidence_map(completion_check):
 def _split_skill_tokens(raw):
     """Split a skills-loaded value into normalized skill tokens.
 
-    Accepts comma- or newline-separated values; strips surrounding brackets,
+    Accepts comma-, semicolon- or newline-separated values; strips surrounding brackets,
     quotes, whitespace, and zero-width characters so that visually-identical
     values do not produce false negatives.
     """
     tokens = []
-    for part in re.split(r"[,\n]+", raw):
+    for part in re.split(r"[,;\n]+", raw):
         token = _ZERO_WIDTH_RE.sub("", part).strip().strip("[]").strip().strip("\"'").strip()
         if token:
             tokens.append(token)
@@ -401,7 +472,7 @@ def _skill_name(token):
     while a different skill such as ``verification-before-completion-v2`` keeps its
     suffix and therefore does not match the canonical name on exact comparison.
     """
-    return re.split(r"[\s(]", token, maxsplit=1)[0].strip().rstrip(":").lower()
+    return re.split(r"[\s(]", token, maxsplit=1)[0].strip().rstrip(":.").lower()
 
 
 def extract_all_control_blocks(text, name):
@@ -435,7 +506,7 @@ def extract_skills_loaded(io_trace):
     """Return skill tokens from an io-trace `skills-loaded` field.
 
     Accepts three equivalent serializations so the gate is format-agnostic:
-      - inline CSV:   ``- skills-loaded: a, b``
+      - inline list:  ``- skills-loaded: a, b`` or ``a; b``
       - flow list:    ``- skills-loaded: [a, b]``
       - nested list:  ``- skills-loaded:`` then indented ``  - a`` / ``  - b`` lines
     """

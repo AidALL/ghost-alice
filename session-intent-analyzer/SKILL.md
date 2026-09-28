@@ -24,17 +24,17 @@ session-intent-analyzer maintains a small per-session ledger of the user's curre
 
 ## Storage Contract
 
-- The ledger lives under `.tmp/session-intent/<platform>/<session-id>/` in the Ghost-ALICE repo root.
+- The authoritative ledger lives in `.tmp/session-intent/ghost-state.sqlite3` in the Ghost-ALICE repo root, keyed by exact platform and session ID.
 - The installer passes `--root <repo>/.tmp/session-intent` to hook commands. Manual runs may override the root with `GHOST_ALICE_SESSION_INTENT_ROOT`.
-- `intent-state.json` stores the latest session intent state.
+- SQLite stores the latest state and ordered semantic events in one transaction. `intent-state.json` and `intent-events.jsonl` are legacy inputs or explicit exports, never authority after import. Read with `scripts/session_intent_ledger.py --read-state --root <receipt.ledger_root> --platform <receipt.platform> --session-id <receipt.session_id>`; do not read or edit the compatibility path directly.
 - Hooks record digest-only observations and intake status. Agents add semantic deltas only when goals, constraints, decisions, or acceptance criteria materially change.
 - Scalar intent fields are replaced by the latest semantic delta. Lists such as constraints, non-goals, open questions, criteria, and decisions are deduped or merged by id.
 - `conduct_feedback` records compressed behavioral corrections, how the agent operated versus what the user asked, and merges by id while preserving `occurrence_count`. Repeated same-id corrections in one session increment `occurrence_count`; status-only updates do not. session-intent-analyzer captures it and skill-evolution consumes it, so the behavioral-correction loop is complete only across both skills, not in skill-evolution alone.
 - `model_security_decision` is owned by jailbreak-detector. Intake preserves it and must not clobber it.
 - Only a current-lineage block decision is carried to `downstream-gates.json`. Non-block decisions and non-current-lineage decisions are not carried.
-- `intent-events.jsonl` records input observations and intent updates.
+- The `--read-events` API returns input observations and normalized semantic changes with input and revision references. New change records preserve supported intermediate intent; they do not reconstruct missing historical dialogue.
 - `security-events.jsonl` records security judgments.
-- `../current-session.json` points to the current platform session and state path.
+- Database discovery metadata replaces the platform pointer for new writes. Legacy `../current-session.json` is only a discovery hint; it never supplies a write identity.
 - Raw prompts, full conversations, tool output, and secret values are never stored.
 - User input is stored only as digest and length.
 - Detailed schema lives in `references/ledger-schema.md`.
@@ -48,14 +48,20 @@ session-intent-analyzer maintains a small per-session ledger of the user's curre
 
 ## Procedure
 
-1. When the current hook supplies a `[session-intent-receipt]`, use its exact `ledger_root`, `platform`, and `session_id` as explicit `--root`, `--platform`, and `--session-id` arguments for semantic updates; use its `state_path` for downstream context. The receipt binds to the completed observation even if another session changes `current-session.json`. Do not replace it with an installed script's default root or a later pointer. Codex CLI writes are bound to the native `CODEX_THREAD_ID` when available; other hosts may supply `GHOST_ALICE_SESSION_ID`. A conflicting explicit id is rejected before writing. Without either binding, writes require an explicitly selected `--session-id`; the shared pointer is not a write identity. Hooks still resolve payload session fields before environment and pointer fallbacks for digest-only intake.
+1. When the current hook supplies a `[session-intent-receipt]`, pass its exact `ledger_root`, `platform`, `session_id`, and `input_event_id` as explicit `--root`, `--platform`, `--session-id`, and `--expected-input-event-id` arguments for semantic updates; read downstream context with `--read-state` using the same coordinates; `state_path` is a compatibility locator and may not exist. Do not replace them with an installed script's default root or a later shared pointer. Codex CLI writes are bound to the native `CODEX_THREAD_ID` when available; other hosts may supply `GHOST_ALICE_SESSION_ID`. A conflicting explicit id is rejected before writing. Without either binding, writes require an explicitly selected `--session-id`. Hook intake resolves identity from payload fields and then the appropriate host environment; it never uses the shared pointer as write identity. Missing identity produces a degraded observation without writing a guessed session.
 2. For hook observation, store only `input_digest`, `input_char_count`, `intake_status=observed`, and `intent_delta_status=not-provided`.
 3. Add a semantic delta only when `current_goal`, `user_intent_summary`, `constraints`, `non_goals`, `decisions`, `open_questions`, or `acceptance_criteria` materially changes. When a completion, recommendation, or choice is anticipated, record verifiable `acceptance_criteria` from user intent so the final `[completion-check]` can carry them into `acceptance-criteria` and bind each claim in `claim-evidence-map`. When the user explicitly revises a boundary, record a decision naming the replaced restriction, the authorized exception, and the restrictions that still apply. Accumulating a new goal alone does not make that relationship clear.
 4. Keep corrective lessons general. Do not store long episode details. Preserve the reusable reasoning pattern, not case detail. When the user corrects the agent's conduct (under-delivery, silent scope narrowing, reporting or asking instead of executing, punting a decision the content could resolve, an unrequested trace), record compressed `conduct_feedback` with a stable `id` and a reusable `summary` or `corrective_rule`. Judge correction by the asserted mismatch between a prior agent action or claim and the applicable `current_goal`, `constraints`, `non_goals`, `decisions`, or `acceptance_criteria`, not by keywords. Apply the evidence boundary below before recording or incrementing a correction. skill-evolution consumes these entries as recommendations; apply changes only when the user asks to update.
 5. Use `consumer_hints` when downstream gates need immediate caution or completion criteria.
-6. Use `scripts/session_intent_ledger.py` to update `intent-state.json` and `intent-events.jsonl`.
-7. If security signals exist, pass `intent_summary` and `intent-state.json` to jailbreak-detector.
-8. For repeated-action analysis, pass `--intent-ledger <intent-state.json>` to skill-evolution.
+6. Use `scripts/session_intent_ledger.py` to update the SQLite state and audit atomically. An active input requires the expected input ID. If a newer input invalidates the receipt, read and interpret that input before deciding what to write; never attach a stale judgment to a fresh ID. The writer also accepts `--expected-revision` when a decision must match an exact inspected state revision.
+7. If security signals exist, pass `intent_summary` and the authoritative state returned by `--read-state` to jailbreak-detector.
+8. For repeated-action analysis, pass `--intent-ledger <receipt.state_path>` to skill-evolution; its reader resolves that compatibility locator through the storage API.
+
+Substitute the current receipt and a compressed semantic delta in this example:
+
+```bash
+session_intent_ledger.py --root "<receipt.ledger_root>" --platform "<receipt.platform>" --session-id "<receipt.session_id>" --expected-input-event-id "<receipt.input_event_id>" --delta-json '{"current_goal":"<compressed-current-goal>"}'
+```
 
 Correction evidence boundary:
 

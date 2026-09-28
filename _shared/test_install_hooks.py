@@ -803,7 +803,7 @@ class TestMessageLanguage(unittest.TestCase):
             message = second_payload["systemMessage"]
             self.assertIn("gate-opened: jailbreak-detector silent allow", message)
             self.assertNotIn("decision=allow", message)
-            self.assertIn("intent-ledger: read", message)
+            self.assertIn("intent-ledger: use session_intent_ledger.py --read-state", message)
             self.assertIn("task-router-step", message)
             self.assertIn("atomic meaning decomposition", message)
             self.assertIn("focus-layer/scope-reopen", message)
@@ -5072,9 +5072,12 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             override = root / "override-python"
-            override.symlink_to(sys.executable)
+            override.write_text(
+                "#!/bin/sh\nexport GHOST_OVERRIDE_PROBE=selected\n"
+                f"exec {shlex.quote(sys.executable)} \"$@\"\n", encoding="utf-8")
+            override.chmod(0o700)
             hook_script = root / "hook.py"
-            hook_script.write_text("import sys; print(sys.executable)\n", encoding="utf-8")
+            hook_script.write_text("import os; print(os.environ.get('GHOST_OVERRIDE_PROBE', 'not-selected'))\n", encoding="utf-8")
             command = install_hooks._hook_python_invocation(hook_script)
             result = subprocess.run(
                 ["/bin/sh", "-c", command],
@@ -5082,7 +5085,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
                 capture_output=True, text=True, check=False,
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr)
-            self.assertEqual(Path(result.stdout.strip()), override)
+            self.assertEqual(result.stdout.strip(), "selected")
 
     def test_hook_python_invocation_resolves_compatible_python_from_runtime_path(self):
         if os.name == "nt":

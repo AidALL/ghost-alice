@@ -55,6 +55,8 @@ class DerivationTests(unittest.TestCase):
         (self.session_dir / "intent-events.jsonl").write_text(
             json.dumps({
                 "event": "user-input-observed",
+                "platform": "claude",
+                "session_id": self.session,
                 "event_id": event_id,
                 "input_digest": digest,
                 "input_char_count": char_count,
@@ -95,7 +97,7 @@ class DerivationTests(unittest.TestCase):
                     "schema_version": "session-intent-ledger.v1", "platform": platform, "session_id": "native",
                     "model_security_decision": {"decision": "block", "risk_flags": ["scope-drift"], "input_event_id": "e-native"},
                 }))
-                (session_dir / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-native"}) + "\n")
+                (session_dir / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "platform": platform, "session_id": "native", "event_id": "e-native", "input_digest": "sha256:native"}) + "\n")
                 (self.tmp / platform / "current-session.json").write_text(json.dumps({"schema_version": "session-intent-current.v1", "session_id": "foreign"}))
                 gate_path = session_dir / "downstream-gates.json"
                 gate_path.unlink(missing_ok=True)
@@ -116,7 +118,8 @@ class DerivationTests(unittest.TestCase):
     def test_native_reminder_does_not_recommend_foreign_pointer_state(self) -> None:
         session_dir = self.tmp / "codex/native"
         session_dir.mkdir(parents=True)
-        (session_dir / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-native"}) + "\n")
+        (session_dir / "intent-state.json").write_text(json.dumps({"schema_version": "session-intent-ledger.v1", "platform": "codex", "session_id": "native"}))
+        (session_dir / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "platform": "codex", "session_id": "native", "event_id": "e-native", "input_digest": "sha256:native"}) + "\n")
         (self.tmp / "codex/current-session.json").write_text(json.dumps({
             "schema_version": "session-intent-current.v1", "session_id": "foreign",
             "state_path": str(self.tmp / "codex/foreign/intent-state.json"),
@@ -149,7 +152,7 @@ class DerivationTests(unittest.TestCase):
                     "schema_version": "session-intent-ledger.v1", "platform": platform, "session_id": "write-failure",
                     "model_security_decision": {"decision": "block", "risk_flags": ["scope-drift"], "input_event_id": "e-current"},
                 }))
-                (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-current"}) + "\n")
+                (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "platform": platform, "session_id": "write-failure", "event_id": "e-current", "input_digest": "sha256:current"}) + "\n")
                 (session / "downstream-gates.json").mkdir()
                 out = subprocess.run(["node", str(HOOK), "--platform", platform, "--event", "PreToolUse",
                                       "--hook", "tool-checkpoint", "--session-intent-root", str(self.tmp)],

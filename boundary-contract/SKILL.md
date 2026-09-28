@@ -20,6 +20,7 @@ boundary-contract declares the work boundary before implementation, modification
   - [verification](#verification)
 - [Source Rules](#source-rules)
 - [Tool-Checkpoint Link](#tool-checkpoint-link)
+- [Exact Protected-File Evidence](#exact-protected-file-evidence)
 - [Failure Modes](#failure-modes)
 
 
@@ -96,11 +97,19 @@ Use verification after implementation. Separate verification commands, screensho
 
 ## Source Rules
 
-- `user-explicit`: The user directly stated the decision.
+- Assign a source to each atomic proposition. Split combined statements with different origins into separate items; a source label must not carry across mixed origins.
+- `user-explicit`: The user directly stated the decision. Actual human approval remains user-explicit.
 - `inferred`: The agent is locking a conservative assumption for this phase.
-- `previous-tool`: A tool result produced the decision.
+- `previous-tool`: A tool result produced the decision, including observed hook/runtime-generated controls even when transported with `role=user`. A generated approval digest and its preservation requirement have this source; transport role does not turn them into human approval.
 - `system-doc`: AGENTS.md, SKILL.md, or policy docs require it.
 - `unknown`: The source is unclear. Do not use it as an execution-phase lock.
+
+Keep a user-protected file and a runtime generation separate:
+
+```text
+- Preserve protected.txt as the user requested. [source: user-explicit]
+- Preserve the hook-provided approval-generation value. [source: previous-tool]
+```
 
 ## Tool-Checkpoint Link
 
@@ -112,6 +121,21 @@ When a boundary contract is active, each tool checkpoint must include:
 ```
 
 If `contract-check` does not map to the contract, do not make the tool call. Renew the contract or ask the user.
+
+## Exact Protected-File Evidence
+
+When an execution contract protects existing files or requires exact modification-time comparisons, use the installed `scripts/file_guard.py` before dependent writes. It captures file content, exact timestamp, identity and mode without writing task files. Resolve the script relative to this loaded skill directory; read its `--help` only if invocation details are needed.
+
+```text
+python3 <loaded-skill-directory>/scripts/file_guard.py capture --path <protected-file> [--path <another-protected-file>]
+python3 <loaded-skill-directory>/scripts/file_guard.py check --token <unchanged-token-from-capture>
+```
+
+`capture` emits JSON containing a string `token` and its `paths`. Keep that token verbatim in current-session tool state and pass it to `check` using the host's structured arguments or proper shell quoting. Do not decode, regenerate or hand-copy its timestamp fields. Do not send nanosecond timestamps or large identity integers through JavaScript `Number`, JSON numeric fields, floating-point seconds or rounded displays. Do not create a replacement numeric baseline when the helper is available.
+
+Capture once before the protected operation. Check immediately before a dependent write, and after the operation when preservation is an acceptance condition. A failed check stops the dependent write; investigate the original baseline instead of replacing it with the current state. If the installed helper is unavailable, keep capture and comparison in one exact-integer process or persist integer fields as strings from their original source. Never recover lost precision by converting an already rounded number to a string.
+
+The guard observes regular files at a point in time; it is not an atomic write lock, authorization token or business-completion proof. It rejects symlink paths and parent traversal (`..`); use the actual absolute file path. It does not cover directory membership. Preserve any additional contract-specific checks separately. A bookkeeping-only recovery does not itself invalidate a completed guard or business check; do not rerun either without a relevant change or contrary evidence.
 
 ## Failure Modes
 

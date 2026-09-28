@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
-import { deriveDownstreamGateFromDecision, DownstreamGatePersistenceError } from "./derive_downstream_gate.mjs";
+import { deriveDownstreamGateFromDecision, DownstreamGatePersistenceError, isCanonicalIdentityComponent, readSessionIntentSnapshot, inputLineageMatches } from "./derive_downstream_gate.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -53,58 +53,10 @@ function sessionIntentRoot(configuredRoot = "") {
 }
 
 function sessionIntentDir(platform, sessionId, root = "") {
-  const safePlatform = safePathComponent(platform || "codex");
-  const safeSession = safePathComponent(sessionId || "unknown");
-  return path.join(sessionIntentRoot(root), safePlatform, safeSession);
-}
-
-function currentSessionPointerPath(platform, root = "") {
-  const safePlatform = safePathComponent(platform || "codex");
-  return path.join(sessionIntentRoot(root), safePlatform, "current-session.json");
-}
-
-function safePathComponent(value, fallback = "unknown") {
-  const cleaned = String(value || fallback)
-    .trim()
-    .replace(/[^A-Za-z0-9_.=-]+/g, "-")
-    .replace(/^[.-]+|[.-]+$/g, "");
-  return cleaned || fallback;
-}
-
-function readCurrentSessionPointer(platform, root = "") {
-  const pointer = readJsonFile(currentSessionPointerPath(platform, root), {});
-  if (!pointer || pointer.schema_version !== "session-intent-current.v1") {
-    return "";
+  if (!isCanonicalIdentityComponent(platform) || !isCanonicalIdentityComponent(sessionId)) {
+    throw new Error("Invalid session intent identity");
   }
-  return firstNonEmpty(pointer.session_id);
-}
-
-function sessionIntentContext(platform, input, root = "") {
-  const sessionId = inputSessionId(platform, input, root, "");
-  if (!sessionId) {
-    return null;
-  }
-
-  const pointer = readJsonFile(currentSessionPointerPath(platform, root), {});
-  if (!pointer || pointer.schema_version !== "session-intent-current.v1") {
-    return null;
-  }
-  if (safePathComponent(pointer.session_id, "") !== sessionId) {
-    return null;
-  }
-
-  const statePath = firstNonEmpty(
-    pointer.state_path,
-    path.join(sessionIntentDir(platform, sessionId, root), "intent-state.json"),
-  );
-  if (!statePath) {
-    return null;
-  }
-  return {
-    sessionId,
-    statePath,
-    eventsPath: path.join(path.dirname(statePath), "intent-events.jsonl"),
-  };
+  return path.join(sessionIntentRoot(root), platform, sessionId);
 }
 
 function readHookInput() {
@@ -194,16 +146,21 @@ function firstNonEmpty(...values) {
 }
 
 function inputSessionId(platform, input, root = "", fallback = "") {
-  return safePathComponent(firstNonEmpty(
+  if (!isCanonicalIdentityComponent(platform)) return "";
+  for (const candidate of [
     input.session_id,
     input.sessionId,
     input.conversation_id,
     input.thread_id,
     platform === "codex" ? process.env.CODEX_THREAD_ID : "",
     process.env.GHOST_ALICE_SESSION_ID,
-    readCurrentSessionPointer(platform, root),
-    fallback,
-  ), fallback);
+  ]) {
+    if (candidate === undefined || candidate === null || candidate === "") continue;
+    // Reject invalid native identity; do not sanitize or fall through to a
+    // different session. A mutable discovery pointer cannot bind a hook call.
+    return isCanonicalIdentityComponent(candidate) ? candidate : "";
+  }
+  return "";
 }
 
 function hasUndecidedPendingMerge(platform) {
@@ -278,21 +235,23 @@ function toolCheckpointEnforcementEnabled(platform = "codex", env = process.env)
   return !new Set(["0", "false", "off", "no", "reminder"]).has(raw);
 }
 
-function downstreamGateState(platform, input, root = "") {
+function downstreamGateState(platform, input, root = "", intentSnapshot = undefined) {
   const sessionId = inputSessionId(platform, input, root, "");
   if (!sessionId) {
     return null;
   }
   const gatePath = path.join(sessionIntentDir(platform, sessionId, root), "downstream-gates.json");
   const state = readJsonFile(gatePath, null);
-  if (!state || state.schema_version !== "downstream-gates.v1") {
+  if (!state || state.schema_version !== "downstream-gates.v1"
+      || state.platform !== platform || state.session_id !== sessionId) {
     return null;
   }
   if (state.gate !== "jailbreak-detector") {
     return null;
   }
   const dirPath = sessionIntentDir(platform, sessionId, root);
-  const latestEvent = latestIntentEvent(dirPath);
+  const snapshot = intentSnapshot === undefined ? readSessionIntentSnapshot(dirPath, platform, sessionId) : intentSnapshot;
+  const latestEvent = snapshot?.latestInput;
   const match = downstreamGateMatchesLatestEvent(state, latestEvent);
   if (!match.ok) {
     return { ...state, stale: true, stale_reason: match.reason, legacy: match.legacy === true };
@@ -307,23 +266,6 @@ function readJsonLine(line) {
   } catch {
     return null;
   }
-}
-
-function latestIntentEvent(sessionDirPath) {
-  const eventsPath = path.join(sessionDirPath, "intent-events.jsonl");
-  let lines = [];
-  try {
-    lines = fs.readFileSync(eventsPath, "utf8").trim().split(/\r?\n/u).filter(Boolean);
-  } catch {
-    return null;
-  }
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const row = readJsonLine(lines[index]);
-    if (row && row.event === "user-input-observed") {
-      return row;
-    }
-  }
-  return null;
 }
 
 function sha256Text(value) {
@@ -369,11 +311,8 @@ function downstreamGateMatchesLatestEvent(gate, latestEvent) {
   if (!latestEvent) {
     return { ok: false, legacy: false, reason: "stale downstream gate: latest input event missing" };
   }
-  if (gate.input_event_id && latestEvent.event_id && gate.input_event_id !== latestEvent.event_id) {
-    return { ok: false, legacy: false, reason: "stale downstream gate: input_event_id mismatch" };
-  }
-  if (gate.input_digest && latestEvent.input_digest && gate.input_digest !== latestEvent.input_digest) {
-    return { ok: false, legacy: false, reason: "stale downstream gate: input_digest mismatch" };
+  if (!inputLineageMatches(gate, latestEvent)) {
+    return { ok: false, legacy: false, reason: "stale downstream gate: input lineage mismatch" };
   }
   return { ok: true, legacy: false };
 }
@@ -391,7 +330,7 @@ function taskRouterReleaseMessage(sessionId, statePath, gatePath, mode) {
     "Do not skip task-router because the turn looks like answer-only conversation or because a prior turn was already routed.",
     "Do not describe the governance order as task-router before session-intent-analyzer or before the jailbreak-detector downstream gate.",
     `gate-opened: jailbreak-detector silent allow for session ${sessionId}; no current block decision recorded.`,
-    `intent-ledger: read ${statePath} after session-intent preflight.`,
+    `intent-ledger: use session_intent_ledger.py --read-state --root ${JSON.stringify(path.dirname(path.dirname(path.dirname(statePath))))} --platform ${JSON.stringify(path.basename(path.dirname(path.dirname(statePath))))} --session-id ${JSON.stringify(sessionId)} after session-intent preflight. Compatibility export: ${statePath} is not authoritative.`,
     gateDetail,
     "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
   ].join("\n");
@@ -400,18 +339,20 @@ function taskRouterReleaseMessage(sessionId, statePath, gatePath, mode) {
 function taskRouterReminderMessage(platform, input, root = "") {
   const sessionId = inputSessionId(platform, input, root, "");
   if (!sessionId || sessionId === "unknown") {
-    return "hook-reminder: task-router withheld until session-intent-analyzer writes current-session.json and the current-lineage block check can run. Do not run task-router yet.";
+    return "hook-reminder: task-router withheld until session-intent-analyzer observes an explicitly bound session and the current-lineage block check can run. Do not run task-router yet.";
   }
 
   const sessionDirPath = sessionIntentDir(platform, sessionId, root);
-  const gate = downstreamGateState(platform, { ...input, session_id: sessionId }, root);
+  const snapshot = readSessionIntentSnapshot(sessionDirPath, platform, sessionId);
+  if (snapshot?.degraded) {
+    return `hook-reminder: task-router withheld: the session-intent ledger is degraded for session ${sessionId}. Repair intake before routing; do not reuse the persisted prior-input decision.`;
+  }
+  if (!snapshot?.latestInput) {
+    return `hook-reminder: task-router withheld until session-intent-analyzer records current input for session ${sessionId}. Continue intake/bootstrap; do not run task-router yet.`;
+  }
+  const gate = downstreamGateState(platform, { ...input, session_id: sessionId }, root, snapshot);
   if (!gate) {
-    const latestEvent = latestIntentEvent(sessionDirPath);
-    if (!latestEvent) {
-      return `hook-reminder: task-router withheld until session-intent-analyzer writes current-session.json for session ${sessionId}. Continue intake/bootstrap; do not run task-router yet.`;
-    }
-    const pointer = readJsonFile(currentSessionPointerPath(platform, root), {});
-    const statePath = firstNonEmpty(pointer && pointer.schema_version === "session-intent-current.v1" && safePathComponent(pointer.session_id) === sessionId ? pointer.state_path : "", path.join(sessionDirPath, "intent-state.json"));
+    const statePath = path.join(sessionDirPath, "intent-state.json");
     return taskRouterReleaseMessage(sessionId, statePath, path.join(sessionDirPath, "downstream-gates.json"), "absent");
   }
   if (gate.stale) {
@@ -422,8 +363,7 @@ function taskRouterReminderMessage(platform, input, root = "") {
     return `hook-reminder: task-router withheld because jailbreak-detector downstream gate is not open. decision=${decision}. Do not run task-router or downstream work.`;
   }
 
-  const pointer = readJsonFile(currentSessionPointerPath(platform, root), {});
-  const statePath = firstNonEmpty(pointer && pointer.schema_version === "session-intent-current.v1" && safePathComponent(pointer.session_id) === sessionId ? pointer.state_path : "", path.join(sessionDirPath, "intent-state.json"));
+  const statePath = path.join(sessionDirPath, "intent-state.json");
   return taskRouterReleaseMessage(sessionId, statePath, path.join(sessionDirPath, "downstream-gates.json"), "present-nonblock");
 }
 
@@ -448,8 +388,9 @@ function toolCheckpointSurfaceLineage(platform, input, root = "") {
   if (!sessionId || sessionId === "unknown") {
     return null;
   }
-  const safePlatform = safePathComponent(platform || "codex");
-  const latestEvent = latestIntentEvent(sessionIntentDir(platform, sessionId, root));
+  const safePlatform = platform;
+  const snapshot = readSessionIntentSnapshot(sessionIntentDir(platform, sessionId, root), platform, sessionId);
+  const latestEvent = snapshot?.latestInput;
   const eventId = firstNonEmpty(latestEvent?.event_id);
   const inputDigest = firstNonEmpty(latestEvent?.input_digest);
   if (eventId || inputDigest) {
@@ -458,6 +399,7 @@ function toolCheckpointSurfaceLineage(platform, input, root = "") {
       key: `${safePlatform}:${sessionId}:intent:${eventId}:${inputDigest}`,
     };
   }
+  if (snapshot?.degraded || snapshot?.lineageSource === "state") return null;
   if (safePlatform === "claude") {
     const transcriptDigest = latestTranscriptUserDigest(firstNonEmpty(input.transcript_path, input.transcriptPath));
     return {
@@ -498,11 +440,11 @@ function shouldSurfaceToolCheckpoint(platform, input, root = "") {
   });
 }
 
-function toolCheckpointDecision(platform, input, sessionIntentRootArg = "") {
+function toolCheckpointDecision(platform, input, sessionIntentRootArg = "", intentSnapshot = undefined) {
   if (!toolCheckpointEnforcementEnabled(platform)) {
     return null;
   }
-  const downstreamGate = downstreamGateState(platform, input, sessionIntentRootArg);
+  const downstreamGate = downstreamGateState(platform, input, sessionIntentRootArg, intentSnapshot);
   if (!downstreamGate?.stale
     && (downstreamGate?.opened === false || downstreamGate?.decision === "block")) {
     return { deny: true, reason: downstreamGateDenialReason(downstreamGate) };
@@ -524,9 +466,18 @@ try {
 
   if (hook === "tool-checkpoint" && (event === "BeforeTool" || event === "PreToolUse")) {
     const gateSession = inputSessionId(platform, input, args["session-intent-root"], "");
+    const snapshot = gateSession ? readSessionIntentSnapshot(
+      sessionIntentDir(platform, gateSession, args["session-intent-root"]), platform, gateSession) : null;
     if (gateSession && gateSession !== "unknown") {
       try {
-        deriveDownstreamGateFromDecision(sessionIntentDir(platform, gateSession, args["session-intent-root"]), platform, gateSession);
+        const derived = deriveDownstreamGateFromDecision(sessionIntentDir(platform, gateSession, args["session-intent-root"]), platform, gateSession, snapshot);
+        // The model block was established from this coherent state snapshot.
+        // A concurrent projection writer must not erase it between derivation
+        // and enforcement by replacing/truncating the optional gate file.
+        if (derived && toolCheckpointEnforcementEnabled(platform)) {
+          emit(denialPayload(platform, event, message, downstreamGateDenialReason(derived)));
+          process.exit(0);
+        }
       } catch (error) {
         if (!(error instanceof DownstreamGatePersistenceError)) {
           throw error;
@@ -539,7 +490,7 @@ try {
         }
       }
     }
-    const decision = toolCheckpointDecision(platform, input, args["session-intent-root"]);
+    const decision = toolCheckpointDecision(platform, input, args["session-intent-root"], snapshot);
     if (decision && decision.deny) {
       emit(denialPayload(platform, event, message, decision.reason));
       process.exit(0);

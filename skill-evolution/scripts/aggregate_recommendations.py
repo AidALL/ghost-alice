@@ -18,6 +18,7 @@ Dependencies: Python 3.11+ standard library only.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from datetime import datetime, timezone
@@ -67,14 +68,27 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
     now_dt = parse_ts(now) or datetime.now(timezone.utc)
     by_id: dict[str, dict[str, Any]] = {}
     state_files = iter_state_files(root)
-    for state_file in state_files:
-        try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
+    if (root / "ghost-state.sqlite3").exists() or (root / ".sqlite-authority.json").exists():
+        entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
+        spec = importlib.util.spec_from_file_location("ghost_backlog_ledger", entry)
+        ledger = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ledger)
+        records = ledger.list_session_states(root)
+        session_count = len(records)
+    else:
+        records = []
+        session_count = len(state_files)
+        for state_file in state_files:
+            try:
+                data = json.loads(state_file.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict):
+                records.append({"session_id": state_file.parent.name, "platform": state_file.parent.parent.name, **data})
+    for data in records:
         if not isinstance(data, dict):
             continue
-        session = str(data.get("session_id") or state_file.parent.name)
+        session = (str(data.get("platform") or "unknown"), str(data.get("session_id") or "unknown"))
         for entry in data.get("conduct_feedback", []):
             if not isinstance(entry, dict):
                 continue
@@ -139,7 +153,7 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
     recommendations.sort(key=lambda item: item["occurrence_count"], reverse=True)
     return {
         "root": str(root),
-        "session_files": len(state_files),
+        "session_files": session_count,
         "recommendation_count": len(recommendations),
         "recommendations": recommendations,
     }

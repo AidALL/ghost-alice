@@ -52,18 +52,19 @@ class ModelRecordedSecurityDecisionIntegration(unittest.TestCase):
         )
 
     def latest_input_event_id(self) -> str:
-        events = (self.session_dir() / "intent-events.jsonl").read_text(encoding="utf-8").splitlines()
-        for line in reversed(events):
-            row = json.loads(line)
-            if row.get("event") == "user-input-observed" and row.get("event_id"):
-                return row["event_id"]
-        return ""
+        result = subprocess.run(
+            [sys.executable, str(LEDGER), "--root", str(self.tmp),
+             "--platform", "claude", "--session-id", self.session, "--read-state"],
+            check=True, capture_output=True, text=True,
+        )
+        return json.loads(result.stdout)["latest_input_event_id"]
 
     def record_decision(self, decision_record: dict) -> None:
         # simulates jailbreak-detector recording model_security_decision (delta, no --input)
         subprocess.run(
             [sys.executable, str(LEDGER), "--root", str(self.tmp),
              "--platform", "claude", "--session-id", self.session,
+             "--expected-input-event-id", decision_record["input_event_id"],
              "--delta-json", json.dumps({"model_security_decision": decision_record})],
             check=True, capture_output=True, text=True,
         )

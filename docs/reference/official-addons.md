@@ -26,7 +26,7 @@ bash install.sh --addon autopilot
 | --- | --- | --- | --- |
 | autopilot | Continue verified work items through the privileged autonomous adapter after explicit approval. | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-The coordinated release pair is core `0.3.0` and Autopilot `0.3.0`. Autopilot retains a technical minimum of core `0.2.2`; use the coordinated pair for the current session-intent and continuation fixes. Product release numbers do not replace the addon compatibility matrix. See the [0.3.0 release notes](../release/2026-09-26-release-notes.md) for what changed and what was verified.
+The coordinated release pair is core `0.4.0` and Autopilot `0.4.0`. Autopilot requires core `0.4.0` for its shared SQLite runtime; use the coordinated pair for the current session-intent and continuation fixes. Product release numbers do not replace the addon compatibility matrix. See the [0.4.0 release notes](../release/2026-09-28-release-notes.md) for what changed and what was verified.
 
 ## Custom, Tenant, And Local Development Addons
 

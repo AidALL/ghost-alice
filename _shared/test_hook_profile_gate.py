@@ -111,8 +111,9 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 session = root / platform / "native"
                 session.mkdir(parents=True)
                 (root / platform / "current-session.json").write_text(json.dumps({"schema_version": "session-intent-current.v1", "session_id": "foreign"}))
-                (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "event_id": "e-native"}) + "\n")
-                (session / "downstream-gates.json").write_text(json.dumps({"schema_version": "downstream-gates.v1", "gate": "jailbreak-detector", "decision": "block", "input_event_id": "e-native"}))
+                (session / "intent-state.json").write_text(json.dumps({"schema_version": "session-intent-ledger.v1", "platform": platform, "session_id": "native"}))
+                (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "platform": platform, "session_id": "native", "event_id": "e-native", "input_digest": "sha256:native"}) + "\n")
+                (session / "downstream-gates.json").write_text(json.dumps({"schema_version": "downstream-gates.v1", "platform": platform, "session_id": "native", "gate": "jailbreak-detector", "decision": "block", "input_event_id": "e-native"}))
             env = {"GHOST_ALICE_SESSION_INTENT_ROOT": str(root), "CODEX_THREAD_ID": "native", "GHOST_ALICE_SESSION_ID": "foreign"}
             self.assertTrue(hook_profile_gate._has_current_downstream_block(env, {}, "codex"))
             self.assertFalse(hook_profile_gate._has_current_downstream_block(env, {"session_id": "foreign"}, "codex"))
@@ -223,6 +224,8 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             root = Path(temp_root)
             session_dir = root / "codex" / "s-block"
             session_dir.mkdir(parents=True)
+            (session_dir / "intent-state.json").write_text(json.dumps({
+                "schema_version": "session-intent-ledger.v1", "platform": "codex", "session_id": "s-block"}))
             (root / "codex" / "current-session.json").write_text(
                 json.dumps({
                     "schema_version": "session-intent-current.v1",
@@ -236,6 +239,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             (session_dir / "intent-events.jsonl").write_text(
                 json.dumps({
                     "event": "user-input-observed",
+                    "platform": "codex", "session_id": "s-block",
                     "event_id": "evt-current",
                     "input_digest": "sha256:current",
                 })
@@ -267,7 +271,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                     "GHOST_ALICE_PLATFORM": "codex",
                     "GHOST_ALICE_SESSION_INTENT_ROOT": str(root),
                 },
-                hook_payload={},
+                hook_payload={"session_id": "s-block"},
             )
 
         self.assertTrue(context["security_boundary"])
@@ -277,6 +281,8 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             root = Path(temp_root)
             session_dir = root / "codex" / "s-stale"
             session_dir.mkdir(parents=True)
+            (session_dir / "intent-state.json").write_text(json.dumps({
+                "schema_version": "session-intent-ledger.v1", "platform": "codex", "session_id": "s-stale"}))
             (root / "codex" / "current-session.json").write_text(
                 json.dumps({
                     "schema_version": "session-intent-current.v1",
@@ -290,6 +296,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             (session_dir / "intent-events.jsonl").write_text(
                 json.dumps({
                     "event": "user-input-observed",
+                    "platform": "codex", "session_id": "s-stale",
                     "event_id": "evt-new",
                     "input_digest": "sha256:new",
                 })
@@ -321,7 +328,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                     "GHOST_ALICE_PLATFORM": "codex",
                     "GHOST_ALICE_SESSION_INTENT_ROOT": str(root),
                 },
-                hook_payload={},
+                hook_payload={"session_id": "s-stale"},
             )
 
         self.assertNotIn("security_boundary", context)

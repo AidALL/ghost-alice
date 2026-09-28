@@ -377,7 +377,7 @@ class TestRuntimeConfigDefaults(unittest.TestCase):
         self.assertTrue(path.is_symlink())
         self.assertEqual(os.readlink(path), original_link)
         self.assertEqual(target.read_bytes(), original_bytes)
-        self.assertEqual(Path(mkstemp.call_args.kwargs["dir"]), target.parent)
+        self.assertEqual(Path(mkstemp.call_args.kwargs["dir"]).resolve(), target.parent.resolve())
         self.assertEqual(list(target.parent.glob(f".{target.name}.*.tmp")), [])
 
     def test_broken_symlink_creates_target_only_when_target_parent_exists(self):

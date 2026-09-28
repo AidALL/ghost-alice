@@ -351,7 +351,7 @@ class NodeRuntimeStatusTest(unittest.TestCase):
                 )
 
         self.assertEqual(status, install_doctor.STATUS_OK)
-        self.assertIn(f"codex-config:{codex_node}", detail)
+        self.assertIn(f"codex-config:{codex_node.resolve()}", detail)
         self.assertNotIn(str(registered_node), detail)
 
     def test_existing_non_node_fallback_candidates_never_report_ok(self) -> None:
@@ -1097,9 +1097,9 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         def run_process(command, **kwargs):
             calls.append((command, kwargs))
             ledger_root = Path(command[command.index("--root") + 1])
-            pointer = ledger_root / "claude" / "current-session.json"
-            pointer.parent.mkdir(parents=True)
-            pointer.write_text("{}\n", encoding="utf-8")
+            from session_intent_analyzer_hook import record_turn
+            record_turn(root=ledger_root, platform="claude", session_id="doctor-runtime-golden",
+                        raw_user_input="runtime session intent golden")
             return install_doctor.subprocess.CompletedProcess(
                 command,
                 0,
@@ -1153,6 +1153,22 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         )
         self.assertFalse(run_root.exists())
 
+    def test_session_intent_golden_verifies_database_without_pointer_export(self):
+        hook = self.runtime / "session_intent_analyzer_hook.py"
+        hook.write_text("# subprocess replaced by focused test runner\n", encoding="utf-8")
+
+        def run_process(command, **kwargs):
+            from session_intent_analyzer_hook import record_turn
+            root = Path(command[command.index("--root") + 1])
+            record_turn(root=root, platform="claude", session_id="doctor-runtime-golden",
+                        raw_user_input="runtime session intent golden")
+            (root / "claude" / "current-session.json").unlink(missing_ok=True)
+            return install_doctor.subprocess.CompletedProcess(command, 0, json.dumps({"continue": True}), "")
+
+        with mock.patch.object(install_doctor.subprocess, "run", run_process):
+            result = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+        self.assertEqual(result, (install_doctor.STATUS_OK, "golden-pass"))
+
     def test_session_intent_golden_rejects_pointerless_write_failure(self):
         hook = self.runtime / "session_intent_analyzer_hook.py"
         hook.write_text(
@@ -1167,7 +1183,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
 
         self.assertEqual(status, install_doctor.STATUS_ERROR)
-        self.assertEqual(detail, "current-session-not-written")
+        self.assertEqual(detail, "session-intent-not-committed")
 
 
 if __name__ == "__main__":

@@ -6,12 +6,14 @@
       "adapter_id": "autopilot-mode",
       "allowed_addon_id": "autopilot-mode",
       "expected_skill_name": "autopilot-mode",
-      "events": ["on_agent_stop"],
+      "events": ["pre_tool_use", "on_agent_stop"],
       "script_rel_by_event": {
-        "on_agent_stop": "adapters/autopilot_mode.py"
+        "on_agent_stop": "adapters/autopilot_mode.py",
+        "pre_tool_use": "adapters/autopilot_pretool.py"
       },
       "hook_id_by_event": {
-        "on_agent_stop": "continue"
+        "on_agent_stop": "continue",
+        "pre_tool_use": "prepare-origin"
       },
       "args_policy": "no_args",
       "marker_template": "[adapter:{adapter_id}] {hook_id}",

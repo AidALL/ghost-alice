@@ -8,11 +8,11 @@ Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층�
 
 기존 에이전트 실행 환경 위에서 동작하며, 에이전트가 완료를 선언하기 전에 작업 과정과 근거를 검토할 수 있도록 돕습니다. 프롬프트 모음이나 챗봇 연결 도구, 독립 실행형 에이전트 런타임을 제공하는 저장소는 아닙니다.
 
-## 버전 0.3.0
+## 버전 0.4.0
 
-[웹사이트](https://aidall.github.io/ghost-alice/) · [릴리즈 안내](./docs/ko/release/2026-09-26-release-notes.md) · [Core 릴리즈](https://github.com/AidALL/ghost-alice/releases/tag/v0.3.0) · [Autopilot 릴리즈](https://github.com/AidALL/ghost-alice-autopilot/releases/tag/v0.3.0)
+[웹사이트](https://aidall.github.io/ghost-alice/) · [릴리즈 안내](./docs/ko/release/2026-09-28-release-notes.md) · [Core 릴리즈](https://github.com/AidALL/ghost-alice/releases) · [Autopilot 릴리즈](https://github.com/AidALL/ghost-alice-autopilot/releases)
 
-Ghost-ALICE core와 공식 Autopilot 애드온의 릴리즈 버전을 0.3.0으로 맞췄습니다. 함께 검증한 권장 조합은 core 0.3.0과 Autopilot 0.3.0이며, 애드온이 요구하는 기술적인 최소 core 버전은 0.2.2로 유지합니다. 두 프로젝트 모두 Apache-2.0 오픈소스로 계속 제공됩니다.
+Ghost-ALICE core와 공식 Autopilot 애드온의 릴리즈 버전을 0.4.0으로 맞췄습니다. 함께 검증한 권장 조합은 core 0.4.0과 Autopilot 0.4.0이며, 애드온이 요구하는 최소 core 버전은 새 SQLite API를 제공하는 0.4.0입니다. 두 프로젝트 모두 Apache-2.0 오픈소스로 계속 제공됩니다.
 
 - 의도 스냅샷은 누적 제약과 함께 활성 결정 및 기록된 작업 범위를 보존합니다. 후속 처리 단계는 새 목표만으로 포괄적인 권한을 가정하지 않고 사용자의 수정을 해석할 수 있습니다.
 - 현재 세션에 대한 바인딩으로 훅이나 기록 작업이 다른 세션의 원장을 임의로 선택하지 않도록 합니다. 기록된 범위와 교정 피드백은 해석에 필요한 문맥이며, 실행 권한을 부여하지 않습니다.

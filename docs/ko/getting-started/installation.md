@@ -80,7 +80,7 @@ Addon-specific behavior, state files, pause/resume controls, removal details는 
 | --- | --- | --- | --- | --- |
 | autopilot | explicitly approved autonomous run을 work item 단위로 계속 진행한다 | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-버전을 맞춘 권장 조합은 core `0.3.0`과 Autopilot `0.3.0`입니다. Autopilot의 기술적 최소 core 버전은 계속 `0.2.2`이며, 최신 세션 의도 처리와 연속 실행 수정을 함께 사용하시려면 같은 릴리스 조합을 사용해 주세요. 제품 릴리스 번호가 애드온 호환성 표를 대신하지는 않습니다. 변경 내용과 검증 범위는 [0.3.0 릴리스 노트](../release/2026-09-26-release-notes.md)에서 확인하실 수 있습니다.
+버전을 맞춘 권장 조합은 core `0.4.0`과 Autopilot `0.4.0`입니다. Autopilot의 최소 core 버전은 `0.4.0`이며, 최신 세션 의도 처리와 연속 실행 수정을 함께 사용하시려면 같은 릴리스 조합을 사용해 주세요. 제품 릴리스 번호가 애드온 호환성 표를 대신하지는 않습니다. 변경 내용과 검증 범위는 [0.4.0 릴리스 노트](../release/2026-09-28-release-notes.md)에서 확인하실 수 있습니다.
 
 ## Install One Official Addon To One Platform
 

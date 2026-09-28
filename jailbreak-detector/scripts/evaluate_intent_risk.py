@@ -18,6 +18,7 @@ Dependencies: Python 3.11+ standard library only.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from datetime import datetime, timezone
@@ -26,8 +27,14 @@ from typing import Any
 
 
 def load_state(path: Path | None) -> dict[str, Any]:
-    if path is None or not path.exists():
+    if path is None:
         return {}
+    if path.name == "intent-state.json":
+        entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
+        spec = importlib.util.spec_from_file_location("ghost_security_ledger", entry)
+        ledger = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ledger)
+        return ledger.read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

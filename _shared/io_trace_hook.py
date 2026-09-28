@@ -17,6 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from session_intent_analyzer_hook import bound_session_identity, _safe_component
+from task_router_reminder_hook import session_material, session_events
 
 MAX_LINES = 10000
 
@@ -146,9 +148,18 @@ def _text(value: Any, fallback: str = "") -> str:
     return text if text else fallback
 
 
+def _platform(payload: dict[str, Any]) -> str:
+    # Installer-supplied host context wins over incidental payload metadata.
+    value = os.environ.get("GHOST_ALICE_PLATFORM") or payload.get("platform")
+    if not isinstance(value, str) or not value or len(value) > 120 or _safe_component(value) != value:
+        return "unknown"
+    return value
+
+
 def _extract(payload: dict[str, Any]) -> dict[str, str]:
     tool = _text(payload.get("tool_name") or payload.get("tool"), "unknown")
-    session = _text(payload.get("session_id") or payload.get("sessionId"), "unknown")
+    platform = _platform(payload)
+    session = bound_session_identity(platform, payload) or "unknown"
     tool_input = _as_dict(payload.get("tool_input"))
     path = "n/a"
     pattern = ""
@@ -174,7 +185,7 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
     else:
         path = _text(tool_input.get("file_path") or tool_input.get("path"), "n/a")
 
-    row = {"session": session, "tool": tool, "path": path, "pattern": pattern}
+    row = {"platform": platform, "session": session, "tool": tool, "path": path, "pattern": pattern}
     if op and path != "n/a":
         row["op"] = op
     return row
@@ -248,30 +259,6 @@ def _session_intent_root() -> Path:
     return default_root()
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return rows
-    for line in lines:
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict):
-            rows.append(row)
-    return rows
-
-
 def _is_semantic_delta_recovery(payload: dict[str, Any]) -> bool:
     tool_input = _as_dict(payload.get("tool_input"))
     command = _text(tool_input.get("cmd") or tool_input.get("command"))
@@ -294,23 +281,28 @@ def _dedup_key_seen(dedup_key: str) -> bool:
 
 
 def _semantic_delta_warning(payload: dict[str, Any]) -> dict[str, str] | None:
-    session = _text(payload.get("session_id") or payload.get("sessionId"), "")
-    platform = _text(payload.get("platform"), "codex")
-    if not session or _is_semantic_delta_recovery(payload):
+    platform = _platform(payload)
+    session = bound_session_identity(platform, payload)
+    if platform == "unknown" or not session or _is_semantic_delta_recovery(payload):
         return None
-    session_dir = _session_intent_root() / platform / session
+    root = _session_intent_root()
+    session_dir = root / platform / session
     state_path = session_dir / "intent-state.json"
-    events_path = session_dir / "intent-events.jsonl"
-    state = _read_json(state_path)
-    if state.get("last_semantic_delta_status") != "not-provided":
+    material = session_material(root, platform, session)
+    state, latest = material['state'], material['latest_input']
+    if not latest or state.get("last_semantic_delta_status") != "not-provided":
         return None
     user_events = [
-        row for row in _read_jsonl(events_path)
+        row for row in session_events(root, platform, session)
         if row.get("event") == "user-input-observed"
     ]
     if len(user_events) < 3:
         return None
     recent = user_events[-3:]
+    if any(row.get("platform") != platform or row.get("session_id") != session for row in recent):
+        return None
+    if recent[-1].get("event_id") != latest.get("event_id") or recent[-1].get("input_digest") != latest.get("input_digest"):
+        return None
     if any(row.get("intent_delta_status", "not-provided") != "not-provided" for row in recent):
         return None
     latest_event_id = _text(recent[-1].get("event_id"), "")
@@ -320,6 +312,7 @@ def _semantic_delta_warning(payload: dict[str, Any]) -> dict[str, str] | None:
     if _dedup_key_seen(dedup_key):
         return None
     return {
+        "platform": platform,
         "session": session,
         "tool": "governance-warning",
         "path": str(state_path),

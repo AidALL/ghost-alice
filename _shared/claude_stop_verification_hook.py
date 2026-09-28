@@ -142,10 +142,6 @@ def _assistant_text_from_stop_input(input_data: dict[str, Any]) -> str:
     return ""
 
 
-def _already_retrying(input_data: dict[str, Any]) -> bool:
-    return bool(input_data.get("stop_hook_active") or input_data.get("stopHookActive"))
-
-
 def _allow_payload(message: str = "") -> dict[str, Any]:
     payload: dict[str, Any] = {"continue": True}
     if message:
@@ -163,6 +159,11 @@ def _block_payload(reason: str) -> dict[str, Any]:
 def _standalone_retry_guidance() -> str:
     return (
         "Retry by writing a complete standalone final answer that includes the requested answer payload again. " "Begin with the user's requested answer, not with the verification process. " "Required control block format overrides any requested line-count limit. " "Write [completion-check] and [io-trace] as canonical multi-line blocks, not inline one-line summaries. " "Do not output a correction-only note. " "Do not refer to a previous answer with phrases such as above, earlier, already provided, or previously."
+        " Preserve the substantive answer when the defect is only control-field formatting; "
+        "change only the invalid control fields, not the business calculations or conclusions. "
+        "Do not invent evidence or turn a failed/unverified result into a pass. "
+        "If the required evidence is unavailable, withdraw unsupported completion claims and "
+        "report the unverified or failed state without a finalized [completion-check]."
     )
 
 
@@ -214,10 +215,10 @@ def main() -> int:
 
     reason = _append_standalone_retry_guidance(reason)
 
-    if _already_retrying(input_data):
-        print(json.dumps(_allow_payload(reason), ensure_ascii=False))
-        return 0
-
+    # A retry flag describes host lifecycle, not verification success. Invalid
+    # retries remain blocked; an honest partial-status answer without a closure
+    # assertion takes the normal allow path above. Do not manufacture a pass to
+    # avoid a retry loop. Host retry limits/intervention remain host policy.
     print(json.dumps(_block_payload(reason), ensure_ascii=False))
     return 0
 

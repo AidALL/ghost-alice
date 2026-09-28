@@ -34,6 +34,7 @@ def _make_autopilot_adapter_addon(tmp: Path) -> Path:
         encoding="utf-8",
     )
     (skill / "adapters" / "autopilot_mode.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
+    (skill / "adapters" / "autopilot_pretool.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
     (addon / "addon.json").write_text(json.dumps({
         "addon_version": "0.1.0",
         "addon_id": "autopilot-mode",

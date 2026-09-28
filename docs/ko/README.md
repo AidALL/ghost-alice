@@ -6,7 +6,7 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 
 쌍을 이루는 문서는 상단에서 언어를 전환하실 수 있습니다. 영어 문서에서는 한국어 링크를, 한국어 문서에서는 영어 링크를 제공합니다.
 
-현재 버전을 맞춘 공개 릴리스는 Ghost-ALICE OS `0.3.0`과 Ghost-ALICE Autopilot `0.3.0`입니다. 의도·세션·연속 실행 변경과 검증 범위는 [릴리스 노트](./release/2026-09-26-release-notes.md)에서 확인하실 수 있습니다.
+현재 버전을 맞춘 공개 릴리스는 Ghost-ALICE OS `0.4.0`과 Ghost-ALICE Autopilot `0.4.0`입니다. 의도·세션·연속 실행 변경과 검증 범위는 [릴리스 노트](./release/2026-09-28-release-notes.md)에서 확인하실 수 있습니다.
 
 ## Start Here
 
@@ -47,7 +47,7 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 | Platform adapter compliance | [../policies/platform-adapter-compliance.md](../policies/platform-adapter-compliance.md) | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) |
 | Live smoke regression | [../policies/live-smoke-regression.md](../policies/live-smoke-regression.md) | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [../policies/evaluator-artifact-contract.md](../policies/evaluator-artifact-contract.md) | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) |
-| Current release notes | [../release/2026-09-26-release-notes.md](../release/2026-09-26-release-notes.md) | [release/2026-09-26-release-notes.md](./release/2026-09-26-release-notes.md) |
+| Current release notes | [../release/2026-09-28-release-notes.md](../release/2026-09-28-release-notes.md) | [release/2026-09-28-release-notes.md](./release/2026-09-28-release-notes.md) |
 | Public release checklist | [../release/public-release-checklist.md](../release/public-release-checklist.md) | [release/public-release-checklist.md](./release/public-release-checklist.md) |
 | Planning policy | [../plans/README.md](../plans/README.md) | [plans/README.md](./plans/README.md) |
 

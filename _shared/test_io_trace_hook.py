@@ -38,6 +38,8 @@ class TestIoTraceHook(unittest.TestCase):
         events = [
             {
                 "event": "user-input-observed",
+                "platform": platform,
+                "session_id": session_id,
                 "event_id": f"evt-{index}",
                 "input_digest": f"sha256:{index}",
                 "intent_delta_status": "not-provided",
@@ -327,6 +329,40 @@ class TestIoTraceHook(unittest.TestCase):
 
 
 class TestSessionIntentRootResolution(unittest.TestCase):
+    def test_installed_platform_is_not_inferred_as_codex(self):
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "claude", "CODEX_THREAD_ID": "foreign"}, clear=True):
+            row = io_trace_hook._extract({"session_id": "same-id", "platform": "codex"})
+        self.assertEqual(row.get("platform"), "claude")
+        self.assertEqual(row["session"], "same-id")
+
+    def test_unknown_platform_and_invalid_identity_are_not_guessed(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(io_trace_hook._extract({"session_id": "own"}).get("platform"), "unknown")
+            self.assertEqual(io_trace_hook._extract({"platform": "codex", "session_id": "../other"})["session"], "unknown")
+
+    def test_warning_requires_same_identity_and_latest_committed_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory = root / "claude" / "same-id"
+            directory.mkdir(parents=True)
+            state = {"schema_version": "session-intent-ledger.v1", "platform": "claude", "session_id": "same-id",
+                     "last_semantic_delta_status": "not-provided", "ledger_revision": 4,
+                     "latest_input_event_id": "evt-4", "latest_input_digest": "digest-4", "latest_input_char_count": 1}
+            events = [{"event": "user-input-observed", "platform": "claude", "session_id": "same-id",
+                       "event_id": f"evt-{i}", "input_digest": f"digest-{i}"} for i in range(1, 4)]
+            (directory / "intent-state.json").write_text(json.dumps(state))
+            (directory / "intent-events.jsonl").write_text("\n".join(map(json.dumps, events)))
+            with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "claude", "GHOST_ALICE_SESSION_INTENT_ROOT": tmp}, clear=True):
+                payload = {"session_id": "same-id"}
+                with mock.patch.object(io_trace_hook, "_dedup_key_seen", return_value=False):
+                    self.assertIsNone(io_trace_hook._semantic_delta_warning(payload))
+                    events.append(dict(events[-1], event_id="evt-4", input_digest="digest-4"))
+                    (directory / "intent-events.jsonl").write_text("\n".join(map(json.dumps, events)))
+                    self.assertIsNotNone(io_trace_hook._semantic_delta_warning(payload))
+                    state["platform"] = "codex"
+                    (directory / "intent-state.json").write_text(json.dumps(state))
+                    self.assertIsNone(io_trace_hook._semantic_delta_warning(payload))
+
     def test_runtime_copy_resolves_ledger_root_from_skill_install(self):
         # N2: the runtime tree ships only _shared, so the repo-relative ledger candidate never exists there. The hook must resolve the real ledger from a skill install location and use its repo-aware default_root, instead of silently falling back to the legacy ~/.ghost-alice root (which diverges from where the ledger actually writes in repo sessions). Runs in a subprocess so no cached module can mask it.
         repo_shared = Path(__file__).resolve().parent
@@ -340,7 +376,8 @@ class TestSessionIntentRootResolution(unittest.TestCase):
             shutil.copy2(real_ledger, skill_scripts / "session_intent_ledger.py")
             runtime_shared = base / "runtime" / "current" / "_shared"
             runtime_shared.mkdir(parents=True)
-            shutil.copy2(repo_shared / "io_trace_hook.py", runtime_shared / "io_trace_hook.py")
+            for name in ("io_trace_hook.py", "session_intent_analyzer_hook.py", "task_router_reminder_hook.py"):
+                shutil.copy2(repo_shared / name, runtime_shared / name)
             fake_repo = base / "repo"
             (fake_repo / "skill-catalog").mkdir(parents=True)
             (fake_repo / "session-intent-analyzer").mkdir()
@@ -351,7 +388,7 @@ class TestSessionIntentRootResolution(unittest.TestCase):
             env["USERPROFILE"] = str(home)
             hook_path = str(runtime_shared / "io_trace_hook.py").replace("\\", "/")
             script = (
-                "import importlib.util; "
+                f"import importlib.util,sys; sys.path.insert(0, {str(runtime_shared)!r}); "
                 f"spec = importlib.util.spec_from_file_location('io_trace_hook_rt', '{hook_path}'); "
                 "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
                 "print(mod._session_intent_root())"

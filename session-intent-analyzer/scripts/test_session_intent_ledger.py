@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sqlite3
 import pathlib
 import shutil
 import subprocess
@@ -28,6 +29,33 @@ def load_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def authority_state(ledger, path):
+    return ledger.read_session_state(root=path.parents[2], platform=path.parent.parent.name,
+                                     session_id=path.parent.name)
+
+
+def authority_events(ledger, path):
+    return ledger.read_session_events(root=path.parents[2], platform=path.parent.parent.name,
+                                      session_id=path.parent.name)
+
+
+def authority_event_text(ledger, path):
+    return "".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+                   for row in authority_events(ledger, path))
+
+
+def authority_bytes(ledger, path):
+    return json.dumps(authority_state(ledger, path), sort_keys=True).encode()
+
+
+def authority_dump(ledger, root):
+    connection = sqlite3.connect(ledger.storage_database_path(root).as_uri() + "?mode=ro", uri=True)
+    try:
+        return connection.execute("PRAGMA user_version").fetchone(), tuple(connection.iterdump())
+    finally:
+        connection.close()
 
 
 class TestListFieldStructuredMerge(unittest.TestCase):
@@ -88,18 +116,19 @@ class SessionIntentLedgerTests(unittest.TestCase):
         result = self.run_cli(root, "--delta-json", '{"current_goal":"native goal"}',
                               identity={"CODEX_THREAD_ID": "native-session", "GHOST_ALICE_SESSION_ID": "stale-override"})
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((root / "codex/native-session/intent-state.json").is_file())
+        self.assertEqual(self.ledger.read_session_state(root=root, platform="codex", session_id="native-session")["current_goal"], "native goal")
         self.assertFalse((root / "codex/unrelated-pointer/intent-state.json").exists())
         self.assertFalse((root / "codex/stale-override/intent-state.json").exists())
 
-    def test_cli_matching_native_safe_id_can_write(self) -> None:
+    def test_cli_normalized_native_alias_cannot_write(self) -> None:
         root = self.tmpdir / "ledger"
         native = "../native/" + "x" * 200
         safe = ("native-" + "x" * 200)[:120]
         result = self.run_cli(root, "--session-id", safe, "--delta-json", '{"current_goal":"same session"}',
                               identity={"CODEX_THREAD_ID": native})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads((root / "codex" / safe / "intent-state.json").read_text())["current_goal"], "same session")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid ledger identity", result.stderr)
+        self.assertFalse((root / "codex" / safe / "intent-state.json").exists())
 
     def test_cli_configured_session_binds_when_native_identity_is_unavailable(self) -> None:
         root = self.tmpdir / "ledger"
@@ -111,18 +140,18 @@ class SessionIntentLedgerTests(unittest.TestCase):
         result = self.run_cli(root, "--platform", "claude", "--delta-json", '{"current_goal":"bound"}',
                               identity={"GHOST_ALICE_SESSION_ID": "configured"})
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue((root / "claude/configured/intent-state.json").is_file())
+        self.assertEqual(self.ledger.read_session_state(root=root, platform="claude", session_id="configured")["current_goal"], "bound")
 
     def test_cli_native_bound_session_can_read_other_historical_snapshot_without_writing(self) -> None:
         root = self.tmpdir / "ledger"
         self.ledger.record_turn(root=root, platform="codex", session_id="historical",
                                 intent_delta={"current_goal": "historical context"})
-        before = {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+        before = authority_dump(self.ledger, root)
         result = self.run_cli(root, "--session-id", "historical", "--snapshot",
                               identity={"CODEX_THREAD_ID": "native-session"})
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["current_goal"], "historical context")
-        self.assertEqual(before, {str(p): p.read_bytes() for p in root.rglob("*") if p.is_file()})
+        self.assertEqual(before, authority_dump(self.ledger, root))
 
     def test_conduct_feedback_merges_by_id(self) -> None:
         state = self.ledger.default_state("codex", "session-cf")
@@ -220,8 +249,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
             source="agent",
         )
 
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
-        events_text = paths["events"].read_text(encoding="utf-8")
+        state = authority_state(self.ledger, paths["state"])
+        events_text = authority_event_text(self.ledger, paths["events"])
 
         self.assertEqual(state["current_goal"], "implement the new session intent guard")
         self.assertIn("do not store raw prompts", state["constraints"])
@@ -230,7 +259,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertNotIn(raw_prompt, events_text)
         self.assertNotIn("abc123", events_text)
 
-    def test_intent_delta_updates_jsonl_and_current_session_pointer(self) -> None:
+    def test_intent_delta_updates_events_and_current_session_discovery(self) -> None:
         root = self.tmpdir / "ledger"
         delta = {
             "current_goal": "bridge session intent to approved autopilot run state",
@@ -259,8 +288,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
             source="agent",
         )
 
-        rows = [json.loads(line) for line in paths["events"].read_text(encoding="utf-8").splitlines()]
-        pointer = json.loads((root / "codex" / "current-session.json").read_text(encoding="utf-8"))
+        rows = authority_events(self.ledger, paths["events"])
+        pointer = self.ledger.read_current_session_pointer(root, "codex")
 
         self.assertEqual(rows[-1]["event"], "intent-updated")
         self.assertEqual(
@@ -268,9 +297,10 @@ class SessionIntentLedgerTests(unittest.TestCase):
             ["acceptance_criteria", "conduct_feedback", "current_goal"],
         )
         self.assertIn("intent_delta_digest", rows[-1])
-        self.assertNotIn("raw", json.dumps(rows[-1], ensure_ascii=False).lower())
-        self.assertEqual(pointer["session_id"], "session-jsonl")
-        self.assertEqual(pointer["state_path"], str(paths["state"]))
+        self.assertNotIn("raw_user_input", rows[-1])
+        self.assertIn("semantic_changes", rows[-1])
+        self.assertEqual(pointer, "session-jsonl")
+        self.assertFalse(paths["state"].exists(), "authoritative writes must not create JSON exports")
 
     def test_repeated_same_input_events_get_distinct_event_ids(self) -> None:
         root = self.tmpdir / "ledger"
@@ -293,7 +323,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             source="hook",
         )
 
-        rows = [json.loads(line) for line in paths["events"].read_text(encoding="utf-8").splitlines()]
+        rows = authority_events(self.ledger, paths["events"])
         self.assertNotEqual(rows[0]["event_id"], rows[1]["event_id"])
 
     def test_default_root_prefers_repo_tmp_session_intent(self) -> None:
@@ -347,7 +377,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             },
         )
 
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         decisions = {item["id"]: item for item in state["decisions"]}
 
         self.assertTrue(decisions["storage-location"]["superseded"])
@@ -394,7 +424,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             },
         )
 
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         snapshot = self.ledger.consumer_snapshot(paths["state"])
 
         self.assertEqual(
@@ -435,7 +465,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 "latest_scope": scope,
             },
         )
-        before = paths["state"].read_bytes()
+        before = authority_bytes(self.ledger, paths["state"])
         completed = subprocess.run(
             [sys.executable, str(LEDGER), "--root", str(root), "--platform", "codex",
              "--session-id", "scope-correction", "--snapshot"],
@@ -451,7 +481,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(snapshot["constraints"], ["Keep unrelated files unchanged"])
         self.assertEqual(snapshot["non_goals"], ["Edit configuration during diagnosis", "Publish externally"])
         self.assertEqual(snapshot["model_security_decision"]["decision"], "block")
-        self.assertEqual(paths["state"].read_bytes(), before)
+        self.assertEqual(authority_bytes(self.ledger, paths["state"]), before)
 
     def test_snapshot_scope_context_is_detached_from_state(self) -> None:
         state = self.ledger.default_state("codex", "scope-copy")
@@ -486,7 +516,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             },
         )
 
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         by_id = {c["id"]: c for c in state["acceptance_criteria"]}
 
         # Every criterion starts unmet.
@@ -496,7 +526,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertTrue(by_id["c-user"]["admitted"])
         self.assertFalse(by_id["c-inf"]["admitted"])
 
-    def test_merge_preserves_met_status_on_recriterion_without_status(self) -> None:
+    def test_merge_reopens_changed_recriterion_without_status(self) -> None:
         root = self.tmpdir / "ledger"
         common = {"id": "AC1", "summary": "do X", "source": "user-explicit"}
         self.ledger.record_turn(
@@ -507,15 +537,17 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.ledger.mark_acceptance_criterion_met(
             root=root, platform="codex", session_id="s",
             criterion_id="AC1", completion_check_digest="a" * 64,
+            expected_criterion=dict(common, admitted=True),
         )
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(common, summary="do X (clarified)")]},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac1 = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
-        # Re-recording without an explicit status must not reset a met criterion.
-        self.assertEqual(ac1["status"], "met")
+        # The old proof cannot certify even a purported clarification by itself.
+        self.assertEqual(ac1["status"], "unmet")
+        self.assertNotIn("met_completion_check_digest", ac1)
         self.assertEqual(ac1["summary"], "do X (clarified)")
 
     def test_mark_criterion_met_requires_valid_digest_and_sets_met(self) -> None:
@@ -530,8 +562,9 @@ class SessionIntentLedgerTests(unittest.TestCase):
         paths = self.ledger.mark_acceptance_criterion_met(
             root=root, platform="codex", session_id="s",
             criterion_id="AC1", completion_check_digest=digest,
+            expected_criterion={"id": "AC1", "summary": "do X", "source": "user-explicit", "admitted": True},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac1 = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
         self.assertEqual(ac1["status"], "met")
         self.assertEqual(ac1["met_completion_check_digest"], digest)
@@ -550,7 +583,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 {"id": "AC1", "summary": "do X", "source": "user-explicit", "status": "met"},
             ]},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac1 = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
         # "met" is write-only via mark_acceptance_criterion_met; raw input cannot assert it.
         self.assertEqual(ac1["status"], "unmet")
@@ -562,7 +595,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base)]},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
         self.assertFalse(ac["admitted"])
 
@@ -570,7 +603,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base, admitted=True)]},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
         self.assertTrue(ac["admitted"])
 
@@ -586,7 +619,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base, admitted=None)]},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-inf")
         self.assertTrue(ac["admitted"])
 
@@ -600,13 +633,14 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.ledger.mark_acceptance_criterion_met(
             root=root, platform="codex", session_id="s",
             criterion_id="AC1", completion_check_digest="a" * 64,
+            expected_criterion=dict(common, admitted=True),
         )
         # A present-but-invalid status field must not silently reset a met criterion.
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(common, status="done")]},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
         self.assertEqual(ac["status"], "met")
 
@@ -622,7 +656,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base, source="user-explicit")]},
         )
-        state = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-up")
         self.assertTrue(ac["admitted"])
 
@@ -636,18 +670,19 @@ class SessionIntentLedgerTests(unittest.TestCase):
         mark_paths = self.ledger.mark_acceptance_criterion_met(
             root=root, platform="codex", session_id="s",
             criterion_id="AC1", completion_check_digest="a" * 64,
+            expected_criterion=dict(common, admitted=True),
         )
         met_at = next(
-            c for c in json.loads(mark_paths["state"].read_text(encoding="utf-8"))["acceptance_criteria"]
+            c for c in authority_state(self.ledger, mark_paths["state"])["acceptance_criteria"]
             if c["id"] == "AC1"
         )["met_at"]
-        # Re-recording with a refreshed summary must keep the met_at audit stamp.
+        # Re-recording an unchanged condition keeps its verified audit stamp.
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
-            intent_delta={"acceptance_criteria": [dict(common, summary="do X (clarified)")]},
+            intent_delta={"acceptance_criteria": [dict(common)]},
         )
         ac1 = next(
-            c for c in json.loads(paths["state"].read_text(encoding="utf-8"))["acceptance_criteria"]
+            c for c in authority_state(self.ledger, paths["state"])["acceptance_criteria"]
             if c["id"] == "AC1"
         )
         self.assertEqual(ac1["met_at"], met_at)
@@ -665,15 +700,12 @@ class SessionIntentLedgerTests(unittest.TestCase):
             source="hook",
         )
 
-        pointer = root / "codex" / "current-session.json"
-        self.assertTrue(pointer.exists())
-        pointer_data = json.loads(pointer.read_text(encoding="utf-8"))
-
-        self.assertEqual(pointer_data["schema_version"], "session-intent-current.v1")
-        self.assertEqual(pointer_data["platform"], "codex")
-        self.assertEqual(pointer_data["session_id"], "session-real")
-        self.assertEqual(pathlib.Path(pointer_data["state_path"]), paths["state"])
-        self.assertNotIn("secret-token", pointer.read_text(encoding="utf-8"))
+        self.assertEqual(self.ledger.read_current_session_pointer(root, "codex"), "session-real")
+        state = authority_state(self.ledger, paths["state"])
+        self.assertEqual(state["platform"], "codex")
+        self.assertEqual(state["session_id"], "session-real")
+        self.assertFalse((root / "codex" / "current-session.json").exists())
+        self.assertNotIn(b"secret-token", self.ledger.storage_database_path(root).read_bytes())
 
     def test_unknown_session_does_not_replace_current_session_pointer(self) -> None:
         root = self.tmpdir / "ledger"
@@ -681,8 +713,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
         self.ledger.record_turn(root=root, platform="codex", session_id="unknown")
 
-        pointer = json.loads((root / "codex" / "current-session.json").read_text(encoding="utf-8"))
-        self.assertEqual(pointer["session_id"], "session-real")
+        pointer = self.ledger.read_current_session_pointer(root, "codex")
+        self.assertEqual(pointer, "session-real")
 
     def test_resolve_session_id_prefers_explicit_payload_env_then_pointer(self) -> None:
         root = self.tmpdir / "ledger"
@@ -783,10 +815,11 @@ class SessionIntentLedgerTests(unittest.TestCase):
             intent_delta={"current_goal": "read the current snapshot only"},
             source="agent",
         )
-        state_before = json.loads(paths["state"].read_text(encoding="utf-8"))
+        state_before = authority_state(self.ledger, paths["state"])
         state_before["updated_at"] = "2026-01-01T00:00:00Z"
-        self.ledger.write_json(paths["state"], state_before)
-        events_before = paths["events"].read_text(encoding="utf-8")
+        with self.ledger.storage_transaction(root) as connection:
+            self.ledger._save_state(connection, state_before)
+        events_before = authority_event_text(self.ledger, paths["events"])
 
         completed = subprocess.run(
             [
@@ -806,8 +839,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
         )
 
         snapshot = json.loads(completed.stdout)
-        state_after = json.loads(paths["state"].read_text(encoding="utf-8"))
-        events_after = paths["events"].read_text(encoding="utf-8")
+        state_after = authority_state(self.ledger, paths["state"])
+        events_after = authority_event_text(self.ledger, paths["events"])
 
         self.assertEqual(snapshot["current_goal"], "read the current snapshot only")
         self.assertEqual(state_after, state_before)
@@ -841,7 +874,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
         snapshot = json.loads(completed.stdout)
         events_path = root / "codex" / "s-delta-snapshot" / "intent-events.jsonl"
-        rows = [json.loads(line) for line in events_path.read_text(encoding="utf-8").splitlines()]
+        rows = authority_events(self.ledger, events_path)
 
         self.assertEqual(snapshot["current_goal"], "update then print snapshot")
         self.assertEqual(rows[-1]["event"], "intent-updated")
@@ -873,8 +906,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
         state_path = root / "codex" / "s-input" / "intent-state.json"
         events_path = root / "codex" / "s-input" / "intent-events.jsonl"
-        state_text = state_path.read_text(encoding="utf-8")
-        events_text = events_path.read_text(encoding="utf-8")
+        state_text = json.dumps(authority_state(self.ledger, state_path))
+        events_text = authority_event_text(self.ledger, events_path)
         row = json.loads(events_text.splitlines()[0])
 
         self.assertEqual(row["event"], "user-input-observed")
@@ -931,7 +964,7 @@ class ModelSecurityDecisionTests(unittest.TestCase):
         root = pathlib.Path(tempfile.mkdtemp(prefix="evt-label-"))
         self.addCleanup(lambda: shutil.rmtree(root, ignore_errors=True))
         # user input -> user-input-observed (carries lineage)
-        self.ledger.record_turn(
+        input_paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s-evt",
             raw_user_input="hello", source="hook",
         )
@@ -939,8 +972,9 @@ class ModelSecurityDecisionTests(unittest.TestCase):
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s-evt",
             intent_delta={"current_goal": "updated goal"}, source="cli",
+            expected_input_event_id=authority_state(self.ledger, input_paths["state"])["latest_input_event_id"],
         )
-        rows = [json.loads(line) for line in paths["events"].read_text(encoding="utf-8").splitlines()]
+        rows = authority_events(self.ledger, paths["events"])
         self.assertEqual(rows[0]["event"], "user-input-observed")
         self.assertIn("event_id", rows[0])
         self.assertEqual(rows[1]["event"], "intent-updated")

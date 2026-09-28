@@ -797,13 +797,14 @@ def _runtime_session_intent_golden_status(
             return STATUS_ERROR, "hook-output-invalid-json"
         if data.get("continue") is not True:
             return STATUS_ERROR, "hook-output-not-continue"
-        pointer = root / platform / "current-session.json"
-        if not pointer.exists():
+        from task_router_reminder_hook import session_material
+        material = session_material(root, platform, "doctor-runtime-golden")
+        if material["degraded"] or not material["latest_input"]:
             system_message = str(data.get("systemMessage") or "")
             if LEDGER_UNAVAILABLE_DEGRADE in system_message:
                 # The intent-audit surface is the governance input anchor; an install without it must not read as fully healthy. WARNING, not ERROR: the absent-ledger degrade is documented behavior.
                 return STATUS_WARNING, "ledger-unavailable-degraded"
-            return STATUS_ERROR, "current-session-not-written"
+            return STATUS_ERROR, "session-intent-not-committed"
     return STATUS_OK, "golden-pass"
 
 

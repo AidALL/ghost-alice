@@ -104,6 +104,7 @@ def _write_remote_autopilot_addon(work: Path) -> None:
         ),
         encoding="utf-8",
     )
+    (adapters / "autopilot_pretool.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
 
 
 def _make_bare_remote(root: Path) -> str:

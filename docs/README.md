@@ -6,7 +6,7 @@ Ghost-ALICE OS documentation is bilingual at the reader-facing documentation lay
 
 Every paired document should expose a language switch near the top. In an English document, the English side is plain text and the Korean side is a link. In a Korean document, the English side is a link and the Korean side is plain text.
 
-The coordinated current release is Ghost-ALICE OS `0.3.0` with Ghost-ALICE Autopilot `0.3.0`. Read the [release notes](./release/2026-09-26-release-notes.md) for the intent, session, and continuation changes and their verification limits.
+The coordinated current release is Ghost-ALICE OS `0.4.0` with Ghost-ALICE Autopilot `0.4.0`. Read the [release notes](./release/2026-09-28-release-notes.md) for the intent, session, and continuation changes and their verification limits.
 
 ## Start Here
 
@@ -47,7 +47,7 @@ The coordinated current release is Ghost-ALICE OS `0.3.0` with Ghost-ALICE Autop
 | Platform adapter compliance | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) | [ko/policies/platform-adapter-compliance.md](./ko/policies/platform-adapter-compliance.md) |
 | Live smoke regression | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) | [ko/policies/live-smoke-regression.md](./ko/policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) | [ko/policies/evaluator-artifact-contract.md](./ko/policies/evaluator-artifact-contract.md) |
-| Current release notes | [release/2026-09-26-release-notes.md](./release/2026-09-26-release-notes.md) | [ko/release/2026-09-26-release-notes.md](./ko/release/2026-09-26-release-notes.md) |
+| Current release notes | [release/2026-09-28-release-notes.md](./release/2026-09-28-release-notes.md) | [ko/release/2026-09-28-release-notes.md](./ko/release/2026-09-28-release-notes.md) |
 | Public release checklist | [release/public-release-checklist.md](./release/public-release-checklist.md) | [ko/release/public-release-checklist.md](./ko/release/public-release-checklist.md) |
 | Planning policy | [plans/README.md](./plans/README.md) | [ko/plans/README.md](./ko/plans/README.md) |
 

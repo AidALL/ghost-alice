@@ -26,6 +26,8 @@ import agent_visibility_policy
 import runtime_config
 import work_impact_projection
 import strict_session_log
+from session_intent_analyzer_hook import bound_session_identity
+from task_router_reminder_hook import session_material, gate_state
 
 SAFE_BARE_COMMANDS = {
     "bash",
@@ -518,12 +520,12 @@ def _event_name(payload: dict[str, object], env: dict[str, str]) -> str:
 
 
 def _platform_name(env: dict[str, str]) -> str:
-    return _safe_path_component(env.get("GHOST_ALICE_PLATFORM") or "unknown")
+    return str(env.get("GHOST_ALICE_PLATFORM") or "unknown")
 
 
 def _pending_merge_manifest_path(env: dict[str, str], platform: str) -> Path | None:
     home = _home_from_env(env)
-    if home is None:
+    if home is None or bound_session_identity(platform, {"session_id": "pending-merge"}, {}) is None:
         return None
     return home / ".ghost-alice" / "pending-merges" / platform / "manifest.json"
 
@@ -543,7 +545,7 @@ def _session_intent_root_candidates(env: dict[str, str]) -> list[Path]:
     candidates: list[Path] = []
     configured = str(env.get("GHOST_ALICE_SESSION_INTENT_ROOT") or "").strip()
     if configured:
-        candidates.append(Path(configured).expanduser())
+        return [Path(configured).expanduser()]
     candidates.append(Path(__file__).resolve().parents[1] / ".tmp" / "session-intent")
     home = _home_from_env(env)
     if home is not None:
@@ -558,73 +560,23 @@ def _session_intent_root_candidates(env: dict[str, str]) -> list[Path]:
     return unique
 
 
-def _current_session_pointer(root: Path, platform: str) -> dict[str, object]:
-    pointer = _read_json(root / _safe_path_component(platform) / "current-session.json")
-    if pointer.get("schema_version") != "session-intent-current.v1":
-        return {}
-    return pointer
-
-
-def _resolve_session_id(root: Path, platform: str, payload: dict[str, object], env: dict[str, str]) -> str:
-    pointer = _current_session_pointer(root, platform)
-    return _safe_path_component(_first_text(
-        payload.get("session_id"),
-        payload.get("sessionId"),
-        payload.get("conversation_id"),
-        payload.get("thread_id"),
-        env.get("CODEX_THREAD_ID") if _safe_path_component(platform) == "codex" else None,
-        env.get("GHOST_ALICE_SESSION_ID"),
-        pointer.get("session_id"),
-        "",
-    ))
-
-
-def _session_dir(root: Path, platform: str, session_id: str) -> Path:
-    return root / _safe_path_component(platform) / _safe_path_component(session_id)
-
-
-def _latest_intent_event(session_dir: Path) -> dict[str, object]:
-    events_path = session_dir / "intent-events.jsonl"
-    try:
-        lines = events_path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return {}
-    for line in reversed(lines):
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(row, dict) and row.get("event") == "user-input-observed":
-            return row
-    return {}
-
-
-def _downstream_gate_matches_latest_event(gate: dict[str, object], latest_event: dict[str, object]) -> bool:
-    if not gate.get("input_event_id") and not gate.get("input_digest"):
-        return False
-    if not latest_event:
-        return False
-    if gate.get("input_event_id") and latest_event.get("event_id"):
-        return gate["input_event_id"] == latest_event["event_id"]
-    if gate.get("input_digest") and latest_event.get("input_digest"):
-        return gate["input_digest"] == latest_event["input_digest"]
-    return False
-
-
 def _has_current_downstream_block(env: dict[str, str], payload: dict[str, object], platform: str) -> bool:
+    session_id = bound_session_identity(platform, payload, env)
+    if not session_id or session_id == "unknown":
+        return False
     for root in _session_intent_root_candidates(env):
-        session_id = _resolve_session_id(root, platform, payload, env)
-        if session_id == "unknown":
+        # Once a store contains this bound session, do not borrow a block from
+        # another root merely because the selected store has no current block.
+        material = session_material(root, platform, session_id)
+        if material.get("degraded"):
+            return False
+        if not material.get("state"):
             continue
-        session = _session_dir(root, platform, session_id)
-        gate = _read_json(session / "downstream-gates.json")
-        if gate.get("schema_version") != "downstream-gates.v1" or gate.get("gate") != "jailbreak-detector":
-            continue
-        if not _downstream_gate_matches_latest_event(gate, _latest_intent_event(session)):
-            continue
+        gate = gate_state(root, platform, session_id, material)
+        if not gate or gate.get("stale"):
+            return False
         decision = str(gate.get("decision") or "").strip().lower()
-        if gate.get("opened") is False or decision == "block":
-            return True
+        return gate.get("opened") is False or decision == "block"
     return False
 
 
@@ -864,6 +816,10 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
     child_env = dict(env)
     # subprocess.run encodes the pipe as UTF-8 below; Python children must decode the same bytes independently of the Windows console code page.
     child_env["PYTHONIOENCODING"] = "utf-8"
+    # Node's ledger reader must use the same selected Python as this runner,
+    # including installed interpreters outside the child's PATH.
+    if not child_env.get("GHOST_ALICE_PYTHON"):
+        child_env["GHOST_ALICE_PYTHON"] = sys.executable
     started = time.perf_counter()
     result = subprocess.run(
         argv,

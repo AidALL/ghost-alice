@@ -306,7 +306,8 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         text = VALID_TEXT.replace("    verdict: pass\n", "    verdict: maybe\n", 1)
         reason = MOD.validate_completion_text(text)
         self.assertIsNotNone(reason)
-        self.assertIn("pass | fail | unverified", reason)
+        self.assertIn("Invalid verdict value", reason)
+        self.assertIn("without punctuation", reason)
 
     def test_entry_verdict_unverified_blocks(self) -> None:
         text = VALID_TEXT.replace("    verdict: pass\n", "    verdict: unverified\n", 1)

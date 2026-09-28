@@ -7,6 +7,7 @@ Dependencies: Python 3.11+ standard library only.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -303,10 +304,18 @@ def analyze_events(events: list[Event], window: int, min_count: int) -> dict[str
 def load_intent_context(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
-    try:
-        value = json.loads(path.expanduser().read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
+    path = path.expanduser()
+    if path.name == "intent-state.json" and any((path.parents[2] / name).exists() for name in ("ghost-state.sqlite3", ".sqlite-authority.json")):
+        entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
+        spec = importlib.util.spec_from_file_location("ghost_evolution_ledger", entry)
+        ledger = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(ledger)
+        value = ledger.read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
+    else:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
     if not isinstance(value, dict):
         return None
     decisions = [item for item in value.get("decisions", []) if isinstance(item, dict)]

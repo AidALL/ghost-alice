@@ -1106,7 +1106,7 @@ def _platform_io_trace_entry(platform_key: str, event: str) -> Optional[dict[str
     io_command = _io_trace_hook_command(payload_mode=True)
     if not io_command:
         return None
-    return _command_entry(_hook_runner_command("io-trace", io_command, IO_TRACE_MARKER))
+    return _command_entry(_hook_runner_command("io-trace", io_command, IO_TRACE_MARKER, platform_key=platform_key))
 
 
 def _ensure_hook_dispatcher_installed(dry_run: bool = False) -> bool:
@@ -2478,7 +2478,7 @@ def install_hook(
         marker = spec["marker"]
         match_marker = marker + " "
         inner = _hook_python_command(spec["script"], payload=True)
-        entry = _hook_runner_command_entry(spec["runner_id"], inner, marker)
+        entry = _hook_runner_command_entry(spec["runner_id"], inner, marker, platform_key=platform_key)
         command = _entry_command(entry)
         verified_addon_commands.add((event_name, command))
         if event_name not in hooks_obj:

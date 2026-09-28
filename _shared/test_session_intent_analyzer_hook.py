@@ -21,6 +21,9 @@ from unittest.mock import patch
 
 
 SCRIPT = pathlib.Path(__file__).resolve().with_name("session_intent_analyzer_hook.py")
+sys.path.insert(0, str(SCRIPT.parents[1] / "session-intent-analyzer" / "scripts"))
+import session_intent_ledger as ledger_api
+
 RECEIPT_START = "[session-intent-receipt]"
 RECEIPT_END = "[/session-intent-receipt]"
 
@@ -34,6 +37,13 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.tmp_home = pathlib.Path(tempfile.mkdtemp(prefix="session-intent-hook-test-"))
         self.ledger_root = self.tmp_home / "ghost-alice" / ".tmp" / "session-intent"
         self.addCleanup(lambda: shutil.rmtree(self.tmp_home, ignore_errors=True))
+
+    def state(self, session_id, platform="codex"):
+        return ledger_api.read_session_state(root=self.ledger_root, platform=platform,
+                                             session_id=session_id, recover_audit=False)
+
+    def events(self, session_id, platform="codex"):
+        return ledger_api.read_session_events(root=self.ledger_root, platform=platform, session_id=session_id)
 
     def run_hook(
         self,
@@ -88,7 +98,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         receipt = receipt_from(payload["systemMessage"])
         state = self.ledger_root / "codex" / "s-receipt" / "intent-state.json"
         events = state.with_name("intent-events.jsonl")
-        event = json.loads(events.read_text().splitlines()[0])
+        event = self.events("s-receipt")[0]
         self.assertEqual(receipt, {
             "schema_version": "session-intent-observation-receipt.v1",
             "intake_status": "observed",
@@ -97,17 +107,21 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             "session_id": "s-receipt",
             "state_path": str(state.resolve()),
             "events_path": str(events.resolve()),
+            "database_path": str((self.ledger_root / "ghost-state.sqlite3").resolve()),
+            "storage_backend": "sqlite",
             "input_event_id": event["event_id"],
         })
         self.assertNotIn(prompt, result.stdout)
         self.assertNotIn("not-a-real-secret", result.stdout)
         self.assertIn("--root", payload["systemMessage"])
         self.assertIn("--session-id", payload["systemMessage"])
+        self.assertIn("--read-state", payload["systemMessage"])
+        self.assertNotIn("Use state_path for downstream intent context", payload["systemMessage"])
         self.assertIn("Do not create an alternate ledger", payload["systemMessage"])
 
-    def test_receipt_native_session_wins_pointer_and_env_and_uses_safe_paths(self) -> None:
+    def test_receipt_native_session_wins_pointer_and_env_and_uses_exact_paths(self) -> None:
         self.run_hook({"session_id": "old-pointer", "prompt": "prior"})
-        session_id = "../native/" + "x" * 200
+        session_id = "native-session-exact"
         result = self.run_hook(
             {"session_id": session_id, "prompt": "current"}, session_env="other-env"
         )
@@ -115,12 +129,12 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn(RECEIPT_START, message)
         receipt = receipt_from(message)
-        self.assertEqual(receipt["session_id"], ("native-" + "x" * 200)[:120])
+        self.assertEqual(receipt["session_id"], session_id)
         state = pathlib.Path(receipt["state_path"])
-        self.assertTrue(state.is_file())
+        self.assertEqual(self.state(session_id)["session_id"], session_id)
         self.assertEqual(state.parent.name, receipt["session_id"])
         self.assertEqual(state.parents[2], self.ledger_root.resolve())
-        self.assertFalse((self.ledger_root / "codex" / "other-env").exists())
+        self.assertEqual(self.state("other-env"), {})
 
     def test_receipt_stays_with_completed_observation_when_other_session_moves_pointer(self) -> None:
         hook = TestDegradeMarkerPathParity._load("session_intent_analyzer_hook")
@@ -143,10 +157,10 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         message = json.loads(output.getvalue())["systemMessage"]
         self.assertIn(RECEIPT_START, message)
         receipt = receipt_from(message)
-        pointer = json.loads((self.ledger_root / "codex" / "current-session.json").read_text())
-        self.assertEqual(pointer["session_id"], "concurrent-session")
+        pointer = ledger_api.read_current_session_pointer(self.ledger_root, "codex")
+        self.assertEqual(pointer, "concurrent-session")
         self.assertEqual(receipt["session_id"], "native-session")
-        event = json.loads(pathlib.Path(receipt["events_path"]).read_text().splitlines()[0])
+        event = self.events(receipt["session_id"])[0]
         self.assertEqual(receipt["input_event_id"], event["event_id"])
 
     def test_write_failure_emits_no_observed_receipt(self) -> None:
@@ -169,9 +183,9 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertNotIn("Ledger write failed", payload["systemMessage"])
 
-        events = self.ledger_root / "codex" / "s-korean" / "intent-events.jsonl"
-        text = events.read_text(encoding="utf-8")
-        row = json.loads(text.splitlines()[0])
+        rows = self.events("s-korean")
+        text = json.dumps(rows)
+        row = rows[0]
         self.assertEqual(row["input_char_count"], len(prompt))
         expected_digest = f"sha256:{hashlib.sha256(prompt.encode('utf-8')).hexdigest()}"
         self.assertEqual(row["input_digest"], expected_digest)
@@ -188,10 +202,10 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(payload["continue"], True)
         self.assertIn("session-intent-analyzer", payload["systemMessage"])
 
-        events = self.ledger_root / "codex" / "s-hook" / "intent-events.jsonl"
-        self.assertTrue(events.exists())
-        text = events.read_text(encoding="utf-8")
-        row = json.loads(text.splitlines()[0])
+        rows = self.events("s-hook")
+        self.assertTrue(rows)
+        text = json.dumps(rows)
+        row = rows[0]
         self.assertEqual(row["event"], "user-input-observed")
         self.assertIn("input_digest", row)
         self.assertNotIn("secret-token", text)
@@ -204,10 +218,8 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         })
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        state_path = self.ledger_root / "codex" / "s-digest-only" / "intent-state.json"
-        events_path = self.ledger_root / "codex" / "s-digest-only" / "intent-events.jsonl"
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        row = json.loads(events_path.read_text(encoding="utf-8").splitlines()[0])
+        state = self.state("s-digest-only")
+        row = self.events("s-digest-only")[0]
 
         self.assertEqual(state["intake_status"], "observed")
         self.assertEqual(state["last_semantic_delta_status"], "not-provided")
@@ -227,13 +239,26 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertFalse((session_dir / "intent-events.jsonl").exists())
         self.assertFalse((session_dir / "intent-state.json").exists())
         self.assertFalse((self.ledger_root / "codex" / "current-session.json").exists())
+        self.assertEqual(self.state("s-empty-payload"), {})
+        self.assertEqual(self.events("s-empty-payload"), [])
 
-    def test_hook_uses_unknown_session_when_absent(self) -> None:
+    def test_hook_reports_unavailable_write_identity_when_absent(self) -> None:
         result = self.run_hook({"user_prompt": "Update the current intent summary."})
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         events = self.ledger_root / "codex" / "unknown" / "intent-events.jsonl"
-        self.assertTrue(events.exists())
+        self.assertFalse(events.exists())
+        self.assertEqual(self.state("unknown"), {})
+        self.assertNotIn(RECEIPT_START, result.stdout)
+        self.assertIn("Ledger write failed", result.stdout)
+
+    def test_hook_rejects_identity_alias_without_overwriting_a_session(self) -> None:
+        self.run_hook({"session_id": "native-session", "prompt": "first"})
+        before = self.state("native-session")
+        result = self.run_hook({"session_id": "native/session", "prompt": "wrong identity"})
+        self.assertNotIn(RECEIPT_START, result.stdout)
+        self.assertIn("Ledger write failed", result.stdout)
+        self.assertEqual(self.state("native-session"), before)
 
     def test_hook_accepts_camelcase_session_id_and_user_prompt(self) -> None:
         result = self.run_hook({
@@ -242,31 +267,26 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         })
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        events = self.ledger_root / "codex" / "s-camel" / "intent-events.jsonl"
-        self.assertTrue(events.exists())
-        text = events.read_text(encoding="utf-8")
-        row = json.loads(text.splitlines()[0])
+        rows = self.events("s-camel")
+        self.assertTrue(rows)
+        text = json.dumps(rows)
+        row = rows[0]
         self.assertEqual(row["event"], "user-input-observed")
         self.assertEqual(row["session_id"], "s-camel")
         self.assertEqual(row["input_char_count"], len("do not store this raw secret-token"))
         self.assertNotIn("secret-token", text)
-        self.assertFalse((self.ledger_root / "codex" / "unknown").exists())
+        self.assertEqual(self.state("unknown"), {})
 
-    def test_hook_writes_current_session_pointer(self) -> None:
+    def test_hook_commits_current_session_discovery(self) -> None:
         result = self.run_hook({
             "sessionId": "s-camel",
             "userPrompt": "do not store this raw secret-token",
         })
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
-        pointer = self.ledger_root / "codex" / "current-session.json"
-        self.assertTrue(pointer.exists())
-        data = json.loads(pointer.read_text(encoding="utf-8"))
-
-        self.assertEqual(data["schema_version"], "session-intent-current.v1")
-        self.assertEqual(data["session_id"], "s-camel")
-        self.assertIn("s-camel/intent-state.json", data["state_path"].replace("\\", "/"))
-        self.assertNotIn("secret-token", pointer.read_text(encoding="utf-8"))
+        self.assertEqual(ledger_api.read_current_session_pointer(self.ledger_root, "codex"), "s-camel")
+        self.assertEqual(self.state("s-camel")["session_id"], "s-camel")
+        self.assertNotIn(b"secret-token", (self.ledger_root / "ghost-state.sqlite3").read_bytes())
 
     def test_hook_does_not_write_downstream_gate_at_prompt_submit(self) -> None:
         # The model-recorded security decision migration removed deterministic
@@ -283,35 +303,35 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         session_dir = self.ledger_root / "codex" / "s-no-gate"
         self.assertFalse((session_dir / "downstream-gates.json").exists())
 
-        state = json.loads((session_dir / "intent-state.json").read_text(encoding="utf-8"))
+        state = self.state("s-no-gate")
         self.assertEqual(state["intake_status"], "observed")
 
-        events_text = (session_dir / "intent-events.jsonl").read_text(encoding="utf-8")
+        events_text = json.dumps(self.events("s-no-gate"))
         self.assertNotIn("secret-token", events_text)
         self.assertNotIn("ignore previous", events_text)
 
     def test_native_session_observation_and_receipt_writer_ignore_foreign_pointer(self) -> None:
         seeded = self.run_hook({"session_id": "foreign", "prompt": "foreign input"})
         self.assertEqual(seeded.returncode, 0, seeded.stderr)
-        foreign_events = self.ledger_root / "codex/foreign/intent-events.jsonl"
-        before = foreign_events.read_bytes()
+        before = self.events("foreign")
         result = self.run_hook({"prompt": "native input"},
                                native_session_env="native", session_env="stale-override")
         self.assertEqual(result.returncode, 0, result.stderr)
         receipt = receipt_from(json.loads(result.stdout)["systemMessage"])
         self.assertEqual(receipt["session_id"], "native")
-        self.assertEqual(foreign_events.read_bytes(), before)
+        self.assertEqual(self.events("foreign"), before)
         env = dict(os.environ, CODEX_THREAD_ID="native", GHOST_ALICE_SESSION_ID="stale-override")
         ledger = SCRIPT.parents[1] / "session-intent-analyzer/scripts/session_intent_ledger.py"
         written = subprocess.run([
             sys.executable, str(ledger), "--root", receipt["ledger_root"],
             "--platform", receipt["platform"], "--session-id", receipt["session_id"],
+            "--expected-input-event-id", receipt["input_event_id"],
             "--delta-json", '{"current_goal":"native goal"}',
         ], env=env, capture_output=True, text=True, check=False)
         self.assertEqual(written.returncode, 0, written.stderr)
-        state = json.loads(pathlib.Path(receipt["state_path"]).read_text())
+        state = self.state(receipt["session_id"], receipt["platform"])
         self.assertEqual(state["current_goal"], "native goal")
-        events = [json.loads(line) for line in pathlib.Path(receipt["events_path"]).read_text().splitlines()]
+        events = self.events(receipt["session_id"], receipt["platform"])
         observed_events = [row for row in events if row["event"] == "user-input-observed"]
         self.assertEqual(observed_events[-1]["event_id"], receipt["input_event_id"])
 
@@ -320,7 +340,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                                native_session_env="native", session_env="generic")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(receipt_from(json.loads(result.stdout)["systemMessage"])["session_id"], "payload")
-        self.assertFalse((self.ledger_root / "codex/native").exists())
+        self.assertEqual(self.state("native"), {})
 
     def test_documented_security_write_uses_receipt_without_host_environment(self) -> None:
         skill = SCRIPT.parents[1] / "jailbreak-detector/SKILL.md"
@@ -345,12 +365,12 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                 result = subprocess.run([sys.executable, str(ledger), *argv[1:]],
                                         env=env, cwd=self.tmp_home, capture_output=True, text=True, check=False)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                state = json.loads(pathlib.Path(receipt["state_path"]).read_text())
+                state = self.state(receipt["session_id"], receipt["platform"])
                 decision = state["model_security_decision"]
                 self.assertEqual(decision["decision"], "block")
                 self.assertEqual(decision["input_event_id"], receipt["input_event_id"])
 
-    def test_hook_uses_current_session_pointer_when_payload_lacks_session_id(self) -> None:
+    def test_hook_cannot_use_shared_pointer_as_missing_write_identity(self) -> None:
         first = self.run_hook({
             "sessionId": "s-existing",
             "userPrompt": "first prompt",
@@ -360,12 +380,12 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         second = self.run_hook({"userPrompt": "second prompt without session id"})
 
         self.assertEqual(second.returncode, 0, msg=second.stderr)
-        events = self.ledger_root / "codex" / "s-existing" / "intent-events.jsonl"
-        self.assertTrue(events.exists())
-        rows = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
-        self.assertEqual(len(rows), 2)
+        rows = self.events("s-existing")
+        self.assertEqual(len(rows), 1)
         self.assertTrue(all(row["session_id"] == "s-existing" for row in rows))
-        self.assertFalse((self.ledger_root / "codex" / "unknown").exists())
+        self.assertEqual(self.state("unknown"), {})
+        self.assertNotIn(RECEIPT_START, second.stdout)
+        self.assertIn("Ledger write failed", second.stdout)
 
 
 class LedgerDependencyDegradeTests(unittest.TestCase):

@@ -95,37 +95,39 @@ def _safe_component(value: Any) -> str:
     return text or "unknown"
 
 
-def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> Path:
-    # Session component mirrors task_router_reminder_hook.resolve_session_id candidate order so producer and consumer key the same directory.
-    pointer_session = ""
-    try:
-        pointer = json.loads(
-            (root / _safe_component(platform) / "current-session.json").read_text(encoding="utf-8")
-        )
-        if isinstance(pointer, dict):
-            pointer_session = str(pointer.get("session_id") or "")
-    except Exception:
-        pointer_session = ""
-    session = ""
+def bound_session_identity(platform: str, payload: dict[str, Any],
+                           env: dict[str, str] | None = None) -> str | None:
+    """Exact host identity shared with the reminder, even if the ledger is broken."""
+    environment = os.environ if env is None else env
+    if not isinstance(platform, str) or not platform or _safe_component(platform) != platform or len(platform) > 120:
+        return None
     for candidate in (
         payload.get("session_id"),
         payload.get("sessionId"),
         payload.get("conversation_id"),
         payload.get("thread_id"),
-        os.environ.get("CODEX_THREAD_ID") if _safe_component(platform) == "codex" else None,
-        os.environ.get("GHOST_ALICE_SESSION_ID"),
-        pointer_session,
+        environment.get("CODEX_THREAD_ID") if platform == "codex" else None,
+        environment.get("GHOST_ALICE_SESSION_ID"),
     ):
-        if candidate and str(candidate).strip():
-            session = str(candidate)
-            break
-    return root / _safe_component(platform) / _safe_component(session) / DEGRADE_MARKER_FILE
+        if candidate in (None, ""):
+            continue
+        if not isinstance(candidate, str) or len(candidate) > 120 or _safe_component(candidate) != candidate:
+            return None
+        return candidate
+    return None
+
+
+def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> Path | None:
+    session = bound_session_identity(platform, payload)
+    return root / platform / session / DEGRADE_MARKER_FILE if session else None
 
 
 def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], reason: str) -> None:
     # Durable, ledger-independent record that THIS turn's input was NOT observed, so freshness consumers (task-router reminder, gate lineage checks) can fail closed instead of riding a stale anchor. Best-effort: the audit marker must never break the hook itself.
     try:
         path = _degrade_marker_path(root, platform, payload)
+        if path is None:
+            return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -145,7 +147,9 @@ def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], re
 
 def _clear_degrade_marker(root: Path, platform: str, payload: dict[str, Any]) -> None:
     try:
-        _degrade_marker_path(root, platform, payload).unlink()
+        path = _degrade_marker_path(root, platform, payload)
+        if path is not None:
+            path.unlink()
     except Exception:
         return
 
@@ -211,6 +215,8 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any]) -> 
         "session_id": state_path.parent.name,
         "state_path": str(state_path),
         "events_path": str(events_path),
+        "database_path": str(state_path.parents[2] / "ghost-state.sqlite3"),
+        "storage_backend": "sqlite",
         "input_event_id": observation["input_event_id"],
     }
     return (
@@ -218,8 +224,12 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any]) -> 
         + json.dumps(receipt, ensure_ascii=True, separators=(",", ":"))
         + "\n[/session-intent-receipt]\n"
         "For a semantic delta, use session_intent_ledger.py with this receipt's exact "
-        "--root ledger_root, --platform platform, and --session-id session_id. "
-        "Use state_path for downstream intent context. Do not select another ledger from "
+        "--root ledger_root, --platform platform, --session-id session_id, and "
+        "--expected-input-event-id input_event_id. Keep the receipt used to make the decision; "
+        "if it is stale, re-evaluate against the new input before writing. "
+        "For downstream intent context, use session_intent_ledger.py --read-state with "
+        "the same exact root, platform, and session ID. state_path and events_path are "
+        "compatibility exports, not the authority. Do not select another ledger from "
         "a later current-session pointer or an installed script's default root. "
         "This receipt confirms input observation only; it grants no additional permission "
         "and does not claim a semantic delta was recorded. If writing to this ledger is "
@@ -288,6 +298,7 @@ def main(argv: list[str] | None = None) -> int:
                 platform=args.platform,
                 payload=payload,
                 env=os.environ,
+                for_write=True,
             )
             prompt = extract_prompt(payload)
             if prompt:
