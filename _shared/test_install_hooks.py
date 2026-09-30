@@ -926,9 +926,12 @@ class TestMessageLanguage(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
+            # A headless host returns only the final message, so its retry must stand alone.
+            headless_env = {**os.environ, "GHOST_ALICE_AGENT_VISIBILITY": "strict", "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}
             result = _run_hook_command(
                 install_hooks.STOP_HOOK_COMMAND,
                 input_text=json.dumps({"transcript_path": str(transcript)}),
+                env=headless_env,
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -4028,13 +4031,13 @@ class TestInstallHook(TempHomeTestCase):
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
-        # Four entries: prompt pending-merge + session-intent-analyzer + task-router-reminder + web-search-first.
-        self.assertEqual(len(hooks), 4)
+        # Three entries on Claude Code: prompt pending-merge + session-intent-analyzer + task-router-reminder.
+        self.assertEqual(len(hooks), 3)
         cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
         self.assertTrue(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in c for c in cmds))
         self.assertTrue(any(install_hooks.HOOK_MARKER in c for c in cmds))
         self.assertTrue(any(install_hooks.SESSION_INTENT_MARKER in c for c in cmds))
-        self.assertTrue(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
+        self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
         allow = settings["permissions"]["allow"]
         for skill_name in _expected_ghost_alice_skill_names():
             with self.subTest(skill_name=skill_name):
@@ -4063,10 +4066,10 @@ class TestInstallHook(TempHomeTestCase):
                     elif install_hooks.WEB_SEARCH_FIRST_MARKER in command:
                         marker_order.append("web-search-first")
 
-                self.assertEqual(
-                    marker_order,
-                    ["pending-merge", "session-intent", "task-router-reminder", "web-search-first"],
-                )
+                expected = ["pending-merge", "session-intent", "task-router-reminder"]
+                if platform in install_hooks.WEB_SEARCH_FIRST_PLATFORMS:
+                    expected.append("web-search-first")
+                self.assertEqual(marker_order, expected)
 
     def test_install_replaces_legacy_pre_tool_checkpoint_marker(self):
         """Old pre-tool checkpoint entries are removed when the new marker is installed."""
@@ -4514,8 +4517,8 @@ class TestInstallHook(TempHomeTestCase):
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
-        # Existing 1 + prompt pending-merge + session-intent-analyzer + task-router + web-search-first = 5.
-        self.assertEqual(len(hooks), 5)
+        # Existing 1 + prompt pending-merge + session-intent-analyzer + task-router = 4.
+        self.assertEqual(len(hooks), 4)
         self.assertEqual(hooks[0]["matcher"], "*.py")
 
     def test_install_creates_backup(self):
@@ -4653,7 +4656,7 @@ class TestCheckStatus(TempHomeTestCase):
         for entry in settings["hooks"]["UserPromptSubmit"]:
             for hook in entry.get("hooks", []):
                 command = hook.get("command", "")
-                if install_hooks.WEB_SEARCH_FIRST_MARKER in command:
+                if install_hooks.SESSION_INTENT_MARKER in command:
                     hook["command"] = command + " --local-user-edit"
         self._write_settings("claude", settings)
 
@@ -4661,25 +4664,27 @@ class TestCheckStatus(TempHomeTestCase):
 
         self.assertEqual(status.status_token, "HOOK_INSTALLED_DRIFT")
         self.assertEqual(status.legacy_status, "missing")
-        self.assertEqual(status.details["drifted"], ["web-search-first"])
+        self.assertEqual(status.details["drifted"], ["session-intent"])
         self.assertNotEqual(status.status_label, install_hooks.STATUS_LABELS["missing"])
 
     def test_install_reports_stale_web_search_hook_as_replaced_not_removed(self):
-        """A stale mandatory web-search-first hook is reported as replacement."""
-        self._write_settings("claude", {})
-        result = install_hooks.install_hook("claude")
+        """On a platform that installs it, a stale web-search-first hook is reported as replacement."""
+        self._create_platform_dir("codex")
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
-        settings = self._read_settings("claude")
+        settings = self._read_settings("codex")
         for entry in settings["hooks"]["UserPromptSubmit"]:
             for hook in entry.get("hooks", []):
                 command = hook.get("command", "")
                 if install_hooks.WEB_SEARCH_FIRST_MARKER in command:
                     hook["command"] = command + " --local-user-edit"
-        self._write_settings("claude", settings)
+        self._write_settings("codex", settings)
 
         output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            result = install_hooks.install_hook("claude")
+        with contextlib.redirect_stdout(output), \
+                patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            result = install_hooks.install_hook("codex")
 
         text = output.getvalue()
         self.assertEqual(result, "installed")
@@ -4720,27 +4725,28 @@ class TestCheckStatus(TempHomeTestCase):
         result = install_hooks.check_status("claude")
         self.assertEqual(result, "missing")
 
-    def test_status_missing_when_web_search_hook_is_missing(self):
-        """Missing web-search-first hook is missing."""
-        self._write_settings("claude", {
-            "hooks": {
-                "UserPromptSubmit": [
-                    install_hooks.PROMPT_PENDING_MERGE_ENTRY,
-                    install_hooks.HOOK_ENTRY,
-                    install_hooks.SESSION_INTENT_ENTRY,
-                ],
-                "Stop": [install_hooks.STOP_HOOK_ENTRY],
-                "SessionStart": [install_hooks.SESSION_START_ENTRY],
-                "PostToolUse": [
-                    {
-                        "matcher": "",
-                        "hooks": [{"type": "command", "command": "bash '/tmp/io-trace-hook.sh' # [io-trace] Ghost-ALICE"}],
-                    }
-                ],
-            },
-        })
-        result = install_hooks.check_status("claude")
+    def test_status_missing_for_codex_when_web_search_hook_is_missing(self):
+        """Codex still requires the web-search-first hook."""
+        self._create_platform_dir("codex")
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            self.assertEqual(install_hooks.install_hook("codex"), "installed")
+            settings = self._read_settings("codex")
+            settings["hooks"]["UserPromptSubmit"] = [
+                entry for entry in settings["hooks"]["UserPromptSubmit"]
+                if not any(install_hooks.WEB_SEARCH_FIRST_MARKER in h.get("command", "") for h in entry["hooks"])
+            ]
+            self._write_settings("codex", settings)
+            result = install_hooks.check_status("codex")
         self.assertEqual(result, "missing")
+
+    def test_status_installed_for_claude_without_web_search_hook(self):
+        """Claude Code does not install or require the web-search-first hook."""
+        self._create_platform_dir("claude")
+        self.assertEqual(install_hooks.install_hook("claude"), "installed")
+        settings = self._read_settings("claude")
+        commands = [h["command"] for entry in settings["hooks"]["UserPromptSubmit"] for h in entry["hooks"]]
+        self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in commands))
+        self.assertEqual(install_hooks.check_status("claude"), "installed")
 
     def test_status_missing_when_session_intent_hook_is_missing(self):
         """Missing session-intent-analyzer hook is missing."""
@@ -5798,14 +5804,41 @@ class TestSessionStartHook(unittest.TestCase):
 class TestWebSearchFirstHook(TempHomeTestCase):
     """Rule 10: web-search-first hook for external tool claims (agent governance)."""
 
-    def test_web_search_first_hook_installed_for_claude(self):
+    def test_web_search_first_hook_not_installed_for_claude(self):
+        """Its systemMessage-only output never reaches the model on Claude Code, so it adds no model-facing layer."""
         self._create_platform_dir("claude")
         result = install_hooks.install_hook("claude")
         self.assertEqual(result, "installed")
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
         cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
+        self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
+
+    def test_web_search_first_hook_still_installed_for_codex(self):
+        self._create_platform_dir("codex")
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            result = install_hooks.install_hook("codex")
+        self.assertEqual(result, "installed")
+        hooks = self._read_settings("codex")["hooks"]["UserPromptSubmit"]
+        cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
         self.assertTrue(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
+
+    def test_reinstall_removes_a_legacy_web_search_first_entry_for_claude(self):
+        self._create_platform_dir("claude")
+        install_hooks.install_hook("claude")
+        settings = self._read_settings("claude")
+        settings["hooks"]["UserPromptSubmit"].append(install_hooks.WEB_SEARCH_FIRST_ENTRY)
+        self._write_settings("claude", settings)
+
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            result = install_hooks.install_hook("claude")
+
+        self.assertEqual(result, "installed")
+        self.assertIn("Removed 1 web-search-first hook entry(ies)", output.getvalue())
+        hooks = self._read_settings("claude")["hooks"]["UserPromptSubmit"]
+        cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
+        self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
 
     def test_web_search_first_command_mentions_community_sources(self):
         result = _run_hook_command(install_hooks.WEB_SEARCH_FIRST_COMMAND)
@@ -6128,6 +6161,9 @@ class TestWebSearchFirstHook(TempHomeTestCase):
     def test_web_search_first_hook_removed_on_uninstall(self):
         self._create_platform_dir("claude")
         install_hooks.install_hook("claude")
+        settings = self._read_settings("claude")
+        settings["hooks"]["UserPromptSubmit"].append(install_hooks.WEB_SEARCH_FIRST_ENTRY)  # legacy install
+        self._write_settings("claude", settings)
         result = install_hooks.uninstall_hook("claude")
         self.assertEqual(result, "removed")
         settings = self._read_settings("claude")

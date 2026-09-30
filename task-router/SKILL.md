@@ -63,10 +63,7 @@ task-router scans available skill descriptions against the current session inten
   - [1.4 Execute Routed Workflow](#14-execute-routed-workflow)
 - [2. No Skill Match](#2-no-skill-match)
 - [3. Relationship To using-coding-convention](#3-relationship-to-using-coding-convention)
-- [4. Examples](#4-examples)
-  - [Operations](#operations)
-  - [Document Verification](#document-verification)
-  - [Development](#development)
+- [4. Reference](#4-reference)
 - [Failure Modes](#failure-modes)
 
 
@@ -98,7 +95,7 @@ This step performs atomic meaning decomposition from the accepted session intent
 
 Reconcile the current goal, latest scope, active decisions, accumulated constraints/non-goals, and acceptance criteria before selecting an action category. An accumulated list can retain an earlier turn's restriction. A supported explicit user revision resolves only the named exception; other restrictions remain. Do not silently redefine an edit request as analysis because an older restriction remains in a list, or treat a newer goal as automatic permission. When the context cannot resolve the conflict, identify the conflicting boundary and ask only for that missing decision; proceed with uncontroversial work where possible. Existing explicit authorization that resolves the conflict does not need another approval.
 
-Do not invent the chronology of a boundary. A timestamp on a decision does not date an undated restriction; active status, admitted criteria, and reports of prior edits alone do not establish that the restriction was later replaced. Distinguish a current user instruction or supplied conversation/event evidence from a compressed current_goal label. A clear current instruction can authorize a bounded change without formal revocation wording. If only conflicting snapshot fields are available, keep that conflict unresolved rather than calling one field initial or outdated without evidence. Ask about the contested authority only; missing task files are a separate issue.
+For boundary chronology and conflicting snapshot fields, apply `references/routing-details.md` before choosing the action category.
 
 Identify the user's primary request, whether a question or instruction, before adjacent detail. Preserve a causal axis only when the request asks about a cause or relationship; do not invent one for an imperative request. At pre-tool routing, do not fabricate or require an unsupported answer. Preserve the request for downstream output, which leads with the supported causal answer or completed imperative result after the necessary evidence or work.
 
@@ -141,7 +138,8 @@ Rules:
 - `primary-request` preserves the user's primary question or imperative instruction.
 - `response-mode: clarification-only` is the terminal route defined below; ambiguity by itself is not sufficient, and this mode uses `response-order: clarification-question-only`.
 - `response-mode: direct-response` is the no-work terminal route for content that can be resolved from the current input and conversation without tools or state access; it uses `response-order: resolved-intent-first`.
-- Route classification precedes evidence planning. A premise or symptom embedded in a causal question is not itself an inspection or verification request. Classify a request as current-state lookup only when the user explicitly asks to inspect, verify, or determine the exact local cause, or when the current conversation already establishes a specific repository, session, machine, file, or artifact as the referent. First-person wording, tense, technical-state language, ambient working directory, opened project, and tool availability do not establish that referent. When a stable general mechanism answers the question, use `direct-response`; verification rules must not promote it to a normal route.
+- Route classification precedes evidence planning. A premise or symptom embedded in a causal question is not itself an inspection or verification request. Classify a request as current-state lookup only when the user explicitly asks to inspect, verify, or determine the exact local cause, or when the current conversation already establishes a specific repository, session, machine, file, or artifact as the referent. An established referent authorizes inspection but does not require it. First-person wording, tense, technical-state language, ambient working directory, opened project, and tool availability do not establish that referent. When a stable general mechanism answers the question, use `direct-response`; verification rules must not promote it to a normal route.
+- Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists. The contract lives in `verification-before-completion` under `references/verify-or-reuse.md`.
 - The user's terminal objective outranks investigative means.
 - Treat investigation, provenance reconstruction, artifact preservation, and worktree inspection as means unless the user explicitly requests one as a deliverable.
 - Do not let a means replace, narrow, or expand the terminal objective.
@@ -159,23 +157,11 @@ Rules:
 
 ### 1.1.2 Clarification-Only Terminal Route
 
-Use `response-mode: clarification-only` only when an essential referent or decisive input is missing, the current conversation does not already supply it, and no supported answer or safe action can begin without it. Intake and routing still run internally; this route terminates before downstream skills or work.
-
-Ask only for the minimum decisive information, normally one concise question. Do not inspect files, repositories, manifests, tools, credentials, or external state to guess what the user meant. Defer a manual pending-merge check until the next actionable turn when no hook result exists. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging remains active.
-
-Do not use this route when the content already resolves the question, when existing conversation context supplies the referent, when the user requested a lookup or status check, or merely to avoid work. If a useful bounded answer can be given with an explicit assumption, answer it instead of punting.
+Use it only when an essential referent or decisive input is missing and no supported answer or safe action can begin. Ask only for the minimum decisive information, normally one concise question. Intake and routing still run internally. Do not use it when the content already resolves the question, the user requested a lookup or status check, or a bounded answer can be given with an explicit assumption. Do not inspect files, repositories, manifests, tools, credentials, or external state to guess what the user meant, and emit no control block. Full contract: `references/routing-details.md`.
 
 ### 1.1.3 Direct-Response Terminal Route
 
-Use `response-mode: direct-response` when the current input and conversation fully support the answer and no file change, external side effect, current-state lookup, tool call, or fresh verification is needed. Eligible content includes an explicit correction or non-goal that can be acknowledged immediately, a terminal objective that supersedes a previously proposed means, a bounded explanation of a general mechanism, and stable, low-risk, non-current general guidance.
-
-Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence that the active workspace is currently in that state. Do not validate or rebut that premise before explaining. First-person, past-cause, and deictic wording does not bind the question to the active workspace. The workspace becomes the target only when the user identifies it, supplies workspace evidence, or explicitly requests exact diagnosis or inspection. Explain common causes first; offer repository-specific inspection only conditionally when the user asks for the exact cause.
-
-Lead with the resolved content. For a correction, accept it in the first sentence, state the corrected scope or non-goal, and do not revive the superseded direction as a requirement, solution, or verification target. For a causal explanation, answer the general cause and make any repository-specific diagnosis conditional instead of inspecting the current repository. For a direct how-to, give the shortest actionable method that satisfies the stated constraint. Add at most one short caveat when a real unresolved risk could change the answer.
-
-Intake, security review, routing, and strict hook logging still run internally. Defer a missing manual pending-merge check until the next actionable turn. Do not inspect files, repositories, manifests, tools, credentials, or external state, and do not emit `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, or `[io-trace]` on the user surface. Do not load downstream skills or create a boundary contract.
-
-This route is unavailable when the user requests a lookup, verification, file or state inspection, modification, external side effect, current or version-specific fact, support or regression judgment, or high-risk advice. Any required tool call or fresh evidence reclassifies the turn as `normal`.
+Use it when the current input and conversation fully support the answer with no file change, side effect, current-state lookup, tool call, or fresh verification. Eligible content includes an explicit correction or non-goal, a terminal objective that supersedes a proposed means, a bounded explanation of a general mechanism, stable, low-risk, non-current general guidance, and an answer from retained artifact content when verify-or-reuse yields reuse. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic. Do not validate or rebut that premise before explaining. Lead with the resolved content; Do not inspect files, repositories, manifests, tools, credentials, or external state, and emit no control block. It is unavailable for lookup, inspection, modification, verification, current or version-specific facts, support or regression judgments, and high-risk advice. Full contract: `references/routing-details.md`.
 
 ### Sufficient Change Principle
 
@@ -245,7 +231,7 @@ After a normal route, emit:
 - task-router: done
 - using-coding-convention: done | n/a
 - boundary-contract: required | done | n/a
-- skill-call: session-intent-analyzer (this turn); task-router (this turn); using-coding-convention (this turn) | n/a
+- skill-call: <each skill actually called this turn, as name (this turn)> | n/a
 - next-required: <skill-name|none>
 ```
 
@@ -270,52 +256,9 @@ If no output skill matches, continue without one. task-router does not block the
 
 task-router performs repository-wide first-pass routing. using-coding-convention performs second-pass routing inside the coding-convention skill family.
 
-## 4. Examples
+## 4. Reference
 
-### Operations
-
-```text
-request: "Schedule a meeting tomorrow at 3."
-[task-router]
-domain: operations
-output-skills: none
-verification-skills: none
-lifecycle: verification-before-completion
-boundary-contract: n/a
-next-required: none
-```
-
-### Clarification Only
-
-```text
-request: "I can't get it to work. How do I fix this?"
-[task-router]
-domain: other
-response-mode: clarification-only
-output-skills: none
-verification-skills: none
-lifecycle: none
-boundary-contract: n/a
-next-required: user-input
-```
-
-The user-facing response asks for the exact error and relevant context without inspecting the working directory or exposing governance ceremony.
-
-### Direct Response
-
-```text
-request: "How can I compile in Eclipse without running the program?"
-[task-router]
-domain: development / tooling
-response-mode: direct-response
-output-skills: none
-verification-skills: none
-lifecycle: none
-boundary-contract: n/a
-next-required: user-input
-```
-
-The user-facing response gives the compile-only action directly and omits routing, verification, and audit ceremony.
+`references/routing-details.md` holds boundary reconciliation, the full clarification-only and direct-response contracts, worked examples, and failure modes. Read it when a route decision is not obvious from the procedure above.
 
 ### General Past-Cause Explanation
 
@@ -333,43 +276,12 @@ next-required: user-input
 
 The user-facing response explains common process-state causes first, does not inspect or rebut the premise from the ambient workspace, and offers exact diagnosis only conditionally.
 
-### Document Verification
-
-```text
-request: "Check whether the requirements table and body text match."
-[task-router]
-domain: docs
-output-skills: document extraction if available
-verification-skills: adversarial-verification
-lifecycle: verification-before-completion
-boundary-contract: n/a
-next-required: text extraction addon if installed; otherwise ask for readable source text
-```
-
-### Development
-
-```text
-request: "Build only the Android login UI mockup. Do not touch auth, API, DI, or navigation. Verify with screenshot."
-[task-router]
-domain: development / Android UI
-output-skills: development workflow skill if installed
-verification-skills: verification-before-completion
-lifecycle: using-coding-convention -> verification-before-completion
-boundary-contract: required
-boundary-reason: modification request with explicit prohibited surfaces and screenshot verification
-next-required: boundary-contract
-```
-
 ## Failure Modes
 
 - task-router runs before session-intent-analyzer.
-- task-router treats absent `downstream-gates.json` as denial when no current-lineage block exists.
-- task-router writes `allowed-surface` instead of handing off to boundary-contract.
-- The agent opens files before routing.
-- Verification skills are deferred until after the work is already claimed complete.
 - A previous turn's routing is reused without current-turn routing.
 - Missing context is used as permission to inspect the working directory, Git state, manifests, credentials, or tools instead of asking the minimum clarification.
-- `clarification-only` is used even though the content or current conversation already resolves the question.
 - A general explanatory question is silently converted into a diagnosis of the current repository or machine.
-- An explicit correction or terminal objective is acknowledged only after defending, investigating, or verifying the superseded direction.
 - `direct-response` is used for a current, version-sensitive, high-risk, lookup, inspection, modification, or verification request.
+
+The full list is in `references/routing-details.md`.

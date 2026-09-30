@@ -65,9 +65,9 @@ Runtime tool-checkpoint payload는 routine recovery cost 또는 recovery note fi
 
 ### completion-reminder
 
-executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 `verification-before-completion`이 lifecycle gate다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않는다. Claude Code처럼 visible Skill surface가 있는 환경에서는 actual Skill call 이후에만 `skill-call: verification-before-completion (this turn)`를 사용한다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 같은 record를 사용한다.
+executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 `verification-before-completion`이 lifecycle gate다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않는다. Claude Code처럼 visible Skill surface가 있는 환경에서는 `[completion-check]`에 skill-call 줄이 없고, Stop hook이 actual Skill call을 transcript에서 확인한다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 `skill-call: verification-before-completion (this turn)`를 사용한다.
 
-final response `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`에도 같은 skill이 있어야 한다.
+Codex에서 final response `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`에도 같은 skill이 있어야 한다. Claude Code는 `skills-loaded`를 대조하지 않는다.
 
 ## Shell Matrix
 

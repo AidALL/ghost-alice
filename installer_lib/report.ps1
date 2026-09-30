@@ -116,7 +116,14 @@ function Join-InstallLabels {
 }
 
 function Get-HookSuiteLabel {
-    return "prompt, session-intent, web-search-first, tool-checkpoint, completion, session-start, io-trace"
+    param([string]$PlatformLabel = "")
+
+    # The web-search-first reminder is installed only where it reaches the model (Codex); Claude Code does not get it.
+    $hooks = "prompt, session-intent"
+    if ($PlatformLabel -match "(?i)codex") {
+        $hooks += ", web-search-first"
+    }
+    return "$hooks, tool-checkpoint, completion, session-start, io-trace"
 }
 
 function Format-SkillSyncLine {
@@ -234,7 +241,7 @@ function Write-InstallReportTail {
         [string]$Visibility = "dynamic"
     )
 
-    Write-Host ("  [3/5] Hooks               {0} enabled" -f (Get-HookSuiteLabel))
+    Write-Host ("  [3/5] Hooks               {0} enabled" -f (Get-HookSuiteLabel -PlatformLabel $PlatformLabel))
     Write-Host ("  [4/5] Runtime config      {0} hooks=true, Visibility Level=[{1}]" -f $PlatformLabel, $Visibility)
     Write-Host "  [5/5] Verification        ok"
     Write-Host ""

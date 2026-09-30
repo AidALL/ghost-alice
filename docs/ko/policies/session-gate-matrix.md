@@ -108,7 +108,7 @@ The user's terminal objective outranks investigative means. investigation, prove
 
 `response-mode: clarification-only`는 current conversation에 essential referent 또는 decisive input이 없어 answer나 safe action을 시작할 수 없는 terminal route다. Intake and routing still run internally. Ask only for the minimum decisive information. context를 guess하기 위해 files, repositories, manifests, tools, credentials, external state를 inspect하지 않는다. manual pending-merge check는 next actionable turn까지 defer한다. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging은 active 상태로 남는다. the content already resolves the question이거나 user가 lookup/status check를 요청했거나 explicit assumption으로 bounded answer가 가능하면 이 route를 사용하지 않는다.
 
-`response-mode: direct-response`는 file change, side effect, current-state lookup, tool call, fresh verification 없이 current input과 conversation만으로 resolved content를 답할 수 있는 no-work terminal route다. `response-order: resolved-intent-first`를 사용한다. Route classification precedes evidence planning. causal premise 자체는 inspection request가 아니고 verification burden은 current-state referent를 만들 수 없다. explicit inspection request 또는 conversation에서 이미 established된 referent만 local diagnosis를 허용한다. explicit correction 또는 non-goal을 먼저 accept하고, superseded means보다 terminal objective를 우선하며, current repository나 machine을 inspect하지 않고 general explanation 또는 stable low-risk how-to를 답한다. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. general why/how question에 나온 technical state는 active workspace에 대한 evidence가 아니라 explanation topic으로 취급한다. Do not validate or rebut that premise before explaining. first-person, past-cause, deictic wording, tense, technical-state language, ambient context, tool availability은 question을 workspace에 bind하지 않으며, user가 workspace를 identify하거나 workspace evidence를 제공하거나 exact diagnosis/inspection을 명시적으로 요청할 때만 workspace가 target이 된다. Intake and routing still run internally; strict hook logging은 active다. missing manual pending-merge check를 defer하고 downstream skill을 load하지 않으며, decision-relevant caveat 최대 하나와 resolved content만 emit한다. `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, `[io-trace]`를 emit하지 않는다. current/version-specific fact, support/regression claim, high-risk advice, lookup, inspection, modification, verification request는 normal route를 사용한다.
+`response-mode: direct-response`는 file change, side effect, current-state lookup, tool call, fresh verification 없이 current input과 conversation만으로 resolved content를 답할 수 있는 no-work terminal route다. `response-order: resolved-intent-first`를 사용한다. Route classification precedes evidence planning. causal premise 자체는 inspection request가 아니고 verification burden은 current-state referent를 만들 수 없다. explicit inspection request 또는 conversation에서 이미 established된 referent만 local diagnosis를 허용한다. An established referent authorizes inspection but does not require it. explicit correction 또는 non-goal을 먼저 accept하고, superseded means보다 terminal objective를 우선하며, current repository나 machine을 inspect하지 않고 general explanation 또는 stable low-risk how-to를 답한다. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. general why/how question에 나온 technical state는 active workspace에 대한 evidence가 아니라 explanation topic으로 취급한다. Do not validate or rebut that premise before explaining. first-person, past-cause, deictic wording, tense, technical-state language, ambient context, tool availability은 question을 workspace에 bind하지 않으며, user가 workspace를 identify하거나 workspace evidence를 제공하거나 exact diagnosis/inspection을 명시적으로 요청할 때만 workspace가 target이 된다. Intake and routing still run internally; strict hook logging은 active다. missing manual pending-merge check를 defer하고 downstream skill을 load하지 않으며, decision-relevant caveat 최대 하나와 resolved content만 emit한다. `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, `[io-trace]`를 emit하지 않는다. current/version-specific fact, support/regression claim, high-risk advice, lookup, inspection, modification, verification request는 normal route를 사용한다.
 
 `routing-surface`의 `change-depth`, `focus-layer`, `verification-complexity`는 English canonical enum을 그대로 사용한다. unknown, ambiguous, contradictory value는 fuller surface로 fail closed하고 existing scope reopen point를 통해 focus를 reopen한다.
 
@@ -137,7 +137,7 @@ first commentary는 normal route에서 다음 block을 포함해야 하며 no-wo
 - task-router: done
 - using-coding-convention: done | n/a
 - boundary-contract: required | done | n/a
-- skill-call: session-intent-analyzer (this turn); task-router (this turn); using-coding-convention (this turn) | n/a
+- skill-call: <each skill actually called this turn, as name (this turn)> | n/a
 - next-required: <skill-name|none>
 ```
 
@@ -145,8 +145,6 @@ final response가 executed work의 complete, fixed, successful, freshly verified
 
 ```text
 [completion-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
   - <criterion-id>: <user-intent-or-contract-condition> [source: user-explicit | inferred | previous-tool | system-doc]
 - claim-evidence-map:
@@ -161,17 +159,21 @@ final response가 executed work의 complete, fixed, successful, freshly verified
 
 `acceptance-criteria`는 user intent, locked decisions, boundary-contract에서 추출한 verifiable criteria다. `claim-evidence-map`은 closure claim을 criterion과 fresh evidence에 연결한다. `unverified`가 `none`이 아니면 completion 또는 success가 settled된 것처럼 말하지 않는다. finalized `[completion-check]`는 `verdict: pass | fail`과 `unverified: none`을 사용한다. unverified item이 있으면 finalizing하지 말고 prose로 partial state와 remaining verification을 보고한다. Installed Stop completion hooks는 executed-work closure claim에 `[completion-check]`를 요구하고 routine non-closure response는 allow한다.
 
-Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message.
 
 Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check. Verification output does not create a new obligation to verify the verification.
 
-Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. 해당 claim 전에 current turn에서 `verification-before-completion`을 load/call하고, decision-relevant fresh verification을 run/read한 뒤에만 `skill-call: verification-before-completion (this turn)`가 있는 `[completion-check]`를 쓴다. If any step is missing or out of order, the completion-check is invalid.
+Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists. Answer an objection that a check was redundant from the recorded mutation authority and events, not from hypothetical external changes. Say each fact, status, plan, and apology once; later messages carry only new results or decisions. canonical contract는 `coding-convention/verification-before-completion/references/verify-or-reuse.md`이며 Claude와 Codex가 같은 contract를 그대로 쓰고, platform adapter는 tool name mapping만 담당한다.
+
+When you confirm a flaw in a prompt or other deliverable you provided, return the corrected complete deliverable unless the user asked only for diagnosis (`confirmed-flaw-not-propagated`).
+
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check. 해당 claim 전에 current turn에서 `verification-before-completion`을 load/call하고, decision-relevant fresh verification을 run/read한 뒤에만 `[completion-check]`를 쓴다. If any step is missing or out of order, the completion-check is invalid.
 
 `skill-call:` line은 그 skill workflow가 current turn에서 실제로 실행됐다는 record다. Claude Code에서는 visible Skill call 이후에만 쓴다. Codex처럼 visible Skill tool이 없는 환경에서는 current turn에 해당 skill의 `SKILL.md`를 실제로 읽고 workflow를 따른 뒤에만 쓴다.
 
-`verification-before-completion`은 executed-work closure claim 전 lifecycle gate다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않는다. Claude Code 같은 visible skill surface에서는 actual call 전 `[completion-check]`에 `skill-call: verification-before-completion (this turn)`를 쓰지 않는다. Codex에서는 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 쓴다.
+`verification-before-completion`은 executed-work closure claim 전 lifecycle gate다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않는다. Claude Code에서는 `[completion-check]`에 `skill-call: verification-before-completion (this turn)` 줄이 없다. Stop hook이 visible Skill call을 transcript에서 확인한다. Codex에서는 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 그 줄을 쓴다.
 
-`[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`도 `verification-before-completion`을 포함해야 한다. Stop completion hook이 final response를 validate하는 곳에서는 이 mismatch 또는 missing `[completion-check]`가 retry loop를 만들 수 있다.
+Codex에서 `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`도 `verification-before-completion`을 포함해야 한다. Claude Code에서는 Stop hook이 `skills-loaded`를 대조하지 않는다. Stop completion hook이 final response를 validate하는 곳에서는 이런 결함을 턴당 최대 한 번 block한다. 이전 메시지가 화면에 남는 host에서는 빠졌거나 고친 control block만 요청하고, headless 또는 알 수 없는 host에서는 완전한 단독 답변을 요청하며, 그 한 번의 재시도 뒤에도 남는 결함은 또 다른 재작성 대신 보이는 notice와 함께 턴을 끝낸다.
 
 Codex environments without a visible Skill surface:
 
@@ -184,7 +186,7 @@ Codex environments without a visible Skill surface:
 
 `tool-checkpoint`는 PreToolUse/BeforeTool checkpoint다. user-input intake order의 일부가 아니며 `session-intent-analyzer`, `jailbreak-detector`, `task-router`보다 먼저 run한다고 설명하면 안 된다.
 
-default `[tool-checkpoint]` block은 `intent`와 `why`를 carries한다. `procedure`는 next work decision을 바꾸거나 non-routine step을 명확히 할 때 추가한다. `contract-ref`와 `contract-check`는 boundary-contract가 active일 때 추가한다. `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`은 side effect, forced signal, mismatch, meaningful user decision point 때문에 field가 useful할 때만 추가한다. 이렇게 checkpoint procedure는 유지하되 work boundary, focus layer, verification burden, recovery를 바꾸지 않는 low-impact tool call에 무의미한 값을 반복하지 않는다.
+default `[tool-checkpoint]` block은 `intent`와 `why`를 carries한다. `procedure`는 next work decision을 바꾸거나 non-routine step을 명확히 할 때 추가한다. `contract-ref`와 `contract-check`는 boundary-contract가 active일 때 추가한다. `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`은 side effect, forced signal, mismatch, meaningful user decision point 때문에 field가 useful할 때만 추가한다. 이렇게 checkpoint procedure는 유지하되 work boundary, focus layer, verification burden, recovery를 바꾸지 않는 low-impact tool call에 무의미한 값을 반복하지 않는다. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger. 이 field는 model-side reasoning이며 hook decision은 여전히 current-lineage block gate만 읽는다.
 
 `recovery-action`은 conditional이다. failure mode가 concrete recovery step, scope reopen, external side effect handling, 또는 hard-to-recover action을 요구할 때만 추가한다. stable English action phrase 또는 slug로 유지한다. mismatch가 scope를 바꾸면 `procedure` 또는 `recovery-action`에 `focus-layer`와 `scope-reopen` target을 적는다.
 

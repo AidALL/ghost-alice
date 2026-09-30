@@ -95,8 +95,12 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
             entry_id = str(entry.get("id") or "").strip()
             if not entry_id:
                 continue
-            agg = by_id.setdefault(entry_id, {
-                "id": entry_id,
+            # A recorded pattern class groups differently named corrections of one failure family.
+            pattern_class = str(entry.get("pattern_class") or "").strip()
+            agg = by_id.setdefault(pattern_class or entry_id, {
+                "id": pattern_class or entry_id,
+                "pattern_class": pattern_class,
+                "member_ids": set(),
                 "summary": "",
                 "failure_pattern": "",
                 "corrective_rule": "",
@@ -107,6 +111,7 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
                 "first_seen": None,
                 "last_seen": None,
             })
+            agg["member_ids"].add(entry_id)
             if entry.get("summary"):
                 agg["summary"] = str(entry["summary"])
             if entry.get("failure_pattern"):
@@ -134,6 +139,8 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
             days_since_last = round((now_dt - agg["last_seen"]).total_seconds() / 86400.0, 2)
         recommendations.append({
             "id": agg["id"],
+            "pattern_class": agg["pattern_class"] or None,
+            "member_ids": sorted(agg["member_ids"]) if agg["pattern_class"] else [],
             "summary": agg["summary"],
             "corrective_rule": agg["corrective_rule"],
             "failure_pattern": agg["failure_pattern"],

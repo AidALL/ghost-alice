@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,12 @@ from completion_check_validator import (  # noqa: E402
 )
 
 VERIFICATION_SKILL = "verification-before-completion"
+# Every Claude block reason carries this marker so a later Stop in the same turn can count earlier retries.
+COMPLETION_GATE_MARKER = "[completion-gate]"
+RETRIES_PER_TURN = 1
+# Hosts whose screen keeps the earlier assistant messages of the turn. Headless hosts (sdk-*) return only the
+# final message, and an unknown host is treated the same way, so both keep the standalone rewrite.
+TRANSCRIPT_SURFACES = frozenset({"cli", "claude-desktop", "claude-vscode", "remote_desktop", "remote_mobile"})
 
 
 def _read_hook_input() -> dict[str, Any]:
@@ -174,6 +181,58 @@ def _append_standalone_retry_guidance(reason: str) -> str:
     return f"{reason} {guidance}"
 
 
+def _partial_retry_guidance() -> str:
+    return (
+        "Your answer above stays visible to the user. Do not repeat or rewrite it. "
+        "Reply with only the missing or corrected control blocks: [completion-check] followed by [io-trace], "
+        "as canonical multi-line blocks. Keep the answer's claims unchanged. "
+        "Do not invent evidence or turn a failed/unverified result into a pass. "
+        "If the required evidence is unavailable, reply instead with one short line that withdraws the unsupported "
+        "completion claim and names what remains unverified, without a finalized [completion-check]."
+    )
+
+
+def _host_entrypoint(entries: list[dict[str, Any]]) -> str:
+    # The running host's own value outranks the transcript record.
+    value = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").strip()
+    if value:
+        return value
+    for entry in reversed(entries):
+        recorded = entry.get("entrypoint")
+        if isinstance(recorded, str) and recorded.strip():
+            return recorded.strip()
+    return ""
+
+
+def _entry_text(entry: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for item in _content_items(entry):
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict) and isinstance(item.get("text"), str):
+            parts.append(item["text"])
+    return "\n".join(parts)
+
+
+def _gate_blocks_this_turn(entries: list[dict[str, Any]]) -> int:
+    # Stop feedback is a meta user entry, so it never starts a new turn.
+    count = 0
+    for entry in entries[_turn_start_index(entries) + 1 :]:
+        if entry.get("type") != "user" or not entry.get("isMeta"):
+            continue
+        text = _entry_text(entry)
+        if "Stop hook feedback" in text and COMPLETION_GATE_MARKER in text:
+            count += 1
+    return count
+
+
+def _retry_limit_notice(reason: str) -> str:
+    return (
+        f"{COMPLETION_GATE_MARKER} The answer ended without a valid [completion-check] after one retry. "
+        f"Remaining defect: {reason}"
+    )
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--platform", choices=("claude", "codex"), default="claude")
@@ -196,29 +255,45 @@ def main() -> int:
 
     skill_loaded = args.platform == "codex" or _verification_skill_loaded_this_turn(entries)
     # Completion-body-validation invariant: Stop validates executed-work closure claims and explicit completion-check blocks. Routine explanations are not forced through verification-before-completion.
-    body_issue = validate_completion_text(final_text, require_completion_check=True)
+    # Claude Code verifies the verification-before-completion Skill call from its own transcript (skill_loaded above), so its completion-check carries no self-report lines. Codex has no visible Skill surface and keeps them.
+    body_issue = validate_completion_text(
+        final_text, require_completion_check=True, require_skill_self_report=args.platform == "codex",
+    )
     has_completion_marker = looks_like_completion_claim(final_text)
 
     if body_issue is None and (skill_loaded or not has_completion_marker):
         print(json.dumps(_allow_payload(), ensure_ascii=False))
         return 0
 
+    reminder = (
+        "completion-reminder: verification-before-completion is an always-on completion lifecycle gate. " "Before the final response, call the Claude Code Skill tool with input " '{"skill": "verification-before-completion"} in this turn. ' "Do not ask the user whether to use the skill; invoke it directly. " "Then map each claim to evidence that already exists in this turn, such as a returned write or test result; "
+        "run a check only for a claim that no existing result covers, or withdraw that claim, and never repeat a "
+        "successful check just to fill a field. Only then write [completion-check]. Do not treat task-router, " "metadata, prior context, or evidence-only status inspection as that Skill call."
+    )
     missing_marker = not has_completion_marker and body_issue is not None
     if missing_marker:
         reason = body_issue
+        # Claude gets one retry per turn, so the first block names every missing part at once.
+        if args.platform == "claude" and not skill_loaded:
+            reason = f"{body_issue} {reminder}"
     elif not skill_loaded:
-        reason = (
-            "completion-reminder: verification-before-completion is an always-on completion lifecycle gate. " "Before the final response, call the Claude Code Skill tool with input " '{"skill": "verification-before-completion"} in this turn. ' "Do not ask the user whether to use the skill; invoke it directly. " "Then perform the fresh evidence check, and only then write [completion-check] with " "skill-call: verification-before-completion (this turn). Do not infer this from task-router, " "metadata, prior context, or evidence-only status inspection."
-        )
+        reason = reminder
     else:
         reason = body_issue
 
-    reason = _append_standalone_retry_guidance(reason)
+    if args.platform == "codex":
+        print(json.dumps(_block_payload(_append_standalone_retry_guidance(reason)), ensure_ascii=False))
+        return 0
 
-    # A retry flag describes host lifecycle, not verification success. Invalid
-    # retries remain blocked; an honest partial-status answer without a closure
-    # assertion takes the normal allow path above. Do not manufacture a pass to
-    # avoid a retry loop. Host retry limits/intervention remain host policy.
+    # One retry per turn: a defect that survives it ends the turn with a visible notice instead of another
+    # rewrite. The notice is not a pass; the answer stays marked as lacking a valid [completion-check].
+    if _gate_blocks_this_turn(entries) >= RETRIES_PER_TURN:
+        print(json.dumps(_allow_payload(_retry_limit_notice(reason)), ensure_ascii=False))
+        return 0
+    if _host_entrypoint(entries) in TRANSCRIPT_SURFACES:
+        reason = f"{COMPLETION_GATE_MARKER} {reason} {_partial_retry_guidance()}"
+    else:
+        reason = f"{COMPLETION_GATE_MARKER} {_append_standalone_retry_guidance(reason)}"
     print(json.dumps(_block_payload(reason), ensure_ascii=False))
     return 0
 

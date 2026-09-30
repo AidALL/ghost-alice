@@ -223,12 +223,12 @@ def _text_payload(platform: str, hook: HookKind, context: str, internal: str) ->
 
 def _json_payload(platform: str, internal: str) -> str:
     pending = _pending_entries(platform)
-    message = internal
     if pending:
         message = f"{internal}\n{_pending_line(platform, len(pending))}"
-    else:
-        message = f"{internal}\n{_clean_contract_line(platform)}"
-    return json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False)
+        return json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False)
+    message = f"{internal}\n{_clean_contract_line(platform)}"
+    # A clean pass is routine: the hook runner keeps it off the user screen and in the strict log.
+    return json.dumps({"continue": True, "systemMessage": message, "ghostAliceSurface": "routine"}, ensure_ascii=False)
 
 
 def main() -> int:

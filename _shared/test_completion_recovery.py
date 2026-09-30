@@ -224,6 +224,19 @@ class CompletionRecoveryTests(unittest.TestCase):
         self.assertTrue(payload.get("continue"))
         self.assertNotIn("systemMessage", payload)
 
+    def test_missing_skill_retry_fills_evidence_from_existing_results(self):
+        # Blocked subjects re-read files they had just written because this retry text ordered a new check.
+        result = subprocess.run(
+            [sys.executable, "-B", str(HOOK), "--platform", "claude"],
+            input=json.dumps({"last_assistant_message": VALID, "transcript_path": ""}),
+            text=True, capture_output=True, check=True,
+        )
+        reason = json.loads(result.stdout)["reason"]
+        self.assertIn('{"skill": "verification-before-completion"}', reason)
+        self.assertIn("map each claim to evidence that already exists in this turn", reason)
+        self.assertIn("never repeat a successful check just to fill a field", reason)
+        self.assertNotIn("perform the fresh evidence check", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

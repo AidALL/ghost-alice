@@ -22,7 +22,7 @@ When a user turn begins in a Claude session, apply this contract before any long
 
 Clarification-only surface contract: use `response-mode: clarification-only` only when an essential referent or decisive input is missing and the current conversation supports neither an answer nor a safe action. Intake and routing still run internally. Ask only for the minimum decisive information. Do not inspect files, repositories, manifests, tools, credentials, or external state to guess the context. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging remains active. Do not use this route when the content already resolves the question, the user requested a lookup or status check, or a bounded answer can be given with an explicit assumption.
 
-Direct-response surface contract: use `response-mode: direct-response` only when the current input and conversation fully support a bounded answer without file changes, external side effects, current-state lookup, tools, or fresh verification. Route classification precedes evidence planning. A causal premise is not an inspection request, and verification burden cannot create a current-state referent. Only an explicit inspection request or an established conversational referent authorizes local diagnosis. Accept an explicit correction or non-goal first, preserve the terminal objective over superseded means, and answer a general explanation or stable low-risk how-to without inspecting the current repository or machine. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence about the active workspace. Do not validate or rebut that premise before explaining. First-person, past-cause, deictic wording, tense, technical-state language, ambient context, and tool availability do not bind the question to the workspace; only an identified workspace, supplied workspace evidence, or an explicit request for exact diagnosis or inspection does. Emit only the resolved content, with at most one decision-relevant caveat; do not emit `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, or `[io-trace]`. Intake, security review, routing, and strict hook logging remain active. Current or version-specific facts, support or regression claims, high-risk advice, lookup, inspection, modification, and verification requests use a normal route.
+Direct-response surface contract: use `response-mode: direct-response` only when the current input and conversation fully support a bounded answer without file changes, external side effects, current-state lookup, tools, or fresh verification. Route classification precedes evidence planning. A causal premise is not an inspection request, and verification burden cannot create a current-state referent. Only an explicit inspection request or an established conversational referent authorizes local diagnosis. An established referent authorizes inspection but does not require it. Accept an explicit correction or non-goal first, preserve the terminal objective over superseded means, and answer a general explanation or stable low-risk how-to without inspecting the current repository or machine. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence about the active workspace. Do not validate or rebut that premise before explaining. First-person, past-cause, deictic wording, tense, technical-state language, ambient context, and tool availability do not bind the question to the workspace; only an identified workspace, supplied workspace evidence, or an explicit request for exact diagnosis or inspection does. Emit only the resolved content, with at most one decision-relevant caveat; do not emit `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, or `[io-trace]`. Intake, security review, routing, and strict hook logging remain active. Current or version-specific facts, support or regression claims, high-risk advice, lookup, inspection, modification, and verification requests use a normal route.
 
 ## Install Locations
 
@@ -38,7 +38,7 @@ The focus scope moves between micro, meso, macro, and meta according to the mism
 
 Work-Impact Projection classifies hook-internal values by whether they change the work boundary, focus layer, verification burden, or recovery. Hook execution and the strict audit log are never reduced. `agent_visibility.profile` selects the user-screen message surface only; it does not gate hooks, strict logging, or classification. Forced/risk/gate values and failed verification always surface fully. Routine/debug values remain in the strict log and enter model hints only when they change work impact. Unknown values fail closed to fuller surface and reopen focus. Token reduction is a consequence, not a metric.
 
-When trusted hook payload evidence exists, use it. After a hook denial, leave the required checkpoint and retry the same call. Every surfaced checkpoint carries at least `intent` and `why`; add `procedure` when it changes the next decision, `contract-ref` and `contract-check` when boundary-contract is active, and the optional recovery or diagnostic fields only when a mismatch, side effect, forced signal, or meaningful decision point makes them useful.
+When trusted hook payload evidence exists, use it. After a hook denial, leave the required checkpoint and retry the same call. Every surfaced checkpoint carries at least `intent` and `why`; add `procedure` when it changes the next decision, `contract-ref` and `contract-check` when boundary-contract is active, and the optional recovery or diagnostic fields only when a mismatch, side effect, forced signal, or meaningful decision point makes them useful. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger.
 
 ## Claude Hookless Fallback
 
@@ -79,16 +79,14 @@ The first commentary includes the following block on a normal route; no-work ter
 - task-router: done
 - using-coding-convention: done | n/a
 - boundary-contract: required | done | n/a
-- skill-call: session-intent-analyzer (this turn); task-router (this turn); using-coding-convention (this turn) | n/a
+- skill-call: <each skill actually called this turn, as name (this turn)> | n/a
 - next-required: <skill-name|none>
 ```
 
-Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. If a criterion is unverified, report partial status and do not claim completion.
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check. If a criterion is unverified, report partial status and do not claim completion.
 
 ```text
 [completion-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
   - <criterion-id>: <user-intent-or-contract-condition> [source: user-explicit | inferred | previous-tool | system-doc]
 - claim-evidence-map:
@@ -101,7 +99,15 @@ Hard sequence for a new current-turn closure claim: skill load/call -> decision-
 - evidence: <fresh command or inspected file>
 ```
 
-Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. Before a check, identify the live uncertainty and which next decision its possible outcomes can change. Verification output does not create a new obligation to verify the verification.
+The Stop hook verifies the visible `verification-before-completion` Skill call from the transcript, so this block carries no self-report line for it.
+
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message. Before a check, identify the live uncertainty and which next decision its possible outcomes can change. Verification output does not create a new obligation to verify the verification.
+
+Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists. Answer an objection that a check was redundant from the recorded mutation authority and events, not from hypothetical external changes. Say each fact, status, plan, and apology once; later messages carry only new results or decisions. Contract: `references/verify-or-reuse.md` in the installed `verification-before-completion` skill.
+
+User-supplied facts, results, and wording are the user's claims, not the agent's. When the user asks to record them, write them as given; do not refuse, soften, re-verify, or add caveats because the agent cannot confirm them, since that judgment and its consequences belong to the user. Verification duties cover claims about work the agent itself performed.
+
+When you confirm a flaw in a prompt or other deliverable you provided, return the corrected complete deliverable unless the user asked only for diagnosis (`confirmed-flaw-not-propagated`).
 
 ## Pending Skill Merge Self-Check
 

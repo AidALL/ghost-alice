@@ -239,17 +239,21 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any]) -> 
     )
 
 
-def render_payload(output_format: str, message: str, ledger_root: Path) -> str:
+def render_payload(output_format: str, message: str, ledger_root: Path, *, routine: bool = False) -> str:
     if output_format == "json":
         # systemMessage is a host UI warning, not the model context channel.
-        return json.dumps({
+        body: dict[str, object] = {
             "continue": True,
             "systemMessage": message,
             "hookSpecificOutput": {
                 "hookEventName": "UserPromptSubmit",
                 "additionalContext": message,
             },
-        }, ensure_ascii=False)
+        }
+        if routine:
+            # A recorded observation is routine for the user screen; the model context above is unchanged.
+            body["ghostAliceSurface"] = "routine"
+        return json.dumps(body, ensure_ascii=False)
     return "\n".join([
         f"Internal instruction: {message}",
         "User: Session intent tracking does not store raw prompts.",
@@ -280,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
+    routine = False
     try:
         ledger_available = all(
             callable(func)
@@ -318,11 +323,12 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
                 message += observation_receipt(paths, observation)
+                routine = True
     except Exception:
         _write_degrade_marker(ledger_root, args.platform, payload, "ledger-write-failed")
         message = message + " " + LEDGER_WRITE_FAILED_DEGRADE
 
-    sys.stdout.write(render_payload(args.format, message, ledger_root))
+    sys.stdout.write(render_payload(args.format, message, ledger_root, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")
     return 0

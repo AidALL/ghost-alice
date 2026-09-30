@@ -65,9 +65,9 @@ Runtime tool-checkpoint payload does not require routine recovery cost or recove
 
 ### completion-reminder
 
-Before claiming executed work is complete, fixed, successful, or freshly verified, `verification-before-completion` is the lifecycle gate. Routine explanations, meta-discussion, and options do not require it unless they claim finished work or verified results. On Claude Code, where a visible Skill surface exists, use `skill-call: verification-before-completion (this turn)` only after the actual Skill call. On Codex, where no visible Skill surface exists, use the same record only when that `SKILL.md` was actually read and the workflow followed in the current turn.
+Before claiming executed work is complete, fixed, successful, or freshly verified, `verification-before-completion` is the lifecycle gate. Routine explanations, meta-discussion, and options do not require it unless they claim finished work or verified results. On Claude Code, where a visible Skill surface exists, the `[completion-check]` has no skill-call line; the Stop hook verifies the actual Skill call from the transcript. On Codex, where no visible Skill surface exists, use `skill-call: verification-before-completion (this turn)` only when that `SKILL.md` was actually read and the workflow followed in the current turn.
 
-If the final response `[completion-check]` claims `skill-call: verification-before-completion (this turn)`, the same final response `[io-trace]` `skills-loaded` must include the same skill.
+On Codex, if the final response `[completion-check]` claims `skill-call: verification-before-completion (this turn)`, the same final response `[io-trace]` `skills-loaded` must include the same skill. Claude Code does not cross-check `skills-loaded`.
 
 ## Shell Matrix
 

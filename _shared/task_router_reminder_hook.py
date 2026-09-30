@@ -155,11 +155,16 @@ def ledger_read_instruction(root: Path, platform: str, session_id: str) -> str:
 
 
 def reminder_message(base_message: str, root: Path, platform: str, payload: dict[str, Any]) -> str:
+    return reminder_result(base_message, root, platform, payload)[0]
+
+
+def reminder_result(base_message: str, root: Path, platform: str, payload: dict[str, Any]) -> tuple[str, bool]:
+    """(message, routine). Only a release with no current block is routine; every withheld or stale state is not."""
     session_id = resolve_session_id(root, platform, payload)
     if session_id == "unknown":
         return (
             "hook-reminder: task-router withheld until the current host supplies a valid session identity " "and the current-lineage block check can run. Do not run task-router yet."
-        )
+        ), False
 
     # Fail-closed on a degraded ledger: when session-intent-analyzer could not record the latest input (broken import or write failure), the "latest event" anchor is stale, so releasing routing here would ride a previous turn's lineage. The marker is cleared by the analyzer hook on the next successful observation.
     degrade_marker = session_dir(root, platform, session_id) / "ledger-degraded.json"
@@ -175,17 +180,17 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
             "hook-reminder: task-router withheld: the session-intent ledger is degraded "
             f"({reason}) and the latest input was NOT recorded, so current-lineage checks "
             "would ride a stale anchor. Fail closed: repair the session-intent ledger " "(fix the broken dependency or reinstall the skill) before routing."
-        )
+        ), False
 
     material = session_material(root, platform, session_id)
     if material['degraded']:
         return ("hook-reminder: task-router withheld: the session-intent ledger is degraded. "
-                "Repair the authoritative reader before routing; do not reuse a compatibility export.")
+                "Repair the authoritative reader before routing; do not reuse a compatibility export."), False
     if not material['latest_input']:
         return (
             "hook-reminder: task-router withheld until session-intent-analyzer records the current input "
             f"for session {session_id}. Continue intake/bootstrap; do not ask the user for another input."
-        )
+        ), False
     gate = gate_state(root, platform, session_id, material)
     if not gate:
         gate_path = str(session_dir(root, platform, session_id) / "downstream-gates.json")
@@ -195,21 +200,21 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
             ledger_read_instruction(root, platform, session_id),
             f"downstream-gate: {gate_path} absent; silent allow invariant applies unless a current-lineage model block is recorded.",
             "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
-        ])
+        ]), True
 
     if gate.get("stale"):
         reason = str(gate.get("stale_reason") or "stale downstream gate")
         return (
             "hook-reminder: jailbreak-detector downstream gate is stale for the latest input. "
             f"{reason}. Continue intake/routing; do not reuse the stale decision as current block/allow."
-        )
+        ), False
 
     decision = str(gate.get("decision") or "unknown")
     if gate.get("opened") is False or decision == "block":
         return (
             "hook-reminder: task-router withheld because jailbreak-detector downstream gate recorded a current-lineage block. "
             f"decision={decision}. Do not run task-router or downstream work."
-        )
+        ), False
 
     gate_path = str(session_dir(root, platform, session_id) / "downstream-gates.json")
     return "\n".join([
@@ -218,12 +223,15 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
         ledger_read_instruction(root, platform, session_id),
         f"downstream-gate: {gate_path} contains no block; silent allow invariant applies.",
         "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
-    ])
+    ]), True
 
 
-def render_payload(output_format: str, message: str) -> str:
+def render_payload(output_format: str, message: str, *, routine: bool = False) -> str:
     if output_format == "json":
-        return json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False)
+        body: dict[str, Any] = {"continue": True, "systemMessage": message}
+        if routine:
+            body["ghostAliceSurface"] = "routine"
+        return json.dumps(body, ensure_ascii=False)
     return "\n".join([
         f"Internal instruction: {message}",
         "User: Run task-router after session-intent preflight; absent current-lineage block gate is silent allow.",
@@ -250,8 +258,8 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             base_message = DEFAULT_INTERNAL
     root = Path(args.root).expanduser()
-    message = reminder_message(base_message, root, args.platform, read_payload())
-    sys.stdout.write(render_payload(args.format, message))
+    message, routine = reminder_result(base_message, root, args.platform, read_payload())
+    sys.stdout.write(render_payload(args.format, message, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")
     return 0

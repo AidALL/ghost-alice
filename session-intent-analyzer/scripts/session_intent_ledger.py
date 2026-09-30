@@ -39,6 +39,22 @@ SECURITY_REASON_MAX = 240
 SECURITY_RISK_FLAG_MAX = 12
 CONDUCT_FEEDBACK_SOURCES = {"user-explicit", "inferred"}
 CONDUCT_FEEDBACK_STATUS = {"open", "encoded"}
+# Stable failure families let differently named corrections recur visibly across sessions.
+CONDUCT_PATTERN_CLASSES = (
+    "redundant-verification",
+    "missed-reverification",
+    "wrong-copy-evidence",
+    "unsupported-claim",
+    "restatement-loop",
+    "unrequested-content",
+    "under-delivery",
+    "unnecessary-reapproval",
+    "scope-widening",
+    "scope-narrowing",
+    "premise-mismatch-without-stop",
+    "governance-record-error",
+    "domain-rule",
+)
 SAFE_COMPONENT = re.compile(r"[^A-Za-z0-9_.=-]+")
 # JSON numbers must retain their exact value in the JavaScript consumers.
 MAX_SHARED_INTEGER = (1 << 53) - 1
@@ -754,7 +770,7 @@ def _semantic_projection(state: dict[str, Any]) -> dict[str, Any]:
     projection["decisions"] = objects(state.get("decisions"),
         ("id", "summary", "source", "superseded", "superseded_by"))
     projection["conduct_feedback"] = objects(state.get("conduct_feedback"),
-        ("id", "summary", "failure_pattern", "corrective_rule", "source", "status", "occurrence_count"))
+        ("id", "summary", "failure_pattern", "pattern_class", "corrective_rule", "source", "status", "occurrence_count"))
     scope = state.get("latest_scope")
     projection["latest_scope"] = {}
     if isinstance(scope, dict):
@@ -986,8 +1002,14 @@ def normalize_conduct_feedback(raw: Any, timestamp: str) -> dict[str, Any] | Non
     if not entry_id:
         return None
     source = str(payload.get("source") or "user-explicit").strip()
+    pattern_class = str(payload.get("pattern_class") or "").strip()
+    invalid = []
     if source not in CONDUCT_FEEDBACK_SOURCES:
-        source = "user-explicit"
+        invalid.append(f"source {source!r} is not one of {sorted(CONDUCT_FEEDBACK_SOURCES)}")
+    if pattern_class and pattern_class not in CONDUCT_PATTERN_CLASSES:
+        invalid.append(f"pattern_class {pattern_class!r} is not one of {list(CONDUCT_PATTERN_CLASSES)}")
+    if invalid:
+        raise ValueError(f"conduct_feedback {entry_id!r}: " + "; ".join(invalid))
     status = str(payload.get("status") or "open").strip()
     if status not in CONDUCT_FEEDBACK_STATUS:
         status = "open"
@@ -995,6 +1017,7 @@ def normalize_conduct_feedback(raw: Any, timestamp: str) -> dict[str, Any] | Non
         "id": safe_component(entry_id, "conduct"),
         "summary": summary or rule or pattern,
         "failure_pattern": pattern,
+        "pattern_class": pattern_class,
         "corrective_rule": rule,
         "source": source,
         "status": status,
@@ -1045,6 +1068,8 @@ def merge_conduct_feedback(existing: Any, incoming: Any, timestamp: str) -> list
                 current["summary"] = normalized["summary"]
             if normalized["failure_pattern"]:
                 current["failure_pattern"] = normalized["failure_pattern"]
+            if normalized["pattern_class"]:
+                current["pattern_class"] = normalized["pattern_class"]
             if normalized["corrective_rule"]:
                 current["corrective_rule"] = normalized["corrective_rule"]
             if isinstance(raw, dict) and "source" in raw:
