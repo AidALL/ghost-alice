@@ -803,7 +803,15 @@ class TestMessageLanguage(unittest.TestCase):
             message = second_payload["systemMessage"]
             self.assertIn("gate-opened: jailbreak-detector silent allow", message)
             self.assertNotIn("decision=allow", message)
-            self.assertIn("intent-ledger: use session_intent_ledger.py --read-state", message)
+            import session_intent_ledger
+            ledger_command = message.split("intent-ledger: use ", 1)[1].split(
+                " after session-intent preflight.", 1)[0]
+            ledger_args = shlex.split(ledger_command)
+            self.assertEqual(ledger_args, [
+                sys.executable, str(Path(session_intent_ledger.__file__).resolve()),
+                "--read-state", "--root", str(root),
+                "--platform", "codex", "--session-id", "s-codex-router",
+            ])
             self.assertIn("task-router-step", message)
             self.assertIn("atomic meaning decomposition", message)
             self.assertIn("focus-layer/scope-reopen", message)

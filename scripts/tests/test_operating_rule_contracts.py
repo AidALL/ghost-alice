@@ -142,6 +142,12 @@ class OperatingRuleContractTest(unittest.TestCase):
 
         for target in targets:
             body = target.read_text(encoding="utf-8")
+            if target.parent.name == "verification-before-completion":
+                # The entrypoint requires this reference before an external
+                # claim. Validate that reachable contract, not forced expansion.
+                reference = "references/external-tool-evidence.md"
+                self.assertIn(f"]({reference})", body)
+                body += (target.parent / reference).read_text(encoding="utf-8")
             with self.subTest(path=target):
                 for needle in required:
                     self.assertIn(needle, body)

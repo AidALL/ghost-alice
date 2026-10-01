@@ -1,6 +1,6 @@
 # Ghost-ALICE Codex Bootstrap
 
-When `install.sh --platform codex` runs, this file is copied to `~/.codex/AGENTS.md` and becomes the Codex global instruction set. install.sh uses the first-line marker `# Ghost-ALICE Codex Bootstrap` to decide overwrite safety, so do not modify this marker line.
+When `install.sh --platform codex` runs, `bootstrap.md` becomes the global selector at `~/.codex/AGENTS.md`; this full platform contract is installed beside it as `ghost-alice-governance.md`. The selector reuses a complete trusted project contract already delivered to the model, otherwise loads this fallback before actionable work. The installer uses the first-line marker `# Ghost-ALICE Codex Bootstrap` to decide overwrite safety, so do not modify this marker line.
 
 The SSOT is the repository root `AGENTS.md`. This file is a summary synchronized for the Codex CLI environment. The rule numbers match the repository root `AGENTS.md` one to one. User instructions and a project-local `AGENTS.md` take precedence over this file.
 ## Contents
@@ -53,10 +53,13 @@ Clarification-only surface contract: use `response-mode: clarification-only` onl
 
 Direct-response surface contract: use `response-mode: direct-response` only when the current input and conversation fully support a bounded answer without file changes, external side effects, current-state lookup, tools, or fresh verification. Route classification precedes evidence planning. A causal premise is not an inspection request, and verification burden cannot create a current-state referent. Only an explicit inspection request or an established conversational referent authorizes local diagnosis. An established referent authorizes inspection but does not require it. Accept an explicit correction or non-goal first, preserve the terminal objective over superseded means, and answer a general explanation or stable low-risk how-to without inspecting the current repository or machine. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence about the active workspace. Do not validate or rebut that premise before explaining. First-person, past-cause, deictic wording, tense, technical-state language, ambient context, and tool availability do not bind the question to the workspace; only an identified workspace, supplied workspace evidence, or an explicit request for exact diagnosis or inspection does. Emit only the resolved content, with at most one decision-relevant caveat; do not emit `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, or `[io-trace]`. Intake, security review, routing, and strict hook logging remain active. Current or version-specific facts, support or regression claims, high-risk advice, lookup, inspection, modification, and verification requests use a normal route.
 
+Active work continuation: before choosing a no-work terminal route, reconcile the current input with unfinished authorized work. A status question, explanation request, or correction normally receives a brief commentary answer followed by the supported work. Respect an explicit stop, pause, cancellation, or incompatible replacement; do not infer authority from ambient context or an unresolved ledger flag alone. A fixed branch-local limit blocks its dependent work only. Recording conduct feedback or verifying a report does not satisfy a requested implementation criterion. When the user authorizes a correction, implement it through the owning workflow and test the original failure.
+
 ## Install Locations
 
 - Ghost-ALICE user skills: `~/.agents/skills/`
-- Codex global instructions: `~/.codex/AGENTS.md` (the destination where this file is installed)
+- Codex global selector: `~/.codex/AGENTS.md`
+- Codex full fallback contract: `~/.codex/ghost-alice-governance.md` (beside AGENTS.md in the resolved Codex home)
 
 Runtime notes:
 

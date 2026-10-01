@@ -2,7 +2,7 @@
 
 언어: [🇺🇸 English](../../reference/repository-structure.md) | 🇰🇷 한국어
 
-이 문서는 root README에서 분리된 repository map이다. README는 간결한 public entry point로 유지하고, 이 page가 상세 구조를 담는다.
+이 문서는 root README에서 분리된 repository map입니다. README는 간결한 public entry point로 유지하고, 이 page가 상세 구조를 담습니다.
 ## Contents
 
 - [Top-Level Documents](#top-level-documents)
@@ -34,7 +34,7 @@
 | [platforms/codex/](../../../platforms/codex/) | Codex bootstrap source |
 | [hooks/](../../../hooks/) | repository hook-related files |
 
-installer 전체 architecture는 [installer architecture](./installer-architecture.md)를 본다.
+installer 전체 architecture는 [installer architecture](./installer-architecture.md)를 봅니다.
 
 ## Shared Utilities
 
@@ -59,15 +59,15 @@ installer 전체 architecture는 [installer architecture](./installer-architectu
 
 | Path | Role |
 | --- | --- |
-| [official-docs/derived/](../../../official-docs/derived/) | Ghost-ALICE analysis, philosophy, compliance, closed-loop SSOT |
-| [docs/policies/](../../policies/) | runtime, platform, evaluator policy documents |
+| [official-docs/derived/](../../../official-docs/derived/) | 공개 기여자가 따라야 하는 준수 절차이며 장문 철학은 Wiki에서 제공합니다 |
+| [docs/policies/](../policies) | runtime, platform, evaluator policy documents |
 | [docs/ko/policies/](../policies/) | Korean counterparts for policy documents |
-| [docs/plans/](../../plans/) | public roadmap policy and planning boundaries |
+| [docs/plans/](../plans) | public roadmap policy and planning boundaries |
 | [docs/ko/plans/](../plans/) | Korean counterparts for planning documents |
 
 ## Installed Runtime State
 
-다음 path는 repository 밖의 user home directory 아래에 있다.
+다음 path는 repository 밖의 user home directory 아래에 있습니다.
 
 | Path | Role |
 | --- | --- |
@@ -78,10 +78,12 @@ installer 전체 architecture는 [installer architecture](./installer-architectu
 | `~/.agents/skills/` | Codex user skill copy install target |
 | `~/.claude/skills/` | Claude Code skill install target |
 
+Codex의 관리 부트스트랩은 완전하게 제공된 프로젝트 계약 또는 설치된 `~/.codex/ghost-alice-governance.md` 대체 계약을 선택합니다. 설치기는 `~/.codex/config.toml`에서 전체 지침 예산을 관리합니다. 세션 실행 상태의 기준은 영수증의 저장소 루트에 있는 `.tmp/session-intent/ghost-state.sqlite3`입니다. JSON 포인터와 스냅샷은 호환성·내보내기 자료이며, 상태는 영수증의 root·platform·session identity를 사용하여 `session_intent_ledger.py --read-state`로 읽습니다.
+
 ## Documentation Responsibility
 
-- README는 public description과 quick start만 담는다.
-- 자세한 installation과 update guidance는 [installation guide](../getting-started/installation.md)에 둔다.
-- contributor-facing installer flow와 safety model은 [installer architecture](./installer-architecture.md)에 둔다.
-- Policy와 runtime matrices는 [docs/ko/policies](../policies/)에 둔다.
-- Long-form philosophy와 closed-loop reasoning은 [official-docs/derived](../../../official-docs/derived/)에 둔다.
+- README는 public description과 quick start만 담습니다.
+- 자세한 installation과 update guidance는 [installation guide](../getting-started/installation.md)에 둡니다.
+- contributor-facing installer flow와 safety model은 [installer architecture](./installer-architecture.md)에 둡니다.
+- Policy와 runtime matrices는 [docs/ko/policies](../policies/)에 둡니다.
+- 장문 철학과 closed-loop reasoning은 [Wiki](https://github.com/AidALL/ghost-alice/wiki/Home_ko)에 두며 [official-docs/derived](../../../official-docs/derived/)는 공개 기여자 절차를 담습니다.

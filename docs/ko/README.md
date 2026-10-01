@@ -6,7 +6,17 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 
 쌍을 이루는 문서는 상단에서 언어를 전환하실 수 있습니다. 영어 문서에서는 한국어 링크를, 한국어 문서에서는 영어 링크를 제공합니다.
 
-현재 버전을 맞춘 공개 릴리스는 Ghost-ALICE OS `0.4.0`과 Ghost-ALICE Autopilot `0.4.0`입니다. 의도·세션·연속 실행 변경과 검증 범위는 [릴리스 노트](./release/2026-09-28-release-notes.md)에서 확인하실 수 있습니다.
+현재 버전을 맞춘 공개 릴리스는 Ghost-ALICE OS `0.4.1`과 Ghost-ALICE Autopilot `0.4.1`입니다. 의도·세션·연속 실행 변경과 검증 범위는 [릴리스 노트](./release/2026-10-01-release-notes.md)에서 확인하실 수 있습니다.
+
+## 빠른 설치
+
+복제한 Core 저장소에서 다음 명령을 실행하시면 사용 가능한 에이전트 플랫폼을 자동으로 감지하여 Core와 Autopilot을 함께 설치합니다.
+
+```bash
+bash install.sh --addon autopilot
+```
+
+상태 질문과 교정 중에도 승인된 작업의 범위를 유지하며 작업을 이어가고, 완료 보고를 항목별 근거와 연결합니다. 저장소 복제, 운영체제별 명령과 명시적인 플랫폼 선택은 [설치 안내](./getting-started/installation.md)를 확인해 주세요.
 
 ## Start Here
 
@@ -47,9 +57,13 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 | Platform adapter compliance | [../policies/platform-adapter-compliance.md](../policies/platform-adapter-compliance.md) | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) |
 | Live smoke regression | [../policies/live-smoke-regression.md](../policies/live-smoke-regression.md) | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [../policies/evaluator-artifact-contract.md](../policies/evaluator-artifact-contract.md) | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) |
-| Current release notes | [../release/2026-09-28-release-notes.md](../release/2026-09-28-release-notes.md) | [release/2026-09-28-release-notes.md](./release/2026-09-28-release-notes.md) |
+| Current release notes | [../release/2026-10-01-release-notes.md](../release/2026-10-01-release-notes.md) | [release/2026-10-01-release-notes.md](./release/2026-10-01-release-notes.md) |
 | Public release checklist | [../release/public-release-checklist.md](../release/public-release-checklist.md) | [release/public-release-checklist.md](./release/public-release-checklist.md) |
 | Planning policy | [../plans/README.md](../plans/README.md) | [plans/README.md](./plans/README.md) |
+
+## 기준 기여자 문서
+
+`CONTRIBUTING.md`, `SUPPORT.md`, `CHANGELOG.md`와 `official-docs/`는 영어를 기준 기여자 경로로 사용합니다. 제어 토큰과 과거 릴리즈 기록은 그대로 보존하며, 현재 사용자용 한국어 문서는 위 표에서 제공합니다. 과거 릴리즈 안내는 해당 날짜의 버전과 검증 한계를 보존합니다.
 
 ## Update Rule
 

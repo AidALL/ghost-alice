@@ -6,7 +6,17 @@ Ghost-ALICE OS documentation is bilingual at the reader-facing documentation lay
 
 Every paired document should expose a language switch near the top. In an English document, the English side is plain text and the Korean side is a link. In a Korean document, the English side is a link and the Korean side is plain text.
 
-The coordinated current release is Ghost-ALICE OS `0.4.0` with Ghost-ALICE Autopilot `0.4.0`. Read the [release notes](./release/2026-09-28-release-notes.md) for the intent, session, and continuation changes and their verification limits.
+The coordinated current release is Ghost-ALICE OS `0.4.1` with Ghost-ALICE Autopilot `0.4.1`. Read the [release notes](./release/2026-10-01-release-notes.md) for current verification scope.
+
+## Quick Install
+
+From the cloned Core repository, install Core and Autopilot together with automatic agent-platform detection:
+
+```bash
+bash install.sh --addon autopilot
+```
+
+Keep approved work moving across status questions and corrections, retain its boundaries, and connect completion claims to each item's evidence. The [installation guide](./getting-started/installation.md) covers cloning, OS-native commands and explicit platform selection.
 
 ## Start Here
 
@@ -47,9 +57,13 @@ The coordinated current release is Ghost-ALICE OS `0.4.0` with Ghost-ALICE Autop
 | Platform adapter compliance | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) | [ko/policies/platform-adapter-compliance.md](./ko/policies/platform-adapter-compliance.md) |
 | Live smoke regression | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) | [ko/policies/live-smoke-regression.md](./ko/policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) | [ko/policies/evaluator-artifact-contract.md](./ko/policies/evaluator-artifact-contract.md) |
-| Current release notes | [release/2026-09-28-release-notes.md](./release/2026-09-28-release-notes.md) | [ko/release/2026-09-28-release-notes.md](./ko/release/2026-09-28-release-notes.md) |
+| Current release notes | [release/2026-10-01-release-notes.md](./release/2026-10-01-release-notes.md) | [ko/release/2026-10-01-release-notes.md](./ko/release/2026-10-01-release-notes.md) |
 | Public release checklist | [release/public-release-checklist.md](./release/public-release-checklist.md) | [ko/release/public-release-checklist.md](./ko/release/public-release-checklist.md) |
 | Planning policy | [plans/README.md](./plans/README.md) | [ko/plans/README.md](./ko/plans/README.md) |
+
+## Canonical Contributor Documents
+
+`CONTRIBUTING.md`, `SUPPORT.md`, `CHANGELOG.md` and `official-docs/` use English as the canonical contributor path. Their control tokens and historical release records remain literal; paired current reader guides are listed above. Historical release notes preserve the versions and evidence limits of their dated release.
 
 ## Update Rule
 

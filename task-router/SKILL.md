@@ -54,6 +54,7 @@ task-router scans available skill descriptions against the current session inten
 - [1. Procedure](#1-procedure)
   - [1.0 Pending-Merge Precheck](#10-pending-merge-precheck)
   - [1.1 Consume Session Intent Context](#11-consume-session-intent-context)
+  - [Active Work Continuation](#active-work-continuation)
   - [1.1.1 Routing Surface](#111-routing-surface)
   - [1.1.2 Clarification-Only Terminal Route](#112-clarification-only-terminal-route)
   - [1.1.3 Direct-Response Terminal Route](#113-direct-response-terminal-route)
@@ -91,6 +92,8 @@ At task-router start, before consuming session intent context:
 
 Use the current intent summary and downstream gate context first. The raw user input is not the source of truth. Surface signals may supplement missing context.
 
+Use exact file and executable paths established by runtime, tool, or source evidence rather than deriving directory structure from a skill-family label; when a binding is missing, perform one bounded file inventory and reuse the established path.
+
 This step performs atomic meaning decomposition from the accepted session intent context.
 
 Reconcile the current goal, latest scope, active decisions, accumulated constraints/non-goals, and acceptance criteria before selecting an action category. An accumulated list can retain an earlier turn's restriction. A supported explicit user revision resolves only the named exception; other restrictions remain. Do not silently redefine an edit request as analysis because an older restriction remains in a list, or treat a newer goal as automatic permission. When the context cannot resolve the conflict, identify the conflicting boundary and ask only for that missing decision; proceed with uncontroversial work where possible. Existing explicit authorization that resolves the conflict does not need another approval.
@@ -98,6 +101,8 @@ Reconcile the current goal, latest scope, active decisions, accumulated constrai
 For boundary chronology and conflicting snapshot fields, apply `references/routing-details.md` before choosing the action category.
 
 Identify the user's primary request, whether a question or instruction, before adjacent detail. Preserve a causal axis only when the request asks about a cause or relationship; do not invent one for an imperative request. At pre-tool routing, do not fabricate or require an unsupported answer. Preserve the request for downstream output, which leads with the supported causal answer or completed imperative result after the necessary evidence or work.
+
+When judging a causal or design hypothesis, reason independently about its mechanism and the contrary case or limits; restating the stated goal is not a judgment. When reviewing changes, lead with concrete before-to-after behavior and the evidenced installation or adoption state before utility or necessity advice; scope a finding of no additional need to the evaluated candidate instead of declaring the whole bundle worthless.
 
 Extract:
 
@@ -110,6 +115,18 @@ Extract:
 - verification signal: fact-check, consistency, schema, regulation, visual, etc.
 - boundary signal: explicit non-goals, prohibited layers, read-only discovery, screenshot-only checks, or unclear file surface
 - change-depth signal: minimal, localized, structural, systemic
+
+### Active Work Continuation
+
+Reconcile the current input with unfinished authorized work before selecting a terminal route. A status question, explanation request, or correction during that work normally steers the active task. Answer the question briefly in commentary, apply the correction, and continue the supported implementation or verification. A bounded answer can reuse retained evidence without making the entire turn `direct-response`.
+
+Preserve the attained work stage from retained evidence when answering status or sequence questions. Distinguish feedback recorded, source changed, behavior tested, and runtime installed or adopted; report only supported stages and the remaining gap. These are evidence distinctions, not a mandatory stage ladder. Do not describe an already ongoing behavior improvement as a future first step or restart authorized work to fit a proposed sequence. A status question supplies no new execution permission; continue only within existing authorization.
+
+An explicit stop, pause, cancellation, or incompatible replacement changes that decision. An essential missing decision or an unsafe action can block dependent work; continue independent authorized work where possible. Do not infer unfinished work or authority from the ambient workspace, an unresolved ledger flag alone, or tool availability. Genuine no-work answers keep their terminal route.
+
+A branch-local failure, including a fixed external quota limit or publication bookkeeping conflict, blocks only work that depends on it. Keep the requested result as the completion target, use available supported paths, and report the specific gap. Retry only after an observed change or when a retry can change the next decision.
+
+When a correction identifies an execution failure and the user authorizes fixing it, route to the owning implementation workflow and an original-failure regression. Recording `conduct_feedback` or producing an evolution report is not the correction itself. A report-only recommendation without that authorization remains report-only.
 
 ### 1.1.1 Routing Surface
 
@@ -138,6 +155,7 @@ Rules:
 - `primary-request` preserves the user's primary question or imperative instruction.
 - `response-mode: clarification-only` is the terminal route defined below; ambiguity by itself is not sufficient, and this mode uses `response-order: clarification-question-only`.
 - `response-mode: direct-response` is the no-work terminal route for content that can be resolved from the current input and conversation without tools or state access; it uses `response-order: resolved-intent-first`.
+- Apply Active Work Continuation first: a brief answer inside ongoing authorized work does not terminate that work.
 - Route classification precedes evidence planning. A premise or symptom embedded in a causal question is not itself an inspection or verification request. Classify a request as current-state lookup only when the user explicitly asks to inspect, verify, or determine the exact local cause, or when the current conversation already establishes a specific repository, session, machine, file, or artifact as the referent. An established referent authorizes inspection but does not require it. First-person wording, tense, technical-state language, ambient working directory, opened project, and tool availability do not establish that referent. When a stable general mechanism answers the question, use `direct-response`; verification rules must not promote it to a normal route.
 - Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists. The contract lives in `verification-before-completion` under `references/verify-or-reuse.md`.
 - The user's terminal objective outranks investigative means.
@@ -162,6 +180,8 @@ Use it only when an essential referent or decisive input is missing and no suppo
 ### 1.1.3 Direct-Response Terminal Route
 
 Use it when the current input and conversation fully support the answer with no file change, side effect, current-state lookup, tool call, or fresh verification. Eligible content includes an explicit correction or non-goal, a terminal objective that supersedes a proposed means, a bounded explanation of a general mechanism, stable, low-risk, non-current general guidance, and an answer from retained artifact content when verify-or-reuse yields reuse. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic. Do not validate or rebut that premise before explaining. Lead with the resolved content; Do not inspect files, repositories, manifests, tools, credentials, or external state, and emit no control block. It is unavailable for lookup, inspection, modification, verification, current or version-specific facts, support or regression judgments, and high-risk advice. Full contract: `references/routing-details.md`.
+
+This terminal route also requires that no actionable authorized work remains in the active task, unless the user explicitly stops, pauses, cancels, or replaces it. Use commentary for an answer that interrupts ongoing work.
 
 ### Sufficient Change Principle
 

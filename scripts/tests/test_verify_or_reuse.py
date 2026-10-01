@@ -600,8 +600,14 @@ class InstalledCopyTests(unittest.TestCase):
         skills_path = Path(skills_dir)
         self._check_installed_skill(skills_path)
         agents = skills_path.parents[1] / ".codex" / "AGENTS.md"
-        if agents.is_file():
-            self.assertIn(VERIFY_OR_REUSE_PRECHECK, " ".join(agents.read_text(encoding="utf-8").split()))
+        self.assertTrue(agents.is_file())
+        loader = agents.read_text(encoding="utf-8")
+        companion = agents.with_name("ghost-alice-governance.md")
+        self.assertIn("When the complete Ghost-ALICE project contract is already supplied", loader)
+        self.assertIn("Otherwise, before actionable work", loader)
+        self.assertIn(str(companion), loader)
+        self.assertTrue(companion.is_file())
+        self.assertIn(VERIFY_OR_REUSE_PRECHECK, " ".join(companion.read_text(encoding="utf-8").split()))
 
     def test_installed_claude_copy_matches_repository_ssot(self) -> None:
         claude_dir = os.environ.get("GHOST_ALICE_INSTALLED_CLAUDE_DIR")

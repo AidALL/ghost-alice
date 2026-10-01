@@ -24,6 +24,8 @@ Do not use this route when the content already resolves the question, when exist
 
 ## Direct-Response Terminal Route
 
+Apply the Active Work Continuation procedure in `../SKILL.md` first. A status answer or accepted correction within unfinished authorized implementation belongs in commentary, followed by the supported work. Retained evidence can answer the interruption without another check. It does not convert the active task into a no-work terminal response. An explicit stop, pause, cancellation, or incompatible replacement governs continuation; ambient context or an unresolved ledger flag alone cannot authorize work.
+
 Use `response-mode: direct-response` when the current input and conversation fully support the answer and no file change, external side effect, current-state lookup, tool call, or fresh verification is needed. Eligible content includes an explicit correction or non-goal that can be acknowledged immediately, a terminal objective that supersedes a previously proposed means, a bounded explanation of a general mechanism, stable, low-risk, non-current general guidance, and an answer from retained artifact content when verify-or-reuse yields reuse.
 
 Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence that the active workspace is currently in that state. Do not validate or rebut that premise before explaining. First-person, past-cause, and deictic wording does not bind the question to the active workspace. The workspace becomes the target only when the user identifies it, supplies workspace evidence, or explicitly requests exact diagnosis or inspection. Explain common causes first; offer repository-specific inspection only conditionally when the user asks for the exact cause.
@@ -35,6 +37,18 @@ Intake, security review, routing, and strict hook logging still run internally. 
 This route is unavailable when the user requests a lookup, verification, file or state inspection, modification, external side effect, current or version-specific fact, support or regression judgment, or high-risk advice. Any required tool call or fresh evidence reclassifies the turn as `normal`.
 
 ## Examples
+
+### Status During Implementation
+
+The user authorized a parser fix and isolated regression test. The fix remains unwritten. The user asks, "What have you done?" Answer briefly from retained evidence in commentary, then implement and test the fix under the existing authorization. Do not send a final status report and wait for renewed permission.
+
+### External Limit On One Branch
+
+One provider's fixed quota prevents its live smoke test, while local reproduction and another supported execution path remain available. Preserve the provider-specific gap, implement and test the supported correction, and do not keep probing the unchanged quota. Passing the alternate branch does not prove the blocked branch passed.
+
+### Explicit Pause And Finished Work
+
+If the user says, "Stop editing and only explain the existing result," stop edits and give the bounded explanation. If the requested implementation and its acceptance tests are complete, a later question about retained evidence can use `direct-response`. Neither case creates new work from an old unresolved flag.
 
 ### Operations
 
@@ -137,3 +151,5 @@ next-required: boundary-contract
 - A general explanatory question is silently converted into a diagnosis of the current repository or machine.
 - An explicit correction or terminal objective is acknowledged only after defending, investigating, or verifying the superseded direction.
 - `direct-response` is used for a current, version-sensitive, high-risk, lookup, inspection, modification, or verification request.
+- A status answer or feedback record ends unfinished authorized work.
+- A fixed branch-local obstacle is repeatedly checked while independent work remains.

@@ -148,10 +148,33 @@ def ledger_state_path(root: Path, platform: str, session_id: str) -> str:
 
 
 def ledger_read_instruction(root: Path, platform: str, session_id: str) -> str:
-    args = ["session_intent_ledger.py", "--read-state", "--root", str(root),
+    ledger = importlib.import_module("session_intent_ledger")
+    args = [sys.executable, str(Path(ledger.__file__).resolve()),
+            "--read-state", "--root", str(root),
             "--platform", platform, "--session-id", session_id]
     return (f"intent-ledger: use {shlex.join(args)} after session-intent preflight. "
             f"Compatibility export: {ledger_state_path(root, platform, session_id)} is not authoritative.")
+
+
+def unresolved_work_instruction(state: dict[str, Any]) -> list[str]:
+    """Expose existing admitted work, without interpreting the new input or granting authority."""
+    criteria = state.get("acceptance_criteria")
+    if not isinstance(criteria, list):
+        return []
+    pending = [item["id"] for item in criteria
+               if isinstance(item, dict) and item.get("admitted") is True
+               and item.get("status") == "unmet"
+               and isinstance(item.get("id"), str) and item["id"]]
+    if not pending:
+        return []
+    return [
+        "unresolved-work: " + json.dumps(pending, ensure_ascii=False),
+        "Reconcile the current input with these criteria and existing authorization. "
+        "During actionable authorized work, answer status questions in commentary and continue; "
+        "partial verification or a branch-local blocker does not finish the task. "
+        "Respect an explicit stop, pause, cancellation, or replacement. "
+        "This reminder does not authorize work or decide tool permission.",
+    ]
 
 
 def reminder_message(base_message: str, root: Path, platform: str, payload: dict[str, Any]) -> str:
@@ -200,6 +223,7 @@ def reminder_result(base_message: str, root: Path, platform: str, payload: dict[
             ledger_read_instruction(root, platform, session_id),
             f"downstream-gate: {gate_path} absent; silent allow invariant applies unless a current-lineage model block is recorded.",
             "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
+            *unresolved_work_instruction(material['state']),
         ]), True
 
     if gate.get("stale"):
@@ -223,12 +247,22 @@ def reminder_result(base_message: str, root: Path, platform: str, payload: dict[
         ledger_read_instruction(root, platform, session_id),
         f"downstream-gate: {gate_path} contains no block; silent allow invariant applies.",
         "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
+        *unresolved_work_instruction(material['state']),
     ]), True
 
 
 def render_payload(output_format: str, message: str, *, routine: bool = False) -> str:
     if output_format == "json":
-        body: dict[str, Any] = {"continue": True, "systemMessage": message}
+        # Visibility controls the user notice, not the routing instructions.
+        # Match the intake hook's model-context channel through the installed wrapper.
+        body: dict[str, Any] = {
+            "continue": True,
+            "systemMessage": message,
+            "hookSpecificOutput": {
+                "hookEventName": "UserPromptSubmit",
+                "additionalContext": message,
+            },
+        }
         if routine:
             body["ghostAliceSurface"] = "routine"
         return json.dumps(body, ensure_ascii=False)

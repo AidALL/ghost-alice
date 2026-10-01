@@ -138,10 +138,10 @@ Then share `git status --short --branch`, the conflict file list, and both diff 
 
 ### 5. Run the Installer After Git Is Clean
 
-Use the bash-first installer path:
+After source recovery, reinstall Core and Autopilot together. `--update-source` alone refreshes Core source; the addon is fetched by the paired installation command. On Windows, use `.\install.cmd --addon autopilot`, then `--doctor` and `--status`:
 
 ```bash
-bash install.sh
+bash install.sh --addon autopilot
 bash install.sh --doctor
 bash install.sh --status
 ```

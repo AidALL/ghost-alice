@@ -65,7 +65,7 @@ When reporting a workflow case, include what you were trying to do, the platform
 1. Read [README.md](./README.md) for the project model.
 2. Read [AGENTS.md](./AGENTS.md) for the repository operating contract.
 3. Check [docs/getting-started/installation.md](./docs/getting-started/installation.md) for installer behavior and platform paths.
-4. For public surface changes, run the validation commands listed below before opening a pull request.
+4. For public surface changes, run the validation commands listed below before opening a pull request. Update English and paired polite Korean documentation together, preserve literal control/schema tokens, and keep dated historical release facts intact.
 
 ## Development Setup
 
@@ -119,7 +119,7 @@ python3 scripts/validate_platform_adapters.py
 Windows installer changes should include PowerShell-oriented validation where possible.
 
 ```powershell
-.\install.ps1 -Doctor
+.\install.cmd --doctor
 ```
 
 The Wiki lives in a separate repository (`<repo>.wiki.git`), so changes there are not covered by the repo test suites. When you edit Wiki pages, clone the wiki and run the report-only structural audit against your checkout. It flags broken internal links and missing English/Korean page pairs only; it does not judge prose.

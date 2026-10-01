@@ -60,7 +60,17 @@ No acceptance-criteria means no completed verification-before-completion.
 
 Before any claim that executed work is complete, fixed, successful, or freshly verified, extract verifiable criteria from the user intent, locked decisions, and boundary-contract. Put those criteria in `acceptance-criteria`, then connect each intended closure claim to a criterion and fresh evidence in `claim-evidence-map`.
 
+Keep the requested result as the terminal criterion. If the user requested implementation, a compatibility report, successful diagnostic, observation record, or list of remaining gaps is supporting work. Do not replace the implementation criterion with a report criterion, narrow it to the subset that passed, or mark the task complete because the supporting work is verified. A report is the deliverable only when the user requested a report.
+
 Evidence such as link checks, lint, diff checks, or passing tests proves completion only when it directly satisfies the criterion. If the central criterion is not directly verified, leave it in `unverified` and report partial status in prose.
+
+When aggregating repair status, preserve each item's evidence scope before composing the lead or table: the target and failure context checked, the kind of verification, and the conclusion it supports. Reuse the existing records; this mapping does not require a new artifact or another run. Code regression, instruction conformance, installed delivery, and behavior in a continuing conversation establish different things. Edited and installed guidance alone is not a demonstrated behavioral repair. A short isolated decision does not establish recovery in an accumulated context it did not exercise.
+
+Scope the lead and each row to that evidence. Do not flatten unlike stages into "all fixed and verified" and try to repair the implication with a trailing "no guarantee in every situation" disclaimer. If the old and new guidance both pass a case, it supports that checked behavior, not a causal improvement; missing improvement evidence is not merely an unmeasured percentage. Keep a verified source repair or installation complete at its own stage while naming the specific unsupported behavioral conclusion.
+
+Honor the user's agreed disposition criteria, including treating a historical issue as handled when the selected current check does not reproduce it. Do not replace that agreement with a universal-reliability requirement, reopen handled cases, or rerun unchanged work. Apply the scope mapping to the completion criterion actually agreed.
+
+While actionable authorized work remains, that partial status is a commentary checkpoint followed by the next supported action. A failed provider branch or bookkeeping conflict preserves its specific gap; it does not finish independent implementation. Stop or yield when the user explicitly requests it, when a required decision or authorization is missing, or when no supported work remains. A failed criterion proves the failure, not successful task completion.
 
 ## Relayed Verdicts And Absence Claims
 
@@ -101,13 +111,7 @@ If any step is missing or out of order, the completion-check is invalid.
 
 ## Autopilot Proof Publication
 
-When the current installation is Codex or Claude, includes `autopilot-mode/scripts/autopilot_completion.py`, and this session has admitted criteria for authorized execution, the installed PreToolUse adapter captures immutable prospective provenance before the business verification and surfaces one concrete preparation command for that current contract without admitting or advancing execution. Other platforms retain the existing workflow. Plan-only replies, explanations, installations without this helper, and sessions without admitted execution criteria do not use this publication path. Do not create execution criteria to activate it.
-
-1. Keep the current admitted criteria and semantic contract accurate before verification. The pretool notice supplies current coordinates; follow its preparation command before the first final answer, preferably before verification. Repeated tools under the same contract do not repeat the notice or refresh its original capture time. Resolve the installed helper and the current hook/intake coordinates. Use the concrete notice command, or run `autopilot_completion.py prepare --reapprove-current-input --intent-root ROOT --platform PLATFORM --session-id SESSION --input-event-id INPUT` with the permitted Python interpreter. This explicit preparation keeps the admitted user task as the publication unit even when advisory conduct feedback exists; it does not replace that task with a separate conduct plan. Preserve the returned `receipt_token` and `prepared_at` strings verbatim. Use its returned `criterion_ids` unchanged for the current proof; historical met criteria keep their original evidence. Preparation promotes an exact existing prospective capture when available; otherwise it captures runtime provenance at that moment. It does not verify business work. For a newer input or changed contract that the user already authorized, use `prepare --reapprove-current-input` with that current input receipt. It can run after verification only when the runtime already captured the exact current contract before that original proof; the original capture and proof times remain unchanged. Without such a capture, prepare before its new verification. This uses the supported admission bridge and archives the previous generation while admitting the new current generation; it does not require another permission round for already-authorized work.
-2. Perform the necessary business verification once. Capture its actual ISO timestamp as a string and its tool-result or evidence locator. Keep the original reference in the supported `[completion-check]` covering exactly the returned `criterion_ids`, with exactly one nonempty top-level `- evidence:` section. Supply the timestamp once through `--verified-at`; do not insert it into proof that lacks a timestamp. Preserve the original proof bytes and raw timestamp; never replace the verification time with the later publication time. If proof already declares `verified-at` or `verified_at`, its single value must match that raw string exactly. Existing explicit verification times in legacy evidence remain checked; an inconsistent, malformed, or ambiguous declaration is rejected.
-3. Before the initial final answer, use the concrete publish command returned by preparation, or run `autopilot_completion.py publish --receipt-token TOKEN --verified-at ORIGINAL_ISO_TIME --completion-file -`, passing that exact completion block on stdin. The helper derives the exact reference text from the single top-level evidence section and binds the original raw timestamp, receipt and unchanged proof digest in immutable publication provenance. This checks consistency, not the truth of a caller's first supplied timestamp. It does not select nested claim evidence, invent a tool identifier, or independently authenticate an external tool result. Missing, empty, duplicate, placeholder, ambiguous, or partial evidence remains rejected. A legacy caller may explicitly supply `--evidence-source` only with an unchanged value already present in the proof; a mismatch or empty override is rejected, never replaced. Both helper invocations must use the current session's `GHOST_ALICE_SESSION_INTENT_ROOT`, `GHOST_ALICE_PLATFORM`, and `GHOST_ALICE_SESSION_ID` environment bindings; derive these from the current hook/intake, never from an older run. The helper constructs the decision envelope and digest. Its pending-publication result is bookkeeping evidence; the Stop adapter retains the transaction that marks criteria met. Keep the requested business answer and supported completion block in the final response.
-
-Do not hand-build a replacement decision envelope, rerun business checks to manufacture a publication, or prepare a new receipt for proof produced before its capture. If publication alone failed, retry publication with the original receipt and unchanged proof. A missing publication record is not evidence of unfinished business work. A stale receipt, changed input, changed criterion, changed scope, or failed proof stays rejected; reopen only the affected verification under the current authorized contract. At Stop, a matched prospective capture becomes a receipt and the missing-publication message supplies the concrete installed publish command. Follow that command with the original proof and timestamp. If no original receipt or matching prospective capture exists, report the binding gap separately from the supported business result instead of relabeling old proof. Use stdin or permitted runtime scratch when the user prohibits extra task files.
+When this Codex or Claude installation includes `autopilot-mode/scripts/autopilot_completion.py` and the current session has admitted criteria for authorized execution, read [references/autopilot-publication.md](references/autopilot-publication.md) before preparation, business verification or the first final answer. Follow the current hook notice, exact receipt coordinates and original evidence times; publication remains required before the initial final answer. Plan-only replies, explanations, installations without this helper and sessions without admitted execution criteria do not activate this path. A binding or publication failure does not erase supported business evidence or finish independent authorized work. Do not create criteria to activate publication, replace foreign run state or rerun unchanged checks for bookkeeping.
 
 ## Retain Evidence On First Execution
 
@@ -184,6 +188,7 @@ When you confirm a flaw in a prompt or other deliverable you provided, return th
 | Regression test works | Red-green evidence when TDD requires it | A test that passed once |
 | Agent completed the work | VCS diff plus independent verification | The agent's success report |
 | Requirements satisfied | Claim-evidence map for each acceptance criterion | Tests pass alone, links pass alone, or diff exists alone |
+| Requested implementation complete | Implemented behavior and its original-failure regression | A verified report of compatibility, observations, or remaining work |
 | Relayed/endorsed review verdict | Current behavior evidence when an observed mutation event or evidenced open change path affects it; otherwise the relevant existing evidence with its age | The reviewer's verdict, or your agreement with it, alone |
 | Absence claim ("no test/code exists", "not enforced") | A targeted current search when an observed change could alter it; otherwise the relevant existing search with its age | Reasoning or the source's say-so |
 | Content of an artifact you authored and still retain | Retained authored evidence when verify-or-reuse returns reuse | A re-read justified only by a possible change |
@@ -212,6 +217,7 @@ Stop before claiming success when any of these appear:
 | "Lint passed." | Lint is not a compiler or a requirement map. |
 | "Another agent said it succeeded." | Endorse it only with decision-relevant evidence; reuse unchanged evidence with its age. |
 | "Partial checks are enough." | Partial checks prove only the checked criteria. |
+| "I reported the gaps, so the implementation task is complete." | Keep the requested result as the criterion and continue supported authorized work. |
 | "The wording is different, so the rule does not apply." | Completion implications still count. |
 | "It might have been edited externally." | Name the actual change path and observed event, or answer from retained evidence. |
 
@@ -229,69 +235,11 @@ From accumulated failure memory:
 
 ## External Tool Web-Search-First Gate
 
-Layer marker: `web-search-first`.
-
-If the final claim includes factual behavior about an external tool, library, CLI, SDK, framework, version, or platform behavior, apply the web-search evidence gate before the claim.
-
-Categories:
-
-- Category A, specification definition: one official source may be enough when the claim is only what the spec says should happen.
-- Category B, runtime behavior: run at least three WebSearch queries.
-- Category C, version-dependent behavior: run at least three WebSearch queries, including the version or year.
-
-Minimum query pattern for Category B or C:
-
-- `<tool> <year> github issue`
-- `<tool> reddit`
-- `<tool> not working <version>`
-
-Evidence block extension:
-
-```text
-- web-search-evidence:
-  - query: <query 1>
-    accessible_url: <url>
-    finding: <key finding or value>
-    source-locator:
-      source_type: web
-      region: n/a
-  - query: <query 2>
-    accessible_url: <url>
-    finding: <key finding or value>
-    source-locator:
-      source_type: web
-      region: n/a
-  - query: <query 3>
-    accessible_url: <url>
-    finding: <key finding or value>
-    source-locator:
-      source_type: web
-      region: n/a
-```
-
-Source-locator contract:
-
-- Web evidence must include `accessible_url`.
-- Attached or local file evidence must include `file_path`, `page`, and `region`.
-- `region` values are `top`, `middle`, `bottom`, or `n/a`. Literal enum form: `top | middle | bottom | n/a`.
-- Materials without pages use `page: n/a` plus an equivalent locator such as section, row, slide, or sheet in `locator_note`.
-- Numeric claims, original sources, tables, and figures must bind the specific value to its source location.
-
-When Category B or C appears and `web-search-evidence` has fewer than three entries, lacks `accessible_url`, or lacks `source-locator`, the completion claim is invalid. Search again, fill the evidence, then claim only what the evidence supports.
-
-This gate exists because official docs describe intended behavior, while community reports often reveal runtime regressions, race conditions, and version-dependent failures.
-
-The only exception is an explicit user instruction for this session to waive web-search evidence.
+Layer marker: `web-search-first`. Before a material factual claim about an external tool, library, CLI, SDK, framework, version or platform behavior, read [references/external-tool-evidence.md](references/external-tool-evidence.md) and apply its evidence gate. Category A specification definitions may use one official source; Category B runtime behavior and Category C version-dependent behavior require at least three WebSearch queries and accessible `source-locator` values. Keep the explicit user waiver and the project's stable, low-risk direct-response exemption; do not manufacture external claims or searches for a local-only task.
 
 ## Evaluator Artifact Contract
 
-Before claiming verification-complexity-level-3 completion, external agent governance absorption, or RAG/evaluator candidate promotion, read `docs/policies/evaluator-artifact-contract.md`.
-
-The completion evidence must include an accepted `verifier-result.json`.
-
-- A read-only evaluator pass must not modify installed assets.
-- Do not promote a candidate playbook without an accepted verifier result.
-- At least one rejected candidate must exist so the verifier has proven it can say no.
+Before claiming verification-complexity-level-3 completion, external agent governance absorption or RAG/evaluator candidate promotion, read [references/evaluator-artifacts.md](references/evaluator-artifacts.md) and `docs/policies/evaluator-artifact-contract.md`. Require an accepted `verifier-result.json` with a rejected candidate; stop promotion when it is absent or rejected. A read-only evaluator must not modify installed assets.
 
 ## When To Apply
 

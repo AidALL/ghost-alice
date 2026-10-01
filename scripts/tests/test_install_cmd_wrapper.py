@@ -42,29 +42,23 @@ class InstallCmdWrapperTest(unittest.TestCase):
         self.assertIn('set "PYTHONIOENCODING=utf-8"', install_cmd)
         self.assertIn("-File \"%PS1%\" %*", install_cmd)
 
-    def test_readme_documents_cmd_as_windows_native_wrapper_for_python_contract(self) -> None:
-        readme = README.read_text(encoding="utf-8")
-
-        self.assertIn("`install.cmd` keeps the Windows native wrapper path", readme)
-        self.assertIn("Python 3.11+", readme)
-        self.assertIn("UTF-8 console setup", readme)
-        self.assertIn("`-NoProfile -ExecutionPolicy Bypass`", readme)
+    def test_detailed_guide_documents_windows_native_wrapper_for_python_contract(self) -> None:
+        guide = INSTALLATION_DOC.read_text(encoding="utf-8")
+        self.assertIn("./docs/getting-started/installation.md", README.read_text(encoding="utf-8"))
+        self.assertIn("`install.cmd` keeps the native wrapper path", guide)
+        self.assertIn("Python 3.11+", guide)
+        self.assertIn("UTF-8 console setup", guide)
+        self.assertIn("`-NoProfile -ExecutionPolicy Bypass`", guide)
 
     def test_docs_prefer_cmd_wrapper_when_powershell_policy_blocks_ps1(self) -> None:
         expectations = {
             README: [
-                "Windows Command Prompt or PowerShell:",
-                ".\\install.cmd",
-                "PowerShell execution policy",
-                "`-NoProfile -ExecutionPolicy Bypass`",
-                "does not change the user or machine execution policy",
+                "bash install.sh --addon autopilot",
+                "./docs/getting-started/installation.md",
             ],
             README_KO: [
-                "Windows Command Prompt 또는 PowerShell:",
-                ".\\install.cmd",
-                "PowerShell 호출에는",
-                "`-NoProfile -ExecutionPolicy Bypass`",
-                "사용자나 시스템에 저장된 실행 정책은 변경하지 않습니다",
+                "bash install.sh --addon autopilot",
+                "./docs/ko/getting-started/installation.md",
             ],
             INSTALLATION_DOC: [
                 ".\\install.cmd",
@@ -74,9 +68,9 @@ class InstallCmdWrapperTest(unittest.TestCase):
             ],
             INSTALLATION_DOC_KO: [
                 ".\\install.cmd",
-                "PowerShell execution policy",
+                "PowerShell 실행 정책",
                 "`-NoProfile -ExecutionPolicy Bypass`",
-                "사용자 또는 머신 execution policy를 변경하지 않는다",
+                "사용자나 컴퓨터의 실행 정책은 변경하지 않습니다",
             ],
             TROUBLESHOOTING_DOC: [
                 ".\\install.cmd",
@@ -86,7 +80,7 @@ class InstallCmdWrapperTest(unittest.TestCase):
             TROUBLESHOOTING_DOC_KO: [
                 ".\\install.cmd",
                 "cannot be loaded because running scripts is disabled",
-                "사용자 또는 머신 execution policy를 변경하지 않는다",
+                "사용자 또는 머신 execution policy를 변경하지 않습니다",
             ],
         }
 
@@ -499,21 +493,19 @@ class InstallCmdWrapperTest(unittest.TestCase):
         expectations = {
             README: [
                 "## Official Addons",
-                "Official addons are maintained as separate repositories",
                 "bash install.sh --addon autopilot",
-                "The autopilot repository is an addon package consumed by the core installer",
-                "This install example is not a full runtime compatibility claim",
-                "compatibility-matrix.json",
-                "Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository.",
+                "Installation does not grant run approval",
+                "./docs/getting-started/installation.md",
+                "./docs/reference/official-addons.md",
+                "https://github.com/AidALL/ghost-alice-autopilot",
             ],
             README_KO: [
                 "## Official Addons",
-                "Ghost-ALICE 폴더에서 짧은 이름으로 설치하실 수 있습니다",
                 "bash install.sh --addon autopilot",
-                "Autopilot은 Ghost-ALICE 설치기로 설치하는 애드온 패키지입니다",
-                "모든 실행 환경과의 호환성을 보장하지는 않습니다",
-                "compatibility-matrix.json",
-                "애드온별 동작 방식, 상태 파일, 일시 정지·재개 방법, 제거 절차는 해당 애드온 저장소에서 확인해 주세요",
+                "설치 자체가 실행 승인을 부여하지는 않습니다",
+                "./docs/ko/getting-started/installation.md",
+                "./docs/ko/reference/official-addons.md",
+                "https://github.com/AidALL/ghost-alice-autopilot",
             ],
             INSTALLATION_DOC: [
                 "## Install Official Addons",
@@ -521,16 +513,16 @@ class InstallCmdWrapperTest(unittest.TestCase):
                 "bash install.sh --addon autopilot",
                 "This install example is not a full runtime compatibility claim",
                 "compatibility-matrix.json",
-                "Windows Command Prompt and PowerShell use the same official alias",
+                "Windows Command Prompt or PowerShell",
                 "## Runtime And Platform Reference",
             ],
             INSTALLATION_DOC_KO: [
                 "## Install Official Addons",
                 "## Official Addon List",
                 "bash install.sh --addon autopilot",
-                "full runtime compatibility claim이 아니다",
+                "설치 예시가 전체 실행 환경의 호환성을 입증하지는 않습니다",
                 "compatibility-matrix.json",
-                "Windows Command Prompt와 PowerShell도",
+                "Windows Command Prompt와 PowerShell에서도",
                 "## Runtime And Platform Reference",
             ],
         }

@@ -14,7 +14,7 @@ The session gate SSOT is `skill-catalog/session-gates.json`. This document is th
 - [Work-Impact Projection Contract](#work-impact-projection-contract)
 - [Runtime Checkpoints](#runtime-checkpoints)
 - [tool-checkpoint Visible Surface](#tool-checkpoint-visible-surface)
-- [tool-checkpoint Batch / Continuation Compression](#tool-checkpoint-batch-continuation-compression)
+- [tool-checkpoint Batch / Continuation Compression](#tool-checkpoint-batch--continuation-compression)
 - [Notes](#notes)
 
 
@@ -125,6 +125,8 @@ Work-Impact Projection classifies hook-internal values by whether they change th
 ## Runtime Checkpoints
 
 Ghost-ALICE OS documents use an English canonical narrative + English control surface as the default coordination contract. The reader-facing documentation tree also keeps paired Korean counterparts where the tree exposes a pair. Field names, enum values, literal tokens, gate schemas, and allowed/forbidden values stay English and are not translated.
+
+Active work continuation: before choosing a no-work terminal route, reconcile the current input with unfinished authorized work. A status question, explanation request, or correction normally receives a brief commentary answer followed by the supported work. Respect an explicit stop, pause, cancellation, or incompatible replacement; do not infer authority from ambient context or an unresolved ledger flag alone. A fixed branch-local limit blocks its dependent work only. Recording conduct feedback or verifying a report does not satisfy a requested implementation criterion. When the user authorizes a correction, implement it through the owning workflow and test the original failure.
 
 The first commentary must include this block for every normal route; no-work terminal routes emit no control block:
 
