@@ -142,6 +142,8 @@ def _routing_surface_reason(context: dict[str, Any]) -> str | None:
 
 
 def _routine_reason(context: dict[str, Any]) -> str | None:
+    if context.get("declared_surface") == "routine":
+        return "declared-routine"
     signal = str(context.get("signal") or "").strip().lower().replace("_", "-")
     if signal in LOW_VALUE_SIGNALS:
         return signal
@@ -166,7 +168,8 @@ def _forced_reason(
     if exit_code != 0:
         return "forced-nonzero-exit"
 
-    text = f"{hook_id}\n{event}\n{stdout}\n{stderr}"
+    # A hook that declared its surface is judged by real state in `context`, not by the words of its own message.
+    text = "" if context.get("declared_surface") else f"{hook_id}\n{event}\n{stdout}\n{stderr}"
     decision = str(context.get("decision") or "").strip().lower()
     if decision == "block" or _text_contains_any(
         text,

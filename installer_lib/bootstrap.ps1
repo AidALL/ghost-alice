@@ -110,6 +110,7 @@ function Set-CodexBootstrap {
         (Join-Path $script:GhostAliceRoot "_shared/global_rule_blocks.py"),
         "codex-merge",
         "--source", $CodexBootstrapSource,
+        "--loader", (Join-Path $script:GhostAliceRoot "platforms/codex/bootstrap.md"),
         "--dest", $agentsPath,
         "--proposed", "$agentsPath.ghost-alice-proposed"
     )
@@ -137,7 +138,8 @@ function Remove-CodexBootstrapIfUnused {
     }
 
     $agentsPath = Join-Path (Resolve-CodexHome) "AGENTS.md"
-    if (-not (Test-Path $agentsPath)) {
+    $contractPath = Join-Path (Resolve-CodexHome) "ghost-alice-governance.md"
+    if ((-not (Test-Path $agentsPath)) -and (-not (Test-Path $contractPath))) {
         return $false
     }
 

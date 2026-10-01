@@ -97,7 +97,7 @@ ensure_codex_bootstrap() {
     return 1
   fi
 
-  args=(codex-merge --source "$CODEX_BOOTSTRAP_SOURCE" --dest "$agents_path" --proposed "${agents_path}.ghost-alice-proposed")
+  args=(codex-merge --source "$CODEX_BOOTSTRAP_SOURCE" --loader "${SCRIPT_DIR}/platforms/codex/bootstrap.md" --dest "$agents_path" --proposed "${agents_path}.ghost-alice-proposed")
   if ! result="$("$py" "${SCRIPT_DIR}/_shared/global_rule_blocks.py" "${args[@]}")"; then
     error "$(t 'Codex AGENTS.md block merge failed; aborting install' 'Codex AGENTS.md block merge failed; aborting install')"
     return 1
@@ -123,7 +123,9 @@ remove_codex_bootstrap_if_unused() {
 
   codex_home="$(resolve_codex_home)"
   agents_path="${codex_home}/AGENTS.md"
-  [ -f "$agents_path" ] || return 1
+  if [ ! -f "$agents_path" ] && [ ! -f "${codex_home}/ghost-alice-governance.md" ]; then
+    return 1
+  fi
 
   py="$(_find_python_runtime || true)"
   if [ -z "$py" ]; then

@@ -148,11 +148,13 @@ def _apply_bootstrap(
     spec: RuleBlockSpec,
     *,
     proposed_path: Path | str | None = None,
+    source_text: str | None = None,
 ) -> ApplyResult:
     source = Path(source_path)
     dest = Path(dest_path)
     proposed = Path(proposed_path) if proposed_path is not None else dest.with_name(dest.name + ".ghost-alice-proposed")
-    source_text = _read_text(source)
+    if source_text is None:
+        source_text = _read_text(source)
 
     existing_text = None
     if dest.exists():
@@ -181,6 +183,8 @@ def _remove_marker_line(text: str, spec: RuleBlockSpec) -> str:
 
 def _remove_bootstrap(dest_path: Path | str, spec: RuleBlockSpec) -> ApplyResult:
     dest = Path(dest_path)
+    if dest.is_symlink():
+        return ApplyResult("unchanged", dest)
     if not dest.exists():
         return ApplyResult("unchanged", dest)
 
@@ -219,16 +223,44 @@ def apply_codex_bootstrap(
     dest_path: Path | str,
     *,
     proposed_path: Path | str | None = None,
+    loader_path: Path | str | None = None,
 ) -> ApplyResult:
+    loader_text = None
+    if loader_path is not None:
+        loader_text = _read_text(Path(loader_path))
+        placeholder = "{{GOVERNANCE_PATH}}"
+        if loader_text.count(placeholder) != 1:
+            raise GlobalRuleBlockError("Codex loader requires exactly one governance path placeholder")
+        # Keep the fallback outside automatically loaded AGENTS.md files. It
+        # follows the same ownership and managed-block rules as the old port.
+        contract = Path(dest_path).with_name("ghost-alice-governance.md")
+        if contract.is_symlink():
+            raise GlobalRuleBlockError(f"refusing symlink governance contract: {contract}")
+        if contract.exists() and not contract.is_file():
+            raise GlobalRuleBlockError(f"governance contract is not a regular file: {contract}")
+        if contract.exists():
+            status, _ = _merge_bootstrap_text(_read_text(contract), _read_text(Path(source_path)), CODEX_SPEC)
+            if status == "proposed":
+                raise GlobalRuleBlockError(f"user-owned governance contract: {contract}")
+        _apply_bootstrap(source_path, contract, CODEX_SPEC)
+        loader_text = loader_text.replace(placeholder, contract.resolve().as_posix())
     return _apply_bootstrap(
         source_path,
         dest_path,
         CODEX_SPEC,
         proposed_path=proposed_path,
+        source_text=loader_text,
     )
 
 
 def remove_codex_bootstrap(dest_path: Path | str) -> ApplyResult:
+    result = _remove_bootstrap(dest_path, CODEX_SPEC)
+    companion = _remove_bootstrap(Path(dest_path).with_name("ghost-alice-governance.md"), CODEX_SPEC)
+    return companion if result.status == "unchanged" and companion.status != "unchanged" else result
+
+
+def remove_codex_rule_file(dest_path: Path | str) -> ApplyResult:
+    """Remove one owned rule asset so cleanup can report each disposition."""
     return _remove_bootstrap(dest_path, CODEX_SPEC)
 
 
@@ -270,6 +302,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     codex.add_argument("--source", required=True, type=Path)
     codex.add_argument("--dest", required=True, type=Path)
     codex.add_argument("--proposed", type=Path, default=None)
+    codex.add_argument("--loader", type=Path, default=None)
 
     codex_remove = subparsers.add_parser("codex-remove")
     codex_remove.add_argument("--dest", required=True, type=Path)
@@ -293,6 +326,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.source,
                 args.dest,
                 proposed_path=args.proposed,
+                loader_path=args.loader,
             )
             print(f"{result.status}:{result.path}")
         elif args.command == "codex-remove":

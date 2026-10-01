@@ -277,8 +277,11 @@ def classify_global_rule_file(
     full_file_marker: str,
     managed_block_begin: Optional[str] = None,
     managed_block_end: Optional[str] = None,
+    reject_symlinks: bool = False,
 ) -> AssetClassification:
     asset_id = path.name
+    if reject_symlinks and path.is_symlink():
+        return AssetClassification(path, KIND_GLOBAL_RULE, asset_id, OWNERSHIP_CONFLICT, "rule-file-symlink")
     if not path.exists():
         return AssetClassification(path, KIND_GLOBAL_RULE, asset_id, OWNERSHIP_ABSENT, "rule-file-absent")
     if not path.is_file():

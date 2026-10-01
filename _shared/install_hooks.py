@@ -353,7 +353,7 @@ SESSION_INTENT_INTERNAL = (
     "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
     "Use the ledger as context for skill-evolution and jailbreak-detector. "
     "skill-evolution is a report-only branch that terminates. jailbreak-detector records model_security_decision in the ledger; only current-lineage block decisions are carried to downstream-gates.json, and absent current block means silent allow. "
-    "Capture trigger: when this input corrects the agent's prior behavior or understanding, record a compressed conduct_feedback entry (id, failure_pattern, corrective_rule, source=user-explicit, status=open) with session_intent_ledger.py so skill-evolution and the /evolution backlog surface it. "
+    "Capture trigger: when this input corrects the agent's prior behavior or understanding, record a compressed conduct_feedback entry (id, failure_pattern, corrective_rule, pattern_class, source=user-explicit, status=open) with session_intent_ledger.py so skill-evolution and the /evolution backlog surface it. "
     "Basis for the correction judgment: a mismatch the input asserts between the agent's prior action/claim and the applicable goal, constraints, non_goals, decisions, and acceptance_criteria, not keyword matching. A direct assertion or clear contextual rejection supports user-explicit feedback even without a raw transcript. "
     "Evidence boundary: read supplied prior context before attributing a mismatch. New constraints, reminders, changed requirements, or refreshing a formerly valid result do not alone establish prior misconduct; record them as intent fields. Use source=inferred only for an actually observed behavior gap, not a hypothetical future violation or buggy task code. If no mismatch is supported, leave feedback absent. Increment occurrence_count only for another supported correction, not a repeated boundary or reread lesson."
     " Boundary provenance: timestamps on decisions do not date undated restrictions. Active status, admitted criteria, and recorded past edits alone do not prove a conflicting restriction was replaced. Resolve a boundary from the current user instruction or supplied conversation/event evidence; a clear current instruction needs no formal revocation phrase or renewed approval. With only conflicting snapshot fields, do not invent earlier/later ordering or authorize a disputed change; identify the conflict and continue uncontested work. Missing files and missing authorization are distinct."
@@ -410,7 +410,7 @@ SESSION_INTENT_ENTRY_CODEX = {
 # 2. Work-stop hook: verification-before-completion reminder.
 STOP_HOOK_MARKER = "[completion-reminder] AGENTS.md"
 STOP_HOOK_INTERNAL = (
-    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. " "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. " "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. " "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. " "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. " "On visible Skill surfaces such as Claude Code Skill, actually load " "verification-before-completion before writing skill-call: verification-before-completion. " "Do not infer verification from task-router, metadata, prior context, or routing notes. " "Do not claim skill-call: verification-before-completion unless verification-before-completion was actually loaded this turn."
+    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. " "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. " "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. " "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. " "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. " "On visible Skill surfaces such as Claude Code Skill, actually load " "verification-before-completion before the closure claim; the Stop hook checks that call in the transcript, so the [completion-check] carries no skill-call line there. " "On Codex, write skill-call: verification-before-completion only after reading that SKILL.md in this turn. " "Do not infer verification from task-router, metadata, prior context, or routing notes. " "Do not claim skill-call: verification-before-completion unless verification-before-completion was actually loaded this turn."
 )
 STOP_HOOK_MESSAGE = _localized_bridge(
     STOP_HOOK_INTERNAL,
@@ -496,6 +496,8 @@ SESSION_START_ENTRY_CODEX = {
 # 4. User input hook (auxiliary): require web search before external tool claims (rule 10).
 # This is an agent governance hook with the same shape as the task-router hook. It injects text on every user input to require community signal checks before external tool claims.
 WEB_SEARCH_FIRST_MARKER = "[web-search-first]"
+# Only platforms where the reminder reaches the model get the hook. On Claude Code its systemMessage output is shown to the user and never added to the model context, so it adds no model-facing layer of Rule 10 there; the installer leaves it out and removes an entry from an older install.
+WEB_SEARCH_FIRST_PLATFORMS = frozenset({"codex"})
 WEB_SEARCH_FIRST_INTERNAL = (
     "web-search-first: AGENTS.md Rule 10. Before factual claims about external tools, libraries, CLIs, SDKs, frameworks, versions, or platform behavior, cross-check at least three community sources with WebSearch. Official docs alone are not enough for runtime behavior."
 )
@@ -507,6 +509,7 @@ def _web_search_first_command(*, output_format: str, payload_mode: bool = False)
             _shell_print_json({
                 "continue": True,
                 "systemMessage": WEB_SEARCH_FIRST_INTERNAL,
+                "ghostAliceSurface": "routine",
             }, payload_mode=payload_mode)
             + f" # {WEB_SEARCH_FIRST_MARKER}"
         )
@@ -1003,7 +1006,7 @@ def _platform_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
         command = _hook_reminder_command(platform="codex", output_format="json", payload_mode=True)
     else:
         command = _hook_reminder_command(platform="claude", output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("prompt", command, HOOK_MARKER)
+    return _hook_runner_command_entry("prompt", command, HOOK_MARKER, platform_key=platform_key)
 
 
 def _platform_prompt_pending_merge_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -1011,7 +1014,7 @@ def _platform_prompt_pending_merge_entry(platform_key: str, event: str) -> dict[
         command = _prompt_pending_merge_command(platform="codex", output_format="json", payload_mode=True)
     else:
         command = _prompt_pending_merge_command(platform="claude", output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("pending-merge-prompt", command, PROMPT_PENDING_MERGE_MARKER)
+    return _hook_runner_command_entry("pending-merge-prompt", command, PROMPT_PENDING_MERGE_MARKER, platform_key=platform_key)
 
 
 def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -1019,7 +1022,7 @@ def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, A
         command = _session_intent_analyzer_command(platform="codex", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
     else:
         command = _session_intent_analyzer_command(platform="claude", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
-    return _hook_runner_command_entry("session-intent", command, SESSION_INTENT_MARKER)
+    return _hook_runner_command_entry("session-intent", command, SESSION_INTENT_MARKER, platform_key=platform_key)
 
 
 def _platform_web_search_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -1027,7 +1030,7 @@ def _platform_web_search_entry(platform_key: str, event: str) -> dict[str, Any]:
         command = _web_search_first_command(output_format="json", payload_mode=True)
     else:
         command = _web_search_first_command(output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("web-search-first", command, WEB_SEARCH_FIRST_MARKER)
+    return _hook_runner_command_entry("web-search-first", command, WEB_SEARCH_FIRST_MARKER, platform_key=platform_key)
 
 
 def _platform_tool_checkpoint_entry(
@@ -1055,8 +1058,12 @@ def _platform_tool_checkpoint_entry(
 
 def _platform_stop_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
     if platform_key == "codex":
-        return _hook_runner_command_entry("completion", _stop_hook_command("codex", payload_mode=True), STOP_HOOK_MARKER)
-    return _hook_runner_command_entry("completion", _stop_hook_command("claude", payload_mode=True), STOP_HOOK_MARKER)
+        return _hook_runner_command_entry(
+            "completion", _stop_hook_command("codex", payload_mode=True), STOP_HOOK_MARKER, platform_key=platform_key,
+        )
+    return _hook_runner_command_entry(
+        "completion", _stop_hook_command("claude", payload_mode=True), STOP_HOOK_MARKER, platform_key=platform_key,
+    )
 
 
 def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -1064,7 +1071,7 @@ def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, An
         command = _session_start_command(platform="codex", output_format="json", payload_mode=True)
     else:
         command = _session_start_command(platform="claude", output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER)
+    return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER, platform_key=platform_key)
 
 
 def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[str, str, str, str]]:
@@ -2040,8 +2047,11 @@ def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
         if first_managed_index is None:
             first_managed_index = index
 
-    if first_managed_index is None or any(marker not in managed for marker in ordered_markers):
+    # web-search-first is optional (Claude Code does not install it); the other three must all be present to reorder.
+    required_markers = [marker for marker in ordered_markers if marker != WEB_SEARCH_FIRST_MARKER]
+    if first_managed_index is None or any(marker not in managed for marker in required_markers):
         return False
+    present_markers = [marker for marker in ordered_markers if marker in managed]
 
     rebuilt: list[dict[str, Any]] = []
     inserted = False
@@ -2051,7 +2061,7 @@ def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
             rebuilt.append(entry)
             continue
         if not inserted:
-            rebuilt.extend(managed[item] for item in ordered_markers)
+            rebuilt.extend(managed[item] for item in present_markers)
             inserted = True
 
     if rebuilt == hooks_list:
@@ -2272,36 +2282,45 @@ def install_hook(
         _log(_t("  session-intent-analyzer hook added", "  session-intent-analyzer hook added"))
         changed = True
 
-    # Install the web-search-first hook (rule 10: web search before external tool claims). Separate entry on the same UserPromptSubmit event; injects text alongside the task-router reminder.
-    web_search_entry = _platform_web_search_entry(platform_key, hook_key)
-    web_search_command = _entry_command(web_search_entry)
-    removed = _remove_stale_hook_entries(
-        hook_list,
-        WEB_SEARCH_FIRST_MARKER,
-        web_search_command,
-        require_dispatcher=require_dispatcher,
-        hook_id="web-search-first",
-    )
-    if removed:
-        _log(_t(f"  Replaced {removed} stale web-search-first hook entry(ies)", f"  Replaced {removed} stale web-search-first hook entry(ies)"))
-        changed = True
+    # Install the web-search-first hook (rule 10: web search before external tool claims) where its output reaches the model. Separate entry on the same UserPromptSubmit event; injects text alongside the task-router reminder.
+    if platform_key in WEB_SEARCH_FIRST_PLATFORMS:
+        web_search_entry = _platform_web_search_entry(platform_key, hook_key)
+        web_search_command = _entry_command(web_search_entry)
+        removed = _remove_stale_hook_entries(
+            hook_list,
+            WEB_SEARCH_FIRST_MARKER,
+            web_search_command,
+            require_dispatcher=require_dispatcher,
+            hook_id="web-search-first",
+        )
+        if removed:
+            _log(_t(f"  Replaced {removed} stale web-search-first hook entry(ies)", f"  Replaced {removed} stale web-search-first hook entry(ies)"))
+            changed = True
 
-    if _hook_already_exists(
-        hook_list,
-        WEB_SEARCH_FIRST_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=web_search_command,
-    ):
-        _log(_t("  web-search-first hook already exists. Skipping", "  web-search-first hook already exists. Skipping"))
+        if _hook_already_exists(
+            hook_list,
+            WEB_SEARCH_FIRST_MARKER,
+            require_dispatcher=require_dispatcher,
+            expected_command=web_search_command,
+        ):
+            _log(_t("  web-search-first hook already exists. Skipping", "  web-search-first hook already exists. Skipping"))
+        else:
+            hook_list.append(web_search_entry)
+            _log(_t("  web-search-first hook added (rule 10)", "  web-search-first hook added (rule 10)"))
+            changed = True
     else:
-        hook_list.append(web_search_entry)
-        _log(_t("  web-search-first hook added (rule 10)", "  web-search-first hook added (rule 10)"))
-        changed = True
+        removed = _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER)
+        if removed:
+            _log(_t(
+                f"  Removed {removed} web-search-first hook entry(ies) (its output does not reach the model on this platform)",
+                f"  Removed {removed} web-search-first hook entry(ies) (its output does not reach the model on this platform)",
+            ))
+            changed = True
 
     if _reorder_user_prompt_governance_hooks(hook_list):
         _log(_t(
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder -> web-search-first",
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder -> web-search-first",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder (-> web-search-first where installed)",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder (-> web-search-first where installed)",
         ))
         changed = True
 
@@ -3046,6 +3065,8 @@ def check_status_detail(
             permission = f"Skill({skill_name})"
             present = permission in allowed_rules
             required[f"skill-permission:{skill_name}"] = (present, present)
+    if platform_key not in WEB_SEARCH_FIRST_PLATFORMS:
+        required.pop("web-search-first", None)
     missing = [label for label, (present, ok) in required.items() if not present]
     drifted = [label for label, (present, ok) in required.items() if present and not ok]
     incomplete = missing + drifted

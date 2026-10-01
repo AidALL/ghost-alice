@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import json
+import base64
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -249,6 +251,39 @@ class CurrentSessionReaderTests(unittest.TestCase):
         self.save_state()
         self.assertIn('current-lineage block', self.message())
 
+    def test_released_context_preserves_admitted_unfinished_work(self):
+        self.state['acceptance_criteria'] = [
+            {'id': 'runtime-fix', 'admitted': True, 'status': 'unmet'},
+            {'id': 'already-done', 'admitted': True, 'status': 'met'},
+            {'id': 'proposal-only', 'admitted': False, 'status': 'unmet'},
+        ]
+        self.save_state()
+        message = self.message()
+        self.assertIn('unresolved-work: ["runtime-fix"]', message)
+        self.assertNotIn('already-done', message)
+        self.assertNotIn('proposal-only', message)
+        self.assertIn('Reconcile the current input', message)
+        self.assertIn('commentary', message)
+        self.assertIn('does not authorize', message)
+
+    def test_completed_or_unadmitted_criteria_do_not_start_work(self):
+        self.state['acceptance_criteria'] = [
+            {'id': 'done', 'admitted': True, 'status': 'met'},
+            {'id': 'draft', 'admitted': False, 'status': 'unmet'},
+        ]
+        self.save_state()
+        self.assertNotIn('unresolved-work:', self.message())
+
+    def test_pending_work_never_overrides_a_current_block(self):
+        self.state['acceptance_criteria'] = [
+            {'id': 'runtime-fix', 'admitted': True, 'status': 'unmet'},
+        ]
+        self.state['model_security_decision'] = {'decision': 'block', 'input_event_id': 'new-input'}
+        self.save_state()
+        message = self.message()
+        self.assertIn('withheld', message)
+        self.assertNotIn('unresolved-work:', message)
+
     def test_identity_helper_matches_writer_identity_selection(self):
         import session_intent_analyzer_hook as analyzer
         for platform in ('codex', 'claude', 'agent-runtime'):
@@ -302,6 +337,147 @@ console.log(JSON.stringify({{event:snapshot?.latestInput?.event_id || '', matche
                 py_input = trh.latest_intent_event(self.root, 'codex', 'bound-session')
                 self.assertEqual(py_input.get('event_id', ''), js['event'])
                 self.assertEqual([trh.downstream_gate_matches_latest_event(r, py_input)['ok'] for r in records], js['matches'])
+
+
+class RoutingDeliveryTests(unittest.TestCase):
+    """Exercise authoritative storage and both platform wire formats, not only a policy string."""
+
+    def test_ledger_hint_reads_exact_session_from_unrelated_cwd(self):
+        import install_hooks
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        shared = Path(trh.__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'ledger root with spaces'
+            unrelated = Path(temporary) / 'unrelated cwd'
+            unrelated.mkdir()
+            env = dict(os.environ)
+            env.pop('CODEX_THREAD_ID', None)
+            env.pop('GHOST_ALICE_SESSION_ID', None)
+            for platform in ('codex', 'claude'):
+                session_id = f'{platform}-hint-session'
+                ledger.record_turn(
+                    root=root, platform=platform, session_id=session_id,
+                    raw_user_input='status question',
+                    intent_delta={'current_goal': f'{platform} active work'},
+                )
+                with patch.object(install_hooks, '_session_intent_root', return_value=root), \
+                     patch.object(install_hooks, '_hook_shared_dir', return_value=shared):
+                    native_command = install_hooks._entry_command(
+                        install_hooks._platform_hook_entry(platform, 'UserPromptSubmit'))
+                self.assertIn('hook_profile_gate.py', native_command)
+                for profile in ('strict', 'dynamic', 'minimal'):
+                    with self.subTest(platform=platform, profile=profile):
+                        home = Path(temporary) / platform / profile
+                        home.mkdir(parents=True)
+                        profile_env = dict(env, HOME=str(home), USERPROFILE=str(home),
+                                           GHOST_ALICE_AGENT_VISIBILITY=profile)
+                        result = subprocess.run(
+                            native_command, shell=True,
+                            input=json.dumps({'session_id': session_id,
+                                              'hook_event_name': 'UserPromptSubmit'}),
+                            cwd=unrelated, text=True, capture_output=True,
+                            env=profile_env, check=True,
+                        )
+                        host = json.loads(result.stdout)
+                        self.assertTrue(host['continue'])
+                        context = host['hookSpecificOutput']['additionalContext']
+                        command = context.split('intent-ledger: use ', 1)[1].split(
+                            ' after session-intent preflight.', 1)[0]
+                        args = shlex.split(command)
+                        self.assertTrue(Path(args[0]).is_absolute(), command)
+                        self.assertTrue(Path(args[0]).is_file(), command)
+                        self.assertTrue(Path(args[1]).is_absolute(), command)
+                        self.assertTrue(Path(args[1]).is_file(), command)
+                        observed = subprocess.run(
+                            args, cwd=unrelated, text=True, capture_output=True,
+                            env=profile_env, check=True,
+                        )
+                        state = json.loads(observed.stdout)
+                        self.assertEqual(platform, state['platform'])
+                        self.assertEqual(session_id, state['session_id'])
+                        self.assertEqual(f'{platform} active work', state['current_goal'])
+
+    def test_unfinished_criteria_reach_platform_context_from_sqlite(self):
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        script = Path(trh.__file__)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for platform in ('codex', 'claude'):
+                with self.subTest(platform=platform):
+                    ledger.record_turn(
+                        root=root, platform=platform, session_id='active-work',
+                        raw_user_input='status question',
+                        intent_delta={'acceptance_criteria': [{
+                            'id': 'order-fix', 'summary': 'Preserve first-seen order.',
+                            'source': 'user-explicit', 'admitted': True, 'status': 'unmet',
+                        }]},
+                    )
+                    # Once SQLite owns the state, an old export cannot erase the work.
+                    exported = trh.session_dir(root, platform, 'active-work') / 'intent-state.json'
+                    exported.parent.mkdir(parents=True, exist_ok=True)
+                    exported.write_text('{"acceptance_criteria": []}', encoding='utf-8')
+                    env = dict(os.environ)
+                    env.pop('CODEX_THREAD_ID', None)
+                    env.pop('GHOST_ALICE_SESSION_ID', None)
+                    result = subprocess.run(
+                        [sys.executable, str(script), '--platform', platform,
+                         '--format', 'json' if platform == 'codex' else 'text',
+                         '--root', str(root)],
+                        input=json.dumps({'session_id': 'active-work'}),
+                        text=True, capture_output=True, env=env, check=True,
+                    )
+                    if platform == 'codex':
+                        payload = json.loads(result.stdout)
+                        self.assertTrue(payload['continue'])
+                        context = payload['systemMessage']
+                    else:
+                        context = result.stdout
+                    self.assertIn('unresolved-work: ["order-fix"]', context)
+                    self.assertIn('Respect an explicit stop', context)
+
+    def test_installer_reminder_keeps_model_context_through_visibility_wrapper(self):
+        import install_hooks
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        shared = Path(trh.__file__).parent
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / 'intent'
+            for platform in ('codex', 'claude'):
+                ledger.record_turn(
+                    root=root, platform=platform, session_id='active-work',
+                    raw_user_input='status question',
+                    intent_delta={'acceptance_criteria': [{
+                        'id': 'order-fix', 'summary': 'Preserve first-seen order.',
+                        'source': 'user-explicit', 'admitted': True, 'status': 'unmet',
+                    }]},
+                )
+                with patch.object(install_hooks, '_session_intent_root', return_value=root), \
+                     patch.object(install_hooks, '_resolve_task_router_reminder_hook_script',
+                                  return_value=str(shared / 'task_router_reminder_hook.py')):
+                    command = install_hooks._hook_reminder_command(
+                        platform=platform, output_format='json', payload_mode=True)
+                encoded = base64.urlsafe_b64encode(command.encode()).decode()
+                for profile in ('strict', 'dynamic', 'minimal'):
+                    with self.subTest(platform=platform, profile=profile):
+                        home = Path(temporary) / platform / profile
+                        home.mkdir(parents=True)
+                        env = dict(os.environ, HOME=str(home), USERPROFILE=str(home),
+                                   GHOST_ALICE_AGENT_VISIBILITY=profile)
+                        env.pop('CODEX_THREAD_ID', None)
+                        env.pop('GHOST_ALICE_SESSION_ID', None)
+                        result = subprocess.run(
+                            [sys.executable, str(shared / 'hook_profile_gate.py'),
+                             'run', 'prompt', platform, encoded],
+                            input=json.dumps({'session_id': 'active-work',
+                                              'hook_event_name': 'UserPromptSubmit'}),
+                            text=True, capture_output=True, env=env, check=True,
+                        )
+                        host = json.loads(result.stdout)
+                        self.assertTrue(host['continue'])
+                        context = host['hookSpecificOutput']['additionalContext']
+                        self.assertIn('unresolved-work: ["order-fix"]', context)
+                        self.assertIn('task-router consumes session-intent', context)
+                        if profile != 'strict':
+                            self.assertNotIn('systemMessage', host)
 
 
 if __name__ == "__main__":

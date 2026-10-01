@@ -11,7 +11,7 @@ Ghost-ALICE uninstall is driven by the `install-state` manifest written by the i
 - [Source Of Truth Files](#source-of-truth-files)
 - [Cleanup Order](#cleanup-order)
 - [Recovery Principles](#recovery-principles)
-- [system_env_changes](#systemenvchanges)
+- [system_env_changes](#system_env_changes)
 
 ## Choose The Removal Scope
 

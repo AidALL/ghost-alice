@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: Use before claiming completion, fixes, passes, commits, or PR creation. Requires running verification commands and reading their output before making success claims. Evidence always comes before claims.
+description: Use before claiming completion, fixes, passes, commits, or PR creation, and before re-reading an artifact to support a claim. Evidence always comes before claims; reuse unchanged evidence and check only when the result can change.
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -12,16 +12,17 @@ compatibility:
 - [Iron Law](#iron-law)
 - [Acceptance Criteria Iron Law](#acceptance-criteria-iron-law)
 - [Relayed Verdicts And Absence Claims](#relayed-verdicts-and-absence-claims)
+- [Verify-Or-Reuse Gate](#verify-or-reuse-gate)
 - [Hard Finalization Order](#hard-finalization-order)
 - [Autopilot Proof Publication](#autopilot-proof-publication)
 - [Retain Evidence On First Execution](#retain-evidence-on-first-execution)
 - [Gate Function](#gate-function)
 - [Evidence Selection And Stop Gate](#evidence-selection-and-stop-gate)
 - [Completion-Check Format](#completion-check-format)
+- [Confirmed Flaw Propagation](#confirmed-flaw-propagation)
 - [Common Failures](#common-failures)
 - [Red Flags](#red-flags)
 - [Rationalization Defense](#rationalization-defense)
-- [Verification Patterns](#verification-patterns)
 - [Why It Matters](#why-it-matters)
 - [External Tool Web-Search-First Gate](#external-tool-web-search-first-gate)
 - [Evaluator Artifact Contract](#evaluator-artifact-contract)
@@ -47,7 +48,7 @@ Do not claim a new current-turn closure without decision-relevant fresh verifica
 
 Explaining unchanged prior work is not a new closure claim. Cite the existing evidence and its age instead of rerunning unchanged work merely because another message arrived.
 
-Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message.
 
 If a verification command or inspection did not run in this message, do not claim that it freshly passed in this message.
 
@@ -59,37 +60,58 @@ No acceptance-criteria means no completed verification-before-completion.
 
 Before any claim that executed work is complete, fixed, successful, or freshly verified, extract verifiable criteria from the user intent, locked decisions, and boundary-contract. Put those criteria in `acceptance-criteria`, then connect each intended closure claim to a criterion and fresh evidence in `claim-evidence-map`.
 
+Keep the requested result as the terminal criterion. If the user requested implementation, a compatibility report, successful diagnostic, observation record, or list of remaining gaps is supporting work. Do not replace the implementation criterion with a report criterion, narrow it to the subset that passed, or mark the task complete because the supporting work is verified. A report is the deliverable only when the user requested a report.
+
 Evidence such as link checks, lint, diff checks, or passing tests proves completion only when it directly satisfies the criterion. If the central criterion is not directly verified, leave it in `unverified` and report partial status in prose.
+
+When aggregating repair status, preserve each item's evidence scope before composing the lead or table: the target and failure context checked, the kind of verification, and the conclusion it supports. Reuse the existing records; this mapping does not require a new artifact or another run. Code regression, instruction conformance, installed delivery, and behavior in a continuing conversation establish different things. Edited and installed guidance alone is not a demonstrated behavioral repair. A short isolated decision does not establish recovery in an accumulated context it did not exercise.
+
+Scope the lead and each row to that evidence. Do not flatten unlike stages into "all fixed and verified" and try to repair the implication with a trailing "no guarantee in every situation" disclaimer. If the old and new guidance both pass a case, it supports that checked behavior, not a causal improvement; missing improvement evidence is not merely an unmeasured percentage. Keep a verified source repair or installation complete at its own stage while naming the specific unsupported behavioral conclusion.
+
+Honor the user's agreed disposition criteria, including treating a historical issue as handled when the selected current check does not reproduce it. Do not replace that agreement with a universal-reliability requirement, reopen handled cases, or rerun unchanged work. Apply the scope mapping to the completion criterion actually agreed.
+
+While actionable authorized work remains, that partial status is a commentary checkpoint followed by the next supported action. A failed provider branch or bookkeeping conflict preserves its specific gap; it does not finish independent implementation. Stop or yield when the user explicitly requests it, when a required decision or authorization is missing, or when no supported work remains. A failed criterion proves the failure, not successful task completion.
 
 ## Relayed Verdicts And Absence Claims
 
-A verdict you endorse as current is your own claim. Put it in the `claim-evidence-map`. If the relevant state may have changed, gather fresh evidence; inheriting a source's verdict is not evidence. If the task is only to explain an unchanged prior result, cite the existing evidence and its age without recreating it. Severity does not lower the bar.
+A verdict you endorse as current is your own claim. Put it in the `claim-evidence-map`. If verify-or-reuse finds an observed mutation event or an evidenced open change path for a current-state claim, gather fresh evidence; inheriting a source's verdict is not evidence. If the task is only to explain an unchanged prior result, cite the existing evidence and its age without recreating it. Severity does not lower the bar.
 
-An absence claim -- "no test exists", "X is not enforced", "nothing handles this" -- is never proven by reasoning or by a source's say-so. For a new or possibly changed absence claim, use a targeted current search that would surface the thing if present. Reuse a relevant prior search only when the searched state and criterion are unchanged, and state its age.
+An absence claim -- "no test exists", "X is not enforced", "nothing handles this" -- is never proven by reasoning or by a source's say-so. For a new absence claim, or one whose searched state has an observed mutation event, use a targeted current search that would surface the thing if present. Reuse a relevant prior search only when the searched state and criterion are unchanged, and state its age.
 
 A verdict stated only in prose, outside the `claim-evidence-map`, escapes this gate. If you assert it, map it.
 
+## Verify-Or-Reuse Gate
+
+Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists.
+
+This gate applies to questions as well as closure claims. The flow, vocabulary, and decision table live in `references/verify-or-reuse.md`, with `scripts/verify_or_reuse.py` as its executable form; resolve both relative to this skill directory on every platform.
+
+- A trigger is an explicit re-inspection request, an observed mutation event after the evidence, an evidenced externally writable artifact for a current-state claim, lost retained evidence, or evidence that covers a different copy.
+- An as-authored claim is answered from retained authored content, even if the artifact changed later.
+- An unknown mutation authority does not open a change path. Answer a current-state claim as the last known state and say so instead of re-reading.
+- Check the copy the claim is about; a proxy copy is `wrong-copy`. A user designation or dated or compared content selects among versions; a folder name or familiarity does not.
+- When the writer confirms nothing relevant changed, reuse the retained evidence as current unless an observed mutation event contradicts it.
+- When a trigger exists, run one minimal check of the target copy and keep its result. Do not repeat it without a new trigger.
+
+Answer an objection that a check was redundant from the recorded mutation authority and events, not from hypothetical external changes.
+
+Say each fact, status, plan, and apology once; later messages carry only new results or decisions.
+
 ## Hard Finalization Order
 
-Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check.
 
 Before any executed-work completion, fix, success, or fresh-verification claim, perform the steps below in this exact order:
 
 1. Load or call `verification-before-completion` for the current turn. On Claude Code, this means the visible Skill call. On Codex, this means reading this current `SKILL.md` and following its workflow.
-2. Extract the acceptance criteria and run the decision-relevant fresh verification that can prove or disprove each intended final claim.
-3. Only after the skill is loaded and the fresh evidence is read, write `[completion-check]` with `skill-call: verification-before-completion (this turn)`.
+2. Extract the acceptance criteria and map each intended final claim to fresh evidence from this turn: cite a successful result already returned, such as a write or a test run, and run a decision-relevant check only for a claim that no returned result covers.
+3. Only after the skill is loaded and every claim has its evidence, write `[completion-check]`; on Codex, include the `skill-call: verification-before-completion (this turn)` line.
 
 If any step is missing or out of order, the completion-check is invalid.
 
 ## Autopilot Proof Publication
 
-When the current installation is Codex or Claude, includes `autopilot-mode/scripts/autopilot_completion.py`, and this session has admitted criteria for authorized execution, the installed PreToolUse adapter captures immutable prospective provenance before the business verification and surfaces one concrete preparation command for that current contract without admitting or advancing execution. Other platforms retain the existing workflow. Plan-only replies, explanations, installations without this helper, and sessions without admitted execution criteria do not use this publication path. Do not create execution criteria to activate it.
-
-1. Keep the current admitted criteria and semantic contract accurate before verification. The pretool notice supplies current coordinates; follow its preparation command before the first final answer, preferably before verification. Repeated tools under the same contract do not repeat the notice or refresh its original capture time. Resolve the installed helper and the current hook/intake coordinates. Use the concrete notice command, or run `autopilot_completion.py prepare --reapprove-current-input --intent-root ROOT --platform PLATFORM --session-id SESSION --input-event-id INPUT` with the permitted Python interpreter. This explicit preparation keeps the admitted user task as the publication unit even when advisory conduct feedback exists; it does not replace that task with a separate conduct plan. Preserve the returned `receipt_token` and `prepared_at` strings verbatim. Use its returned `criterion_ids` unchanged for the current proof; historical met criteria keep their original evidence. Preparation promotes an exact existing prospective capture when available; otherwise it captures runtime provenance at that moment. It does not verify business work. For a newer input or changed contract that the user already authorized, use `prepare --reapprove-current-input` with that current input receipt. It can run after verification only when the runtime already captured the exact current contract before that original proof; the original capture and proof times remain unchanged. Without such a capture, prepare before its new verification. This uses the supported admission bridge and archives the previous generation while admitting the new current generation; it does not require another permission round for already-authorized work.
-2. Perform the necessary business verification once. Capture its actual ISO timestamp as a string and its tool-result or evidence locator. Keep the original reference in the supported `[completion-check]` covering exactly the returned `criterion_ids`, with exactly one nonempty top-level `- evidence:` section. Supply the timestamp once through `--verified-at`; do not insert it into proof that lacks a timestamp. Preserve the original proof bytes and raw timestamp; never replace the verification time with the later publication time. If proof already declares `verified-at` or `verified_at`, its single value must match that raw string exactly. Existing explicit verification times in legacy evidence remain checked; an inconsistent, malformed, or ambiguous declaration is rejected.
-3. Before the initial final answer, use the concrete publish command returned by preparation, or run `autopilot_completion.py publish --receipt-token TOKEN --verified-at ORIGINAL_ISO_TIME --completion-file -`, passing that exact completion block on stdin. The helper derives the exact reference text from the single top-level evidence section and binds the original raw timestamp, receipt and unchanged proof digest in immutable publication provenance. This checks consistency, not the truth of a caller's first supplied timestamp. It does not select nested claim evidence, invent a tool identifier, or independently authenticate an external tool result. Missing, empty, duplicate, placeholder, ambiguous, or partial evidence remains rejected. A legacy caller may explicitly supply `--evidence-source` only with an unchanged value already present in the proof; a mismatch or empty override is rejected, never replaced. Both helper invocations must use the current session's `GHOST_ALICE_SESSION_INTENT_ROOT`, `GHOST_ALICE_PLATFORM`, and `GHOST_ALICE_SESSION_ID` environment bindings; derive these from the current hook/intake, never from an older run. The helper constructs the decision envelope and digest. Its pending-publication result is bookkeeping evidence; the Stop adapter retains the transaction that marks criteria met. Keep the requested business answer and supported completion block in the final response.
-
-Do not hand-build a replacement decision envelope, rerun business checks to manufacture a publication, or prepare a new receipt for proof produced before its capture. If publication alone failed, retry publication with the original receipt and unchanged proof. A missing publication record is not evidence of unfinished business work. A stale receipt, changed input, changed criterion, changed scope, or failed proof stays rejected; reopen only the affected verification under the current authorized contract. At Stop, a matched prospective capture becomes a receipt and the missing-publication message supplies the concrete installed publish command. Follow that command with the original proof and timestamp. If no original receipt or matching prospective capture exists, report the binding gap separately from the supported business result instead of relabeling old proof. Use stdin or permitted runtime scratch when the user prohibits extra task files.
+When this Codex or Claude installation includes `autopilot-mode/scripts/autopilot_completion.py` and the current session has admitted criteria for authorized execution, read [references/autopilot-publication.md](references/autopilot-publication.md) before preparation, business verification or the first final answer. Follow the current hook notice, exact receipt coordinates and original evidence times; publication remains required before the initial final answer. Plan-only replies, explanations, installations without this helper and sessions without admitted execution criteria do not activate this path. A binding or publication failure does not erase supported business evidence or finish independent authorized work. Do not create criteria to activate publication, replace foreign run state or rerun unchanged checks for bookkeeping.
 
 ## Retain Evidence On First Execution
 
@@ -117,7 +139,7 @@ Skipping any step is not verification. It is a lie.
 
 ## Evidence Selection And Stop Gate
 
-Current accessible behavior or content is the default direct evidence for semantic claims. Hash or provenance evidence is appropriate when the criterion is artifact identity, integrity, drift, merge safety, or reproducibility. Do not use hash equality, byte identity, cache history, or repository lineage as a proxy for current semantic behavior.
+Current accessible behavior or content is the default direct evidence for semantic claims. That default governs which evidence a required check uses, not whether to check: while verify-or-reuse returns reuse, retained authored or inspected evidence remains direct evidence. Hash or provenance evidence is appropriate when the criterion is artifact identity, integrity, drift, merge safety, or reproducibility. Do not use hash equality, byte identity, cache history, or repository lineage as a proxy for current semantic behavior.
 
 Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check.
 
@@ -129,8 +151,6 @@ Use this block immediately before the final summary when you are making an execu
 
 ```text
 [completion-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
   - <criterion-id>: <user-intent-or-contract-condition> [source: user-explicit | inferred | previous-tool | system-doc]
 - claim-evidence-map:
@@ -143,9 +163,19 @@ Use this block immediately before the final summary when you are making an execu
 - evidence: <fresh command or inspected file>
 ```
 
+On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after that skill's `SKILL.md` was read and followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
+
 Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Record the actually called `verification-before-completion` skill in an explicit `skills-loaded` list in `[io-trace]`. A format repair must preserve the substantive business result and supported evidence.
 
 Only emit a finalized `[completion-check]` when every listed criterion has a `pass` or `fail` verdict and `unverified` is `none`. If anything remains unverified, do not emit the final block. Report the partial state in prose and name the missing check.
+
+## Confirmed Flaw Propagation
+
+When you confirm a flaw in a prompt or other deliverable you provided, return the corrected complete deliverable unless the user asked only for diagnosis (`confirmed-flaw-not-propagated`).
+
+- The confirmed flaw is a failed criterion for that deliverable until the corrected version is delivered.
+- Do not return the previous version again after the flaw is confirmed.
+- A safe fix inside the existing scope needs no renewed approval. Ask first only when the fix is unsafe or outside the agreed scope.
 
 ## Common Failures
 
@@ -158,8 +188,11 @@ Only emit a finalized `[completion-check]` when every listed criterion has a `pa
 | Regression test works | Red-green evidence when TDD requires it | A test that passed once |
 | Agent completed the work | VCS diff plus independent verification | The agent's success report |
 | Requirements satisfied | Claim-evidence map for each acceptance criterion | Tests pass alone, links pass alone, or diff exists alone |
-| Relayed/endorsed review verdict | Current behavior evidence when state may have changed; otherwise the relevant existing evidence with its age | The reviewer's verdict, or your agreement with it, alone |
-| Absence claim ("no test/code exists", "not enforced") | A targeted current search when absence may have changed; otherwise the relevant existing search with its age | Reasoning or the source's say-so |
+| Requested implementation complete | Implemented behavior and its original-failure regression | A verified report of compatibility, observations, or remaining work |
+| Relayed/endorsed review verdict | Current behavior evidence when an observed mutation event or evidenced open change path affects it; otherwise the relevant existing evidence with its age | The reviewer's verdict, or your agreement with it, alone |
+| Absence claim ("no test/code exists", "not enforced") | A targeted current search when an observed change could alter it; otherwise the relevant existing search with its age | Reasoning or the source's say-so |
+| Content of an artifact you authored and still retain | Retained authored evidence when verify-or-reuse returns reuse | A re-read justified only by a possible change |
+| Deliverable after a confirmed flaw | The corrected complete deliverable | An explanation of the flaw alone |
 
 ## Red Flags
 
@@ -184,39 +217,11 @@ Stop before claiming success when any of these appear:
 | "Lint passed." | Lint is not a compiler or a requirement map. |
 | "Another agent said it succeeded." | Endorse it only with decision-relevant evidence; reuse unchanged evidence with its age. |
 | "Partial checks are enough." | Partial checks prove only the checked criteria. |
+| "I reported the gaps, so the implementation task is complete." | Keep the requested result as the criterion and continue supported authorized work. |
 | "The wording is different, so the rule does not apply." | Completion implications still count. |
+| "It might have been edited externally." | Name the actual change path and observed event, or answer from retained evidence. |
 
-## Verification Patterns
-
-Tests:
-
-```text
-Run the test command, read the result, then claim only the observed result.
-```
-
-Regression tests:
-
-```text
-Write the test -> run and observe pass -> revert or disable the fix -> observe fail -> restore fix -> observe pass.
-```
-
-Builds:
-
-```text
-Run the build command and read exit code 0 before claiming build success.
-```
-
-Requirements:
-
-```text
-Re-read the user intent and contract -> write acceptance criteria -> verify each criterion -> report missing criteria or verified completion.
-```
-
-Agent delegation:
-
-```text
-Read the agent report -> inspect current accessible behavior when needed -> apply the uncertainty gate -> run only a decision-relevant check -> report the supported state.
-```
+Verification patterns for tests, regressions, builds, requirements, and delegation: `references/verification-detail.md`.
 
 ## Why It Matters
 
@@ -230,69 +235,11 @@ From accumulated failure memory:
 
 ## External Tool Web-Search-First Gate
 
-Layer marker: `web-search-first`.
-
-If the final claim includes factual behavior about an external tool, library, CLI, SDK, framework, version, or platform behavior, apply the web-search evidence gate before the claim.
-
-Categories:
-
-- Category A, specification definition: one official source may be enough when the claim is only what the spec says should happen.
-- Category B, runtime behavior: run at least three WebSearch queries.
-- Category C, version-dependent behavior: run at least three WebSearch queries, including the version or year.
-
-Minimum query pattern for Category B or C:
-
-- `<tool> <year> github issue`
-- `<tool> reddit`
-- `<tool> not working <version>`
-
-Evidence block extension:
-
-```text
-- web-search-evidence:
-  - query: <query 1>
-    accessible_url: <url>
-    finding: <key finding or value>
-    source-locator:
-      source_type: web
-      region: n/a
-  - query: <query 2>
-    accessible_url: <url>
-    finding: <key finding or value>
-    source-locator:
-      source_type: web
-      region: n/a
-  - query: <query 3>
-    accessible_url: <url>
-    finding: <key finding or value>
-    source-locator:
-      source_type: web
-      region: n/a
-```
-
-Source-locator contract:
-
-- Web evidence must include `accessible_url`.
-- Attached or local file evidence must include `file_path`, `page`, and `region`.
-- `region` values are `top`, `middle`, `bottom`, or `n/a`. Literal enum form: `top | middle | bottom | n/a`.
-- Materials without pages use `page: n/a` plus an equivalent locator such as section, row, slide, or sheet in `locator_note`.
-- Numeric claims, original sources, tables, and figures must bind the specific value to its source location.
-
-When Category B or C appears and `web-search-evidence` has fewer than three entries, lacks `accessible_url`, or lacks `source-locator`, the completion claim is invalid. Search again, fill the evidence, then claim only what the evidence supports.
-
-This gate exists because official docs describe intended behavior, while community reports often reveal runtime regressions, race conditions, and version-dependent failures.
-
-The only exception is an explicit user instruction for this session to waive web-search evidence.
+Layer marker: `web-search-first`. Before a material factual claim about an external tool, library, CLI, SDK, framework, version or platform behavior, read [references/external-tool-evidence.md](references/external-tool-evidence.md) and apply its evidence gate. Category A specification definitions may use one official source; Category B runtime behavior and Category C version-dependent behavior require at least three WebSearch queries and accessible `source-locator` values. Keep the explicit user waiver and the project's stable, low-risk direct-response exemption; do not manufacture external claims or searches for a local-only task.
 
 ## Evaluator Artifact Contract
 
-Before claiming verification-complexity-level-3 completion, external agent governance absorption, or RAG/evaluator candidate promotion, read `docs/policies/evaluator-artifact-contract.md`.
-
-The completion evidence must include an accepted `verifier-result.json`.
-
-- A read-only evaluator pass must not modify installed assets.
-- Do not promote a candidate playbook without an accepted verifier result.
-- At least one rejected candidate must exist so the verifier has proven it can say no.
+Before claiming verification-complexity-level-3 completion, external agent governance absorption or RAG/evaluator candidate promotion, read [references/evaluator-artifacts.md](references/evaluator-artifacts.md) and `docs/policies/evaluator-artifact-contract.md`. Require an accepted `verifier-result.json` with a rejected candidate; stop promotion when it is absent or rejected. A read-only evaluator must not modify installed assets.
 
 ## When To Apply
 
@@ -302,8 +249,10 @@ Apply this skill immediately before:
 - any recommendation or choice that claims finished work or verified results
 - any new current-turn positive status judgment
 - commit, push, PR creation, or branch finishing
-- endorsing a delegated agent result as current after relevant state may have changed
+- endorsing a delegated agent result as current after an observed change to the relevant state
 - reporting tests, lint, build, scans, or review as sufficient
+- re-reading, fetching, or re-inspecting an artifact to answer a question or support a claim
+- confirming a flaw in a deliverable you provided
 
 The rule covers exact words, paraphrases, implications, and tone that suggests the work is complete.
 
@@ -315,6 +264,8 @@ Before finalizing, ask:
 - Which closure claims am I about to make?
 - Does each new closure claim require fresh evidence, or is relevant unchanged evidence sufficient?
 - What live uncertainty and next decision can the check change?
+- Before any re-read, fetch, or re-inspection, did verify-or-reuse name an observed trigger?
+- Did a confirmed flaw in my own deliverable produce the corrected complete deliverable?
 - Did I read the full output and exit status?
 - Is anything still unverified?
 - Does any claim require web-search evidence or an evaluator artifact?

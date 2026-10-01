@@ -901,6 +901,18 @@ def run(args: argparse.Namespace) -> int:
         for entry in live_owners:
             print(f"  {entry['owner']} {entry['name']}")
 
+    global_rules = list(args.global_rule)
+    for asset_id, rule_path, marker, begin, end in args.global_rule:
+        if asset_id != "codex-bootstrap":
+            continue
+        try:
+            body = Path(rule_path).read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeDecodeError):
+            continue  # Existing ownership diagnostics handle the primary.
+        # Legacy full ports do not require a sibling. Only the conditional
+        # selector introduces this installation dependency.
+        if "## Select the applicable contract" in body and "ghost-alice-governance.md" in body:
+            global_rules.append(("codex-governance", str(Path(rule_path).with_name("ghost-alice-governance.md")), marker, begin, end))
     global_rule_results = [
         (
             asset_id,
@@ -909,9 +921,10 @@ def run(args: argparse.Namespace) -> int:
                 full_file_marker=full_file_marker,
                 managed_block_begin=managed_block_begin,
                 managed_block_end=managed_block_end,
+                reject_symlinks=asset_id == "codex-governance",
             ),
         )
-        for asset_id, rule_path, full_file_marker, managed_block_begin, managed_block_end in args.global_rule
+        for asset_id, rule_path, full_file_marker, managed_block_begin, managed_block_end in global_rules
     ]
     global_rule_statuses = [_ownership_status(item) for _, item in global_rule_results]
     global_rule_overall = _max_status(global_rule_statuses)

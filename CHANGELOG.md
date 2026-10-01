@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 Use this section for changes that have landed after the latest tagged public release.
 
+## [0.4.1] - 2026-10-01
+
+### Changed
+
+- Coordinate Core and Autopilot 0.4.1 while retaining the addon's Core 0.4.0 technical minimum.
+- Use a conditional Codex bootstrap and preserve the complete project instruction budget.
+- Move specialized completion procedures into triggered references while retaining verification and audit requirements.
+- Continue approved work across status questions and corrections, and distinguish per-case completion evidence.
+
+### Fixed
+
+- Emit executable, absolute session-ledger commands from hooks, including unrelated working directories and paths with spaces.
+- Preserve user-owned governance files and symlink targets during install, diagnosis and cleanup.
+- Separate useful evaluation tooling from evidence-backed runtime adoption; avoid repeated unchanged quota checks.
+
+### Documentation
+
+- Synchronize current website, paired polite English/Korean reader guidance, published wiki sources and complete release notes for 0.4.1; retain dated historical release facts.
+
+### Verification Scope
+
+- Selected independent gpt-6.1-sol Codex cases cover observed completion reporting, approved-work continuation and scoped execution. Claude guidance installation was checked without fresh Claude model inference. Each case supports its own evidence scope.
+- See the [current release notes](docs/release/2026-10-01-release-notes.md#verification-scope); these observations do not establish universal reliability, causal improvement or quantified token savings.
+
 ## [0.4.0] - 2026-09-28
 
 ### Changed

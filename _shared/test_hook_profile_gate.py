@@ -2331,6 +2331,10 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
 
         env = os.environ.copy()
         env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
+        # An isolated home keeps the clean-pass assertion independent of the real machine's pending merges.
+        isolated_home = tempfile.TemporaryDirectory()
+        self.addCleanup(isolated_home.cleanup)
+        env["HOME"] = isolated_home.name
 
         pending = subprocess.run(
             ["/bin/bash", "-lc", install_hooks._entry_command(pending_entry)],
@@ -2360,15 +2364,18 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
             check=False,
         )
 
+        # A disabled hook prints nothing; a clean merge check runs and stays off the minimal user screen.
         self.assertEqual(pending.returncode, 0)
         pending_payload = json.loads(pending.stdout)
         self.assertTrue(pending_payload["continue"])
-        self.assertIn("merge-companion prompt-check", pending_payload["systemMessage"])
-        self.assertIn("merge-companion-precheck: clean (hook-verified)", pending_payload["systemMessage"])
+        self.assertNotIn("systemMessage", pending_payload)
+        self.assertNotIn("ghostAliceSurface", pending_payload)
         self.assertEqual(prompt.returncode, 0)
         self.assertIn("task-router", prompt.stdout)
         self.assertEqual(session_start.returncode, 0)
-        self.assertIn("merge-companion", session_start.stdout)
+        session_payload = json.loads(session_start.stdout)
+        self.assertTrue(session_payload["continue"])
+        self.assertNotIn("systemMessage", session_payload)
 
 
 class TestHookProtocolSurface(unittest.TestCase):

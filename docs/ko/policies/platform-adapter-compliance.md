@@ -2,7 +2,7 @@
 
 언어: [🇺🇸 English](../../policies/platform-adapter-compliance.md) | 🇰🇷 한국어
 
-이 contract는 Claude, Codex, terminal-only adapters가 실제로 지원하는 surface를 과장 없이 기록한다.
+이 contract는 Claude, Codex, terminal-only adapters가 실제로 지원하는 surface를 과장 없이 기록합니다.
 ## Contents
 
 - [Principles](#principles)
@@ -14,14 +14,14 @@
 
 ## Principles
 
-- hook semantics가 runtime smoke로 검증되지 않은 platform은 `instruction-backed` 상태로 둔다.
-- `instruction-backed`는 policy text, skill placement, installer onramp가 있다는 뜻이다. direct runtime hook equivalence를 의미하지 않는다.
-- installer가 Codex hook file을 작성하더라도, 그 event semantics를 gate completion evidence로 쓰려면 먼저 smoke evidence가 필요하다.
-- `terminal-only`는 hookless fallback으로 취급한다.
+- hook semantics가 runtime smoke로 검증되지 않은 platform은 `instruction-backed` 상태로 둡니다.
+- `instruction-backed`는 policy text, skill placement, installer onramp가 있다는 뜻입니다. direct runtime hook equivalence를 의미하지 않습니다.
+- installer가 Codex hook file을 작성하더라도, 그 event semantics를 gate completion evidence로 쓰려면 먼저 smoke evidence가 필요합니다.
+- `terminal-only`는 hookless fallback으로 취급합니다.
 
 ## Adapter Records
 
-`skill-catalog/platform-adapters.json`의 각 record는 다음 field를 가진다.
+`skill-catalog/platform-adapters.json`의 각 record는 다음 field를 가집니다.
 
 - `id`
 - `state`
@@ -36,9 +36,9 @@
 
 ## States
 
-- `native`: platform runtime이 installer-managed hooks와 skill surfaces를 직접 지원한다.
-- `instruction-backed`: instructions, skill placement, adapter config는 있지만 hook/event semantics에는 여전히 smoke evidence가 필요하다.
-- `terminal-only`: humans가 project policy와 skill files를 fallback으로 따라야 한다.
+- `native`: platform runtime이 installer-managed hooks와 skill surfaces를 직접 지원합니다.
+- `instruction-backed`: instructions, skill placement, adapter config는 있지만 hook/event semantics에는 여전히 smoke evidence가 필요합니다.
+- `terminal-only`: humans가 project policy와 skill files를 fallback으로 따라야 합니다.
 
 ## Required Adapters
 
@@ -52,4 +52,4 @@
 python3 scripts/validate_platform_adapters.py
 ```
 
-validator는 required fields, required adapter ids, date formats, source doc existence, Codex native claims absence, hook evidence/fallback records를 검사한다.
+validator는 required fields, required adapter ids, date formats, source doc existence, Codex native claims absence, hook evidence/fallback records를 검사합니다.

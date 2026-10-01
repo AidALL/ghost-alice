@@ -2,7 +2,7 @@
 
 언어: [🇺🇸 English](../../policies/installer-platform-compatibility-matrix.md) | 🇰🇷 한국어
 
-이 문서는 Ghost-ALICE installer의 Phase 7 compatibility test contract다.
+이 문서는 Ghost-ALICE installer의 Phase 7 compatibility test contract입니다.
 ## Contents
 
 - [Runtime Contract](#runtime-contract)
@@ -22,52 +22,54 @@
 | Area | Contract | Test owner |
 | --- | --- | --- |
 | Python runtime | Python 3.11+ accepted, upper bound 없음, future-version allowlist 없음 | `scripts/run_installer_compat_tests.py`, `scripts.tests.test_install_runtime_detection` |
-| Python bootstrap | default install path는 abort 전에 package-manager Python setup을 시도한다. read-only status/doctor/list는 system을 mutate하지 않는다 | `scripts.tests.test_install_runtime_detection` |
+| Python bootstrap | default install path는 abort 전에 package-manager Python setup을 시도합니다. read-only status/doctor/list는 system을 mutate하지 않습니다 | `scripts.tests.test_install_runtime_detection` |
 | Python lookup | `python`, `python3`, `python3.*`, broken store stubs, spaces in PATH | `scripts.tests.test_install_runtime_detection` |
 | Encoding | shell entrypoint와 native wrapper에서 UTF-8 mode 강제 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_install_cmd_wrapper` |
 | User home paths | spaces와 non-ASCII HOME fixtures 지원 유지 | `scripts.tests.test_installer_asset_inventory`, installer integration tests |
-| PSScriptAnalyzer optional | PSScriptAnalyzer는 optional이다. module이 없으면 parser/static tests가 minimum gate다 | local full validation |
-| Public surface parity | README, docs/index.html, Claude command wrappers는 `skill-catalog/skills.json` count, list, targets와 정렬되어야 한다 | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
-| Ghost-ALICE fresh clone install policy | public installs는 fresh `AidALL/ghost-alice` clone plus install을 사용한다. installer는 existing remotes를 rewrite하거나 local checkout directories를 rename하거나 repository migration flags를 expose하지 않는다. installed Claude permission cleanup은 managed stale checkout path allow rules로 제한된다 | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook` |
-| Agent visibility profile | default `agent_visibility.profile`은 `dynamic`다. allowed values는 `strict`, `dynamic`, `minimal`이다. public installer command surface는 `--visibility`를 사용한다. native wrapper compatibility alias는 implementation-test coverage로 유지한다. `--agent-visibility`는 long-form compatibility alias로 계속 허용된다. profile은 user-facing governance message surface만 제어한다. hook installation/execution을 suppress하지 않고 generated hook command contracts를 바꾸지 않으며 strict-grade session logging은 always-on이다 | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
-| Agent visibility runtime command surface | Claude Code는 `/visibility strict|dynamic|minimal`, Codex는 trusted `UserPromptSubmit` hook pseudo-command path for `/visibility`, 모든 platform은 `_shared/agent_visibility_cli.py`를 사용한다. Documentation은 이것들을 하나의 slash-command spelling으로 collapse하면 안 된다 | `scripts.tests.test_install_status_contract` |
+| PSScriptAnalyzer optional | PSScriptAnalyzer는 optional입니다. module이 없으면 parser/static tests가 minimum gate입니다 | local full validation |
+| Public surface parity | README, docs/index.html, Claude command wrappers는 `skill-catalog/skills.json` count, list, targets와 정렬되어야 합니다 | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
+| Ghost-ALICE fresh clone install policy | public installs는 fresh `AidALL/ghost-alice` clone plus install을 사용합니다. installer는 existing remotes를 rewrite하거나 local checkout directories를 rename하거나 repository migration flags를 expose하지 않습니다. installed Claude permission cleanup은 managed stale checkout path allow rules로 제한됩니다 | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook` |
+| Agent visibility profile | default `agent_visibility.profile`은 `dynamic`입니다. allowed values는 `strict`, `dynamic`, `minimal`입니다. public installer command surface는 `--visibility`를 사용합니다. native wrapper compatibility alias는 implementation-test coverage로 유지합니다. `--agent-visibility`는 long-form compatibility alias로 계속 허용됩니다. profile은 user-facing governance message surface만 제어합니다. hook installation/execution을 suppress하지 않고 generated hook command contracts를 바꾸지 않으며 strict-grade session logging은 always-on입니다 | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
+| Agent visibility runtime command surface | Claude Code는 `/visibility strict|dynamic|minimal`, Codex는 trusted `UserPromptSubmit` hook pseudo-command path for `/visibility`, 모든 platform은 `_shared/agent_visibility_cli.py`를 사용합니다. Documentation은 이것들을 하나의 slash-command spelling으로 collapse하면 안 됩니다 | `scripts.tests.test_install_status_contract` |
 
 ## Agent Hook Runtime Contract
 
-Ghost-ALICE installer는 hook file이 있다는 것만으로 충분하다고 보지 않는다. hook payload와 platform permission policy도 current repo contract와 맞아야 한다. 오래된 hook entry가 남아 있어도 runtime payload가 바뀌면 installer는 managed entry를 update한다. hook 존재 여부와 `agent_visibility.profile`은 별개 문제다. profile은 user-facing message surface만 제어할 뿐, missing이나 drift 판정을 누그러뜨리지 않는다.
+Ghost-ALICE installer는 hook file이 있다는 것만으로 충분하다고 보지 않습니다. hook payload와 platform permission policy도 current repo contract와 맞아야 합니다. 오래된 hook entry가 남아 있어도 runtime payload가 바뀌면 installer는 managed entry를 update합니다. hook 존재 여부와 `agent_visibility.profile`은 별개 문제입니다. profile은 user-facing message surface만 제어할 뿐, missing이나 drift 판정을 누그러뜨리지 않습니다.
 
-Base session-gate contract는 core behavior를 설명한다. Official privileged adapter addon은 선언된 hook event 이후 behavior를 확장할 수 있지만, addon-specific queue, task schema, continuation policy는 addon에 남고 addon-owned smoke evidence가 필요하다.
+Base session-gate contract는 core behavior를 설명합니다. Official privileged adapter addon은 선언된 hook event 이후 behavior를 확장할 수 있지만, addon-specific queue, task schema, continuation policy는 addon에 남고 addon-owned smoke evidence가 필요합니다.
 
-Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따른다. 이 procedure는 Claude Code, Codex, Antigravity에 같은 README first 10 lines request를 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission behavior를 관찰한다.
+Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니다. 이 procedure는 Claude Code, Codex, Antigravity에 같은 README first 10 lines request를 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission behavior를 관찰합니다.
 
 | Platform | Runtime surface | Contract | Regression owner |
 | --- | --- | --- | --- |
-| Claude Code | `~/.claude/settings.json` hooks and `permissions.allow` | installed Ghost-ALICE skills 전체에 대해 `Skill(<name>)` permission을 allow한다. `task-router`, `merge-companion`, `verification-before-completion` 같은 core gates만 포함한 shortened allowlist는 insufficient하다 | `_shared.test_install_hooks.TestInstallHook` |
-| Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | visible Skill tool이 없으므로 required gates는 `SKILL.md` read와 workflow execution으로 기록한다. `hooks.json`의 hook event names는 install-surface configuration이며 runtime firing proof가 아니다. gate-completion claim에는 observed hook payload evidence, runtime smoke, 또는 hookless/manual fallback wording이 필요하다. `web-search-first`와 `tool-checkpoint` payloads는 installation and drift verification targets다. agent visibility profile은 hook execution을 줄이면 안 된다. Windows native Codex는 actual hook payload firing과 `SKILL.md` read records에 별도 smoke를 둔다 | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks와 `permissions.allow` | `platforms/claude/CLAUDE.md`의 독립적인 관리 블록을 설치하여 임의 작업 디렉터리에서도 규칙 0부터 12와 hookless fallback을 제공합니다. 표시가 없는 사용자 파일은 설치 상태로 계산하지 않는 제안 파일로 보존합니다. 모든 설치된 Ghost-ALICE skill에 `Skill(<name>)` 권한을 허용하며 core-only allowlist로 축소하지 않습니다. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
+| Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | visible Skill tool이 없으므로 required gates는 `SKILL.md` read와 workflow execution으로 기록합니다. `hooks.json`의 hook event names는 install-surface configuration이며 runtime firing proof가 아닙니다. gate-completion claim에는 observed hook payload evidence, runtime smoke, 또는 hookless/manual fallback wording이 필요합니다. `web-search-first`와 `tool-checkpoint` payloads는 installation and drift verification targets입니다. agent visibility profile은 hook execution을 줄이면 안 됩니다. Windows native Codex는 actual hook payload firing과 `SKILL.md` read records에 별도 smoke를 둡니다 | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
+
+설치된 Codex 계약은 관리되는 짧은 선택기 `~/.codex/AGENTS.md`, 전체 대체 계약 `~/.codex/ghost-alice-governance.md`와 `~/.codex/config.toml`의 전체 프로젝트 지침 예산으로 구성됩니다. 완전하고 신뢰된 프로젝트 지침이 있으면 대체 계약보다 우선합니다. 대체 계약이 없거나 읽을 수 없으면 의존하는 실제 작업을 진행하지 않으며 status와 doctor가 이 의존성을 확인합니다. 사용자 거버넌스 파일과 심볼릭 링크 대상은 보호합니다.
 
 ## Hook Message Semantics
 
 ### task-router
 
-모든 user input은 `task-router` target이다. simple questions, opinions, status comments, follow-up questions, smoke tests 모두 first tool call 전에 route한다. "previous turn에서 이미 routed 됐다"는 valid skip reason이 아니다.
+모든 user input은 `task-router` target입니다. simple questions, opinions, status comments, follow-up questions, smoke tests 모두 first tool call 전에 route합니다. "previous turn에서 이미 routed 됐다"는 valid skip reason이 아닙니다.
 
 ### session-intent-analyzer
 
-모든 user input은 session intent ledger가 observe한다. Hooks는 digest와 event data만 저장하며 raw prompts를 저장하지 않는다. goals, constraints, decisions, non-goals가 바뀌면 agent는 compressed delta를 `intent-state.json`에 기록한다. `intent-state.json`은 update-plus-accumulate state다. scalar intent fields는 newer deltas로 replace되고, list-like constraints, non-goals, questions, criteria, decisions는 stable id 또는 dedupe로 merge된다. 이 context는 `skill-evolution`과 `jailbreak-detector`가 소비한다. deterministic hard-block rules는 explicit attack signals에 대한 narrow regression guards이며 gradual multi-turn jailbreak resistance는 session-intent summary quality와 cumulative constraint comparison에 달려 있다.
+모든 user input은 session intent ledger가 observe합니다. Hooks는 digest와 event data만 저장하며 raw prompts를 저장하지 않습니다. goals, constraints, decisions, non-goals가 바뀌면 agent는 기준 상태인 SQLite 원장 API로 compressed delta를 기록합니다. 호환성·내보내기 자료인 `intent-state.json`은 update-plus-accumulate state입니다. scalar intent fields는 newer deltas로 replace되고, list-like constraints, non-goals, questions, criteria, decisions는 stable id 또는 dedupe로 merge됩니다. 이 context는 `skill-evolution`과 `jailbreak-detector`가 소비합니다. deterministic hard-block rules는 explicit attack signals에 대한 narrow regression guards이며 gradual multi-turn jailbreak resistance는 session-intent summary quality와 cumulative constraint comparison에 달려 있습니다.
 
 ### pending merge precheck
 
-SessionStart 또는 UserPromptSubmit hook이 current platform pending-merge precheck를 실행했고 pending warning이 없다는 contract를 제공하면 runtime은 `merge-companion-precheck: clean (hook-verified)`를 기록하고 shell manifest checks를 반복하지 않는다. hook이 undecided entry를 보고하거나 hook evidence가 없을 때만 current platform manifest를 직접 읽는다. undecided entry가 있으면 `merge-companion`을 먼저 surface한다. user-explicit defer/skip은 manifest entry를 `decided=false`로 남긴 채 계속 진행할 수 있다.
+SessionStart 또는 UserPromptSubmit hook이 current platform pending-merge precheck를 실행했고 pending warning이 없다는 contract를 제공하면 runtime은 `merge-companion-precheck: clean (hook-verified)`를 기록하고 shell manifest checks를 반복하지 않습니다. hook이 undecided entry를 보고하거나 hook evidence가 없을 때만 current platform manifest를 직접 읽습니다. undecided entry가 있으면 `merge-companion`을 먼저 surface합니다. user-explicit defer/skip은 manifest entry를 `decided=false`로 남긴 채 계속 진행할 수 있습니다.
 
 ### tool-checkpoint recovery surface
 
-Runtime tool-checkpoint payload는 routine recovery cost 또는 recovery note fields를 요구하지 않는다. Default visible surface는 `intent`와 `why`를 유지하고, `failure-mode-if-wrong`과 `recovery-action`은 side effect, forced signal, mismatch, meaningful user decision point, hard-to-recover action에 필요할 때만 나타난다.
+Runtime tool-checkpoint payload는 routine recovery cost 또는 recovery note fields를 요구하지 않습니다. Default visible surface는 `intent`와 `why`를 유지하고, `failure-mode-if-wrong`과 `recovery-action`은 side effect, forced signal, mismatch, meaningful user decision point, hard-to-recover action에 필요할 때만 나타납니다.
 
 ### completion-reminder
 
-executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 `verification-before-completion`이 lifecycle gate다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않는다. Claude Code처럼 visible Skill surface가 있는 환경에서는 actual Skill call 이후에만 `skill-call: verification-before-completion (this turn)`를 사용한다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 같은 record를 사용한다.
+executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 `verification-before-completion`이 lifecycle gate입니다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않습니다. Claude Code처럼 visible Skill surface가 있는 환경에서는 `[completion-check]`에 skill-call 줄이 없고, Stop hook이 actual Skill call을 transcript에서 확인합니다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 `skill-call: verification-before-completion (this turn)`를 사용합니다.
 
-final response `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`에도 같은 skill이 있어야 한다.
+Codex에서 final response `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`에도 같은 skill이 있어야 합니다. Claude Code는 `skills-loaded`를 대조하지 않습니다.
 
 ## Shell Matrix
 
@@ -75,16 +77,16 @@ final response `[completion-check]`가 `skill-call: verification-before-completi
 | --- | --- | --- |
 | macOS bash 3.2 | `install.sh` parse와 targeted install/status flows | local macOS full validation |
 | modern bash | Linux/GitHub Actions `install.sh` smoke and unittest integration | `installer compatibility matrix` workflow step |
-| zsh invocation | `zsh install.sh`는 bash-only syntax 실행 전 bash로 re-exec한다. installer는 bash-owned 상태로 남는다 | `scripts.tests.test_installer_compat_matrix` |
+| zsh invocation | `zsh install.sh`는 bash-only syntax 실행 전 bash로 re-exec합니다. installer는 bash-owned 상태로 남습니다 | `scripts.tests.test_installer_compat_matrix` |
 | Linux bash | `install.sh --platform codex --skip-source-health task-router` fixture | `scripts.tests.test_install_preflight_quarantine` |
 | WSL | Linux bash와 동일하며 Windows path boundary smoke 포함 | manual 또는 Windows CI |
 | Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, UTF-8 bridge | runtime detection and Codex hook config tests |
-| Windows native Codex hook smoke | native Windows Codex installer path `.\install.cmd --platform codex`가 Codex bootstrap, `hooks.json`, `config.toml` hooks enabled를 작성하고 live smoke가 hook payload firing을 관찰한다 | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/ko/policies/live-smoke-regression.md` |
-| Windows visibility preference smoke | native wrapper visibility forwarding이 `_shared/install_hooks.py --visibility`에 도달한다. legacy visibility alias는 compatibility coverage로 계속 허용되고 status는 hook state와 runtime profile을 separately report한다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
-| Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible. analyzer가 있으면 `PSUseCompatibleSyntax` static analysis가 PS5-incompatible syntax를 잡는다 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
-| Windows PowerShell 7.4 LTS cleanup | native Windows installer cleanup이 latest 7.6.x MSI를 resolve하기 전에 product-code scoped `msiexec.exe /x ... /quiet /norestart`로 detected PowerShell 7.4.x MSI products를 제거한다. product code 없는 non-MSI entries는 skip하고, 7.5/7.6+, Windows PowerShell 5.1, unrelated products는 제거하지 않는다 | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
-| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output은 official addon alias를 노출하고 git URL addon source용 native wrapper branch/tag option을 설명한다 | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |
-| CMD wrapper | native Windows installer entrypoint에 delegates하고 arguments를 forward하며 UTF-8을 강제한다. official `--addon autopilot` alias는 PowerShell binding과 addon source preparation을 거쳐 유지한다. wrapper-facing help도 같은 alias와 branch/tag wording을 노출한다 | `scripts.tests.test_install_cmd_wrapper` |
+| Windows native Codex hook smoke | native Windows Codex installer path `.\install.cmd --platform codex`가 Codex bootstrap, `hooks.json`, `config.toml` hooks enabled를 작성하고 live smoke가 hook payload firing을 관찰합니다 | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/ko/policies/live-smoke-regression.md` |
+| Windows visibility preference smoke | native wrapper visibility forwarding이 `_shared/install_hooks.py --visibility`에 도달합니다. legacy visibility alias는 compatibility coverage로 계속 허용되고 status는 hook state와 runtime profile을 separately report합니다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
+| Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible. analyzer가 있으면 `PSUseCompatibleSyntax` static analysis가 PS5-incompatible syntax를 잡습니다 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
+| Windows PowerShell 7.4 LTS cleanup | native Windows installer cleanup이 latest 7.6.x MSI를 resolve하기 전에 product-code scoped `msiexec.exe /x ... /quiet /norestart`로 detected PowerShell 7.4.x MSI products를 제거합니다. product code 없는 non-MSI entries는 skip하고, 7.5/7.6+, Windows PowerShell 5.1, unrelated products는 제거하지 않습니다 | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
+| PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output은 official addon alias를 노출하고 git URL addon source용 native wrapper branch/tag option을 설명합니다 | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |
+| CMD wrapper | native Windows installer entrypoint에 delegates하고 arguments를 forward하며 UTF-8을 강제합니다. official `--addon autopilot` alias는 PowerShell binding과 addon source preparation을 거쳐 유지합니다. wrapper-facing help도 같은 alias와 branch/tag wording을 노출합니다 | `scripts.tests.test_install_cmd_wrapper` |
 
 ## CI Commands
 
@@ -104,4 +106,4 @@ python3 scripts/run_installer_compat_tests.py --group installer-status-contract
 python3 scripts/run_installer_compat_tests.py --group installer-powershell-static
 ```
 
-optional analyzer coverage는 위 `installer-powershell-static` group을 통해 노출한다. 직접 analyzer invocation은 public install guidance에 포함하지 않는다.
+optional analyzer coverage는 위 `installer-powershell-static` group을 통해 노출합니다. 직접 analyzer invocation은 public install guidance에 포함하지 않습니다.

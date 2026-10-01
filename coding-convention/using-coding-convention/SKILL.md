@@ -70,20 +70,18 @@ The first commentary in a development turn must include:
 - session-intent-analyzer: done | hook-observed | pending
 - task-router: done
 - using-coding-convention: done
-- skill-call: session-intent-analyzer (this turn); task-router (this turn); using-coding-convention (this turn)
+- skill-call: <each skill actually called this turn, as name (this turn)> | n/a
 - next-required: <skill-name|none>
 ```
 
 Before any claim that executed work is complete, fixed, successful, or freshly verified, emit:
 
-Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. Load or call `verification-before-completion` for this turn first, run and read the decision-relevant fresh verification second, and only then write `[completion-check]`. If any step is missing or out of order, the completion-check is invalid.
+Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check. Load or call `verification-before-completion` for this turn first, run and read the decision-relevant fresh verification second, and only then write `[completion-check]`. If any step is missing or out of order, the completion-check is invalid.
 
-Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check.
+Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message.
 
 ```text
 [completion-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
   - <criterion-id>: <user-intent-or-contract-condition> [source: user-explicit | inferred | previous-tool | system-doc]
 - claim-evidence-map:
@@ -95,6 +93,8 @@ Every user input reopens routing; it does not by itself invalidate unchanged evi
   - none
 - evidence: <fresh command or inspected file>
 ```
+
+On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after that skill's `SKILL.md` was read and followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
 
 A `[completion-check]` is not complete without `acceptance-criteria` and `claim-evidence-map`. If evidence does not directly prove a criterion, leave that criterion in `unverified` and do not speak as though the work is complete or successful.
 

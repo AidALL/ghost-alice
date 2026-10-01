@@ -59,7 +59,7 @@ For the full installer architecture, read [installer architecture](./installer-a
 
 | Path | Role |
 | --- | --- |
-| [official-docs/derived/](../../official-docs/derived/) | Ghost-ALICE analysis, philosophy, compliance, and closed-loop SSOT |
+| [official-docs/derived/](../../official-docs/derived/) | Public contributor compliance procedures; long-form philosophy lives in the Wiki |
 | [docs/policies/](../policies/) | Runtime, platform, and evaluator policy documents |
 | [docs/plans/](../plans/) | Public roadmap policy and planning boundaries |
 
@@ -76,10 +76,12 @@ These paths live outside the repository under the user's home directory.
 | `~/.agents/skills/` | Codex user skill copy install target |
 | `~/.claude/skills/` | Claude Code skill install target |
 
+The Codex managed bootstrap selects a complete supplied project contract or the installed `~/.codex/ghost-alice-governance.md` fallback. The installer manages the full instruction budget in `~/.codex/config.toml`. Runtime session state is authoritative in `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root; JSON pointers and snapshots are compatibility/export material. Read state through `session_intent_ledger.py --read-state` with the receipt root, platform and session identity.
+
 ## Documentation Responsibility
 
 - README holds the public description and quick start only.
 - Detailed installation and update guidance lives in [installation guide](../getting-started/installation.md).
 - Contributor-facing installer flow and safety model live in [installer architecture](./installer-architecture.md).
 - Policy and runtime matrices live in [docs/policies](../policies/).
-- Long-form philosophy and closed-loop reasoning live in [official-docs/derived](../../official-docs/derived/).
+- Long-form philosophy and closed-loop reasoning live in the [Wiki](https://github.com/AidALL/ghost-alice/wiki); [official-docs/derived](../../official-docs/derived/) holds public contributor procedures.

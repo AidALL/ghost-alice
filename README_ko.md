@@ -8,71 +8,34 @@ Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층�
 
 기존 에이전트 실행 환경 위에서 동작하며, 에이전트가 완료를 선언하기 전에 작업 과정과 근거를 검토할 수 있도록 돕습니다. 프롬프트 모음이나 챗봇 연결 도구, 독립 실행형 에이전트 런타임을 제공하는 저장소는 아닙니다.
 
-## 버전 0.4.0
+## 버전 0.4.1
 
-[웹사이트](https://aidall.github.io/ghost-alice/) · [릴리즈 안내](./docs/ko/release/2026-09-28-release-notes.md) · [Core 릴리즈](https://github.com/AidALL/ghost-alice/releases) · [Autopilot 릴리즈](https://github.com/AidALL/ghost-alice-autopilot/releases)
+[웹사이트](https://aidall.github.io/ghost-alice/) · [릴리즈 안내](./docs/ko/release/2026-10-01-release-notes.md) · [Core 릴리즈](https://github.com/AidALL/ghost-alice/releases/tag/v0.4.1) · [Autopilot 릴리즈](https://github.com/AidALL/ghost-alice-autopilot/releases/tag/v0.4.1)
 
-Ghost-ALICE core와 공식 Autopilot 애드온의 릴리즈 버전을 0.4.0으로 맞췄습니다. 함께 검증한 권장 조합은 core 0.4.0과 Autopilot 0.4.0이며, 애드온이 요구하는 최소 core 버전은 새 SQLite API를 제공하는 0.4.0입니다. 두 프로젝트 모두 Apache-2.0 오픈소스로 계속 제공됩니다.
+Ghost-ALICE core 0.4.1과 공식 Autopilot 0.4.1 애드온을 함께 사용해 주세요. 애드온의 기술적 최소 core 버전은 0.4.0으로 유지됩니다. 두 프로젝트 모두 Apache-2.0 오픈소스로 제공됩니다.
 
-- 의도 스냅샷은 누적 제약과 함께 활성 결정 및 기록된 작업 범위를 보존합니다. 후속 처리 단계는 새 목표만으로 포괄적인 권한을 가정하지 않고 사용자의 수정을 해석할 수 있습니다.
-- 현재 세션에 대한 바인딩으로 훅이나 기록 작업이 다른 세션의 원장을 임의로 선택하지 않도록 합니다. 기록된 범위와 교정 피드백은 해석에 필요한 문맥이며, 실행 권한을 부여하지 않습니다.
-- Autopilot은 대기 중인 완료 기록이나 계획을 적용하기 전에 현재 의도를 확인합니다. 명시적인 `agent-runtime` 계약에는 플랫폼, 세션 ID, 절대경로인 의도 원장 루트가 필요하며, 모델 추론·도구 실행·이벤트 전달은 연결하는 host가 담당합니다.
+- 상태 질문이나 교정 중에도 승인된 작업을 이어가며, 명시적인 중단과 현재 작업 범위를 존중합니다.
+- Codex의 자동 부트스트랩은 짧게 유지하고, 필요한 전체 거버넌스 계약과 프로젝트 지침을 보존합니다.
+- 완료를 보고하기 전에 항목별 실제 검증 범위를 구분하며, 한도 오류 반복 확인과 평가 도구의 불필요한 제품 반영을 줄입니다.
+- Autopilot은 현재 세션의 실행 상태를 선택하고, 다른 실행을 가져오지 않으면서 쓰기 불가능한 파생 경로를 처리합니다.
 
-이번 변경은 기록된 의도와 작업 재개 계약을 강화합니다. 모든 모델이 항상 의도를 정확히 해석한다고 보장하지는 않습니다. 플랫폼별 지원 범위와 검증 한계는 [Autopilot 호환성 표](https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json)에서 확인해 주세요.
+선정한 독립 Codex 사례에서 유사한 실패 입력과 실제 범위 내 작업 수행을 확인했습니다. Claude 설치도 확인했으며, 이 결과가 새로운 Claude 모델 추론이나 모든 상황의 행동 신뢰성을 입증하는 것은 아닙니다. 지원 범위는 [Autopilot 호환성 표](https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json)에서 확인해 주세요.
 
 ## Quick Start
 
-macOS, Linux, WSL, Git Bash:
+복제한 Ghost-ALICE 저장소 폴더에서 Core와 공식 Autopilot을 한 번에 설치해 주세요. 설치기가 사용 가능한 에이전트 플랫폼을 자동으로 감지합니다.
 
 ```bash
-git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice
-cd ~/ghost-alice
-bash install.sh
+bash install.sh --addon autopilot
 ```
 
-Windows Command Prompt:
-
-```cmd
-git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice
-cd %USERPROFILE%\ghost-alice
-.\install.cmd
-```
-
-사용하시는 운영체제에 맞는 설치 명령을 실행해 주세요. Windows에서는 `.\install.cmd ...`를, macOS, Linux, WSL, Git Bash에서는 `bash install.sh ...`를 사용하며, 두 명령은 같은 긴 형식의 옵션을 지원합니다. `install.cmd`는 Windows용 래퍼를 통해 실행되고 Python 3.11 이상을 요구하며, 콘솔을 UTF-8로 설정합니다. PowerShell 호출에는 `-NoProfile -ExecutionPolicy Bypass`를 사용하여 실행 정책으로 인한 차단을 처리하지만, 사용자나 시스템에 저장된 실행 정책은 변경하지 않습니다.
+저장소 복제, 운영체제별 실행 명령, 플랫폼 선택, 업데이트와 문제 해결은 [상세 설치 안내](./docs/ko/getting-started/installation.md)를 확인해 주세요.
 
 ## Official Addons
 
-공식 애드온은 필요한 기능을 추가하는 확장 패키지입니다. 별도 저장소에서 관리하며, 위에서 내려받은 Ghost-ALICE 폴더에서 짧은 이름으로 설치하실 수 있습니다.
+Autopilot은 명시적으로 승인된 작업을 해당 세션의 범위와 예산 안에서 항목 단위로 이어갑니다. 설치 자체가 실행 승인을 부여하지는 않습니다. 별도 저장소인 [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot)에서 관리합니다.
 
-macOS, Linux, WSL, Git Bash:
-
-```bash
-bash install.sh --addon <addon>
-```
-
-Windows Command Prompt 또는 PowerShell:
-
-```cmd
-.\install.cmd --addon <addon>
-```
-
-일부 공식 애드온은 특정 작업을 위한 스킬만 추가하고, 다른 애드온은 실행 절차까지 확장합니다. 애드온별 동작 방식, 상태 파일, 일시 정지·재개 방법, 제거 절차는 해당 애드온 저장소에서 확인해 주세요.
-
-Autopilot은 Ghost-ALICE 설치기로 설치하는 애드온 패키지입니다. 아래 설치 예시가 모든 실행 환경과의 호환성을 보장하지는 않습니다. 사용하실 환경의 지원 범위는 애드온 저장소의 `compatibility-matrix.json`에서 확인해 주세요.
-
-| 애드온 | 용도 | 기본 설치 명령 | 자세한 안내 |
-| --- | --- | --- | --- |
-| autopilot | 명시적으로 승인하신 자율 실행을 작업 항목 단위로 이어갑니다. | `bash install.sh --addon autopilot` / `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
-
-사용자 정의 애드온, 조직별 애드온, 로컬에서 개발 중인 애드온은 `--addon-source`로 설치하실 수 있습니다.
-
-```bash
-bash install.sh --addon-source /path/to/addon-repo
-```
-
-```cmd
-.\install.cmd --addon-source C:\path\to\addon-repo
-```
+운영체제별 명령, 사용자 정의 애드온, 플랫폼 선택과 제거는 [설치 안내](./docs/ko/getting-started/installation.md)와 [공식 애드온 참조](./docs/ko/reference/official-addons.md)를 확인해 주세요.
 
 ## Documentation Map
 
@@ -86,7 +49,7 @@ bash install.sh --addon-source /path/to/addon-repo
 | 세션 처리 단계와 필수 검사 규칙 | [Session gate matrix](./docs/ko/policies/session-gate-matrix.md) |
 | 설치기의 플랫폼별 호환성 기준 | [Installer platform compatibility](./docs/ko/policies/installer-platform-compatibility-matrix.md) |
 | 팀 도입 안내와 설계 배경 | [GitHub Wiki](https://github.com/AidALL/ghost-alice/wiki) |
-| 공식 애드온 사용법 | [Wiki: official addons](https://github.com/AidALL/ghost-alice/wiki/official-addons_ko) |
+| 공식 애드온 사용법 | [Wiki: official addons](./docs/ko/reference/official-addons.md) |
 | 애드온 제작 방법 | [Wiki: addon authoring](https://github.com/AidALL/ghost-alice/wiki/addon-authoring_ko) |
 
 ## Project Guarantees

@@ -9,6 +9,16 @@ This guide is the command reference for installing, updating, checking, and repa
 
 On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`. This handles PowerShell execution policy blocks and does not change the user or machine execution policy.
 
+## Core and Autopilot together
+
+After cloning this repository, use the platform-auto-detect installation:
+
+```bash
+bash install.sh --addon autopilot
+```
+
+For Windows Command Prompt or PowerShell, use `.\install.cmd --addon autopilot`. The detailed options below let you select a specific agent platform or manage each installation separately.
+
 ## Contents
 
 - [Quick Install](#quick-install)
@@ -31,15 +41,15 @@ macOS, Linux, WSL, or Git Bash:
 ```bash
 git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice
 cd ~/ghost-alice
-bash install.sh
+bash install.sh --addon autopilot
 ```
 
-Windows Command Prompt or PowerShell:
+Windows Command Prompt:
 
 ```cmd
 git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice
 cd %USERPROFILE%\ghost-alice
-.\install.cmd
+.\install.cmd --addon autopilot
 ```
 
 ## Install Official Addons
@@ -80,7 +90,7 @@ Addon-specific behavior, state files, pause/resume controls, and removal details
 | --- | --- | --- | --- | --- |
 | autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-The coordinated release pair is core `0.4.0` and Autopilot `0.4.0`. Autopilot requires core `0.4.0` for its shared SQLite runtime; use the coordinated pair for the current session-intent and continuation fixes. Product release numbers do not replace the addon compatibility matrix. See the [0.4.0 release notes](../release/2026-09-28-release-notes.md) for what changed and what was verified.
+The recommended product pair is Core `0.4.1` and Autopilot `0.4.1`. Autopilot's technical minimum remains Core `0.4.0` for the shared SQLite runtime. Check the addon compatibility matrix for support boundaries and the [current release notes](../release/2026-10-01-release-notes.md) for verification scope.
 
 ## Install One Official Addon To One Platform
 
@@ -107,6 +117,8 @@ bash install.sh --addon-source /path/to/addon-repo
 For git URL addon sources, `--addon-tag` selects the branch or tag to clone into the local addon source cache.
 
 ## Install One Platform
+
+The following commands install Core only. Add `--addon autopilot` to include Autopilot for the selected platform.
 
 | Target | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |
@@ -161,16 +173,16 @@ cd ~/ghost-alice && git fetch origin main && git show FETCH_HEAD:scripts/bootstr
 
 If source update stops with conflicts, divergent branches, or non-fast-forward state, do not rerun the installer repeatedly. Follow [troubleshooting](./troubleshooting.md) first.
 
-Then rerun the installer.
+`--update-source` updates the Core source checkout; it does not update the addon package. Reinstall Core and Autopilot together, then check the installed state. The bootstrap updater may reinstall Core only, so follow it with this same paired command.
 
 ```bash
-bash install.sh
+bash install.sh --addon autopilot
 bash install.sh --doctor
 bash install.sh --status
 ```
 
 ```cmd
-.\install.cmd
+.\install.cmd --addon autopilot
 .\install.cmd --doctor
 .\install.cmd --status
 ```
@@ -248,10 +260,17 @@ A full install deploys:
 - Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
 - Claude Code permission allowlist
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` global bootstrap
-- Codex `~/.codex/AGENTS.md` bootstrap
+- Codex `~/.codex/AGENTS.md` bootstrap, managed `~/.codex/ghost-alice-governance.md` fallback and project instruction budget in `~/.codex/config.toml`
 - support state for install-state, pending merges, install rollbacks, and uninstall reports
 
 The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving adjacent user text. If the destination is a markerless user-owned file, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
+
+### Codex Governance Contract
+
+The managed `~/.codex/AGENTS.md` bootstrap selects the contract; it is not the complete fallback. If trusted project instructions already supply the complete `# Ghost-ALICE OS Project` contract through mandatory rule 12, use it directly. Otherwise, load the full managed sibling `~/.codex/ghost-alice-governance.md` before actionable work. A heading, excerpt or truncated project contract is insufficient. Missing or unreadable fallback keeps dependent work closed; bounded no-work answers can use the terminal route.
+
+The installer manages the full project instruction budget in `~/.codex/config.toml`, preserves user configuration and records rollback state. Status and doctor check the bootstrap, sibling governance file and instruction-budget configuration together. They preserve user-owned files and symlink targets; a proposal is not an installed contract.
+
 
 ### merge-companion
 

@@ -73,6 +73,8 @@ Choose exactly one:
 
 `speculative` defaults to reject unless later evaluation is exceptionally strong.
 
+Separate evaluation means from runtime adoption. Benchmarking or A/B comparison can serve an explicitly requested evaluation deliverable, but evaluation usefulness alone does not justify adding runtime features. For runtime adoption or improvement, name the observed runtime behavior gap and the expected correction; assess the harm and regression risk of that correction. Do not substitute a new evaluation tool or product when the authorized objective is to improve current runtime behavior. Genuine user-directed evaluation work and evidenced runtime improvements remain permitted within their authorized scope.
+
 ### 3. Assess Harm If Skipped
 
 Use one of these harm shapes:

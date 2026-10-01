@@ -20,7 +20,7 @@ from installer_assets import (
     OWNERSHIP_USER_MODIFIED_MANAGED,
     classify_skill_root,
 )
-from global_rule_blocks import remove_claude_bootstrap, remove_codex_bootstrap
+from global_rule_blocks import remove_claude_bootstrap, remove_codex_rule_file
 from install_hooks import uninstall_hook
 
 REMOVABLE_TARGET_OWNERSHIPS = {
@@ -873,18 +873,22 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
     ]
 
 
-def _global_rule_item(platform: str, *, confirm: bool) -> dict[str, Any] | None:
+def _global_rule_item(platform: str, *, confirm: bool, companion: bool = False) -> dict[str, Any] | None:
     if platform == "codex":
-        path = _codex_home() / "AGENTS.md"
-        remover = remove_codex_bootstrap
+        path = _codex_home() / ("ghost-alice-governance.md" if companion else "AGENTS.md")
+        remover = remove_codex_rule_file
     elif platform == "claude":
         path = _claude_home() / "CLAUDE.md"
         remover = remove_claude_bootstrap
     else:
         return None
 
+    if path.is_symlink():
+        return {"kind": "global-rule", "path": path.as_posix(), "action": "manual-review", "reason": "rule-file-symlink"}
     if not path.exists():
         return {"kind": "global-rule", "path": path.as_posix(), "action": "missing", "reason": "rule-file-absent"}
+    if not path.is_file():
+        return {"kind": "global-rule", "path": path.as_posix(), "action": "manual-review", "reason": "rule-path-not-file"}
 
     if confirm:
         result = remover(path)
@@ -912,6 +916,14 @@ def _global_rule_item(platform: str, *, confirm: bool) -> dict[str, Any] | None:
         "action": "would-remove-global-rule" if has_ghost_alice_block else "unchanged",
         "reason": "ghost-alice-block-present" if has_ghost_alice_block else "ghost-alice-block-absent",
     }
+
+
+def _global_rule_items(platform: str, *, confirm: bool) -> list[dict[str, Any]]:
+    primary = _global_rule_item(platform, confirm=confirm)
+    items = [primary] if primary is not None else []
+    if platform == "codex":
+        items.append(_global_rule_item(platform, confirm=confirm, companion=True))
+    return items
 
 
 def _hook_item(platform: str, *, confirm: bool) -> dict[str, Any]:
@@ -961,9 +973,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
     manifest, manifest_error = _load_manifest(args.install_state_manifest)
     items: list[dict[str, Any]] = []
     items.append(_hook_item(args.platform, confirm=args.confirm))
-    global_rule = _global_rule_item(args.platform, confirm=args.confirm)
-    if global_rule is not None:
-        items.append(global_rule)
+    items.extend(_global_rule_items(args.platform, confirm=args.confirm))
     if manifest is None:
         items.append(
             {

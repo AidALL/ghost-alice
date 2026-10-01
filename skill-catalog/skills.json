@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-09-26T15:20:55Z",
+  "generated_at": "2026-09-28T18:01:46Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -273,7 +273,7 @@
     {
       "name": "verification-before-completion",
       "path": "coding-convention/verification-before-completion/SKILL.md",
-      "description": "Use before claiming completion, fixes, passes, commits, or PR creation. Requires running verification commands and reading their output before making success claims. Evidence always comes before claims.",
+      "description": "Use before claiming completion, fixes, passes, commits, or PR creation, and before re-reading an artifact to support a claim. Evidence always comes before claims; reuse unchanged evidence and check only when the result can change.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [

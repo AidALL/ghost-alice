@@ -8,71 +8,34 @@ Ghost-ALICE OS is an agent governance layer for AI work. It keeps intent, bounda
 
 It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It is the operating layer that makes agent work auditable before the agent claims completion.
 
-## Version 0.4.0
+## Version 0.4.1
 
-[Website](https://aidall.github.io/ghost-alice/) · [Release notes](./docs/release/2026-09-28-release-notes.md) · [Core release](https://github.com/AidALL/ghost-alice/releases) · [Autopilot release](https://github.com/AidALL/ghost-alice-autopilot/releases)
+[Website](https://aidall.github.io/ghost-alice/) · [Release notes](./docs/release/2026-10-01-release-notes.md) · [Core release](https://github.com/AidALL/ghost-alice/releases/tag/v0.4.1) · [Autopilot release](https://github.com/AidALL/ghost-alice-autopilot/releases/tag/v0.4.1)
 
-Ghost-ALICE core and the official Autopilot addon share the 0.4.0 release version. Use core 0.4.0 with Autopilot 0.4.0 for the recommended, jointly verified pair; the addon's runtime now requires core 0.4.0. Both projects remain open source under Apache-2.0.
+Use Ghost-ALICE core 0.4.1 with the official Autopilot 0.4.1 addon. The addon's technical minimum remains core 0.4.0. Both projects remain open source under Apache-2.0.
 
-- Intent snapshots preserve active decisions and the recorded scope alongside accumulated constraints, helping consumers interpret user corrections without treating a newer goal as blanket permission.
-- Current-session binding prevents a hook or write from silently selecting another session's ledger. Recorded scope and correction feedback supply context; they do not grant execution authority.
-- Autopilot checks the current intent before applying pending completion receipts or plans. Its explicit `agent-runtime` contract requires a platform, session ID, and absolute intent root; the host still provides model inference, tool execution, and event dispatch.
+- Keep approved work moving across status questions and corrections; honor explicit pauses and preserve current scope.
+- Load the full governance contract when needed, while keeping Codex's automatic bootstrap short and preserving complete project instructions.
+- Distinguish each repair's actual verification scope before reporting completion; avoid quota retry loops and evaluation-only runtime additions.
+- Select Autopilot state for the exact current session and handle unwritable derived paths without taking over another run.
 
-These changes strengthen the recorded-intent and continuation contract. They do not guarantee correct interpretation by every model; platform support and verification limits remain documented in the [Autopilot compatibility matrix](https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json).
+Selected independent Codex cases exercised similar failure inputs and actual scoped work. Claude installation was checked; these cases do not establish fresh Claude model inference or universal behavior reliability. See the [Autopilot compatibility matrix](https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json) for supported surfaces.
 
 ## Quick Start
 
-macOS, Linux, WSL, or Git Bash:
+From the cloned Ghost-ALICE repository, install Core and the official Autopilot addon together. The installer automatically detects the available agent platforms:
 
 ```bash
-git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice
-cd ~/ghost-alice
-bash install.sh
+bash install.sh --addon autopilot
 ```
 
-Windows Command Prompt:
-
-```cmd
-git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice
-cd %USERPROFILE%\ghost-alice
-.\install.cmd
-```
-
-Public install guidance uses OS-native entrypoints with the same long flag surface. Windows uses `.\install.cmd ...`; macOS, Linux, WSL, and Git Bash use `bash install.sh ...`. `install.cmd` keeps the Windows native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`; this handles PowerShell execution policy blocks and does not change the user or machine execution policy.
+See the [detailed installation guide](./docs/getting-started/installation.md) for cloning, OS-native entrypoints, platform selection, updates and troubleshooting.
 
 ## Official Addons
 
-Official addons are maintained as separate repositories and installed from the Ghost-ALICE core checkout with a short alias.
+Autopilot continues explicitly approved work one item at a time within its session, scope and budget. Installation does not grant run approval. It is maintained in [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot).
 
-macOS, Linux, WSL, or Git Bash:
-
-```bash
-bash install.sh --addon <addon>
-```
-
-Windows Command Prompt or PowerShell:
-
-```cmd
-.\install.cmd --addon <addon>
-```
-
-Some official addons add only capability skills. Others can extend runtime workflow behavior. Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository.
-
-The autopilot repository is an addon package consumed by the core installer. This install example is not a full runtime compatibility claim; read the addon repository `compatibility-matrix.json` before making one.
-
-| Addon | Purpose | Basic install | Details |
-| --- | --- | --- | --- |
-| autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` / `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
-
-Custom, tenant, or local development addons use `--addon-source`.
-
-```bash
-bash install.sh --addon-source /path/to/addon-repo
-```
-
-```cmd
-.\install.cmd --addon-source C:\path\to\addon-repo
-```
+For native commands, custom addon sources, platform selection and removal, use the [installation guide](./docs/getting-started/installation.md) and [official addon reference](./docs/reference/official-addons.md).
 
 ## Documentation Map
 
@@ -86,7 +49,7 @@ bash install.sh --addon-source /path/to/addon-repo
 | Session gate contract | [Session gate matrix](./docs/policies/session-gate-matrix.md) |
 | Installer compatibility contract | [Installer platform compatibility](./docs/policies/installer-platform-compatibility-matrix.md) |
 | Team onboarding and background | [GitHub Wiki](https://github.com/AidALL/ghost-alice/wiki) |
-| Official addon usage | [Wiki: official addons](https://github.com/AidALL/ghost-alice/wiki/official-addons) |
+| Official addon usage | [Wiki: official addons](./docs/reference/official-addons.md) |
 | Addon authoring | [Wiki: addon authoring](https://github.com/AidALL/ghost-alice/wiki/addon-authoring) |
 
 ## Project Guarantees

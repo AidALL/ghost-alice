@@ -580,6 +580,22 @@ def _has_current_downstream_block(env: dict[str, str], payload: dict[str, object
     return False
 
 
+# A hook marks its own routine state with this private key; the runner strips it before the host sees the output.
+SURFACE_DECLARATION_KEY = "ghostAliceSurface"
+
+
+def _take_surface_declaration(stdout: str) -> tuple[str, str]:
+    """(declared surface, stdout without the private key). Only "routine" is a declaration; anything else is dropped."""
+    try:
+        protocol = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return "", stdout
+    if not isinstance(protocol, dict) or SURFACE_DECLARATION_KEY not in protocol:
+        return "", stdout
+    declared = protocol.pop(SURFACE_DECLARATION_KEY)
+    return ("routine" if declared == "routine" else ""), json.dumps(protocol, ensure_ascii=False) + "\n"
+
+
 def _visibility_context(
     hook_id: str,
     stdout: str,
@@ -588,6 +604,7 @@ def _visibility_context(
     *,
     env: dict[str, str] | None = None,
     hook_payload: dict[str, object] | None = None,
+    declared: str = "",
 ) -> dict[str, object]:
     source_env = env if env is not None else os.environ
     payload = hook_payload or {}
@@ -603,6 +620,12 @@ def _visibility_context(
         context["pending_merge_undecided"] = True
     if _has_current_downstream_block(source_env, payload, platform):
         context["security_boundary"] = True
+    if declared:
+        # A declaring hook's own wording is not evidence of state; only the real state above and the exit code count.
+        context["declared_surface"] = declared
+        if exit_code != 0:
+            context["failed_verification"] = True
+        return context
     if (
         "no pending warning from this hook means merge-companion-precheck is clean" in text
         or "routine clean pass" in text
@@ -665,6 +688,8 @@ def _classification_from_decision(
         return ("duplicate-reminder", "routine", "routine", False)
     if reason == "noop-audit":
         return ("noop-audit", "debug", "audit-only", False)
+    if reason == "declared-routine":
+        return (normalize_hook_id(hook_id), "routine", "routine", False)
     if reason == "forced-pending-merge":
         return ("pending-merge", "risk", "forced", False)
     if reason == "forced-security-boundary":
@@ -719,6 +744,10 @@ def _one_line(text: str) -> str:
     return " ".join(text.split())
 
 
+def _labeled(value_key: str, value: str) -> str:
+    return value if value.startswith(f"{value_key}:") else f"{value_key}: {value}"
+
+
 def _render_model_surface(item: dict[str, object], stdout: str, stderr: str) -> str:
     level = str(item.get("model_surface") or "")
     value_key = str(item.get("value_key") or "surface-item")
@@ -728,10 +757,10 @@ def _render_model_surface(item: dict[str, object], stdout: str, stderr: str) -> 
     if level == "marker":
         return f"{value_key} observed"
     if level in {"digest", "focused"}:
-        return f"{value_key}: {value}" if value else f"{value_key} observed"
+        return _labeled(value_key, value) if value else f"{value_key} observed"
     if level == "full":
         return "\n".join(part for part in (stdout, stderr) if part)
-    return f"{value_key}: {value}" if value else f"{value_key} observed"
+    return _labeled(value_key, value) if value else f"{value_key} observed"
 
 
 def _is_hook_noop_json(stdout: str) -> bool:
@@ -771,7 +800,7 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
             elif isinstance(warning, str) and warning:
                 protocol["systemMessage"] = (
                     f"{value_key} observed" if level == "compact"
-                    else f"{value_key}: {_one_line(warning)}"
+                    else _labeled(value_key, _one_line(warning))
                 )
             return (json.dumps(protocol, ensure_ascii=False) + "\n", "")
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
@@ -780,7 +809,7 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
     if level == "compact":
         return (f"{value_key} observed\n", "")
     if level == "focused":
-        return ((f"{value_key}: {value}\n" if value else f"{value_key} observed\n"), "")
+        return ((f"{_labeled(value_key, value)}\n" if value else f"{value_key} observed\n"), "")
     if level in {"full", "forced"}:
         return (stdout, stderr)
     return (stdout, stderr)
@@ -832,23 +861,25 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
         check=False,
     )
     observed_duration = time.perf_counter() - started
+    declared, host_stdout = _take_surface_declaration(result.stdout)
     hook_payload = _payload_from_stdin(stdin_text)
     config = runtime_config.load_config(env=env, home=_home_from_env(env))
     profile = config["agent_visibility"]["profile"]
     event = _event_name(hook_payload, env)
     context = _visibility_context(
         hook_id,
-        result.stdout,
+        host_stdout,
         result.stderr,
         result.returncode,
         env=env,
         hook_payload=hook_payload,
+        declared=declared,
     )
     decision = agent_visibility_policy.decide(
         profile=profile,
         hook_id=hook_id,
         event=event,
-        stdout=result.stdout,
+        stdout=host_stdout,
         stderr=result.stderr,
         exit_code=result.returncode,
         context=context,
@@ -858,15 +889,15 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
     log_ref = str(strict_session_log.log_path(_home_from_env(env), platform, session_id))
     item = _surface_item_for_result(
         hook_id=hook_id,
-        stdout=result.stdout,
+        stdout=host_stdout,
         stderr=result.stderr,
         context=context,
         decision=decision,
         profile=profile,
         strict_log_ref=log_ref,
     )
-    model_surface_output = _render_model_surface(item, result.stdout, result.stderr)
-    user_stdout, user_stderr = _render_user_surface(item, result.stdout, result.stderr)
+    model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
+    user_stdout, user_stderr = _render_user_surface(item, host_stdout, result.stderr)
     strict_session_log.append_event(
         home=_home_from_env(env),
         platform=platform,

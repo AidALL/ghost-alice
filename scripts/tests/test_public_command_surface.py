@@ -68,8 +68,6 @@ class PublicCommandSurfaceTest(unittest.TestCase):
         *_markdown_files(REPO_ROOT / "docs"),
     ]
     WINDOWS_NATIVE_WRAPPER_REQUIREMENTS = {
-        REPO_ROOT / "README.md": r".\install.cmd --addon autopilot",
-        REPO_ROOT / "README_ko.md": r".\install.cmd --addon autopilot",
         REPO_ROOT / "docs" / "getting-started" / "installation.md": (
             r".\install.cmd --addon autopilot"
         ),
@@ -123,6 +121,15 @@ class PublicCommandSurfaceTest(unittest.TestCase):
             if phrase not in path.read_text(encoding="utf-8"):
                 missing.append(f"{path.relative_to(REPO_ROOT.parent)} missing {phrase!r}")
         self.assertEqual([], missing)
+        for readme, guide in (
+            (REPO_ROOT / "README.md", "./docs/getting-started/installation.md"),
+            (REPO_ROOT / "README_ko.md", "./docs/ko/getting-started/installation.md"),
+        ):
+            text = readme.read_text(encoding="utf-8")
+            with self.subTest(readme=readme.name):
+                self.assertIn(guide, text)
+                self.assertEqual("bash install.sh --addon autopilot",
+                                 text.split("```bash\n", 1)[1].split("```", 1)[0].strip())
 
     def test_public_docs_avoid_powershell_style_installer_command_surface(self) -> None:
         self.assertEqual([], _scan_files(self.PUBLIC_DOC_SURFACES, self.PUBLIC_DOC_FORBIDDEN_PATTERNS))

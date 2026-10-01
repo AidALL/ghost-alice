@@ -89,7 +89,9 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         result = self.run_hook({"session_id": "s-receipt", "prompt": prompt})
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(set(payload), {"continue", "systemMessage", "hookSpecificOutput"})
+        # The private surface key marks the recorded observation as routine; the hook runner strips it.
+        self.assertEqual(set(payload), {"continue", "systemMessage", "hookSpecificOutput", "ghostAliceSurface"})
+        self.assertEqual(payload["ghostAliceSurface"], "routine")
         self.assertEqual(payload["hookSpecificOutput"], {
             "hookEventName": "UserPromptSubmit",
             "additionalContext": payload["systemMessage"],

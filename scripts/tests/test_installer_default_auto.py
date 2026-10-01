@@ -247,9 +247,9 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         install_sh = INSTALL_SH.read_text(encoding="utf-8")
         install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
 
-        self.assertIn("bash install.sh\n", readme)
-        self.assertIn(".\\install.cmd\n", readme)
-        self.assertIn("install.cmd\n", readme)
+        first_command = readme.split("```bash\n", 1)[1].split("```", 1)[0].strip()
+        self.assertEqual(first_command, "bash install.sh --addon autopilot")
+        self.assertIn("./docs/getting-started/installation.md", readme)
         self.assertNotIn("```powershell\n.\\install.ps1\n```", readme)
         self.assertNotIn("bash install.sh --auto", readme)
         self.assertNotIn(".\\install.ps1 -Auto", readme)

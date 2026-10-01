@@ -137,7 +137,12 @@ join_by() {
 }
 
 hook_suite_label() {
-  printf '%s\n' "prompt, session-intent, web-search-first, tool-checkpoint, completion, session-start, io-trace"
+  local platform_label="${1:-}" hooks="prompt, session-intent"
+  # The web-search-first reminder is installed only where it reaches the model (Codex); Claude Code does not get it.
+  case "$platform_label" in
+    *[Cc]odex*) hooks="$hooks, web-search-first" ;;
+  esac
+  printf '%s\n' "$hooks, tool-checkpoint, completion, session-start, io-trace"
 }
 
 report_skill_sync_line() {
@@ -237,7 +242,7 @@ report_print_start() {
 
 report_print_tail() {
   local platform_label="$1" visibility="${2:-dynamic}"
-  printf '%s\n' "  [3/5] Hooks               $(hook_suite_label) enabled"
+  printf '%s\n' "  [3/5] Hooks               $(hook_suite_label "$platform_label") enabled"
   printf '  [4/5] Runtime config      %s hooks=true, Visibility Level=[%s]\n' "$platform_label" "$visibility"
   printf '%s\n\n' "  [5/5] Verification        ok"
   printf '%s\n' "Attention"
