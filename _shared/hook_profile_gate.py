@@ -616,7 +616,19 @@ def _visibility_context(
         routing_surface = payload.get("routing-surface")
     if isinstance(routing_surface, dict):
         context["routing_surface"] = routing_surface
-    if _has_pending_merge_undecided(source_env, platform):
+    pending = None
+    if hook_id in {"pending-merge-prompt", "session-start"} and exit_code == 0:
+        try:
+            receipt = json.loads(stdout).get("ghostAlicePendingMergeCheck")
+            if (isinstance(receipt, dict) and receipt.get("platform") == platform
+                    and receipt.get("manifest_path") == str(_pending_merge_manifest_path(source_env, platform))
+                    and type(receipt.get("undecided_count")) is int and receipt["undecided_count"] >= 0):
+                pending = receipt["undecided_count"] > 0
+        except (ValueError, TypeError, AttributeError):
+            pass
+    if pending is None:
+        pending = _has_pending_merge_undecided(source_env, platform)
+    if pending:
         context["pending_merge_undecided"] = True
     if _has_current_downstream_block(source_env, payload, platform):
         context["security_boundary"] = True

@@ -117,9 +117,9 @@ Leave the block below when the final response claims executed work is complete, 
 - evidence: <fresh command or inspected file>
 ```
 
-On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after that skill's `SKILL.md` was read and followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
+On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after a fresh or valid retained instruction body was used and the workflow followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
 
-Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Record the actually called `verification-before-completion` skill in an explicit `skills-loaded` list in `[io-trace]`. A format repair must preserve the substantive business result and supported evidence.
+Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Record the executed `verification-before-completion` workflow in `[io-trace]`: `skills-loaded` for an actual read or `skills-reused` for a valid retained instruction body. A format repair must preserve the substantive business result and supported evidence.
 
 The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each closure claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
 
@@ -137,12 +137,12 @@ Hard sequence for a new current-turn closure claim: skill load/call -> decision-
 
 Final message surface contract: when a final user surface includes an executed-work closure claim or explicit `[completion-check]`, close in the order `[completion-check]` -> a short summary -> `[io-trace]`. Otherwise, routine explanations can close with a short summary and `[io-trace]` only. A no-work terminal response emits only its concise clarification or resolved content and no control block. Use `[gate-state]` only on the opening surface early in a normal route, and do not attach it again after `[completion-check]`. Keep the summary short, with only the conclusion and the key evidence. Tool calls (Bash, Read, and so on) appearing folded in the UI are not a defect, so do not do separate work to reduce raw command exposure. The target of surface brevity is the final user commentary, not the folded tool blocks.
 
-The `skill-call:` line is a factual record that the relevant skill workflow was actually performed in the current turn through that platform's skill execution mechanism. On a platform with a visible Skill call surface, such as Claude Code, record it only after the actual call. On a platform without a visible Skill tool, such as Codex, record it only when the skill's `SKILL.md` was actually read and the procedure was followed.
+The `skill-call:` line is a factual record that the relevant skill workflow was actually performed in the current turn through that platform's skill execution mechanism. On a platform with a visible Skill call surface, such as Claude Code, record it only after the actual call. On a platform without a visible Skill tool, such as Codex, record it only when a fresh or valid retained instruction body was used and the procedure was followed.
 
 Points to follow in an environment without a Codex visible Skill surface:
-- Always read the skill's `SKILL.md` before marking a required gate as complete.
-- Do not treat a gate as complete based only on metadata, description, memory, a prior turn, or an "already know it" reason.
-- If you did not read `SKILL.md` in the current turn, do not list that skill in `skill-call:`. That gate is still pending.
+- Read or validly reuse the skill's instruction body before marking a required gate as complete.
+- Do not treat a gate as complete based only on metadata, a description, a prior verdict, or an "already know it" reason.
+- If neither a fresh nor a valid retained instruction body is available, the gate is pending; do not list a skill-call.
 - Apply the same standard to simple tasks, already-routed tasks, and tasks where the metadata looks sufficient.
 
 ### 0-A. merge-companion Self-Check Gate (pending-merge prose-rule layer)
@@ -300,6 +300,7 @@ Output an `[io-trace]` block at the end of every normal response. A no-work term
 - commands-run: [command summary, ...]
 - web-accessed: [URL or search term, ...]
 - skills-loaded: [skill name, ...]
+- skills-reused: [skill name, ...]
 - subagents: [description -> tool-call count, ...]
 ```
 
@@ -309,7 +310,8 @@ Rules:
 - Write file paths as absolute paths.
 - Truncate Bash commands to the first 200 characters.
 - `skills-loaded` records only the skills that either had a visible Skill call in the current turn, or, in an environment without a visible Skill call surface such as Codex, had their `SKILL.md` body actually read and their workflow performed.
-- A required gate skill is not satisfied by a metadata-only match. In an environment without a visible Skill call surface such as Codex, you must read the `SKILL.md` of `task-router` and the gate skills required that turn. If you did not read `SKILL.md`, it is neither a `skill-call` nor `done`.
+- A required gate skill is not satisfied by a metadata-only match. In an environment without a visible Skill call surface such as Codex, use a fresh or valid retained instruction body for `task-router` and the gate skills required that turn. Without that body and current workflow execution, it is neither a `skill-call` nor `done`.
+- `skills-reused` records an executed workflow using a valid retained instruction body, with its source path and same-session load-record evidence; it is not a new file read.
 - If you read a `SKILL.md` directly with a tool, also record the absolute path in `files-read`. A metadata-only match is not file I/O and is not a `skills-loaded` entry.
 - A subagent result must include the list of files accessed inside that agent. Add "include the list of accessed file paths in the result" to the subagent dispatch prompt.
 
@@ -380,3 +382,5 @@ Operating rules:
 - When local changes, generated outputs, agent suggestions, or reviewer suggestions conflict, choose the change set that best satisfies the locked contract and survives the most relevant targeted tests. Do not choose by recency, authorship, or smaller diff alone.
 - When the user explicitly asks to "just make it work" or requests urgent recovery, a temporary patch is allowed, but leave a `residual-impact` note.
 - For a new rule, skill, or document change, confirm with a test or a gate that the rule actually triggers on the real execution path.
+
+Instruction-body loading follows `coding-convention/verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse (installed path on Codex). A retained instruction body may be reused with a same-session coded load record; current-input workflow judgments still run. List actual reads in skills-loaded and valid reuse in skills-reused. Routine clean merge results need no repeated prose; preserve pending/changed/failed-state warnings.

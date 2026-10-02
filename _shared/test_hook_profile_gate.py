@@ -20,6 +20,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_profile_gate
 import install_hooks
+import pending_merge_precheck_hook
 
 
 def _make_node_executable(node: Path) -> None:
@@ -218,6 +219,38 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             )
 
         self.assertTrue(context["pending_merge_undecided"])
+
+    def test_pending_merge_hook_result_reuses_completed_manifest_check(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            env = {"HOME": temp_home, "GHOST_ALICE_PLATFORM": "codex"}
+            manifest = Path(temp_home) / ".ghost-alice/pending-merges/codex/manifest.json"
+            for count in (0, 1):
+                receipt = {"platform": "codex", "manifest_path": str(manifest), "undecided_count": count}
+                stdout = json.dumps({"continue": True, "ghostAlicePendingMergeCheck": receipt})
+                with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", side_effect=AssertionError("duplicate manifest read")):
+                    context = hook_profile_gate._visibility_context("pending-merge-prompt", stdout, "", 0, env=env, declared="routine")
+                self.assertEqual(bool(context.get("pending_merge_undecided")), count > 0)
+
+    def test_invalid_or_unrelated_merge_result_keeps_manifest_fallback(self):
+        env = {"HOME": "/isolated", "GHOST_ALICE_PLATFORM": "codex"}
+        valid = {"platform": "codex", "manifest_path": "/isolated/.ghost-alice/pending-merges/codex/manifest.json", "undecided_count": 0}
+        cases = [("pending-merge-prompt", {**valid, "platform": "claude"}, 0),
+                 ("pending-merge-prompt", {**valid, "manifest_path": "/foreign/manifest.json"}, 0),
+                 ("pending-merge-prompt", {**valid, "undecided_count": False}, 0),
+                 ("pending-merge-prompt", {**valid, "undecided_count": -1}, 0),
+                 ("pending-merge-prompt", valid, 1), ("prompt", valid, 0)]
+        for hook, receipt, exit_code in cases:
+            with self.subTest(hook=hook, receipt=receipt, exit_code=exit_code):
+                with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", return_value=True) as probe:
+                    context = hook_profile_gate._visibility_context(hook, json.dumps({"ghostAlicePendingMergeCheck": receipt}), "", exit_code, env=env, declared="routine")
+                probe.assert_called_once()
+                self.assertTrue(context["pending_merge_undecided"])
+
+    def test_clean_merge_payload_does_not_repeat_workflow_boilerplate(self):
+        with mock.patch.object(pending_merge_precheck_hook, "_pending_entries", return_value=[]):
+            payload = json.loads(pending_merge_precheck_hook._json_payload("codex", "LONG WORKFLOW INSTRUCTION"))
+        self.assertNotIn("LONG WORKFLOW INSTRUCTION", payload["systemMessage"])
+        self.assertEqual(payload["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
 
     def test_visibility_context_reads_current_downstream_block_gate(self):
         with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as temp_root:

@@ -33,6 +33,16 @@ def receipt_from(message: str) -> dict:
 
 
 class SessionIntentAnalyzerHookTests(unittest.TestCase):
+    def test_repeated_guidance_compacts_but_each_input_gets_new_receipt_and_event(self):
+        first = json.loads(self.run_hook({"session_id": "reuse", "prompt": "first objective"}).stdout)["systemMessage"]
+        second = json.loads(self.run_hook({"session_id": "reuse", "prompt": "changed objective"}).stdout)["systemMessage"]
+        self.assertLess(len(second), len(first))
+        self.assertIn("apply the retained skill to current meaning", second)
+        self.assertNotEqual(receipt_from(first)["input_event_id"], receipt_from(second)["input_event_id"])
+        self.assertEqual(len(self.events("reuse")), 2)
+        self.assertNotIn(b"first objective", (self.ledger_root / "session-checks.sqlite3").read_bytes())
+        self.assertNotIn(b"changed objective", (self.ledger_root / "session-checks.sqlite3").read_bytes())
+
     def setUp(self) -> None:
         self.tmp_home = pathlib.Path(tempfile.mkdtemp(prefix="session-intent-hook-test-"))
         self.ledger_root = self.tmp_home / "ghost-alice" / ".tmp" / "session-intent"

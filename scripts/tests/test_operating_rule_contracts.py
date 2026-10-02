@@ -6,6 +6,17 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class OperatingRuleContractTest(unittest.TestCase):
+    def test_retained_instruction_body_reuse_preserves_current_input_execution(self) -> None:
+        reference = (REPO_ROOT / "coding-convention/verification-before-completion/references/verify-or-reuse.md").read_text()
+        for needle in ["## Instruction Body Reuse", "same session", "new user input alone", "observed instruction change", "retained body is lost", "execute the applicable workflow for the current input"]:
+            self.assertIn(needle, reference)
+        for relative in ["AGENTS.md", "platforms/codex/AGENTS.md", "docs/policies/session-gate-matrix.md", "coding-convention/using-coding-convention/SKILL.md", "task-router/SKILL.md", "coding-convention/verification-before-completion/SKILL.md"]:
+            with self.subTest(relative=relative):
+                body = (REPO_ROOT / relative).read_text()
+                self.assertIn("retained instruction body", body)
+                self.assertNotIn("If you did not read `SKILL.md` in the current turn", body)
+                self.assertNotIn("If the `SKILL.md` was not read in this turn", body)
+
     def test_clarification_only_route_asks_before_tools_or_governance_ceremony(self) -> None:
         task_router = (REPO_ROOT / "task-router" / "SKILL.md").read_text(encoding="utf-8")
         for needle in [

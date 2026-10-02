@@ -255,7 +255,7 @@ After a normal route, emit:
 - next-required: <skill-name|none>
 ```
 
-In Codex, `skill-call` means the relevant `SKILL.md` body was actually read and followed in the current turn.
+Instruction-body reuse follows `verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse. In Codex, `skill-call` means a fresh or valid retained instruction body was used and its workflow followed in the current turn.
 
 For `response-mode: clarification-only` or `direct-response`, keep the routing record in the strict audit surface and use the terminal route instead of emitting the user-facing blocks above.
 

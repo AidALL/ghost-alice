@@ -169,17 +169,17 @@ When you confirm a flaw in a prompt or other deliverable you provided, return th
 
 Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check. Before making that claim, load or call `verification-before-completion` for the current turn, run and read the decision-relevant fresh verification, and only then write `[completion-check]`. If any step is missing or out of order, the completion-check is invalid.
 
-The `skill-call:` line records that the workflow for that skill was actually executed through the platform's skill execution mechanism in this turn. On Claude Code, write it only after a visible Skill call. On Codex, where no visible Skill tool exists, write it only after reading that skill's `SKILL.md` in this turn and following the workflow.
+The `skill-call:` line records that the workflow for that skill was actually executed through the platform's skill execution mechanism in this turn. On Claude Code, write it only after a visible Skill call. On Codex, where no visible Skill tool exists, write it only after using a fresh or valid retained instruction body and following the workflow this turn.
 
-`verification-before-completion` is the lifecycle gate before executed-work closure claims. Routine explanations, meta-discussion, and options do not require it unless they claim finished work or verified results. On Claude Code, `[completion-check]` carries no `skill-call: verification-before-completion (this turn)` line: the Stop hook verifies the visible Skill call from the transcript. On Codex, where no visible Skill surface exists, write that line in `[completion-check]` only when that `SKILL.md` was actually read and the workflow followed in this turn.
+`verification-before-completion` is the lifecycle gate before executed-work closure claims. Routine explanations, meta-discussion, and options do not require it unless they claim finished work or verified results. On Claude Code, `[completion-check]` carries no `skill-call: verification-before-completion (this turn)` line: the Stop hook verifies the visible Skill call from the transcript. On Codex, where no visible Skill surface exists, write that line in `[completion-check]` only when a fresh or valid retained instruction body was used and the workflow followed in this turn.
 
-On Codex, if `[completion-check]` claims `skill-call: verification-before-completion (this turn)`, the same final response's `[io-trace]` `skills-loaded` must include `verification-before-completion`; on Claude Code the Stop hook does not cross-check `skills-loaded`. Where a Stop completion hook validates the final response, it blocks such a defect at most once per turn: on a host that keeps earlier messages visible it asks only for the missing or corrected control blocks, on a headless or unknown host it asks for a complete standalone answer, and a defect that survives that one retry ends the turn with a visible notice instead of another rewrite.
+On Codex, if `[completion-check]` claims `skill-call: verification-before-completion (this turn)`, the same final response's `[io-trace]` `skills-loaded` or `skills-reused` must include `verification-before-completion`; on Claude Code the Stop hook does not cross-check `skills-loaded`. Where a Stop completion hook validates the final response, it blocks such a defect at most once per turn: on a host that keeps earlier messages visible it asks only for the missing or corrected control blocks, on a headless or unknown host it asks for a complete standalone answer, and a defect that survives that one retry ends the turn with a visible notice instead of another rewrite.
 
 In Codex environments without a visible Skill surface:
 
-- Read the relevant `SKILL.md` before marking a required gate done.
-- Do not mark a gate complete because of metadata, descriptions, memory, prior turns, or "I already know it."
-- If the `SKILL.md` was not read in this turn, do not list the skill in `skill-call:`; the gate is still pending.
+- Read or validly reuse the relevant instruction body before marking a required gate done.
+- Do not mark a gate complete because of metadata, descriptions, prior verdicts, or "I already know it."
+- If neither a fresh nor a valid retained instruction body is available, the gate is pending; do not list a skill-call.
 - Apply the same standard to simple tasks, already-routed tasks, and cases where metadata appears sufficient.
 
 ## tool-checkpoint Visible Surface
@@ -210,4 +210,6 @@ Simple polling of the same ref is not a duty to repeat output forever; the compa
 - `task-router` decides only whether `boundary-contract` is required. `boundary-contract` owns allowed-surface, file names, and test-purpose.
 - If task-router outputs `boundary-contract: required`, the next required gate is boundary-contract.
 - The `skill-call:` field structurally prevents mixing form completion with actual obligation completion. It was introduced after observing that prose-only reminders still allowed omissions within the same turn.
-- Metadata-only skill matching is candidate discovery, not execution. Required gate skills are not complete unless the actual `SKILL.md` file was read and the workflow followed.
+- Metadata-only skill matching is candidate discovery, not execution. Required gate skills are not complete unless a fresh or valid retained instruction body was used and the workflow followed.
+
+Instruction-body loading follows `coding-convention/verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse (installed path on Codex). A retained instruction body may be reused with a same-session coded load record; current-input workflow judgments still run. List actual reads in skills-loaded and valid reuse in skills-reused. Routine clean merge results need no repeated prose; preserve pending/changed/failed-state warnings.

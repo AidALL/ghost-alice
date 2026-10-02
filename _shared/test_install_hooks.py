@@ -657,6 +657,10 @@ class TestMessageLanguage(unittest.TestCase):
         ):
             result = _run_hook_command(command, env=env)
             self.assertEqual(result.returncode, 0)
+            if command == install_hooks.SESSION_START_COMMAND:
+                self.assertIn("merge-companion", result.stdout)
+                self.assertNotIn("Internal instruction:", result.stdout)
+                continue
             self.assertIn("Internal instruction:", result.stdout)
             self.assertIn("User:", result.stdout)
             self.assertIn("Tech:", result.stdout)
@@ -812,10 +816,11 @@ class TestMessageLanguage(unittest.TestCase):
                 "--read-state", "--root", str(root),
                 "--platform", "codex", "--session-id", "s-codex-router",
             ])
-            self.assertIn("task-router-step", message)
-            self.assertIn("atomic meaning decomposition", message)
-            self.assertIn("focus-layer/scope-reopen", message)
-            self.assertIn("skill assignment", message)
+            self.assertIn("execute task-router for this input", message)
+            self.assertIn("reuse retained instructions, reload if lost", message)
+            self.assertNotIn("task-router-step", message)
+            self.assertNotIn("atomic meaning decomposition", message)
+            self.assertIn("downstream-gate:", message)
 
     def test_codex_task_router_reminder_releases_on_absent_gate_after_intent_preflight(self):
         script = Path(install_hooks.__file__).with_name("task_router_reminder_hook.py")
@@ -1181,7 +1186,12 @@ class TestMessageLanguage(unittest.TestCase):
                 line for line in result.stdout.splitlines()
                 if line.startswith("Internal instruction:")
             ]
-            self.assertTrue(internal_lines)
+            if command == install_hooks.SESSION_START_COMMAND:
+                self.assertIn("merge-companion", result.stdout)
+                self.assertFalse(internal_lines)
+                self.assertIsNone(re.search(r"[\uac00-\ud7a3]", result.stdout))
+            else:
+                self.assertTrue(internal_lines)
             for line in internal_lines:
                 self.assertIsNone(re.search(r"[\uac00-\ud7a3]", line))
         result = _run_hook_command(
@@ -5732,12 +5742,11 @@ class TestSessionStartHook(unittest.TestCase):
         from install_hooks import PROMPT_PENDING_MERGE_COMMAND
         result = _run_hook_command(PROMPT_PENDING_MERGE_COMMAND)
         self.assertEqual(result.returncode, 0)
-        self.assertIn("Internal instruction:", result.stdout)
-        self.assertIn("merge-companion prompt-check", result.stdout)
+        self.assertIn("merge-companion-precheck: clean (hook-verified)", result.stdout)
+        self.assertNotIn("Internal instruction:", result.stdout)
         self.assertIn("do not run an extra shell manifest check", result.stdout)
         self.assertIn("merge-companion", result.stdout)
-        _assert_contains_any(self, result.stdout, "current conversation", "current conversation")
-        _assert_contains_any(self, result.stdout, "without an extra shell check", "without an extra shell check")
+        self.assertIn("pending-merges/claude/manifest.json", result.stdout)
         self.assertNotIn("Check the current platform pending-merge manifest", result.stdout)
         self.assertNotIn("next time Claude/Codex is opened", result.stdout)
         self.assertNotIn("The next time you open Claude/Codex", result.stdout)
@@ -5802,9 +5811,9 @@ class TestSessionStartHook(unittest.TestCase):
 
         result = _run_hook_command(SESSION_START_COMMAND)
         self.assertEqual(result.returncode, 0)
-        _assert_contains_any(self, result.stdout, "At session start", "At session start")
-        _assert_contains_any(self, result.stdout, "without an extra shell check", "extra shell check")
-        self.assertIn("do not run a second shell check just to prove clean", result.stdout)
+        self.assertIn("merge-companion-precheck: clean (hook-verified)", result.stdout)
+        self.assertIn("do not run an extra shell manifest check", result.stdout)
+        self.assertIn("pending-merges/claude/manifest.json", result.stdout)
         self.assertNotIn("next time Claude/Codex is opened", result.stdout)
         self.assertNotIn("The next time you open Claude/Codex", result.stdout)
 
@@ -6017,10 +6026,10 @@ class TestWebSearchFirstHook(TempHomeTestCase):
 
     def test_codex_foreground_hooks_emit_valid_json_system_messages(self):
         cases = (
-            (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, "merge-companion prompt-check"),
+            (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
             (install_hooks.HOOK_COMMAND_CODEX, "hook-reminder"),
             (install_hooks.WEB_SEARCH_FIRST_COMMAND_CODEX, "web-search-first"),
-            (install_hooks.SESSION_START_COMMAND_CODEX, "merge-companion session-check"),
+            (install_hooks.SESSION_START_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
         )
 
         for command, expected in cases:
@@ -6028,11 +6037,16 @@ class TestWebSearchFirstHook(TempHomeTestCase):
                 if command == install_hooks.WEB_SEARCH_FIRST_COMMAND_CODEX:
                     result = _run_hook_command(command, env=_strict_hook_env())
                 else:
-                    result = _run_hook_command(command)
+                    result = _run_hook_command(command, env=_strict_hook_env({"HOME": str(self.fake_home)}))
                 self.assertEqual(result.returncode, 0, msg=result.stderr)
                 payload = json.loads(result.stdout)
                 self.assertEqual(payload["continue"], True)
                 self.assertIn(expected, payload["systemMessage"])
+                if command in (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, install_hooks.SESSION_START_COMMAND_CODEX):
+                    receipt = payload["ghostAlicePendingMergeCheck"]
+                    self.assertEqual(receipt["platform"], "codex")
+                    self.assertEqual(receipt["undecided_count"], 0)
+                    self.assertEqual(Path(receipt["manifest_path"]), self.fake_home / ".ghost-alice/pending-merges/codex/manifest.json")
                 self.assertIsNone(re.search(r"[\uac00-\ud7a3]", payload["systemMessage"]))
                 self.assertNotIn("User:", payload["systemMessage"])
                 self.assertNotIn("Tech:", payload["systemMessage"])

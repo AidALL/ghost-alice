@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from session_intent_analyzer_hook import bound_session_identity, _safe_component as safe_path_component
+from session_check_cache import instruction_delivery
 
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1] / ".tmp" / "session-intent"
@@ -292,7 +293,15 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             base_message = DEFAULT_INTERNAL
     root = Path(args.root).expanduser()
-    message, routine = reminder_result(base_message, root, args.platform, read_payload())
+    payload = read_payload()
+    message, routine = reminder_result(base_message, root, args.platform, payload)
+    # The current input/gate was evaluated above. Only repeated prose is cached.
+    if routine:
+        # Bind to the inspected material's session, never the discovery pointer.
+        session_id = resolve_session_id(root, args.platform, payload)
+        if not instruction_delivery(root, args.platform, session_id, "hook-router-instructions", Path(__file__), base_message):
+            message = message.replace(base_message, "hook-reminder: execute task-router for this input; reuse retained instructions, reload if lost.", 1)
+            message = "\n".join(line for line in message.splitlines() if not line.startswith("task-router-step:"))
     sys.stdout.write(render_payload(args.format, message, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")

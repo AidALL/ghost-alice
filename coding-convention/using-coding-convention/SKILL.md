@@ -24,6 +24,7 @@ A task-router no-work terminal route (`clarification-only` or `direct-response`)
 
 - [Priority](#priority)
 - [Platform Loading](#platform-loading)
+- [Instruction Body Reuse](#instruction-body-reuse)
 - [Core Rule](#core-rule)
 - [Skill Flow](#skill-flow)
 - [Red Flags](#red-flags)
@@ -53,8 +54,12 @@ Use the host runtime's real skill surface when it exists.
 
 - Claude Code: use the `Skill` tool. Follow the loaded skill body. Do not use `Read` to load the skill file directly.
 - Copilot CLI: use the platform skill tool. Use `references/copilot-tools.md` when tool names or async shell behavior need mapping.
-- Codex: visible metadata is not a skill call. A required gate is complete only after the current `SKILL.md` body has been read and followed. Use `references/codex-tools.md` for Codex tool mapping, named-agent workarounds, and environment detection.
+- Codex: visible metadata is not a skill call. A required gate is complete only after a fresh or valid retained instruction body has been used and its current workflow followed. Use `references/codex-tools.md` for Codex tool mapping, named-agent workarounds, and environment detection.
 - Other environments: use the host documentation and preserve the same semantic order.
+
+## Instruction Body Reuse
+
+Use a fresh or valid retained instruction body under `verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse. The installed `_shared/session_check_cache.py` stores/query-checks exact session-bound load records. New inputs rerun workflow judgments; unchanged retained bodies do not need reloading. Read on first use, changed source/session/copy, lost body or missing record. Metadata alone never qualifies.
 
 ## Core Rule
 
@@ -94,11 +99,11 @@ Every user input reopens routing; it does not by itself invalidate unchanged evi
 - evidence: <fresh command or inspected file>
 ```
 
-On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after that skill's `SKILL.md` was read and followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
+On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after a fresh or valid retained instruction body was used and the workflow followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
 
 A `[completion-check]` is not complete without `acceptance-criteria` and `claim-evidence-map`. If evidence does not directly prove a criterion, leave that criterion in `unverified` and do not speak as though the work is complete or successful.
 
-The `skill-call:` line records that the skill workflow actually ran in this turn. It is not a substitute for loading the skill. On Claude Code, write it only after the visible Skill call. On Codex, write it only after reading the current `SKILL.md` and following the workflow.
+The `skill-call:` line records that the skill workflow actually ran in this turn. It is not a substitute for loading the skill. On Claude Code, write it only after the visible Skill call. On Codex, write it only after using a fresh or valid retained instruction body and following the current workflow.
 
 ## Skill Flow
 
