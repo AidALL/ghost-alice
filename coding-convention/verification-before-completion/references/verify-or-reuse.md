@@ -8,6 +8,7 @@ This reference is the canonical semantic contract for deciding whether a claim a
 - [Decision Flow](#decision-flow)
 - [State Vocabulary](#state-vocabulary)
 - [Decision Rules](#decision-rules)
+- [Instruction Body Reuse](#instruction-body-reuse)
 - [Signals That Are Not Triggers](#signals-that-are-not-triggers)
 - [Redundancy Corrections](#redundancy-corrections)
 - [Authoritative Copy](#authoritative-copy)
@@ -81,6 +82,16 @@ Claim scopes for a `reuse` answer: `authored-at`, `current`, `last-known`; other
 | The planned check targets a copy other than the claim's copy | `wrong-copy`; redirect to the target copy verdict | not the planned call |
 
 An agent write re-anchors evidence when the agent retains the full content it wrote; a partial patch does not, so the previous full-content evidence is stale after it. A failed write, an unexecuted instruction, or a read changes nothing.
+
+## Instruction Body Reuse
+
+Instruction loading and current-input workflow execution are separate obligations. In Codex, a retained instruction body already read in the same session may be reused; a new user input alone does not require another body read. Still execute the applicable workflow for the current input, including intent, security, routing and completion decisions. Metadata, a name, a prior verdict or a thin summary is not a retained body.
+
+Use the installed `_shared/session_check_cache.py` with the exact receipt root/platform/session ID and `--instruction-path <actual SKILL.md>`. On first use it reads the body and stores only path, file version and check time in `session-checks.sqlite3`; it never stores the body. On a later use, add `--body-retained` only when the usable body remains in context. An observed instruction change, different session/copy, missing/corrupt record, or retained body is lost requires a read. Do not recreate hashes or inspect the file separately before the helper; its target stamp and stored session record perform that mechanical decision once.
+
+Record reused instruction names in `skills-reused`, including their source path/original load evidence. `skills-loaded` and `files-read` describe actual reads this turn. A `skill-call` records current workflow execution, supported by either a fresh body read or this valid reuse; it never reuses a prior input's verdict. Visible Skill surfaces keep their platform-native invocation requirement.
+
+The pending-merge hook uses the same session-bound store: unchanged manifest versions reuse a normalized count; creation, replacement or modification invalidates it. Hooks and strict logging still run, and every input's intent/security state is evaluated fresh. Cache failure performs the real check; it never grants permission or hides a block.
 
 ## Signals That Are Not Triggers
 

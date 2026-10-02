@@ -502,7 +502,7 @@ def extract_all_control_blocks(text, name):
     return blocks
 
 
-def extract_skills_loaded(io_trace):
+def extract_skills_loaded(io_trace, *, field="skills-loaded"):
     """Return skill tokens from an io-trace `skills-loaded` field.
 
     Accepts three equivalent serializations so the gate is format-agnostic:
@@ -512,7 +512,7 @@ def extract_skills_loaded(io_trace):
     """
     lines = _split_lines(io_trace)
     for index, line in enumerate(lines):
-        header = _SKILLS_LOADED_HEADER_RE.match(line)
+        header = re.match(r"^\s*-?\s*" + re.escape(field) + r"\s*:\s*(.*)$", line, re.I)
         if not header:
             continue
         inline = header.group(1).strip()
@@ -594,18 +594,18 @@ def validate_completion_text(text, *, require_completion_check=False, require_sk
                 [
                     "verification-reminder: emitted.",
                     "Run verification-before-completion before claiming completion.",
-                    "Do not claim a verification skill-call unless the verification skill " "was actually loaded this turn.",
+                    "Do not claim a verification skill-call unless a fresh or valid retained instruction body was used and its workflow executed this turn.",
                 ]
             )
 
         if "[io-trace]" not in text:
-            return "A verification skill-call should be backed by [io-trace] with skills-loaded evidence."
+            return "A verification skill-call should be backed by [io-trace] with skills-loaded or skills-reused evidence."
 
         io_trace = extract_control_block(text, "io-trace")
-        skills_loaded = extract_skills_loaded(io_trace)
+        skills_loaded = extract_skills_loaded(io_trace) + extract_skills_loaded(io_trace, field="skills-reused")
         if not any(_skill_name(skill) == "verification-before-completion" for skill in skills_loaded):
             return (
-                "The [io-trace] skills-loaded list should include verification-before-completion " "when completion-check claims that skill-call."
+                "The [io-trace] skills-loaded or skills-reused list should include verification-before-completion when completion-check claims that skill-call."
             )
     elif "[io-trace]" not in text:
         return "A finalized completion response must include an [io-trace] block after [completion-check]."

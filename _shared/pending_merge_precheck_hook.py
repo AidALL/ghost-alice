@@ -20,6 +20,8 @@ from typing import Any, Literal
 
 from merge_companion_messages import render_pending_merge_message
 import runtime_config
+from session_check_cache import observe_check, UnstableCheckTarget
+from session_intent_analyzer_hook import bound_session_identity
 
 OutputFormat = Literal["text", "json"]
 HookKind = Literal["prompt-check", "hook-reminder", "session-check"]
@@ -205,30 +207,31 @@ def _visibility_json_payload(input_payload: dict[str, Any]) -> str | None:
     return json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False)
 
 
-def _text_payload(platform: str, hook: HookKind, context: str, internal: str) -> str:
-    pending = _pending_entries(platform)
-    if pending:
+def _text_payload(platform: str, hook: HookKind, context: str, internal: str, result: dict | None = None) -> str:
+    count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
+    if count:
+        if result is not None and result["status"] == "reused":
+            return f"merge-companion precheck: pending={count} (unchanged; session check reused)."
         return "\n".join([
-            f"Internal instruction: {internal}",
-            _pending_line(platform, len(pending)),
+            _pending_line(platform, count),
             render_pending_merge_message(context),  # type: ignore[arg-type]
         ])
 
-    return "\n".join([
-        f"Internal instruction: {internal}",
-        f"User: {_CLEAN_USER_COPY[hook]}",
-        f"Tech: {_CLEAN_TECH_COPY[hook]}",
-    ])
+    return _clean_contract_line(platform)
 
 
-def _json_payload(platform: str, internal: str) -> str:
-    pending = _pending_entries(platform)
-    if pending:
-        message = f"{internal}\n{_pending_line(platform, len(pending))}"
-        return json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False)
-    message = f"{internal}\n{_clean_contract_line(platform)}"
+def _json_payload(platform: str, internal: str, result: dict | None = None) -> str:
+    count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
+    receipt = {"platform": platform, "manifest_path": str(_pending_manifest_path(platform)), "undecided_count": count}
+    if result is not None:
+        receipt.update({"status": result["status"], "checked_at": result["checked_at"]})
+    if count:
+        message = (f"merge-companion precheck: pending={count} (unchanged; session check reused)."
+                   if result is not None and result["status"] == "reused" else _pending_line(platform, count))
+        return json.dumps({"continue": True, "systemMessage": message, "ghostAlicePendingMergeCheck": receipt}, ensure_ascii=False)
+    message = _clean_contract_line(platform)
     # A clean pass is routine: the hook runner keeps it off the user screen and in the strict log.
-    return json.dumps({"continue": True, "systemMessage": message, "ghostAliceSurface": "routine"}, ensure_ascii=False)
+    return json.dumps({"continue": True, "systemMessage": message, "ghostAliceSurface": "routine", "ghostAlicePendingMergeCheck": receipt}, ensure_ascii=False)
 
 
 def main() -> int:
@@ -238,18 +241,35 @@ def main() -> int:
     parser.add_argument("--context", required=True, choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", required=True, choices=["text", "json"])
     parser.add_argument("--internal-b64", required=True)
+    parser.add_argument("--root", type=Path)
     args, _unknown = parser.parse_known_args()
 
     internal = _decode_internal(args.internal_b64)
+    input_payload = _read_hook_input()
     if args.hook in {"prompt-check", "hook-reminder"} and args.context == "prompt_submit" and args.format == "json":
-        visibility_payload = _visibility_json_payload(_read_hook_input())
+        visibility_payload = _visibility_json_payload(input_payload)
         if visibility_payload is not None:
             print(visibility_payload)
             return 0
+    result = None
+    if args.root is not None:
+        session_id = bound_session_identity(args.platform, input_payload) or "unknown"
+        # Cache only normalized check metadata, not backup contents or raw manifest entries.
+        try:
+            result = observe_check(args.root, args.platform, session_id, "pending-merges", _pending_manifest_path(args.platform),
+                                   lambda: {"undecided_count": len(_pending_entries(args.platform))},
+                                   validate=lambda value: type(value.get("undecided_count")) is int and value["undecided_count"] >= 0)
+        except UnstableCheckTarget as error:
+            reason = f"merge-companion precheck: {error}"
+            if args.format == "json":
+                print(json.dumps({"decision": "block", "reason": reason}))
+                return 0
+            print(reason, file=sys.stderr)
+            return 2
     if args.format == "json":
-        print(_json_payload(args.platform, internal))
+        print(_json_payload(args.platform, internal, result))
     else:
-        print(_text_payload(args.platform, args.hook, args.context, internal))
+        print(_text_payload(args.platform, args.hook, args.context, internal, result))
     return 0
 
 

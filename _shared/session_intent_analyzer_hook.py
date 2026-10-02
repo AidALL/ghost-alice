@@ -203,7 +203,7 @@ def extract_prompt(payload: dict[str, Any]) -> str:
     )
 
 
-def observation_receipt(paths: dict[str, Path], observation: dict[str, Any]) -> str:
+def observation_receipt(paths: dict[str, Path], observation: dict[str, Any], *, compact: bool = False) -> str:
     """Bind the semantic writer to this completed observation, not a mutable pointer."""
     state_path = Path(paths["state"]).resolve()
     events_path = Path(paths["events"]).resolve()
@@ -219,10 +219,14 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any]) -> 
         "storage_backend": "sqlite",
         "input_event_id": observation["input_event_id"],
     }
-    return (
+    binding = (
         "\n[session-intent-receipt]\n"
         + json.dumps(receipt, ensure_ascii=True, separators=(",", ":"))
         + "\n[/session-intent-receipt]\n"
+    )
+    if compact:
+        return binding + "Use exact receipt bindings for ledger reads/deltas; reject stale input IDs. No raw text or alternate ledger. Read the skill if its body is lost."
+    return binding + (
         "For a semantic delta, use session_intent_ledger.py with this receipt's exact "
         "--root ledger_root, --platform platform, --session-id session_id, and "
         "--expected-input-event-id input_event_id. Keep the receipt used to make the decision; "
@@ -322,7 +326,15 @@ def main(argv: list[str] | None = None) -> int:
                     observation=observation,
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
-                message += observation_receipt(paths, observation)
+                try:
+                    from session_check_cache import instruction_delivery
+                    full = instruction_delivery(ledger_root, args.platform, session_id, "hook-intake-instructions", Path(__file__), message)
+                except (ImportError, OSError):
+                    # Cache delivery is optional; a successful intake stays valid.
+                    full = True
+                if not full:
+                    message = "session-intent-analyzer: input observed; apply the retained skill to current meaning; add only material semantic deltas."
+                message += observation_receipt(paths, observation, compact=not full)
                 routine = True
     except Exception:
         _write_degrade_marker(ledger_root, args.platform, payload, "ledger-write-failed")

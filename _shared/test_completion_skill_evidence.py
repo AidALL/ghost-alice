@@ -53,6 +53,10 @@ def reply(text):
 
 
 class ValidatorOptionTests(unittest.TestCase):
+    def test_codex_accepts_executed_workflow_with_valid_instruction_reuse_trace(self):
+        reused = WITH_SELF_REPORT.replace("skills-loaded:", "skills-reused:")
+        self.assertIsNone(self.check(reused))
+
     def check(self, text, **kwargs):
         return validator.validate_completion_text(text, require_completion_check=True, **kwargs)
 

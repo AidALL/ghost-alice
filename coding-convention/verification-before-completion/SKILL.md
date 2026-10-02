@@ -103,7 +103,7 @@ Hard sequence for a new current-turn closure claim: skill load/call -> decision-
 
 Before any executed-work completion, fix, success, or fresh-verification claim, perform the steps below in this exact order:
 
-1. Load or call `verification-before-completion` for the current turn. On Claude Code, this means the visible Skill call. On Codex, this means reading this current `SKILL.md` and following its workflow.
+1. Load or call `verification-before-completion` for the current turn. On Claude Code, this means the visible Skill call. On Codex, this means using a fresh or valid retained instruction body and following its workflow for this input; see Instruction Body Reuse in `references/verify-or-reuse.md`.
 2. Extract the acceptance criteria and map each intended final claim to fresh evidence from this turn: cite a successful result already returned, such as a write or a test run, and run a decision-relevant check only for a claim that no returned result covers.
 3. Only after the skill is loaded and every claim has its evidence, write `[completion-check]`; on Codex, include the `skill-call: verification-before-completion (this turn)` line.
 
@@ -163,9 +163,9 @@ Use this block immediately before the final summary when you are making an execu
 - evidence: <fresh command or inspected file>
 ```
 
-On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after that skill's `SKILL.md` was read and followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
+On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after a fresh or valid retained instruction body was used and the workflow followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
 
-Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Record the actually called `verification-before-completion` skill in an explicit `skills-loaded` list in `[io-trace]`. A format repair must preserve the substantive business result and supported evidence.
+Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Record the executed `verification-before-completion` workflow in `[io-trace]`: `skills-loaded` for an actual read or `skills-reused` for a valid retained instruction body. A format repair must preserve the substantive business result and supported evidence.
 
 Only emit a finalized `[completion-check]` when every listed criterion has a `pass` or `fail` verdict and `unverified` is `none`. If anything remains unverified, do not emit the final block. Report the partial state in prose and name the missing check.
 

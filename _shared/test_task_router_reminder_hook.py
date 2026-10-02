@@ -340,6 +340,36 @@ console.log(JSON.stringify({{event:snapshot?.latestInput?.event_id || '', matche
 
 
 class RoutingDeliveryTests(unittest.TestCase):
+    def test_cached_guidance_never_reuses_the_previous_input_security_verdict(self):
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = dict(os.environ)
+            env.pop('CODEX_THREAD_ID', None)
+            env.pop('GHOST_ALICE_SESSION_ID', None)
+            def run():
+                return json.loads(subprocess.run(
+                    [sys.executable, trh.__file__, '--platform', 'codex', '--format', 'json', '--root', str(root)],
+                    input=json.dumps({'session_id': 'reuse'}), text=True, capture_output=True, env=env, check=True,
+                ).stdout)['systemMessage']
+            ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='first')
+            first = run()
+            ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='second')
+            second = run()
+            self.assertIn('gate-opened', first)
+            self.assertIn('gate-opened', second)
+            self.assertIn('reuse retained instructions', second)
+            self.assertLess(len(second), len(first))
+            ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='blocked')
+            state = ledger.read_session_state(root=root, platform='codex', session_id='reuse')
+            event = state['latest_input_event_id']
+            ledger.record_turn(root=root, platform='codex', session_id='reuse', expected_input_event_id=event,
+                               intent_delta={'model_security_decision': {'decision': 'block', 'input_event_id': event}})
+            blocked = run()
+            self.assertIn('current-lineage block', blocked)
+            self.assertNotIn('gate-opened', blocked)
+            self.assertNotIn('reuse retained instructions', blocked)
+
     """Exercise authoritative storage and both platform wire formats, not only a policy string."""
 
     def test_ledger_hint_reads_exact_session_from_unrelated_cwd(self):
@@ -475,7 +505,10 @@ class RoutingDeliveryTests(unittest.TestCase):
                         self.assertTrue(host['continue'])
                         context = host['hookSpecificOutput']['additionalContext']
                         self.assertIn('unresolved-work: ["order-fix"]', context)
-                        self.assertIn('task-router consumes session-intent', context)
+                        if profile == 'strict':
+                            self.assertIn('task-router consumes session-intent', context)
+                        else:
+                            self.assertIn('execute task-router for this input', context)
                         if profile != 'strict':
                             self.assertNotIn('systemMessage', host)
 

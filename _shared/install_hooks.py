@@ -201,6 +201,14 @@ def _resolve_pending_merge_precheck_script() -> str:
     return _resolve_shared_hook_script("pending_merge_precheck_hook.py")
 
 
+def _repo_root_from_this_file() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _session_intent_root() -> Path:
+    return _repo_root_from_this_file() / ".tmp" / "session-intent"
+
+
 def _pending_merge_precheck_command(
     *,
     platform: str,
@@ -226,6 +234,8 @@ def _pending_merge_precheck_command(
             output_format,
             "--internal-b64",
             instruction_payload,
+            "--root",
+            _quote_static_arg(_session_intent_root()),
         ])
 
     if output_format == "json":
@@ -280,14 +290,6 @@ HOOK_INTERNAL = (
     "Every user input requires task-router, including a simple question, opinion, clarification, status comment, or follow-up. "
     "Do not skip task-router for answer-only turns or prior routing; never place task-router before session-intent-analyzer or the jailbreak-detector downstream gate."
 )
-
-
-def _repo_root_from_this_file() -> Path:
-    return Path(__file__).resolve().parents[1]
-
-
-def _session_intent_root() -> Path:
-    return _repo_root_from_this_file() / ".tmp" / "session-intent"
 
 
 def _resolve_task_router_reminder_hook_script() -> str:
@@ -410,7 +412,7 @@ SESSION_INTENT_ENTRY_CODEX = {
 # 2. Work-stop hook: verification-before-completion reminder.
 STOP_HOOK_MARKER = "[completion-reminder] AGENTS.md"
 STOP_HOOK_INTERNAL = (
-    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. " "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. " "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. " "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. " "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. " "On visible Skill surfaces such as Claude Code Skill, actually load " "verification-before-completion before the closure claim; the Stop hook checks that call in the transcript, so the [completion-check] carries no skill-call line there. " "On Codex, write skill-call: verification-before-completion only after reading that SKILL.md in this turn. " "Do not infer verification from task-router, metadata, prior context, or routing notes. " "Do not claim skill-call: verification-before-completion unless verification-before-completion was actually loaded this turn."
+    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. " "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. " "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. " "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. " "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. " "On visible Skill surfaces such as Claude Code Skill, actually load " "verification-before-completion before the closure claim; the Stop hook checks that call in the transcript, so the [completion-check] carries no skill-call line there. " "On Codex, write skill-call: verification-before-completion only after using a fresh or valid retained instruction body and executing its workflow this turn. " "Do not infer verification from task-router, metadata, prior context, or routing notes. " "Do not claim skill-call: verification-before-completion unless its workflow was executed this turn with a fresh or valid retained instruction body."
 )
 STOP_HOOK_MESSAGE = _localized_bridge(
     STOP_HOOK_INTERNAL,

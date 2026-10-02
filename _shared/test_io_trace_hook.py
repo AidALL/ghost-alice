@@ -376,7 +376,7 @@ class TestSessionIntentRootResolution(unittest.TestCase):
             shutil.copy2(real_ledger, skill_scripts / "session_intent_ledger.py")
             runtime_shared = base / "runtime" / "current" / "_shared"
             runtime_shared.mkdir(parents=True)
-            for name in ("io_trace_hook.py", "session_intent_analyzer_hook.py", "task_router_reminder_hook.py"):
+            for name in ("io_trace_hook.py", "session_intent_analyzer_hook.py", "task_router_reminder_hook.py", "session_check_cache.py"):
                 shutil.copy2(repo_shared / name, runtime_shared / name)
             fake_repo = base / "repo"
             (fake_repo / "skill-catalog").mkdir(parents=True)
