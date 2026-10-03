@@ -596,6 +596,18 @@ def _take_surface_declaration(stdout: str) -> tuple[str, str]:
     return ("routine" if declared == "routine" else ""), json.dumps(protocol, ensure_ascii=False) + "\n"
 
 
+def _strip_private_protocol_metadata(stdout: str) -> str:
+    """Remove consumed internal receipts at the host boundary; retain raw audit."""
+    try:
+        protocol = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return stdout
+    if not isinstance(protocol, dict) or "ghostAlicePendingMergeCheck" not in protocol:
+        return stdout
+    protocol.pop("ghostAlicePendingMergeCheck")
+    return json.dumps(protocol, ensure_ascii=False) + "\n"
+
+
 def _visibility_context(
     hook_id: str,
     stdout: str,
@@ -761,6 +773,7 @@ def _labeled(value_key: str, value: str) -> str:
 
 
 def _render_model_surface(item: dict[str, object], stdout: str, stderr: str) -> str:
+    stdout = _strip_private_protocol_metadata(stdout)
     level = str(item.get("model_surface") or "")
     value_key = str(item.get("value_key") or "surface-item")
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
@@ -791,6 +804,7 @@ def _is_hook_noop_json(stdout: str) -> bool:
 
 
 def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> tuple[str, str]:
+    stdout = _strip_private_protocol_metadata(stdout)
     level = str(item.get("user_surface") or "")
     if _is_hook_noop_json(stdout):
         return (stdout, "" if level in {"hidden", "compact", "focused"} else stderr)

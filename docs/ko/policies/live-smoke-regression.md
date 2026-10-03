@@ -28,7 +28,7 @@
 각 runtime에서 repo root를 열고 이 request를 보냅니다.
 
 ```text
-Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion and include [io-trace].
+Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion.
 ```
 
 ## Target Runtimes
@@ -56,7 +56,7 @@ Antigravity adapter가 없으면 그 smoke item은 inconclusive로 기록합니�
 - conditional `recovery-action`: mismatch, scope reopen, external side effect, hard-to-recover action에 concrete next step이 필요할 때만 나타납니다.
 - `skill activation permission`: Claude Code와 Antigravity-family runtime이 core gate만 담은 줄인 allowlist 때문에 막히지 않습니다.
 - `verification-before-completion`: completion claim 직전에 fresh evidence가 나타납니다.
-- `[io-trace]`: 읽은 file, 실행한 command, load한 skill이 auditable하게 남습니다.
+- `internal audit`: 화면의 `[io-trace]`를 요구하지 않고도 도구 접근 기록을 감사할 수 있습니다.
 - pending merge precheck: hook evidence가 있으면 hook-verified reuse로 분기하고, 없으면 current platform manifest를 직접 inspect합니다.
 
 ## Verification Layers
@@ -86,7 +86,7 @@ observed:
   recovery-action:
   skill activation permission:
   verification-before-completion:
-  io-trace:
+  internal-audit:
 failure triage:
   status: pass | fail | invalid-harness | inconclusive
   reason:

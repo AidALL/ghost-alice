@@ -89,7 +89,7 @@ If hooks are disabled in the Codex session, if the session is before hook review
 - Do not infer whether an action is safe from tool-call identity or payload content. The decision depends only on the current-lineage block gate and the silent allow invariant.
 - Gate schemas such as `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, and `[io-trace]` follow the English canonical narrative + English control surface principle.
 - When a final response claims executed work is complete, fixed, successful, or freshly verified, leave a `[completion-check]` block that connects acceptance criteria with fresh evidence.
-- Leave an `[io-trace]` block at the end of every normal response; a no-work terminal route emits only its concise clarification or resolved content.
+- Keep strict internal audit records; display a concise trace only when requested or decision-relevant. A no-work terminal route emits only its concise clarification or resolved content.
 - If you omit any of these, fill it in immediately and then continue.
 
 ## Session Gate Contract
@@ -139,7 +139,7 @@ Leave the block below when the final response claims executed work is complete, 
 - evidence: <fresh command or inspected file>
 ```
 
-Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Record the executed `verification-before-completion` workflow in `[io-trace]`: `skills-loaded` for an actual read or `skills-reused` for a valid retained instruction body. A format repair must preserve the substantive business result and supported evidence.
+Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Retain actual skill-read or valid-reuse execution evidence internally; a printed `[io-trace]` is optional and is not a verification prerequisite. A format repair returns only the corrected completion fields, preserves the substantive result and valid evidence, and never demands the business answer again or reruns unchanged checks.
 
 The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each closure claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
 
@@ -171,7 +171,7 @@ This procedure is a quality-maintenance device that the user confirmed across re
 
 In every conversation, after the session-intent-analyzer intake and the jailbreak-detector downstream gate, and before downstream work or a tool call, call the `task-router` skill. Check its applicability regardless of domain, including coding, documentation, research, and chores. A missing manual pending-merge result may be deferred only through a no-work terminal route; a normal route resolves it before downstream work.
 
-In Codex the skill description and metadata are exposed in the system context, but that alone is not treated as satisfying the required gate. After the session-intent-analyzer intake and the jailbreak-detector downstream gate, read or validly reuse `~/.agents/skills/task-router/SKILL.md` and perform the current `task-router` workflow to scan the skill descriptions loaded into the system. task-router is a consumer of the session-intent and jailbreak gate context, and it does not own raw user intent, the ledger, the jailbreak decision, the downstream gate state, or tool permission. Record the output, verification, and lifecycle skill matching results, then start the work. If that turn requires additional gates such as `using-coding-convention`, `systematic-debugging`, `test-driven-development`, `verification-before-completion`, or `finishing-a-development-branch`, use a fresh or valid retained instruction body for that skill's `SKILL.md`. Record every `SKILL.md` read in the `files-read` of `[io-trace]` with an absolute path. A metadata-only match is not a file read and is not a `skills-loaded` entry. Do not skip this gate.
+In Codex the skill description and metadata are exposed in the system context, but that alone is not treated as satisfying the required gate. After the session-intent-analyzer intake and the jailbreak-detector downstream gate, read or validly reuse `~/.agents/skills/task-router/SKILL.md` and perform the current `task-router` workflow to scan the skill descriptions loaded into the system. task-router is a consumer of the session-intent and jailbreak gate context, and it does not own raw user intent, the ledger, the jailbreak decision, the downstream gate state, or tool permission. Record the output, verification, and lifecycle skill matching results, then start the work. If that turn requires additional gates such as `using-coding-convention`, `systematic-debugging`, `test-driven-development`, `verification-before-completion`, or `finishing-a-development-branch`, use a fresh or valid retained instruction body for that skill's `SKILL.md`. Retain every actual `SKILL.md` read with its absolute path in execution evidence. A requested printed trace may summarize those reads; it is not mandatory. A metadata-only match is not a file read and is not a `skills-loaded` entry. Do not skip this gate.
 
 The normal order is `pending-merge precheck -> session-intent-analyzer -> jailbreak-detector/downstream-gates -> task-router -> downstream/tool-checkpoint`. Describing it as `task-router -> session-intent-analyzer`, or arranging the execution order so that it skips passing through the detector, is a rule violation.
 
@@ -242,30 +242,15 @@ The helper handles the lookup priority automatically: env var -> `~/.ghost-alice
 
 ### 9. io-trace Transparency Rule
 
-Output an `[io-trace]` block at the end of every normal response. A no-work terminal response (`clarification-only` or `direct-response`) emits no control block and permits no downstream file, tool, credential, or external-state access. Strict hook logging remains active for the exception.
+Keep strict tool audit logging active independently of user-screen verbosity. The PostToolUse `_shared/io_trace_hook.py` records to `~/.ghost-alice/io-trace.jsonl`; installed hook execution and audit consumers are unchanged.
 
-```
-[io-trace]
-- files-read: [path1, path2, ...]
-- files-written: [path1, ...]
-- files-searched: [pattern -> target path, ...]
-- commands-run: [command summary, ...]
-- web-accessed: [URL or search term, ...]
-- skills-loaded: [skill name, ...]
-- skills-reused: [skill name, ...]
-- subagents: [description -> tool-call count, ...]
-```
+Printed `[io-trace]` is optional. Show a concise trace or audit locator when the user requests it or when access provenance changes the next decision. Routine file, command and skill lists stay in execution evidence rather than being pasted into every answer. A missing, differently ordered or differently formatted printed trace cannot invalidate completion evidence or force answer replay.
 
-Rules:
-- Omit a category that has no items (do not output an empty array).
-- Write file paths as absolute paths.
-- `skills-loaded` records only the skills whose `SKILL.md` body was actually read and whose workflow was performed in the current turn.
-- A required gate skill is not satisfied by a metadata-only match. Use a fresh or valid retained instruction body for `task-router` and the gate skills required that turn. Without that body and current workflow execution, it is neither a `skill-call` nor `done`.
-- `skills-reused` records an executed workflow using a valid retained instruction body, with its source path and same-session load-record evidence; it is not a new file read.
-- If you read a `SKILL.md` directly with a tool, also record the absolute path in `files-read`. A metadata-only match is not file I/O and is not a `skills-loaded` entry.
-- A subagent result must include the list of files accessed inside that agent.
-
-Code-level reinforcement: `_shared/io_trace_hook.py` records automatically to `~/.ghost-alice/io-trace.jsonl` as a PostToolUse hook.
+- A required gate skill is not satisfied by a metadata-only match. Before marking a gate done, use a fresh or valid retained instruction body and perform its workflow. Preserve truthful actual-read, visible-call and valid-reuse evidence; an optional printed list is not proof of execution.
+- Retain absolute accessed-file paths and call counts in subagent evidence artifacts; do not paste the entire inventory into the user answer by default.
+- If a trace is requested, use only non-empty factual categories: `files-read`, `files-written`, `files-searched`, `commands-run`, `web-accessed`, `skills-loaded`, `skills-reused`, and `subagents`. Distinguish actual reads from valid reuse.
+- Surface meaningful changes, blocks, failed verification and unresolved criteria. Display suppression never suppresses those decisions or internal checks.
+- A no-work terminal route emits only its resolved answer or decisive clarification and starts no downstream access; strict hook logging remains active.
 
 ## Codex CLI Environment Notes
 
@@ -273,7 +258,7 @@ Code-level reinforcement: `_shared/io_trace_hook.py` records automatically to `~
 
 Skill bodies are written against the Claude Code tool names (`Read`, `Write`, `Edit`, `Bash`, `Skill`, `Task`, `TodoWrite`). In Codex, map them as follows.
 
-- A `Skill` call is unnecessary. Codex receives skill metadata as native context, but recognizing metadata is not loading or running a skill. Record a required gate skill in `skill-call:` only after using a fresh or valid retained instruction body and following the current procedure. Record actual reads in `skills-loaded`; record valid reuse in `skills-reused`.
+- A `Skill` call is unnecessary. Codex receives skill metadata as native context, but recognizing metadata is not loading or running a skill. Record a required gate skill in `skill-call:` only after using a fresh or valid retained instruction body and following the current procedure. Retain actual reads and valid reuse in internal execution evidence; distinguish them in any requested trace.
 - `Task` subagent dispatch -> `spawn_agent`. For details see `coding-convention/using-coding-convention/references/codex-tools.md`.
 - `TodoWrite` -> `update_plan`
 - `Read`, `Write`, `Edit`, and `Bash` use the native tools.
@@ -344,4 +329,4 @@ Operating rules:
 - When the user explicitly asks to "just make it work" or requests urgent recovery, a temporary patch is allowed, but leave a `residual-impact` note.
 - For a new rule, skill, or document change, confirm with a test or a gate that the rule actually triggers on the real execution path.
 
-Instruction-body loading follows `coding-convention/verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse (installed path on Codex). A retained instruction body may be reused with a same-session coded load record; current-input workflow judgments still run. List actual reads in skills-loaded and valid reuse in skills-reused. Routine clean merge results need no repeated prose; preserve pending/changed/failed-state warnings.
+Instruction-body loading follows `coding-convention/verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse (installed path on Codex). A retained instruction body may be reused with a same-session coded load record; current-input workflow judgments still run. Retain actual reads and valid reuse in internal execution evidence; distinguish them in any requested trace. Routine clean merge results need no repeated prose; preserve pending/changed/failed-state warnings.

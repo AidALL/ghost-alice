@@ -257,7 +257,7 @@ This organizes where the current implementation components fit in the four-layer
 | boundary-contract/SKILL.md | layer 1 / layer 2 boundary lock | Declares objective, non-goals, allowed surfaces, prohibited surfaces, acceptance criteria, and stop conditions before implementation or verification work |
 | tool-checkpoint | PreToolUse / BeforeTool governance checkpoint | Hook-enforced full-schema retry point. It is not user-input intake and is not a semantic safety classifier. Its decision depends only on the current-lineage downstream block gate |
 | verification-before-completion/SKILL.md | layer 3 completion evidence gate | Requires fresh verification evidence and claim-evidence mapping before completion, recommendation, choice, or success claims |
-| io-trace hook and prompt surface | governance transparency layer | PostToolUse audit log plus prompt-visible `[io-trace]` summary. It records file/tool access metadata without storing raw prompts or secrets |
+| io-trace hook and prompt surface | governance transparency layer | PostToolUse audit log with an optional, decision-relevant `[io-trace]` summary. It records file/tool access metadata without storing raw prompts or secrets |
 | skill-evolution/SKILL.md | layer 4 report-only evolution input | Consumes session intent and io-trace patterns to produce Instinct candidate reports. It does not automatically modify skills |
 | compact-handoff/SKILL.md | governance continuity support | Preserves evidence, state, and next actions across context compaction without changing hook behavior |
 | agent-security-scan/SKILL.md | governance audit support | Performs report-only static scans of settings, hooks, skills, MCP config, credential surfaces, and exposure risks |

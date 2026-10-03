@@ -49,23 +49,23 @@ SMOKE_CASES: dict[str, SmokeCase] = {
     "readme-first-lines": SmokeCase(
         case_id="readme-first-lines",
         prompt=(
-            "Read the first 10 lines of README.md using a read-only local " "command, summarize what Ghost-ALICE OS is in one paragraph, " "apply verification-before-completion before any completion " "claim, and include [io-trace]. Do not edit files."
+            "Read the first 10 lines of README.md using a read-only local " "command, summarize what Ghost-ALICE OS is in one paragraph, " "apply verification-before-completion before any completion " "claim. Do not edit files."
         ),
-        required_markers=("[gate-state]", "[io-trace]"),
+        required_markers=("[gate-state]",),
     ),
     "install-doctor-read": SmokeCase(
         case_id="install-doctor-read",
         prompt=(
-            "Read _shared/install_doctor.py using a simple read-only full-file " "command such as `Get-Content _shared/install_doctor.py -Raw`; avoid " "shell-side filtering or formatting for the target file. " "Summarize in at most 4 lines what runtime-core doctor drift " "detection covers, citing concrete code symbols as evidence. " "Do not edit files. Include [io-trace]."
+            "Read _shared/install_doctor.py using a simple read-only full-file " "command such as `Get-Content _shared/install_doctor.py -Raw`; avoid " "shell-side filtering or formatting for the target file. " "Summarize in at most 4 lines what runtime-core doctor drift " "detection covers, citing concrete code symbols as evidence. " "Do not edit files."
         ),
-        required_markers=("[gate-state]", "[io-trace]"),
+        required_markers=("[gate-state]",),
     ),
     "completion-check-readme": SmokeCase(
         case_id="completion-check-readme",
         prompt=(
-            "Read the first 10 lines of README.md, make a brief completion " "claim only after fresh verification-before-completion, and " "include both [completion-check] and [io-trace]. Do not edit files."
+            "Read the first 10 lines of README.md, make a brief completion " "claim only after fresh verification-before-completion, and " "include [completion-check]. Do not edit files."
         ),
-        required_markers=("[completion-check]", "[io-trace]"),
+        required_markers=("[completion-check]",),
     ),
 }
 

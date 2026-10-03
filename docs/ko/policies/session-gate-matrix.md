@@ -175,7 +175,7 @@ Hard sequence for a new current-turn closure claim: skill load/call -> decision-
 
 `verification-before-completion`은 executed-work closure claim 전 lifecycle gate입니다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않습니다. Claude Code에서는 `[completion-check]`에 `skill-call: verification-before-completion (this turn)` 줄이 없습니다. Stop hook이 visible Skill call을 transcript에서 확인합니다. Codex에서는 새로 읽거나 유효하게 보존된 instruction body로 해당 workflow를 따른 경우에만 그 줄을 씁니다.
 
-Codex에서 `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded` 또는 `skills-reused`도 `verification-before-completion`을 포함해야 합니다. Claude Code에서는 Stop hook이 `skills-loaded`를 대조하지 않습니다. Stop completion hook이 final response를 validate하는 곳에서는 이런 결함을 턴당 최대 한 번 block합니다. 이전 메시지가 화면에 남는 host에서는 빠졌거나 고친 control block만 요청하고, headless 또는 알 수 없는 host에서는 완전한 단독 답변을 요청하며, 그 한 번의 재시도 뒤에도 남는 결함은 또 다른 재작성 대신 보이는 notice와 함께 턴을 끝냅니다.
+화면의 `[io-trace]`는 선택 사항이며, 유무·순서·스킬 목록 표기로 완료를 차단하지 않습니다. 엄격한 내부 감사와 실제 검증은 유지합니다. Claude는 현재 턴의 실제 Skill 호출을 검사하고, Codex는 워크플로 실행 후 정확한 검증 스킬 선언을 요구합니다. 복구는 누락되거나 잘못된 완료 필드만 요청하며, 근거가 없으면 짧고 정직하게 완료 주장을 철회합니다. 업무 본문 반복이나 변경 없는 근거의 재검증은 요구하지 않습니다. Claude의 한 번 재시도와 미해결 결함 알림, Codex의 실제 완료 근거 결함 차단은 유지합니다. 마지막 응답만 반환하는 호출자는 원래 업무 결과와 정정 기록을 별도로 보존해야 합니다. 이 훅은 복구 상태를 반환하며 업무 본문을 재구성하지 않습니다.
 
 Codex environments without a visible Skill surface:
 
@@ -214,4 +214,4 @@ same ref의 simple polling은 output을 영원히 반복하라는 의무가 아�
 - `skill-call:` field는 form completion과 actual obligation completion이 섞이는 것을 구조적으로 막습니다.
 - metadata-only skill matching은 candidate discovery이지 execution이 아닙니다. Required gate skills는 fresh 또는 valid retained instruction body를 사용하고 현재 입력의 workflow를 따를 때만 complete입니다.
 
-Instruction body 재사용은 canonical `coding-convention/verification-before-completion/references/verify-or-reuse.md`의 Instruction Body Reuse를 따릅니다. 동일 세션의 코드 기록과 실제로 보존된 body가 필요합니다. 현재 입력의 의미 판단과 gate workflow는 계속 수행합니다. 실제 읽기는 `skills-loaded`, 유효한 재사용은 `skills-reused`에 기록합니다.
+Instruction body 재사용은 canonical `coding-convention/verification-before-completion/references/verify-or-reuse.md`의 Instruction Body Reuse를 따릅니다. 동일 세션의 코드 기록과 실제로 보존된 body가 필요합니다. 현재 입력의 의미 판단과 gate workflow는 계속 수행합니다. 실제 읽기와 유효한 재사용은 내부 실행 근거에 구분하여 남깁니다. 화면 추적 목록은 요청되거나 판단에 필요할 때만 표시합니다.

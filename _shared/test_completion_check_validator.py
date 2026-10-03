@@ -106,10 +106,9 @@ class TestCompletionTextFinalSurfaceOrder(unittest.TestCase):
         self.assertIsNotNone(result)
         self.assertIn("gate-state", result)
 
-    def test_completion_check_rejects_io_trace_before_completion_check(self):
+    def test_completion_check_allows_optional_trace_before_completion_check(self):
         result = v.validate_completion_text(_final_text("io", "completion", "summary"))
-        self.assertIsNotNone(result)
-        self.assertIn("io-trace", result)
+        self.assertIsNone(result)
 
     def test_completion_check_allows_completion_summary_io_trace_order(self):
         self.assertIsNone(v.validate_completion_text(_final_text("completion", "summary", "io")))
@@ -161,10 +160,9 @@ class TestSkillsLoadedForms(unittest.TestCase):
         block = "- skills-loaded:\n  - task-router\n  - verification-before-completion\n- commands-run: [x]"
         self.assertIsNone(self._validate(block))
 
-    def test_missing_skill_rejected(self):
+    def test_optional_trace_missing_skill_does_not_gate_completion(self):
         result = self._validate("- skills-loaded: task-router")
-        self.assertIsNotNone(result)
-        self.assertIn("skills-loaded", result)
+        self.assertIsNone(result)
 
     def _validate(self, skills_block):
         return v.validate_completion_text(self._final(skills_block))
@@ -454,8 +452,8 @@ class TestExplicitMultilineQuotedExamples(unittest.TestCase):
         self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
 
 
-class TestSkillsLoadedGateExactName(unittest.TestCase):
-    """io-trace skills-loaded gate matches the canonical name, not a substring."""
+class TestOptionalTraceSkillNames(unittest.TestCase):
+    """Optional printed skill labels do not determine verification execution."""
 
     def _final(self, skills_block):
         completion_check = "\n".join(
@@ -473,10 +471,9 @@ class TestSkillsLoadedGateExactName(unittest.TestCase):
         )
         return completion_check + "\n\n[io-trace]\n" + skills_block
 
-    def test_v2_suffix_is_rejected(self):
+    def test_optional_v2_label_does_not_override_valid_self_report(self):
         result = v.validate_completion_text(self._final("- skills-loaded: [verification-before-completion-v2]"))
-        self.assertIsNotNone(result)
-        self.assertIn("skills-loaded", result)
+        self.assertIsNone(result)
 
     def test_paren_annotation_still_accepted(self):
         self.assertIsNone(

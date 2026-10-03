@@ -73,10 +73,10 @@ class ValidatorOptionTests(unittest.TestCase):
         broken = WITHOUT_SELF_REPORT.replace("    evidence: python check.py exited 0\n", "")
         self.assertIn("evidence", self.check(broken, require_skill_self_report=False))
 
-    def test_transcript_mode_still_requires_io_trace_after_the_block(self):
-        self.assertIn("io-trace", self.check(f"Result.\n\n{BODY}", require_skill_self_report=False))
+    def test_transcript_mode_accepts_missing_or_reordered_optional_trace(self):
+        self.assertIsNone(self.check(f"Result.\n\n{BODY}", require_skill_self_report=False))
         before = f"Result.\n\n{IO_TRACE}\n{BODY}"
-        self.assertIn("io-trace", self.check(before, require_skill_self_report=False))
+        self.assertIsNone(self.check(before, require_skill_self_report=False))
 
     def test_transcript_mode_still_rejects_gate_state_after_the_block(self):
         late = WITHOUT_SELF_REPORT + "\n[gate-state]\n- task-router: done\n"

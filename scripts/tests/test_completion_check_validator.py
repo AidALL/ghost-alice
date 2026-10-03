@@ -233,21 +233,19 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         self.assertIsNotNone(reason)
         self.assertIn("verification-reminder", reason)
 
-    def test_missing_io_trace(self) -> None:
+    def test_missing_io_trace_is_allowed(self) -> None:
         # Remove the whole [io-trace] block (last block in VALID_TEXT).
         text = VALID_TEXT.split("[io-trace]")[0]
         reason = MOD.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("[io-trace]", reason)
+        self.assertIsNone(reason)
 
-    def test_io_trace_skills_loaded_missing_verification(self) -> None:
+    def test_optional_trace_skills_do_not_gate_completion(self) -> None:
         text = VALID_TEXT.replace(
             "- skills-loaded: [verification-before-completion]\n",
             "- skills-loaded: [task-router]\n",
         )
         reason = MOD.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("skills-loaded", reason)
+        self.assertIsNone(reason)
 
     def test_compact_form_without_acceptance_criteria_is_accepted(self) -> None:
         # Compact form: no acceptance-criteria enumeration, but the claim-evidence-map still binds each claim to evidence and a verdict.

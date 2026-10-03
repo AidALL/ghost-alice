@@ -28,7 +28,7 @@ This procedure runs the same small request in real agent runtimes to verify that
 Open the repo root in each runtime and send this request:
 
 ```text
-Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion and include [io-trace].
+Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion.
 ```
 
 ## Target Runtimes
@@ -56,7 +56,7 @@ Each smoke record captures whether these signals were observed:
 - conditional `recovery-action`: appears only when mismatch, scope reopen, external side effect, or hard-to-recover action needs a concrete next step.
 - `skill activation permission`: Claude Code and Antigravity-family runtimes are not blocked by a shortened allowlist that covers only core gates.
 - `verification-before-completion`: fresh evidence appears immediately before the completion claim.
-- `[io-trace]`: files read, commands run, and skills loaded remain auditable.
+- `internal audit`: tool access remains auditable without requiring printed `[io-trace]`.
 - pending merge precheck: branch to hook-verified reuse when hook evidence exists; otherwise inspect the current platform manifest directly.
 
 ## Verification Layers
@@ -86,7 +86,7 @@ observed:
   recovery-action:
   skill activation permission:
   verification-before-completion:
-  io-trace:
+  internal-audit:
 failure triage:
   status: pass | fail | invalid-harness | inconclusive
   reason:

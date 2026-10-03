@@ -54,7 +54,7 @@ If hooks are disabled in the Claude session, hook review or trust is incomplete,
 - Surface one full `[tool-checkpoint]` per user-input lineage. A declared routine batch may use `[tool-checkpoint:batch]`; polling the same already-started process may use `[tool-checkpoint:continuation]`. New user input, a block or denial, a mismatch, or any other decision-relevant state change returns to the full checkpoint.
 - Keep gate schemas and canonical operating narrative in English.
 - Before claiming executed work complete, fixed, successful, or freshly verified, run `verification-before-completion`, gather decision-relevant fresh evidence, and emit `[completion-check]` that maps each claim to its acceptance criterion and evidence.
-- End every normal response with `[io-trace]`; a no-work terminal route emits only its concise clarification or resolved content.
+- Keep strict internal audit records; printed `[io-trace]` is optional and cannot gate completion. A no-work terminal route emits only its concise clarification or resolved content.
 - If a required step was missed, repair it immediately and continue.
 
 ## Session Gate Contract
@@ -174,18 +174,15 @@ Resolve external credentials through `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/_sh
 
 ### 9. io-trace Transparency Rule
 
-End every normal response with an `[io-trace]` block containing only non-empty categories among `files-read`, `files-written`, `files-searched`, `commands-run`, `web-accessed`, `skills-loaded`, and `subagents`. Use absolute paths. List a skill only after Claude's visible Skill call completed and its workflow was performed. Include every accessed-file list returned by a subagent. A no-work terminal route (`clarification-only` or `direct-response`) emits no block and permits no downstream file, tool, credential, or external-state access; strict hook logging remains active.
+Keep strict tool audit logging active independently of user-screen verbosity. The PostToolUse `_shared/io_trace_hook.py` records to `~/.ghost-alice/io-trace.jsonl`; installed hook execution and audit consumers are unchanged.
 
-```text
-[io-trace]
-- files-read: [path1, path2, ...]
-- files-written: [path1, ...]
-- files-searched: [pattern -> target path, ...]
-- commands-run: [command summary, ...]
-- web-accessed: [URL or search term, ...]
-- skills-loaded: [skill name, ...]
-- subagents: [description -> tool-call count, ...]
-```
+Printed `[io-trace]` is optional. Show a concise trace or audit locator when the user requests it or when access provenance changes the next decision. Routine file, command and skill lists stay in execution evidence rather than being pasted into every answer. A missing, differently ordered or differently formatted printed trace cannot invalidate completion evidence or force answer replay.
+
+- A required gate skill is not satisfied by a metadata-only match. Before marking a gate done, use a fresh or valid retained instruction body and perform its workflow. Preserve truthful actual-read, visible-call and valid-reuse evidence; an optional printed list is not proof of execution.
+- Retain absolute accessed-file paths and call counts in subagent evidence artifacts; do not paste the entire inventory into the user answer by default.
+- If a trace is requested, use only non-empty factual categories: `files-read`, `files-written`, `files-searched`, `commands-run`, `web-accessed`, `skills-loaded`, `skills-reused`, and `subagents`. Distinguish actual reads from valid reuse.
+- Surface meaningful changes, blocks, failed verification and unresolved criteria. Display suppression never suppresses those decisions or internal checks.
+- A no-work terminal route emits only its resolved answer or decisive clarification and starts no downstream access; strict hook logging remains active.
 
 ### 10. Mandatory Web Search Before External Tool Claims
 

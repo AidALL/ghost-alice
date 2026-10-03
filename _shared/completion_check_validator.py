@@ -770,10 +770,10 @@ def validate_completion_text(text, *, require_completion_check=False, require_sk
     the explicit marker, while routine explanations remain allowed.
 
     `require_skill_self_report` (default True) keeps the self-reported
-    verification-before-completion lines and the io-trace skills-loaded
-    cross-check. A host that can verify the skill call from its own transcript
-    (Claude Code) passes False; the block then needs no constant self-report
-    lines, while the io-trace block and every evidence check still apply.
+    verification-before-completion lines. A host that can verify the skill
+    call from its own transcript (Claude Code) passes False. Printed io-trace
+    is optional display, not verification evidence; every evidence check
+    still applies independently of its presence, order or skill spelling.
     """
     text = _strip_block_examples(text)
     if not text:
@@ -802,16 +802,15 @@ def validate_completion_text(text, *, require_completion_check=False, require_sk
     if any(position > first_completion for position in gate_state_positions):
         return "[gate-state] belongs to the opening surface and must not appear after [completion-check]."
 
-    io_trace_positions = find_control_block_positions(text, "io-trace")
-    if io_trace_positions and io_trace_positions[0] < first_completion:
-        return "[io-trace] must appear after [completion-check] on finalized completion surfaces."
-
     if require_skill_self_report:
         if not _VERIFICATION_DONE_RE.search(completion_check):
             return "[completion-check] must include '- verification-before-completion: done'."
 
         skill_call = _SKILL_CALL_RE.search(completion_check)
-        if not skill_call or "verification-before-completion" not in skill_call.group(1):
+        if not skill_call or not any(
+            _skill_name(token) == "verification-before-completion"
+            for token in _split_skill_tokens(skill_call.group(1))
+        ):
             return " ".join(
                 [
                     "verification-reminder: emitted.",
@@ -819,18 +818,6 @@ def validate_completion_text(text, *, require_completion_check=False, require_sk
                     "Do not claim a verification skill-call unless a fresh or valid retained instruction body was used and its workflow executed this turn.",
                 ]
             )
-
-        if "[io-trace]" not in text:
-            return "A verification skill-call should be backed by [io-trace] with skills-loaded or skills-reused evidence."
-
-        io_trace = extract_control_block(text, "io-trace")
-        skills_loaded = extract_skills_loaded(io_trace) + extract_skills_loaded(io_trace, field="skills-reused")
-        if not any(_skill_name(skill) == "verification-before-completion" for skill in skills_loaded):
-            return (
-                "The [io-trace] skills-loaded or skills-reused list should include verification-before-completion when completion-check claims that skill-call."
-            )
-    elif "[io-trace]" not in text:
-        return "A finalized completion response must include an [io-trace] block after [completion-check]."
 
     # Validate every completion-check block, not just the first, so a malformed later block cannot pass by hiding behind a valid earlier one.
     for block in extract_all_control_blocks(text, "completion-check"):

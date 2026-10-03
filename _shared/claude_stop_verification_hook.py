@@ -127,7 +127,7 @@ def _verification_skill_loaded_this_turn(entries: list[dict[str, Any]]) -> bool:
 
 def _assistant_text_this_turn(entries: list[dict[str, Any]]) -> str:
     # Validate the FINAL response only: the last assistant message, which is the one that triggered this stop. AskUserQuestion answers and tool results are not real user prompts, so a "since last user prompt" span would concatenate the completion-checks of several earlier responses and re-validate a stale one (causing repeated false blocks).
-    for entry in reversed(entries):
+    for entry in reversed(entries[_turn_start_index(entries) + 1 :]):
         message = entry.get("message")
         if not isinstance(message, dict) or message.get("role") != "assistant":
             continue
@@ -239,10 +239,10 @@ def main() -> int:
     entries = _iter_transcript(input_data.get("transcript_path") or input_data.get("transcriptPath"))
 
     input_text = _assistant_text_from_stop_input(input_data)
-    if args.platform == "codex":
-        final_text = input_text or _assistant_text_this_turn(entries)
-    else:
-        final_text = _assistant_text_this_turn(entries) or input_text
+    # Native Stop carries the response that triggered this event. Transcript
+    # writes can lag behind it, especially after a blocked-response repair.
+    # Keep transcript-backed Skill proof separate from response-body selection.
+    final_text = input_text or _assistant_text_this_turn(entries)
     if not final_text.strip():
         print(json.dumps(_allow_payload(), ensure_ascii=False))
         return 0

@@ -98,14 +98,14 @@ class CompletionRecoveryTests(unittest.TestCase):
                       "task-router; verification-before-completion; boundary-contract",
                       "verification-before-completion."):
             with self.subTest(value=value):
-                self.assertIsNone(self.check(VALID.replace('[verification-before-completion]', value)))
+                self.assertIsNone(self.check(VALID.replace('skill-call: verification-before-completion (this turn)', 'skill-call: '+value)))
 
-    def test_skill_name_prefix_or_mention_does_not_count_as_skill_load(self):
+    def test_skill_call_prefix_or_mention_does_not_count_as_execution(self):
         for value in ("task-router; verification-before-completion-v2.",
                       "task-router; skipped verification-before-completion.",
                       "task-router; verification-before-completion.fake"):
             with self.subTest(value=value):
-                self.assertIsNotNone(self.check(VALID.replace('[verification-before-completion]', value)))
+                self.assertIsNotNone(self.check(VALID.replace('skill-call: verification-before-completion (this turn)', 'skill-call: '+value)))
 
     def test_multiple_declared_criteria_accept_equivalent_delimiters(self):
         text = VALID.replace('- claim-evidence-map:', '  - boundary: Preserve the protected file. [source: user-explicit]\n- claim-evidence-map:')
@@ -238,10 +238,11 @@ class CompletionRecoveryTests(unittest.TestCase):
     def test_recovery_preserves_business_payload_and_does_not_invent_evidence(self):
         payload = self.hook(VALID.replace("    evidence: python check.py exited 0\n", ""))
         self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertNotIn("complete standalone final answer", payload["reason"])
+        self.assertIn("only the missing or corrected", payload["reason"])
         self.assertIn("Preserve the substantive answer", payload["reason"])
         self.assertIn("Do not invent evidence", payload["reason"])
-        self.assertIn("report the unverified or failed state", payload["reason"])
+        self.assertIn("withdrawing the unsupported", payload["reason"])
 
     def test_honest_unverified_retry_can_end_without_false_success(self):
         payload = self.hook("I have not verified that the tests pass. Verification remains unresolved.", retry=True)

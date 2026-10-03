@@ -86,7 +86,7 @@ Other skills must not call it speculatively.
 
 ## io-trace
 
-Record manifest reads/writes, backup reads/copies, staged writes, and user confirmation prompts in the final `[io-trace]` block.
+Retain manifest reads/writes, backup reads/copies, staged writes and user confirmation activity in internal execution evidence. The PostToolUse audit remains active. Show a concise trace or audit locator only when requested or needed for a decision; do not require a printed `[io-trace]` block.
 
 ## References
 

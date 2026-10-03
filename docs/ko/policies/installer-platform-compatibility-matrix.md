@@ -69,7 +69,7 @@ Runtime tool-checkpoint payload는 routine recovery cost 또는 recovery note fi
 
 executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 `verification-before-completion`이 lifecycle gate입니다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않습니다. Claude Code처럼 visible Skill surface가 있는 환경에서는 `[completion-check]`에 skill-call 줄이 없고, Stop hook이 actual Skill call을 transcript에서 확인합니다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 `skill-call: verification-before-completion (this turn)`를 사용합니다.
 
-Codex에서 final response `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded`에도 같은 skill이 있어야 합니다. Claude Code는 `skills-loaded`를 대조하지 않습니다.
+화면의 `[io-trace]`는 선택 사항이며, 유무·순서·스킬 목록 표기로 완료를 차단하지 않습니다. 엄격한 내부 감사와 실제 검증은 유지합니다. Claude는 현재 턴의 실제 Skill 호출을 검사하고, Codex는 워크플로 실행 후 정확한 검증 스킬 선언을 요구합니다. 복구는 누락되거나 잘못된 완료 필드만 요청하며, 근거가 없으면 짧고 정직하게 완료 주장을 철회합니다. 업무 본문 반복이나 변경 없는 근거의 재검증은 요구하지 않습니다. Claude의 한 번 재시도와 미해결 결함 알림, Codex의 실제 완료 근거 결함 차단은 유지합니다. 마지막 응답만 반환하는 호출자는 원래 업무 결과와 정정 기록을 별도로 보존해야 합니다. 이 훅은 복구 상태를 반환하며 업무 본문을 재구성하지 않습니다.
 
 ## Shell Matrix
 

@@ -898,7 +898,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("Do not ask the user", payload["reason"])
         self.assertIn("always-on completion lifecycle gate", payload["reason"])
 
-    def test_claude_stop_hook_retry_reason_requires_standalone_final_answer(self):
+    def test_claude_stop_hook_retry_repairs_fields_without_answer_replay(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -939,7 +939,7 @@ class TestMessageLanguage(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            # A headless host returns only the final message, so its retry must stand alone.
+            # A headless host receives a bounded correction; the hook does not regenerate its business result.
             headless_env = {**os.environ, "GHOST_ALICE_AGENT_VISIBILITY": "strict", "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}
             result = _run_hook_command(
                 install_hooks.STOP_HOOK_COMMAND,
@@ -950,12 +950,10 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("complete standalone final answer", payload["reason"])
-        self.assertIn("Do not refer to a previous answer", payload["reason"])
-        self.assertIn("Begin with the user's requested answer", payload["reason"])
-        self.assertIn("control block format overrides any requested line-count limit", payload["reason"])
-        self.assertIn("canonical multi-line blocks", payload["reason"])
-        self.assertIn("Do not output a correction-only note", payload["reason"])
+        self.assertNotIn("complete standalone final answer", payload["reason"])
+        self.assertIn("only the missing or corrected [completion-check]", payload["reason"])
+        self.assertIn("do not repeat or rewrite the business answer", payload["reason"])
+        self.assertIn("Do not invent evidence", payload["reason"])
 
     def test_claude_stop_hook_allows_actual_verification_skill_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1021,7 +1019,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("decision", payload)
 
     def test_claude_stop_hook_blocks_completion_claim_with_invalid_body(self):
-        # Completion-body-validation invariant: verification skill loaded, but the [completion-check] body is incomplete (no [io-trace]/acceptance-criteria/claim-evidence-map). The strengthened Claude Stop gate must block, matching the .mjs validator.
+        # Completion-body-validation invariant: verification skill loaded, but the [completion-check] body is incomplete (no claim-evidence-map). The strengthened Claude Stop gate must block, matching the .mjs validator.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1063,7 +1061,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("io-trace", payload["reason"])
+        self.assertIn("claim-evidence-map", payload["reason"])
 
     def test_claude_stop_hook_validates_only_final_response(self):
         # Regression: AskUserQuestion answers / tool results are NOT real user prompts, so the turn boundary does not reset on them. The hook must validate only the FINAL response, not concatenate completion-checks from earlier responses in the span (which made it re-extract a stale/invalid earlier block and block).
@@ -5985,7 +5983,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self.assertNotIn("decision", payload)
         self.assertNotIn("systemMessage", payload)
 
-    def test_codex_stop_hook_body_issue_retry_requires_standalone_answer(self):
+    def test_codex_stop_hook_optional_trace_does_not_require_retry(self):
         result = _run_hook_command(
             install_hooks.STOP_HOOK_COMMAND_CODEX,
             input_text=json.dumps({
@@ -6011,12 +6009,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("decision"), "block", msg=payload)
-        self.assertIn("skills-loaded", payload["reason"])
-        self.assertIn("complete standalone final answer", payload["reason"])
-        self.assertIn("control block format overrides any requested line-count limit", payload["reason"])
-        self.assertIn("canonical multi-line blocks", payload["reason"])
-        self.assertIn("Do not output a correction-only note", payload["reason"])
+        self.assertEqual(payload, {"continue": True})
 
     def test_codex_stop_hook_uses_validator_command(self):
         command = install_hooks.STOP_HOOK_COMMAND_CODEX

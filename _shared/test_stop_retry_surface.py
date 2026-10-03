@@ -1,4 +1,4 @@
-"""Claude Stop-hook retry shape: partial repair where earlier messages stay visible, one retry per turn."""
+"""Claude Stop-hook retry shape: field repair across all host types, one retry per turn."""
 
 import json
 import os
@@ -84,7 +84,7 @@ class StopRetrySurfaceTests(unittest.TestCase):
                 self.assertIn("Do not invent evidence", payload["reason"])
                 self.assertNotIn("complete standalone final answer", payload["reason"])
 
-    def test_transcript_entrypoint_decides_when_the_environment_has_none(self):
+    def test_recorded_entrypoint_does_not_reinstate_replay(self):
         payload = self.run_hook([prompt("Compute it.", "claude-desktop"), skill_call(), reply(DEFECTIVE)])
         self.assertEqual(payload.get("decision"), "block")
         self.assertIn("only the missing or corrected control blocks", payload["reason"])
@@ -162,16 +162,16 @@ class StopRetrySurfaceTests(unittest.TestCase):
                                  reply(DEFECTIVE)], "claude-desktop")
         self.assertEqual(payload.get("decision"), "block")
 
-    def test_codex_retry_text_is_unchanged(self):
+    def test_codex_retry_uses_field_repair(self):
         result = subprocess.run(
             [sys.executable, "-B", str(HOOK), "--platform", "codex"],
-            input=json.dumps({"last_assistant_message": DEFECTIVE}),
+            input=json.dumps({"last_assistant_message": DEFECTIVE,"host_context":{"delivery_surface":"visible_transcript"}}),
             text=True, capture_output=True, check=True,
             env={**os.environ, "CLAUDE_CODE_ENTRYPOINT": "claude-desktop"},
         )
         payload = json.loads(result.stdout)
         self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertNotIn("complete standalone final answer", payload["reason"])
 
 
 if __name__ == "__main__":
