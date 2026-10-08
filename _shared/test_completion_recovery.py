@@ -293,6 +293,14 @@ class CompletionRecoveryTests(unittest.TestCase):
         payload = self.hook(text)
         self.assertEqual(payload.get("decision"), "block")
 
+    def test_quoted_list_lazy_continuation_needs_no_stop_recovery(self):
+        for prefix in ("> - ", "> 1. ", "> 1. > "):
+            text = prefix + "Example output:\nThe task is complete.\n[completion-check]\n"
+            with self.subTest(text=text):
+                payload = self.hook(text)
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -298,6 +298,50 @@ class TestMarkdownExampleBoundaries(unittest.TestCase):
         self.assertFalse(v.looks_like_completion_claim(text))
         self.assertFalse(v.requires_completion_check(text))
 
+    def test_quoted_list_paragraphs_can_continue_lazily(self):
+        for prefix in ("> - ", "> 1. ", "> 2) ", "> 1. > "):
+            text = prefix + "Example output:\nThe task is complete.\n[completion-check]\n"
+            with self.subTest(text=text):
+                self.assertFalse(v.looks_like_completion_claim(text))
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_quoted_list_paragraphs_end_at_blank_or_block_interruption(self):
+        for interruption in ("\n", "# Outside\n", "---\n", "- Outside\n"):
+            text = "> - Example output:\n" + interruption + "The task is complete."
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_quoted_nonparagraph_blocks_do_not_acquire_lazy_paragraphs(self):
+        for first in ("> ```text", "> - ```text", "> # Heading", "> - # Heading", ">     code", "> -     code", "> ---"):
+            text = first + "\nThe task is complete."
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+
+    def test_actual_control_fields_after_quoted_list_are_preserved(self):
+        text = "> 1. Example output:\nquoted continuation.\n\n" + _final_text("completion", "summary", "io")
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_quoted_fence_body_does_not_enable_laziness_for_outside_claim(self):
+        for text in ("> ```text\n> example body\nThe task is complete.",
+                     "> - ```text\n>   example body\nThe task is complete."):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+
+    def test_explicit_indented_quote_paragraph_continuation_keeps_laziness(self):
+        for first in ("> - Example output:", "> Example output:"):
+            text = first + "\n>     continued example\nThe task is complete.\n[completion-check]\n"
+            with self.subTest(text=text):
+                self.assertFalse(v.looks_like_completion_claim(text))
+                self.assertFalse(v.requires_completion_check(text))
+
+    def test_quoted_list_heading_and_code_leaves_still_end_paragraph_laziness(self):
+        for continuation in (">     # Quoted heading", ">\n>       code"):
+            text = "> - Example output:\n" + continuation + "\nThe task is complete."
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+
 
 class TestExplicitMultilineQuotedExamples(unittest.TestCase):
     def example(self, opening, closing):

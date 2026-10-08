@@ -139,6 +139,14 @@ class CompletionRouteTests(unittest.TestCase):
         self.assertTrue(result.get("required_completion_check"))
         self.assertEqual(result.get("evidence_route"), "owner_verification")
 
+    def test_quoted_list_lazy_continuation_does_not_create_closure(self):
+        for prefix in ("> - ", "> 1. ", "> 1. > "):
+            text = prefix + "Example output:\nThe task is complete.\n[completion-check]\n"
+            with self.subTest(text=text):
+                result = self.select({}, dict(text=text, phase="final"), {})
+                self.assertFalse(result.get("required_completion_check"))
+                self.assertEqual(result.get("evidence_route"), "no_external_check")
+
     def test_mixed_reply_selects_only_current_reply_units_and_criteria(self):
         result = self.select(claims=dict(text="The fix is complete. Here is why.", phase="final", work_unit_ids=["fix", "explain", "backlog"]))
         self.assertEqual(result.get("selected_work_unit_ids"), ["fix", "explain"])
@@ -214,6 +222,61 @@ class CompletionRouteTests(unittest.TestCase):
     def test_malformed_owner_plan_does_not_reuse_a_different_revision(self):
         ctx = context(); ctx["verification_plan"]["checks"][0]["contract_revision"] = True
         self.assertEqual(self.select(ctx).get("evidence_route"), "reopen_cause")
+
+    def test_malformed_evidence_container_or_member_selects_no_business_rerun(self):
+        for raw in ({}, [None]):
+            with self.subTest(raw=raw):
+                result = self.select(proof=dict(criteria=raw), ap=dict(enabled=True, publication_status="prepared"))
+                self.assertEqual(result.get("evidence_route"), "reopen_cause")
+                self.assertEqual(result["publication_route"], "blocked")
+                decision = result["unit_decisions"][0]["criteria"][0]
+                self.assertEqual(decision["check_ids"], [])
+                self.assertEqual(decision["required_check_ids"], ["original-failure"])
+
+    def test_genuine_evidence_absence_still_selects_owner_required_check(self):
+        for proof in ({}, dict(criteria=[])):
+            with self.subTest(proof=proof):
+                result = self.select(proof=proof)
+                self.assertEqual(result.get("evidence_route"), "fresh_affected")
+                self.assertEqual(result["unit_decisions"][0]["criteria"][0]["check_ids"], ["original-failure"])
+
+    def test_incomplete_selected_owner_record_retains_valid_proof_but_blocks_publication(self):
+        for malformed in (None, dict(work_unit_id="fix", contract_revision=1)):
+            proof = evidence(); proof["criteria"].append(malformed)
+            with self.subTest(malformed=malformed):
+                result = self.select(proof=proof, ap=dict(enabled=True, publication_status="prepared"))
+                self.assertEqual(result.get("evidence_route"), "reopen_cause")
+                self.assertEqual(result["publication_route"], "blocked")
+                decision = result["unit_decisions"][0]["criteria"][0]
+                self.assertEqual(decision["check_ids"], [])
+                self.assertEqual(decision["proof_ref"], "tool-result-old")
+                self.assertEqual(decision["verified_at"], "2026-10-01T12:00:00Z")
+
+    def test_malformed_owned_record_reopens_only_its_unit(self):
+        ctx = context()
+        ctx["response_route"]["selected_work_unit_ids"].append("backlog")
+        ctx["response_route"]["selected_criteria"].append(dict(ctx["response_route"]["selected_criteria"][0], work_unit_id="backlog"))
+        ctx["verification_plan"]["checks"].append(dict(check_id="backlog-check", work_unit_id="backlog", contract_revision=1, criterion_id="AC1"))
+        proof = evidence(); proof["criteria"].extend([dict(proof["criteria"][0], work_unit_id="backlog", check_ids=["backlog-check"], proof_ref="backlog-result"),
+                                                    dict(work_unit_id="fix", contract_revision=1)])
+        result = self.select(ctx, proof=proof)
+        first, _, last = result["unit_decisions"]
+        self.assertEqual(first["evidence_route"], "reopen_cause")
+        self.assertEqual(first["criteria"][0]["check_ids"], [])
+        self.assertEqual(first["criteria"][0]["proof_ref"], "tool-result-old")
+        self.assertEqual(last["evidence_route"], "reuse")
+        self.assertEqual(last["criteria"][0]["proof_ref"], "backlog-result")
+
+    def test_unrelated_historical_records_do_not_supply_or_conflict_with_current_proof(self):
+        proof = evidence(); proof["criteria"].extend([dict(proof["criteria"][0], contract_revision=2, proof_ref="other-revision"),
+                                                    dict(proof["criteria"][0], work_unit_id="backlog", proof_ref="other-unit")])
+        result = self.select(proof=proof)
+        self.assertEqual(result.get("evidence_route"), "reuse")
+        self.assertEqual(result["unit_decisions"][0]["criteria"][0]["proof_ref"], "tool-result-old")
+        proof["criteria"].pop(0)
+        result = self.select(proof=proof)
+        self.assertEqual(result.get("evidence_route"), "fresh_affected")
+        self.assertNotIn("proof_ref", result["unit_decisions"][0]["criteria"][0])
 
     def test_pure_selector_does_not_mutate_any_input(self):
         inputs = [context(), dict(text="The fix is complete.", phase="final"), evidence(), dict(enabled=True, publication_status="prepared")]

@@ -183,6 +183,45 @@ def _strip_noncommittal_spans(text):
     return _QUOTED_SPAN_RE.sub(" ", text)
 
 
+def _quoted_leaf_content(body, paragraph_open=False, container_indent=0):
+    """Find the paragraph leaf inside demonstrated quote/list containers.
+
+    CommonMark 0.31.2 sections 5.1/5.2 and Example 292 permit lazy paragraph
+    continuation through those containers, but not through code or headings.
+    """
+    indentation = len(body) - len(body.lstrip(" "))
+    removed = 0
+    if container_indent and indentation >= container_indent:
+        body = body[container_indent:]
+        removed = container_indent
+    elif not paragraph_open and body.strip():
+        container_indent = 0
+    while body.strip():
+        indentation = len(body) - len(body.lstrip(" "))
+        if indentation >= 4:
+            # Indented code cannot interrupt an existing paragraph.
+            return (body if paragraph_open else ""), container_indent
+        if re.fullmatch(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", body):
+            return "", container_indent
+        nested = _QUOTE_LINE_RE.match(body)
+        if nested is not None:
+            removed += len(body) - len(nested.group(1))
+            container_indent = removed
+            body = nested.group(1)
+            continue
+        item = _LIST_ITEM_RE.match(body)
+        if item is not None:
+            padding = len(item.group(0)) - len(item.group(0).rstrip(" \t"))
+            end = item.end() if padding <= 4 else item.end() - padding + 1
+            removed += end
+            container_indent = removed
+            body = body[end:]
+            paragraph_open = False
+            continue
+        return body, container_indent
+    return "", container_indent
+
+
 def _strip_block_examples(text):
     """Mask Markdown examples while retaining prose and real control fields.
 
@@ -197,6 +236,8 @@ def _strip_block_examples(text):
     indented = False
     paragraph = False
     quote_paragraph = False
+    quote_container_indent = 0
+    quoted_fence = None
     control_fields = False
     list_indent = 0
     for line in _split_lines(text):
@@ -219,19 +260,32 @@ def _strip_block_examples(text):
         quote = _QUOTE_LINE_RE.match(expanded)
         if quote:
             body = quote.group(1)
-            while (nested := _QUOTE_LINE_RE.match(body)) is not None:
-                body = nested.group(1)
-            quote_paragraph = bool(body.strip()) and not _FENCE_OPEN_RE.match(body) and not _PARAGRAPH_BREAK_RE.match(body)
+            if quoted_fence is not None:
+                char, length = quoted_fence
+                indentation = len(body) - len(body.lstrip(" "))
+                closing = body[quote_container_indent:] if indentation >= quote_container_indent else body
+                if re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(length) + r",}[ \t]*", closing):
+                    quoted_fence = None
+                quote_paragraph = False
+            else:
+                leaf, quote_container_indent = _quoted_leaf_content(body, quote_paragraph, quote_container_indent)
+                opener = _FENCE_OPEN_RE.match(leaf)
+                if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+                    quoted_fence = opener.group(1)[0], len(opener.group(1))
+                quote_paragraph = bool(leaf.strip()) and not opener and not _PARAGRAPH_BREAK_RE.match(leaf)
             paragraph = False
             control_fields = False
             list_indent = 0
             kept.append("")
             continue
+        # Missing quote markers cannot lazily continue a fenced code leaf.
+        quoted_fence = None
         if quote_paragraph:
             if not blank and not _FENCE_OPEN_RE.match(expanded) and not _PARAGRAPH_BREAK_RE.match(expanded):
                 kept.append("")
                 continue
             quote_paragraph = False
+        quote_container_indent = 0
         if blank:
             paragraph = False
             kept.append("")

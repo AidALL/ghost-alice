@@ -58,6 +58,28 @@ def _aggregate(routes):
     return max(routes, key=_EVIDENCE_PRIORITY.index) if routes else "no_external_check"
 
 
+def _assessment_shape_valid(value):
+    return (isinstance(value, dict) and _qualified_key_valid(value)
+            and value.get("validity") in ("valid", "invalid", "unknown")
+            and value.get("relevant_change") in ("none", "changed", "unknown")
+            and isinstance(value.get("check_ids"), list)
+            and all(isinstance(check, str) and check for check in value["check_ids"])
+            and all(isinstance(value.get(field), str) and value[field].strip()
+                    for field in ("proof_ref", "verified_at")))
+
+
+def _assessment_may_belong(value, key):
+    """Scope incomplete ownership conservatively; exclude known other owners."""
+    if not isinstance(value, dict):
+        return True
+    for field, expected in zip(("work_unit_id", "contract_revision", "criterion_id"), key):
+        actual = value.get(field)
+        known = type(actual) is int and actual > 0 if field == "contract_revision" else isinstance(actual, str) and bool(actual.strip())
+        if known and actual != expected:
+            return False
+    return True
+
+
 def _bound_selection(context, claim_scope):
     route = context.get("response_route")
     if route is None:
@@ -113,12 +135,27 @@ def _bound_selection(context, claim_scope):
                                                                     if c["work_unit_id"] in selected]
 
 
-def _criterion_decision(criterion, checks, assessments, failure):
+def _criterion_decision(criterion, checks, assessments, failure, malformed_container=False):
     key = _key(criterion)
     required = [c["check_id"] for c in checks if _key(c) == key]
-    matches = [p for p in assessments if _key(p) == key]
+    relevant = [p for p in assessments if _assessment_may_belong(p, key)]
+    malformed = malformed_container or any(not _assessment_shape_valid(p) for p in relevant)
+    matches = [p for p in relevant if _assessment_shape_valid(p) and _key(p) == key]
     decision = dict(work_unit_id=key[0], contract_revision=key[1], criterion_id=key[2],
                     required_check_ids=required, check_ids=[])
+    if malformed:
+        # An administrative data defect cannot authorize another business check.
+        # Retain a uniquely identified, still-valid covering proof without using
+        # historical or foreign assessments to fill the selected owner's gap.
+        retained = [p for p in matches if p["validity"] == "valid" and p["relevant_change"] == "none"
+                    and required and all(check in p["check_ids"] for check in required)]
+        if len(retained) == 1:
+            decision.update(proof_ref=retained[0]["proof_ref"], verified_at=retained[0]["verified_at"])
+            receipt = retained[0].get("core_receipt")
+            if isinstance(receipt, str) and receipt.strip():
+                decision["core_receipt"] = receipt
+        return dict(decision, evidence_route="reopen_cause",
+                    reason="Malformed selected-owner evidence: reopen the unknown/integrity cause without a business rerun.")
     if failure in _REOPEN_FAILURES or failure not in {"none", "recording"}:
         return dict(decision, evidence_route="reopen_cause", reason="Reopen the smallest failing authority, integrity or contract cause.")
     if len(matches) > 1:
@@ -170,14 +207,16 @@ def select_completion_route(context, claim_scope, evidence_state, autopilot_stat
                                                        or not isinstance(c.get("check_id"), str) or not c["check_id"] for c in checks)
     checks = [c for c in checks if isinstance(c, dict) and isinstance(c.get("check_id"), str) and c["check_id"]] if isinstance(checks, list) else []
     assessments = evidence_state.get("criteria", [])
-    assessments = [p for p in assessments if isinstance(p, dict)] if isinstance(assessments, list) else []
+    malformed_container = not isinstance(assessments, list)
+    assessments = assessments if isinstance(assessments, list) else []
     failure = evidence_state.get("failure_kind", "none")
     if not isinstance(failure, str):
         failure = "unknown"
     unit_decisions = []
     for unit in units:
         owned = [c for c in criteria if c["work_unit_id"] == unit["work_unit_id"]]
-        decisions = [_criterion_decision(c, checks, assessments, "unknown" if malformed_plan else failure) for c in owned]
+        decisions = [_criterion_decision(c, checks, assessments, "unknown" if malformed_plan else failure,
+                                         malformed_container) for c in owned]
         routes = [d["evidence_route"] for d in decisions]
         if not routes and unit["kind"] == "execution":
             routes = ["reopen_cause" if failure != "none" else "owner_verification"]
