@@ -607,6 +607,30 @@ class TestKoreanNegatedStatusNotABlock(unittest.TestCase):
         ):
             self.assertFalse(v.requires_completion_check(phrase), phrase)
 
+    def test_korean_prefixed_incomplete_status_is_not_a_claim(self):
+        for phrase in (
+            "수정 작업은 아직 미완료입니다.",
+            "같은 종료 훅이 계속 재시도하고 있습니다. 현재 실행을 중지한 뒤 "
+            "Autopilot 훅을 수동으로 임시 해제해야 합니다. 수정 작업은 아직 미완료입니다.",
+            "작업 미완료",
+            "작업이 미완료된 상태입니다.",
+            "설치본 적용과 Claude PTY 검증은 확인되지 않았습니다.",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertFalse(v.requires_completion_check(phrase))
+                self.assertIsNone(v.validate_completion_text(phrase, require_completion_check=True))
+
+    def test_incomplete_status_does_not_hide_a_real_claim(self):
+        for phrase in (
+            "수정했습니다. 테스트가 통과했습니다.",
+            "빌드는 미완료지만 테스트가 통과했습니다.",
+            "테스트가 통과했고 빌드는 미완료입니다.",
+            "수정 작업은 아직 미완료입니다. 테스트가 통과했습니다.",
+        ):
+            with self.subTest(phrase=phrase):
+                self.assertTrue(v.requires_completion_check(phrase))
+                self.assertIsNotNone(v.validate_completion_text(phrase, require_completion_check=True))
+
     def test_korean_real_completion_still_detected(self):
         self.assertTrue(v.requires_completion_check("작업 완료했습니다."))
         self.assertTrue(v.requires_completion_check("테스트 통과했다."))

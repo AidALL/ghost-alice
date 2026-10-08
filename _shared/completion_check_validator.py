@@ -145,7 +145,9 @@ _NEGATED_CLOSURE_RE = re.compile(
     r"(?:complete|completed|done|fixed|resolved|implemented|passing|pass|"
     r"passed|green|clean|succeed|succeeded)\b"
     r"|\bnot\s+there\s+yet\b|\bnot\s+yet\b"
-    r"|아직|않았|않은|않고"
+    # "미완료" means incomplete. Remove the whole negative token so the
+    # detector cannot match its "완료" suffix, without hiding another claim.
+    r"|미완료|아직|않았|않은|않고"
     # Korean negation is post-verbal ("완료되지 않았다" = is NOT complete), so the closure word survives if only the negation particle is removed. Match the closure word together with its trailing negation so the whole span is stripped and the executed-work pattern no longer sees a bare "작업...완료".
     r"|(?:완료|끝냈|끝남|고쳤|해결|반영|통과|성공|깨끗)"
     r"[^\n.!?;,]{0,6}(?:않|안\s|아니|아닙|하지\s*못|되지\s*못|못했|못했다|못했습니다|볼\s*수[^\n.!?;,]{0,8}없)",

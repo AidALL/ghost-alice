@@ -33,9 +33,9 @@ class CompletionRecoveryTests(unittest.TestCase):
     def check(self, text):
         return validator.validate_completion_text(text, require_completion_check=True)
 
-    def hook(self, text, *, retry=False):
+    def hook(self, text, *, retry=False, platform="codex"):
         result = subprocess.run(
-            [sys.executable, "-B", str(HOOK), "--platform", "codex"],
+            [sys.executable, "-B", str(HOOK), "--platform", platform],
             input=json.dumps({"last_assistant_message": text, "stop_hook_active": retry}),
             text=True, capture_output=True, check=True,
         )
@@ -65,6 +65,30 @@ class CompletionRecoveryTests(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assertIsNotNone(self.check(text))
+
+    def test_korean_incomplete_status_does_not_start_stop_recovery(self):
+        for text in (
+            "수정 작업은 아직 미완료입니다.",
+            "같은 종료 훅이 계속 재시도하고 있습니다. 현재 실행을 중지한 뒤 "
+            "Autopilot 훅을 수동으로 임시 해제해야 합니다. 수정 작업은 아직 미완료입니다.",
+            "설치본 적용과 Claude PTY 검증은 확인되지 않았습니다.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, retry=retry, platform=platform), {"continue": True})
+
+    def test_korean_incomplete_status_keeps_real_claims_blocked(self):
+        for text in (
+            "수정했습니다. 테스트가 통과했습니다.",
+            "빌드는 미완료지만 테스트가 통과했습니다.",
+            "테스트가 통과했고 빌드는 미완료입니다.",
+            "수정 작업은 아직 미완료입니다. 테스트가 통과했습니다.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, retry=retry, platform=platform).get("decision"), "block")
 
     def test_inline_none_is_equivalent_to_nested_none(self):
         self.assertIsNone(self.check(VALID.replace("- unverified:\n  - none", "- unverified: none")))
