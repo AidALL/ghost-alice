@@ -469,6 +469,12 @@ def _initialize_database(connection: sqlite3.Connection) -> None:
         FOREIGN KEY(platform, session_id) REFERENCES sessions(platform, session_id))""")
     connection.execute("""CREATE UNIQUE INDEX IF NOT EXISTS intent_mutations
         ON intent_events(platform, session_id, mutation_id) WHERE mutation_id IS NOT NULL""")
+    connection.execute("""CREATE TABLE IF NOT EXISTS canonical_intakes (
+        platform TEXT NOT NULL, session_id TEXT NOT NULL, input_event_id TEXT NOT NULL,
+        input_digest TEXT NOT NULL, input_char_count INTEGER NOT NULL CHECK(input_char_count >= 0),
+        event_sequence INTEGER NOT NULL CHECK(event_sequence > 0), PRIMARY KEY(platform, session_id),
+        FOREIGN KEY(platform, session_id, event_sequence)
+        REFERENCES intent_events(platform, session_id, sequence))""")
     connection.execute("""CREATE TABLE IF NOT EXISTS legacy_migrations (
         platform TEXT NOT NULL, session_id TEXT NOT NULL, sources_json TEXT NOT NULL,
         imported_at TEXT NOT NULL, PRIMARY KEY(platform, session_id),
@@ -1258,6 +1264,8 @@ def record_turn(
             event["intent_delta_digest"] = json_digest(intent_delta)
             event["delta_keys"] = sorted(str(key) for key in intent_delta.keys())
         _commit(connection, state, event)
+        if raw_user_input is not None:
+            _persist_canonical_intake(connection, state)
     return paths
 
 
@@ -1317,34 +1325,68 @@ def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dic
         return None
 
 
+def _observation_matches(event, platform, session_id, event_id, digest, count) -> bool:
+    return (isinstance(event, dict) and event.get("event") == "user-input-observed"
+            and event.get("platform") == platform and event.get("session_id") == session_id
+            and event.get("event_id") == event_id and event.get("input_event_id") == event_id
+            and event.get("input_digest") == digest and type(event.get("input_char_count")) is int
+            and event["input_char_count"] == count)
+
+
+def _current_observation_sequence(connection: sqlite3.Connection, state: dict[str, Any]) -> int | None:
+    matches = []
+    for sequence, raw in connection.execute(
+            "SELECT sequence,event_json FROM intent_events WHERE platform=? AND session_id=?",
+            (state["platform"], state["session_id"])):
+        event = json.loads(raw)
+        if isinstance(event, dict) and event.get("event_id") == state["latest_input_event_id"]:
+            if not _observation_matches(event, state["platform"], state["session_id"],
+                    state["latest_input_event_id"], state["latest_input_digest"], state["latest_input_char_count"]):
+                return None
+            matches.append(sequence)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _canonical_intake_record(connection: sqlite3.Connection, state: dict[str, Any]):
+    if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='canonical_intakes'").fetchone():
+        return None
+    return connection.execute("""SELECT input_event_id,input_digest,input_char_count,event_sequence
+        FROM canonical_intakes WHERE platform=? AND session_id=?""",
+        (state["platform"], state["session_id"])).fetchone()
+
+
 def _canonical_input_bound(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> bool:
-    """Upgrade genuine SQLite receipts; imported chronology is never guessed."""
-    current = state.get("latest_input_event_id")
-    if not current:
+    """Only a protected SQLite record or verified native audit origin binds intake."""
+    if not state.get("latest_input_event_id"):
         return False
-    stamp = state.get("canonical_input_event_id")
-    if stamp:
-        return stamp == current
-    coordinates = (state["platform"], state["session_id"])
+    sequence = _current_observation_sequence(connection, state)
+    if sequence is None:
+        return False
+    record = _canonical_intake_record(connection, state)
+    if record is not None:
+        expected = (state["latest_input_event_id"], state["latest_input_digest"],
+                    state["latest_input_char_count"], sequence)
+        if tuple(record) == expected:
+            return True
+        if record[0] == state["latest_input_event_id"]:
+            return False  # Conflicting current provenance cannot be downgraded.
+        prior = connection.execute("SELECT event_json FROM intent_events WHERE platform=? AND session_id=? AND sequence=?",
+                                   (state["platform"], state["session_id"], record[3])).fetchone()
+        return (prior is not None and sequence > record[3]
+                and _observation_matches(json.loads(prior[0]), state["platform"], state["session_id"], *record[:3]))
     imported_count = _imported_event_count(connection, root, state)
-    if imported_count is None:
-        return False
-    observations = []
-    for row in connection.execute("SELECT sequence,event_json FROM intent_events WHERE platform=? AND session_id=?",
-                                  coordinates):
-        event = json.loads(row[1])
-        if (isinstance(event, dict) and event.get("event") == "user-input-observed"
-                and event.get("event_id") == current):
-            observations.append((row[0], event))
-    if len(observations) != 1:
-        return False
-    sequence, event = observations[0]
-    return (sequence > imported_count
-            and event.get("platform") == state["platform"] and event.get("session_id") == state["session_id"]
-            and event.get("input_event_id") == current
-            and event.get("input_digest") == state["latest_input_digest"]
-            and type(event.get("input_char_count")) is int
-            and event["input_char_count"] == state["latest_input_char_count"])
+    return imported_count is not None and sequence > imported_count
+
+
+def _persist_canonical_intake(connection: sqlite3.Connection, state: dict[str, Any]) -> None:
+    sequence = _current_observation_sequence(connection, state)
+    if sequence is None:
+        raise ValueError("canonical intake must match exactly one authoritative observation")
+    connection.execute("""INSERT INTO canonical_intakes VALUES(?,?,?,?,?,?)
+        ON CONFLICT(platform,session_id) DO UPDATE SET input_event_id=excluded.input_event_id,
+        input_digest=excluded.input_digest,input_char_count=excluded.input_char_count,
+        event_sequence=excluded.event_sequence""", (state["platform"], state["session_id"],
+        state["latest_input_event_id"], state["latest_input_digest"], state["latest_input_char_count"], sequence))
 
 
 def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
@@ -1366,6 +1408,7 @@ def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_i
         except ValueError as exc:
             raise routes.RouteBindingError(str(exc)) from exc
         state["canonical_input_event_id"] = state["latest_input_event_id"]
+        _persist_canonical_intake(connection, state)
         projection, units = routes.validate_response_route(state, candidate, boundary_ref)
         state["response_route"] = projection
         state["work_units"] = units
@@ -1393,8 +1436,9 @@ def read_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id:
         raise routes.RouteBindingError(str(exc)) from exc
     with _read_connection(root, transaction) as connection:
         state = _stored_state(connection, platform, session_id)
-        if state is not None and _canonical_input_bound(connection, root, state):
-            state["canonical_input_event_id"] = state["latest_input_event_id"]
+        if state is not None:
+            state["canonical_input_event_id"] = (state["latest_input_event_id"]
+                if _canonical_input_bound(connection, root, state) else "")
     if state is None:
         return None
     return routes.project_stored_response_route(state, expected_input_event_id)
@@ -1443,8 +1487,8 @@ def mark_acceptance_criterion_met(
         if criterion.get("admitted") is not True:
             raise ValueError("acceptance criterion is not admitted")
         if "work_unit_id" in criterion:
-            if _canonical_input_bound(connection, root, state):
-                state["canonical_input_event_id"] = state["latest_input_event_id"]
+            state["canonical_input_event_id"] = (state["latest_input_event_id"]
+                if _canonical_input_bound(connection, root, state) else "")
             route = _response_route_module().project_stored_response_route(state)
             if (route is None or route["status"] != "ready" or not any(
                     (c["work_unit_id"], c["contract_revision"], c["criterion_id"]) ==
@@ -1461,6 +1505,8 @@ def mark_acceptance_criterion_met(
         criterion["met_completion_check_digest"] = digest
         criterion["met_at"] = now
         state["updated_at"] = now
+        if "work_unit_id" in criterion:
+            _persist_canonical_intake(connection, state)
         _commit(connection, state, {
             "ts": now,
             "event": "acceptance-criterion-met",

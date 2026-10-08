@@ -226,6 +226,7 @@ class ResponseRouteTests(unittest.TestCase):
         with ledger.storage_transaction(self.root) as tx:
             state = ledger.read_session_state(**self.coords, transaction=tx)
             state.pop("canonical_input_event_id")  # Genuine pre-upgrade SQLite shape.
+            tx.execute("DROP TABLE canonical_intakes")
             tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
                        (json.dumps(state), "codex", "current"))
         before = ledger.read_session_events(**self.coords)
@@ -253,6 +254,7 @@ class ResponseRouteTests(unittest.TestCase):
         with ledger.storage_transaction(copied) as tx:
             state = ledger.read_session_state(**coords, transaction=tx)
             state.pop("canonical_input_event_id")
+            tx.execute("DROP TABLE canonical_intakes")
             tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
                        (json.dumps(state), "codex", "current"))
         before = ledger.read_session_events(**coords)
@@ -261,6 +263,67 @@ class ResponseRouteTests(unittest.TestCase):
             candidate=self.candidate(), boundary_ref="boundary-1")["status"], "ready")
         self.assertEqual([e for e in ledger.read_session_events(**coords) if e["event"] == "user-input-observed"],
                          [e for e in before if e["event"] == "user-input-observed"])
+
+    def test_older_import_preserved_json_stamp_cannot_authorize_current_route(self):
+        self.event = self.setup_owned()
+        self.record()
+        copied = Path(self.tmp.name) / "older-preserved-stamp"
+        paths = ledger.session_paths(copied, "codex", "current")
+        paths["state"].parent.mkdir(parents=True)
+        exported = ledger.read_session_state(**self.coords)
+        paths["state"].write_text(json.dumps(exported))
+        paths["events"].write_text("".join(json.dumps(e) + "\n" for e in ledger.read_session_events(**self.coords)))
+        coords = dict(root=copied, platform="codex", session_id="current")
+        ledger.migrate_session(**coords)
+        # Older Core's generic import retained all accessory JSON state fields.
+        # Restore that exact persisted shape after importing its actual audit.
+        with ledger.storage_transaction(copied) as tx:
+            imported = ledger.read_session_state(**coords, transaction=tx)
+            imported["canonical_input_event_id"] = exported["canonical_input_event_id"]
+            imported["response_route"] = exported["response_route"]
+            tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                       (json.dumps(imported), "codex", "current"))
+        self.assertEqual(self.api.read_response_route(**coords)["status"], "stale")
+        with self.assertRaises(self.api.RouteBindingError):
+            self.api.record_response_route(**coords, expected_input_event_id=self.event,
+                candidate=self.candidate(), boundary_ref="boundary-1")
+
+    def test_trusted_intake_record_must_match_current_digest_count_and_sequence(self):
+        self.event = self.setup_owned()
+        self.record()
+        with ledger.storage_transaction(self.root) as tx:
+            row = tx.execute("SELECT input_event_id,input_digest,input_char_count,event_sequence FROM canonical_intakes WHERE platform=? AND session_id=?",
+                             ("codex", "current")).fetchone()
+            self.assertEqual(row[:3], (self.event, ledger.read_session_state(**self.coords, transaction=tx)["latest_input_digest"],
+                                      ledger.read_session_state(**self.coords, transaction=tx)["latest_input_char_count"]))
+        for column, invalid in (("input_digest", "sha256:" + "f" * 64),
+                                ("input_char_count", row[2] + 1), ("event_sequence", row[3] + 1)):
+            with self.subTest(column=column):
+                with ledger.storage_transaction(self.root) as tx:
+                    tx.execute(f"UPDATE canonical_intakes SET {column}=? WHERE platform=? AND session_id=?",
+                               (invalid, "codex", "current"))
+                self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
+                with self.assertRaises(self.api.RouteBindingError):
+                    self.record()
+                with ledger.storage_transaction(self.root) as tx:
+                    tx.execute("UPDATE canonical_intakes SET input_event_id=?,input_digest=?,input_char_count=?,event_sequence=? WHERE platform=? AND session_id=?",
+                               (*row, "codex", "current"))
+
+    def test_native_intake_record_and_event_roll_back_together(self):
+        self.event = self.setup_owned()
+        before = ledger.read_session_state(**self.coords)
+        with self.assertRaisesRegex(RuntimeError, "rollback native intake"):
+            with ledger.storage_transaction(self.root) as tx:
+                ledger.record_turn(**self.coords, raw_user_input="new input to roll back", transaction=tx)
+                row = tx.execute("SELECT input_event_id FROM canonical_intakes WHERE platform=? AND session_id=?",
+                                 ("codex", "current")).fetchone()
+                self.assertNotEqual(row[0], self.event)
+                raise RuntimeError("rollback native intake")
+        self.assertEqual(ledger.read_session_state(**self.coords), before)
+        with ledger.storage_transaction(self.root) as tx:
+            row = tx.execute("SELECT input_event_id FROM canonical_intakes WHERE platform=? AND session_id=?",
+                             ("codex", "current")).fetchone()
+            self.assertEqual(row[0], self.event)
 
     def test_ownerless_met_snapshot_only_matches_ownerless_local_id(self):
         self.event = self.setup_owned()
