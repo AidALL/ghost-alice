@@ -280,6 +280,19 @@ class CompletionRecoveryTests(unittest.TestCase):
                 self.assertTrue(payload.get("continue"))
                 self.assertNotIn("systemMessage", payload)
 
+    def test_inline_quote_boundaries_cannot_bypass_stop_validation(self):
+        for literal in ("OK.", "pending.", "(Next section)"):
+            text = f'The command returned "{literal}"\n\nThe task is complete.\n\n"[io-trace]"'
+            with self.subTest(text=text):
+                payload = self.hook(text)
+                self.assertEqual(payload.get("decision"), "block")
+                self.assertIn("require a [completion-check]", payload["reason"])
+
+    def test_inline_quotes_cannot_hide_a_malformed_unquoted_control_block(self):
+        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[io-trace]"'
+        payload = self.hook(text)
+        self.assertEqual(payload.get("decision"), "block")
+
 
 if __name__ == "__main__":
     unittest.main()

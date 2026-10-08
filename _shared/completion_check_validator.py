@@ -275,13 +275,21 @@ def _strip_block_examples(text):
 def _mask_multiline_quoted_examples(text):
     """Mask balanced quoted examples, retaining outside text and line breaks.
 
-    Inline quoted evidence in actual control fields is unchanged. An ASCII
-    quote introduced after whitespace in a later field is an opening delimiter,
-    not proof that an earlier unclosed example ended there. Ambiguous spans are
-    retained for normal validation rather than suppressing the answer.
+    Reserve complete inline quotation boundaries before considering multiline
+    examples. Neither endpoint of an existing inline span may be repurposed.
+    Keep their original text, including evidence in actual control fields.
+    Multiline exclusion requires an explicit quote opening at a line boundary;
+    ambiguous prose spans remain visible to normal validation.
     """
+    inline_boundaries = {position for inline in _QUOTED_SPAN_RE.finditer(text)
+                         for position in (inline.start(), inline.end() - 1)}
     def mask(match):
         span = match.group(0)
+        if match.start() in inline_boundaries or match.end() - 1 in inline_boundaries:
+            return span
+        opening_prefix = text[:match.start()].rsplit("\n", 1)[-1]
+        if opening_prefix.strip():
+            return span
         if span[0] in ("'", '"'):
             closing_prefix = span[:-1].rsplit("\n", 1)[-1]
             if closing_prefix and closing_prefix[-1].isspace() and closing_prefix.strip():

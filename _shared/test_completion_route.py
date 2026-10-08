@@ -133,6 +133,12 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertFalse(result.get("required_completion_check"))
                 self.assertEqual(result.get("evidence_route"), "no_external_check")
 
+    def test_inline_quote_boundaries_cannot_hide_actual_closure(self):
+        text = 'The command returned "OK."\n\nThe task is complete.\n\n"[io-trace]"'
+        result = self.select({}, dict(text=text, phase="final"), {})
+        self.assertTrue(result.get("required_completion_check"))
+        self.assertEqual(result.get("evidence_route"), "owner_verification")
+
     def test_mixed_reply_selects_only_current_reply_units_and_criteria(self):
         result = self.select(claims=dict(text="The fix is complete. Here is why.", phase="final", work_unit_ids=["fix", "explain", "backlog"]))
         self.assertEqual(result.get("selected_work_unit_ids"), ["fix", "explain"])

@@ -355,6 +355,25 @@ class TestExplicitMultilineQuotedExamples(unittest.TestCase):
         self.assertTrue(v.looks_like_completion_claim(text))
         self.assertTrue(v.requires_completion_check(text))
 
+    def test_complete_inline_quote_boundaries_cannot_hide_outside_closure(self):
+        for literal in ("OK.", "pending.", "(Next section)"):
+            text = f'The command returned "{literal}"\n\nThe task is complete.\n\n"[io-trace]"'
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_inline_quotes_cannot_hide_a_real_unquoted_control_block(self):
+        for literal in ("OK.", "pending.", "(Next section)"):
+            text = f'The command returned "{literal}"\n\n' + _final_text("completion", "summary", "io") + '\n\n"[io-trace]"'
+            with self.subTest(text=text):
+                self.assertTrue(v.looks_like_completion_claim(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_inline_quotes_cannot_hide_a_malformed_unquoted_control_block(self):
+        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[io-trace]"'
+        self.assertTrue(v.looks_like_completion_claim(text))
+        self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
 
 class TestSkillsLoadedGateExactName(unittest.TestCase):
     """io-trace skills-loaded gate matches the canonical name, not a substring."""
