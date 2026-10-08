@@ -27,7 +27,7 @@ CHECK_WITHOUT_EVIDENCE = """[completion-check]
 """
 DEFECTIVE = f"{ANSWER}\n\n{CHECK_WITHOUT_EVIDENCE}"
 UNMARKED_CLOSURE = "작업을 완료했습니다."
-INTERACTIVE = ("cli", "claude-desktop", "claude-vscode", "remote_desktop", "remote_mobile")
+INTERACTIVE = ("claude-desktop", "claude-vscode", "remote_desktop", "remote_mobile")
 
 
 def prompt(text, entrypoint=None):
@@ -51,16 +51,23 @@ def stop_feedback(reason):
 
 
 class StopRetrySurfaceTests(unittest.TestCase):
-    def run_hook(self, entries, entrypoint=None, platform="claude"):
+    def run_hook(self, entries, entrypoint=None, platform="claude", host_context=None, claims_changed=False, scratchpad_dir=None):
         env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_ENTRYPOINT"}
         if entrypoint is not None:
             env["CLAUDE_CODE_ENTRYPOINT"] = entrypoint
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+            hook_input = {"transcript_path": str(transcript)}
+            if host_context is not None:
+                hook_input["host_context"] = host_context
+            if claims_changed:
+                hook_input["claims_changed"] = True
+            if scratchpad_dir is not None:
+                hook_input["scratchpad_dir"] = scratchpad_dir
             result = subprocess.run(
                 [sys.executable, "-B", str(HOOK), "--platform", platform],
-                input=json.dumps({"transcript_path": str(transcript)}),
+                input=json.dumps(hook_input),
                 text=True, capture_output=True, check=True, env=env,
             )
         return json.loads(result.stdout)
@@ -81,6 +88,36 @@ class StopRetrySurfaceTests(unittest.TestCase):
         payload = self.run_hook([prompt("Compute it.", "claude-desktop"), skill_call(), reply(DEFECTIVE)])
         self.assertEqual(payload.get("decision"), "block")
         self.assertIn("only the missing or corrected control blocks", payload["reason"])
+
+    def test_bare_cli_is_ambiguous_and_preserves_the_complete_payload(self):
+        payload = self.run_hook([prompt("Compute it."), skill_call(), reply(DEFECTIVE)], "cli")
+        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertNotIn("only the missing or corrected control blocks", payload["reason"])
+
+    def test_observed_visible_cli_only_patches_metadata(self):
+        payload = self.run_hook([prompt("Compute it."), skill_call(), reply(DEFECTIVE)], "cli",
+                                host_context={"delivery_surface": "visible_transcript"})
+        self.assertIn("only the missing or corrected control blocks", payload["reason"])
+        self.assertNotIn("complete standalone final answer", payload["reason"])
+
+    def test_native_interactive_cli_payload_preserves_visible_answer(self):
+        # The isolated native 2.1.287 probe supplied cli + scratchpad_dir at Stop.
+        payload = self.run_hook([prompt("Compute it."), skill_call(), reply(DEFECTIVE)], "cli",
+                                scratchpad_dir="/tmp/native-probe-scratchpad")
+        self.assertIn("only the missing or corrected control blocks", payload["reason"])
+        self.assertNotIn("complete standalone final answer", payload["reason"])
+
+    def test_native_print_sdk_cli_remains_final_only_with_scratchpad(self):
+        payload = self.run_hook([prompt("Compute it."), skill_call(), reply(DEFECTIVE)], "sdk-cli",
+                                scratchpad_dir="/tmp/native-probe-scratchpad")
+        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertNotIn("only the missing or corrected control blocks", payload["reason"])
+
+    def test_substantive_claim_correction_needs_the_complete_corrected_answer(self):
+        payload = self.run_hook([prompt("Compute it."), skill_call(), reply(DEFECTIVE)], "claude-desktop",
+                                claims_changed=True)
+        self.assertIn("genuine claim correction", payload["reason"])
+        self.assertNotIn("only the missing or corrected control blocks", payload["reason"])
 
     def test_headless_or_unknown_surface_keeps_the_standalone_rewrite(self):
         # The process entrypoint outranks a transcript value; no entrypoint at all is unknown.
@@ -109,6 +146,8 @@ class StopRetrySurfaceTests(unittest.TestCase):
                 self.assertNotIn("decision", second)
                 self.assertIn("Every claim-evidence-map entry must include evidence", second.get("systemMessage", ""))
                 self.assertIn("without a valid [completion-check]", second.get("systemMessage", ""))
+                self.assertIn("Closure remains pending", second["systemMessage"])
+                self.assertIn("do not rerun unchanged business checks", second["systemMessage"])
 
     def test_block_from_an_earlier_turn_does_not_count(self):
         first = self.run_hook([prompt("Compute it."), skill_call(), reply(DEFECTIVE)], "claude-desktop")

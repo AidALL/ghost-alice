@@ -85,7 +85,7 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
 )
 
 # Spans that are quotation or code, not the model's own assertion. Stripped before executed-work detection so illustrative output, quoted user text, and fenced examples do not trigger a spurious completion-check demand.
-_FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
+_FENCED_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.S)
 _INLINE_CODE_RE = re.compile(r"`[^`]*`")
 # Single-quoted spans only count when the quotes sit on word boundaries, so an ordinary contraction apostrophe (won't, don't, y'all) is not mistaken for a quotation delimiter and does not swallow a real claim between two contractions.
 _QUOTED_SPAN_RE = re.compile(
@@ -171,6 +171,16 @@ def _strip_noncommittal_spans(text):
     return _QUOTED_SPAN_RE.sub(" ", text)
 
 
+def _strip_block_examples(text):
+    """Exclude fenced examples and blockquotes from control-field validation.
+
+    Evidence strings inside a real block remain verbatim; only the host's own
+    block headers are completion assertions.
+    """
+    text = _FENCED_CODE_RE.sub(" ", "" if text is None else str(text))
+    return "\n".join(line for line in _split_lines(text) if not line.lstrip().startswith(">"))
+
+
 def strip_control_blocks(text):
     """Remove control blocks so claim detection ignores their contents.
 
@@ -237,7 +247,7 @@ def looks_like_completion_claim(text):
     completion claim. Substring keyword matching of intent is intentionally NOT
     used: it false-positives and string-matching intent is unreliable.
     """
-    for line in _split_lines(text):
+    for line in _split_lines(_strip_block_examples(text)):
         match = _BLOCK_HEADER_RE.match(line.strip())
         if match and match.group(1).lower() == "completion-check":
             return True
@@ -553,13 +563,13 @@ def validate_completion_text(text, *, require_completion_check=False, require_sk
     (Claude Code) passes False; the block then needs no constant self-report
     lines, while the io-trace block and every evidence check still apply.
     """
-    text = "" if text is None else str(text)
+    text = _strip_block_examples(text)
     if not text:
         return None
     if not looks_like_completion_claim(text):
         if require_completion_check and requires_completion_check(text):
             return (
-                "Completion or success claims about executed work require a " "[completion-check] block with fresh verification evidence."
+                "Completion or success claims about executed work require a " "[completion-check] block with valid verification evidence."
             )
         return None
 

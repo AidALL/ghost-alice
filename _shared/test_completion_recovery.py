@@ -237,6 +237,26 @@ class CompletionRecoveryTests(unittest.TestCase):
         self.assertIn("never repeat a successful check just to fill a field", reason)
         self.assertNotIn("perform the fresh evidence check", reason)
 
+    def test_missing_skill_reminder_can_retain_valid_earlier_business_evidence(self):
+        result = subprocess.run(
+            [sys.executable, "-B", str(HOOK), "--platform", "claude"],
+            input=json.dumps({"last_assistant_message": VALID, "transcript_path": ""}),
+            text=True, capture_output=True, check=True,
+        )
+        reason = json.loads(result.stdout)["reason"]
+        self.assertIn("valid earlier results", reason)
+        self.assertIn("original evidence times", reason)
+
+    def test_explanation_label_never_bypasses_actual_closure_validation(self):
+        payload = self.hook("[task-router]\n- work-kind: nonexecution\n\nExplanation: the task is complete.")
+        self.assertEqual(payload.get("decision"), "block")
+        self.assertIn("require a [completion-check]", payload["reason"])
+
+    def test_fenced_completion_example_needs_no_recovery(self):
+        payload = self.hook("Example:\n```text\n[completion-check]\n- claim-evidence-map:\n```\nUse that shape.")
+        self.assertTrue(payload.get("continue"))
+        self.assertNotIn("systemMessage", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

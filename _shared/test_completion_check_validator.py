@@ -222,6 +222,21 @@ class TestCompletionMarkerIsHeaderOnly(unittest.TestCase):
         text = "[completion-check]\n- claim-evidence-map:\n  - claim: x"
         self.assertTrue(v.looks_like_completion_claim(text))
 
+    def test_fenced_completion_block_example_is_not_an_executed_claim(self):
+        text = "Example format:\n```text\n[completion-check]\n- claim-evidence-map:\n```\nUse this shape."
+        self.assertFalse(v.looks_like_completion_claim(text))
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_explanation_label_does_not_excuse_unsupported_actual_closure(self):
+        text = "[task-router]\n- work-kind: nonexecution\n\nExplanation: the task is complete."
+        self.assertTrue(v.requires_completion_check(text))
+        self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_tilde_fenced_example_is_not_an_executed_claim(self):
+        text = "Example:\n~~~text\n[completion-check]\n- claim-evidence-map:\n~~~\nThat is the format."
+        self.assertFalse(v.looks_like_completion_claim(text))
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
 
 class TestSkillsLoadedGateExactName(unittest.TestCase):
     """io-trace skills-loaded gate matches the canonical name, not a substring."""

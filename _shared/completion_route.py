@@ -1,0 +1,222 @@
+"""Pure Core completion policy; domain truth and persistence stay with owners.
+
+Input contracts (JSON-compatible dictionaries):
+* context: platform, session_id, input_event_id, response_route (the existing
+  read_response_route projection), verification_plan.checks. Each owner check
+  has check_id, work_unit_id, contract_revision, criterion_id.
+* claim_scope: text, phase (final/before_tool), optional work_unit_ids narrowing
+  the current selection, optional consequential (owner judgment).
+* evidence_state: failure_kind (none/recording/authority/integrity/contract/
+  unknown), criteria. Each assessment has the same qualified criterion key,
+  validity (valid/invalid/unknown), relevant_change (none/changed/unknown),
+  check_ids (owner checks covered), proof_ref, verified_at, core_receipt. These
+  references and assessments come from the owning verification workflow; a
+  nonempty receipt is a reference, not independently authenticated here.
+* autopilot_state: enabled, publication_status (unprepared/prepared/published).
+
+Output completion-route.v1 contains evidence_route, publication_route, frozen
+selected units/criteria, per-unit/criterion decisions, required_completion_check,
+route_binding and reason. Per-criterion decisions are authoritative; aggregate
+priority is reopen_cause > fresh_affected > owner_verification >
+recording_repair_only > reuse > no_external_check. The aggregate is a summary,
+never an instruction to rerun every unit. Publication routes are none, prepare,
+publish, blocked. ``check_ids`` is affected work to run; ``required_check_ids``
+preserves the owner's full plan. Missing administrative receipts retain valid
+business proof with no business checks selected, while publication is blocked.
+No result grants permission, marks a criterion met, or verifies domain truth.
+Evidence dates are retained verbatim and are never compared with input age.
+"""
+
+from __future__ import annotations
+
+from copy import deepcopy
+
+from completion_check_validator import looks_like_completion_claim, requires_completion_check
+
+SCHEMA_VERSION = "completion-route.v1"
+_EVIDENCE_PRIORITY = ("no_external_check", "reuse", "recording_repair_only", "owner_verification",
+                      "fresh_affected", "reopen_cause")
+_REOPEN_FAILURES = {"authority", "integrity", "contract", "unknown"}
+
+
+def _mapping(value):
+    return value if isinstance(value, dict) else {}
+
+
+def _key(value):
+    value = _mapping(value)
+    return value.get("work_unit_id"), value.get("contract_revision"), value.get("criterion_id")
+
+
+def _qualified_key_valid(value):
+    unit, revision, criterion = _key(value)
+    return (isinstance(unit, str) and bool(unit.strip()) and type(revision) is int and revision > 0
+            and isinstance(criterion, str) and bool(criterion.strip()))
+
+
+def _aggregate(routes):
+    return max(routes, key=_EVIDENCE_PRIORITY.index) if routes else "no_external_check"
+
+
+def _bound_selection(context, claim_scope):
+    route = context.get("response_route")
+    if route is None:
+        return "missing", [], []
+    if not isinstance(route, dict) or route.get("schema_version") != "response-route.v1":
+        return "invalid", [], []
+    if route.get("status") != "ready":
+        return "stale", [], []
+    for field in ("platform", "session_id", "input_event_id"):
+        if not isinstance(context.get(field), str) or not context[field] or route.get(field) != context[field]:
+            return "stale", [], []
+    if route.get("current_input_event_id") != context["input_event_id"]:
+        return "stale", [], []
+    surface = route.get("routing_surface")
+    if (not isinstance(surface, dict) or surface.get("response_mode") not in
+            ("normal", "direct-response", "clarification-only")
+            or surface.get("verification_complexity") not in ("level-1", "level-2", "level-3")
+            or surface.get("boundary_contract") not in ("required", "n/a")
+            or (surface.get("boundary_contract") == "required" and not route.get("boundary_ref"))):
+        return "invalid", [], []
+    units, selected, criteria = (route.get(field) for field in
+                                 ("work_units", "selected_work_unit_ids", "selected_criteria"))
+    if not all(isinstance(value, list) for value in (units, selected, criteria)):
+        return "invalid", [], []
+    by_id = {}
+    owner = dict(platform=context["platform"], session_id=context["session_id"])
+    for unit in units:
+        unit = _mapping(unit)
+        unit_id, revision = unit.get("work_unit_id"), unit.get("contract_revision")
+        if (not isinstance(unit_id, str) or not unit_id or unit_id in by_id
+                or type(revision) is not int or revision < 1 or unit.get("owner") != owner
+                or unit.get("kind") not in ("execution", "nonexecution") or type(unit.get("admitted")) is not bool):
+            return "invalid", [], []
+        by_id[unit_id] = unit
+    if (not all(isinstance(u, str) and u in by_id and by_id[u]["admitted"] is True for u in selected)
+            or len(selected) != len(set(selected))):
+        return "invalid", [], []
+    seen = set()
+    for criterion in criteria:
+        key = _key(criterion)
+        if (not isinstance(criterion, dict) or not isinstance(key[0], str) or key[0] not in selected
+                or type(key[1]) is not int or key[1] != by_id[key[0]]["contract_revision"]
+                or not isinstance(key[2], str) or not key[2] or key[2] != criterion.get("id")
+                or criterion.get("admitted") is not True or key in seen):
+            return "invalid", [], []
+        seen.add(key)
+    narrowed = claim_scope.get("work_unit_ids")
+    if narrowed is not None:
+        if not isinstance(narrowed, list) or not all(isinstance(u, str) for u in narrowed):
+            return "invalid", [], []
+        selected = [u for u in selected if u in narrowed]
+    return "current", [deepcopy(by_id[u]) for u in selected], [deepcopy(c) for c in criteria
+                                                                    if c["work_unit_id"] in selected]
+
+
+def _criterion_decision(criterion, checks, assessments, failure):
+    key = _key(criterion)
+    required = [c["check_id"] for c in checks if _key(c) == key]
+    matches = [p for p in assessments if _key(p) == key]
+    decision = dict(work_unit_id=key[0], contract_revision=key[1], criterion_id=key[2],
+                    required_check_ids=required, check_ids=[])
+    if failure in _REOPEN_FAILURES or failure not in {"none", "recording"}:
+        return dict(decision, evidence_route="reopen_cause", reason="Reopen the smallest failing authority, integrity or contract cause.")
+    if len(matches) > 1:
+        return dict(decision, evidence_route="reopen_cause", reason="Criterion evidence is ambiguous.")
+    proof = matches[0] if matches else None
+    if proof is not None and not _qualified_key_valid(proof):
+        return dict(decision, evidence_route="reopen_cause", reason="Criterion proof ownership or revision is invalid.")
+    if not required:
+        return dict(decision, evidence_route="reopen_cause" if failure == "recording" else "owner_verification",
+                    reason="The owning workflow must resolve the criterion verification plan.")
+    if proof is None:
+        return dict(decision, evidence_route="reopen_cause" if failure == "recording" else "fresh_affected",
+                    check_ids=required if failure != "recording" else [], reason="Selected owner criterion has no covering proof.")
+    validity, change = proof.get("validity"), proof.get("relevant_change")
+    covered = proof.get("check_ids")
+    if (validity not in ("valid", "invalid") or change not in ("none", "changed")
+            or not isinstance(covered, list) or not all(isinstance(c, str) for c in covered)):
+        return dict(decision, evidence_route="reopen_cause", reason="Unknown evidence validity or impact requires fuller cause review.")
+    references = all(isinstance(proof.get(field), str) and proof[field].strip()
+                     for field in ("proof_ref", "verified_at"))
+    if not references:
+        return dict(decision, evidence_route="reopen_cause", reason="Original proof and time are required for evidence reuse.")
+    missing = [check for check in required if check not in covered]
+    valid = validity == "valid" and change == "none" and not missing
+    receipt = proof.get("core_receipt")
+    if valid and (not isinstance(receipt, str) or not receipt.strip()):
+        return dict(decision, evidence_route="reopen_cause", proof_ref=proof["proof_ref"], verified_at=proof["verified_at"],
+                    reason="Valid business evidence is retained; reopen only the missing Core receipt cause.")
+    if valid:
+        return dict(decision, evidence_route="recording_repair_only" if failure == "recording" else "reuse",
+                    proof_ref=proof["proof_ref"], verified_at=proof["verified_at"], core_receipt=receipt,
+                    reason="Reuse valid owner coverage at its original time; closure pending recording repair."
+                    if failure == "recording" else "Reuse valid owner coverage at its original time.")
+    if failure == "recording":
+        return dict(decision, evidence_route="reopen_cause", reason="Recording failure conflicts with the owner proof or coverage.")
+    return dict(decision, evidence_route="fresh_affected", check_ids=required if change == "changed" or validity == "invalid" else missing,
+                reason="Run only the affected or uncovered checks from the owning workflow.")
+
+
+def select_completion_route(context, claim_scope, evidence_state, autopilot_state):
+    """Select evidence and publication independently, without I/O or permission."""
+    context, claim_scope = _mapping(context), _mapping(claim_scope)
+    evidence_state, autopilot_state = _mapping(evidence_state), _mapping(autopilot_state)
+    text = claim_scope.get("text", "")
+    actual_closure = looks_like_completion_claim(text) or requires_completion_check(text)
+    binding, units, criteria = _bound_selection(context, claim_scope)
+    checks = _mapping(context.get("verification_plan")).get("checks", [])
+    malformed_plan = not isinstance(checks, list) or any(not isinstance(c, dict) or not _qualified_key_valid(c)
+                                                       or not isinstance(c.get("check_id"), str) or not c["check_id"] for c in checks)
+    checks = [c for c in checks if isinstance(c, dict) and isinstance(c.get("check_id"), str) and c["check_id"]] if isinstance(checks, list) else []
+    assessments = evidence_state.get("criteria", [])
+    assessments = [p for p in assessments if isinstance(p, dict)] if isinstance(assessments, list) else []
+    failure = evidence_state.get("failure_kind", "none")
+    if not isinstance(failure, str):
+        failure = "unknown"
+    unit_decisions = []
+    for unit in units:
+        owned = [c for c in criteria if c["work_unit_id"] == unit["work_unit_id"]]
+        decisions = [_criterion_decision(c, checks, assessments, "unknown" if malformed_plan else failure) for c in owned]
+        routes = [d["evidence_route"] for d in decisions]
+        if not routes and unit["kind"] == "execution":
+            routes = ["reopen_cause" if failure != "none" else "owner_verification"]
+        unit_decisions.append(dict(work_unit_id=unit["work_unit_id"], contract_revision=unit["contract_revision"],
+                                   evidence_route=_aggregate(routes), criteria=decisions))
+    evidence_route = _aggregate([u["evidence_route"] for u in unit_decisions])
+    if failure in _REOPEN_FAILURES or failure not in {"none", "recording"}:
+        evidence_route = "reopen_cause"
+    elif failure == "recording" and evidence_route != "recording_repair_only":
+        evidence_route = "reopen_cause"
+    elif (actual_closure or claim_scope.get("consequential") is True) and evidence_route == "no_external_check":
+        evidence_route = "owner_verification"
+    selected_execution = any(u["kind"] == "execution" for u in units)
+    publication = "none"
+    if autopilot_state.get("enabled") is True:
+        if binding != "current" and (actual_closure or claim_scope.get("phase") == "before_tool"):
+            publication = "blocked"
+        elif selected_execution:
+            status = autopilot_state.get("publication_status", "unprepared")
+            if evidence_route == "reopen_cause":
+                publication = "blocked"
+            elif status == "unprepared":
+                publication = "prepare"
+            elif claim_scope.get("phase", "final") == "before_tool":
+                publication = "none" if status in ("prepared", "published") else "blocked"
+            elif evidence_route not in ("reuse", "recording_repair_only"):
+                publication = "blocked"
+            elif status == "prepared" or (status == "published" and failure == "recording"):
+                publication = "publish"
+            elif status != "published":
+                publication = "blocked"
+    reason = f"Evidence: {evidence_route}; publication: {publication}. Preserve owner verification requirements."
+    if binding != "current":
+        reason += " Missing or stale response binding requires route repair for capture or advancement; authorized continuation and tool permission are unchanged."
+    if failure == "recording":
+        reason += " Mandatory closure pending; recording alone cannot justify rerunning unchanged business checks."
+    if evidence_route == "reopen_cause":
+        reason += " Reopen the smallest cause and use fuller reasoning for unknown or conflicting evidence."
+    return dict(schema_version=SCHEMA_VERSION, evidence_route=evidence_route, publication_route=publication,
+                selected_work_unit_ids=[u["work_unit_id"] for u in units], selected_criteria=criteria,
+                unit_decisions=unit_decisions, required_completion_check=actual_closure,
+                route_binding=binding, reason=reason)
