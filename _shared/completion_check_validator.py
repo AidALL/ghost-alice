@@ -100,6 +100,14 @@ _QUOTED_SPAN_RE = re.compile(
     "|(?<![A-Za-z0-9])‘[^’\n]*’(?![A-Za-z0-9])"
     "|“[^”\n]*”"
 )
+# Multiline examples use balanced matching delimiters. Same-delimiter nesting
+# and apostrophes inside words are ambiguous, so they remain visible to checks.
+_MULTILINE_QUOTED_SPAN_RE = re.compile(
+    r"(?<![A-Za-z0-9\\])'[^']*\n[^']*'(?![A-Za-z0-9])"
+    r'|(?<![A-Za-z0-9\\])"[^"]*\n[^"]*"(?![A-Za-z0-9])'
+    "|‘[^‘’]*\n[^‘’]*’"
+    "|“[^“”]*\n[^“”]*”"
+)
 
 # Executed-work detection runs per clause. Two lead families are exempt, with different governance scope:
 #   - GOAL / enumeration leads (goal, acceptance criteria, todo, next steps,
@@ -261,7 +269,27 @@ def _strip_block_examples(text):
                                           or header.group(1).lower() == "completion-check"))
         kept.append(line)
         paragraph = bool(content.strip()) and not _PARAGRAPH_BREAK_RE.match(content)
-    return "\n".join(kept)
+    return _mask_multiline_quoted_examples("\n".join(kept))
+
+
+def _mask_multiline_quoted_examples(text):
+    """Mask balanced quoted examples, retaining outside text and line breaks.
+
+    Inline quoted evidence in actual control fields is unchanged. An ASCII
+    quote introduced after whitespace in a later field is an opening delimiter,
+    not proof that an earlier unclosed example ended there. Ambiguous spans are
+    retained for normal validation rather than suppressing the answer.
+    """
+    def mask(match):
+        span = match.group(0)
+        if span[0] in ("'", '"'):
+            closing_prefix = span[:-1].rsplit("\n", 1)[-1]
+            if closing_prefix and closing_prefix[-1].isspace() and closing_prefix.strip():
+                return span
+            if closing_prefix.endswith("\\"):
+                return span
+        return re.sub(r"[^\r\n]", " ", span)
+    return _MULTILINE_QUOTED_SPAN_RE.sub(mask, text)
 
 
 def strip_control_blocks(text):

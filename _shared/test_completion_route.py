@@ -125,6 +125,14 @@ class CompletionRouteTests(unittest.TestCase):
         self.assertTrue(result.get("required_completion_check"))
         self.assertEqual(result.get("evidence_route"), "owner_verification")
 
+    def test_balanced_explicit_multiline_quote_does_not_create_closure(self):
+        for opening, closing in (("“", "”"), ('"', '"')):
+            text = "A sample response is:\n" + opening + "The task is complete.\n[completion-check]\n- claim-evidence-map:\n" + closing
+            with self.subTest(text=text):
+                result = self.select({}, dict(text=text, phase="final"), {})
+                self.assertFalse(result.get("required_completion_check"))
+                self.assertEqual(result.get("evidence_route"), "no_external_check")
+
     def test_mixed_reply_selects_only_current_reply_units_and_criteria(self):
         result = self.select(claims=dict(text="The fix is complete. Here is why.", phase="final", work_unit_ids=["fix", "explain", "backlog"]))
         self.assertEqual(result.get("selected_work_unit_ids"), ["fix", "explain"])

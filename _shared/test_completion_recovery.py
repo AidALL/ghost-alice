@@ -272,6 +272,14 @@ class CompletionRecoveryTests(unittest.TestCase):
         self.assertEqual(payload.get("decision"), "block")
         self.assertIn("require a [completion-check]", payload["reason"])
 
+    def test_balanced_explicit_multiline_quote_needs_no_stop_recovery(self):
+        for opening, closing in (("“", "”"), ('"', '"')):
+            text = "A sample response is:\n" + opening + "The task is complete.\n[completion-check]\n- claim-evidence-map:\n" + closing
+            with self.subTest(text=text):
+                payload = self.hook(text)
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
+
 
 if __name__ == "__main__":
     unittest.main()

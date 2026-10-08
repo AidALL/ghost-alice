@@ -299,6 +299,63 @@ class TestMarkdownExampleBoundaries(unittest.TestCase):
         self.assertFalse(v.requires_completion_check(text))
 
 
+class TestExplicitMultilineQuotedExamples(unittest.TestCase):
+    def example(self, opening, closing):
+        return ("A sample response is:\n" + opening + "The task is complete.\n"
+                "[completion-check]\n- claim-evidence-map:\n" + closing)
+
+    def test_balanced_multiline_example_is_neither_marker_nor_closure(self):
+        for opening, closing in (("“", "”"), ('"', '"'), ("‘", "’"), ("'", "'")):
+            text = self.example(opening, closing)
+            with self.subTest(text=text):
+                self.assertFalse(v.looks_like_completion_claim(text))
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_outside_claim_is_preserved_before_or_after_balanced_quote(self):
+        for opening, closing in (("“", "”"), ('"', '"')):
+            example = self.example(opening, closing)
+            for text in ("The task is complete.\n\n" + example, example + "\n\nThe task is complete."):
+                with self.subTest(text=text):
+                    self.assertFalse(v.looks_like_completion_claim(text))
+                    self.assertTrue(v.requires_completion_check(text))
+                    self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_actual_control_block_after_quotation_remains_valid(self):
+        for opening, closing in (("“", "”"), ('"', '"')):
+            text = self.example(opening, closing) + "\n\n" + _final_text("completion", "summary", "io")
+            with self.subTest(text=text):
+                self.assertTrue(v.looks_like_completion_claim(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_unclosed_or_mismatched_quote_cannot_hide_actual_claims(self):
+        for opening, closing in (("“", ""), ('"', ""), ("“", '"'), ("‘", "”")):
+            text = self.example(opening, closing)
+            with self.subTest(text=text):
+                self.assertTrue(v.looks_like_completion_claim(text))
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_apostrophes_across_lines_cannot_swallow_real_closure(self):
+        text = "I won't lie:\nThe task is complete.\nWe don't ship yet."
+        self.assertTrue(v.requires_completion_check(text))
+
+    def test_inline_quoted_evidence_in_actual_block_is_preserved(self):
+        text = _final_text("completion", "summary", "io").replace("evidence: ran test X", 'evidence: "ran test X"')
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_outside_prose_on_closing_quote_line_is_preserved(self):
+        text = self.example("“", "”") + " The task is complete."
+        self.assertFalse(v.looks_like_completion_claim(text))
+        self.assertTrue(v.requires_completion_check(text))
+
+    def test_unclosed_quote_does_not_pair_with_later_inline_evidence_quotes(self):
+        text = ('Unclosed sample:\n"The task is complete.\n[completion-check]\n'
+                'Actual evidence: "command"\n')
+        self.assertTrue(v.looks_like_completion_claim(text))
+        self.assertTrue(v.requires_completion_check(text))
+
+
 class TestSkillsLoadedGateExactName(unittest.TestCase):
     """io-trace skills-loaded gate matches the canonical name, not a substring."""
 
