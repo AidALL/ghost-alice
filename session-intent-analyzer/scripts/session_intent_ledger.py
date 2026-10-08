@@ -233,6 +233,7 @@ def default_state(platform: str, session_id: str) -> dict[str, Any]:
         "session_id": session_id,
         "ledger_revision": 0,
         "latest_input_event_id": "",
+        "canonical_input_event_id": "",
         "latest_input_digest": "",
         "latest_input_char_count": 0,
         "created_at": now,
@@ -648,6 +649,11 @@ def _load_state_for_update(connection, paths, platform, session_id):
     sources = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
                for key in ("state", "events", "security") if paths[key].exists()}
     state = _load_legacy_state(paths, platform, session_id)
+    # Portable state may carry a copied intake stamp or ready route. Only a
+    # fresh intake committed here can establish canonical current authority.
+    state["canonical_input_event_id"] = ""
+    if isinstance(state.get("response_route"), dict):
+        state["response_route"]["status"] = "stale"
     events = _legacy_events(paths, platform, session_id)
     pending = state.pop("pending_audit_event", None)
     if pending is not None:
@@ -1219,6 +1225,7 @@ def record_turn(
                 # Reopen routing/authorization binding, never the business proof.
                 route["status"] = "stale"
             state["latest_input_event_id"] = observation["input_event_id"]
+            state["canonical_input_event_id"] = observation["input_event_id"]
             state["latest_input_digest"] = observation["input_digest"]
             state["latest_input_char_count"] = observation["input_char_count"]
         decision = (intent_delta or {}).get("model_security_decision")
@@ -1269,6 +1276,77 @@ def _response_route_module():
     return module
 
 
+def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> int | None:
+    """Recover only an attested import prefix, never current compatibility state."""
+    coordinates = (state["platform"], state["session_id"])
+    row = connection.execute("SELECT sources_json FROM legacy_migrations WHERE platform=? AND session_id=?",
+                             coordinates).fetchone()
+    if row is None:
+        return 0
+    sources = json.loads(row[0])
+    if not isinstance(sources, dict) or not sources or not set(sources) <= {"state", "events", "security"}:
+        return None
+    paths = session_paths(root, *coordinates)
+    try:
+        if {key for key in ("state", "events", "security") if paths[key].exists()} != set(sources):
+            return None
+        if any(not paths[key].is_file() or hashlib.sha256(paths[key].read_bytes()).hexdigest() != digest
+               for key, digest in sources.items()):
+            return None
+        imported = _legacy_events(paths, *coordinates)
+        original = _load_legacy_state(paths, *coordinates)
+        pending = original.get("pending_audit_event")
+        if pending is not None:
+            if (not isinstance(pending, dict) or pending.get("platform") != coordinates[0]
+                    or pending.get("session_id") != coordinates[1] or not pending.get("mutation_id")
+                    or pending.get("ledger_revision") != original["ledger_revision"]):
+                return None
+            matches = [e for e in imported if e.get("mutation_id") == pending["mutation_id"]]
+            if matches and matches != [pending]:
+                return None
+            if not matches:
+                imported.append(pending)
+        prefix = [json.loads(row[0]) for row in connection.execute(
+            "SELECT event_json FROM intent_events WHERE platform=? AND session_id=? ORDER BY sequence LIMIT ?",
+            (*coordinates, len(imported)))]
+        if prefix != imported or any(hashlib.sha256(paths[key].read_bytes()).hexdigest() != digest
+                                     for key, digest in sources.items()):
+            return None
+        return len(imported)
+    except (OSError, ValueError):
+        return None
+
+
+def _canonical_input_bound(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> bool:
+    """Upgrade genuine SQLite receipts; imported chronology is never guessed."""
+    current = state.get("latest_input_event_id")
+    if not current:
+        return False
+    stamp = state.get("canonical_input_event_id")
+    if stamp:
+        return stamp == current
+    coordinates = (state["platform"], state["session_id"])
+    imported_count = _imported_event_count(connection, root, state)
+    if imported_count is None:
+        return False
+    observations = []
+    for row in connection.execute("SELECT sequence,event_json FROM intent_events WHERE platform=? AND session_id=?",
+                                  coordinates):
+        event = json.loads(row[1])
+        if (isinstance(event, dict) and event.get("event") == "user-input-observed"
+                and event.get("event_id") == current):
+            observations.append((row[0], event))
+    if len(observations) != 1:
+        return False
+    sequence, event = observations[0]
+    return (sequence > imported_count
+            and event.get("platform") == state["platform"] and event.get("session_id") == state["session_id"]
+            and event.get("input_event_id") == current
+            and event.get("input_digest") == state["latest_input_digest"]
+            and type(event.get("input_char_count")) is int
+            and event["input_char_count"] == state["latest_input_char_count"])
+
+
 def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
                           expected_input_event_id: str, candidate: dict[str, Any],
                           boundary_ref: str | None,
@@ -1280,13 +1358,14 @@ def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_i
     except ValueError as exc:
         raise routes.RouteBindingError(str(exc)) from exc
     with _transaction(root, transaction) as connection:
-        state = _load_state_for_update(connection, session_paths(root, platform, session_id), platform, session_id)
-        if not expected_input_event_id or not state.get("latest_input_event_id"):
-            raise routes.RouteBindingError("a current observed input event is required for a ready route")
+        state = _stored_state(connection, platform, session_id)
+        if state is None or not expected_input_event_id or not _canonical_input_bound(connection, root, state):
+            raise routes.RouteBindingError("ready route requires canonical SQLite intake provenance; restore missing import-boundary evidence, never fabricate a new input")
         try:
             _check_expected(state, expected_input_event_id, None)
         except ValueError as exc:
             raise routes.RouteBindingError(str(exc)) from exc
+        state["canonical_input_event_id"] = state["latest_input_event_id"]
         projection, units = routes.validate_response_route(state, candidate, boundary_ref)
         state["response_route"] = projection
         state["work_units"] = units
@@ -1307,8 +1386,18 @@ def read_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id:
                         expected_input_event_id: str | None = None,
                         transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
     """Read route and input anchor from one authoritative snapshot."""
-    state = read_session_state(root=root, platform=platform, session_id=session_id, transaction=transaction)
-    return _response_route_module().project_stored_response_route(state, expected_input_event_id)
+    routes = _response_route_module()
+    try:
+        validate_identity(platform, session_id)
+    except ValueError as exc:
+        raise routes.RouteBindingError(str(exc)) from exc
+    with _read_connection(root, transaction) as connection:
+        state = _stored_state(connection, platform, session_id)
+        if state is not None and _canonical_input_bound(connection, root, state):
+            state["canonical_input_event_id"] = state["latest_input_event_id"]
+    if state is None:
+        return None
+    return routes.project_stored_response_route(state, expected_input_event_id)
 
 
 def mark_acceptance_criterion_met(
@@ -1346,15 +1435,16 @@ def mark_acceptance_criterion_met(
         _check_expected(state, expected_input_event_id, expected_revision)
         criteria = state.get("acceptance_criteria")
         matches = [c for c in criteria if isinstance(c, dict) and c.get("id") == target_id
-                   and ("work_unit_id" not in expected_criterion or
-                        (c.get("work_unit_id"), c.get("contract_revision")) ==
-                        (expected_criterion["work_unit_id"], expected_criterion.get("contract_revision")))] if isinstance(criteria, list) else []
+                   and (c.get("work_unit_id"), c.get("contract_revision")) ==
+                       (expected_criterion.get("work_unit_id"), expected_criterion.get("contract_revision"))] if isinstance(criteria, list) else []
         if len(matches) != 1:
             raise ValueError("acceptance criterion is missing or ambiguous")
         criterion = matches[0]
         if criterion.get("admitted") is not True:
             raise ValueError("acceptance criterion is not admitted")
         if "work_unit_id" in criterion:
+            if _canonical_input_bound(connection, root, state):
+                state["canonical_input_event_id"] = state["latest_input_event_id"]
             route = _response_route_module().project_stored_response_route(state)
             if (route is None or route["status"] != "ready" or not any(
                     (c["work_unit_id"], c["contract_revision"], c["criterion_id"]) ==
@@ -1411,6 +1501,7 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
         "session_id": state.get("session_id"),
         "ledger_revision": state.get("ledger_revision"),
         "latest_input_event_id": state.get("latest_input_event_id"),
+        "canonical_input_event_id": state.get("canonical_input_event_id"),
         "current_goal": state.get("current_goal", ""),
         "user_intent_summary": state.get("user_intent_summary", ""),
         "constraints": list(state.get("constraints", [])),

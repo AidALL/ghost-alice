@@ -233,7 +233,7 @@ def project_stored_response_route(state, expected_input_event_id=None):
             raise RouteSchemaError("stored selected criterion binding is invalid")
         seen.add(key)
     route = deepcopy(stored)
-    if route.get("input_event_id") != current:
+    if route.get("input_event_id") != current or state.get("canonical_input_event_id") != current:
         route["status"] = "stale"
     criteria = state.get("acceptance_criteria", [])
     for selected_criterion in route["selected_criteria"]:

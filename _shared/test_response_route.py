@@ -186,6 +186,97 @@ class ResponseRouteTests(unittest.TestCase):
                 expected_input_event_id=self.event, completion_check_digest="c" * 64)
         self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"][1]["status"], "unmet")
 
+    def test_compatibility_only_ready_export_cannot_authorize_a_route(self):
+        self.event = self.setup_owned()
+        self.record()
+        copied = Path(self.tmp.name) / "compatibility-only"
+        state = ledger.read_session_state(**self.coords)
+        path = ledger.session_paths(copied, "codex", "current")["state"]
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(state))
+        coords = dict(root=copied, platform="codex", session_id="current")
+        self.assertIsNone(self.api.read_response_route(**coords))
+        self.assertFalse(ledger.storage_database_path(copied).exists())
+        with self.assertRaises(self.api.RouteBindingError):
+            self.api.record_response_route(**coords, expected_input_event_id=self.event,
+                candidate=self.candidate(), boundary_ref="boundary-1")
+        self.assertIsNone(self.api.read_response_route(**coords))
+
+    def test_legacy_import_requires_canonical_intake_before_route_registration(self):
+        self.event = self.setup_owned()
+        self.record()
+        copied = Path(self.tmp.name) / "legacy-import"
+        path = ledger.session_paths(copied, "codex", "current")["state"]
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(ledger.read_session_state(**self.coords)))
+        coords = dict(root=copied, platform="codex", session_id="current")
+        ledger.migrate_session(**coords)
+        with self.assertRaises(self.api.RouteBindingError):
+            self.api.record_response_route(**coords, expected_input_event_id=self.event,
+                candidate=self.candidate(), boundary_ref="boundary-1")
+        self.assertEqual(self.api.read_response_route(**coords)["status"], "stale")
+        ledger.record_turn(**coords, raw_user_input="continue approved work", source="hook")
+        fresh = ledger.read_session_state(**coords)["latest_input_event_id"]
+        self.assertEqual(self.api.record_response_route(**coords, expected_input_event_id=fresh,
+            candidate=self.candidate(), boundary_ref="boundary-1")["status"], "ready")
+
+    def test_existing_canonical_sqlite_receipt_upgrades_without_new_observation(self):
+        self.event = self.setup_owned()
+        self.record()
+        with ledger.storage_transaction(self.root) as tx:
+            state = ledger.read_session_state(**self.coords, transaction=tx)
+            state.pop("canonical_input_event_id")  # Genuine pre-upgrade SQLite shape.
+            tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                       (json.dumps(state), "codex", "current"))
+        before = ledger.read_session_events(**self.coords)
+        self.assertEqual(self.api.read_response_route(**self.coords)["status"], "ready")
+        self.assertEqual(self.record()["status"], "ready")
+        after = ledger.read_session_events(**self.coords)
+        self.assertEqual([e for e in after if e["event"] == "user-input-observed"],
+                         [e for e in before if e["event"] == "user-input-observed"])
+        self.assertEqual(ledger.read_session_state(**self.coords)["canonical_input_event_id"], self.event)
+
+    def test_older_native_intake_after_import_upgrades_from_attested_event_boundary(self):
+        self.event = self.setup_owned()
+        self.record()
+        copied = Path(self.tmp.name) / "older-import"
+        paths = ledger.session_paths(copied, "codex", "current")
+        paths["state"].parent.mkdir(parents=True)
+        paths["state"].write_text(json.dumps(ledger.read_session_state(**self.coords)))
+        paths["events"].write_text("".join(json.dumps(e) + "\n" for e in ledger.read_session_events(**self.coords)))
+        coords = dict(root=copied, platform="codex", session_id="current")
+        ledger.migrate_session(**coords)
+        ledger.record_turn(**coords, raw_user_input="real older canonical input", source="hook")
+        fresh = ledger.read_session_state(**coords)["latest_input_event_id"]
+        self.api.record_response_route(**coords, expected_input_event_id=fresh,
+            candidate=self.candidate(), boundary_ref="boundary-1")
+        with ledger.storage_transaction(copied) as tx:
+            state = ledger.read_session_state(**coords, transaction=tx)
+            state.pop("canonical_input_event_id")
+            tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                       (json.dumps(state), "codex", "current"))
+        before = ledger.read_session_events(**coords)
+        self.assertEqual(self.api.read_response_route(**coords)["status"], "ready")
+        self.assertEqual(self.api.record_response_route(**coords, expected_input_event_id=fresh,
+            candidate=self.candidate(), boundary_ref="boundary-1")["status"], "ready")
+        self.assertEqual([e for e in ledger.read_session_events(**coords) if e["event"] == "user-input-observed"],
+                         [e for e in before if e["event"] == "user-input-observed"])
+
+    def test_ownerless_met_snapshot_only_matches_ownerless_local_id(self):
+        self.event = self.setup_owned()
+        ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+            "acceptance_criteria": [{"id": "AC1", "summary": "legacy AC1", "source": "user-explicit"}]})
+        state = ledger.read_session_state(**self.coords)
+        legacy = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1" and "work_unit_id" not in c)
+        try:
+            ledger.mark_acceptance_criterion_met(**self.coords, criterion_id="AC1", expected_criterion=legacy,
+                expected_input_event_id=self.event, completion_check_digest="d" * 64)
+        except ValueError as exc:
+            self.fail(f"ownerless snapshot must not collide with owned local IDs: {exc}")
+        state = ledger.read_session_state(**self.coords)
+        self.assertEqual([c["status"] for c in state["acceptance_criteria"] if c["id"] == "AC1"],
+                         ["unmet", "unmet", "met"])
+
     def test_official_ledger_snapshot_exposes_detached_projection(self):
         self.event = self.setup_owned()
         self.record()
