@@ -1525,6 +1525,13 @@ def repair_missing_addon_targets(
     }
     for record in records:
         addon_id = str(record.get("addon_id"))
+        if addon_id == "ai-secretary":
+            # This reserved bundle owns skills, runtime and all platform
+            # sidecars atomically. Generic repair must not rewrite one record
+            # or restore a skill outside that ownership inventory.
+            report["kept"].append({"addon_id": addon_id, "kind": "bundle", "name": addon_id,
+                "action": "use-owned-installer", "reason": "complete-bundle-owned-installation"})
+            continue
         addon_root = Path(str(record.get("source", "")))
         try:
             source_maps = _addon_root_source_maps(addon_root, addon_id)
@@ -1723,6 +1730,9 @@ def _main_repair_missing(argv: list[str]) -> int:
         print(f"addon repair error: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(report, ensure_ascii=False, indent=2))
+    if any(item.get("action") == "use-owned-installer" for item in report.get("kept", [])):
+        print("ai-secretary: use-owned-installer; generic repair preserved the complete bundle and its records. "
+            "Use the installed Secretary installer status/uninstall/install with the original manifest parameters.", file=sys.stderr)
     return 1 if report.get("errors") else 0
 
 

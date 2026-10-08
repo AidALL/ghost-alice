@@ -60,6 +60,7 @@ SOURCE_REPO_HOOK_BEFORE_PRESENT=0
 SOURCE_REPO_HOOK_BEFORE=""
 SOURCE_REPO_HOOK_AFTER="hooks"
 ADDON_SOURCES=()
+MANAGED_ADDON_SOURCES=()
 ADDON_TAGS=()
 ADDON_SOURCE_PREPARED=0
 INSTALL_ADDON_TARGETS=()
@@ -334,6 +335,9 @@ official_addon_source() {
     autopilot|autopilot-mode)
       printf '%s\n' "${GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE:-https://github.com/AidALL/ghost-alice-autopilot.git}"
       ;;
+    ai-secretary)
+      printf '%s\n' "${GHOST_ALICE_OFFICIAL_ADDON_AI_SECRETARY_SOURCE:-https://github.com/AidALL/ghost-alice-ai-secretary.git}"
+      ;;
     *)
       return 1
       ;;
@@ -361,12 +365,12 @@ normalize_official_addon_shortcuts() {
     if [ "${ARGS[$i]}" = "--addon" ]; then
       i=$((i + 1))
       if [ "$i" -ge "${#ARGS[@]}" ]; then
-        error "$(t '--addon requires a value (autopilot)' '--addon requires a value (autopilot)')"
+        error "$(t '--addon requires a value (autopilot | ai-secretary)' '--addon requires a value (autopilot | ai-secretary)')"
         return 1
       fi
       addon_name="${ARGS[$i]}"
       addon_source="$(official_addon_source "$addon_name")" || {
-        error "$(t "Unknown official addon: ${addon_name} (supported: autopilot)" "Unknown official addon: ${addon_name} (supported: autopilot)")"
+        error "$(t "Unknown official addon: ${addon_name} (supported: autopilot, ai-secretary)" "Unknown official addon: ${addon_name} (supported: autopilot, ai-secretary)")"
         return 1
       }
       ADDON_SOURCES+=("$addon_source")
@@ -452,6 +456,9 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
     # Prepared addon git sources are forwarded to child installs as local cache paths; the tag has already been applied by the parent checkout.
     ADDON_TAGS=()
   fi
+  # Runtime bundles aggregate the detected platforms into one owned install.
+  # Children receive only generic sources and cannot publish this skill again.
+  install_managed_addons "${detected[@]}" || exit 1
   addon_args=()
   for source in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"}; do
     addon_args+=(--addon-source "$source")
@@ -602,6 +609,10 @@ if [ "$LIST_ADDONS" -eq 1 ]; then
   exit $?
 fi
 
+case "${ARGS[0]:-}" in
+  ""|[!-]*) install_managed_addons "$PLATFORM" || exit 1 ;;
+esac
+
 # ── Main ───────────────────────────────────────────────────
 case "${ARGS[0]:-}" in
   --list|-l)
@@ -640,6 +651,7 @@ case "${ARGS[0]:-}" in
     echo "Usage:"
     echo "  bash install.sh                              # $(t 'Install to detected AI tools' 'Install to detected AI tools')"
     echo "  bash install.sh --addon autopilot            # $(t 'Install official autopilot addon to detected AI tools' 'Install official autopilot addon to detected AI tools')"
+    echo "  bash install.sh --addon ai-secretary         # Install the complete macOS desktop Secretary bundle"
     echo "  bash install.sh --platform claude            # $(t 'Install only to Claude Code' 'Install only to Claude Code')"
     echo "  bash install.sh --platform codex             # $(t 'Install to Codex' 'Install to Codex')"
     echo ""
@@ -655,6 +667,7 @@ case "${ARGS[0]:-}" in
     echo "  --repair               $(t 'Re-provision missing managed targets (never overwrites user-owned slots)' 'Re-provision missing managed targets (never overwrites user-owned slots)')"
     echo "  --verbose, -v          $(t 'Show per-target install details' 'Show per-target install details')"
     echo "  --addon autopilot     $(t 'Install official autopilot addon; --platform is optional' 'Install official autopilot addon; --platform is optional')"
+    echo "  --addon ai-secretary  Install the complete Secretary bundle; --platform is optional (macOS)"
     echo ""
     echo "$(t 'Removal commands:' 'Removal commands:')"
     echo "  --uninstall, -u        $(t 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets' 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets')"

@@ -112,7 +112,7 @@ list_addons() {
     info "$(t 'Addon installation is disabled (--addon-skip)' 'Addon installation is disabled (--addon-skip)')"
     return 0
   fi
-  if [ "${#ADDON_SOURCES[@]}" -eq 0 ]; then
+  if [ "${#ADDON_SOURCES[@]}" -eq 0 ] && [ "${#MANAGED_ADDON_SOURCES[@]}" -eq 0 ]; then
     error "$(t '--list-addons requires --addon-source' '--list-addons requires --addon-source')"
     return 1
   fi
@@ -124,7 +124,7 @@ list_addons() {
     return 1
   fi
   local args=()
-  for source in "${ADDON_SOURCES[@]}"; do
+  for source in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"} ${MANAGED_ADDON_SOURCES[@]+"${MANAGED_ADDON_SOURCES[@]}"}; do
     args+=(--source "$source")
   done
   for skill in "${ALL_SKILLS[@]}"; do

@@ -428,6 +428,20 @@ def uninstall_addon(
     if confirm:
         _write_marker(marker, addon_id, provided)  # intent marker BEFORE any removal
 
+    if addon_id == "ai-secretary":
+        # The bundle installer owns runtime + skills + all platform sidecars.
+        # Delegate before generic target deletion; never execute sidecar argv.
+        import managed_addons
+        report = managed_addons.uninstall_secretary(record, addons_dir=addons_dir, confirm=confirm)
+        if report["status"] == "removed":
+            for selected in report["removed_platform_records"]:
+                directory = selected["addons_dir"]
+                key = selected["platform"]
+                _prune_install_state(addon_id, addons_dir=directory, platform=key)
+                _prune_pending_merge_state(addon_id, addons_dir=directory, platform=key, provided=selected["provided"])
+                _removing_marker_path(addon_id, addons_dir=directory).unlink(missing_ok=True)
+        return report
+
     # Adapter entries are intentionally excluded from the hash-gated file removal below. A privileged adapter's script lives inside its owning skill directory, so the skill target is the file deletion unit and the adapter entry is an install-time integrity/ownership snapshot (T0.3), not a second uninstall-time delete gate. If the skill target is fully removable, its own hash gate covers the adapter script along with the rest of the skill tree. If the skill target is blocked for manual review, the script stays with it. In both cases only the adapter HOOK is removed here, by exact marker, via _adapter_hook_items.
     file_targets = [entry for entry in provided if entry.get("kind") != "adapter"]
     items = [_process_target(entry, allowed_roots=allowed_roots, confirm=confirm) for entry in file_targets]

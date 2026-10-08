@@ -50,3 +50,20 @@ jobs:
 
       - name: Validate platform adapters
         run: python3 scripts/validate_platform_adapters.py
+
+  secretary-boundary:
+    name: Secretary macOS installer boundary
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Test complete bundle dispatch and ownership-aware removal
+        run: python3 -m unittest scripts.tests.test_managed_secretary_addon -v

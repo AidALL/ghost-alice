@@ -63,6 +63,9 @@ PY
 
 _clone_addon_git_source() {
   local source="$1" ref="$2" cache_root key dest tmp
+  if [ "$source" = "https://github.com/AidALL/ghost-alice-ai-secretary.git" ] && [ -z "$ref" ]; then
+    ref="v0.1.0"
+  fi
   if ! command -v git >/dev/null 2>&1; then
     error "$(t 'git not found; cannot clone addon source URL' 'git not found; cannot clone addon source URL')" >&2
     return 1
@@ -116,8 +119,43 @@ prepare_addon_sources() {
       prepared+=("$source")
     fi
   done
-  ADDON_SOURCES=("${prepared[@]}")
+  ADDON_SOURCES=()
+  local kind py
+  py="$(_find_python_runtime || true)"
+  [ -n "$py" ] || return 1
+  for source in "${prepared[@]}"; do
+    kind="$("$py" "${SCRIPT_DIR}/_shared/managed_addons.py" classify --source "$source")" || return 1
+    case "$kind" in
+      managed) MANAGED_ADDON_SOURCES+=("$source") ;;
+      generic) ADDON_SOURCES+=("$source") ;;
+      *) return 1 ;;
+    esac
+  done
   ADDON_SOURCE_PREPARED=1
+}
+
+install_managed_addons() {
+  [ "$ADDON_SKIP" != "1" ] || return 0
+  [ "${#MANAGED_ADDON_SOURCES[@]}" -gt 0 ] || return 0
+  if [ "${#MANAGED_ADDON_SOURCES[@]}" -ne 1 ]; then
+    error "Only one ai-secretary bundle source can be selected"
+    return 1
+  fi
+  local py target_platform skills_dir
+  local platform_args=()
+  py="$(_find_python_runtime || true)"
+  [ -n "$py" ] || return 1
+  for target_platform in "$@"; do
+    case "$target_platform" in
+      codex) skills_dir="$(resolve_codex_skills_dir)" ;;
+      claude) skills_dir="$(resolve_claude_home)/skills" ;;
+      *) error "Unsupported Secretary platform: $target_platform"; return 1 ;;
+    esac
+    platform_args+=(--platform-target "${target_platform}=${skills_dir}")
+  done
+  info "Installing complete ai-secretary bundle for: $*"
+  "$py" "${SCRIPT_DIR}/_shared/managed_addons.py" install \
+    --source "${MANAGED_ADDON_SOURCES[0]}" --core-root "$SCRIPT_DIR" "${platform_args[@]}"
 }
 
 collect_addon_targets() {
