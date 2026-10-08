@@ -32,6 +32,8 @@ ROUTING_TEXT = {"primary_request", "causal_axis", "reason"}
 CANDIDATE_KEYS = {"schema_version", "routing_surface", "work_units", "selected_work_unit_ids", "selected_criteria"}
 UNIT_KEYS = {"work_unit_id", "contract_revision", "kind", "admitted", "owner"}
 REFERENCE_KEYS = {"work_unit_id", "contract_revision", "criterion_id"}
+CRITERION_KEYS = {"id", "summary", "source", "status", "admitted", "work_unit_id", "contract_revision"}
+CRITERION_PROOF_KEYS = {"met_completion_check_digest", "met_at"}
 
 
 class ResponseRouteError(ValueError):
@@ -91,6 +93,42 @@ def _surface(value):
     return surface
 
 
+def _criterion(value, *, resolved=False):
+    required = CRITERION_KEYS | ({"criterion_id"} if resolved else set())
+    if (not isinstance(value, dict) or not required <= set(value)
+            or not set(value) <= required | CRITERION_PROOF_KEYS):
+        raise RouteSchemaError("owned criterion fields are incomplete or unknown")
+    key = (*_unit_key(value), _identifier(value["id"], "criterion id"))
+    if not isinstance(value["summary"], str) or not value["summary"].strip():
+        raise RouteSchemaError("owned criterion summary must be a nonempty string")
+    if not isinstance(value["source"], str) or value["source"] not in ledger.ACCEPTANCE_CRITERIA_SOURCES:
+        raise RouteSchemaError("owned criterion source is invalid")
+    if not isinstance(value["status"], str) or value["status"] not in ledger.ACCEPTANCE_CRITERIA_STATUSES:
+        raise RouteSchemaError("owned criterion status is invalid")
+    if type(value["admitted"]) is not bool:
+        raise RouteSchemaError("owned criterion admission must be boolean")
+    for field in CRITERION_PROOF_KEYS & set(value):
+        if not isinstance(value[field], str) or not value[field]:
+            raise RouteSchemaError(f"owned criterion {field} must be a nonempty string")
+    if resolved and value["criterion_id"] != key[2]:
+        raise RouteSchemaError("stored criterion local-ID alias is inconsistent")
+    return key
+
+
+def _owned_criteria(value):
+    if not isinstance(value, list):
+        raise RouteSchemaError("stored acceptance criteria must be a list")
+    owned = {}
+    for criterion in value:
+        if not isinstance(criterion, dict) or not {"work_unit_id", "contract_revision"} & set(criterion):
+            continue  # Unknown legacy ownership remains unbound.
+        key = _criterion(criterion)
+        if key in owned:
+            raise RouteSchemaError("stored owned criterion is ambiguous")
+        owned[key] = criterion
+    return owned
+
+
 def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
                             boundary_ref: str | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Validate current selection against owned criteria and immutable contracts."""
@@ -108,17 +146,7 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
     if not isinstance(registry, list):
         raise RouteSchemaError("stored work unit registry is invalid")
     units = {}
-    owned = {}
-    criteria = state.get("acceptance_criteria", [])
-    if not isinstance(criteria, list):
-        raise RouteSchemaError("stored acceptance criteria are invalid")
-    for criterion in criteria:
-        if not isinstance(criterion, dict) or "work_unit_id" not in criterion:
-            continue  # Historical ownership is unknown, never inferred.
-        key = (*_unit_key(criterion), _identifier(criterion.get("id"), "criterion id"))
-        if key in owned:
-            raise RouteSchemaError("stored owned criterion is ambiguous")
-        owned[key] = criterion
+    owned = _owned_criteria(state.get("acceptance_criteria", []))
     for raw in candidate["work_units"]:
         unit = deepcopy(_object(raw, UNIT_KEYS, "work unit"))
         key = _unit_key(unit)
@@ -224,9 +252,7 @@ def project_stored_response_route(state, expected_input_event_id=None):
         raise RouteSchemaError("stored selected unit is not admitted")
     seen = set()
     for criterion in stored["selected_criteria"]:
-        if not isinstance(criterion, dict):
-            raise RouteSchemaError("stored selected criterion is invalid")
-        key = (*_unit_key(criterion), _identifier(criterion.get("criterion_id"), "criterion_id"))
+        key = _criterion(criterion, resolved=True)
         if (key in seen or key[0] not in selected or units[key[0]]["contract_revision"] != key[1]
                 or criterion.get("id") != key[2] or criterion.get("admitted") is not True
                 or criterion.get("status") not in ("met", "unmet")):
@@ -235,13 +261,10 @@ def project_stored_response_route(state, expected_input_event_id=None):
     route = deepcopy(stored)
     if route.get("input_event_id") != current or state.get("canonical_input_event_id") != current:
         route["status"] = "stale"
-    criteria = state.get("acceptance_criteria", [])
+    owned = _owned_criteria(state.get("acceptance_criteria", []))
     for selected_criterion in route["selected_criteria"]:
-        matches = [c for c in criteria if isinstance(c, dict)
-                   and (c.get("work_unit_id"), c.get("contract_revision"), c.get("id")) ==
-                   (*_unit_key(selected_criterion), selected_criterion["criterion_id"])]
-        if len(matches) != 1 or any(matches[0].get(k) != selected_criterion.get(k)
-                                   for k in ("summary", "source", "admitted")):
+        criterion = owned.get(_criterion(selected_criterion, resolved=True))
+        if criterion is None or any(criterion[k] != selected_criterion[k] for k in ("summary", "source", "admitted")):
             route["status"] = "stale"
     route["current_input_event_id"] = current
     return route

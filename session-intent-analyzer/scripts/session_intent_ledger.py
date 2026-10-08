@@ -1265,7 +1265,7 @@ def record_turn(
             event["delta_keys"] = sorted(str(key) for key in intent_delta.keys())
         _commit(connection, state, event)
         if raw_user_input is not None:
-            _persist_canonical_intake(connection, state)
+            _persist_canonical_intake(connection, state, native=True)
     return paths
 
 
@@ -1355,21 +1355,29 @@ def _canonical_intake_record(connection: sqlite3.Connection, state: dict[str, An
         (state["platform"], state["session_id"])).fetchone()
 
 
+def _trusted_current_intake_sequence(connection: sqlite3.Connection, state: dict[str, Any]) -> int | None:
+    record = _canonical_intake_record(connection, state)
+    if record is None or tuple(record[:3]) != (state["latest_input_event_id"], state["latest_input_digest"],
+                                             state["latest_input_char_count"]):
+        return None
+    event = connection.execute("SELECT event_json FROM intent_events WHERE platform=? AND session_id=? AND sequence=?",
+                               (state["platform"], state["session_id"], record[3])).fetchone()
+    if event is None or not _observation_matches(json.loads(event[0]), state["platform"], state["session_id"], *record[:3]):
+        return None
+    return record[3]
+
+
 def _canonical_input_bound(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> bool:
     """Only a protected SQLite record or verified native audit origin binds intake."""
     if not state.get("latest_input_event_id"):
         return False
+    record = _canonical_intake_record(connection, state)
+    if record is not None and record[0] == state["latest_input_event_id"]:
+        return _trusted_current_intake_sequence(connection, state) is not None
     sequence = _current_observation_sequence(connection, state)
     if sequence is None:
         return False
-    record = _canonical_intake_record(connection, state)
     if record is not None:
-        expected = (state["latest_input_event_id"], state["latest_input_digest"],
-                    state["latest_input_char_count"], sequence)
-        if tuple(record) == expected:
-            return True
-        if record[0] == state["latest_input_event_id"]:
-            return False  # Conflicting current provenance cannot be downgraded.
         prior = connection.execute("SELECT event_json FROM intent_events WHERE platform=? AND session_id=? AND sequence=?",
                                    (state["platform"], state["session_id"], record[3])).fetchone()
         return (prior is not None and sequence > record[3]
@@ -1378,8 +1386,12 @@ def _canonical_input_bound(connection: sqlite3.Connection, root: Path, state: di
     return imported_count is not None and sequence > imported_count
 
 
-def _persist_canonical_intake(connection: sqlite3.Connection, state: dict[str, Any]) -> None:
-    sequence = _current_observation_sequence(connection, state)
+def _persist_canonical_intake(connection: sqlite3.Connection, state: dict[str, Any], *, native=False) -> None:
+    # New intake still checks ID uniqueness across the audit; a trusted current
+    # record already establishes that proof for repeated route consumers.
+    sequence = None if native else _trusted_current_intake_sequence(connection, state)
+    if sequence is None:
+        sequence = _current_observation_sequence(connection, state)
     if sequence is None:
         raise ValueError("canonical intake must match exactly one authoritative observation")
     connection.execute("""INSERT INTO canonical_intakes VALUES(?,?,?,?,?,?)

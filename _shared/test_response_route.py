@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from copy import deepcopy
 from pathlib import Path
 import shutil
 import subprocess
@@ -141,6 +142,62 @@ class ResponseRouteTests(unittest.TestCase):
             intent_delta={"acceptance_criteria": [self.criterion(admitted=False)]})
         with self.assertRaises(self.api.RouteSchemaError):
             self.record()
+
+    def test_registration_rejects_malformed_owned_criteria_with_typed_errors(self):
+        self.event = self.setup_owned()
+        baseline = ledger.read_session_state(**self.coords)
+        variants = [None, 1]
+        missing_summary = deepcopy(baseline["acceptance_criteria"])
+        missing_summary[0].pop("summary")
+        variants.append(missing_summary)
+        invalid_status = deepcopy(baseline["acceptance_criteria"])
+        invalid_status[0]["status"] = "invalid"
+        variants.append(invalid_status)
+        for criteria in variants:
+            with self.subTest(criteria=criteria):
+                bad_state = deepcopy(baseline)
+                bad_state["acceptance_criteria"] = criteria
+                with ledger.storage_transaction(self.root) as tx:
+                    tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                               (json.dumps(bad_state), "codex", "current"))
+                events = ledger.read_session_events(**self.coords)
+                try:
+                    self.record()
+                except self.api.RouteSchemaError:
+                    pass
+                except Exception as exc:
+                    self.fail(f"typed RouteSchemaError required, got {type(exc).__name__}: {exc}")
+                else:
+                    self.fail("malformed criteria committed an unreadable ready projection")
+                self.assertEqual(ledger.read_session_state(**self.coords), bad_state)
+                self.assertEqual(ledger.read_session_events(**self.coords), events)
+
+    def test_reader_uses_the_same_owned_criterion_schema(self):
+        self.event = self.setup_owned()
+        self.record()
+        baseline = ledger.read_session_state(**self.coords)
+        variants = [None, 1]
+        missing_summary = deepcopy(baseline["acceptance_criteria"])
+        missing_summary[0].pop("summary")
+        variants.append(missing_summary)
+        invalid_status = deepcopy(baseline["acceptance_criteria"])
+        invalid_status[0]["status"] = "invalid"
+        variants.append(invalid_status)
+        for criteria in variants:
+            with self.subTest(criteria=criteria):
+                bad_state = deepcopy(baseline)
+                bad_state["acceptance_criteria"] = criteria
+                with ledger.storage_transaction(self.root) as tx:
+                    tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                               (json.dumps(bad_state), "codex", "current"))
+                try:
+                    self.api.read_response_route(**self.coords)
+                except self.api.RouteSchemaError:
+                    pass
+                except Exception as exc:
+                    self.fail(f"typed RouteSchemaError required, got {type(exc).__name__}: {exc}")
+                else:
+                    self.fail("reader accepted malformed owned criterion state")
 
     def test_same_revision_cannot_relabel_unit_or_changed_criterion(self):
         self.event = self.setup_owned()
