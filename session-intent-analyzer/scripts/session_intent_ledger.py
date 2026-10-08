@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import errno
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -242,6 +243,8 @@ def default_state(platform: str, session_id: str) -> dict[str, Any]:
         "non_goals": [],
         "open_questions": [],
         "acceptance_criteria": [],
+        "work_units": [],
+        "response_route": None,
         "decisions": [],
         "conduct_feedback": [],
         "risk_flags": [],
@@ -766,7 +769,7 @@ def _semantic_projection(state: dict[str, Any]) -> dict[str, Any]:
     for key in ("constraints", "non_goals", "open_questions"):
         projection[key] = objects(state.get(key), ("id", "summary", "source", "status"))
     projection["acceptance_criteria"] = objects(state.get("acceptance_criteria"),
-        ("id", "summary", "source", "admitted", "status", "met_completion_check_digest"))
+        ("id", "summary", "source", "admitted", "status", "met_completion_check_digest", "work_unit_id", "contract_revision"))
     projection["decisions"] = objects(state.get("decisions"),
         ("id", "summary", "source", "superseded", "superseded_by"))
     projection["conduct_feedback"] = objects(state.get("conduct_feedback"),
@@ -885,20 +888,33 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     admitted = raw.get("admitted")
     if not isinstance(admitted, bool):
         admitted = source in ACCEPTANCE_CRITERIA_ADMITTED_SOURCES
-    return {
+    criterion = {
         "id": criterion_id,
         "summary": summary,
         "source": source,
         "status": status,
         "admitted": admitted,
     }
+    if "work_unit_id" in raw or "contract_revision" in raw:
+        unit = raw.get("work_unit_id")
+        revision = raw.get("contract_revision")
+        if (not isinstance(unit, str) or not unit or safe_component(unit, "") != unit
+                or len(unit) > 120 or type(revision) is not int or not 1 <= revision <= MAX_SHARED_INTEGER):
+            raise ValueError("criterion ownership requires an exact work_unit_id and positive integer contract_revision")
+        criterion.update(work_unit_id=unit, contract_revision=revision)
+    return criterion
+
+
+def acceptance_criterion_key(criterion: dict[str, Any]) -> tuple[Any, Any, str]:
+    """An ownerless legacy ID never aliases an explicitly owned local ID."""
+    return criterion.get("work_unit_id"), criterion.get("contract_revision"), criterion["id"]
 
 
 def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, Any]]:
-    merged: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
+    merged: dict[tuple, dict[str, Any]] = {}
+    order: list[tuple] = []
 
-    def store(criterion_id: str, criterion: dict[str, Any]) -> None:
+    def store(criterion_id: tuple[Any, Any, str], criterion: dict[str, Any]) -> None:
         if criterion_id not in merged:
             order.append(criterion_id)
         merged[criterion_id] = criterion
@@ -919,7 +935,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             met_at = item.get("met_at")
             if isinstance(met_at, str) and met_at:
                 criterion["met_at"] = met_at
-        store(criterion["id"], criterion)
+        store(acceptance_criterion_key(criterion), criterion)
 
     # Incoming raw deltas may not assert "met": the status only transitions through mark_acceptance_criterion_met. Admission may still be promoted.
     incoming_items = incoming if isinstance(incoming, list) else [incoming]
@@ -927,7 +943,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
         criterion = normalize_acceptance_criterion(item)
         if criterion is None:
             continue
-        criterion_id = criterion["id"]
+        criterion_id = acceptance_criterion_key(criterion)
         prior = merged.get(criterion_id)
         if prior is not None:
             incoming_admitted = item.get("admitted") if isinstance(item, dict) else None
@@ -1198,6 +1214,10 @@ def record_turn(
         if intent_delta is not None and not isinstance(intent_delta, dict):
             raise ValueError("intent_delta must be an object")
         if raw_user_input is not None:
+            route = state.get("response_route")
+            if isinstance(route, dict) and route.get("input_event_id") != observation["input_event_id"]:
+                # Reopen routing/authorization binding, never the business proof.
+                route["status"] = "stale"
             state["latest_input_event_id"] = observation["input_event_id"]
             state["latest_input_digest"] = observation["input_digest"]
             state["latest_input_char_count"] = observation["input_char_count"]
@@ -1234,6 +1254,63 @@ def record_turn(
     return paths
 
 
+def _response_route_module():
+    """Load the sibling Core helper; installation preserves this shared layout."""
+    path = Path(__file__).resolve().parents[2] / "_shared" / "response_route.py"
+    retained = sys.modules.get("response_route")
+    if retained is not None and Path(retained.__file__).resolve() == path:
+        return retained
+    spec = importlib.util.spec_from_file_location("response_route", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Core response route helper is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["response_route"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+                          expected_input_event_id: str, candidate: dict[str, Any],
+                          boundary_ref: str | None,
+                          transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Official atomic projection writer. Core validates before committing."""
+    routes = _response_route_module()
+    try:
+        validate_identity(platform, session_id)
+    except ValueError as exc:
+        raise routes.RouteBindingError(str(exc)) from exc
+    with _transaction(root, transaction) as connection:
+        state = _load_state_for_update(connection, session_paths(root, platform, session_id), platform, session_id)
+        if not expected_input_event_id or not state.get("latest_input_event_id"):
+            raise routes.RouteBindingError("a current observed input event is required for a ready route")
+        try:
+            _check_expected(state, expected_input_event_id, None)
+        except ValueError as exc:
+            raise routes.RouteBindingError(str(exc)) from exc
+        projection, units = routes.validate_response_route(state, candidate, boundary_ref)
+        state["response_route"] = projection
+        state["work_units"] = units
+        state["updated_at"] = utc_now()
+        _commit(connection, state, {
+            "ts": state["updated_at"], "event": "response-route-recorded",
+            "platform": platform, "session_id": session_id,
+            "input_event_id": expected_input_event_id,
+            "response_route_digest": json_digest(projection),
+            "selected_work_unit_ids": projection["selected_work_unit_ids"],
+            "selected_criteria": [{k: c[k] for k in ("work_unit_id", "contract_revision", "criterion_id")}
+                                  for c in projection["selected_criteria"]],
+        })
+        return deepcopy(projection)
+
+
+def read_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+                        expected_input_event_id: str | None = None,
+                        transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    """Read route and input anchor from one authoritative snapshot."""
+    state = read_session_state(root=root, platform=platform, session_id=session_id, transaction=transaction)
+    return _response_route_module().project_stored_response_route(state, expected_input_event_id)
+
+
 def mark_acceptance_criterion_met(
     *,
     root: Path = DEFAULT_ROOT,
@@ -1268,13 +1345,23 @@ def mark_acceptance_criterion_met(
         state = _load_state_for_update(connection, paths, platform, session_id)
         _check_expected(state, expected_input_event_id, expected_revision)
         criteria = state.get("acceptance_criteria")
-        matches = [c for c in criteria if isinstance(c, dict) and c.get("id") == target_id] if isinstance(criteria, list) else []
+        matches = [c for c in criteria if isinstance(c, dict) and c.get("id") == target_id
+                   and ("work_unit_id" not in expected_criterion or
+                        (c.get("work_unit_id"), c.get("contract_revision")) ==
+                        (expected_criterion["work_unit_id"], expected_criterion.get("contract_revision")))] if isinstance(criteria, list) else []
         if len(matches) != 1:
             raise ValueError("acceptance criterion is missing or ambiguous")
         criterion = matches[0]
         if criterion.get("admitted") is not True:
             raise ValueError("acceptance criterion is not admitted")
-        for key in ("id", "summary", "source", "admitted"):
+        if "work_unit_id" in criterion:
+            route = _response_route_module().project_stored_response_route(state)
+            if (route is None or route["status"] != "ready" or not any(
+                    (c["work_unit_id"], c["contract_revision"], c["criterion_id"]) ==
+                    acceptance_criterion_key(criterion) for c in route["selected_criteria"])):
+                raise ValueError("owned criterion must be selected by a ready current response route")
+        for key in ("id", "summary", "source", "admitted", *(
+                ("work_unit_id", "contract_revision") if "work_unit_id" in criterion else ())):
             if (key not in expected_criterion or expected_criterion[key] != criterion.get(key)
                     or type(expected_criterion[key]) is not type(criterion.get(key))):
                 raise ValueError("stale expected criterion; obtain evidence for the current approved condition")
@@ -1290,6 +1377,8 @@ def mark_acceptance_criterion_met(
             "platform": platform,
             "session_id": session_id,
             "criterion_id": target_id,
+            "work_unit_id": criterion.get("work_unit_id"),
+            "contract_revision": criterion.get("contract_revision"),
             "completion_check_digest": digest,
             "input_event_id": state["latest_input_event_id"],
             "semantic_changes": _semantic_changes(before, state),
@@ -1328,6 +1417,8 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
         "non_goals": list(state.get("non_goals", [])),
         "open_questions": list(state.get("open_questions", [])),
         "acceptance_criteria": list(state.get("acceptance_criteria", [])),
+        "work_units": deepcopy(state.get("work_units", [])),
+        "response_route": deepcopy(state.get("response_route")),
         "decision_count": len(active_decisions),
         "active_decisions": deepcopy(active_decisions),
         "latest_scope": deepcopy(latest_scope) if isinstance(latest_scope, dict) else {},

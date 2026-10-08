@@ -441,6 +441,24 @@ class SessionIntentLedgerTests(unittest.TestCase):
         )
         self.assertEqual(snapshot["acceptance_criteria"], state["acceptance_criteria"])
 
+    def test_owned_local_criterion_ids_survive_without_a_response_projection(self) -> None:
+        root = self.tmpdir / "ledger"
+        self.ledger.record_turn(root=root, platform="codex", session_id="owned", intent_delta={
+            "acceptance_criteria": [
+                {"id": "AC1", "summary": "first contract", "source": "user-explicit",
+                 "work_unit_id": "first", "contract_revision": 1},
+                {"id": "AC1", "summary": "second contract", "source": "user-explicit",
+                 "work_unit_id": "second", "contract_revision": 1},
+                {"id": "old", "summary": "historical unbound condition", "source": "user-explicit"},
+            ]})
+        state = self.ledger.read_session_state(root=root, platform="codex", session_id="owned")
+        self.assertEqual(len(state["acceptance_criteria"]), 3)
+        self.assertEqual([c.get("work_unit_id") for c in state["acceptance_criteria"]],
+                         ["first", "second", None])
+        snapshot = self.ledger.consumer_snapshot(state)
+        self.assertIsNone(snapshot.get("response_route"))
+        self.assertEqual(snapshot["acceptance_criteria"], state["acceptance_criteria"])
+
     def test_snapshot_cli_preserves_corrected_scope_without_granting_authority(self) -> None:
         root = self.tmpdir / "ledger"
         self.ledger.record_turn(

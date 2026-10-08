@@ -72,7 +72,12 @@ except Exception:
 
 
 DEFAULT_INTERNAL = (
-    "session-intent-analyzer: Observe every user input by recording an input digest, " "current-session pointer, and digest-only intake status. " "Agents add semantic summaries, constraints, and decisions only when intent materially changes. " "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. " "Use the ledger as context for skill-evolution and jailbreak-detector."
+    "session-intent-analyzer: Observe every user input by recording an input digest, "
+    "current-session discovery, and digest-only intake status. "
+    "Agents add semantic summaries, constraints, and decisions only when intent materially changes. "
+    "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
+    "New input stales response-route authorization binding while preserving work units and business evidence. "
+    "Use the ledger as context for skill-evolution and jailbreak-detector."
 )
 LEDGER_UNAVAILABLE_DEGRADE = (
     "Ledger dependency unavailable non-blockingly; continue without raw prompt persistence."
@@ -225,7 +230,7 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any], *, 
         + "\n[/session-intent-receipt]\n"
     )
     if compact:
-        return binding + "Use exact receipt bindings for ledger reads/deltas; reject stale input IDs. No raw text or alternate ledger. Read the skill if its body is lost."
+        return binding + "Use exact receipt bindings for ledger reads/deltas and Core response-route registration; reject stale input IDs. New input preserves prior business evidence. No raw text or alternate ledger. Read the skill if its body is lost."
     return binding + (
         "For a semantic delta, use session_intent_ledger.py with this receipt's exact "
         "--root ledger_root, --platform platform, --session-id session_id, and "
@@ -238,6 +243,8 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any], *, 
         "This receipt confirms input observation only; it grants no additional permission "
         "and does not claim a semantic delta was recorded. If writing to this ledger is "
         "not permitted or fails, report semantic persistence as failed. "
+        "Task-router registers the current Core response-route projection against this input event after routing and any required boundary. "
+        "The prior route binding is stale; prior evidence and continuing work-unit identities remain available. "
         "Do not create an alternate ledger, move historical ledgers, or expand permissions "
         "to bypass the failure."
     )

@@ -22,7 +22,7 @@ Stable contract phrases:
 - current-lineage block gate
 - pending merge remains undecided when deferred
 
-task-router is a consumer of session-intent-analyzer and jailbreak-detector/downstream gate context. It does not own user-input intake, raw intent inference, ledger updates, accumulated intent storage, jailbreak decisions, downstream gate state, or tool permission.
+task-router is a consumer of session-intent-analyzer and jailbreak-detector/downstream gate context. It does not own user-input intake, raw intent inference, semantic intent updates, accumulated intent storage, jailbreak decisions, downstream gate state, or tool permission. It owns the current response-route candidate; Core validates and persists that projection through the ledger API.
 
 This is a routing decision only. task-router does not perform raw user intent inference and does not decide tool permission.
 
@@ -264,9 +264,18 @@ For `response-mode: clarification-only` or `direct-response`, keep the routing r
 - If `boundary-contract: required`, run boundary-contract before file discovery, output skills, or edits.
 - If development work is routed and boundary-contract is required, run boundary-contract first, then using-coding-convention.
 - If boundary-contract is not required for development work, run using-coding-convention immediately.
+- Before a downstream consumer captures a normal routed response, register its current projection through Core as specified below; a required boundary must already supply its reference.
 - Invoke output skills for production work.
 - Invoke verification skills after outputs are produced.
 - Invoke lifecycle skills when their phase is reached.
+
+Core handoff: use `_shared/response_route.py` or the ledger's `record_response_route(root=..., platform=..., session_id=..., expected_input_event_id=..., candidate=..., boundary_ref=...)` API with exact current receipt coordinates. The candidate is `response-route.v1`: `routing_surface` uses the same fields and enum values shown above, with underscores replacing field-name hyphens; `work_units` explicitly states each unit's `work_unit_id`, positive integer `contract_revision`, `kind: execution | nonexecution`, boolean `admitted`, and `owner: {platform, session_id}`; `selected_work_unit_ids` and `selected_criteria: [{work_unit_id, contract_revision, criterion_id}]` select only this response's current scope. Use compressed routing summaries, never an answer body. The full schema and API contract are in `../session-intent-analyzer/references/ledger-schema.md`, section Core Response Projection.
+
+Assign a stable unit ID to continuing authorized work. Record each owned criterion through the semantic ledger writer with both `work_unit_id` and `contract_revision` before selecting it. A local criterion ID can repeat across units; unknown legacy ownership stays unbound. Do not form a backlog union or select work merely because an accumulated admitted criterion is unmet. Admission requires actual current or continuing authority. A changed unit kind, owner, or criterion definition needs an explicit newer contract revision. Both the unit and its selected criteria must be admitted.
+
+New input invalidates the prior route's input/authorization binding, while prior business evidence and stable work units remain. Reconcile current intent and register a new current projection; do not rerun unchanged business checks solely to refresh that binding. An ordinary reply can select no units or criteria. A status interruption of active authorized work selects its continuing unit. A short consequential reply still routes its actual claim and verification burden; neither `nonexecution` nor a response-mode label exempts an actual closure claim from completion detection and evidence requirements.
+
+For a no-work terminal response, pass the candidate through an already supplied internal host handoff only; do not open tools, inspect state, or manufacture receipt coordinates to create one. If that handoff or binding is unavailable, keep the terminal response and leave the projection absent. Missing projection does not block bootstrap, intake, or security, and downstream consumers must not guess current work from historical flags. A stale/schema rejection requires re-evaluation of the affected binding or contract, not substitution of a fresh event onto an old decision.
 
 ## 2. No Skill Match
 

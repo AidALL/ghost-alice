@@ -6,6 +6,7 @@
 - [current-session.json](#current-sessionjson)
 - [Hook Observation Receipt](#hook-observation-receipt)
 - [Mutation Contract and Recovery](#mutation-contract-and-recovery)
+- [Core Response Projection](#core-response-projection)
 - [forbidden persistence](#forbidden-persistence)
 
 
@@ -19,7 +20,7 @@ Revision and input character count are integers from `0` through `2**53 - 1`, ex
 
 Completion evidence belongs to the criterion's current definition. Re-recording the same ID and unchanged summary preserves verified `met` status, digest, and timestamp. A changed summary or explicit withdrawal of admission resets that criterion to `unmet` and removes its current proof fields; unrelated criteria retain their evidence. A wording change is conservatively treated as a changed condition because the parser cannot certify semantic equivalence. The existing `acceptance-criterion-met` event remains historical evidence, not proof for the revised condition. A raw delta cannot promote a condition to `met`; revalidation uses the normal completion-check path.
 
-intent-state.json is update-plus-accumulate state. Scalar intent fields such as `current_goal` and `user_intent_summary` are updated to the latest value when a new semantic delta arrives. `constraints`, `non_goals`, `open_questions`, and `risk_flags` accumulate with value-based deduplication. `acceptance_criteria` and `decisions` merge by stable `id`, and decisions can mark prior decisions as superseded through `supersedes`. The database event table is an append-only audit log exposed through `--read-events` and explicit JSONL exports; the state file is not a transcript that appends raw prompts or old summaries.
+intent-state.json is update-plus-accumulate state. Scalar intent fields such as `current_goal` and `user_intent_summary` are updated to the latest value when a new semantic delta arrives. `constraints`, `non_goals`, `open_questions`, and `risk_flags` accumulate with value-based deduplication. Owned `acceptance_criteria` merge by `(work_unit_id, contract_revision, id)`; ownerless legacy criteria continue to merge by their stable `id`. Decisions merge by stable `id` and can mark prior decisions as superseded through `supersedes`. The database event table is an append-only audit log exposed through `--read-events` and explicit JSONL exports; the state file is not a transcript that appends raw prompts or old summaries.
 
 `model_security_decision` is the per-turn model security judgment. It is not accumulated; the latest judgment replaces the previous one. `decision` is `allow | block`, `risk_flags` are short rule-id labels (maximum 12), and `reason` is a summary of 240 characters or fewer, not the raw prompt. `input_event_id` and `input_digest` bind the judgment to the input being judged so stale judgments do not block other turns. jailbreak-detector records this field, and intake preserves it without clobbering. The PreToolUse derivation (`_shared/derive_downstream_gate.mjs`) carries this field to `downstream-gates.json` only when it is a block for the current input lineage. ask-confirm is not gate state.
 
@@ -123,7 +124,7 @@ The receipt does not grant write access, clear security decisions, or prove sema
 
 ## Mutation Contract and Recovery
 
-All supported state mutations use `record_turn` or `mark_acceptance_criterion_met`. Both validate exact canonical platform/session identity, open an immediate SQLite transaction, compare expected input/revision and merge state with its audit event. Unsafe identifiers are rejected rather than sanitized into another identity. The root `.sqlite-authority.json` marker records cutover before the first semantic commit, so a lost database requires explicit restoration instead of recreating state from stale JSON. Corrupt databases and unsupported schema versions fail closed; they never reactivate stale JSON exports.
+All supported state mutations use `record_turn`, `mark_acceptance_criterion_met`, or `record_response_route`. Each validates exact canonical platform/session identity, opens an immediate SQLite transaction, compares the expected input binding and merges state with its audit event. Semantic/completion writers also accept an optional expected revision. Unsafe identifiers are rejected rather than sanitized into another identity. The root `.sqlite-authority.json` marker records cutover before the first semantic commit, so a lost database requires explicit restoration instead of recreating state from stale JSON. Corrupt databases and unsupported schema versions fail closed; they never reactivate stale JSON exports.
 
 `record_turn(..., expected_input_event_id=receipt_id, expected_revision=revision)` requires the expected input ID whenever an observed input is active. A digest-only new-input intake creates an anchor and is exempt from that comparison; attaching a semantic delta to new raw input does not bypass the check. `expected_revision` additionally fences decisions made against a whole-state snapshot. Independent additions for the same input can serialize without requiring a common revision. Security decisions must name that input in their own payload.
 
@@ -136,6 +137,52 @@ All supported state mutations use `record_turn` or `mark_acceptance_criterion_me
 `read_session_state(..., recover_audit=False)` is read-only. Unimported legacy state preserves absent metadata rather than fabricating proof of intake, including a pending audit marker if present. A committed current security block remains visible even while its old audit projection awaits import. `recover_audit=True` explicitly imports/reconciles legacy state. `read_session_events` returns ordered authority; `list_session_states` includes database sessions and unimported legacy identities. API failures must be reported, not converted into a successful empty snapshot. `load_state` and `consumer_snapshot` resolve canonical compatibility paths through the same database authority.
 
 For live database backups use SQLite's backup API or a quiescent, consistent database copy including its journal state; copying only an active main database file can omit committed WAL data. Explicit JSON exports are portable inspection artifacts, not transactional backup or runtime authority. Stored summaries do not establish semantic truth and these guards do not protect against arbitrary direct database tampering by a process with write access.
+
+## Core Response Projection
+
+Core owns `response-route.v1` validation and persistence. task-router supplies the current semantic route candidate; session-intent-analyzer owns semantic criterion updates and admission facts. Neither an addon nor an intake hook guesses current selection from the accumulated backlog. Intake creates no projection: a new input marks the retained route `stale`, preserves the stable work-unit registry, and leaves prior `met` evidence intact. Missing projection is an explicit absence, not a bootstrap, intake, or security denial.
+
+The ledger stores `work_units` as a registry of immutable `(work_unit_id, contract_revision)` contracts and `response_route` as the current projection. A unit has an exact canonical `work_unit_id`, `contract_revision` integer from `1` through `2**53 - 1` excluding booleans, `kind: execution | nonexecution`, boolean `admitted`, and `owner: {platform, session_id}` equal to the authoritative session. Registry entries additionally keep `criteria: [{id, summary, source}]` to fence definition changes. Same-revision kind, owner, or criterion-definition changes fail; an explicit newer revision is required. Admission can change with authority without changing business evidence. A current projection cannot revive an older revision after a newer one was registered.
+
+Each owned criterion carries both `work_unit_id` and `contract_revision`. A partial or malformed owner pair rejects the delta. Ownerless legacy entries remain unbound and cannot enter a ready selection; a repeated local ID does not acquire another entry's owner. The sole `met` writer uses the approved snapshot's exact owner pair to select a local ID and requires owned criteria to be selected in a ready current route. Its legacy ownerless behavior remains compatible. Raw deltas cannot assert `met`. Changing a business condition reopens only that condition; refreshing a route does not erase its proof.
+
+Candidate shape, with no accessory keys:
+
+```json
+{
+  "schema_version": "response-route.v1",
+  "routing_surface": {
+    "intent_relation": "continuation", "primary_request": "implement the approved contract",
+    "causal_axis": "n/a", "response_mode": "normal",
+    "response_order": "imperative-result-first-after-necessary-work",
+    "change_depth": "structural", "focus_layer": "meso",
+    "verification_complexity": "level-2", "boundary_contract": "required",
+    "forced_visibility": "no", "reason": "continuing authorized work"
+  },
+  "work_units": [{"work_unit_id": "repair", "contract_revision": 1,
+    "kind": "execution", "admitted": true,
+    "owner": {"platform": "codex", "session_id": "abc"}}],
+  "selected_work_unit_ids": ["repair"],
+  "selected_criteria": [{"work_unit_id": "repair", "contract_revision": 1, "criterion_id": "AC1"}]
+}
+```
+
+The routing enums are exactly the task-router surface enums, with underscores replacing field-name hyphens. All eleven surface fields are required. `primary_request`, `causal_axis`, and `reason` are compressed nonempty summaries of at most 500 characters. Unknown schemas/enums/fields, duplicate references, inconsistent owners, unadmitted selected units or criteria, and unbound legacy references fail with `RouteSchemaError` (`code: route-schema`). The projection selects only the current response's units and criteria; selection may be empty for an ordinary reply. A unit/response-mode label cannot exempt an actual closure claim from completion evidence.
+
+The validated projection adds `status: ready`, authoritative `platform`, `session_id`, `input_event_id`, and the caller's `boundary_ref` (canonical identifier or `null`). A required boundary needs a nonnull reference. `selected_criteria` contains detached ledger criterion snapshots with `criterion_id` as the local-ID alias. These snapshots freeze the condition selected at registration; current status/proof remains the origin ledger's authority. The read API adds `current_input_event_id`, returns `stale` when the stored event or selected definition no longer matches current state, and rejects malformed stored schemas. A changed input reopens its route/authorization binding, not unrelated business verification.
+
+Supported APIs exist in `_shared/response_route.py` and as keyword-only methods in `session_intent_ledger.py`:
+
+```python
+record_response_route(root, platform, session_id, expected_input_event_id,
+                      candidate, boundary_ref, *, transaction=None)
+read_response_route(root, platform, session_id, *,
+                    expected_input_event_id=None, transaction=None)
+```
+
+`record_response_route` returns the validated ready projection. Core compares the exact current input event inside the same immediate SQLite transaction that writes registry, projection, revision, and `response-route-recorded` audit event. Missing/stale input bindings raise `RouteBindingError` (`code: route-binding`). The audit event stores a projection digest and selected identity references; no business answer body is accepted. `record_turn` cannot write route/registry fields through a semantic delta. `read_response_route` returns `None` for absent projection without creating storage. Pass the same existing `storage_transaction(root)` connection to both route read and origin-state read for an atomic consumer snapshot; nested writes retain savepoint/outer rollback behavior.
+
+CLI: `_shared/response_route.py --root <receipt-root> --platform <receipt-platform> --session-id <receipt-session> --expected-input-event-id <receipt-event> --boundary-ref <boundary-id> --candidate-json <candidate-json>` registers; replace mutation arguments with `--read` to inspect. Explicit session identity is required, mutating calls reject a conflicting native host session, and reads may inspect an explicit historical session. Success emits JSON; a typed error emits `{error, message}` on stderr and exits nonzero. Compatibility JSON exports remain inspection artifacts, never route authority. No-work terminal routes use only an already supplied internal host handoff and otherwise leave the projection absent; they do not open tools or probe user state to manufacture a projection.
 
 ## forbidden persistence
 
