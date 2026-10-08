@@ -85,7 +85,13 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
 )
 
 # Spans that are quotation or code, not the model's own assertion. Stripped before executed-work detection so illustrative output, quoted user text, and fenced examples do not trigger a spurious completion-check demand.
-_FENCED_CODE_RE = re.compile(r"```.*?```|~~~.*?~~~", re.S)
+_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
+_QUOTE_LINE_RE = re.compile(r"^ {0,3}>[ \t]?(.*)$")
+_LIST_ITEM_RE = re.compile(r"^ *(?:[*+-]|[0-9]{1,9}[.)])[ \t]+")
+_PARAGRAPH_BREAK_RE = re.compile(
+    r"^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[*+-]|1[.)])[ \t]+|"
+    r"(?:[-*_][ \t]*){3,}$|(?:=+|-+)[ \t]*$|<[!/A-Za-z])"
+)
 _INLINE_CODE_RE = re.compile(r"`[^`]*`")
 # Single-quoted spans only count when the quotes sit on word boundaries, so an ordinary contraction apostrophe (won't, don't, y'all) is not mistaken for a quotation delimiter and does not swallow a real claim between two contractions.
 _QUOTED_SPAN_RE = re.compile(
@@ -164,21 +170,98 @@ def _strip_noncommittal_spans(text):
     These carry illustrative or reported content, not the model's own
     executed-work assertion, so they must not trigger completion detection.
     """
-    text = _FENCED_CODE_RE.sub(" ", "" if text is None else str(text))
+    text = _strip_block_examples(text)
     text = _INLINE_CODE_RE.sub(" ", text)
-    kept = [line for line in _split_lines(text) if not line.lstrip().startswith(">")]
-    text = "\n".join(kept)
     return _QUOTED_SPAN_RE.sub(" ", text)
 
 
 def _strip_block_examples(text):
-    """Exclude fenced examples and blockquotes from control-field validation.
+    """Mask Markdown examples while retaining prose and real control fields.
 
-    Evidence strings inside a real block remain verbatim; only the host's own
-    block headers are completion assertions.
+    Fence delimiters must occupy a line, use the same character, and close with
+    at least the opening length. Indented code starts at a paragraph boundary;
+    indentation within real control records remains data. Blockquote paragraphs
+    may continue lazily without a repeated marker, until a blank or new block.
+    Keep line boundaries so examples cannot join otherwise separate assertions.
     """
-    text = _FENCED_CODE_RE.sub(" ", "" if text is None else str(text))
-    return "\n".join(line for line in _split_lines(text) if not line.lstrip().startswith(">"))
+    kept = []
+    fence = None
+    indented = False
+    paragraph = False
+    quote_paragraph = False
+    control_fields = False
+    list_indent = 0
+    for line in _split_lines(text):
+        expanded = line.expandtabs(4)
+        blank = not line.strip()
+        indentation = len(expanded) - len(expanded.lstrip(" "))
+        if fence is not None:
+            char, length, container_indent = fence
+            if container_indent and not blank and indentation < container_indent:
+                # A list container ending also ends its unclosed example fence.
+                fence = None
+                list_indent = 0
+                paragraph = False
+            else:
+                content = expanded[container_indent:]
+                if re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(length) + r",}[ \t]*", content):
+                    fence = None
+                kept.append("")
+                continue
+        quote = _QUOTE_LINE_RE.match(expanded)
+        if quote:
+            body = quote.group(1)
+            while (nested := _QUOTE_LINE_RE.match(body)) is not None:
+                body = nested.group(1)
+            quote_paragraph = bool(body.strip()) and not _FENCE_OPEN_RE.match(body) and not _PARAGRAPH_BREAK_RE.match(body)
+            paragraph = False
+            control_fields = False
+            list_indent = 0
+            kept.append("")
+            continue
+        if quote_paragraph:
+            if not blank and not _FENCE_OPEN_RE.match(expanded) and not _PARAGRAPH_BREAK_RE.match(expanded):
+                kept.append("")
+                continue
+            quote_paragraph = False
+        if blank:
+            paragraph = False
+            kept.append("")
+            continue
+        if indentation < list_indent:
+            list_indent = 0
+        code_indentation = indentation - list_indent
+        if indented:
+            if code_indentation >= 4:
+                kept.append("")
+                continue
+            indented = False
+        # A control record's nested fields are evidence data, not code examples.
+        if control_fields and re.match(r"^\s*(?:-\s+|[A-Za-z0-9_-]+\s*:)", line):
+            kept.append(line)
+            paragraph = True
+            continue
+        control_fields = False
+        if code_indentation >= 4 and not paragraph:
+            indented = True
+            kept.append("")
+            continue
+        list_item = _LIST_ITEM_RE.match(expanded)
+        if list_item is not None:
+            list_indent = list_item.end()
+        content = expanded[list_indent:] if list_indent else expanded
+        opener = _FENCE_OPEN_RE.match(content)
+        if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+            fence = opener.group(1)[0], len(opener.group(1)), list_indent
+            paragraph = False
+            kept.append("")
+            continue
+        header = _BLOCK_HEADER_RE.match(line.strip())
+        control_fields = bool(header and (header.group(1).lower() in _CONTROL_BLOCKS
+                                          or header.group(1).lower() == "completion-check"))
+        kept.append(line)
+        paragraph = bool(content.strip()) and not _PARAGRAPH_BREAK_RE.match(content)
+    return "\n".join(kept)
 
 
 def strip_control_blocks(text):
@@ -266,7 +349,7 @@ def requires_completion_check(text):
     hypothetical / goal-framing or that negate the closure verb, so future,
     conditional, quoted, and illustrative phrasing does not trigger the gate.
     """
-    cleaned = _strip_noncommittal_spans(strip_control_blocks(text))
+    cleaned = strip_control_blocks(_strip_noncommittal_spans(text))
     for sentence in _SENTENCE_SPLIT_RE.split(cleaned):
         if not sentence.strip():
             continue

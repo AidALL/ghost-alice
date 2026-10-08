@@ -110,6 +110,21 @@ class CompletionRouteTests(unittest.TestCase):
         self.assertEqual(result.get("evidence_route"), "no_external_check")
         self.assertEqual(result["selected_criteria"], [])
 
+    def test_long_fence_indented_and_lazy_quote_examples_do_not_require_closure(self):
+        for text in ("````text\n```\n[completion-check]\nThe task is complete.\n```\n````\n",
+                     "    [completion-check]\n    The task is complete.\n",
+                     "> Quoted example:\nThe task is complete.\n[completion-check]\n"):
+            with self.subTest(text=text):
+                result = self.select({}, dict(text=text, phase="final"), {})
+                self.assertFalse(result.get("required_completion_check"))
+                self.assertEqual(result.get("evidence_route"), "no_external_check")
+
+    def test_long_example_does_not_hide_real_closure_after_it(self):
+        text = "````text\n```\n[completion-check]\n```\n````\n\nThe task is complete."
+        result = self.select({}, dict(text=text, phase="final"), {})
+        self.assertTrue(result.get("required_completion_check"))
+        self.assertEqual(result.get("evidence_route"), "owner_verification")
+
     def test_mixed_reply_selects_only_current_reply_units_and_criteria(self):
         result = self.select(claims=dict(text="The fix is complete. Here is why.", phase="final", work_unit_ids=["fix", "explain", "backlog"]))
         self.assertEqual(result.get("selected_work_unit_ids"), ["fix", "explain"])

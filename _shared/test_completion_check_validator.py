@@ -238,6 +238,67 @@ class TestCompletionMarkerIsHeaderOnly(unittest.TestCase):
         self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
 
 
+class TestMarkdownExampleBoundaries(unittest.TestCase):
+    EXAMPLES = (
+        "````text\n```\n[completion-check]\nThe task is complete.\n```\n````\n",
+        "~~~~text\n~~~\n[completion-check]\nThe task is complete.\n~~~\n~~~~\n",
+        "Example:\n\n    [completion-check]\n    The task is complete.\n",
+        "\t[completion-check]\n\tThe task is complete.\n",
+        "> This paragraph quotes an example:\nThe task is complete.\n[completion-check]\n",
+    )
+
+    def test_actual_markdown_examples_are_neither_markers_nor_closure_claims(self):
+        for example in self.EXAMPLES:
+            with self.subTest(example=example):
+                self.assertFalse(v.looks_like_completion_claim(example))
+                self.assertFalse(v.requires_completion_check(example))
+                self.assertIsNone(v.validate_completion_text(example, require_completion_check=True))
+
+    def test_real_closure_outside_each_example_still_requires_evidence(self):
+        for example in self.EXAMPLES:
+            for text in (example + "\nThe task is complete.", "The task is complete.\n\n" + example):
+                with self.subTest(text=text):
+                    self.assertFalse(v.looks_like_completion_claim(text))
+                    self.assertTrue(v.requires_completion_check(text))
+                    self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_valid_actual_completion_after_example_preserves_control_fields(self):
+        for example in self.EXAMPLES:
+            text = example + "\n" + _final_text("completion", "summary", "io")
+            with self.subTest(example=example):
+                self.assertTrue(v.looks_like_completion_claim(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_shorter_fence_does_not_end_an_unclosed_long_fence(self):
+        text = "````text\n```\nThe task is complete.\n[completion-check]\n"
+        self.assertFalse(v.looks_like_completion_claim(text))
+        self.assertFalse(v.requires_completion_check(text))
+
+    def test_indentation_cannot_hide_real_paragraph_continuation(self):
+        self.assertTrue(v.requires_completion_check("Result:\n    The task is complete."))
+
+    def test_closing_fence_with_text_is_still_inside_example(self):
+        text = "````text\n```` extra text\n[completion-check]\nThe task is complete.\n````\n"
+        self.assertFalse(v.looks_like_completion_claim(text))
+        self.assertFalse(v.requires_completion_check(text))
+
+    def test_list_paragraph_indentation_does_not_hide_a_real_closure(self):
+        for text in ("- Result:\n    The task is complete.",
+                     "- Result:\n\n    The task is complete."):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+
+    def test_long_fence_in_list_is_still_an_example(self):
+        text = "- Example:\n\n  ````text\n  ```\n  [completion-check]\n  The task is complete.\n  ```\n  ````\n"
+        self.assertFalse(v.looks_like_completion_claim(text))
+        self.assertFalse(v.requires_completion_check(text))
+
+    def test_deeply_nested_list_fence_is_still_an_example(self):
+        text = "- Outer:\n  - Example:\n\n    ````text\n    ```\n    [completion-check]\n    The task is complete.\n    ```\n    ````\n"
+        self.assertFalse(v.looks_like_completion_claim(text))
+        self.assertFalse(v.requires_completion_check(text))
+
+
 class TestSkillsLoadedGateExactName(unittest.TestCase):
     """io-trace skills-loaded gate matches the canonical name, not a substring."""
 

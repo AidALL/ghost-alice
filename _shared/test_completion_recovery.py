@@ -257,6 +257,21 @@ class CompletionRecoveryTests(unittest.TestCase):
         self.assertTrue(payload.get("continue"))
         self.assertNotIn("systemMessage", payload)
 
+    def test_actual_markdown_examples_do_not_trigger_stop_recovery(self):
+        for text in ("````text\n```\n[completion-check]\nThe task is complete.\n```\n````\n",
+                     "    [completion-check]\n    The task is complete.\n",
+                     "> Quoted example:\nThe task is complete.\n[completion-check]\n"):
+            with self.subTest(text=text):
+                payload = self.hook(text)
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
+
+    def test_long_example_preserves_stop_validation_of_outside_closure(self):
+        text = "````text\n```\n[completion-check]\n```\n````\n\nThe task is complete."
+        payload = self.hook(text)
+        self.assertEqual(payload.get("decision"), "block")
+        self.assertIn("require a [completion-check]", payload["reason"])
+
 
 if __name__ == "__main__":
     unittest.main()
