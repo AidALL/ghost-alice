@@ -183,43 +183,64 @@ def _strip_noncommittal_spans(text):
     return _QUOTED_SPAN_RE.sub(" ", text)
 
 
-def _quoted_leaf_content(body, paragraph_open=False, container_indent=0):
+def _consume_quote_container_prefixes(body, containers):
+    """Consume the expected frames, leaving literal code payload untouched."""
+    matched = []
+    for kind, width in containers:
+        if kind == "quote":
+            quote = _QUOTE_LINE_RE.match(body)
+            if quote is None:
+                return body, tuple(matched), False
+            body = quote.group(1)
+        else:
+            indentation = len(body) - len(body.lstrip(" "))
+            if indentation < width:
+                return body, tuple(matched), False
+            body = body[width:]
+        matched.append((kind, width))
+    return body, tuple(matched), True
+
+
+def _quoted_leaf_content(body, paragraph_open=False, containers=()):
     """Find the paragraph leaf inside demonstrated quote/list containers.
 
     CommonMark 0.31.2 sections 5.1/5.2 and Example 292 permit lazy paragraph
     continuation through those containers, but not through code or headings.
     """
-    indentation = len(body) - len(body.lstrip(" "))
-    removed = 0
-    if container_indent and indentation >= container_indent:
-        body = body[container_indent:]
-        removed = container_indent
-    elif not paragraph_open and body.strip():
-        container_indent = 0
+    if not body.strip():
+        return "", containers
+    original = body
+    body, matched, complete = _consume_quote_container_prefixes(body, containers)
+    if (not complete and paragraph_open and not _FENCE_OPEN_RE.match(original)
+            and not _PARAGRAPH_BREAK_RE.match(original) and not _QUOTE_LINE_RE.match(original)):
+        # Existing paragraph leaves may omit container prefixes lazily.
+        frames = list(containers)
+    else:
+        frames = list(matched)
+        if not complete:
+            paragraph_open = False
     while body.strip():
         indentation = len(body) - len(body.lstrip(" "))
         if indentation >= 4:
             # Indented code cannot interrupt an existing paragraph.
-            return (body if paragraph_open else ""), container_indent
+            return (body if paragraph_open else ""), tuple(frames)
         if re.fullmatch(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", body):
-            return "", container_indent
+            return "", tuple(frames)
         nested = _QUOTE_LINE_RE.match(body)
         if nested is not None:
-            removed += len(body) - len(nested.group(1))
-            container_indent = removed
+            frames.append(("quote", 0))
             body = nested.group(1)
             continue
         item = _LIST_ITEM_RE.match(body)
         if item is not None:
             padding = len(item.group(0)) - len(item.group(0).rstrip(" \t"))
             end = item.end() if padding <= 4 else item.end() - padding + 1
-            removed += end
-            container_indent = removed
+            frames.append(("list", end))
             body = body[end:]
             paragraph_open = False
             continue
-        return body, container_indent
-    return "", container_indent
+        return body, tuple(frames)
+    return "", tuple(frames)
 
 
 def _strip_block_examples(text):
@@ -236,7 +257,7 @@ def _strip_block_examples(text):
     indented = False
     paragraph = False
     quote_paragraph = False
-    quote_container_indent = 0
+    quote_containers = ()
     quoted_fence = None
     control_fields = False
     list_indent = 0
@@ -261,18 +282,34 @@ def _strip_block_examples(text):
         if quote:
             body = quote.group(1)
             if quoted_fence is not None:
-                char, length = quoted_fence
-                indentation = len(body) - len(body.lstrip(" "))
-                closing = body[quote_container_indent:] if indentation >= quote_container_indent else body
-                if re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(length) + r",}[ \t]*", closing):
+                char, length, fence_containers = quoted_fence
+                closing, _, complete = _consume_quote_container_prefixes(body, fence_containers)
+                if not complete:
+                    # The prior code leaf ended with its container, rather than
+                    # being closed by a delimiter in a different container.
                     quoted_fence = None
+                    quote_containers = fence_containers
+                elif re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(length) + r",}[ \t]*", closing):
+                    quoted_fence = None
+                    quote_containers = fence_containers
+                    quote_paragraph = False
+                    paragraph = False
+                    control_fields = False
+                    list_indent = 0
+                    kept.append("")
+                    continue
+                else:
+                    # Normalize only the known container frames: any further
+                    # quote/list markers are literal fence contents.
+                    quote_paragraph = False
+                    kept.append("")
+                    continue
                 quote_paragraph = False
-            else:
-                leaf, quote_container_indent = _quoted_leaf_content(body, quote_paragraph, quote_container_indent)
-                opener = _FENCE_OPEN_RE.match(leaf)
-                if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
-                    quoted_fence = opener.group(1)[0], len(opener.group(1))
-                quote_paragraph = bool(leaf.strip()) and not opener and not _PARAGRAPH_BREAK_RE.match(leaf)
+            leaf, quote_containers = _quoted_leaf_content(body, quote_paragraph, quote_containers)
+            opener = _FENCE_OPEN_RE.match(leaf)
+            if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+                quoted_fence = opener.group(1)[0], len(opener.group(1)), quote_containers
+            quote_paragraph = bool(leaf.strip()) and not opener and not _PARAGRAPH_BREAK_RE.match(leaf)
             paragraph = False
             control_fields = False
             list_indent = 0
@@ -285,7 +322,7 @@ def _strip_block_examples(text):
                 kept.append("")
                 continue
             quote_paragraph = False
-        quote_container_indent = 0
+        quote_containers = ()
         if blank:
             paragraph = False
             kept.append("")

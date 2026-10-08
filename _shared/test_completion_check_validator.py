@@ -342,6 +342,41 @@ class TestMarkdownExampleBoundaries(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertTrue(v.requires_completion_check(text))
 
+    def nested_quote_fence(self, explicit=False):
+        tail = "> The task is complete.\n> [completion-check]\n" if explicit else "The task is complete.\n[completion-check]\n"
+        return "> - > ```\n>   > code\n>   > ```\n>\n> A quoted paragraph.\n" + tail
+
+    def test_closed_nested_container_fence_allows_equivalent_lazy_quote_paragraph(self):
+        for explicit in (False, True):
+            text = self.nested_quote_fence(explicit)
+            with self.subTest(explicit=explicit):
+                self.assertFalse(v.looks_like_completion_claim(text))
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_outside_interruptions_after_nested_fence_keep_real_claims(self):
+        for interruption in ("\n", "# Outside\n", "---\n", "- Outside\n"):
+            text = self.nested_quote_fence().split("The task is complete.")[0] + interruption + "The task is complete."
+            with self.subTest(interruption=interruption):
+                self.assertTrue(v.requires_completion_check(text))
+
+    def test_nested_fence_literal_quote_or_list_markers_do_not_close_it(self):
+        for literal in ("> ```", "- ```", "- > ```"):
+            text = "> - > ```\n>   > " + literal + "\n>   > another code line\nThe task is complete.\n[completion-check]\n"
+            with self.subTest(literal=literal):
+                self.assertTrue(v.looks_like_completion_claim(text))
+                self.assertTrue(v.requires_completion_check(text))
+
+    def test_unclosed_nested_container_fence_keeps_unquoted_claim_visible(self):
+        text = "> - > ```\n>   > code\nThe task is complete.\n[completion-check]\n"
+        self.assertTrue(v.looks_like_completion_claim(text))
+        self.assertTrue(v.requires_completion_check(text))
+
+    def test_changed_container_does_not_act_as_a_matching_fence_close(self):
+        text = "> - > ```\n>   > code\n> ```\nThe task is complete.\n[completion-check]\n"
+        self.assertTrue(v.looks_like_completion_claim(text))
+        self.assertTrue(v.requires_completion_check(text))
+
 
 class TestExplicitMultilineQuotedExamples(unittest.TestCase):
     def example(self, opening, closing):

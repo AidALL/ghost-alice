@@ -147,6 +147,14 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertFalse(result.get("required_completion_check"))
                 self.assertEqual(result.get("evidence_route"), "no_external_check")
 
+    def test_closed_nested_container_fence_does_not_create_closure_for_lazy_quote(self):
+        prefix = "> - > ```\n>   > code\n>   > ```\n>\n> A quoted paragraph.\n"
+        for tail in ("The task is complete.\n[completion-check]\n", "> The task is complete.\n> [completion-check]\n"):
+            with self.subTest(tail=tail):
+                result = self.select({}, dict(text=prefix + tail, phase="final"), {})
+                self.assertFalse(result.get("required_completion_check"))
+                self.assertEqual(result.get("evidence_route"), "no_external_check")
+
     def test_mixed_reply_selects_only_current_reply_units_and_criteria(self):
         result = self.select(claims=dict(text="The fix is complete. Here is why.", phase="final", work_unit_ids=["fix", "explain", "backlog"]))
         self.assertEqual(result.get("selected_work_unit_ids"), ["fix", "explain"])

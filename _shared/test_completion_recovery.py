@@ -301,6 +301,14 @@ class CompletionRecoveryTests(unittest.TestCase):
                 self.assertTrue(payload.get("continue"))
                 self.assertNotIn("systemMessage", payload)
 
+    def test_closed_nested_container_fence_needs_no_stop_recovery_for_lazy_quote(self):
+        prefix = "> - > ```\n>   > code\n>   > ```\n>\n> A quoted paragraph.\n"
+        for tail in ("The task is complete.\n[completion-check]\n", "> The task is complete.\n> [completion-check]\n"):
+            with self.subTest(tail=tail):
+                payload = self.hook(prefix + tail)
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
+
 
 if __name__ == "__main__":
     unittest.main()
