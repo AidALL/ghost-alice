@@ -16,23 +16,37 @@ from install_destination import InstallDestination, use
 SHARED = Path(__file__).resolve().parent
 
 
-def test_sync_removes_owned_retired_wrapper_from_active_discovery(tmp_path):
-    catalog = tmp_path/'catalog.json'
-    catalog.write_text(json.dumps({'skills':[]}))
+@pytest.mark.parametrize('entrypoint', ('sync', 'retirement-claude', 'retirement-codex'))
+def test_command_retirement_preserves_unknown_assets_at_installer_entrypoints(tmp_path, entrypoint):
     commands = tmp_path/'commands'
     commands.mkdir()
     retired = commands/'jailbreak-detector.md'
     retired.write_text('@jailbreak-detector/SKILL.md\n\n$ARGUMENTS\n')
     unknown = commands/'local-skill.md'
     unknown.write_text('User-owned command')
-    result = subprocess.run([sys.executable, '-B', str(SHARED/'commands_sync.py'),
-        str(catalog), str(commands), 'fix', 'claude'], text=True, capture_output=True)
+    ghost = tmp_path/'ghost'
+    if entrypoint == 'sync':
+        catalog = tmp_path/'catalog.json'
+        catalog.write_text(json.dumps({'skills':[]}))
+        argv = [sys.executable, '-B', str(SHARED/'commands_sync.py'),
+            str(catalog), str(commands), 'fix', 'claude']
+    else:
+        argv = [sys.executable, '-B', str(SHARED/'retired_assets.py'),
+            '--skills-root', str(tmp_path/'skills'), '--source-root', str(SHARED.parent),
+            '--ghost-root', str(ghost), '--platform', entrypoint.removeprefix('retirement-'),
+            '--commands-root', str(commands)]
+    result = subprocess.run(argv, text=True, capture_output=True,
+        env={**os.environ, 'GHOST_ALICE_GHOST_ROOT': str(ghost)})
     assert result.returncode == 0, result.stdout+result.stderr
-    assert not retired.exists()
     assert unknown.read_text() == 'User-owned command'
     backups = list(commands.parent.glob('retired-command-backups/*/jailbreak-detector.md'))
-    assert len(backups) == 1
-    assert backups[0].read_text() == '@jailbreak-detector/SKILL.md\n\n$ARGUMENTS\n'
+    if entrypoint == 'retirement-codex':
+        assert retired.read_text() == '@jailbreak-detector/SKILL.md\n\n$ARGUMENTS\n'
+        assert backups == []
+    else:
+        assert not retired.exists()
+        assert len(backups) == 1
+        assert backups[0].read_text() == '@jailbreak-detector/SKILL.md\n\n$ARGUMENTS\n'
 
 
 @pytest.mark.parametrize('kind', ('managed', 'modified', 'unknown', 'foreign-marker'))

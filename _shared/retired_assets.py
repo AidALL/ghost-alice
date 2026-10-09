@@ -179,9 +179,13 @@ def main():
     parser.add_argument('--source-root', type=Path, required=True)
     parser.add_argument('--ghost-root', type=Path, required=True)
     parser.add_argument('--platform', choices=('codex','claude'), required=True)
+    parser.add_argument('--commands-root', type=Path)
     args = parser.parse_args()
     for name in RETIRED_SKILLS:
         print(json.dumps(retire_skill(args.skills_root/name, platform=args.platform,
+            source_root=args.source_root, pending_root=args.ghost_root), sort_keys=True))
+    if args.platform == 'claude' and args.commands_root is not None:
+        print(json.dumps(retire_command(args.commands_root/'jailbreak-detector.md',
             source_root=args.source_root, pending_root=args.ghost_root), sort_keys=True))
 
 

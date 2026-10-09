@@ -247,6 +247,13 @@ class InstallCmdWrapperTest(unittest.TestCase):
             home.mkdir()
             (home / ".claude").mkdir()
             (home / ".codex").mkdir()
+            claude_home = tmp_path / "Configured Claude"
+            commands = claude_home / "commands"
+            commands.mkdir(parents=True)
+            retired = commands / "jailbreak-detector.md"
+            retired.write_text("@jailbreak-detector/SKILL.md\n\n$ARGUMENTS\n", encoding="utf-8")
+            unknown = commands / "local-skill.md"
+            unknown.write_text("User-owned command", encoding="utf-8")
             env = os.environ.copy()
             env.update(
                 {
@@ -258,6 +265,8 @@ class InstallCmdWrapperTest(unittest.TestCase):
                     "PYTHONIOENCODING": "utf-8",
                     "GHOST_ALICE_INSTALL_PROGRESS": "0",
                     "GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE": str(ADDON_FIXTURE),
+                    "GHOST_ALICE_GHOST_ROOT": str(home / ".ghost-alice"),
+                    "CLAUDE_CONFIG_DIR": str(claude_home),
                 }
             )
             result = subprocess.run(
@@ -280,6 +289,8 @@ class InstallCmdWrapperTest(unittest.TestCase):
                 encoding="utf-8",
                 errors="replace",
             )
+            self.assertFalse(retired.exists(), msg=result.stderr + result.stdout)
+            self.assertEqual(unknown.read_text(encoding="utf-8"), "User-owned command")
 
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, msg=combined)
