@@ -221,6 +221,13 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "platforms/claude/CLAUDE.md",
+            "## Claude First-Turn Contract\n\n"
+            "1. Reuse the pending-merge precheck.\n"
+            "2. Connect the `session-intent-analyzer` intake.\n"
+            "3. Run `task-router` directly after exact current `session-intent-analyzer` intake.\n"
+            "4. Leave `[gate-state]` in the first commentary.\n"
+            "5. Surface one `[tool-checkpoint]` for the user-input batch.\n\n"
+            "## Session Gate Contract\n"
             "clarification-only\ndirect-response\nminimum decisive information\nIntake and routing still run internally\nDo not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`\n",
         )
         self._write_file(
@@ -721,6 +728,80 @@ class SkillGateContractTest(unittest.TestCase):
             path.write_text(json.dumps(contract))
             messages = '\n'.join(issue.message for issue in run_contract_checks(root))
             self.assertIn('direct intake ownership', messages)
+
+    def test_direct_intake_entrypoint_fields_reject_intermediates_duplicates_and_types(self):
+        cases = (
+            ('always_first', ['policy-review', 'session-intent-analyzer']),
+            ('always_first', ['session-intent-analyzer', 'policy-review']),
+            ('always_first', ['session-intent-analyzer', 'session-intent-analyzer']),
+            ('always_first', 'session-intent-analyzer'),
+            ('always_first', None),
+            ('agent_first_after_intake', ['review-input', 'task-router']),
+            ('agent_first_after_intake', ['task-router', 'review-input']),
+            ('agent_first_after_intake', ['task-router', 'task-router']),
+            ('agent_first_after_intake', 'task-router'),
+            ('agent_first_after_intake', {'task-router': True}),
+            ('agent_first_after_intake', None),
+        )
+        for field, value in cases:
+            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / 'skill-catalog/session-gates.json'
+                contract = json.loads(path.read_text())
+                contract[field] = value
+                path.write_text(json.dumps(contract))
+                messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+                self.assertIn(f'{field} direct intake ownership', messages)
+
+    def test_direct_intake_graph_fields_reject_wrong_shapes_and_order(self):
+        graph = CONTRACT['user_input_graph']
+        cases = (
+            ('user_input_graph', graph[:3] + ['task-router', 'task-router', 'tool-checkpoint']),
+            ('user_input_graph', [graph[0], 'task-router', graph[2], 'session-intent-analyzer', graph[4]]),
+            ('user_input_graph', None),
+            ('user_input_graph', 'task-router'),
+            ('user_input_graph', graph[:3] + [['task-router'], graph[4]]),
+            ('intent_consumers', None),
+            ('intent_consumers', {**CONTRACT['intent_consumers'], 'review-input': ['task-router']}),
+            ('intent_consumers', {'session-intent-analyzer': ['task-router', 'task-router'], 'skill-evolution': ['report-only-terminal-branch']}),
+            ('intent_consumers', {'session-intent-analyzer': {'task-router': True, 'skill-evolution': True}, 'skill-evolution': ['report-only-terminal-branch']}),
+            ('intent_consumers', {'session-intent-analyzer': None, 'skill-evolution': ['report-only-terminal-branch']}),
+        )
+        for field, value in cases:
+            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / 'skill-catalog/session-gates.json'
+                contract = json.loads(path.read_text())
+                contract[field] = value
+                path.write_text(json.dumps(contract))
+                errors = [issue for issue in run_contract_checks(root) if issue.severity == 'ERROR']
+                self.assertTrue(errors, (field, value))
+
+    def test_claude_first_turn_rejects_block_condition_even_with_correct_later_context(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            path = root / 'platforms/claude/CLAUDE.md'
+            text = path.read_text().replace(
+                '3. Run `task-router` directly after exact current `session-intent-analyzer` intake.',
+                '4. If no block exists, run `task-router`.',
+            )
+            text += '\nSession-intent intake feeds task-router directly. Legacy judgments are history only. Native tool permission stays with its host.\n'
+            path.write_text(text)
+            messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+            self.assertIn('Claude first-turn must route directly after exact intake', messages)
+
+    def test_real_claude_first_turn_routes_directly_after_exact_intake(self):
+        text = (REPO_ROOT / 'platforms/claude/CLAUDE.md').read_text()
+        first_turn = self._extract_between(text, '## Claude First-Turn Contract', '\n## ')
+        steps = [line for line in first_turn.splitlines() if line[:1].isdigit()]
+        self.assertEqual([int(line.split('.', 1)[0]) for line in steps], [1, 2, 3, 4, 5])
+        self.assertIn('session-intent-analyzer', steps[1])
+        self.assertIn('task-router', steps[2])
+        self.assertIn('directly after exact current', steps[2])
+        self.assertNotIn('block', steps[2].lower())
 
     def test_valid_contract_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

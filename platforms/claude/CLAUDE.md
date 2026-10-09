@@ -10,9 +10,9 @@ When a user turn begins in a Claude session, apply this contract before any long
 
 1. Reuse a hook-provided pending-merge result first; without one, finish the manual fallback before actionable work, except for a no-work terminal route (`clarification-only` or `direct-response`).
 2. Connect the `session-intent-analyzer` intake.
-4. If no block exists, run `task-router`.
-5. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
-6. Surface one full `[tool-checkpoint]` for the user-input tool batch. Runtime hooks continue checking later tool calls silently unless state changes.
+3. Run `task-router` directly after exact current `session-intent-analyzer` intake.
+4. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
+5. Surface one full `[tool-checkpoint]` for the user-input tool batch. Runtime hooks continue checking later tool calls silently unless state changes.
 
 `tool-checkpoint` is not user-input intake. It is a tool-stage `PreToolUse` retry checkpoint.
 

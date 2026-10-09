@@ -595,6 +595,27 @@ def _check_legacy_tool_checkpoint_names(root: Path) -> list[ContractIssue]:
     return issues
 
 
+def _check_claude_first_turn_contract(root: Path) -> list[ContractIssue]:
+    path = root / 'platforms/claude/CLAUDE.md'
+    if not path.is_file():
+        return []  # The required-file check reports this separately.
+    section = re.search(r'^## Claude First-Turn Contract\s*\n(.*?)(?=^## |\Z)',
+                        _read_text(path), flags=re.MULTILINE | re.DOTALL)
+    steps = re.findall(r'^(\d+)\. (.+)$', section.group(1), flags=re.MULTILINE) if section else []
+    numbers = [int(number) for number, _ in steps]
+    actions = [action for _, action in steps]
+    intake = [index for index, action in enumerate(actions)
+              if action.startswith('Connect the `session-intent-analyzer` intake')]
+    router = [index for index, action in enumerate(actions) if '`task-router`' in action and 'run' in action.lower()]
+    direct = (len(intake) == len(router) == 1 and router[0] == intake[0] + 1
+              and re.fullmatch(r'Run `task-router` directly after exact current `session-intent-analyzer` intake\.',
+                               actions[router[0]]) is not None)
+    if not direct or numbers != list(range(1, len(steps) + 1)):
+        return [ContractIssue('ERROR', 'platforms/claude/CLAUDE.md',
+                              'Claude first-turn must route directly after exact intake with consecutive steps')]
+    return []
+
+
 def run_contract_checks(root: Path) -> list[ContractIssue]:
     issues: list[ContractIssue] = []
     contract_path = root / "skill-catalog" / "session-gates.json"
@@ -607,16 +628,20 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
         issues.append(ContractIssue("ERROR", str(contract_path), f"missing contract key: {key}"))
 
     always_first = contract.get("always_first", [])
-    if "session-intent-analyzer" not in always_first:
-        issues.append(ContractIssue("ERROR", str(contract_path), "always_first must include session-intent-analyzer"))
-    if "task-router" in always_first:
-        issues.append(ContractIssue("ERROR", str(contract_path), "always_first must not put task-router before session-intent-analyzer"))
+    if always_first != ["session-intent-analyzer"]:
+        issues.append(ContractIssue("ERROR", str(contract_path),
+                                    "always_first direct intake ownership requires exactly [session-intent-analyzer]"))
 
     agent_first_after_intake = contract.get("agent_first_after_intake", [])
-    if "task-router" not in agent_first_after_intake:
-        issues.append(ContractIssue("ERROR", str(contract_path), "agent_first_after_intake must include task-router"))
+    if agent_first_after_intake != ["task-router"]:
+        issues.append(ContractIssue("ERROR", str(contract_path),
+                                    "agent_first_after_intake direct intake ownership requires exactly [task-router]"))
 
     user_input_graph = contract.get("user_input_graph", [])
+    if not isinstance(user_input_graph, list) or not all(isinstance(item, str) for item in user_input_graph):
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'user_input_graph direct intake ownership requires a list of string nodes'))
+        user_input_graph = []
     allowed_nodes = {'merge-companion-precheck', 'session-intent-analyzer',
                      'skill-evolution:report-only-terminal-branch', 'task-router', 'tool-checkpoint'}
     if len(user_input_graph) != len(allowed_nodes) or set(user_input_graph) != allowed_nodes:
@@ -659,7 +684,16 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
         )
 
     intent_consumers = contract.get("intent_consumers", {})
+    if not isinstance(intent_consumers, dict) or set(intent_consumers) != {'session-intent-analyzer', 'skill-evolution'}:
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'intent_consumers direct intake ownership permits only intake and report-only evolution owners'))
+        if not isinstance(intent_consumers, dict):
+            intent_consumers = {}
     session_consumers = intent_consumers.get("session-intent-analyzer", [])
+    if not isinstance(session_consumers, list) or not all(isinstance(item, str) for item in session_consumers):
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'intent_consumers.session-intent-analyzer direct intake ownership requires a list of string consumers'))
+        session_consumers = []
     if len(session_consumers) != 2 or set(session_consumers) != {'task-router', 'skill-evolution'}:
         issues.append(ContractIssue('ERROR', str(contract_path),
                                     'direct intake ownership requires only task-router and report-only skill-evolution consumers'))
@@ -840,6 +874,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
                 issues.append(ContractIssue("ERROR", rel_path, message))
 
     issues.extend(_check_gate_state_order(root))
+    issues.extend(_check_claude_first_turn_contract(root))
     issues.extend(_check_legacy_tool_checkpoint_names(root))
 
     return issues
