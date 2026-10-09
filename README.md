@@ -28,8 +28,9 @@ flowchart TB
   P -->|request or status returned| W
   W -->|selected action, check or affected business observation| NT[Native tool-stage dispatch]
   NT --> PERM[Applicable Core constraints and native host permission]
-  NT --> APRE[Registered AP pretool: current qualified selection and automatic v2 preparation]
-  APRE -->|AP receipt, origin, commands or recording diagnostic; continue| W
+  NT --> APRE[Registered AP pretool: AP-owned target resolution and read-only OFF check]
+  APRE -->|active: qualified Core selection; v2 receipt, origin, commands or recording diagnostic| W
+  APRE -.->|OFF: quiet continue only; no capture context or authority access; actual native permission still required| EX
   PERM -->|actual permission allows| EX[Selected implementation or verification executor]
   PERM -->|actual denial| RESULT[Actual matched result with provenance]
   EX -->|actual output, failure or inconclusive observation| RESULT
@@ -47,8 +48,9 @@ flowchart TB
   W -->|bounded discussion or terminal partial/waiting| PAY
   PAY --> NS[Native candidate/final-stage dispatch]
   NS --> CG[Core completion guard: candidate fields and applicable skill evidence]
-  NS --> AS[Registered privileged AP Stop adapter]
-  AS --> RV{Current publication, proof, ownership and dependencies valid?}
+  NS --> AS[Registered privileged AP Stop: AP-owned target resolution and read-only OFF check]
+  AS -->|active| RV{Current publication, proof, ownership and dependencies valid?}
+  AS -->|OFF: quiet no-op; no authority reads or writes| ENV
   RV -->|yes| CW[Exact Core criterion writer in shared authority transaction]
   RV -->|no; no criterion write| APP[Actual application references, status and remaining criteria]
   CW -->|guarded update or actual failure| APP
@@ -83,9 +85,11 @@ flowchart TB
   CAT[Static sparse skill catalog] -.->|dependency| R
 ```
 
+Normal Core hook transport preserves the firing native cwd as Core context and explicit AP target overrides. AP owns project discovery: Claude uses an absolute CLI project directory before payload cwd; Codex uses payload cwd and ignores the Claude-specific hint. Installation source and project-trust paths do not select an AP target; isolated bindings retain their owned project target. Pretool and Stop resolve that target and read OFF before accessing Core authority. OFF returns quiet continue without capture context or authority reads/writes; an active target proceeds to the existing qualified-selection checks. Target selection grants no authority.
+
 This call graph preserves each handler's actual native invocation semantics. The workflow executes selected requests and returns actual matched results to its policy; AP recording does not grant or deny native tool permission. Business observation uses its own authority and limits. The first-five checkpoint remains addressed after reassessment; a new contradiction or stopping condition can reopen the premise. Recording recovery retains its stricter unchanged-failure park rule.
 
-The registered v2 pretool automatically prepares the current selected bindings before the tool. Reuse its valid AP receipt/origin; an explicit returned preparation helper is used only for an applicable unfulfilled dependency. Compatible accepted proof is reused with its original source and verification time. A failed prepare does not revoke business authority: perform only independently justified work, report uncaptured proof honestly, and never relabel it as proof captured by a later receipt. Both preparation and publication/application failures use bounded diagnostic repair; an unchanged failure parks dependent recording. A retry requires a relevant recording or dependency change. `none` and `blocked` permit no AP capture or advancement. Domain checks and native permissions retain their owners.
+For an active AP target and applicable current qualified selection, the registered v2 pretool automatically prepares the selected bindings before the tool. Reuse its valid AP receipt/origin; an explicit returned preparation helper is used only for an applicable unfulfilled dependency. Compatible accepted proof is reused with its original source and verification time. A failed prepare does not revoke business authority: perform only independently justified work, report uncaptured proof honestly, and never relabel it as proof captured by a later receipt. Both preparation and publication/application failures use bounded diagnostic repair; an unchanged failure parks dependent recording. A retry requires a relevant recording or dependency change. `none` and `blocked` permit no AP capture or advancement. Domain checks and native permissions retain their owners.
 
 A read-only review that actually executes work still requires owning verification. Core owns the shared routing projection and per-criterion completion/delivery decisions; domain owners retain their checks. AP consumes Core's `publication_route: none | prepare | publish | blocked`, never mere run existence or the accumulated backlog. Missing or stale route bindings block capture/advancement, not existing authorization or native permission.
 

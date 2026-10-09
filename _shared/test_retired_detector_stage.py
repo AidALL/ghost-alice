@@ -79,7 +79,7 @@ def test_router_uses_intake_without_legacy_classifier_or_backlog_authority(tmp_p
 
 @pytest.mark.parametrize('binding', ('missing', 'foreign'))
 def test_retirement_preserves_exact_event_protected_writes(tmp_path, binding):
-    destination, env, receipt, coordinates = fixture(tmp_path)
+    coordinates = fixture(tmp_path)[3]
     before = ledger.read_session_state(**coordinates)
     expected = None
     if binding == 'foreign':

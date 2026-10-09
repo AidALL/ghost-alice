@@ -38,7 +38,6 @@ _NEWLINE_SPLIT_RE = re.compile(r"\r?\n")
 _VERIFICATION_DONE_RE = re.compile(r"-\s*verification-before-completion:\s*done\b")
 _SKILL_CALL_RE = re.compile(r"-\s*skill-call:\s*([^\n]+)")
 # skills-loaded accepts three equivalent serializations (inline CSV, flow-list `[...]`, or a nested bullet list). The header line is matched here; token extraction and nested-list collection happen in extract_skills_loaded().
-_SKILLS_LOADED_HEADER_RE = re.compile(r"^\s*-?\s*skills-loaded\s*:\s*(.*)$", re.I)
 _ZERO_WIDTH_RE = re.compile("[​‌‍‎‏﻿]")
 
 _TOP_LEVEL_FIELD_RE = re.compile(r"^-\s*[A-Za-z0-9_-]+\s*:")

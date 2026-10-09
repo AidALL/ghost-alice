@@ -38,7 +38,6 @@ import runtime_config
 import work_impact_projection
 import strict_session_log
 from session_intent_analyzer_hook import bound_session_identity
-from task_router_reminder_hook import session_material
 
 SAFE_BARE_COMMANDS = {
     "bash",
@@ -503,13 +502,6 @@ def _read_json(path: Path) -> dict[str, object]:
     except Exception:
         return {}
     return value if isinstance(value, dict) else {}
-
-
-def _safe_path_component(value: object) -> str:
-    text = str(value or "unknown").strip()
-    text = re.sub(r"[^A-Za-z0-9_.=-]+", "-", text)
-    text = re.sub(r"^[.-]+|[.-]+$", "", text)
-    return text or "unknown"
 
 
 def _first_text(*values: object) -> str:

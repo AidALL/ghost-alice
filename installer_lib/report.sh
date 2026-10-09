@@ -67,19 +67,6 @@ print_skill_sync_summary() {
   info "$message"
 }
 
-count_skill_targets() {
-  local total=0
-  local skill targets sub_name sub_path
-  for skill in "$@"; do
-    targets="$(expand_skill_targets "$skill")"
-    while IFS='|' read -r sub_name sub_path; do
-      [ -n "$sub_name" ] || continue
-      total=$((total + 1))
-    done <<< "$targets"
-  done
-  printf '%s\n' "$total"
-}
-
 install_compact_output_enabled() {
   [ "${VERBOSE:-0}" != "1" ]
 }
@@ -179,38 +166,13 @@ report_common_target_progress_line() {
   printf '] [%s/%s] %s' "$done_count" "$total_count" "$suffix"
 }
 
-report_target_operation_progress_line() {
-  local done_count="$1" total_count="$2" suffix="${3:-pending}"
-  printf '        Sync ['
-  report_progress_bar "$done_count" "$total_count" 20
-  printf '] [%s/%s] %s' "$done_count" "$total_count" "$suffix"
-}
-
 report_clear_current_line() {
   printf '\r\033[2K'
-}
-
-report_auto_update_target_operation_progress_line() {
-  report_clear_current_line
-  report_target_operation_progress_line "$@"
 }
 
 report_auto_update_common_target_progress_line() {
   report_clear_current_line
   report_common_target_progress_line "$@"
-}
-
-report_auto_animate_target_operation_progress_line() {
-  local from_count="$1" to_count="$2" total_count="$3" suffix="$4"
-  local completed
-  [ "$from_count" -lt 0 ] && from_count=0
-  [ "$to_count" -lt "$from_count" ] && to_count="$from_count"
-  [ "$to_count" -gt "$total_count" ] && to_count="$total_count"
-  for ((completed = from_count + 1; completed <= to_count; completed++)); do
-    report_auto_update_target_operation_progress_line "$completed" "$total_count" "$suffix"
-    [ "$completed" -lt "$to_count" ] && sleep 0.02
-  done
-  return 0
 }
 
 report_auto_animate_common_target_progress_line() {
@@ -269,7 +231,7 @@ report_print_full() {
 }
 
 report_print_auto_start() {
-  local platform_label="$1" common_targets="$2" visibility="${3:-dynamic}" platform_count="$4"
+  local platform_label="$1" common_targets="$2" visibility="${3:-dynamic}"
   install_log_init
   printf '%s\n\n' "Ghost-ALICE OS installation Process Report"
   printf '%s\n' "Target"
@@ -316,36 +278,6 @@ report_write_target_event() {
     "$1" "$2" "$3" "$4" >>"$INSTALL_REPORT_EVENT_FILE"
 }
 
-report_read_event_counts() {
-  local event_file="$1"
-  if [ ! -s "$event_file" ]; then
-    printf '0|0|0|0\n'
-    return 0
-  fi
-  local py
-  py="$(_find_python_runtime || true)"
-  if [ -z "$py" ]; then
-    printf '0|0|0|0\n'
-    return 0
-  fi
-  "$py" "${SCRIPT_DIR}/_shared/install_report_events.py" event-counts "$event_file"
-}
-
-report_read_platform_target_progress() {
-  local event_file="$1" platform="$2"
-  if [ ! -s "$event_file" ]; then
-    printf '0\n'
-    return 0
-  fi
-  local py
-  py="$(_find_python_runtime || true)"
-  if [ -z "$py" ]; then
-    printf '0\n'
-    return 0
-  fi
-  "$py" "${SCRIPT_DIR}/_shared/install_report_events.py" platform-target-progress "$event_file" "$platform"
-}
-
 report_read_all_common_target_progress() {
   local event_file="$1" platform_count="$2"
   if [ ! -s "$event_file" ]; then
@@ -374,19 +306,4 @@ report_read_weighted_common_target_progress() {
     return 0
   fi
   "$py" "${SCRIPT_DIR}/_shared/install_report_events.py" weighted-common-target-progress "$event_file" "$platform_count" "$total_count"
-}
-
-report_read_target_operation_progress() {
-  local event_file="$1"
-  if [ ! -s "$event_file" ]; then
-    printf '0\n'
-    return 0
-  fi
-  local py
-  py="$(_find_python_runtime || true)"
-  if [ -z "$py" ]; then
-    printf '0\n'
-    return 0
-  fi
-  "$py" "${SCRIPT_DIR}/_shared/install_report_events.py" target-operation-progress "$event_file"
 }

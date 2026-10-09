@@ -5,7 +5,6 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
-import re
 import unittest
 from pathlib import Path
 

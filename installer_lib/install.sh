@@ -25,10 +25,6 @@ sync_commands() {
   "$py_cmd" "${SCRIPT_DIR}/_shared/commands_sync.py" "$catalog" "$claude_dir" "$mode" "$target"
 }
 
-_log() {
-  echo "  [install_hooks] $*"
-}
-
 _platform_dir_for_state() {
   case "$PLATFORM" in
     claude|codex) printf '%s\n' "$PLATFORM" ;;
@@ -1051,8 +1047,8 @@ install() {
   fi
 
   case "$PLATFORM" in
-    claude) run_logged_if_compact ensure_claude_bootstrap "${SKILLS_DIR}" ;;
-    codex) run_logged_if_compact ensure_codex_bootstrap "${SKILLS_DIR}" ;;
+    claude) run_logged_if_compact ensure_claude_bootstrap ;;
+    codex) run_logged_if_compact ensure_codex_bootstrap ;;
   esac
   if ! install_compact_output_enabled; then
     info "$(t "[3/5] Runtime config: platform=${PLATFORM}, visibility=${visibility}" "[3/5] Runtime config: platform=${PLATFORM}, visibility=${visibility}")"
@@ -1063,8 +1059,6 @@ install() {
     info "$(t "Install path: ${SKILLS_DIR}" "Install path: ${SKILLS_DIR}")"
     if [ "$PLATFORM" = "codex" ] && [ "$copy_only" = "1" ]; then
       info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source, then re-run bash install.sh" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source, then re-run bash install.sh")"
-    elif [ "$PLATFORM" = "codex" ]; then
-      info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source")"
     else
       info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source")"
     fi

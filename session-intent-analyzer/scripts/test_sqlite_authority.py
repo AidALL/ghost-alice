@@ -146,7 +146,7 @@ class SQLiteAuthorityTests(unittest.TestCase):
         with sqlite3.connect(self.root / "ghost-state.sqlite3") as connection:
             self.assertEqual(connection.execute("SELECT count(*) FROM sessions").fetchone()[0], 0)
 
-    def test_reporting_and_security_consumers_read_without_exports(self):
+    def test_reporting_consumers_read_without_exports(self):
         old = self.seed()
         ledger.record_turn(**self.args, expected_input_event_id=old["latest_input_event_id"], intent_delta={
             "current_goal": "current DB goal", "conduct_feedback": [{"id": "feedback", "source": "user-explicit",
@@ -159,10 +159,8 @@ class SQLiteAuthorityTests(unittest.TestCase):
             entry.loader.exec_module(module)
             return module
         path = ledger.session_paths(**self.args)["state"]
-        security = load("jailbreak-detector/scripts/evaluate_intent_risk.py")
         analysis = load("skill-evolution/scripts/analyze_io_trace.py")
         aggregate = load("skill-evolution/scripts/aggregate_recommendations.py")
-        self.assertEqual(security.load_state(path).get("current_goal"), "current DB goal")
         self.assertEqual(analysis.load_intent_context(path)["current_goal"], "current DB goal")
         report = aggregate.aggregate(self.root)
         self.assertEqual(report["session_files"], 1)

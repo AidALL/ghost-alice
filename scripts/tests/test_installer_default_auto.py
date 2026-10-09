@@ -59,17 +59,6 @@ def _skill_target_count(*skill_names: str) -> int:
     return total
 
 
-def _read_install_report_events(temp_home: Path) -> list[dict[str, object]]:
-    event_files = sorted((temp_home / ".ghost-alice" / "install").glob("*.events.jsonl"))
-    if not event_files:
-        return []
-    events: list[dict[str, object]] = []
-    for line in event_files[-1].read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            events.append(json.loads(line))
-    return events
-
-
 def _run_pty(command: list[str], *, env: dict[str, str]) -> tuple[int, str]:
     if not hasattr(os, "openpty"):
         raise unittest.SkipTest("pseudo-terminal support is required for TTY progress test")

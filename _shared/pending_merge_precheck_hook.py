@@ -24,34 +24,7 @@ import install_destination
 from session_check_cache import observe_check, UnstableCheckTarget
 from session_intent_analyzer_hook import bound_session_identity
 
-OutputFormat = Literal["text", "json"]
 HookKind = Literal["prompt-check", "hook-reminder", "session-check"]
-
-
-_CLEAN_USER_COPY: dict[HookKind, str] = {
-    "prompt-check": (
-        "Check pending merges before the user-input governance graph continues in the current conversation. " "If this hook does not report a pending warning, treat the current platform merge-companion precheck " "as clean without an extra shell check."
-    ),
-    "hook-reminder": (
-        "Use task-router first in the current conversation. If this hook does not report a " "pending warning, treat the current platform merge-companion precheck as clean " "without an extra shell check."
-    ),
-    "session-check": (
-        "At session start, this hook checks the current platform pending merge state. If this hook does " "not report a pending warning, treat it as clean without an extra shell check."
-    ),
-}
-
-
-_CLEAN_TECH_COPY: dict[HookKind, str] = {
-    "prompt-check": (
-        "The Ghost-ALICE prompt-check hook checks ~/.ghost-alice/pending-merges/<platform>/manifest.json " "at runtime. Pending entries are reported in this same hook output."
-    ),
-    "hook-reminder": (
-        "The Ghost-ALICE foreground hook checks ~/.ghost-alice/pending-merges/<platform>/manifest.json " "at runtime. Pending entries are reported in this same hook output."
-    ),
-    "session-check": (
-        "Missing, empty, fully decided, or unparsable manifests are treated as a silent clean pass."
-    ),
-}
 
 
 def _pending_manifest_path(platform: str) -> Path:

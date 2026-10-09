@@ -57,10 +57,6 @@ function assertOwnedMutation(target) {
   }
 }
 
-function pendingManifestPath(platform) {
-  return path.join(ghostRoot(), "pending-merges", platform, "manifest.json");
-}
-
 function sessionIntentRoot(configuredRoot = "") {
   const configured = firstNonEmpty(configuredRoot, process.env.GHOST_ALICE_SESSION_INTENT_ROOT);
   if (configured) {
@@ -165,7 +161,7 @@ function firstNonEmpty(...values) {
   return "";
 }
 
-function inputSessionId(platform, input, root = "", fallback = "") {
+function inputSessionId(platform, input) {
   if (!isCanonicalIdentityComponent(platform)) return "";
   for (const candidate of [
     input.session_id,
@@ -183,17 +179,6 @@ function inputSessionId(platform, input, root = "", fallback = "") {
   return "";
 }
 
-function hasUndecidedPendingMerge(platform) {
-  try {
-    const raw = fs.readFileSync(pendingManifestPath(platform), "utf8");
-    const manifest = JSON.parse(raw);
-    const entries = Array.isArray(manifest.entries) ? manifest.entries : [];
-    return entries.some((entry) => entry && entry.decided === false);
-  } catch {
-    return false;
-  }
-}
-
 function reminderText(hook) {
   try {
     const data = JSON.parse(fs.readFileSync(new URL("./reminder_texts.json", import.meta.url), "utf8"));
@@ -203,7 +188,7 @@ function reminderText(hook) {
   }
 }
 
-function messageFor(hook, platform) {
+function messageFor(hook) {
   if (hook !== "tool-checkpoint") {
     return "";
   }
@@ -292,7 +277,7 @@ function taskRouterReleaseMessage(sessionId, statePath) {
 }
 
 function taskRouterReminderMessage(platform, input, root = "") {
-  const sessionId = inputSessionId(platform, input, root, "");
+  const sessionId = inputSessionId(platform, input);
   if (!sessionId || sessionId === "unknown") {
     return "hook-reminder: task-router withheld until session-intent-analyzer observes an explicitly bound session. Do not run task-router yet.";
   }
@@ -313,7 +298,7 @@ function toolCheckpointSurfaceStatePath() {
 }
 
 function toolCheckpointSurfaceLineage(platform, input, root = "") {
-  const sessionId = inputSessionId(platform, input, root, "");
+  const sessionId = inputSessionId(platform, input);
   if (!sessionId || sessionId === "unknown") {
     return null;
   }
@@ -335,9 +320,6 @@ function toolCheckpointSurfaceLineage(platform, input, root = "") {
       scope: `${safePlatform}:${sessionId}`,
       key: `${safePlatform}:${sessionId}:fallback:${transcriptDigest || "session"}`,
     };
-  }
-  if (!eventId && !inputDigest) {
-    return null;
   }
   return null;
 }
@@ -378,7 +360,7 @@ try {
   const marker = args.marker ? `${args.marker}: ` : "";
   const body = hook === "hook-reminder"
     ? taskRouterReminderMessage(platform, input, args["session-intent-root"])
-    : messageFor(hook, platform);
+    : messageFor(hook);
   const message = body ? `${marker}${body}` : "";
 
   if (hook === "tool-checkpoint" && (event === "BeforeTool" || event === "PreToolUse")) {

@@ -81,7 +81,7 @@ _promote_bare_installed_addon_ids() {
 list_skills() {
   echo "$(t 'Available skills:' 'Available skills:')"
   echo ""
-  local skill targets line sub_name sub_path desc count
+  local skill targets sub_name sub_path desc count
   for skill in "${ALL_SKILLS[@]}"; do
     targets=$(expand_skill_targets "$skill")
     if [ -z "$targets" ]; then

@@ -35,11 +35,6 @@ def canonical_agent_visibility_profile(value: str | None) -> str:
     return "strict"
 
 
-def canonical_profile(value: str | None) -> str:
-    """Alias of `canonical_agent_visibility_profile`."""
-    return canonical_agent_visibility_profile(value)
-
-
 def _default_config() -> dict[str, Any]:
     return copy.deepcopy(DEFAULT_CONFIG)
 

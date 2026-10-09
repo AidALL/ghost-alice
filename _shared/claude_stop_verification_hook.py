@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -17,7 +16,7 @@ from completion_check_validator import (  # noqa: E402
     validate_completion_text,
 )
 from completion_route import select_completion_route  # noqa: E402
-from response_delivery import recovery_delivery_guidance, observe_recovery_delivery  # noqa: E402
+from response_delivery import observe_recovery_delivery  # noqa: E402
 
 VERIFICATION_SKILL = "verification-before-completion"
 # Every Claude block reason carries this marker so a later Stop in the same turn can count earlier retries.
@@ -163,21 +162,6 @@ def _block_payload(reason: str) -> dict[str, Any]:
         "decision": "block",
         "reason": reason,
     }
-
-
-def _standalone_retry_guidance() -> str:
-    return recovery_delivery_guidance("assembled_complete_payload")
-
-
-def _append_standalone_retry_guidance(reason: str) -> str:
-    guidance = _standalone_retry_guidance()
-    if guidance in reason:
-        return reason
-    return f"{reason} {guidance}"
-
-
-def _partial_retry_guidance() -> str:
-    return recovery_delivery_guidance("preserve_answer_and_patch_metadata")
 
 
 def _recovery_guidance(input_data, entries, platform, final_text):

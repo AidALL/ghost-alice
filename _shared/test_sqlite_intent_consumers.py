@@ -15,7 +15,6 @@ sys.path.insert(0, str(SHARED))
 sys.path.insert(0, str(SHARED.parent / "session-intent-analyzer" / "scripts"))
 import session_intent_ledger as ledger
 import task_router_reminder_hook as router
-import hook_profile_gate as profile
 import io_trace_hook as trace
 
 

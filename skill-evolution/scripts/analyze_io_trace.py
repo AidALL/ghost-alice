@@ -10,7 +10,6 @@ import argparse
 import importlib.util
 import json
 import re
-import sys
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass

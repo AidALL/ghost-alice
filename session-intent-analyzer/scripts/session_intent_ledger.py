@@ -7,7 +7,6 @@ Dependencies: Python 3.11+ standard library only.
 from __future__ import annotations
 
 import argparse
-import errno
 import hashlib
 import importlib.util
 import json
@@ -319,60 +318,11 @@ def write_json(path: Path, data: dict[str, Any]) -> None:
     _atomic_write(path, json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
 
 
-def append_jsonl(path: Path, row: dict[str, Any]) -> None:
-    # Called under the session lock. Atomic replacement also protects audit
-    # readers from a partial last row if a process exits during the write.
-    previous = path.read_text(encoding="utf-8") if path.exists() else ""
-    if previous and not previous.endswith("\n"):
-        previous += "\n"
-    _atomic_write(path, previous + json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-
-
 def validate_identity(platform: str, session_id: str) -> None:
     """Mutation identities are exact, never sanitized aliases of another ID."""
     for value in (platform, session_id):
         if not isinstance(value, str) or not value or safe_component(value, "") != value:
             raise ValueError("invalid ledger identity: use the exact canonical platform and session ID from the hook receipt")
-
-
-@contextmanager
-def _session_lock(paths: dict[str, Path], timeout: float = 10.0):
-    """Serialize all cooperating writers on POSIX and Windows, including threads."""
-    _assert_location_write(paths["dir"] / ".intent-state.lock")
-    paths["dir"].mkdir(parents=True, exist_ok=True)
-    with (paths["dir"] / ".intent-state.lock").open("a+b") as handle:
-        if os.name == "nt":
-            import msvcrt
-            if handle.seek(0, os.SEEK_END) == 0:
-                handle.write(b"\0")
-                handle.flush()
-            def acquire():
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            def release():
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            def acquire():
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            def release():
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                acquire()
-                break
-            except OSError as exc:
-                if exc.errno not in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
-                    raise
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("ledger session is busy; retry with a fresh receipt") from None
-                time.sleep(0.01)
-        try:
-            yield
-        finally:
-            release()
 
 
 def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *, data=None) -> dict[str, Any]:

@@ -289,7 +289,6 @@ def test_managed_outer_parser_does_not_accept_lookalike_runner():
 
 
 def test_normal_upgrade_retains_ledger_after_source_relocation(tmp_path):
-    import dataclasses
     import runtime_config
     import install_destination
     root=tmp_path/'owned';root.mkdir()

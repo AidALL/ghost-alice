@@ -11,7 +11,6 @@ from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 
 
 def _extract_powershell_function(source: str, name: str) -> str:

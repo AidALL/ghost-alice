@@ -16,7 +16,7 @@ ANIMATE_FN = "Write-AutoAnimateCommonTargetProgress"
 class AutoProgressTweenSource(unittest.TestCase):
     """Static guard against Windows auto-progress jump regressions.
 
-    The shell installer uses report_auto_animate_target_operation_progress_line
+    The shell installer uses report_auto_animate_common_target_progress_line
     to tween one step at a time between milestones. The PowerShell port must
     call the per-step tween function from report.ps1 instead of jumping once
     per milestone from 0 to 25 to 50.

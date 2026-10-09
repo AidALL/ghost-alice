@@ -170,7 +170,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         self.assertEqual(result.stdout, "io-trace observed\n" if profile == "minimal" else "")
 
     def observe(self, platform, session):
-        result = self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
+        self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                    "--platform", platform, "--session-id", session,
                                    "--input", "Synthetic isolated security case."])
         state = self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),

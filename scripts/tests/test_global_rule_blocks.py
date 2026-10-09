@@ -11,8 +11,6 @@ from _installer_source import installer_bash_source, installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 GLOBAL_RULE_BLOCKS = REPO_ROOT / "_shared" / "global_rule_blocks.py"
 
 
@@ -300,7 +298,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertIn("claude-remove", sh)
         self.assertIn("ensure_claude_bootstrap", sh)
         self.assertIn("remove_claude_bootstrap_if_unused", sh)
-        self.assertIn('claude) run_logged_if_compact ensure_claude_bootstrap "${SKILLS_DIR}"', sh)
+        self.assertIn('claude) run_logged_if_compact ensure_claude_bootstrap ;;', sh)
         self.assertNotIn("remove_claude_bootstrap || return 1", sh)
         self.assertIn("codex-merge", sh)
         self.assertIn("codex-remove", sh)

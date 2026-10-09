@@ -28,9 +28,6 @@ class ModelRecordedSecurityDecisionIntegration(unittest.TestCase):
     def session_dir(self) -> pathlib.Path:
         return self.tmp / "claude" / self.session
 
-    def gate_text(self) -> str:
-        return (self.session_dir() / "downstream-gates.json").read_text(encoding="utf-8")
-
     def observe_input(self, raw: str) -> None:
         # simulates the UserPromptSubmit hook recording the user-input event
         subprocess.run(

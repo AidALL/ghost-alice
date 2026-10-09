@@ -11,8 +11,6 @@ from _installer_source import installer_bash_source, installer_ps1_source
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ENCODING_GUARD = REPO_ROOT / "_shared" / "encoding_guard.py"
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 
 
 def _load_guard():

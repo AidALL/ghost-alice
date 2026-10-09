@@ -3,7 +3,6 @@
 Dependencies: Python 3.11+ standard library only.
 """
 import importlib.util
-import json
 from pathlib import Path
 import tempfile
 import unittest

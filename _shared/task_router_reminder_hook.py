@@ -39,14 +39,6 @@ def read_payload() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def resolve_session_id(root: Path, platform: str, payload: dict[str, Any]) -> str:
     return bound_session_identity(platform, payload) or "unknown"
 

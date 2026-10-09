@@ -979,8 +979,6 @@ function Invoke-Install {
             $progressLabel = ""
             if ((Test-InstallReportEnabled) -and (Test-LiveCounterEnabled)) {
                 $progressLabel = "  [2/5] Skill sync         "
-            } elseif ((-not $script:InstallCompactOutput) -and (Test-LiveCounterEnabled)) {
-                $progressLabel = T "[2/5] Skill sync" "[2/5] Skill sync"
             }
             $copyEventsDuringBatch = $false
             $progressTargetIds = @()

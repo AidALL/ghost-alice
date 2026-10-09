@@ -103,7 +103,7 @@ class AddonRegistryAuditTest(unittest.TestCase):
         codex_dir = self.gar / "addons" / "codex"
         reg.write_record(_sidecar("other", self.skills / "ghost", content_hash="x"),
                          addons_dir=codex_dir)
-        status, findings = install_doctor._addon_registry_audit(self.gar, "claude")
+        _, findings = install_doctor._addon_registry_audit(self.gar, "claude")
         self.assertEqual([f["addon_id"] for f in findings], ["noop"])  # codex 'other' excluded
 
 

@@ -10,7 +10,6 @@ assert_session_gate_contract() {
 }
 
 ensure_claude_bootstrap() {
-  local skills_root="$1"
   local claude_home rules_path py result args
   claude_home="$(resolve_claude_home)"
   rules_path="${claude_home}/CLAUDE.md"
@@ -85,7 +84,6 @@ remove_claude_bootstrap_if_unused() {
 }
 
 ensure_codex_bootstrap() {
-  local skills_root="$1"
   local codex_home agents_path py result args
   codex_home="$(resolve_codex_home)"
   agents_path="${codex_home}/AGENTS.md"

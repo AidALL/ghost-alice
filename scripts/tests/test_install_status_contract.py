@@ -11,8 +11,6 @@ from _installer_source import installer_bash_source, installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALL_DOCTOR = REPO_ROOT / "_shared" / "install_doctor.py"
 PENDING_MANIFEST_WRITER = REPO_ROOT / "_shared" / "pending_manifest_writer.py"
 CODEX_MARKER = "# Ghost-ALICE Codex Bootstrap"

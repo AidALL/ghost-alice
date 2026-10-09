@@ -151,7 +151,7 @@ _auto_platform_target_keys() {
   local target_platform="$1"
   shift
   local saved_platform="$PLATFORM"
-  local skill targets sub_name sub_path addon_targets_text addon_target a_name a_path a_id
+  local skill targets sub_name sub_path addon_targets_text a_name a_path a_id
 
   PLATFORM="$target_platform"
   [ -d "${SCRIPT_DIR}/_shared" ] && printf '%s\n' "support:_shared"

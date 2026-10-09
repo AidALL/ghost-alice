@@ -106,7 +106,6 @@ if ($args.Count -gt 0) {
 }
 $PlatformWasExplicit = $PSBoundParameters.ContainsKey("Platform")
 $script:InstallLockPath = $null
-$script:ProjectDisplayName = "Ghost-ALICE"
 $script:SourceRepoHookChange = $null
 $script:PwshLtsBaselineVersion = [version]"7.6.0"
 $script:PwshLtsReleaseLine = "7.6"
@@ -122,106 +121,7 @@ if ($script:InstallReportChild) {
 $script:InstallCompactOutput = $false
 # Installer messages are English-only.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 $script:SessionGateContractSource = Join-Path $script:GhostAliceRoot "skill-catalog\session-gates.json"
-
-
-
-# ── Platform path resolution ───────────────────────────────
-# Environment variables take precedence; otherwise use default paths.
-#   Claude Code: CLAUDE_CONFIG_DIR -> ~/.claude
-#   Codex:       CODEX_HOME -> ~/.codex
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 $script:CodexBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\codex\AGENTS.md"
 $script:CodexBootstrapMarker = "# Ghost-ALICE Codex Bootstrap"
@@ -231,26 +131,6 @@ $script:ClaudeBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\clau
 $script:ClaudeBootstrapMarker = "# Ghost-ALICE Claude Bootstrap"
 $script:ClaudeManagedBlockBegin = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
 $script:ClaudeManagedBlockEnd = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ── Git hooks (post-merge auto-refresh) ───────────────────
-# Point this repo's Git hook path to the tracked hooks/ directory so
-# `git pull --ff-only` automatically triggers hooks/post-merge, which in turn
-# re-runs install.sh --platform codex for copy-mode platforms.
-
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Dot-source installer_lib modules. Function definitions live in installer_lib/*.ps1 and are sourced here (before any top-level call) so install.ps1 stays a thin entrypoint.
@@ -275,115 +155,22 @@ $script:DeprecatedInstalledSkills = @(
     "session-intent-guard"
 )
 
-
-
-
-
-
-
-
-
-
-
-
 # ── Skill target expansion ─────────────────────────────────
 # Normal skill (root SKILL.md exists) -> returns one target for itself.
 # Family skill (no root SKILL.md, subdirectories have SKILL.md) -> returns N subskill targets.
 # Missing skill -> returns an empty array.
 
-
 # ── Skill list ─────────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 # ── Install status ─────────────────────────────────────────
 
-
-
-
-
-
-
-
 # ── Uninstall ──────────────────────────────────────────────
 
-
-
-
-
 # ── Install ────────────────────────────────────────────────
-
 
 # ── UserPromptSubmit hook install/remove ───────────────────
 # Require Python 3.11+. Partial fallback violates the freshness contract.
 # Any failure blocks the whole install.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # ── Help ───────────────────────────────────────────────────
 

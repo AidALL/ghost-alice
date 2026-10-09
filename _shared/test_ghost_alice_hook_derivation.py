@@ -77,7 +77,7 @@ class DerivationTests(unittest.TestCase):
         )
 
     def test_native_identity_selection_does_not_project_legacy_blocks(self) -> None:
-        for platform, payload, blocked in (("codex", {}, True), ("codex", {"session_id": "foreign"}, False), ("claude", {}, False)):
+        for platform, payload in (("codex", {}), ("codex", {"session_id": "foreign"}), ("claude", {})):
             with self.subTest(platform=platform, payload=payload):
                 session_dir = self.tmp / platform / "native"
                 session_dir.mkdir(parents=True, exist_ok=True)

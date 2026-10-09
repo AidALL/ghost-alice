@@ -3,7 +3,6 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
 COMMANDS_SYNC = REPO_ROOT / "_shared" / "commands_sync.py"
 
 

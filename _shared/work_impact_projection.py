@@ -26,8 +26,6 @@ from typing import Any
 
 VALUE_KINDS = {"gate", "risk", "routing", "verification", "routine", "debug"}
 EXPOSURE_CLASSES = {"forced", "essential", "focused", "routine", "audit-only"}
-USER_SURFACES = ("hidden", "compact", "focused", "full", "forced")
-MODEL_SURFACES = ("omitted", "marker", "digest", "focused", "full")
 PROFILES = {"strict", "dynamic", "minimal"}
 
 # exposure_class -> {profile -> (user_surface, model_surface_hint)} for the non-forced, non-fail-closed cases. User surface follows the visibility profile. Model surface hints follow work impact, so they do not vary by profile for routine/focused/essential values.

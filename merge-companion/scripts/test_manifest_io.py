@@ -3,13 +3,12 @@
 Dependencies: Python 3.11+ standard library + local merge-companion modules.
 """
 
-import json
 import unittest
 import tempfile
 from pathlib import Path
 import manifest_io
 from manifest_io import (
-    read_manifest, write_manifest, append_entry, append_entry_if_absent,
+    read_manifest, append_entry, append_entry_if_absent,
     mark_decided, list_pending, ManifestError,
 )
 

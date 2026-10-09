@@ -33,7 +33,6 @@ import stat
 import subprocess
 import sys
 import tempfile
-import time
 import tomllib
 import unittest
 from pathlib import Path
@@ -292,13 +291,6 @@ def _minimal_visibility_env(extra: dict[str, str] | None = None) -> dict[str, st
     if extra:
         env.update(extra)
     return env
-
-
-def _assert_contains_any(testcase: unittest.TestCase, text: str, *terms: str) -> None:
-    testcase.assertTrue(
-        any(term in text for term in terms),
-        f"expected one of {terms!r} in {text!r}",
-    )
 
 
 def _visible_and_runner_payload_text(command: str) -> str:
@@ -619,37 +611,6 @@ class TestMessageLanguage(unittest.TestCase):
     def test_t_returns_english(self):
         self.assertEqual(install_hooks._t("Localized", "English"), "English")
 
-    def test_generated_hook_messages_use_polite_or_neutral_tone(self):
-        bad_terms = [
-            "call-do-it",
-            "check-do-it",
-            "verify-do-it",
-            "do-not-miss-it",
-            "input-do-it",
-            "send-it",
-        ]
-        commands = [
-            install_hooks.HOOK_COMMAND,
-            install_hooks.SESSION_INTENT_COMMAND,
-            install_hooks.STOP_HOOK_COMMAND,
-            install_hooks.SESSION_START_COMMAND,
-        ]
-
-        for command in commands:
-            result = _run_hook_command(command)
-            self.assertEqual(result.returncode, 0)
-            for term in bad_terms:
-                with self.subTest(term=term):
-                    self.assertNotIn(term, result.stdout)
-        result = _run_hook_command(
-            install_hooks.WEB_SEARCH_FIRST_COMMAND,
-            env=_strict_hook_env(),
-        )
-        self.assertEqual(result.returncode, 0)
-        for term in bad_terms:
-            with self.subTest(term=term):
-                self.assertNotIn(term, result.stdout)
-
     def test_generated_hook_messages_use_bridge_labels(self):
         for command, env in (
             (install_hooks.HOOK_COMMAND, None),
@@ -666,8 +627,6 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertIn("Internal instruction:", result.stdout)
             self.assertIn("User:", result.stdout)
             self.assertIn("Tech:", result.stdout)
-            self.assertNotIn("legacy non-developer label", result.stdout)
-            self.assertNotIn("legacy developer label", result.stdout)
             self.assertNotIn("Non-developer note", result.stdout)
             self.assertNotIn("Developer note", result.stdout)
 
@@ -2665,7 +2624,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(doc_read.returncode, 0, msg=doc_read.stderr)
         self.assertNotIn("permissionDecision", json.loads(doc_read.stdout).get("hookSpecificOutput", {}))
 
-    def test_codex_dispatcher_blocks_mandatory_governance_skill_docs_while_blocked(self):
+    def test_codex_dispatcher_preserves_host_permission_for_governance_skill_docs(self):
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
         node = shutil.which("node") or shutil.which("node.exe")
@@ -2695,7 +2654,6 @@ class TestMessageLanguage(unittest.TestCase):
             for skill in [
                 "merge-companion",
                 "session-intent-analyzer",
-                "jailbreak-detector",
                 "task-router",
                 "boundary-contract",
                 "using-coding-convention",

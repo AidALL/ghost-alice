@@ -28,8 +28,9 @@ flowchart TB
   P -->|request or status returned| W
   W -->|selected action, check or affected business observation| NT[Native tool-stage dispatch]
   NT --> PERM[Applicable Core constraints and native host permission]
-  NT --> APRE[Registered AP pretool: current qualified selection and automatic v2 preparation]
-  APRE -->|AP receipt, origin, commands or recording diagnostic; continue| W
+  NT --> APRE[Registered AP pretool: AP-owned target resolution and read-only OFF check]
+  APRE -->|active: qualified Core selection; v2 receipt, origin, commands or recording diagnostic| W
+  APRE -.->|OFF: quiet continue only; no capture context or authority access; actual native permission still required| EX
   PERM -->|actual permission allows| EX[Selected implementation or verification executor]
   PERM -->|actual denial| RESULT[Actual matched result with provenance]
   EX -->|actual output, failure or inconclusive observation| RESULT
@@ -47,8 +48,9 @@ flowchart TB
   W -->|bounded discussion or terminal partial/waiting| PAY
   PAY --> NS[Native candidate/final-stage dispatch]
   NS --> CG[Core completion guard: candidate fields and applicable skill evidence]
-  NS --> AS[Registered privileged AP Stop adapter]
-  AS --> RV{Current publication, proof, ownership and dependencies valid?}
+  NS --> AS[Registered privileged AP Stop: AP-owned target resolution and read-only OFF check]
+  AS -->|active| RV{Current publication, proof, ownership and dependencies valid?}
+  AS -->|OFF: quiet no-op; no authority reads or writes| ENV
   RV -->|yes| CW[Exact Core criterion writer in shared authority transaction]
   RV -->|no; no criterion write| APP[Actual application references, status and remaining criteria]
   CW -->|guarded update or actual failure| APP
@@ -83,9 +85,11 @@ flowchart TB
   CAT[Static sparse skill catalog] -.->|dependency| R
 ```
 
+일반 Core hook 전달은 실제 native cwd를 Core 맥락으로 유지하고 명시된 AP 대상 override를 보존합니다. 프로젝트 선택은 AP가 담당합니다. Claude는 절대 CLI 프로젝트 경로를 payload cwd보다 먼저 선택하며, Codex는 payload cwd를 사용하고 Claude 전용 힌트를 무시합니다. 설치 source와 프로젝트 신뢰 경로는 AP 대상을 선택하지 않으며, 격리 바인딩은 소유 프로젝트 대상을 유지합니다. Pretool과 Stop은 해당 대상을 선택하고 OFF를 읽은 뒤 Core 권한 자료에 접근합니다. OFF는 캡처 맥락이나 권한 읽기·쓰기 없이 조용히 계속 진행을 반환하며, 활성 대상은 기존 적격 선택 검사로 진행합니다. 대상 선택은 권한을 부여하지 않습니다.
+
 This call graph preserves each handler's actual native invocation semantics. The workflow executes selected requests and returns actual matched results to its policy; AP recording does not grant or deny native tool permission. Business observation uses its own authority and limits. The first-five checkpoint remains addressed after reassessment; a new contradiction or stopping condition can reopen the premise. Recording recovery retains its stricter unchanged-failure park rule.
 
-등록된 v2 pretool이 도구 실행 전에 현재 선택의 바인딩을 자동 준비합니다. 유효한 AP receipt·origin을 재사용하며 적용되는 미충족 의존성이 있을 때만 반환된 명시적 준비 helper를 사용합니다. 호환되는 승인된 proof는 원래 출처와 검증 시간을 유지하여 재사용합니다. prepare 실패는 업무 권한을 취소하지 않습니다. 독립적으로 정당한 작업만 수행하고, capture되지 않은 proof는 그 상태를 정확히 알리며 이후 receipt에서 capture한 증명으로 다시 표시하지 않습니다. 준비와 publication·적용 실패 모두 한정된 진단·복구를 사용합니다. 변하지 않은 실패는 관련 기록을 보류하며 관련 기록·의존성이 실제로 바뀐 경우에만 재시도합니다. `none`과 `blocked`에서는 AP capture나 진행을 하지 않습니다. 담당 검증과 네이티브 권한은 각 소유자가 유지합니다.
+활성 AP 대상과 적용되는 현재 qualified 선택이 있을 때 등록된 v2 pretool이 도구 실행 전에 선택된 바인딩을 자동 준비합니다. 유효한 AP receipt·origin을 재사용하며 적용되는 미충족 의존성이 있을 때만 반환된 명시적 준비 helper를 사용합니다. 호환되는 승인된 proof는 원래 출처와 검증 시간을 유지하여 재사용합니다. prepare 실패는 업무 권한을 취소하지 않습니다. 독립적으로 정당한 작업만 수행하고, capture되지 않은 proof는 그 상태를 정확히 알리며 이후 receipt에서 capture한 증명으로 다시 표시하지 않습니다. 준비와 publication·적용 실패 모두 한정된 진단·복구를 사용합니다. 변하지 않은 실패는 관련 기록을 보류하며 관련 기록·의존성이 실제로 바뀐 경우에만 재시도합니다. `none`과 `blocked`에서는 AP capture나 진행을 하지 않습니다. 담당 검증과 네이티브 권한은 각 소유자가 유지합니다.
 
 실제 작업을 수행한 읽기 전용 리뷰에도 담당 검증이 필요합니다. Core는 공통 라우팅과 기준별 완료·전달 결정을 소유하며, 도메인 담당자는 검증을 유지합니다. AP는 실행 상태의 존재나 누적 목록 대신 Core의 `publication_route: none | prepare | publish | blocked`를 사용합니다. 누락되거나 오래된 경로는 capture와 진행을 막지만, 기존 승인이나 네이티브 도구 권한을 취소하지 않습니다.
 

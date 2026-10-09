@@ -363,11 +363,6 @@ PROMPT_PENDING_MERGE_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": PROMPT_PENDING_MERGE_COMMAND}],
 }
-PROMPT_PENDING_MERGE_ENTRY_CODEX = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": PROMPT_PENDING_MERGE_COMMAND_CODEX}],
-}
-
 # 1-B. Work-start hook: reminder to call task-router.
 HOOK_MARKER = "[hook-reminder] AGENTS.md"
 HOOK_INTERNAL = (
@@ -482,20 +477,10 @@ SESSION_INTENT_COMMAND = (
     _session_intent_analyzer_command(platform="claude", output_format="text")
     + f" # {SESSION_INTENT_MARKER}"
 )
-SESSION_INTENT_COMMAND_CODEX = (
-    _session_intent_analyzer_command(platform="codex", output_format="json")
-    + f" # {SESSION_INTENT_MARKER}"
-)
-
 SESSION_INTENT_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": SESSION_INTENT_COMMAND}],
 }
-SESSION_INTENT_ENTRY_CODEX = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": SESSION_INTENT_COMMAND_CODEX}],
-}
-
 # 2. Work-stop hook: verification-before-completion reminder.
 STOP_HOOK_MARKER = "[completion-reminder] AGENTS.md"
 STOP_HOOK_INTERNAL = (
@@ -621,11 +606,6 @@ WEB_SEARCH_FIRST_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": WEB_SEARCH_FIRST_COMMAND}],
 }
-WEB_SEARCH_FIRST_ENTRY_CODEX = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": WEB_SEARCH_FIRST_COMMAND_CODEX}],
-}
-
 # 5. Pre-tool hook: tool-checkpoint hook-enforced retry point.
 TOOL_CHECKPOINT_MARKER = "[tool-checkpoint] pre-tool-check"
 LEGACY_TOOL_CHECKPOINT_MARKERS = (f"[{'action'}-{'gate'}] pre-tool-check",)
@@ -648,19 +628,11 @@ TOOL_CHECKPOINT_COMMAND = (
     ))
     + f" # {TOOL_CHECKPOINT_MARKER}"
 )
-TOOL_CHECKPOINT_ENTRY = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": TOOL_CHECKPOINT_COMMAND}],
-}
-
 # ── io-trace hook payload ─────────────────────────────────
 # Record file paths from every tool call into the audit log through PostToolUse events.
 # stdout is not visible to the user because this is PostToolUse, but the log file keeps it.
 
 IO_TRACE_MARKER = "[io-trace] audit"
-HOOK_RUNNER_MARKER_PREFIX = "[hook-runner:"
-
-
 def _discover_ghost_alice_skill_names_from_catalog() -> list[str]:
     catalog = _repo_root_from_this_file() / "skill-catalog" / "skills.json"
     if not catalog.exists():
@@ -806,16 +778,6 @@ def _hook_runner_command_entry(
 def _resolve_io_trace_script() -> str:
     """Return the io_trace_hook.py path relative to the install directory."""
     return _resolve_shared_hook_script("io_trace_hook.py")
-
-IO_TRACE_ENTRY = {
-    "matcher": "",
-    "hooks": [
-        {
-            "type": "command",
-            "command": "",  # Filled dynamically during install.
-        }
-    ],
-}
 
 # ── Semantic Intent -> Platform Event Name Mapping ────────
 #
@@ -1298,10 +1260,6 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "detect": lambda: _resolve_codex_dir().is_dir(),
     },
 }
-
-
-def _node_runtime_available(platform_key: str | None = None) -> bool:
-    return bool(_resolve_node_runtime(platform_key))
 
 
 def _ensure_node_runtime_for_hook_install(platform_key: str) -> str | None:
@@ -2229,16 +2187,6 @@ GHOST_ALICE_HOOK_MARKERS = (
 )
 
 
-def _remove_all_ghost_alice_hooks(hooks_obj: dict[str, Any]) -> int:
-    removed = 0
-    for hook_list in hooks_obj.values():
-        if not isinstance(hook_list, list):
-            continue
-        for marker in GHOST_ALICE_HOOK_MARKERS:
-            removed += _remove_hook_entries(hook_list, marker)
-    return removed
-
-
 def _ensure_claude_ghost_alice_skill_permissions(
     settings: dict[str, Any],
     addon_sources: Any = (),
@@ -3073,7 +3021,6 @@ def check_status_detail(
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
-    config_dir = platform["config_dir"]()
     hook_key = _resolve_hook_event(platform["hook_intent"], platform_key)
 
     if platform_key == "codex" and not _codex_hooks_supported():
