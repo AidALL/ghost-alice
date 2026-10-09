@@ -283,9 +283,9 @@ class InstallCmdWrapperTest(unittest.TestCase):
 
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, msg=combined)
-        self.assertIn("Skills: [26] common targets", combined)
-        self.assertIn("[26/26] common targets synced on all platforms", combined)
-        self.assertNotIn("[26/25]", combined)
+        self.assertIn("Skills: [25] common targets", combined)
+        self.assertIn("[25/25] common targets synced on all platforms", combined)
+        self.assertNotIn("[25/24]", combined)
 
     def test_powershell_auto_addon_report_omits_platform_specific_addon_from_common_count(self) -> None:
         pwsh = shutil.which("pwsh") or shutil.which("powershell")
@@ -360,10 +360,10 @@ class InstallCmdWrapperTest(unittest.TestCase):
 
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, msg=combined)
-        self.assertIn("Skills: [25] common targets", combined)
-        self.assertIn("[25/25] common targets synced on all platforms", combined)
-        self.assertNotIn("[25/26]", combined)
-        self.assertNotIn("[26/26]", combined)
+        self.assertIn("Skills: [24] common targets", combined)
+        self.assertIn("[24/24] common targets synced on all platforms", combined)
+        self.assertNotIn("[24/25]", combined)
+        self.assertNotIn("[25/25]", combined)
 
     def test_powershell_auto_addon_failure_surfaces_child_error(self) -> None:
         pwsh = shutil.which("pwsh") or shutil.which("powershell")
