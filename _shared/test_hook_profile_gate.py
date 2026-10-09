@@ -2358,9 +2358,6 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
     def test_installed_minimal_visibility_runs_prompt_and_session_start(self):
         if os.name == "nt":
             self.skipTest("POSIX shell launcher test does not apply on Windows")
-        pending_entry = install_hooks._platform_prompt_pending_merge_entry("claude", "UserPromptSubmit")
-        prompt_entry = install_hooks._platform_hook_entry("claude", "UserPromptSubmit")
-        session_entry = install_hooks._platform_session_start_entry("claude", "SessionStart")
 
         env = os.environ.copy()
         env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
@@ -2368,6 +2365,10 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         isolated_home = tempfile.TemporaryDirectory()
         self.addCleanup(isolated_home.cleanup)
         env["HOME"] = isolated_home.name
+        with mock.patch.dict(os.environ,{"HOME":isolated_home.name}):
+            pending_entry = install_hooks._platform_prompt_pending_merge_entry("claude", "UserPromptSubmit")
+            prompt_entry = install_hooks._platform_hook_entry("claude", "UserPromptSubmit")
+            session_entry = install_hooks._platform_session_start_entry("claude", "SessionStart")
 
         pending = subprocess.run(
             ["/bin/bash", "-lc", install_hooks._entry_command(pending_entry)],

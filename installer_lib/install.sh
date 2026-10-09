@@ -797,7 +797,7 @@ _run_install_hooks() {
         error "$(t "install_hooks.py not found: ${hook_py}" "install_hooks.py not found: ${hook_py}")"
         return 1
       fi
-      local args=(--platform "$platform" --hook-shared-dir "$(resolve_ghost_alice_runtime_shared_dir)" --skills-dir "$SKILLS_DIR")
+      local args=(--core-source-root "$SCRIPT_DIR" --platform "$platform" --hook-shared-dir "$(resolve_ghost_alice_runtime_shared_dir)" --skills-dir "$SKILLS_DIR")
       local visibility="${AGENT_VISIBILITY:-}"
       if [ "$action" = "install" ] && [ -z "$visibility" ]; then
         visibility="dynamic"

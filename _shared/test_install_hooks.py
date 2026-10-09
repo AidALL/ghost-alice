@@ -670,7 +670,9 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertNotIn("Developer note", result.stdout)
 
     def test_session_intent_hook_command_uses_repo_tmp_root(self):
-        command = install_hooks._session_intent_analyzer_command(platform="codex", output_format="json")
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ,
+                {"HOME":home,"CODEX_HOME":home+"/.codex","GHOST_ALICE_SESSION_INTENT_ROOT":""}):
+            command = install_hooks._session_intent_analyzer_command(platform="codex", output_format="json")
         parts = shlex.split(command)
 
         self.assertIn("--root", parts)
@@ -733,9 +735,11 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("acceptance_criteria", install_hooks.SESSION_INTENT_INTERNAL)
 
     def test_codex_hook_reminder_command_uses_task_router_gate_helper(self):
-        entry_command = install_hooks._entry_command(
-            install_hooks._platform_hook_entry("codex", "UserPromptSubmit")
-        )
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ,
+                {"HOME":home,"CODEX_HOME":home+"/.codex","GHOST_ALICE_SESSION_INTENT_ROOT":""}):
+            entry_command = install_hooks._entry_command(
+                install_hooks._platform_hook_entry("codex", "UserPromptSubmit")
+            )
         command = _visible_and_runner_payload_text(entry_command)
 
         self.assertIn("task_router_reminder_hook.py", command)
@@ -950,9 +954,9 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload.get("decision"), "block")
-        self.assertNotIn("complete standalone final answer", payload["reason"])
-        self.assertIn("only the missing or corrected [completion-check]", payload["reason"])
-        self.assertIn("do not repeat or rewrite the business answer", payload["reason"])
+        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertIn("corrected metadata", payload["reason"])
+        self.assertIn("Preserve the substantive answer", payload["reason"])
         self.assertIn("Do not invent evidence", payload["reason"])
 
     def test_claude_stop_hook_allows_actual_verification_skill_load(self):
@@ -5023,7 +5027,10 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             patch.object(install_hooks, "_repo_root_from_this_file", return_value=repo),
             patch.object(install_hooks, "_codex_hooks_supported", return_value=True),
         ):
-            result = install_hooks.install_hook("codex")
+            destination = install_hooks._default_destination("codex")
+            destination = __import__('dataclasses').replace(destination,
+                core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]),project_root=str(repo))
+            result = install_hooks.install_hook("codex",destination=destination)
         self.assertEqual(result, "installed")
 
         project_key = str(repo.resolve())
@@ -5790,7 +5797,7 @@ class TestSessionStartHook(unittest.TestCase):
         for command in commands:
             encoded_args = re.findall(r'"([A-Za-z0-9_-]{40,}=*)"', command)
             self.assertTrue(encoded_args, msg=command)
-            wrapped_command = base64.urlsafe_b64decode(max(encoded_args, key=len)).decode("utf-8")
+            wrapped_command = base64.urlsafe_b64decode(encoded_args[0]).decode("utf-8")
             self.assertNotIn("--format text", wrapped_command)
             if "--format" in wrapped_command:
                 self.assertIn("--format json", wrapped_command)

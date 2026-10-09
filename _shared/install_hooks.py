@@ -74,6 +74,7 @@ if sys.version_info < MIN_PYTHON_VERSION:
 from merge_companion_messages import render_pending_merge_message
 from hook_profile_gate import normalize_hook_id
 import runtime_config
+import install_destination
 import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
 
@@ -178,7 +179,7 @@ def _default_installed_hook_shared_dir(platform_key: str) -> Path:
     configured = os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
-    return _home() / ".ghost-alice" / "runtime" / "current" / "_shared"
+    return install_destination.ghost_root(_home()) / "runtime" / "current" / "_shared"
 
 
 def _hook_shared_dir_for_platform(platform_key: str, explicit: str | None = None) -> Path | None:
@@ -192,7 +193,9 @@ def _hook_shared_dir_for_platform(platform_key: str, explicit: str | None = None
 
 def _resolve_shared_hook_script(name: str) -> str:
     script = _hook_shared_dir() / name
-    if script.exists():
+    active = install_destination.current()
+    source = Path(active.core_source_root)/"_shared"/name if active else script
+    if script.exists() or (active and source.is_file()):
         return str(script).replace("\\", "/")
     return ""
 
@@ -205,8 +208,93 @@ def _repo_root_from_this_file() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _session_intent_root() -> Path:
-    return _repo_root_from_this_file() / ".tmp" / "session-intent"
+def _session_intent_root(platform: str | None = None) -> Path:
+    configured = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT", "").strip()
+    if configured:
+        if not Path(configured).is_absolute():
+            raise ValueError("session intent root must be absolute")
+        return Path(configured)
+    if "PLATFORMS" not in globals():
+        return _repo_root_from_this_file()/".tmp/session-intent"
+    return Path(_default_destination(platform or "codex").ledger_root)
+
+
+def _default_destination(platform_key: str) -> install_destination.InstallDestination:
+    source = Path(os.environ.get("GHOST_ALICE_CORE_ROOT") or _repo_root_from_this_file())
+    ghost = install_destination.ghost_root(_home())
+    retained = runtime_config.load_config(home=_home()).get("install_locations", {}).get(platform_key, {})
+    ledger = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT") or retained.get("ledger_root") or _retained_installed_ledger(platform_key) or str(source / ".tmp/session-intent")
+    return install_destination.InstallDestination.parse(dict(mode="normal", owned_root=str(_home()),
+        platform_dir=str(_resolve_codex_dir() if platform_key == "codex" else _resolve_claude_dir()),
+        skills_dir=str(_home()/".agents/skills" if platform_key == "codex" else _resolve_claude_dir()/"skills"),
+        ghost_root=str(ghost), ledger_root=str(ledger), project_root=str(source), core_source_root=str(source),
+        runtime_shared_dir=str(os.environ.get(HOOK_SHARED_DIR_ENV) or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR") or ghost/"runtime/current/_shared")))
+
+
+def _retained_installed_ledger(platform_key):
+    """Retain a single explicit authority from the selected installed hook chain.
+
+    Reads only the chosen platform settings, never discovery/latest-checkout state.
+    Multiple managed roots require an explicit choice instead of mixed authority.
+    """
+    import shlex
+    path=(_resolve_codex_dir()/"hooks.json" if platform_key=="codex" else _resolve_claude_dir()/"settings.json")
+    try:
+        settings=json.loads(path.read_text())
+    except (OSError,ValueError):
+        return None
+    roots=set()
+    for groups in settings.get("hooks",{}).values():
+        for group in groups if isinstance(groups,list) else []:
+            for hook in group.get("hooks",[]):
+                command=hook.get("command","")
+                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","prompt","tool-checkpoint","session-start","pending-merge-prompt")):
+                    continue
+                outer=shlex.split(command,comments=True)
+                if "--binding-b64" in outer:
+                    binding=install_destination.decode_binding(outer[outer.index("--binding-b64")+1])
+                    roots.add(binding["destination"]["ledger_root"])
+                else:
+                    args=outer[outer.index("run")+1:]
+                    inner=shlex.split(base64.urlsafe_b64decode(args[-1]).decode(),comments=True)
+                    for flag in ("--root","--session-intent-root"):
+                        if flag in inner:
+                            root=inner[inner.index(flag)+1]
+                            if Path(root).is_absolute(): roots.add(root)
+    if len(roots)>1:
+        raise ValueError("installed managed hooks contain conflicting ledger roots; supply an explicit binding")
+    return next(iter(roots),None)
+
+
+def _destination_action(platform_key, destination, action, *, dry_run=False):
+    resolved = install_destination.InstallDestination.parse(destination)
+    if not (Path(resolved.core_source_root)/"session-intent-analyzer/scripts/session_intent_ledger.py").is_file():
+        raise ValueError("Core source root does not provide the session ledger API")
+    if not (Path(resolved.core_source_root)/"_shared/response_delivery.py").is_file():
+        raise ValueError("Core source root does not provide the response API")
+    if resolved.mode == "isolated":
+        if action not in {"install", "status", "uninstall"}:
+            raise ValueError("isolated destination does not support this action")
+        if install_destination.current() is None and (os.environ.get("GHOST_ALICE_HOOK_SHARED_DIR") or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR")):
+            raise ValueError("isolated destination conflicts with legacy runtime overrides")
+    return resolved
+
+
+def _prepare_destination_runtime(destination, *, dry_run=False):
+    if dry_run:
+        return
+    target = Path(destination.runtime_shared_dir)
+    install_destination.assert_mutation_path(target)
+    if destination.mode == "isolated":
+        Path(destination.platform_dir).mkdir(parents=True, exist_ok=True)
+    for source in (Path(destination.core_source_root)/"_shared").iterdir():
+        if source.is_file() and source.suffix in {".py", ".mjs", ".json"}:
+            output = target/source.name
+            install_destination.assert_mutation_path(output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if not output.exists() or output.read_bytes() != source.read_bytes():
+                shutil.copy2(source, output)
+
 
 
 def _pending_merge_precheck_command(
@@ -235,7 +323,7 @@ def _pending_merge_precheck_command(
             "--internal-b64",
             instruction_payload,
             "--root",
-            _quote_static_arg(_session_intent_root()),
+            _quote_static_arg(_session_intent_root(platform)),
         ])
 
     if output_format == "json":
@@ -308,7 +396,7 @@ def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: b
             "--format",
             output_format,
             "--root",
-            _quote_static_arg(_session_intent_root()),
+            _quote_static_arg(_session_intent_root(platform)),
             "--internal-b64",
             payload,
         ]) + f" # {HOOK_MARKER}"
@@ -382,7 +470,7 @@ def _session_intent_analyzer_command(*, platform: str, output_format: str, paylo
             "--format",
             output_format,
             "--root",
-            _quote_static_arg(_session_intent_root()),
+            _quote_static_arg(_session_intent_root(platform)),
             "--internal-b64",
             payload,
         ])
@@ -681,6 +769,18 @@ def _hook_runner_command(
             raise ValueError(f"unsupported hook runner platform: {platform_key}")
         runner_args.append(platform)
     runner_args.append(payload)
+    binding_platform = platform_key or os.environ.get("GHOST_ALICE_PLATFORM") or "codex"
+    destination = install_destination.current() or _default_destination(binding_platform)
+    binding = destination.binding()
+    if normalized.startswith("adapter-autopilot-mode-"):
+        inner_argv = __import__('shlex').split(command,comments=True)
+        if len(inner_argv) != 2:
+            raise ValueError("registered privileged adapter requires no arguments")
+        adapter_script = Path(inner_argv[1])
+        binding["adapter"] = dict(adapter_id="autopilot-mode", runner_id=normalized,
+            script=str(adapter_script), content_hash=hashlib.sha256(adapter_script.read_bytes()).hexdigest(),
+            event="Stop" if normalized.endswith("-continue") else "PreToolUse")
+    runner_args.extend(["--binding-b64", install_destination.encode_binding(binding)])
     visible_hint = " ghost-alice-hook.mjs" if "ghost-alice-hook.mjs" in command else ""
     return (
         f"{_hook_python_invocation(script, *runner_args)} "
@@ -776,6 +876,9 @@ def _home() -> Path:
 
 
 def _resolve_claude_dir() -> Path:
+    active = install_destination.current()
+    if active:
+        return Path(active.platform_dir)
     env = os.environ.get("CLAUDE_CONFIG_DIR")
     if env:
         return Path(env)
@@ -783,6 +886,9 @@ def _resolve_claude_dir() -> Path:
 
 
 def _resolve_codex_dir() -> Path:
+    active = install_destination.current()
+    if active:
+        return Path(active.platform_dir)
     env = os.environ.get("CODEX_HOME")
     if env:
         return Path(env)
@@ -794,11 +900,12 @@ def _resolve_codex_config_toml() -> Path:
 
 
 def _resolve_ghost_alice_hooks_dir() -> Path:
-    return _home() / ".ghost-alice" / "hooks"
+    return install_destination.ghost_root(_home()) / "hooks"
 
 
 def _resolve_source_hook_dispatcher() -> Path:
-    return Path(__file__).with_name("ghost-alice-hook.mjs")
+    active = install_destination.current()
+    return Path(active.core_source_root)/"_shared/ghost-alice-hook.mjs" if active else Path(__file__).with_name("ghost-alice-hook.mjs")
 
 
 def _resolve_installed_hook_dispatcher() -> Path:
@@ -1149,6 +1256,7 @@ def _ensure_hook_dispatcher_installed(dry_run: bool = False) -> bool:
         return True
 
     for src, dst in pending:
+        install_destination.assert_mutation_path(dst)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         _log(_t(f"  Ghost-ALICE hook file installed: {dst}", f"  Ghost-ALICE hook file installed: {dst}"))
@@ -1236,6 +1344,7 @@ def _read_settings(path: Path, *, backup_corrupt: bool = True) -> dict:
         if backup_corrupt:
             _log(_t("  File may be corrupted. Backing up and starting with empty settings.", "  File may be corrupted. Backing up and starting with empty settings."))
             backup = path.with_suffix(".json.corrupt-bak")
+            install_destination.assert_mutation_path(backup)
             shutil.copy2(path, backup)
             _log(_t(f"  Corrupted file backed up: {backup}", f"  Corrupted file backed up: {backup}"))
         else:
@@ -1266,9 +1375,11 @@ def _write_settings(
         _log(_t(f"DRY-RUN: Would write to {path}:", f"DRY-RUN: Would write to {path}:"))
         print(json.dumps(data, indent=2, ensure_ascii=False))
         return
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_suffix(".json.bak")
+        install_destination.assert_mutation_path(backup)
         shutil.copy2(path, backup)
         _log(_t(f"Backup created: {backup}", f"Backup created: {backup}"))
         _rotate_backups(path, keep=3)
@@ -1291,6 +1402,7 @@ def _restore_settings_snapshot(
     if path.is_symlink():
         runtime_config._resolve_symlink_target(path).unlink(missing_ok=True)
         return
+    install_destination.assert_mutation_path(path)
     path.unlink(missing_ok=True)
 
 
@@ -1315,7 +1427,7 @@ def _rotate_backups(
         pending_root: Optional[Path] = _pending_root
     else:
         try:
-            pending_root = (_home() / ".ghost-alice" / "pending-merges").resolve()
+            pending_root = (install_destination.ghost_root(_home()) / "pending-merges").resolve()
         except OSError:
             pending_root = None
 
@@ -1337,6 +1449,7 @@ def _rotate_backups(
     candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     for old in candidates[keep:]:
         try:
+            install_destination.assert_mutation_path(old)
             old.unlink()
         except OSError:
             pass
@@ -1355,9 +1468,11 @@ def _write_text_file(path: Path, content: str, dry_run: bool = False) -> None:
         print(content, end="" if content.endswith("\n") else "\n")
         return
 
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_suffix(f"{path.suffix}.bak")
+        install_destination.assert_mutation_path(backup)
         shutil.copy2(path, backup)
         _log(_t(f"Backup created: {backup}", f"Backup created: {backup}"))
     with open(path, "w", encoding="utf-8") as f:
@@ -1490,7 +1605,7 @@ def _ensure_codex_hook_feature_enabled(dry_run: bool = False) -> bool:
 
 
 def _codex_hook_feature_change_path() -> Path:
-    return _home() / ".ghost-alice" / "install-state" / "codex-hook-feature-change.json"
+    return install_destination.ghost_root(_home()) / "install-state" / "codex-hook-feature-change.json"
 
 
 def _write_codex_hook_feature_change(
@@ -1512,6 +1627,7 @@ def _write_codex_hook_feature_change(
     if dry_run:
         _log(_t(f"  DRY-RUN: Would record Codex hooks feature flag change: {path}", f"  DRY-RUN: Would record Codex hooks feature flag change: {path}"))
         return
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(change, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _log(_t("  Recorded Codex hooks feature flag rollback metadata", "  Recorded Codex hooks feature flag rollback metadata"))
@@ -1724,7 +1840,7 @@ def _prune_codex_hook_state_path_variants(lines: list[str], keep_key: str) -> bo
 
 
 def _codex_project_trust_change_path() -> Path:
-    return _home() / ".ghost-alice" / "install-state" / "codex-project-trust-change.json"
+    return install_destination.ghost_root(_home()) / "install-state" / "codex-project-trust-change.json"
 
 
 def _codex_project_trust_header(project_path: str) -> str:
@@ -1809,6 +1925,7 @@ def _write_codex_project_trust_change(
     if dry_run:
         _log(_t(f"  DRY-RUN: Would record Codex project trust change: {path}", f"  DRY-RUN: Would record Codex project trust change: {path}"))
         return
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(change, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _log(_t("  Recorded Codex project trust rollback metadata", "  Recorded Codex project trust rollback metadata"))
@@ -1816,7 +1933,7 @@ def _write_codex_project_trust_change(
 
 def _ensure_codex_project_trusted(dry_run: bool = False) -> bool:
     config_file = _resolve_codex_config_toml()
-    project_path = str(_repo_root_from_this_file().resolve())
+    project_path = str(Path(install_destination.current().project_root).resolve() if install_destination.current() else _repo_root_from_this_file().resolve())
     current_content = _read_text_file(config_file)
     updated_content, changed, before_state = _merge_codex_project_trust(current_content, project_path)
 
@@ -1961,13 +2078,41 @@ def _io_trace_hook_command(*, payload_mode: bool = False) -> str:
 
 
 def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
+    """Recognize the actual managed outer argv, including serialized binding.
+
+    Marker text and a lookalike filename do not establish runner ownership.
+    Legacy no-binding commands remain removable without granting v2 capability.
+    """
     if not hook_id:
         return False
-    normalized = re.escape(normalize_hook_id(hook_id))
-    return re.search(
-        rf"hook_profile_gate\.py[\"']?\s+[\"']?run[\"']?\s+[\"']?{normalized}[\"']?(?:\s|$)",
-        command,
-    ) is not None
+    import shlex
+    try:
+        argv = shlex.split(command,comments=True)
+        if argv[:2] == ["/bin/sh","-c"]:
+            if len(argv)<7 or argv[3]!="ghost-alice-python":
+                return False
+            prefix,suffix=POSIX_HOOK_PYTHON_LAUNCHER.split("__GHOST_ALICE_INSTALL_PYTHON__")
+            if not argv[2].startswith(prefix) or not argv[2].endswith(suffix):
+                return False
+            middle=shlex.split(argv[2][len(prefix):-len(suffix)])
+            if len(middle)!=1 or not Path(middle[0]).is_absolute():
+                return False
+            script_index=4
+        else:
+            if len(argv)<4 or not re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?(?:\.exe)?",Path(argv[0]).name):
+                return False
+            script_index=1
+        if not Path(argv[script_index]).is_absolute() or Path(argv[script_index]).name!="hook_profile_gate.py":
+            return False
+        args=argv[script_index+1:]
+        if len(args) in {5,6} and args[-2]=="--binding-b64":
+            install_destination.decode_binding(args[-1]);args=args[:-2]
+        if len(args) not in {3,4} or args[:2] != ["run",normalize_hook_id(hook_id)]:
+            return False
+        base64.urlsafe_b64decode(args[-1]).decode('utf-8')
+        return True
+    except (ValueError,UnicodeError,IndexError):
+        return False
 
 
 def _remove_stale_hook_entries(
@@ -2129,6 +2274,7 @@ def install_hook(
     addon_sources: Any = (),
     skills_dir: str | Path | None = None,
     node_runtime: str | Path | None = None,
+    *, destination: install_destination.InstallDestination | dict | None = None,
 ) -> str:
     """Install hooks into a single framework.
 
@@ -2139,6 +2285,20 @@ def install_hook(
       "unsupported" - skipped because the current runtime does not support it
       "error"     - install failed
     """
+    if destination is not None or install_destination.current() is None:
+        destination = destination or _default_destination(platform_key)
+        resolved = _destination_action(platform_key,destination,"install",dry_run=dry_run)
+        if resolved.mode == "isolated" and skills_dir is not None and Path(skills_dir) != Path(resolved.skills_dir):
+            raise ValueError("isolated destination conflicts with legacy skills override")
+        if resolved.mode == "normal" and skills_dir is not None:
+            resolved = __import__("dataclasses").replace(resolved,skills_dir=str(Path(skills_dir).expanduser().resolve()))
+        with install_destination.use(resolved):
+            if PLATFORMS[platform_key]["detect"]() or resolved.mode == "isolated":
+                _prepare_destination_runtime(resolved,dry_run=dry_run)
+            result = install_hook(platform_key,dry_run,addon_sources,resolved.skills_dir,node_runtime)
+            if not dry_run and result in {"installed","already"}:
+                runtime_config.save_config({"install_locations":{platform_key: __import__('dataclasses').asdict(resolved)}},home=_home())
+            return result
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
@@ -2793,7 +2953,7 @@ def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
     return total
 
 
-def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
+def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None) -> str:
     """Remove hooks from a single framework.
 
     Return values:
@@ -2803,6 +2963,10 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
       "unsupported" - skipped because the current runtime does not support it
       "error"     - removal failed
     """
+    if destination is not None:
+        resolved = _destination_action(platform_key,destination,"uninstall",dry_run=dry_run)
+        with install_destination.use(resolved):
+            return uninstall_hook(platform_key,dry_run)
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
@@ -2898,8 +3062,14 @@ def check_status_detail(
     platform_key: str,
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
     addon_sources: Any = (),
+    destination=None,
 ) -> HookStatus:
     """Return structured hook installation status for a single framework."""
+    if destination is not None or install_destination.current() is None:
+        destination = destination or _default_destination(platform_key)
+        resolved = _destination_action(platform_key,destination,"status")
+        with install_destination.use(resolved):
+            return check_status_detail(platform_key,node_runtime=node_runtime,addon_sources=addon_sources)
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
@@ -3131,7 +3301,7 @@ def check_status_detail(
     )
 
 
-def check_status(platform_key: str, addon_sources: Any = ()) -> str:
+def check_status(platform_key: str, addon_sources: Any = (), *, destination=None) -> str:
     """Return hook installation status through the legacy string API.
 
     Return values:
@@ -3140,7 +3310,7 @@ def check_status(platform_key: str, addon_sources: Any = ()) -> str:
       "skipped"   - framework is not installed
       "unsupported" - current runtime does not support hooks
     """
-    return check_status_detail(platform_key, addon_sources=addon_sources).legacy_status
+    return check_status_detail(platform_key, addon_sources=addon_sources, destination=destination).legacy_status
 
 
 # ── Result Summary Output ─────────────────────────────────
@@ -3270,13 +3440,44 @@ def main() -> int:
         action="version",
         version=f"install_hooks.py {VERSION}",
     )
+    parser.add_argument("--destination-file", help="JSON installation location binding")
+    parser.add_argument("--core-source-root",help="Core source APIs independent of installed runtime")
+    parser.add_argument("--ledger-root",help="Explicit authoritative ledger root independent of source")
     args = parser.parse_args()
+    if args.status and args.uninstall:
+        parser.error("--status and --uninstall select different actions")
+    if args.list_addons and not args.addon_source:
+        parser.error("--list-addons requires at least one --addon-source")
+    destination = None
+    for option,key in ((args.core_source_root,"GHOST_ALICE_CORE_ROOT"),(args.ledger_root,"GHOST_ALICE_SESSION_INTENT_ROOT")):
+        if option:
+            if not Path(option).is_absolute(): parser.error("explicit locations must be absolute")
+            if args.destination_file: parser.error("explicit location flags conflict with --destination-file")
+            os.environ[key]=option
+    if args.destination_file:
+        destination = install_destination.InstallDestination.parse(json.loads(Path(args.destination_file).read_text()))
+        if not args.platform:
+            parser.error("--destination-file requires --platform")
+        _destination_action(args.platform,destination,"status" if args.status else "uninstall" if args.uninstall else "install",dry_run=args.dry_run)
+        if destination.mode == "isolated" and args.agent_visibility and (args.status or args.uninstall):
+            parser.error("isolated visibility changes require install action")
+        if destination.mode == "isolated" and (args.hook_shared_dir or args.skills_dir or args.list_addons):
+            parser.error("isolated destination conflicts with legacy override/list action")
 
+    if destination is not None:
+        with install_destination.use(destination):
+            return _execute_actions(args,destination)
+    if not args.list_addons:
+        for target in ([args.platform] if args.platform else PLATFORMS):
+            _destination_action(target, _default_destination(target),
+                "status" if args.status else "uninstall" if args.uninstall else "install", dry_run=args.dry_run)
+    return _execute_actions(args)
+
+
+def _execute_actions(args, destination=None):
     _log(f"install_hooks.py v{VERSION}")
     _log(_t(f"Home directory: {Path.home()}", f"Home directory: {Path.home()}"))
     if args.list_addons:
-        if not args.addon_source:
-            parser.error("--list-addons requires at least one --addon-source")
         return _print_addon_target_summary(args.addon_source, platform=args.platform)
     if args.addon_source and args.dry_run:
         rc = _print_addon_target_summary(args.addon_source, platform=args.platform)
@@ -3284,7 +3485,7 @@ def main() -> int:
             return rc
     if args.dry_run:
         _log(_t("Mode: DRY-RUN (no actual changes)", "Mode: DRY-RUN (no actual changes)"))
-    if args.agent_visibility:
+    if args.agent_visibility and not args.dry_run:
         runtime_config.save_config(
             {"agent_visibility": {"profile": args.agent_visibility}},
             home=_home(),
@@ -3298,10 +3499,10 @@ def main() -> int:
 
     for key in targets:
         previous_hook_shared_dir = os.environ.get(HOOK_SHARED_DIR_ENV)
-        hook_shared_dir = _hook_shared_dir_for_platform(key, args.hook_shared_dir)
+        hook_shared_dir = None if destination is not None else _hook_shared_dir_for_platform(key, args.hook_shared_dir)
         if hook_shared_dir is not None:
             os.environ[HOOK_SHARED_DIR_ENV] = str(hook_shared_dir)
-        else:
+        elif destination is None:
             os.environ.pop(HOOK_SHARED_DIR_ENV, None)
         try:
             if args.status:
@@ -3311,9 +3512,10 @@ def main() -> int:
                     key,
                     node_runtime=node_runtime,
                     addon_sources=args.addon_source,
+                    destination=destination,
                 )
             elif args.uninstall:
-                results[key] = uninstall_hook(key, dry_run=args.dry_run)
+                results[key] = uninstall_hook(key, dry_run=args.dry_run, destination=destination)
             else:
                 node_runtime = _ensure_node_runtime_for_hook_install(key)
                 if node_runtime is not None:
@@ -3324,6 +3526,7 @@ def main() -> int:
                     addon_sources=args.addon_source,
                     skills_dir=args.skills_dir,
                     node_runtime=node_runtime,
+                    destination=destination,
                 )
         except Exception as e:
             _log(f"ERROR: {PLATFORMS[key]['name']}. {e}")

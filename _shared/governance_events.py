@@ -14,6 +14,7 @@ import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+import install_destination
 from typing import Any
 
 
@@ -97,10 +98,11 @@ def output_path() -> Path:
     configured = os.environ.get("GHOST_ALICE_GOVERNANCE_EVENTS")
     if configured:
         return Path(configured).expanduser()
-    return Path.home() / ".ghost-alice" / "governance-events.jsonl"
+    return install_destination.ghost_root() / "governance-events.jsonl"
 
 
 def append_event(event: dict[str, str], path: Path) -> None:
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")

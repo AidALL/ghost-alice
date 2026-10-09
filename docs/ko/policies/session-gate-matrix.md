@@ -215,3 +215,9 @@ same ref의 simple polling은 output을 영원히 반복하라는 의무가 아�
 - metadata-only skill matching은 candidate discovery이지 execution이 아닙니다. Required gate skills는 fresh 또는 valid retained instruction body를 사용하고 현재 입력의 workflow를 따를 때만 complete입니다.
 
 Instruction body 재사용은 canonical `coding-convention/verification-before-completion/references/verify-or-reuse.md`의 Instruction Body Reuse를 따릅니다. 동일 세션의 코드 기록과 실제로 보존된 body가 필요합니다. 현재 입력의 의미 판단과 gate workflow는 계속 수행합니다. 실제 읽기와 유효한 재사용은 내부 실행 근거에 구분하여 남깁니다. 화면 추적 목록은 요청되거나 판단에 필요할 때만 표시합니다.
+
+## Managed Completion Recording Contract
+
+Core는 accepted response route와 owner, work-unit ID 및 contract revision을 기준으로 current-ready-owned 실행 단위만 선택합니다. AP v2는 해당 단위의 admitted 기준을 기록하며 누적 이력과 unadmitted 보호 조건을 실행 의무로 바꾸지 않습니다. 관리되는 no-argument 훅 경로는 `autopilot-completion-receipt.v2`를 선택하고 기존 공개 legacy API는 v1 기본값을 유지합니다. 위치와 protocol 전달은 session, origin, native trust, admission 또는 approval을 부여하지 않습니다.
+
+새 publication request는 호환되는 기존 근거의 원본 source와 검증 시간을 유지한 채 현재 입력에 연결할 수 있습니다. 새 입력 자체는 변경되지 않은 업무 검증을 다시 열지 않습니다. 적용 여부는 Core, 기록 가능 여부는 AP가 소유합니다. recording-only 실패 시 intake와 binding 복구 도구는 계속 사용할 수 있으며 기록을 복구할 때까지 publication과 application을 차단합니다. 독립적으로 승인된 업무는 계속 진행하고 실제 기준, 관련 산출물 또는 owner/target이 바뀐 검증만 다시 수행합니다. 메타데이터만 고치는 응답은 사용 가능한 이전 답변이 실제로 보이고 claims가 같을 때만 허용됩니다. 그 외에는 완전한 답변을 조립하고 근거가 없으면 지원되지 않는 완료 주장을 정직하게 수정합니다. 출력 io-trace는 선택이며 strict audit은 유지합니다.

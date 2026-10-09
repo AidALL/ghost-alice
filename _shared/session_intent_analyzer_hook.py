@@ -15,6 +15,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+import install_destination
 
 
 def _home() -> Path:
@@ -30,6 +31,9 @@ def _home() -> Path:
 
 
 def _ledger_dir_candidates() -> list[Path]:
+    explicit = os.environ.get("GHOST_ALICE_CORE_ROOT")
+    if explicit:
+        return [Path(explicit)/"session-intent-analyzer/scripts"]
     home = _home()
     candidates = [
         REPO_ROOT / "session-intent-analyzer" / "scripts",
@@ -133,6 +137,7 @@ def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], re
         path = _degrade_marker_path(root, platform, payload)
         if path is None:
             return
+        install_destination.assert_mutation_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(

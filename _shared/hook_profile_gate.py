@@ -22,6 +22,17 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import NoReturn
 
+import install_destination
+
+# Bind transport before source-provider imports. Invalid transport cannot open audit writes.
+if "--binding-b64" in sys.argv:
+    try:
+        _early_binding = install_destination.decode_binding(sys.argv[sys.argv.index("--binding-b64")+1])
+        os.environ.update(install_destination.binding_environment(_early_binding["destination"],os.environ))
+    except (ValueError, IndexError) as error:
+        sys.stderr.write(f"hook binding rejected: {error}\n")
+        raise SystemExit(126)
+
 import agent_visibility_policy
 import runtime_config
 import work_impact_projection
@@ -109,6 +120,8 @@ def _configured_node_runtime_from_value(value: str | None) -> Path | None:
 
 
 def _codex_config_candidates(env: dict[str, str]) -> list[Path]:
+    if env.get("GHOST_ALICE_PLATFORM_DIR") and env.get("GHOST_ALICE_PLATFORM")=="codex":
+        return [Path(env["GHOST_ALICE_PLATFORM_DIR"])/"config.toml"]
     codex_home = env.get("CODEX_HOME")
     if codex_home:
         return [Path(codex_home).expanduser() / "config.toml"]
@@ -527,7 +540,7 @@ def _pending_merge_manifest_path(env: dict[str, str], platform: str) -> Path | N
     home = _home_from_env(env)
     if home is None or bound_session_identity(platform, {"session_id": "pending-merge"}, {}) is None:
         return None
-    return home / ".ghost-alice" / "pending-merges" / platform / "manifest.json"
+    return install_destination.ghost_root(home,env) / "pending-merges" / platform / "manifest.json"
 
 
 def _has_pending_merge_undecided(env: dict[str, str], platform: str) -> bool:
@@ -857,8 +870,19 @@ def _emit_rendered_user_surface(user_stdout: str, user_stderr: str) -> None:
         _write(sys.stderr, user_stderr)
 
 
-def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
+def run(hook_id: str, payload: str, *, platform: str | None = None, binding=None) -> int:
+    if binding is None:
+        return _run(hook_id,payload,platform=platform)
+    binding = install_destination.decode_binding(install_destination.encode_binding(binding))
+    with install_destination.use(binding["destination"]):
+        return _run(hook_id,payload,platform=platform,binding=binding)
+
+
+def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=None) -> int:
     env = dict(os.environ)
+    if binding is not None:
+        binding = install_destination.decode_binding(install_destination.encode_binding(binding))
+        env = install_destination.binding_environment(binding["destination"],env)
     if platform is not None:
         env["GHOST_ALICE_PLATFORM"] = platform
     if not is_hook_enabled(hook_id, env):
@@ -868,6 +892,36 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
     force_success = _has_allowed_success_suffix(command)
     argv = _validate_shell_command(command, env=env)
     stdin_text = _read_stdin()
+    if binding is not None:
+        if binding['destination']['mode'] == 'normal':
+            # Normal global hooks retain the firing project's native cwd;
+            # installation source/project-trust location is not its run root.
+            native_cwd = _payload_from_stdin(stdin_text).get('cwd')
+            if isinstance(native_cwd,str) and Path(native_cwd).is_absolute():
+                env['GHOST_ALICE_PROJECT_CWD'] = native_cwd
+                env['GHOST_ALICE_AUTOPILOT_CWD'] = native_cwd
+            else:
+                env.pop('GHOST_ALICE_AUTOPILOT_CWD',None)
+        for flag in ("--root","--session-intent-root"):
+            if flag in argv and argv[argv.index(flag)+1] != env["GHOST_ALICE_SESSION_INTENT_ROOT"]:
+                raise HookCommandRejected("inner ledger root conflicts with trusted binding")
+        if adapter := binding.get("adapter"):
+            from addon_installer import load_privileged_adapter_allowlist, privileged_adapter_runner_id
+            spec = load_privileged_adapter_allowlist(official_path=Path(env["GHOST_ALICE_CORE_ROOT"])/"skill-catalog/privileged-adapters.json").get(adapter.get("adapter_id"))
+            if (not spec or spec.get("args_policy") != "no_args" or adapter.get("runner_id") != hook_id
+                    or len(argv) != 2 or argv[1] != adapter.get("script")):
+                raise HookCommandRejected("registered adapter identity/arguments mismatch")
+            event = _payload_from_stdin(stdin_text).get("hook_event_name") or _payload_from_stdin(stdin_text).get("hookEventName")
+            semantic = "on_agent_stop" if adapter.get("event") == "Stop" else "pre_tool_use"
+            script = Path(argv[1])
+            expected_rel = Path(spec["script_rel_by_event"][semantic])
+            if (event != adapter.get("event") or hook_id != privileged_adapter_runner_id(adapter["adapter_id"],spec["hook_id_by_event"][semantic])
+                    or script.parts[-len(expected_rel.parts):] != expected_rel.parts
+                    or __import__('hashlib').sha256(script.read_bytes()).hexdigest() != adapter.get("content_hash")):
+                raise HookCommandRejected("registered adapter event/source/hash mismatch")
+            env["GHOST_ALICE_COMPLETION_SCHEMA"] = "autopilot-completion-receipt.v2"
+        elif hook_id.startswith("adapter-"):
+            raise HookCommandRejected("adapter missing registered transport descriptor")
     child_env = dict(env)
     # subprocess.run encodes the pipe as UTF-8 below; Python children must decode the same bytes independently of the Windows console code page.
     child_env["PYTHONIOENCODING"] = "utf-8"
@@ -1021,6 +1075,17 @@ def _strip_trailing_marker_args(args: list[str]) -> list[str] | None:
 
 def main(argv: list[str] | None = None) -> NoReturn:
     args = list(sys.argv[1:] if argv is None else argv)
+    binding = None
+    if "--binding-b64" in args:
+        index = args.index("--binding-b64")
+        if index + 1 >= len(args):
+            raise SystemExit(126)
+        try:
+            binding = install_destination.decode_binding(args[index+1])
+        except ValueError as error:
+            sys.stderr.write(f"hook binding rejected: {error}\n")
+            raise SystemExit(126)
+        del args[index:index+2]
     normalized_args = _strip_trailing_marker_args(args)
     if normalized_args is None or normalized_args[0] != "run":
         sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|legacy-visibility-csv] <payload-b64>\n")
@@ -1034,7 +1099,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
             positional_platform = candidate
     try:
         if len(normalized_args) == 3:
-            raise SystemExit(run(normalized_args[1], payload))
+            raise SystemExit(run(normalized_args[1], payload,binding=binding))
         if len(normalized_args) == 4:
             if positional_platform is not None:
                 raise SystemExit(
@@ -1042,9 +1107,10 @@ def main(argv: list[str] | None = None) -> NoReturn:
                         normalized_args[1],
                         payload,
                         platform=positional_platform,
+                        binding=binding,
                     )
                 )
-            raise SystemExit(run(normalized_args[1], payload))
+            raise SystemExit(run(normalized_args[1], payload,binding=binding))
         sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|legacy-visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
     except HookCommandRejected as exc:

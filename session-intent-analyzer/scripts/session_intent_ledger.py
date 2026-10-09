@@ -25,6 +25,19 @@ from pathlib import Path
 from typing import Any
 
 
+def assert_mutation_path(path, *, env=None):
+    """Expose Core's single location guard without breaking normal skill copies."""
+    source=os.environ if env is None else env
+    if not source.get("GHOST_ALICE_OWNED_ROOT"):
+        return Path(path)
+    sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"_shared"))
+    from install_destination import assert_mutation_path as guard
+    return guard(path,env=source)
+
+
+_assert_location_write = assert_mutation_path
+
+
 SCHEMA_VERSION = "session-intent-ledger.v1"
 CURRENT_SESSION_SCHEMA = "session-intent-current.v1"
 SESSION_INTENT_ROOT_ENV = "GHOST_ALICE_SESSION_INTENT_ROOT"
@@ -280,6 +293,7 @@ def load_state(path: Path, platform: str = "unknown", session_id: str = "unknown
 
 def _atomic_write(path: Path, text: str) -> None:
     """Replace one file; readers see either complete version, never a prefix."""
+    _assert_location_write(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
     try:
@@ -324,6 +338,7 @@ def validate_identity(platform: str, session_id: str) -> None:
 @contextmanager
 def _session_lock(paths: dict[str, Path], timeout: float = 10.0):
     """Serialize all cooperating writers on POSIX and Windows, including threads."""
+    _assert_location_write(paths["dir"] / ".intent-state.lock")
     paths["dir"].mkdir(parents=True, exist_ok=True)
     with (paths["dir"] / ".intent-state.lock").open("a+b") as handle:
         if os.name == "nt":
@@ -511,6 +526,7 @@ def storage_transaction(root: Path):
     """
     database = storage_database_path(root)
     _require_database_if_initialized(root)
+    _assert_location_write(database)
     database.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database, timeout=10, isolation_level=None)
     try:

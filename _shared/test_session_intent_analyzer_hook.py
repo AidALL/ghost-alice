@@ -411,6 +411,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         # Copy the hook so its REPO_ROOT has no sibling ledger; resolution must fall to the home/CLAUDE_CONFIG_DIR candidates we control.
         self.hook = shared / "session_intent_analyzer_hook.py"
         shutil.copy2(SCRIPT, self.hook)
+        shutil.copy2(SCRIPT.with_name("install_destination.py"),shared/"install_destination.py")
         self.home = self.base / "home"
         self.home.mkdir()
         self.root = self.base / "root"
@@ -421,6 +422,9 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         env["USERPROFILE"] = str(self.home)
         env.pop("CLAUDE_CONFIG_DIR", None)
         env.pop("GHOST_ALICE_SESSION_ID", None)
+        # Exercise legacy provider discovery deliberately; an explicit Core source
+        # is a different authoritative capability and must not be ignored.
+        env.pop("GHOST_ALICE_CORE_ROOT", None)
         return subprocess.run(
             [
                 sys.executable, str(self.hook),

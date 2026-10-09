@@ -40,8 +40,25 @@ function userHome(env = process.env) {
   return os.homedir();
 }
 
+function ghostRoot() {
+  return process.env.GHOST_ALICE_GHOST_ROOT || path.join(userHome(), ".ghost-alice");
+}
+
+function assertOwnedMutation(target) {
+  const owned = process.env.GHOST_ALICE_OWNED_ROOT;
+  if (!owned) return;
+  function resolved(candidate) {
+    if (fs.existsSync(candidate)) return fs.realpathSync(candidate);
+    return path.join(resolved(path.dirname(candidate)), path.basename(candidate));
+  }
+  const relative = path.relative(resolved(owned), resolved(target));
+  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error("Isolated mutation escapes owned destination");
+  }
+}
+
 function pendingManifestPath(platform) {
-  return path.join(userHome(), ".ghost-alice", "pending-merges", platform, "manifest.json");
+  return path.join(ghostRoot(), "pending-merges", platform, "manifest.json");
 }
 
 function sessionIntentRoot(configuredRoot = "") {
@@ -49,7 +66,7 @@ function sessionIntentRoot(configuredRoot = "") {
   if (configured) {
     return configured;
   }
-  return path.join(userHome(), ".ghost-alice", "session-intent");
+  return path.join(ghostRoot(), "session-intent");
 }
 
 function sessionIntentDir(platform, sessionId, root = "") {
@@ -83,6 +100,7 @@ function readJsonFile(filePath, fallback) {
 }
 
 function writeJsonFile(filePath, value) {
+  assertOwnedMutation(filePath);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
@@ -94,6 +112,8 @@ function sleepMs(ms) {
 
 function withJsonFileLock(filePath, callback) {
   const lockPath = `${filePath}.lock`;
+  assertOwnedMutation(filePath);
+  assertOwnedMutation(lockPath);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   for (let attempt = 0; attempt < 50; attempt += 1) {
     let fd = null;
@@ -380,7 +400,7 @@ function downstreamGateDenialReason(state) {
 }
 
 function toolCheckpointSurfaceStatePath() {
-  return path.join(userHome(), ".ghost-alice", "hooks", "tool-checkpoint-surface-state.json");
+  return path.join(ghostRoot(), "hooks", "tool-checkpoint-surface-state.json");
 }
 
 function toolCheckpointSurfaceLineage(platform, input, root = "") {

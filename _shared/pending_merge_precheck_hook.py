@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from merge_companion_messages import render_pending_merge_message
 import runtime_config
+import install_destination
 from session_check_cache import observe_check, UnstableCheckTarget
 from session_intent_analyzer_hook import bound_session_identity
 
@@ -54,7 +55,7 @@ _CLEAN_TECH_COPY: dict[HookKind, str] = {
 
 
 def _pending_manifest_path(platform: str) -> Path:
-    return _home() / ".ghost-alice" / "pending-merges" / platform / "manifest.json"
+    return install_destination.ghost_root(_home()) / "pending-merges" / platform / "manifest.json"
 
 
 def _home() -> Path:

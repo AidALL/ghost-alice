@@ -102,6 +102,10 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             env["CLAUDE_CODE_ENTRYPOINT"] = host
         self.counter += 1
         payload = dict(extra or {})
+        # These e7 repair cases exercise an explicitly usable visible prior answer.
+        # Final-only/unknown assembly and absent usable prior are covered in test_stop_retry_surface.
+        payload.setdefault("host_context",{"delivery_surface":"visible_transcript"})
+        payload.setdefault("prior_answer_ref","fixture:usable-business-answer")
         if text is not None:
             payload[direct_key] = text
         if entries is None:
@@ -124,8 +128,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         self.assert_block(payload)
         reason = payload["reason"]
         for forbidden in ("complete standalone final answer", "requested answer payload again",
-                          "Begin with the user's requested answer", "[completion-check] followed by [io-trace]",
-                          "Your answer above stays visible"):
+                          "Begin with the user's requested answer", "[completion-check] followed by [io-trace]"):
             self.assertNotIn(forbidden, reason)
         self.assertIn("Do not invent evidence", reason)
         self.assertTrue("unverified" in reason.lower() or "withdraw" in reason.lower(), msg=reason)

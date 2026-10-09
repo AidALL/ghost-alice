@@ -238,11 +238,11 @@ class CompletionRecoveryTests(unittest.TestCase):
     def test_recovery_preserves_business_payload_and_does_not_invent_evidence(self):
         payload = self.hook(VALID.replace("    evidence: python check.py exited 0\n", ""))
         self.assertEqual(payload.get("decision"), "block")
-        self.assertNotIn("complete standalone final answer", payload["reason"])
-        self.assertIn("only the missing or corrected", payload["reason"])
+        self.assertIn("complete standalone final answer", payload["reason"])
+        self.assertIn("corrected metadata", payload["reason"])
         self.assertIn("Preserve the substantive answer", payload["reason"])
         self.assertIn("Do not invent evidence", payload["reason"])
-        self.assertIn("withdrawing the unsupported", payload["reason"])
+        self.assertIn("withdraws unsupported", payload["reason"])
 
     def test_honest_unverified_retry_can_end_without_false_success(self):
         payload = self.hook("I have not verified that the tests pass. Verification remains unresolved.", retry=True)

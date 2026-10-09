@@ -33,7 +33,7 @@ def recovery_delivery_guidance(delivery_route):
     if delivery_route == "preserve_answer_and_patch_metadata":
         shape = (
             "Your answer above stays visible to the user. Do not repeat or rewrite it. "
-            "Reply with only the missing or corrected control blocks: [completion-check] followed by [io-trace]. "
+            "Reply with only the missing or corrected control blocks: [completion-check]. Printed [io-trace] is optional; strict audit remains required. "
             "Keep the answer's claims unchanged. "
         )
     elif delivery_route == "corrected_complete_answer":
@@ -50,7 +50,7 @@ def recovery_delivery_guidance(delivery_route):
         )
     return shape + (
         "Required control block format overrides any requested line-count limit. "
-        "Write [completion-check] and [io-trace] as canonical multi-line blocks, not inline one-line summaries. "
+        "Write [completion-check] as a canonical multi-line block, not an inline one-line summary. Printed [io-trace] is optional; strict audit remains required. "
         "Preserve the substantive answer when the defect is only control-field formatting; "
         "change only the invalid control fields, not the business calculations or conclusions. "
         "Retain original evidence times and proof references without rerunning unchanged business checks. "

@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import install_destination
 import sqlite3
 from typing import Callable
 
@@ -43,6 +44,7 @@ def _stamp(target: Path) -> list[str] | None:
 
 
 def _connect(root: Path) -> sqlite3.Connection:
+    install_destination.assert_mutation_path(root / "session-checks.sqlite3")
     root.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(root / "session-checks.sqlite3", timeout=2)
     try:

@@ -4,6 +4,8 @@ This reference is the canonical semantic contract for deciding whether a claim a
 
 ## Contents
 
+- [Publication Binding And Evidence Time](#publication-binding-and-evidence-time)
+
 - [Purpose](#purpose)
 - [Decision Flow](#decision-flow)
 - [State Vocabulary](#state-vocabulary)
@@ -192,3 +194,7 @@ Use this template to review a finished turn without storing raw conversation tex
 ## Out Of Scope
 
 This contract does not track every theoretical external change, hash every file, or query a remote store because the artifact lives there. An artifact registry fed by the agent's own tool hooks was rejected: when the change path is closed, the conversation already records every mutation, and when the path is open, the agent's hooks cannot observe the external writes the registry would need. Revisit only if live evaluation shows correct application of this contract failing for lack of mutation facts that the conversation cannot hold.
+
+## Publication Binding And Evidence Time
+
+For managed AP v2, the current publication request binding is distinct from the immutable business evidence record. A new input can require recording under a current receipt without changing the evidence source, original verification time or compatible criterion coverage. Recording-only faults reopen recording; an actual change to a criterion, relevant artifact dependency or owner/target reopens only affected business coverage. Use [autopilot-publication.md](autopilot-publication.md) for the concrete helper sequence. Location transport and protocol capability grant no approval or verification.

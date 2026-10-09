@@ -60,6 +60,13 @@ def _normalized(rel_path: str) -> str:
 
 
 class CompletionLifecycleContractTests(unittest.TestCase):
+    def test_managed_publication_describes_current_units_and_original_proof_reuse(self):
+        text=(REPO_ROOT/"coding-convention/verification-before-completion/references/autopilot-publication.md").read_text()
+        self.assertIn("autopilot-completion-receipt.v2",text)
+        self.assertIn("--evidence-reference",text)
+        self.assertIn("current-ready-owned",text)
+        self.assertIn("recording-only",text.lower())
+
     def test_hard_sequence_is_synchronized_across_completion_surfaces(self) -> None:
         for rel_path in SYNCED_SURFACES:
             with self.subTest(path=rel_path):

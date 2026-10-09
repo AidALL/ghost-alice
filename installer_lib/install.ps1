@@ -220,6 +220,7 @@ function Invoke-InstallHooks {
 
     $pyArgs = @(
         $hookPy,
+        "--core-source-root", $ScriptDir,
         "--platform", $TargetPlatform,
         "--hook-shared-dir", (Resolve-GhostAliceRuntimeSharedDir),
         "--skills-dir", $SkillsDir

@@ -26,6 +26,16 @@ fi
 
 set -euo pipefail
 
+# Full source integration is not an isolated action. Reject before logging/locks.
+for _destination_arg in "$@"; do
+  case "$_destination_arg" in
+    --destination-file|--destination-file=*|--isolated)
+      printf '%s\n' "[ERROR] isolated destinations require the Python hook installer; shell source integration is unsupported" >&2
+      exit 2 ;;
+  esac
+done
+unset _destination_arg
+
 ORIGINAL_LOCALE="${LANGUAGE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}}"
 
 # ── Force UTF-8 locale ────────────────────────────────────

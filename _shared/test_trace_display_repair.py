@@ -76,8 +76,8 @@ class TraceDisplayRepairTests(unittest.TestCase):
                 with self.subTest(platform=platform, host=host):
                     result = self.hook(invalid, platform, host)
                     self.assertEqual(result["decision"], "block")
-                    self.assertIn("missing or corrected", result["reason"])
-                    self.assertNotIn("complete standalone final answer", result["reason"])
+                    self.assertIn("complete standalone final answer", result["reason"])
+                    self.assertNotIn("only the missing or corrected control blocks", result["reason"])
                     self.assertNotIn("payload again", result["reason"])
                     self.assertNotIn("followed by [io-trace]", result["reason"])
 

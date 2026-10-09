@@ -46,6 +46,11 @@ function pythonExecutable() {
 }
 
 function ledgerScript() {
+  if (process.env.GHOST_ALICE_CORE_ROOT) {
+    const explicit = path.join(process.env.GHOST_ALICE_CORE_ROOT, "session-intent-analyzer", "scripts", "session_intent_ledger.py");
+    if (fs.statSync(explicit).isFile()) return explicit;
+    throw new Error("Explicit Core source does not provide the ledger API");
+  }
   const home = process.env.HOME || process.env.USERPROFILE
     || (process.env.HOMEDRIVE && process.env.HOMEPATH ? `${process.env.HOMEDRIVE}${process.env.HOMEPATH}` : os.homedir());
   const candidates = [

@@ -38,7 +38,7 @@ PRIVILEGED_ADAPTER_REQUEST_FIELD = "privileged_adapters"
 CORE_PRIVILEGED_ADAPTER_ALLOWLIST: dict[str, dict[str, Any]] = {}
 PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION = 1
 CORE_PRIVILEGED_ADAPTER_ALLOWLIST_PATH = (
-    Path(__file__).resolve().parents[1] / "skill-catalog" / "privileged-adapters.json"
+    Path(os.environ.get("GHOST_ALICE_CORE_ROOT") or Path(__file__).resolve().parents[1]) / "skill-catalog" / "privileged-adapters.json"
 )
 USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL = Path(".ghost-alice") / "privileged-adapters.json"
 _DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST = object()
@@ -243,6 +243,8 @@ def _merge_allowlist_file(
 
 
 def _default_user_privileged_adapter_allowlist_path() -> Path:
+    if ghost := os.environ.get("GHOST_ALICE_GHOST_ROOT"):
+        return Path(ghost)/"privileged-adapters.json"
     home = os.environ.get("HOME")
     if home:
         return Path(home).expanduser() / USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL

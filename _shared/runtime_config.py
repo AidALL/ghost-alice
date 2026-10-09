@@ -9,6 +9,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
+import install_destination
 from typing import Any
 
 VALID_AGENT_VISIBILITY_PROFILES = {"strict", "dynamic", "minimal"}
@@ -22,8 +23,7 @@ DEFAULT_CONFIG = {
 
 
 def config_path(home: Path | None = None) -> Path:
-    base = Path(home) if home is not None else Path.home()
-    return base / ".ghost-alice" / "config.json"
+    return install_destination.ghost_root(home) / "config.json"
 
 
 def canonical_agent_visibility_profile(value: str | None) -> str:
@@ -95,6 +95,8 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> 
         config["hook_runtime"]["node"] = _normalized_node_registrations(
             hook_runtime.get("node")
         )
+    if isinstance(loaded.get("install_locations"), dict):
+        config["install_locations"] = loaded["install_locations"]
     config["schema_version"] = "ghost-alice-config.v1"
     config["agent_visibility"]["profile"] = canonical_agent_visibility_profile(
         config["agent_visibility"].get("profile")
@@ -123,10 +125,12 @@ def _atomic_write_destination(path: Path) -> Path:
     """
 
     path = Path(path)
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.is_symlink():
         return path
     destination = _resolve_symlink_target(path)
+    install_destination.assert_mutation_path(destination)
     if not destination.parent.is_dir():
         raise FileNotFoundError(
             f"Cannot write through broken symlink {path}: "
@@ -185,8 +189,11 @@ def _atomic_write_json(path: Path, data: Any) -> None:
 
 def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
     path = config_path(home)
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     normalized = load_config(env={}, home=home)
+    if isinstance(config.get("install_locations"),dict):
+        normalized.setdefault("install_locations",{}).update(config["install_locations"])
     agent_visibility = config.get("agent_visibility")
     if isinstance(agent_visibility, dict):
         normalized["agent_visibility"].update(agent_visibility)

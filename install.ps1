@@ -69,8 +69,14 @@ param(
     [switch]$UpdateSource,
     [Alias("skip-source-health")]
     [switch]$SkipSourceHealth,
+    [Alias("destination-file")]
+    [string]$DestinationFile,
     [switch]$Help
 )
+
+if ($DestinationFile) {
+    throw "Isolated destinations require the Python hook installer; PowerShell source integration is unsupported"
+}
 
 # Best-effort UTF-8 console output for Windows PowerShell 5.1 / legacy console hosts.
 $LegacyAsciiConsole = ($PSVersionTable.PSVersion.Major -lt 6 -and $Host.Name -eq "ConsoleHost")
