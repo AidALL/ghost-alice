@@ -602,6 +602,33 @@ def _strip_private_protocol_metadata(stdout: str) -> str:
     return json.dumps(protocol, ensure_ascii=False) + "\n"
 
 
+def _native_protocol_output(stdout: str, *, platform: str, event: str) -> str:
+    """Project only the host envelope; raw output and domain state stay intact."""
+    if platform != "codex" or event not in {"Stop", "SubagentStop"}:
+        return stdout
+    try:
+        protocol = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return stdout
+    if not isinstance(protocol, dict):
+        return stdout
+    # Codex Stop accepts universal fields plus the block decision and its reason.
+    # Internal recording and recovery records belong in the domain and strict log.
+    fields = {"continue", "decision", "reason", "stopReason", "suppressOutput", "systemMessage"}
+    projected = {key: value for key, value in protocol.items() if key in fields}
+    if projected.get("decision") == "block":
+        reason = projected.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            projected["reason"] = next(
+                (value for key in ("systemMessage", "stopReason")
+                 if isinstance(value := protocol.get(key), str) and value.strip()),
+                "A registered Stop hook blocked completion without a usable reason. Inspect the strict hook output.",
+            )
+    if projected == protocol:
+        return stdout
+    return json.dumps(projected, ensure_ascii=False) + "\n"
+
+
 def _visibility_context(
     hook_id: str,
     stdout: str,
@@ -956,7 +983,8 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         strict_log_ref=log_ref,
     )
     model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
-    user_stdout, user_stderr = _render_user_surface(item, host_stdout, result.stderr)
+    native_stdout = _native_protocol_output(host_stdout, platform=platform, event=event)
+    user_stdout, user_stderr = _render_user_surface(item, native_stdout, result.stderr)
     strict_session_log.append_event(
         home=_home_from_env(env),
         platform=platform,
