@@ -286,14 +286,14 @@ flowchart TB
   I --> R[Reconcile current input and continuing authorized work; select focus and verification burden]
   R --> W[Owning workflow or agent]
   T --> W
-  W --> M[Map goal and criteria to source; actual authority; applicable limits; declared bounded local plan]
+  W -->|fresh entry or actual relevant remapping only| M[Map goal and criteria to source; actual authority; applicable limits; declared bounded local plan]
   M --> B{Boundary contract required?}
   B -->|yes| BO[Boundary owner maps sourced proposed actions, targets, consequences and limits; grants no human authority]
   F --> BO
   T --> BO
   BO --> POL_IN
   B -->|no| POL_IN
-  POL_OUT -->|selected request or status returns to owner| W
+  POL_OUT -->|end this invocation; return selected request/status for dispatch| W
   W --> K{Actual selected step?}
   K -->|owning completion procedure selected with supported proof| CAND
   K -->|bounded discussion without selected execution| FINAL
@@ -310,7 +310,7 @@ flowchart TB
   APRE --> SEL[AP consumes actual current qualified Core projection; no authority grant]
   SEL --> ACAP[Applicable v2 prospective preparation captures AP receipt and origin before tool]
   ACAP --> NOTICE[Prepared context and returned commands, or specific recording diagnostic]
-  NOTICE -->|actual notice/status| W
+  NOTICE -->|attach preparation context or diagnostic to the outstanding tool request; no implicit policy re-entry| W
   CP -->|actual permission allows execution| EXEC{Declared executor}
   CP -->|actual permission denial| OBS[Actual matched observation or execution state with provenance]
   APRE -.->|continue even on recording failure; does not grant or deny tool permission| EXEC
