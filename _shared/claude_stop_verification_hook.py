@@ -17,7 +17,7 @@ from completion_check_validator import (  # noqa: E402
     validate_completion_text,
 )
 from completion_route import select_completion_route  # noqa: E402
-from response_delivery import recovery_delivery_guidance, select_recovery_delivery  # noqa: E402
+from response_delivery import recovery_delivery_guidance, observe_recovery_delivery  # noqa: E402
 
 VERIFICATION_SKILL = "verification-before-completion"
 # Every Claude block reason carries this marker so a later Stop in the same turn can count earlier retries.
@@ -25,7 +25,6 @@ COMPLETION_GATE_MARKER = "[completion-gate]"
 RETRIES_PER_TURN = 1
 # Named surfaces retain the established transcript behavior. Bare cli stays
 # unknown; native interactive evidence is recognized separately below.
-TRANSCRIPT_SURFACES = frozenset({"claude-desktop", "claude-vscode", "remote_desktop", "remote_mobile"})
 
 
 def _read_hook_input() -> dict[str, Any]:
@@ -182,24 +181,8 @@ def _partial_retry_guidance() -> str:
 
 
 def _recovery_guidance(input_data, entries, platform, final_text):
-    host_context = input_data.get("host_context")
-    if not isinstance(host_context, dict) or "delivery_surface" not in host_context:
-        entrypoint = _host_entrypoint(entries)
-        scratchpad = input_data.get("scratchpad_dir")
-        # Isolated native Claude 2.1.287 PTY observations: interactive Stop had
-        # cli + scratchpad_dir and an already displayed answer; print used
-        # sdk-cli. Hook stdio was non-TTY in both modes, so it proves no visibility.
-        native_visible = entrypoint == "cli" and isinstance(scratchpad, str) and bool(scratchpad.strip())
-        visible = platform == "claude" and (entrypoint in TRANSCRIPT_SURFACES or native_visible)
-        final_only = platform == "claude" and entrypoint in ("sdk-cli", "sdk-ts", "sdk-py")
-        host_context = {"delivery_surface": "visible_transcript" if visible else "final_only" if final_only else "unknown"}
-    prior_answer_ref = input_data.get("prior_answer_ref")
-    if not isinstance(prior_answer_ref, str) or not prior_answer_ref.strip():
-        # A digest identifies the host-held payload; never store its body in the ledger.
-        prior_answer_ref = "sha256:" + hashlib.sha256(final_text.encode("utf-8")).hexdigest()
-    route = select_recovery_delivery(host_context, prior_answer_ref,
-                                     input_data.get("claims_changed", False), True)
-    return recovery_delivery_guidance(route)
+    return observe_recovery_delivery(input_data, platform=platform,
+        entrypoint=_host_entrypoint(entries), final_text=final_text)["guidance"]
 
 
 def _host_entrypoint(entries: list[dict[str, Any]]) -> str:

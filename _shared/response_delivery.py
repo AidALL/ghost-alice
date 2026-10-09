@@ -58,3 +58,48 @@ def recovery_delivery_guidance(delivery_route):
         "If the required evidence is unavailable, deliver a corrected complete answer that withdraws unsupported "
         "completion claims and report the unverified or failed state without a finalized [completion-check]."
     )
+
+
+def _usable_business_payload(text):
+    if not isinstance(text,str) or not text.strip():
+        return False
+    # A repair that contains only control metadata cannot identify the earlier
+    # substantive answer. The host may instead supply its retained answer ref.
+    if any(marker in text for marker in ('[completion-check]','[io-trace]')):
+        scalar_fields={'criterion','claim','evidence','verdict','source','summary','verification-before-completion',
+            'skill-call','acceptance-criteria','claim-evidence-map','unverified','files-read','files-written',
+            'files-searched','commands-run','web-accessed','skills-loaded','skills-reused','subagents'}
+        for line in text.splitlines():
+            value=line.strip()
+            if not value or value in {'[completion-check]','[io-trace]','- none'} or value.startswith('```'):
+                continue
+            if line[:1].isspace() or value.removeprefix('- ').split(':',1)[0] in scalar_fields:
+                continue
+            return True
+        return False
+    return True
+
+
+def observe_recovery_delivery(input_data, *, platform, entrypoint='', final_text=''):
+    """Interpret the owning host observation once, never infer from child env identity.
+
+    Callers supply actual Stop input or a retained host observation, not intent
+    ledger material. References/digests identify host-held answers without
+    copying their bodies into the ledger. Entry-point alone proves nothing.
+    """
+    import hashlib
+    data = input_data if isinstance(input_data, dict) else {}
+    host = data.get('host_context')
+    if not isinstance(host, dict) or 'delivery_surface' not in host:
+        scratchpad = data.get('scratchpad_dir')
+        native_visible = entrypoint == 'cli' and isinstance(scratchpad, str) and bool(scratchpad.strip())
+        visible = platform == 'claude' and (entrypoint in {'claude-desktop', 'claude-vscode', 'remote_desktop', 'remote_mobile'} or native_visible)
+        final_only = platform == 'claude' and entrypoint in {'sdk-cli', 'sdk-ts', 'sdk-py'}
+        host = dict(delivery_surface='visible_transcript' if visible else 'final_only' if final_only else 'unknown')
+    reference = data.get('prior_answer_ref')
+    if not isinstance(reference, str) or not reference.strip():
+        reference = 'sha256:' + hashlib.sha256(final_text.encode()).hexdigest() if _usable_business_payload(final_text) else None
+    changed = data.get('claims_changed', False)
+    route = select_recovery_delivery(host, reference, changed, True)
+    return dict(delivery_route=route, host_context=host, prior_answer_ref=reference,
+                claims_changed=changed, guidance=recovery_delivery_guidance(route))
