@@ -164,6 +164,22 @@ _COORDINATED_ASSERTION_PREDICATE_RE = re.compile(
     r"concluded|reported|stated|asserted|observed|proved|found|showed)\b",
     re.I,
 )
+_ACTION_ACTOR = (
+    r"(?:i|we|you|he|she|it|they|"
+    r"(?:the|our|my)\s+(?:team|agent|assistant|reviewer))"
+)
+_ACTION_PREDICATE_PREFIX_RE = re.compile(
+    r"\b(?:" + _ACTION_ACTOR + r"|have|has|had)\s+"
+    r"(?:" + _CLOSURE_ADVERBS + r"\s+)*$",
+    re.I,
+)
+_ACTION_OBJECT_DETERMINER_RE = re.compile(r"\s+(?:a|an|the|my|our|all)\b", re.I)
+_FINITE_ACTION_HEAD_RE = re.compile(
+    r"^\s*(?:[>*\-]\s+)?" + _ACTION_ACTOR + r"\s+"
+    r"(?:(?:have|has|had)\s+)?(?:" + _CLOSURE_ADVERBS + r"\s+)*"
+    r"(?:[a-z]+ed|found|said|showed)\b",
+    re.I,
+)
 _GOAL_LEAD_RE = re.compile(
     r"^\s*(?:[>*\-]|\d+[.)])?\s*"
     r"(?:goal|goals|aim|aims|objective|objectives|target|targets|"
@@ -556,6 +572,8 @@ def _asserted_work_predicate(match, clause):
     groups = match.groupdict()
     if not ("read_only_finite" in groups or "read_only_action" in groups):
         return True
+    if groups.get("read_only_action") and not _read_only_action_has_predicate(match, clause):
+        return False
     prefix = clause[:match.start()]
     scope_start = 0
     for boundary in _PREDICATE_SCOPE_BOUNDARY_RE.finditer(prefix):
@@ -579,6 +597,30 @@ def _asserted_work_predicate(match, clause):
     if groups.get("read_only_finite"):
         return True
     return _FUTURE_PREDICATE_RE.search(scoped_prefix) is None
+
+
+def _read_only_action_has_predicate(match, clause):
+    """Require an action context for a completed/finished noun phrase.
+
+    An actor or perfect auxiliary establishes a finite action. An explicit
+    object determiner distinguishes a bare initial/coordinated action from an
+    attributive noun phrase; coordinated actions also require a finite head.
+    """
+    prefix = clause[:match.start()]
+    scope_start = 0
+    for boundary in _PREDICATE_SCOPE_BOUNDARY_RE.finditer(prefix):
+        scope_start = boundary.end()
+    scoped_prefix = prefix[scope_start:]
+    if _ACTION_PREDICATE_PREFIX_RE.search(scoped_prefix):
+        return True
+    if not _ACTION_OBJECT_DETERMINER_RE.match(clause, match.end("read_only_action")):
+        return False
+    if re.fullmatch(r"\s*(?:[>*\-]\s+)?", scoped_prefix):
+        return True
+    if not _FINITE_ACTION_HEAD_RE.search(scoped_prefix):
+        return False
+    return any(predicate.start("verb") == match.start()
+               for predicate in _COORDINATED_ASSERTION_PREDICATE_RE.finditer(clause, scope_start))
 
 
 def extract_top_level_field_section(block, field_name):

@@ -266,6 +266,53 @@ class TestReadOnlyWorkClosure(unittest.TestCase):
         self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
 
 
+class TestReadOnlyActionVersusAttributive(unittest.TestCase):
+    def test_attributive_participles_are_descriptions_not_executed_actions(self):
+        for text in (
+            "A completed review should include evidence.",
+            "A finished report should explain its findings.",
+            "The completed read-only review is an example.",
+            "I attached a completed review.",
+            "I saved the finished report.",
+            "Completed reviews should include evidence.",
+            "Finished reports explain their findings.",
+            "A completed review and finished report should include evidence.",
+            "I examined completed reviews and finished reports.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_finite_and_clear_initial_actions_require_proof(self):
+        for text in (
+            "I completed a review.",
+            "I finished the report.",
+            "Completed the review.",
+            "Finished the report.",
+            "We completed reviews.",
+            "We have already finished the report.",
+            "The team has completed the analysis.",
+            "I examined completed reviews and finished the report.",
+            "I checked whether the report is complete and completed a read-only review.",
+            "A completed review should include evidence; I completed a review.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_action_context_does_not_waive_future_query_or_negative_scope(self):
+        for text in (
+            "I will have completed a review tomorrow.",
+            "I will check whether I finished the report.",
+            "I have not completed a review.",
+            "I haven't finished the report.",
+            "I will check whether the report is complete and confirm the review is complete.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+
 class TestReadOnlyClosurePredicateScope(unittest.TestCase):
     def test_coordinated_finite_predicate_asserts_a_separate_outcome(self):
         for text in (

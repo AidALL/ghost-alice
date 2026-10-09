@@ -152,6 +152,29 @@ class CompletionRecoveryTests(unittest.TestCase):
                     with self.subTest(text=text, platform=platform, retry=retry):
                         self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
 
+    def test_attributive_descriptions_allow_actual_stop(self):
+        for text in (
+            "A completed review should include evidence.",
+            "A finished report should explain its findings.",
+            "Completed reviews should include evidence.",
+            "I examined completed reviews and finished reports.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
+
+    def test_action_predicates_still_require_proof_in_actual_stop(self):
+        for text in (
+            "I completed a review.", "I finished the report.",
+            "Completed the review.",
+            "I checked whether the report is complete and completed a read-only review.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry).get("decision"), "block")
+
     def test_coordinated_finite_assertion_requires_proof_in_actual_stop(self):
         for text in (
             "I checked whether the report is complete and confirmed the review is complete.",
