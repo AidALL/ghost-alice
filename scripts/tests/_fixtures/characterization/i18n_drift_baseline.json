@@ -5,8 +5,7 @@
     "(source missing)",
     "Available skills:`n",
     "Choose the target AI tool:",
-    "Enter a number or name",
-    "[2/5] Skill sync"
+    "Enter a number or name"
   ],
   "sh_only": [
     " sub-skills",
