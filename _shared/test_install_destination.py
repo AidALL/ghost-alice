@@ -38,6 +38,62 @@ def destination_fixture(root):
         project_root=str(root/'project'),core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
 
 
+@pytest.mark.parametrize('invalid',({},[],'',False,0))
+@pytest.mark.parametrize('action',(install_hooks.install_hook,install_hooks.check_status_detail,
+                                  install_hooks.check_status,install_hooks.uninstall_hook))
+def test_malformed_supplied_destination_never_selects_normal_default(tmp_path,invalid,action):
+    # Sentinel stops the original wrong dispatch before it can read normal
+    # locations or perform effects; the public API must reject the supplied value.
+    with patch.object(install_hooks,'_default_destination',side_effect=AssertionError('normal fallback selected')) as default:
+        with pytest.raises(ValueError):action('codex',destination=invalid)
+        default.assert_not_called()
+    assert list(tmp_path.iterdir())==[]
+
+
+@pytest.mark.parametrize('action',(install_hooks.install_hook,install_hooks.check_status_detail,install_hooks.check_status))
+def test_none_destination_preserves_default_dispatch(action):
+    class DefaultSelected(Exception):pass
+    with patch.object(install_hooks,'_default_destination',side_effect=DefaultSelected) as default:
+        with pytest.raises(DefaultSelected):action('codex',destination=None)
+        default.assert_called_once_with('codex')
+
+
+@pytest.mark.parametrize('representation',('dict','instance','asdict'))
+def test_valid_destination_representations_do_not_select_normal_default(tmp_path,representation):
+    from dataclasses import asdict
+    from install_destination import InstallDestination
+    value=destination_fixture(tmp_path/'owned')
+    instance=InstallDestination(**value)
+    supplied={'dict':value,'instance':instance,'asdict':asdict(instance)}[representation]
+    with patch.object(install_hooks,'_default_destination',side_effect=AssertionError('normal fallback selected')) as default:
+        install_hooks.check_status_detail('codex',destination=supplied)
+        default.assert_not_called()
+    assert not (tmp_path/'owned').exists()
+
+
+@pytest.mark.parametrize('value',('', 'owned-destination.json',None))
+def test_powershell_destination_option_rejects_before_effects_when_available(tmp_path,value):
+    import shutil,subprocess
+    powershell=shutil.which('pwsh') or shutil.which('powershell')
+    if not powershell:pytest.skip('PowerShell runtime unavailable; source-control-flow verification only')
+    source=(Path(install_hooks.__file__).resolve().parents[1]/'install.ps1').read_text(encoding='utf-8-sig')
+    barrier='# Best-effort UTF-8 console output'
+    assert source.count(barrier)==1
+    # Execute the actual public parameter binding and rejection in a copied
+    # entrypoint. The sentinel blocks every normal effect if rejection regresses.
+    guarded=tmp_path/'guarded-install.ps1'
+    guarded.write_text(source.replace(barrier,"throw 'normal-effect-sentinel'\n"+barrier,1),encoding='utf-8-sig')
+    options='@{}' if value is None else "@{DestinationFile='"+value.replace("'","''")+"'}"
+    quoted=str(guarded).replace("'","''")
+    command="$fixtureOptions="+options+"; try { & '"+quoted+"' @fixtureOptions; exit 97 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 71 }"
+    result=subprocess.run([powershell,'-NoLogo','-NoProfile','-NonInteractive','-Command',command],
+        cwd=tmp_path,text=True,capture_output=True)
+    assert result.returncode==71,result.stdout+result.stderr
+    expected='normal-effect-sentinel' if value is None else 'PowerShell source integration is unsupported'
+    assert expected in result.stderr,result.stdout+result.stderr
+    assert list(tmp_path.iterdir())==[guarded]
+
+
 @pytest.mark.parametrize('mode',('normal','isolated'))
 def test_constructor_default_matches_dictionary_and_asdict_without_aliasing(tmp_path,mode):
     from dataclasses import asdict

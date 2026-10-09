@@ -2286,7 +2286,7 @@ def install_hook(
       "error"     - install failed
     """
     if destination is not None or install_destination.current() is None:
-        destination = destination or _default_destination(platform_key)
+        destination = _default_destination(platform_key) if destination is None else destination
         resolved = _destination_action(platform_key,destination,"install",dry_run=dry_run)
         if resolved.mode == "isolated" and skills_dir is not None and Path(skills_dir) != Path(resolved.skills_dir):
             raise ValueError("isolated destination conflicts with legacy skills override")
@@ -3066,7 +3066,7 @@ def check_status_detail(
 ) -> HookStatus:
     """Return structured hook installation status for a single framework."""
     if destination is not None or install_destination.current() is None:
-        destination = destination or _default_destination(platform_key)
+        destination = _default_destination(platform_key) if destination is None else destination
         resolved = _destination_action(platform_key,destination,"status")
         with install_destination.use(resolved):
             return check_status_detail(platform_key,node_runtime=node_runtime,addon_sources=addon_sources)

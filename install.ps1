@@ -74,7 +74,7 @@ param(
     [switch]$Help
 )
 
-if ($DestinationFile) {
+if ($PSBoundParameters.ContainsKey('DestinationFile')) {
     throw "Isolated destinations require the Python hook installer; PowerShell source integration is unsupported"
 }
 
