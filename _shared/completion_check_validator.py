@@ -156,6 +156,14 @@ _TEMPORAL_SUBORDINATOR_RE = re.compile(
     r"\b(?:when|whenever|once|until|before|after|unless|as\s+soon\s+as)\b",
     re.I,
 )
+# Finite action and factual reporting predicates open their own assertion
+# scope. A shared future auxiliary still governs coordinated participles.
+_COORDINATED_ASSERTION_PREDICATE_RE = re.compile(
+    r"\band\s+(?:(?:have|has|had)\s+)?(?:" + _CLOSURE_ADVERBS + r"\s+)*"
+    r"(?P<verb>completed|finished|confirmed|verified|established|determined|"
+    r"concluded|reported|stated|asserted|observed|proved|found|showed)\b",
+    re.I,
+)
 _GOAL_LEAD_RE = re.compile(
     r"^\s*(?:[>*\-]|\d+[.)])?\s*"
     r"(?:goal|goals|aim|aims|objective|objectives|target|targets|"
@@ -552,7 +560,17 @@ def _asserted_work_predicate(match, clause):
     scope_start = 0
     for boundary in _PREDICATE_SCOPE_BOUNDARY_RE.finditer(prefix):
         scope_start = boundary.end()
+    inherited_future = False
+    for predicate in _COORDINATED_ASSERTION_PREDICATE_RE.finditer(clause, scope_start):
+        if predicate.start("verb") > match.start():
+            break
+        inherited_future = inherited_future or bool(
+            _FUTURE_PREDICATE_RE.search(clause[scope_start:predicate.start()])
+        )
+        scope_start = predicate.start("verb")
     scoped_prefix = prefix[scope_start:]
+    if inherited_future:
+        return False
     if _INQUIRY_SUBORDINATOR_RE.search(scoped_prefix):
         return False
     for subordinator in _TEMPORAL_SUBORDINATOR_RE.finditer(scoped_prefix):

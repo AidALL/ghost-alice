@@ -152,6 +152,29 @@ class CompletionRecoveryTests(unittest.TestCase):
                     with self.subTest(text=text, platform=platform, retry=retry):
                         self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
 
+    def test_coordinated_finite_assertion_requires_proof_in_actual_stop(self):
+        for text in (
+            "I checked whether the report is complete and confirmed the review is complete.",
+            "I checked if the report is complete and found the review is complete.",
+            "I checked whether the report is complete and completed a read-only review.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry).get("decision"), "block")
+
+    def test_coordinated_nonassertion_allows_actual_stop(self):
+        for text in (
+            "I will check whether the report is complete and confirm the review is complete.",
+            "I will have checked whether the report is complete and confirmed the review is complete.",
+            "I checked whether the report is complete and confirmed whether the review is complete.",
+            "I checked whether the report is complete and did not confirm the review is complete.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
+
     def test_independent_assertions_after_dependent_status_still_block_actual_stop(self):
         for text in (
             "I will check whether the review is complete; the report is complete.",

@@ -267,6 +267,37 @@ class TestReadOnlyWorkClosure(unittest.TestCase):
 
 
 class TestReadOnlyClosurePredicateScope(unittest.TestCase):
+    def test_coordinated_finite_predicate_asserts_a_separate_outcome(self):
+        for text in (
+            "I checked whether the report is complete and confirmed the review is complete.",
+            "I checked whether the report is complete and established that the analysis is complete.",
+            "I have checked whether the report is complete and verified the review has been completed.",
+            "I checked if the report is complete and found the review is complete.",
+            "I checked whether the report is complete and completed a read-only review.",
+            "I have not checked whether the report is complete; I confirmed the review is complete.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_coordinated_dependent_or_future_predicate_does_not_assert_outcome(self):
+        for text in (
+            "I will check whether the report is complete and confirm the review is complete.",
+            "I will have checked whether the report is complete and confirmed the review is complete.",
+            "I checked whether the report is complete and whether the review is complete.",
+            "I checked whether the report is complete and confirmed whether the review is complete.",
+            "I checked whether the report is complete and did not confirm the review is complete.",
+            "I checked whether the report is complete and never confirmed the review is complete.",
+            "I will check whether the report is complete and have verified the review is complete.",
+            "I checked whether the report is complete and hoped the review is complete.",
+            "I checked whether the report is complete and doubted the review is complete.",
+            "I checked whether the report is complete and planned that the review is complete.",
+            "I have not checked whether the report is complete and confirmed the review is complete.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
     def test_embedded_inquiry_status_is_not_an_asserted_outcome(self):
         for text in (
             "I will check whether the read-only review is complete.",
