@@ -90,6 +90,42 @@ class CompletionRecoveryTests(unittest.TestCase):
                     with self.subTest(text=text, platform=platform, retry=retry):
                         self.assertEqual(self.hook(text, retry=retry, platform=platform).get("decision"), "block")
 
+    def test_readonly_closure_requires_proof_in_actual_stop_entrypoint(self):
+        for text in (
+            "The read-only fixture review is complete.",
+            "The read-only report is complete.",
+            "I completed the read-only review.",
+            "읽기 전용 검토 완료",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        payload = self.hook(text, retry=retry, platform=platform)
+                        self.assertEqual(payload.get("decision"), "block")
+                        self.assertIn("require a [completion-check]", payload["reason"])
+
+    def test_readonly_nonclosure_does_not_start_stop_recovery(self):
+        for text in (
+            "Here are the tradeoffs for a read-only review; no work has been executed.",
+            "Goal: the review is complete, the report is complete.",
+            "The read-only fixture review is not complete.",
+            "읽기 전용 검토는 아직 미완료입니다.",
+            "Historical response:\n```text\nThe read-only fixture review is complete.\n```",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, retry=retry, platform=platform), {"continue": True})
+
+    def test_readonly_closure_retains_proof_validation_in_actual_stop_entrypoint(self):
+        supported = VALID.replace("Business result: 82 hours 40 minutes.",
+                                 "The read-only fixture review is complete.")
+        self.assertEqual(self.hook(supported), {"continue": True})
+        unsupported = supported.replace("    evidence: python check.py exited 0\n", "")
+        payload = self.hook(unsupported)
+        self.assertEqual(payload.get("decision"), "block")
+        self.assertIn("must include evidence", payload["reason"])
+
     def test_inline_none_is_equivalent_to_nested_none(self):
         self.assertIsNone(self.check(VALID.replace("- unverified:\n  - none", "- unverified: none")))
 

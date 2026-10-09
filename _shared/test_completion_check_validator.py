@@ -208,6 +208,64 @@ class TestExecutedWorkDetectorFalseBlocks(unittest.TestCase):
         self.assertTrue(v.requires_completion_check("The task is complete."))
 
 
+class TestReadOnlyWorkClosure(unittest.TestCase):
+    def test_executed_review_and_report_closures_require_evidence(self):
+        for text in (
+            "The read-only fixture review is complete.",
+            "The read-only report is complete.",
+            "The analysis is done.",
+            "The audit is completed.",
+            "The investigation is complete.",
+            "The research is complete.",
+            "I completed the review.",
+            "I finished the report.",
+            "I completed the read-only review.",
+            "읽기 전용 검토 완료",
+            "보고서 작성 완료입니다.",
+            "분석이 완료된 상태입니다.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_readonly_discussion_plan_and_negative_status_are_not_closure(self):
+        for text in (
+            "A complete review explains its evidence and unresolved questions.",
+            "The review's completion criteria concern evidence coverage.",
+            "Goal: the review is complete, the report is complete.",
+            "Once the review is complete, write the report.",
+            "I will complete the read-only review next.",
+            "The review is not complete.",
+            "I have not verified that the report is complete.",
+            "읽기 전용 검토는 아직 미완료입니다.",
+            "보고서는 완료되지 않았습니다.",
+            "검토 완료 조건을 설명합니다.",
+            "검토가 완료되면 보고서를 작성합니다.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_quoted_and_pasted_historical_review_data_are_not_current_claims(self):
+        for text in (
+            'The historical response said "The review is complete."',
+            "Historical response:\n```text\nThe read-only fixture review is complete.\n```",
+            "> Historical response:\nThe review is complete.\n",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_review_example_does_not_hide_a_separate_current_closure(self):
+        text = 'The old response said "The review is complete."\n\nThe read-only report is complete.'
+        self.assertTrue(v.requires_completion_check(text))
+        self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_review_closure_with_valid_completion_fields_is_allowed(self):
+        text = "The read-only fixture review is complete.\n\n" + _final_text("completion", "summary")
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+
 class TestCompletionMarkerIsHeaderOnly(unittest.TestCase):
     """looks_like_completion_claim must require a real block header."""
 

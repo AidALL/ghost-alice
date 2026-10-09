@@ -65,6 +65,9 @@ _KOREAN_STATUS_END = (
 )
 
 _VALID_VERDICTS = ("pass", "fail", "unverified")
+# Executed work includes read-only deliverables. Match their asserted closure,
+# not the word "complete" alone; the same clause/example filters apply below.
+_READ_ONLY_WORK_NOUNS = r"(?:review|report|analysis|audit|research|investigation)"
 _EXECUTED_WORK_CLAIM_PATTERNS = (
     re.compile(
         r"\b(?:the\s+)?(?:requested\s+)?(?:work|task|change|fix|implementation|"
@@ -77,9 +80,19 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
         r"(?:the\s+)?(?:requested\s+)?(?:work|task|change|fix|request|issue|bug)\b",
         re.I,
     ),
+    re.compile(
+        r"\b" + _READ_ONLY_WORK_NOUNS
+        + r"\s+(?:is\s+)?(?:complete|completed|done|finished)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(?:i\s+)?(?:completed|finished)\s+(?:the\s+)?"
+        r"(?:requested\s+)?(?:read[- ]only\s+)?" + _READ_ONLY_WORK_NOUNS + r"\b",
+        re.I,
+    ),
     re.compile(r"\b(?:all\s+)?tests?\s+(?:pass|passed|green)\b", re.I),
     re.compile(r"\b(?:build|lint|typecheck|test\s+suite)\s+(?:succeeded|passed|is\s+clean)\b", re.I),
-    re.compile(r"(?:작업|변경|수정|구현|요청|이슈|버그).{0,12}(?:완료|끝남|해결|반영)" + _KOREAN_STATUS_END),
+    re.compile(r"(?:작업|변경|수정|구현|요청|이슈|버그|검토|보고서|평가|분석|조사|연구).{0,12}(?:완료|끝남|해결|반영)" + _KOREAN_STATUS_END),
     re.compile(r"(?:테스트|빌드|린트|타입체크).{0,12}(?:통과|성공|깨끗)" + _KOREAN_STATUS_END),
     re.compile(r"(?:완료|수정|구현|해결|반영)" + _KOREAN_ASSERTED_END + r"|(?:끝냈|고쳤)(?:습니다|다)"),
 )
