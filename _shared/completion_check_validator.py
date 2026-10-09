@@ -168,6 +168,10 @@ _ACTION_ACTOR = (
     r"(?:i|we|you|he|she|it|they|"
     r"(?:the|our|my)\s+(?:team|agent|assistant|reviewer))"
 )
+_INQUIRY_ACTION_SUBJECT_RE = re.compile(
+    r"\b(?:whether|if)\s+(?:or\s+not\s+)?" + _ACTION_ACTOR + r"\s+",
+    re.I,
+)
 _ACTION_PREDICATE_PREFIX_RE = re.compile(
     r"\b(?:" + _ACTION_ACTOR + r"|have|has|had)\s+"
     r"(?:" + _CLOSURE_ADVERBS + r"\s+)*$",
@@ -586,6 +590,11 @@ def _asserted_work_predicate(match, clause):
         inherited_future = inherited_future or bool(
             _FUTURE_PREDICATE_RE.search(clause[scope_start:predicate.start()])
         )
+        # Coordination keeps the actor introduced inside an inquiry in that
+        # dependent subject scope. Explicit clause/subject boundaries above
+        # still open a separate assertion after the inquiry.
+        if _INQUIRY_ACTION_SUBJECT_RE.search(clause[scope_start:predicate.start()]):
+            continue
         scope_start = predicate.start("verb")
     scoped_prefix = prefix[scope_start:]
     if inherited_future:

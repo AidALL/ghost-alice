@@ -353,6 +353,31 @@ class TestReadOnlyActionVersusAttributive(unittest.TestCase):
 
 
 class TestReadOnlyClosurePredicateScope(unittest.TestCase):
+    def test_inquiry_subject_keeps_its_coordinated_actions_dependent(self):
+        for text in (
+            "I wonder whether I read the source and completed the review.",
+            "I wonder if we ran the checks and finished the report.",
+            "I wonder whether or not I read the source and completed the review.",
+            "I wonder whether I have read the source and completed the review.",
+            "I wonder whether I read the source and confirmed the review is complete.",
+            "The question is whether the team read the source and completed the review.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_inquiry_subject_does_not_hide_independent_executed_actions(self):
+        for text in (
+            "I checked whether I read the source and I completed the review.",
+            "I checked whether I read the source; I completed the review.",
+            "I checked whether the report is complete and completed the review.",
+            "I checked if the report is complete and finished the report.",
+            "I wonder whether I read the source and completed the review; the report is complete.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
     def test_coordinated_finite_predicate_asserts_a_separate_outcome(self):
         for text in (
             "I checked whether the report is complete and confirmed the review is complete.",
