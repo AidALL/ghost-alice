@@ -226,9 +226,9 @@ Fix the root cause, not the symptom.
 □ 2. Implement a single fix
 
 - Address the identified root cause
-- One change at a time
-- No "while I am here" improvements
-- No bundled refactoring
+- Make one coherent, evidence-backed repair at sufficient depth
+- No unrelated "while I am here" improvements
+- Include structural changes when the identified cause requires them
 
 □ 3. Verify the fix
 
@@ -238,29 +238,15 @@ Fix the root cause, not the symptom.
 
 □ 4. When the fix does not work
 
-- Stop
-- Count: how many fixes have you tried?
-- Fewer than 3: go back to Phase 1 and re-analyze with the new information
-- 3 or more: stop and suspect the architecture (number 5 below)
-- Do not try a fourth fix without an architecture discussion
+Stop repeating an unsupported fix. Record the new result and identify which hypothesis, source-to-target mapping or architectural premise it challenges. Return directly to that affected cause; retain valid observations and unrelated checks.
 
-□ 5. When 3 or more fixes have failed: suspect the architecture
+Repeated failures increase the reason to inspect shared state, coupling and the overall design. A count alone does not prove that the architecture is wrong, and it does not prohibit an evidence-backed repair within existing authority.
 
-Patterns that suggest an architecture problem:
+□ 5. Reopen the implicated architectural premise
 
-- Each fix reveals new shared state, coupling, or problems in a different place
-- The fix requires a "large refactoring"
-- Each fix creates a new symptom somewhere else
+Signals worth investigating include fixes that expose problems in different places, shared-state coupling, or a correction whose necessary scope is structural. Compare the current design against requirements and contrary evidence. Resolve whether the cause is local, a wrong hypothesis, a mapping problem or an architectural mismatch.
 
-Stop and suspect the foundation.
-
-- Is this pattern fundamentally sound?
-- Are you "just holding onto it out of inertia"?
-- Keep fixing symptoms vs. refactor the architecture, which one?
-
-Discuss with the user before trying more fixes.
-
-This is not a hypothesis failure, it is a wrong architecture.
+Repair the supported cause to sufficient depth under the accepted objective and authority. For a resolved executable change, follow the owning code-TDD workflow and verify the affected behavior. Ask the user only for an unresolved human-owned decision or changed explicit boundary. Continue independent authorized work; stop unchanged investigation when no outcome can change the next decision.
 
 ## Red Flags. Stop and Return to the Procedure.
 
@@ -275,12 +261,10 @@ If the following thoughts come up:
 - "The pattern is X but let us adapt it differently"
 - "The main problems are as follows: [a list of fixes with no investigation]"
 - Proposing a solution before tracing the data flow
-- "Just one more fix" (after already trying 2 or more)
+- "Just one more fix" without a changed hypothesis or new evidence
 - Each fix reveals a new problem in a different place
 
-They all mean one thing. Stop. Return to Phase 1.
-
-When 3 or more fixes have failed: suspect the architecture (see Phase 4.5)
+Stop the unsupported action and reopen the affected investigation. Reuse valid evidence; repeated failures are a signal to assess the architectural premise in Phase 4.5, not a diagnosis by count.
 
 ## Signs the User Thinks You Are Going Wrong
 
@@ -305,7 +289,7 @@ When you see these signs: stop. Return to Phase 1.
 | "Several fixes at once saves time" | You cannot isolate what worked. It creates new bugs. |
 | "The reference is too long, just adapt the pattern" | Partial understanding guarantees bugs. Read it to the end. |
 | "I see the problem, I should fix it" | Seeing the symptom != understanding the root cause |
-| "Just one more fix" (after 2 failures) | 3 or more failures = an architecture problem. Suspect the pattern, do not fix it again. |
+| "Just one more fix" without new evidence | Reopen the implicated hypothesis or architectural premise. Failure count alone proves no cause; continue an evidence-backed in-scope repair and its affected check. |
 
 ## Quick Reference
 
@@ -339,3 +323,17 @@ Related skills
 
 - `test-driven-development`: for writing a failing test case (Phase 4, Step 1).
 - `verification-before-completion`: verify the fix before claiming success.
+
+## Repair limits, authority and useful checks
+
+Actual current and prior human instructions supply the authorization envelope: objective, prohibitions, allowed actions and targets, side effects and resources. Retained authority facts preserve their human source; trusted system/project constraints retain their identified source. Intake compresses semantic facts and the router selects current work without granting authority. Distinguish human-owned criteria and resource choices from agent-derived interpretations and bounded local plans; an absent explicit resource cap is not an approved human limit. Renew a narrower implementation contract only inside actual authority, without weakening acceptance criteria or inferring permission from focus expansion. Request an exact human-owned decision before crossing its boundary. Actual grant renews only the affected plan and granted scope; denial parks it; no response leaves it waiting. Continue other eligible authorized work.
+
+A failed repair round requires a corrective change and a completed relevant observation of the same unresolved failure. Initial failure is zero. Group by unresolved failure, affected criterion, stage and target; explain what each result changes about cause, mapping, design or verification. Unknown causes cannot justify relabeling/reset, and identical error text cannot combine unrelated business and recording failures. Preserve cumulative attempts and the addressed first-five checkpoint across agents and handoffs. Demonstrated resolution followed by recurrence is a linked new incident. Five failed rounds is the maximum before the first mandatory premise reassessment, not a minimum retry count or whole-task limit. Once addressed, cumulative six or seven alone do not retrigger that checkpoint. New relevant contradiction or a current stopping condition can require reassessment. Continuation requires a distinguishable hypothesis, a discriminating check, an explicit additional-attempt or resource allowance and a stopping condition inside remaining parent resources. Reassessment resets neither attempts nor resources; exhaustion parks the affected continuation. Five alone does not require human escalation.
+
+Before a discretionary check, name the unresolved criterion or competing explanation, why the method discriminates, and attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions. Mere potential to find something is insufficient. Stochastic repeats require uncertainty, sampling and stopping rules. Mandatory owning checks remain required; unavailable proof or unresolved required criteria prevent completion. Reuse valid unchanged passing proof at its original source and time; reopen only affected proof after observed change, contradiction or explicit recheck. Unknown already-executed business state calls for bounded affected observation, not automatic business replay; not-yet-executed required work still needs its actual action. Inconclusive checks give no business pass/fail verdict or failed-business-repair increment, but observation and recording attempts consume their bounded resources.
+
+Retain decisions in existing work context and handoffs; no counter hook, classifier, compulsory per-conversation record or new mandatory report is required. Recording-specific typed recovery parks an identical unchanged failure without waiting for five rounds. Preserve known business proof when only recording fails. Exclude parked and human-waiting branches until an actual relevant reopening event. If no eligible work remains, use valid proof for all required criteria and resolve relevant contrary evidence before owning completion verification; otherwise report honest partial/waiting status.
+
+The owning workflow calls the selected business action or corrective change and receives its actual result; declared action output may itself supply the verification observation. Domain verification returns actual observations, source and time to the workflow for criterion judgment. The applicable registered v2 pretool automatically prepares AP origin/receipt before the tool and returns current qualified command context. Reuse that valid prepared result; use an explicit returned preparation helper only when the applicable dependency remains genuinely unfulfilled. A recording gap affects capture/publication/application recordability; AP pretool continues and native tool permission remains with its host. Required or discriminating business observation follows its own authority and resource bounds; recording recovery rules govern recording attempts only. Preserve valid proof and its original source/time, including when recording is unavailable.
+
+For a candidate closure, the owning workflow obtains or reuses supported proof. Applicable AP publication uses the exact current qualified selection, prepared AP receipt and actual returned publish command to leave a pending-adapter request. Native candidate/final dispatch invokes its actually registered handlers: the completion guard checks candidate fields and applicable skill evidence; the privileged AP Stop adapter revalidates publication, proof, ownership and dependencies. Only accepted current publication reaches the exact Core criterion writer within the shared authority transaction. Missing, stale or invalid publication returns a recording diagnostic without a criterion write. Actual application status and remaining criteria determine unit recording/completion claims. The handlers retain their actual native invocation semantics. Core owns delivery policy and may assemble the permitted payload; the workflow/native host performs visible delivery. Candidate claims use the supported current scope, while actual recording/application and visibility results govern further repair and closure claims. Preserve already-visible unchanged business content for applicable control-only repair. Return an admissible affected step to the workflow, or honest partial/waiting status when no eligible continuation remains.

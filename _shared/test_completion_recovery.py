@@ -1,4 +1,4 @@
-"""Completion regressions from observed native sessions and contrast cases."""
+"""Completion closure and nonclosure contrast tests."""
 
 import json
 import subprocess
@@ -42,7 +42,7 @@ class CompletionRecoveryTests(unittest.TestCase):
         return json.loads(result.stdout)
 
     def test_korean_nominal_and_conditional_completion_are_not_assertions(self):
-        # The first phrase is the observed short-answer false positive.
+        # The first phrase is a nonclosure control; the positive claim must still require evidence.
         for text in (
             "작업 간 완료 의존관계는 그대로입니다.",
             "작업 완료 시간은 14분입니다.",
@@ -454,7 +454,7 @@ class CompletionRecoveryTests(unittest.TestCase):
         self.assertNotIn("systemMessage", payload)
 
     def test_missing_skill_retry_fills_evidence_from_existing_results(self):
-        # Blocked subjects re-read files they had just written because this retry text ordered a new check.
+        # A metadata-only retry must preserve valid authored evidence without ordering another check.
         result = subprocess.run(
             [sys.executable, "-B", str(HOOK), "--platform", "claude"],
             input=json.dumps({"last_assistant_message": VALID, "transcript_path": ""}),

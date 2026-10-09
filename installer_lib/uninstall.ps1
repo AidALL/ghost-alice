@@ -538,7 +538,7 @@ Advanced/operator commands:
   --addon-tag TAG                        Checkout branch/tag for git URL addon sources
   --addon-skip                           Disable addon installation
   --list-addons                          List addon manifest targets
-  --cleanup-pending                      Clean false-positive legacy pending entries
+  --cleanup-pending                      Clean false-positive pending entries
   --update-source                        Stash source checkout local changes and fast-forward
   --skip-source-health                   Skip source health gate
   --help                                 Show this help
@@ -577,7 +577,7 @@ Advanced/operator commands:
   --addon-tag TAG                        Checkout branch/tag for git URL addon sources
   --addon-skip                           Disable addon installation
   --list-addons                          List addon manifest targets
-  --cleanup-pending                      Clean false-positive legacy pending entries
+  --cleanup-pending                      Clean false-positive pending entries
   --update-source                        Stash source checkout local changes and fast-forward
   --skip-source-health                   Skip source health gate
   --help                                 Show this help

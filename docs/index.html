@@ -458,6 +458,7 @@
       .addon-table th,
       .addon-table td { padding: 12px; }
     }
+    h3[id] { scroll-margin-top: 112px; }
   </style>
 </head>
 <body>
@@ -531,7 +532,7 @@
           <div class="card">
             <h3>Bind work to its session</h3>
             <p>Current-session checks prevent ledger writes and autonomous continuation from borrowing another session's context. Autopilot checks intent before applying pending receipts or plans.</p>
-            <a href="./docs/release/2026-10-01-release-notes.html">Read previous release scope</a>
+            <a href="./docs/policies/installer-platform-compatibility-matrix.html">Read compatibility requirements</a>
           </div>
           <div class="card">
             <h3>Load the right contract</h3>
@@ -539,7 +540,7 @@
             <a href="./docs/getting-started/installation.html">Read the installation contract</a>
           </div>
         </div>
-        <p class="section-note">Coordinated source candidate: Core 0.5.0 and Autopilot 0.5.0, minimum Core 0.5.0. Native validation, installed adoption, release and publication require separate evidence. Review the <a href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">documented support and verification limits</a>.</p>
+        <p class="section-note">Core 0.5.0 and Autopilot 0.5.0; Autopilot requires Core 0.5.0 or later. Native validation, installed adoption, release and publication require separate evidence. Review the <a href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">documented support and verification limits</a>.</p>
         <div class="actions">
           <a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core release</a>
           <a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Autopilot release</a>
@@ -627,30 +628,45 @@
       <div class="wrap">
         <div class="section-head">
           <h2>How it works</h2>
-          <p class="section-note">A quality floor, not a fixed script. Checks continue only while their outcomes can change the next decision.</p>
+          <p class="section-note">A quality floor, not a fixed script. Discretionary checks must discriminate a named uncertainty and map attainable outcomes to different next decisions. Mandatory checks remain required.</p>
         </div>
         <figure class="gate-flow-diagram" aria-labelledby="flow-heading">
           <h3 id="flow-heading">Keep the same work open to correction</h3>
-          <p>Core selects the current work; its owner produces and verifies it. Contrary evidence returns to the affected artifact, mapping, composition, route or inferred premise. Human and native authority keep their own boundaries.</p>
+          <p>Actual current and prior human instructions supply authority. Retained facts preserve that source; trusted system and project constraints retain their origins. Intake compresses facts and the router selects work without granting permission.</p>
           <div class="flow-chart">
-            <div class="flow-node"><span>1 · Intake</span>Pending-merge precheck → session-intent-analyzer: digest intake and changed semantic intent</div>
-            <div class="flow-edge">↓ call: current intent</div>
-            <div class="flow-node" id="flow-routing"><span>2 · Core router</span>Reconcile this request with continuing authorized work.<br>Select current qualified execution or bounded discussion.</div>
-            <div class="flow-branch">↳ Nonexecution only → answer without AP publication.<br>Actually executed read-only review/report still requires owning verification.</div>
-            <div class="flow-edge">↓ control: selected execution; boundary contract when required</div>
-            <div class="flow-node"><span>3 · Owning production and verification</span>Produce, map sources, inspect contrary evidence and check the affected criteria.<br>Call native tools under native permissions and credentials; return actual output or failure.</div>
-            <div class="flow-return">↰ Return to router when the composition, route or inferred premise is wrong.<br>↺ Repair an affected artifact or mapping within this owner.</div>
-            <div class="flow-edge">↓ return: criterion evidence and uncertainty</div>
-            <div class="flow-node"><span>4 · Core completion and delivery</span>Choose evidence action per criterion. Aggregate decisions do not rerun all checks.<br>Reuse valid unchanged proof at its original source and time.</div>
-            <div class="flow-return">↰ Return unsupported criteria to their owning work.</div>
-            <div class="flow-ap">
-              <div class="flow-edge">⇄ conditional call and status return</div>
-              <div class="flow-node"><span>Autopilot recording and advancement</span>Only when AP is enabled and Core has current ready qualified selected execution.<br>Consume <code>publication_route: none | prepare | publish | blocked</code>.<br>Run existence or backlog alone is insufficient.</div>
-            </div>
-            <div class="flow-edge">↓ result: supported complete or honest partial answer</div>
-            <div class="flow-node"><span>5 · User delivery</span>Visible unchanged payload: patch metadata only.<br>Final-only, unknown or no usable prior payload: assemble one complete answer.<br>Changed claims: corrected complete answer; unsupported claims: withdrawal or partial status.</div>
+            <div class="flow-node"><span>1 · Sources and owning decisions</span>Human input + retained human facts + trusted constraints → pending-merge precheck → semantic intake → router → owning workflow.<br>Reconcile this request with continuing authorized work. Map sourced criteria, actual authority and bounded local resources. The policy returns an eligible action, check, recovery request, human question, retained proof or status to its owner.</div>
+            <div class="flow-branch">↳ Bounded discussion without selected execution → supported native answer, no AP publication.<br>Exact missing human decision → ask before crossing its boundary; actual scoped answer returns to the policy. No response leaves that branch waiting.</div>
+            <div class="flow-edge">↓ call: selected authorized work through actual native tool-stage dispatch</div>
+            <div class="flow-node" id="flow-routing"><span>2 · Permission and prospective preparation</span>Actual Core constraints and native host permission govern tool execution.<br>The registered AP v2 pretool consumes the current ready qualified selection and automatically prepares AP origin/receipt before the tool, returning command context or a recording diagnostic. Reuse valid prepared context; use an explicit returned helper only for an applicable unfulfilled dependency.</div>
+            <div class="flow-branch">↳ Core projection uses <code>publication_route: none | prepare | publish | blocked</code>; the managed preparation caller supplies the actual qualified context.<br>Run existence or backlog alone is insufficient. Missing/stale/blocked selection prevents dependent AP capture/advancement. AP recording failure returns <code>continue: true</code>; tool permission stays with its owner.</div>
+            <div class="flow-edge">↓ call owning executor or domain verifier; return the actual result</div>
+            <div class="flow-node"><span>3 · Evidence and policy return</span>Actual action output may be its one declared verification observation; a separate check returns observations, source and time.<br>The owner returns the matched result to its policy. Reuse valid unchanged proof at its original source/time. Unknown already-executed state needs bounded affected observation; recording-only failure preserves business proof and uses its recording rule.</div>
+            <div class="flow-return">↰ Return to router when evidence reopens mapping, composition, route or an inferred premise; repair an affected artifact through its owner.<br>Business observation follows its own authority/resources. Recording recovery does not gate unrelated observation or replay the business operation.</div>
+            <div class="flow-edge">↓ owning completion procedure prepares a truthful candidate with supported proof</div>
+            <div class="flow-node"><span>4 · Applicable AP publication</span>Use the exact current qualified selection, actual prepared AP receipt and returned publish command with supported proof or compatible original references.<br>Acceptance creates a pending-adapter request. An unavailable required recording condition returns to bounded recovery or honest partial status; existing proof and business authority remain intact.</div>
+            <div class="flow-edge">↓ supported candidate or partial/control payload → actual native candidate/final-stage dispatch</div>
+            <div class="flow-node"><span>5 · Native validation and guarded application</span>The completion guard checks candidate fields and applicable skill evidence. The separately registered AP Stop adapter revalidates publication, proof, ownership and dependencies under actual native invocation semantics.<br>Accepted current publication → exact Core criterion writer in the shared authority transaction → actual application status and remaining criteria.<br>Missing, stale or invalid publication → recording diagnostic, with no criterion write.</div>
+            <div class="flow-return">↰ Actual guard/application result and observed visibility return to the owning policy. An admissible affected request resumes work.<br>Identical unchanged recording failure or exhausted recording allowance → park that dependent branch. Other eligible authorized work continues.</div>
+            <div class="flow-edge">↓ actual host-supported delivery or corrective disposition</div>
+            <div class="flow-node"><span>6 · Visible result and human feedback</span>The workflow/native host delivers the supported scope; Core owns payload selection and may assemble it.<br>Already-visible unchanged payload → applicable control/metadata-only repair. Final-only, unknown or no usable prior payload → one assembled answer. Changed claims → corrected answer; unsupported scope → honest partial status.<br>Keep business proof, pending publication, actual application, unit completion and observed delivery distinct. Actual next human input returns to intake.</div>
           </div>
-          <figcaption>Calls and returns above describe current work. Dependency: the sparse skill catalog guides routing. Audit: strict observations continue throughout. Report input: intake and audit feed skill-evolution as a terminal report-only branch, without an automatic production return.</figcaption>
+          <figcaption>This is one connected responsibility and return path, with the bounded policy enlarged below. Native handlers follow their actual registration and invocation semantics. The sparse catalog is a routing dependency; strict audit observes without granting permission. Intake and audit feed evolution only as a terminal report branch. <a href="https://github.com/AidALL/ghost-alice/blob/main/architecture.md#repair-entry-result-and-return-paths">Read the connected master diagram</a>.</figcaption>
+        </figure>
+        <figure class="gate-flow-diagram" aria-labelledby="repair-heading">
+          <h3 id="repair-heading">Bounded repair and return decisions</h3>
+          <div class="flow-chart">
+            <div class="flow-node"><span>1 · Select from sourced work</span>The owning workflow calls the policy with actual criteria, authority, current evidence and remaining resource bounds. Select only eligible remaining work.<br>No eligible branch → all required valid proof and no unresolved relevant contrary evidence? Proceed to the owning completion procedure and truthful candidate; otherwise return partial/waiting status.</div>
+            <div class="flow-edge">↓ classify the selected requirement</div>
+            <div class="flow-node"><span>2 · Return the next request</span>Unperformed required work → bounded action plan.<br>Unknown already-executed state → affected business observation under its own authority/resources; known business result with recording error → recovery under its recording rule.<br>Existing valid proof → retain its source/time.<br>Only the owning workflow executes the returned request and supplies its actual matched result.</div>
+            <div class="flow-branch">↳ Before any boundary crossing, ask the exact human-owned decision. Grant affects only its scope; denial parks; silence stays waiting. Focus changes do not grant authority or weaken criteria.</div>
+            <div class="flow-edge">↓ actual result and owning interpretation</div>
+            <div class="flow-node"><span>3 · Classify evidence</span>Pass → support that criterion, retaining other unresolved conditions.<br>Confirmed noncompliance → identify failure, criterion, stage and target.<br>Unavailable/inconclusive → bounded observation recovery, without a business pass/fail verdict. Observer and recording attempts still consume resources.</div>
+            <div class="flow-return">↳ Initial failure is zero. Increment only when a corrective change and completed relevant check observe the same unresolved failure. Tool calls, diagnostics and unknown outcomes do not count as failed business repairs.</div>
+            <div class="flow-edge">↓ retain attempts and what each result changes</div>
+            <div class="flow-node"><span>4 · Reassess at a new trigger</span>Five failed rounds is the maximum before the first mandatory premise reassessment. Once addressed, cumulative six or seven alone do not trigger it again.<br>New relevant contradiction or a current stopping condition can require reassessment. Continue only with a distinguishable hypothesis, discriminating check, explicit additional allowance and stopping condition inside remaining parent resources.</div>
+            <div class="flow-return">↰ Supported bounded continuation → return a new selected request to the owning workflow.<br>↳ Exhausted allowance or no admissible next step → park. Reassessment does not reset attempts, refill resources or automatically reopen that branch.<br>Only an actual relevant reopening event can make a parked branch eligible; other independent eligible work can continue.</div>
+          </div>
+          <figcaption>Discretionary checks must discriminate a named uncertainty and map attainable outcomes to different specified decisions; stochastic repeats need sampling and stopping rules. Mandatory checks stay required. An identical unchanged recording failure parks under its owning rule without waiting for five rounds. No runtime counter or new per-conversation report is implied.</figcaption>
         </figure>
         <figure class="gate-flow-diagram focus-figure" aria-labelledby="focus-heading">
           <h3 id="focus-heading">Focus moves to the cause</h3>
@@ -664,10 +680,11 @@
             <g class="focus-box"><rect x="15" y="20" width="255" height="90" rx="8"/><rect x="390" y="20" width="255" height="90" rx="8"/><rect x="15" y="210" width="255" height="90" rx="8"/><rect x="390" y="210" width="255" height="90" rx="8"/></g>
             <g text-anchor="middle" fill="currentColor" font-size="23"><text x="143" y="57">Micro</text><text x="143" y="87" font-size="19">Artifact / source</text><text x="518" y="57">Meso</text><text x="518" y="87" font-size="19">Subtask / mapping</text><text x="143" y="248">Meta</text><text x="143" y="278" font-size="19">Inferred premise / route</text><text x="518" y="248">Macro</text><text x="518" y="278" font-size="19">Combined result</text><text x="330" y="154" font-size="18">repair ↔ contrary evidence</text><text x="330" y="181" font-size="17">direct movement allowed</text></g>
           </svg>
-          <figcaption>Ask the human for the exact changed explicit decision only. Existing authority permits owner repair. A necessity review cannot discard unfinished approved work.</figcaption>
+          <figcaption>The authorization envelope covers objective, prohibitions, actions, targets, side effects and resources. Renew a narrower implementation contract inside it; focus changes grant no new authority. Ask only for a human-owned boundary or acceptance decision, or decisive unavailable input. Five failed rounds alone do not require human escalation.</figcaption>
         </figure>
-        <p class="section-note">The standalone per-input classifier and downstream gate are retired. Tool-checkpoint records and deduplicates retry guidance; it does not enforce arbitrary payload permission. SQLite and public ledger APIs own runtime state. JSON is compatibility/export material.</p>
+        <p class="section-note">Session intake feeds task-router directly. Tool-checkpoint records and deduplicates retry guidance; native tool permission belongs to the host. SQLite and public ledger APIs own runtime state. JSON supplies validated import/export formats.</p>
         <p class="section-note">A new input rebinds the request, preserving unchanged proof. A first recording-only failure gets bounded repair; the identical unchanged failure parks until relevant change. Independent approved work continues. Business result, recording/application, whole-unit completion and delivery stay distinct.</p>
+        <p class="section-note">A failed repair round requires corrective change and a completed relevant observation of the same unresolved failure. Initial failure is zero; the first-five checkpoint remains addressed across handoffs. Reassessment cannot reset attempts or resources. Unavailable required proof remains unverified; recording recovery preserves its stricter unchanged-failure park rule.</p>
         <p><a href="https://github.com/AidALL/ghost-alice/blob/main/architecture.md">Read the normative architecture and ownership graph</a></p>
       </div>
     </section>
@@ -683,7 +700,7 @@
           <div class="card"><h3>skill-evolution candidates</h3><p>Behavioral improvement candidates remain report-only until explicitly accepted.</p></div>
           <div class="card"><h3>pending-merge review</h3><p>Installed local edits are surfaced before being overwritten.</p></div>
           <div class="card"><h3>adversarial verification</h3><p>Source-heavy or high-stakes claims can be checked through independent review.</p></div>
-          <div class="card"><h3>Current work selection</h3><p>Core reconciles each request with continuing authorized work. Historical backlog does not select execution.</p></div>
+          <div class="card"><h3>Current work selection</h3><p>Core reconciles each request with continuing authorized work. Accumulated backlog does not select execution.</p></div>
           <div class="card"><h3>runtime recovery</h3><p>Installer state, support files, and cleanup reports preserve recovery context.</p></div>
         </div>
       </div>
@@ -692,7 +709,7 @@
   </main>
 
   <footer>
-    <div class="wrap">Ghost-ALICE OS 0.5.0 candidate. Agent governance operating layer. <a href="https://github.com/AidALL/ghost-alice/blob/main/LICENSE">Apache-2.0</a>.</div>
+    <div class="wrap">Ghost-ALICE OS 0.5.0. Agent governance operating layer. <a href="https://github.com/AidALL/ghost-alice/blob/main/LICENSE">Apache-2.0</a>.</div>
   </footer>
 
   <script>

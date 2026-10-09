@@ -1,7 +1,7 @@
 """Shared content-hash helper for install-state targets and addon sidecars.
 
-Extracted so both the install-state writer and the addon sidecar writer compute
-``content_hash`` the same way. Pure standard library.
+Both writers use the same ``content_hash`` calculation. Dependencies: Python
+standard library.
 """
 
 from __future__ import annotations

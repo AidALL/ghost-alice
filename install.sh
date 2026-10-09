@@ -216,12 +216,7 @@ assert_session_gate_contract
 # ── UserPromptSubmit hook install/remove ──────────────────
 # Require Python 3.11+. Partial fallback violates the freshness contract.
 # Any failure blocks the whole install.
-
-
-
-
-
-# Python bootstrap and guidance when Python is missing (v1.3.0 removed node.js/bash fallbacks).
+# Bootstrap Python and report setup guidance when it is unavailable.
 # Keep install.sh-level bootstrap messages ASCII English to avoid encoding corruption. User-facing messages are emitted by install_hooks.py under Python UTF-8.
 
 
@@ -273,7 +268,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --auto|-a)
-      # Backward-compatible no-op. Plain install is auto-detect by default.
+      # Accepted no-op option; plain install detects platforms automatically.
       shift
       ;;
     --skip-source-health)
@@ -439,8 +434,7 @@ if [ "$UPDATE_SOURCE" -eq 1 ]; then
   update_source_checkout
   exit $?
 fi
-
-# auto/default: detect ~/.claude and ~/.codex, then recurse per platform. Auto child installs are separate install path operations, not a duplicate install. Legacy-readable log shape: [auto] (${platform_index}/${#detected[@]}) <platform>
+# Detect ~/.claude and ~/.codex, then install separately for each selected platform. Log shape: [auto] (${platform_index}/${#detected[@]}) <platform>
 if [ "$AUTO_DETECT" -eq 1 ]; then
   detected=()
   while IFS= read -r plat; do
@@ -673,7 +667,7 @@ case "${ARGS[0]:-}" in
     echo "$(t 'Advanced/operator commands:' 'Advanced/operator commands:')"
     echo "  SKILL_NAMES            $(t 'Install specified skills only' 'Install specified skills only')"
     echo "  --list, -l             $(t 'List available skills' 'List available skills')"
-    echo "  --cleanup-pending      $(t 'Clean false-positive legacy pending entries' 'Clean false-positive legacy pending entries')"
+    echo "  --cleanup-pending      $(t 'Clean false-positive pending entries' 'Clean false-positive pending entries')"
     echo "  --update-source        $(t 'Stash source checkout local changes and run git pull --ff-only' 'Stash source checkout local changes and run git pull --ff-only')"
     echo "  --addon-source PATH|URL"
     echo "                          $(t 'Add local addon repo or git URL source' 'Add local addon repo or git URL source')"

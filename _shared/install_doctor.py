@@ -909,7 +909,7 @@ def run(args: argparse.Namespace) -> int:
             body = Path(rule_path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue  # Existing ownership diagnostics handle the primary.
-        # Legacy full ports do not require a sibling. Only the conditional
+        # Full governance ports do not require a sibling. Only the conditional
         # selector introduces this installation dependency.
         if "## Select the applicable contract" in body and "ghost-alice-governance.md" in body:
             global_rules.append(("codex-governance", str(Path(rule_path).with_name("ghost-alice-governance.md")), marker, begin, end))

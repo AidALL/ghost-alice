@@ -108,4 +108,4 @@ Add project-specific keys in private deployment documentation, not in the public
 - `secrets.env` is plaintext. Keep it only on a trusted personal or organization-managed machine. Do not put it on a shared server.
 - Never commit it to git. The helper does not block this automatically, so take care yourself.
 - The helper keeps permissions at 600 even after saving, but right after editing manually, run `chmod 600 ~/.ghost-alice/secrets.env` once.
-- OS Keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) is not supported at present. This is a decision to lower the barrier to entry for non-coding users. It will be implemented separately if it becomes necessary.
+- The helper reads environment variables and the managed plaintext file. It does not integrate with OS credential stores.

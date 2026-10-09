@@ -31,7 +31,7 @@ Managed by manifest_io.py. Guarantees atomic write plus flock.
    - "merged" -> decided=true, called after the staged merge is applied to the live location
    - "discarded" -> decided=true, called after the staged change and backup are discarded
    - "deferred" -> decided=false is kept, decision="deferred" is recorded (asked again in the next session)
-3. Cleanup. A decided=true entry can be rotated afterward (detailed policy is a follow-up task)
+3. Cleanup. A decided=true entry can be rotated afterward
 
 ## Guarantees
 

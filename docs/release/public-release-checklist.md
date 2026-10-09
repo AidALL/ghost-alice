@@ -33,7 +33,6 @@ Create a public repository snapshot that includes the core Ghost-ALICE OS govern
 - `SECURITY.md`
 - `CODE_OF_CONDUCT.md`
 - `SUPPORT.md`
-- `CHANGELOG.md`
 - `AGENTS.md`, `CLAUDE.md`
 - `install.sh`, `install.ps1`, `install.cmd`
 - `installer_lib/`

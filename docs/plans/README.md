@@ -13,4 +13,4 @@ This directory is reserved for public planning documents. Do not use it for loca
 
 ## Current Public Roadmap
 
-No public roadmap items are tracked in this directory for the initial release.
+Record only public roadmap items that contributors can review in this directory.

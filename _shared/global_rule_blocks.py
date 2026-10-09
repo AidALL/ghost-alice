@@ -232,7 +232,7 @@ def apply_codex_bootstrap(
         if loader_text.count(placeholder) != 1:
             raise GlobalRuleBlockError("Codex loader requires exactly one governance path placeholder")
         # Keep the fallback outside automatically loaded AGENTS.md files. It
-        # follows the same ownership and managed-block rules as the old port.
+        # follows the same ownership and managed-block rules for each platform.
         contract = Path(dest_path).with_name("ghost-alice-governance.md")
         if contract.is_symlink():
             raise GlobalRuleBlockError(f"refusing symlink governance contract: {contract}")

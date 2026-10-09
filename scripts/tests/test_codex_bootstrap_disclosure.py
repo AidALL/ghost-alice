@@ -42,7 +42,7 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             fallback = dest.with_name("ghost-alice-governance.md")
             self.assertIn(str(fallback), dest.read_text())
-            # Every original procedure remains available to ordinary projects.
+            # Required governance procedures remain available to ordinary projects.
             self.assertIn(CONTRACT.read_text().split("\n", 1)[1].strip(), fallback.read_text())
             self.assertNotIn("## Codex Hookless Fallback", dest.read_text())
 

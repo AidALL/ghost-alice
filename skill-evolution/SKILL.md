@@ -28,11 +28,13 @@ Intent context preserves `active_decisions` and `latest_scope` from the ledger s
 
 - Analyze `~/.ghost-alice/io-trace.jsonl` or isolated fixtures.
 - Find repeated tool sequences in a project.
-- Interpret repeated behavior with `.tmp/session-intent/<platform>/<session-id>/intent-state.json`.
+- Interpret repeated behavior from the exact session ledger; the `intent-state.json` path is a location coordinate for the CLI reader.
 - Answer when the user asks whether there are skill upgrades, update recommendations, or evolution backlog items to review.
 - Gather evidence before proposing a new skill, hook, or doctor check.
 
 ## Conduct Feedback
+
+When SQLite authority is present, the report reader uses the public ledger API with the supplied root/platform/session. Portable JSON may supply offline report input; it is not current routing or permission authority.
 
 Tool-frequency, workflow, and sequence mining finds automation candidates, but it does not show whether the agent's behavior matched what the user asked. `conduct_feedback` fills that gap. Read it from the session-intent ledger as a first-class evolution signal.
 

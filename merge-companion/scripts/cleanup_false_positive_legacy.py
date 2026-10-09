@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Clean installer-created false-positive legacy pending entries.
+"""Clean installer-created false-positive pending entries.
 
 Dependencies: Python 3.11+ standard library + local merge-companion/_shared modules.
 """

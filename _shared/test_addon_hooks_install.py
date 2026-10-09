@@ -1,7 +1,5 @@
-"""TDD for plan Phase 4 (addon-hook-ordering + core-only-snapshot-compatibility +
-addon-hook-runner-namespace): install_hook appends observational addon hook
-entries AFTER the core suite, the inner command passes the hook-runner allowlist,
-and a core-only install stays byte-identical.
+"""Observational addon hook installation checks: append after the Core suite,
+validate the runner namespace and preserve Core-only configuration.
 
 Run: python3 -m pytest _shared/test_addon_hooks_install.py -q
 """

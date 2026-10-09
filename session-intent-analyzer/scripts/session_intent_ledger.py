@@ -397,7 +397,7 @@ def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *
         raise ValueError("ledger input anchor is incomplete; inspect it before writing")
     state = default_state(platform, session_id)
     state.update(data)
-    # A read of legacy state must not fabricate a new creation/update instant
+    # Reading imported state must not fabricate a creation/update instant
     # on every call. Unknown historical timestamps stay explicitly unknown.
     for key in ("created_at", "updated_at"):
         if key not in data:
@@ -418,7 +418,7 @@ def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *
                     state["latest_input_digest"] = event["input_digest"]
                     state["latest_input_char_count"] = event.get("input_char_count", 0)
         except (json.JSONDecodeError, UnicodeError):
-            raise ValueError("legacy ledger audit is corrupt; inspect it before writing") from None
+            raise ValueError("source ledger audit is corrupt; inspect it before writing") from None
     for key in ("latest_input_event_id", "latest_input_digest"):
         if not isinstance(state.get(key), str):
             raise ValueError("ledger input lineage is invalid")
@@ -458,13 +458,13 @@ def storage_is_initialized(root: Path) -> bool:
 def _require_database_if_initialized(root: Path) -> None:
     database = storage_database_path(root)
     if (database.parent / ".sqlite-authority.json").exists() and not database.is_file():
-        raise ValueError("authoritative SQLite database is missing; restore it, do not revive legacy JSON")
+        raise ValueError("authoritative SQLite database is missing; restore it, do not use JSON exports as authority")
 
 
 def _check_database(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version != STORAGE_SCHEMA_VERSION:
-        raise ValueError("unsupported Ghost state database schema; no legacy fallback is permitted")
+        raise ValueError("unsupported Ghost state database schema; no JSON fallback is permitted")
 
 
 def _initialize_database(connection: sqlite3.Connection) -> None:
@@ -543,7 +543,7 @@ def storage_transaction(root: Path):
         if not marker.exists():
             # This routing marker records cutover, never semantic state. It
             # precedes the first semantic commit so a lost DB cannot silently
-            # resurrect pre-migration JSON. Restore the DB to recover.
+            # read JSON exports as authority. Restore the DB to recover.
             write_json(marker, {"schema_version": "ghost-sqlite-authority.v1", "database": database.name})
         connection.execute("BEGIN IMMEDIATE")
         try:
@@ -688,12 +688,12 @@ def _load_state_for_update(connection, paths, platform, session_id):
             raise ValueError("ledger audit conflicts with committed state")
         if not matches:
             events.append(pending)
-    # Catch a legacy writer changing the files during import; legacy writers
+    # Detect source-file mutations during import; source writers
     # must be stopped at cutover. The originals remain a recovery source.
     after = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
              for key in ("state", "events", "security") if paths[key].exists()}
     if after != sources:
-        raise ValueError("legacy source changed during migration; retry after stopping the legacy writer")
+        raise ValueError("JSON source changed during import; retry after stopping its writer")
     _save_state(connection, state)
     for event in events:
         _append_event(connection, platform, session_id, event)
@@ -724,7 +724,7 @@ def _commit(connection, state: dict[str, Any], event: dict[str, Any]) -> None:
 
 def read_session_state(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
                        recover_audit: bool = False, transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
-    """Read authority without creating files. Legacy recovery is an explicit import."""
+    """Read authority without creating files. JSON recovery requires explicit import."""
     validate_identity(platform, session_id)
     if recover_audit:
         return migrate_session(root=root, platform=platform, session_id=session_id, transaction=transaction)
@@ -733,14 +733,14 @@ def read_session_state(*, root: Path = DEFAULT_ROOT, platform: str, session_id: 
         if state is not None:
             return state
         paths = session_paths(root, platform, session_id)
-        # Preserve absent legacy metadata, rather than inventing proof of a
-        # current intake. Migration normalizes only after validating its audit.
+        # Preserve absent input metadata rather than inventing proof of a
+        # current intake. Normalize only after validating its audit.
         if not paths["state"].exists():
             _load_legacy_state(paths, platform, session_id)
             return {}
         raw = json.loads(paths["state"].read_text(encoding="utf-8"))
         _load_legacy_state(paths, platform, session_id, data=raw)
-        # Pending legacy projection does not invalidate its committed current
+        # A pending import projection does not invalidate its committed current
         # block. Preserve the pending marker; import reconciles it atomically.
         return raw
 
@@ -826,7 +826,7 @@ def merge_unique(existing: Any, incoming: Any) -> list[Any]:
     (dicts, e.g. {"id", "summary"}) are kept as objects and deduped by their
     "id" when present, else by a normalized JSON form. This only preserves the
     shape supplied by the caller; it does not impose or validate a schema.
-    First occurrence wins, matching the prior string-dedup behavior.
+    First occurrence wins.
     """
     values: list[Any] = []
     seen: set[tuple[str, str]] = set()
@@ -934,7 +934,7 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
 
 
 def acceptance_criterion_key(criterion: dict[str, Any]) -> tuple[Any, Any, str]:
-    """An ownerless legacy ID never aliases an explicitly owned local ID."""
+    """An ownerless ID never aliases an explicitly owned local ID."""
     return criterion.get("work_unit_id"), criterion.get("contract_revision"), criterion["id"]
 
 
@@ -998,7 +998,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
     return [merged[criterion_id] for criterion_id in order]
 
 
-# Historical import/audit shape only; current consumers do not derive permission.
+# Import/audit shape only; current consumers do not derive permission.
 def normalize_security_decision(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -1634,7 +1634,7 @@ def invalidate_acceptance_criterion(
 def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
     if isinstance(state_or_path, Path):
         # A single read preserves both semantics and their actual metadata.
-        # Missing legacy metadata must not become a fabricated CAS anchor.
+        # Missing input metadata must not become a fabricated CAS anchor.
         if state_or_path.name == "intent-state.json":
             state = read_session_state(root=state_or_path.parents[2], platform=state_or_path.parent.parent.name,
                                        session_id=state_or_path.parent.name)
@@ -1695,7 +1695,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--snapshot", action="store_true", help="emit consumer snapshot")
     parser.add_argument("--read-state", action="store_true", help="read exact authoritative state without mutation")
     parser.add_argument("--read-events", action="store_true", help="read ordered authoritative audit events")
-    parser.add_argument("--migrate", action="store_true", help="atomically import the explicitly selected legacy session")
+    parser.add_argument("--migrate", action="store_true", help="atomically import the explicitly selected JSON session")
     parser.add_argument("--export-to", help="write a portable projection to a separate root")
     return parser
 

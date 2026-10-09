@@ -478,7 +478,7 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(support["install-rollbacks"]["action"], "removed")
 
     def test_confirm_removes_addon_sidecars(self) -> None:
-        # Full uninstall must clean the per-addon sidecar registry; otherwise orphan ~/.ghost-alice/addons/*.json survive a full uninstall (C-ORPHAN-3).
+        # Full uninstall must clean the per-addon sidecar registry; otherwise orphan ~/.ghost-alice/addons/*.json survive a full uninstall.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             managed = _write_managed_skill(root, "task-router")
@@ -486,7 +486,7 @@ class UninstallCleanupTest(unittest.TestCase):
                 root,
                 [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
             )
-            # platform-scoped (M5): run_cleanup uses platform "codex"
+            # Platform-scoped cleanup uses platform "codex".
             addons_dir = root / ".ghost-alice" / "addons" / "codex"
             addons_dir.mkdir(parents=True)
             (addons_dir / "noop.json").write_text('{"addon_id":"noop"}\n', encoding="utf-8")

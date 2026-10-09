@@ -33,7 +33,6 @@ local state, secrets, private addons, tenant content, private development artifa
 - `SECURITY.md`
 - `CODE_OF_CONDUCT.md`
 - `SUPPORT.md`
-- `CHANGELOG.md`
 - `AGENTS.md`, `CLAUDE.md`
 - `install.sh`, `install.ps1`, `install.cmd`
 - `installer_lib/`

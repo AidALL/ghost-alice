@@ -121,7 +121,7 @@ def _owned_criteria(value):
     owned = {}
     for criterion in value:
         if not isinstance(criterion, dict) or not {"work_unit_id", "contract_revision"} & set(criterion):
-            continue  # Unknown legacy ownership remains unbound.
+            continue  # Unknown ownership remains unbound.
         key = _criterion(criterion)
         if key in owned:
             raise RouteSchemaError("stored owned criterion is ambiguous")

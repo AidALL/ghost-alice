@@ -120,7 +120,7 @@ def use(destination, *, reject_legacy=False):
     if reject_legacy and resolved.mode == 'isolated':
         for key in LEGACY_OVERRIDES:
             if os.environ.get(key):
-                raise ValueError(f'isolated destination conflicts with legacy override {key}')
+                raise ValueError(f'isolated destination conflicts with explicit override {key}')
     token = _ACTIVE.set(resolved)
     keys = set(COORDINATES) | set(LEGACY_OVERRIDES) | {'GHOST_ALICE_OWNED_ROOT','GHOST_ALICE_TEMP_ROOT','PYTHONDONTWRITEBYTECODE','GHOST_ALICE_AUTOPILOT_CWD','GHOST_ALICE_AUTOPILOT_RUN_DIR','GHOST_ALICE_GOVERNANCE_EVENTS'}
     before = {key:os.environ.get(key) for key in keys}

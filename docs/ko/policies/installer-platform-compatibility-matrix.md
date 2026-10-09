@@ -2,7 +2,7 @@
 
 언어: [🇺🇸 English](../../policies/installer-platform-compatibility-matrix.md) | 🇰🇷 한국어
 
-이 문서는 Ghost-ALICE installer의 Phase 7 compatibility test contract입니다.
+이 문서는 Ghost-ALICE installer의 compatibility test contract입니다.
 ## Contents
 
 - [Runtime Contract](#runtime-contract)
@@ -55,7 +55,7 @@ Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니�
 
 ### session-intent-analyzer
 
-모든 user input은 session intent ledger가 observe합니다. Hooks는 digest와 event data만 저장하며 raw prompts를 저장하지 않습니다. goals, constraints, decisions, non-goals가 바뀌면 agent는 기준 상태인 SQLite 원장 API로 compressed delta를 기록합니다. 호환성·내보내기 자료인 `intent-state.json`은 update-plus-accumulate state입니다. scalar intent fields는 newer deltas로 replace되고, list-like constraints, non-goals, questions, criteria, decisions는 stable id 또는 dedupe로 merge됩니다. 이 context는 task-router와 report-only skill-evolution이 소비합니다. legacy classifier 판단은 이력으로만 남으며 현재 permission을 부여하지 않습니다.
+모든 user input은 session intent ledger가 observe합니다. Hooks는 digest와 event data만 저장하며 raw prompts를 저장하지 않습니다. goals, constraints, decisions, non-goals가 바뀌면 agent는 기준 상태인 SQLite 원장 API로 compressed delta를 기록합니다. 호환성·내보내기 자료인 `intent-state.json`은 update-plus-accumulate state입니다. scalar intent fields는 newer deltas로 replace되고, list-like constraints, non-goals, questions, criteria, decisions는 stable id 또는 dedupe로 merge됩니다. 이 context는 task-router와 report-only skill-evolution이 소비합니다. 감사 기록은 현재 실행 권한을 부여하지 않습니다.
 
 ### pending merge precheck
 
@@ -82,7 +82,7 @@ executed work가 complete, fixed, successful, freshly verified라고 claim하기
 | WSL | Linux bash와 동일하며 Windows path boundary smoke 포함 | manual 또는 Windows CI |
 | Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, UTF-8 bridge | runtime detection and Codex hook config tests |
 | Windows native Codex hook smoke | native Windows Codex installer path `.\install.cmd --platform codex`가 Codex bootstrap, `hooks.json`, `config.toml` hooks enabled를 작성하고 live smoke가 hook payload firing을 관찰합니다 | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/ko/policies/live-smoke-regression.md` |
-| Windows visibility preference smoke | native wrapper visibility forwarding이 `_shared/install_hooks.py --visibility`에 도달합니다. legacy visibility alias는 compatibility coverage로 계속 허용되고 status는 hook state와 runtime profile을 separately report합니다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
+| Windows visibility preference smoke | native wrapper visibility forwarding이 `_shared/install_hooks.py --visibility`에 도달합니다. visibility alias는 compatibility coverage로 계속 허용되고 status는 hook state와 runtime profile을 separately report합니다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible. analyzer가 있으면 `PSUseCompatibleSyntax` static analysis가 PS5-incompatible syntax를 잡습니다 | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | Windows PowerShell 7.4 LTS cleanup | native Windows installer cleanup이 latest 7.6.x MSI를 resolve하기 전에 product-code scoped `msiexec.exe /x ... /quiet /norestart`로 detected PowerShell 7.4.x MSI products를 제거합니다. product code 없는 non-MSI entries는 skip하고, 7.5/7.6+, Windows PowerShell 5.1, unrelated products는 제거하지 않습니다 | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
 | PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output은 official addon alias를 노출하고 git URL addon source용 native wrapper branch/tag option을 설명합니다 | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |

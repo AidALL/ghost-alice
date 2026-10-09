@@ -1,5 +1,5 @@
-"""Shell e2e for plan T2.3: `install.sh --uninstall --addon <id>` removes the
-addon's installed targets AND its sidecar (and resume + dep-block wiring loads).
+"""Shell e2e: addon uninstall removes owned targets and sidecar, with
+resumable cleanup and dependency blocking.
 
 Run: python3 -m pytest _shared/test_addon_uninstall_shell.py -q
 """

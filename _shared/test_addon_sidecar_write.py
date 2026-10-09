@@ -1,4 +1,4 @@
-"""TDD for plan tasks T1.1/T1.2/T1.3 (python layer): addon identity threading + sidecar writing.
+"""Checks for addon identity propagation and sidecar writing.
 
 Run: python3 -m pytest _shared/test_addon_sidecar_write.py -q
 """

@@ -11,11 +11,11 @@ compatibility:
 
 Develop an idea into a complete design and specification through natural collaborative conversation.
 
-First understand the current project context, then refine the idea by asking one question at a time. Once you understand what to build, present the design and obtain user approval.
+Use this workflow for unresolved design decisions. Reuse the current accepted objective, design and explicit authority. Ask for a missing human-owned decision or a change to explicit scope; a repair inside the accepted design does not require renewed approval. Reopen only the affected premise, mapping or component when contrary evidence appears, then return to the authorized work.
 
 #### Prohibition Rules
 
-Do not call implementation skills. Do not write code. Do not run project scaffolding. Do not take implementation actions. Hold off until you present the design and the user approves it. Apply this to every project, no matter how simple it looks.
+Keep implementation that depends on an unresolved human-owned design decision closed until that decision is supplied. Existing approved design and authority satisfy this condition; continue independent authorized work. Do not use a design review to silently drop the approved objective or add unrelated features.
 ## Contents
 
 - [Anti-pattern: "Too simple to need a design"](#anti-pattern-too-simple-to-need-a-design)
@@ -29,20 +29,20 @@ Do not call implementation skills. Do not write code. Do not run project scaffol
 
 ## Anti-pattern: "Too simple to need a design"
 
-Every project goes through this procedure. To-do lists, single-function utilities, configuration changes, all of them. In "simple" projects, unexamined assumptions cause the most wasted work. A design can be short (a few sentences for a truly simple project), but you must present it and obtain approval.
+Small work can still contain a decisive design uncertainty. Resolve that uncertainty at the useful level of detail; a few sentences may be enough. Simplicity does not waive a real human-owned decision, and a checklist does not invalidate a decision the user already made.
 
 ## Checklist
 
-Create a task for each item below and complete them in order:
+Use the applicable steps for the live design uncertainty. Preserve accepted decisions and skip completed steps whose evidence remains valid:
 
 1. Explore the project context. Review files, documents, and recent commits.
 2. Present the visual companion (when visual questions are expected). A standalone message, not merged with other content. See the visual companion section below.
 3. Clarification questions. One at a time, to understand the objective, constraints, and success criteria.
 4. Present 2 to 3 approaches. Include trade-offs and a recommendation.
-5. Present the design. Organize sections to match complexity, and request approval after each section.
+5. Present a concrete design at the required level of detail. Request only missing human-owned decisions.
 6. Write the design document. Save it to `docs/coding-convention/specs/YYYY-MM-DD-<topic>-design.md` and commit.
 7. Specification self-review. A quick check for placeholders, contradictions, ambiguity, and scope (see below).
-8. Have the user review the written specification. Request review of the specification file before proceeding.
+8. If the written specification introduces an unresolved human-owned decision, request review of that exact decision. Otherwise retain the existing approval.
 9. Transition to the implementation stage. Call the writing-plans skill to build the implementation plan.
 
 ## Process Flow
@@ -52,28 +52,30 @@ digraph brainstorming {
     "Explore project context" [shape=box];
     "Visual question present?" [shape=diamond];
     "Present visual companion\n(standalone message, no other content)" [shape=box];
-    "Ask clarification questions" [shape=box];
-    "Present 2-3 approaches" [shape=box];
+    "Resolve missing requirements" [shape=box];
+    "Compare unsettled alternatives" [shape=box];
     "Present design sections" [shape=box];
-    "User approves design?" [shape=diamond];
+    "Required design decision available?" [shape=diamond];
     "Write design document" [shape=box];
     "Specification self-review\n(inline fixes)" [shape=box];
-    "User reviews specification?" [shape=diamond];
+    "Unresolved human decision in spec?" [shape=diamond];
     "Call writing-plans skill" [shape=doublecircle];
 
-    "Explore project context" -> "Visual question present?";
+    "Explore project context" -> "Visual question present?" [label="unresolved design"];
+    "Explore project context" -> "Call writing-plans skill" [label="accepted design; no affected uncertainty"];
     "Visual question present?" -> "Present visual companion\n(standalone message, no other content)" [label="yes"];
-    "Visual question present?" -> "Ask clarification questions" [label="no"];
-    "Present visual companion\n(standalone message, no other content)" -> "Ask clarification questions";
-    "Ask clarification questions" -> "Present 2-3 approaches";
-    "Present 2-3 approaches" -> "Present design sections";
-    "Present design sections" -> "User approves design?";
-    "User approves design?" -> "Present design sections" [label="no, revise"];
-    "User approves design?" -> "Write design document" [label="yes"];
+    "Visual question present?" -> "Resolve missing requirements" [label="no"];
+    "Present visual companion\n(standalone message, no other content)" -> "Resolve missing requirements";
+    "Resolve missing requirements" -> "Compare unsettled alternatives";
+    "Compare unsettled alternatives" -> "Present design sections";
+    "Present design sections" -> "Required design decision available?";
+    "Required design decision available?" -> "Present design sections" [label="no, revise"];
+    "Required design decision available?" -> "Write design document" [label="yes; current approval reusable"];
     "Write design document" -> "Specification self-review\n(inline fixes)";
-    "Specification self-review\n(inline fixes)" -> "User reviews specification?";
-    "User reviews specification?" -> "Write design document" [label="change requested"];
-    "User reviews specification?" -> "Call writing-plans skill" [label="approved"];
+    "Specification self-review\n(inline fixes)" -> "Unresolved human decision in spec?";
+    "Unresolved human decision in spec?" -> "Present design sections" [label="yes; ask exact decision"];
+    "Specification self-review\n(inline fixes)" -> "Explore project context" [label="contrary premise evidence"];
+    "Unresolved human decision in spec?" -> "Call writing-plans skill" [label="none; accepted authority holds"];
 }
 ```
 
@@ -103,7 +105,7 @@ Present the design:
 
 - When you judge that you understand what to build, present the design.
 - Match each section to its complexity. A few sentences when simple, up to 200 to 300 characters for nuanced parts.
-- After each section, ask whether it is correct so far.
+- Ask for the exact unresolved human-owned decision; do not repeat approval requests for accepted sections.
 - Content to include: architecture, components, data flow, error handling, testing.
 - If something is unclear, prepare to clarify.
 
@@ -138,17 +140,13 @@ After writing the design document, look at it with fresh eyes:
 3. Scope check. Is it focused enough for a single implementation plan, or does it need decomposition?
 4. Ambiguity check. Can any requirement be interpreted in two different ways? Pick one and make it explicit.
 
-Fix problems inline. No re-review is needed. Just fix them and proceed.
+Fix problems within the accepted scope. Re-check only the affected requirement when the change or a contradiction makes its evidence insufficient, then proceed.
 
 If you judge that self-review alone is not enough, dispatch a subagent to run a stricter review of the specification document. The prompt template used here is defined in references/spec-document-reviewer-prompt.md.
 
 User review gate:
 
-After passing the specification review loop, ask the user to review the written specification before proceeding:
-
-"The specification is written and committed to `<path>`. Before I start writing the implementation plan, please review it and tell me what you want to change."
-
-Wait for the user's response. If they request changes, make them and re-run the specification review loop. Proceed only after the user approves.
+After specification review, identify any human-owned decision that remains unresolved. Present the concrete affected specification and request that decision. Dependent implementation waits for the response. If the specification reflects already accepted decisions, continue without renewed approval. A requested change reopens only the affected design and verification.
 
 Implementation:
 
@@ -160,8 +158,8 @@ Implementation:
 - One question at a time. Do not overwhelm with several questions.
 - Prefer multiple choice. It is easier to answer than open-ended.
 - Remove YAGNI relentlessly. Strip unnecessary features from every design.
-- Explore alternatives. Always present 2 to 3 approaches before settling.
-- Incremental verification. Present the design, get approval, then proceed.
+- Explore alternatives when their trade-offs can change a live design decision; reuse settled choices.
+- Incremental verification. Resolve affected uncertainty, obtain missing human-owned decisions, then proceed within current authority.
 - Stay flexible. If something is unclear, go back to clarify.
 
 ## Visual Companion
@@ -172,7 +170,7 @@ Present the companion:
 
 When an upcoming question is expected to include visual content (mockups, layouts, diagrams), present it once for consent:
 
-"Some of this work might be easier to explain in a web browser. I can prepare mockups, diagrams, comparisons, and other visuals as we go. This feature is still new and can consume many tokens. Should I try it? (Opening a local URL is required.)"
+"Some of this work might be easier to explain in a web browser. I can prepare mockups, diagrams, comparisons, and other visuals as we go. The visuals can consume many tokens. Should I try it? (Opening a local URL is required.)"
 
 This presentation must be its own message. Do not merge it with a clarification question, a context summary, or any other content. The message must contain only the presentation above and nothing else. Wait for the user's response. If they decline, proceed with text-only brainstorming.
 

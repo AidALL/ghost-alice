@@ -2,7 +2,7 @@
 
 This document organizes the system vision and design tracks of Ghost-ALICE OS. Ghost-ALICE OS is not a general-purpose operating system or a standalone agent runtime. It is an agent governance operating layer that manages the work boundary, verification, session intent, install state, and platform-specific hook behavior of an AI agent session.
 
-Documentation boundary: this repository document is the compact architecture map. Long-form design background lives in the Wiki. The "four-layer model" below describes the knowledge-work lifecycle axis; Wiki pages may use Layer 0-5 wording for the runtime governance stack. Those are different axes, not competing layer counts.
+Documentation boundary: this repository document is the compact architecture map. The Wiki explains the same current ownership and return paths in depth. The four-layer model below describes work responsibilities; micro, meso, macro and meta describe the focus of a repair.
 ## Contents
 
 - [0. Purpose and Non-Purpose](#0-purpose-and-non-purpose)
@@ -60,53 +60,60 @@ Core reconciles the current request with continuing authorized work before selec
 
 ```mermaid
 flowchart TB
-  H[Human objective and explicit authority]
-  P[Pending-merge precheck]
-  I[Digest intake and changed semantic intent]
-  R[Core router: reconcile current request and continuing authorized work]
-  S{Current selected work}
-  D[Bounded discussion: no selected execution]
-  B{Boundary required?}
-  BC[Owning boundary contract]
-  W[Owning production and criterion verification]
-  N[Native tool execution]
-  NP[Native permissions and credential controls]
-  C[Core per-criterion completion and delivery policy]
-  AP[AP recording and unit advancement]
-  A[Supported complete or honest partial answer]
-  E[Skill-evolution: report-only terminal]
-  AU[Strict audit]
-  SC[Static sparse skill dependencies]
-  H -->|control: authorized request| P
-  P -->|call: intake| I
-  I -->|call: current intent| R
-  I -.->|report input only| E
-  SC -.->|dependency| R
-  R -->|control: current ready selection| S
-  S -->|nonexecution only| D
-  D -->|result: no AP publication| A
-  S -->|selected execution| B
-  B -->|yes: call| BC
-  B -->|no: continue| W
-  BC -->|control: authorized boundary| W
-  W -->|call: action| N
-  NP -->|native authority| N
-  N -->|return: output or failure| W
-  W -->|return: owner evidence and uncertainty| C
-  C -->|call only if AP enabled and current qualified selection; publication_route prepare or publish| AP
-  AP -->|return: recording and advancement status| C
-  C -->|result: visibility-aware delivery| A
-  A -->|return: result and exact open decision| H
-  W -->|repair: artifact or mapping| W
-  W -->|reopen: composition, route or inferred premise| R
-  C -->|reopen: affected criterion only| W
-  H -.->|authority: exact scope decisions| BC
-  N -.->|audit observation, never permission| AU
-  C -.->|audit: closure and delivery| AU
-  AU -.->|report input only| E
+  H[Actual current and prior human instructions] -->|source| I[Pending merge and exact semantic intake]
+  T[Identified trusted system and project constraints] -->|source| I
+  I --> R[Reconcile request and continuing authorized work]
+  R --> W[Owning workflow maps sourced criteria, actual authority and local resource bounds]
+  W --> P[Bounded decision policy; select eligible work and interpret evidence]
+  P -->|request or status returned| W
+  W -->|selected action, check or affected business observation| NT[Native tool-stage dispatch]
+  NT --> PERM[Applicable Core constraints and native host permission]
+  NT --> APRE[Registered AP pretool: current qualified selection and automatic v2 preparation]
+  APRE -->|AP receipt, origin, commands or recording diagnostic; continue| W
+  PERM -->|actual permission allows| EX[Selected implementation or verification executor]
+  PERM -->|actual denial| RESULT[Actual matched result with provenance]
+  EX -->|actual output, failure or inconclusive observation| RESULT
+  RESULT -->|owner resumes actual matched result| P
+  W -->|selected recording-only recovery| REC[Bounded recording command under its owning rule]
+  REC -->|actual result; preserve business proof| P
+  W -->|exact missing human-owned decision| ASK[Human request; waiting branch excluded]
+  ASK -->|actual scoped grant, denial or decisive answer| P
+  W -->|owning completion selected; fresh or valid retained proof| C[Truthful candidate and supported fields]
+  C -->|applicable actual prepared AP receipt and returned command| PUB[AP publish proof or original reference]
+  PUB -->|accepted request; pending application| PAY[Supported candidate payload or partial/control status]
+  PUB -->|recording diagnostic| P
+  C -->|no applicable AP publication| PAY
+  C -->|required recording unavailable| P
+  W -->|bounded discussion or terminal partial/waiting| PAY
+  PAY --> NS[Native candidate/final-stage dispatch]
+  NS --> CG[Core completion guard: candidate fields and applicable skill evidence]
+  NS --> AS[Registered privileged AP Stop adapter]
+  AS --> RV{Current publication, proof, ownership and dependencies valid?}
+  RV -->|yes| CW[Exact Core criterion writer in shared authority transaction]
+  RV -->|no; no criterion write| APP[Actual recording/application status and recovery]
+  CW -->|guarded update or actual failure| APP
+  CG --> ND[Actual native delivery or corrective disposition]
+  APP --> ND
+  ND -->|actual corrective result and visibility| P
+  ND -->|host-supported visible payload/status| HUMAN[Human receives supported scope]
+  HUMAN -->|actual new input or feedback| I
+  P -->|initial failure zero; failed corrective rounds; first-five checkpoint unaddressed or new contradiction| RE[Reassess implicated premise without resetting attempts or resources]
+  RE -->|discriminating hypothesis and bounded continuation| P
+  RE -->|exhausted or no admissible step| PARK[Park affected branch; retain unresolved state]
+  PARK -->|other eligible work or actual reopening trigger only| P
+  P -->|artifact, mapping, composition, route or inferred premise mismatch| R
+  I -.->|report input only| EV[Skill-evolution terminal report]
+  AUD[Strict audit observations] -.->|report input only; never permission| EV
+  NT -.->|audit| AUD
+  NS -.->|audit| AUD
+  CAT[Static sparse skill catalog] -.->|dependency| R
 ```
 
-Solid edges name calls, control, authority or result returns. Dashed edges name dependencies, human constraints, audit or report input. Neither audit nor evolution grants permission or automatically enters production. The diagram's AP edge consumes Core's `publication_route: none | prepare | publish | blocked`; the mere existence of an admitted run or old backlog cannot activate it. A missing/stale route blocks dependent capture or advancement, not existing human authorization or native tool permission.
+This call graph preserves each handler's actual native invocation semantics. The workflow executes selected requests and returns actual matched results to its policy; AP recording does not grant or deny native tool permission. Business observation uses its own authority and limits. The first-five checkpoint remains addressed after reassessment; a new contradiction or stopping condition can reopen the premise. Recording recovery retains its stricter unchanged-failure park rule.
+
+The registered v2 pretool automatically prepares the current selected bindings before the tool. Reuse its valid AP receipt/origin; an explicit returned preparation helper is used only for an applicable unfulfilled dependency. Compatible accepted proof is reused with its original source and verification time. A failed prepare does not revoke business authority: perform only independently justified work, report uncaptured proof honestly, and never relabel it as proof captured by a later receipt. Both preparation and publication/application failures use bounded diagnostic repair; an unchanged failure parks dependent recording. A retry requires a relevant recording or dependency change. `none` and `blocked` permit no AP capture or advancement. Domain checks and native permissions retain their owners.
+
+Solid edges name calls, control, authority or result returns. Dashed edges name dependencies, human constraints, audit or report input. Neither audit nor evolution grants permission or automatically enters production. The diagram's AP edge consumes Core's `publication_route: none | prepare | publish | blocked`; the mere existence of an admitted run or accumulated backlog cannot activate it. A missing/stale route blocks dependent capture or advancement, not existing human authorization or native tool permission.
 
 ### Bidirectional focus
 
@@ -135,12 +142,12 @@ These connections are examples, not required adjacent steps. Move directly to th
 | Core task-router | Own reusable `routing-surface.v1` complexity/focus/verification/boundary projection and propose `response-route.v1` current qualified selection. Reopen affected routing when owner evidence contradicts it. |
 | Owning workflow | Lock required boundaries, produce the output and perform its domain checks. Return unsupported criteria to the affected cause; a selector cannot waive owning verification. |
 | Core completion | Select per-criterion reuse, affected verification or cause/recording repair. Aggregate priority summarizes decisions; it does not order all checks to rerun. |
-| Core delivery | Repair visible unchanged payload with control/metadata only; assemble one complete answer for final-only, unknown or absent usable prior delivery. Correct actually changed claims and withdraw unsupported ones. |
+| Core delivery policy | Select the supported delivery scope and applicable control/metadata-only repair, assembled answer, corrected answer, withdrawal or partial status. Core may assemble the permitted payload; the owning workflow/native host performs actual visible delivery while preserving usable prior visible business content. |
 | Autopilot | Consume actual current-ready qualified selection and Core publication decision, record criterion outcomes, and determine unit advancement. Applied request is distinct from whole-unit completion. |
 | Governance support | Preserve authorization, credentials, exact owner/session/source/hash/lineage/criterion/proof and strict audit throughout the work. |
 | Skill-evolution | Consume intake/audit for a report-only terminal recommendation. Adoption requires its own authorized owning workflow. |
 
-The standalone per-input classifier and its downstream gate are retired without a renamed equivalent. Legacy model judgments and audit records remain readable history and confer no current routing or native permission authority. Snapshot helpers read identity/storage; they do not infer admission or security judgments.
+Snapshot helpers read identity and storage. They do not infer admission or native permission; audit records do not supply current routing authority.
 
 ## 2. Spectrum Adaptation Principle (Adaptive Activation)
 
@@ -158,7 +165,17 @@ A first recording-only failure permits bounded repair while preserving business 
 
 ### 2.3 Over-Engineering Prevention Principle
 
-Stop a check when no possible result can change the next decision. Stop repeated checking when it adds no relevant state delta. These stop rules do not terminate unfinished authorized production. Preserve distinctions among a supported business outcome, recording/application status, whole-unit completion and host delivery scope.
+Actual current and prior human instructions supply the authorization envelope: objective, prohibitions, allowed actions and targets, side effects and resources. Retained authority facts preserve their human source; trusted system/project constraints retain their identified source. Intake compresses semantic facts and the router selects current work without granting authority. Distinguish human-owned criteria and resource choices from agent-derived interpretations and bounded local plans; an absent explicit resource cap is not an approved human limit. Renew a narrower implementation contract only inside actual authority, without weakening acceptance criteria or inferring permission from focus expansion. Request an exact human-owned decision before crossing its boundary. Actual grant renews only the affected plan and granted scope; denial parks it; no response leaves it waiting. Continue other eligible authorized work.
+
+A failed repair round requires a corrective change and a completed relevant observation of the same unresolved failure. Initial failure is zero. Group by unresolved failure, affected criterion, stage and target; explain what each result changes about cause, mapping, design or verification. Unknown causes cannot justify relabeling/reset, and identical error text cannot combine unrelated business and recording failures. Preserve cumulative attempts and the addressed first-five checkpoint across agents and handoffs. Demonstrated resolution followed by recurrence is a linked new incident. Five failed rounds is the maximum before the first mandatory premise reassessment, not a minimum retry count or whole-task limit. Once addressed, cumulative six or seven alone do not retrigger that checkpoint. New relevant contradiction or a current stopping condition can require reassessment. Continuation requires a distinguishable hypothesis, a discriminating check, an explicit additional-attempt or resource allowance and a stopping condition inside remaining parent resources. Reassessment resets neither attempts nor resources; exhaustion parks the affected continuation. Five alone does not require human escalation.
+
+Before a discretionary check, name the unresolved criterion or competing explanation, why the method discriminates, and attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions. Mere potential to find something is insufficient. Stochastic repeats require uncertainty, sampling and stopping rules. Mandatory owning checks remain required; unavailable proof or unresolved required criteria prevent completion. Reuse valid unchanged passing proof at its original source and time; reopen only affected proof after observed change, contradiction or explicit recheck. Unknown already-executed business state calls for bounded affected observation, not automatic business replay; not-yet-executed required work still needs its actual action. Inconclusive checks give no business pass/fail verdict or failed-business-repair increment, but observation and recording attempts consume their bounded resources.
+
+Retain decisions in existing work context and handoffs; no counter hook, classifier, compulsory per-conversation record or new mandatory report is required. Recording-specific typed recovery parks an identical unchanged failure without waiting for five rounds. Preserve known business proof when only recording fails. Exclude parked and human-waiting branches until an actual relevant reopening event. If no eligible work remains, use valid proof for all required criteria and resolve relevant contrary evidence before owning completion verification; otherwise report honest partial/waiting status.
+
+The owning workflow calls the selected business action or corrective change and receives its actual result; declared action output may itself supply the verification observation. Domain verification returns actual observations, source and time to the workflow for criterion judgment. The applicable registered v2 pretool automatically prepares AP origin/receipt before the tool and returns current qualified command context. Reuse that valid prepared result; use an explicit returned preparation helper only when the applicable dependency remains genuinely unfulfilled. A recording gap affects capture/publication/application recordability; AP pretool continues and native tool permission remains with its host. Required or discriminating business observation follows its own authority and resource bounds; recording recovery rules govern recording attempts only. Preserve valid proof and its original source/time, including when recording is unavailable.
+
+For a candidate closure, the owning workflow obtains or reuses supported proof. Applicable AP publication uses the exact current qualified selection, prepared AP receipt and actual returned publish command to leave a pending-adapter request. Native candidate/final dispatch invokes its actually registered handlers: the completion guard checks candidate fields and applicable skill evidence; the privileged AP Stop adapter revalidates publication, proof, ownership and dependencies. Only accepted current publication reaches the exact Core criterion writer within the shared authority transaction. Missing, stale or invalid publication returns a recording diagnostic without a criterion write. Actual application status and remaining criteria determine unit recording/completion claims. The handlers retain their actual native invocation semantics. Core owns delivery policy and may assemble the permitted payload; the workflow/native host performs visible delivery. Candidate claims use the supported current scope, while actual recording/application and visibility results govern further repair and closure claims. Preserve already-visible unchanged business content for applicable control-only repair. Return an admissible affected step to the workflow, or honest partial/waiting status when no eligible continuation remains.
 
 ---
 
@@ -183,22 +200,22 @@ Ghost-ALICE OS core separates the publicly releasable governance layer from per-
 
 ## 4. Design Decisions
 
-This chapter records the design decisions reflected in the current implementation and document contracts.
+This chapter defines the current representation, owners and operating conditions.
 
 ### Request Decomposition Engine
-- Resolution method: task-router semantically scans the skill descriptions in the system-reminder and matches production, verification, and lifecycle skills. The answer to the "classifier vs decomposer vs hybrid" question is "semantic skill matching + one Core-owned routing projection"
-- Clarification questions: the brainstorming skill handles them. task-router only performs matching
-- Semantic calling algorithm: the LLM directly compares the description text loaded into the system-reminder. No separate embedding or vector DB
-- No undecided items
+- task-router decomposes the request into meaningful work units, reconciles continuing authorized work and selects production, verification and lifecycle skills. It owns the reusable routing projection and current response-route candidate.
+- Clarification belongs to the workflow that encounters a decisive missing requirement. Brainstorming handles design discovery when selected; a bounded clarification does not require that skill for every domain.
+- Skill matching compares the available description text semantically. Owning instruction bodies supply procedures; metadata alone does not satisfy a required workflow.
 
 ### Semantic Calling Graph Representation
-- Resolution method: because the `calls` graph is kept static and sparse, extensions such as validates/validated-by/debugs/augments were unnecessary
-- Current type enum: hard | soft | union | meta | external-hard | external-union
-- Dynamic relationships (verification attachment, debugging loop, and so on) are not placed on the calls graph and are expressed by the body prose and the runtime
-- Graph serialization: a frontmatter YAML list adopted as the single source of truth
-- No undecided items
+- The `calls` graph expresses static, sparse skill relationships.
+- Type enum: hard | soft | union | meta | external-hard | external-union.
+- Instruction bodies and runtime procedures express verification attachment, debugging loops and same-work repair returns.
+- The frontmatter YAML list is the source of truth for catalog serialization.
 
-### Consensus Protocol
+### Selected Adversarial Verification Protocol
+
+These agent counts and consensus rules apply only when `adversarial-verification` is the selected owning workflow. Its `verification-complexity` field configures that protocol; it does not replace Core task complexity or require consensus for all level-2 or level-3 work. Section 2.1 governs shared checkpoint selection.
 - Number of agents: verification-complexity-level-1 exempt, verification-complexity-level-2 fixed at 3 (internal-logic, external-fact, internal-fact), verification-complexity-level-3 at 5 (fixed 3 + dynamic selection of 2 from a pool of 4). Pool: external-logic, edge-case, prior-art, incentive
 - Consensus rule: unanimity (default) / majority / weighted. Caller-specified, unanimity when unspecified
 - Adversarial round termination condition: after each complete 3-5-agent cycle, stop when no decision-relevant uncertainty remains and another round cannot produce a relevant state delta. Do not continue only to satisfy a round-count minimum. Unresolved disagreement fails closed to meta-judge/human escalation. A finite safety cap of 50 rounds remains
@@ -255,3 +272,147 @@ This organizes where the current implementation components fit in the four-layer
 Defined boundaries
 - compliance checklist Phase 1 to 5 is "format verification of the skill itself". Separated from the domain verification of the output.
 - validate_skills.py is a frontmatter linter. It is a different component from the runtime verification system.
+
+## Repair entry, result and return paths
+
+The connected master links sourced goals and authority, owning policy requests, actual native/tool results, bounded repair, pending publication, guarded criterion application and human feedback. Focus may move directly between micro artifacts, meso mappings, macro composition and meta inferred premises; every repair returns to the affected owning work.
+
+```mermaid
+flowchart TB
+  H[Actual current human input] --> I[Session intent intake with source attribution]
+  HP[Actual prior human instructions and decisions] --> F[Retained human facts and original source]
+  F --> I
+  T[Identified applicable system and project instructions] --> I
+  I --> R[Reconcile current input and continuing authorized work; select focus and verification burden]
+  R --> W[Owning workflow or agent]
+  T --> W
+  W --> M[Map goal and criteria to source; actual authority; applicable limits; declared bounded local plan]
+  M --> B{Boundary contract required?}
+  B -->|yes| BO[Boundary owner maps sourced proposed actions, targets, consequences and limits; grants no human authority]
+  F --> BO
+  T --> BO
+  BO --> POL_IN
+  B -->|no| POL_IN
+  POL_OUT -->|selected request or status returns to owner| W
+  W --> K{Actual selected step?}
+  K -->|owning completion procedure selected with supported proof| CAND
+  K -->|bounded discussion without selected execution| FINAL
+  K -->|returned partial or waiting status; no admissible eligible continuation| FINAL[Supported payload or honest partial/control status]
+  K -->|supported proof reuse selected by policy| E[Proof for exact criterion and target; original source and verification time]
+  K -->|exact human-owned decision missing| HQ[Request exact decision; park only its dependent branch while waiting]
+  HQ -->|actual request| HH[Human]
+  HH -->|actual scoped grant, denial or decisive answer| HR[Match response to outstanding request; no response is not a result]
+  HR -->|owning workflow resumes actual matched human answer| POL_RESUME
+  K -->|authorized action, owning check or affected observation| REQ[Declared method, target, bounded resources and action-output verification classification]
+  REQ --> NT[Native tool-stage dispatch according to actual registered handlers]
+  NT --> CP[Applicable Core constraints and native host permission]
+  NT --> APRE[Registered AP pretool handler when enabled]
+  APRE --> SEL[AP consumes actual current qualified Core projection; no authority grant]
+  SEL --> ACAP[Applicable v2 prospective preparation captures AP receipt and origin before tool]
+  ACAP --> NOTICE[Prepared context and returned commands, or specific recording diagnostic]
+  NOTICE -->|actual notice/status| W
+  CP -->|actual permission allows execution| EXEC{Declared executor}
+  CP -->|actual permission denial| OBS[Actual matched observation or execution state with provenance]
+  APRE -.->|continue even on recording failure; does not grant or deny tool permission| EXEC
+  EXEC -->|business action or corrective change| X[Implementation executor]
+  EXEC -->|separate verification or affected observation| V[Domain verification owner]
+  X -->|actual action output, failure or uncertain state| OBS
+  V -->|actual completed or inconclusive observation| OBS
+  OBS -->|owning workflow matches actual result to its outstanding request| POL_RESUME
+  K -->|recording-only recovery| AREC[Applicable bounded AP recording command; no business replay]
+  AREC -->|owning workflow matches actual recording result| POL_RESUME
+  E -->|valid owning completion proof when completion is selected| CAND[Owning completion workflow prepares truthful candidate and supported fields]
+  CAND --> PUB{AP-enabled current qualified publication applicable?}
+  PUB -->|yes; actual prepared receipt and returned command available| APU[Publish supported proof or compatible original reference using AP receipt]
+  APU -->|accepted request| PEND[Pending-adapter publication; no criterion met write]
+  APU -->|owning workflow returns actual recording diagnostic| POL_RESUME
+  PUB -->|no applicable publication| FINAL
+  PUB -->|required recording remains unavailable| PART[Retain supported business proof; recover admissible affected recording or report honest partial]
+  PART -->|owner submits actual unresolved recording state| POL_RESUME
+  PEND --> FINAL
+  FINAL --> NF[Native candidate/final-stage dispatch according to actual registered handlers]
+  NF --> CG[Core completion guard validates candidate fields and actual required skill evidence]
+  NF --> AS[Registered privileged AP Stop handler when applicable]
+  AS --> AV[Revalidate current publication, proof, ownership and dependencies]
+  AV -->|accepted current validated publication| CW[Core exact owned-criterion writer within shared authority transaction]
+  AV -->|missing, stale or invalid publication; no criterion write| APP
+  CW -->|guarded update or actual failure| APP[Actual AP application reference/status, remaining criteria and bounded recovery]
+  CG -->|actual guard result| ND[Native supported delivery or corrective disposition]
+  APP -->|actual recording/application result| ND
+  ND -->|owner matches actual native corrective requirement and visibility| POL_RESUME
+  ND -->|host-supported delivery| OUT[Actual visible supported payload or status]
+  OUT --> HH
+  HH -->|actual next input or feedback| I
+
+  subgraph POLICY[Owning bounded decision policy; returns requests and accepts only actual matched results]
+  POL_IN[Fresh workflow call: owning sourced mapping from actual user facts and trusted constraints; actual authority, declared local plan, evidence and remaining resources] --> POL_SELECT{Eligible remaining branch?}
+  POL_SELECT -->|none| POL_ALL{All required criteria have valid proof and no unresolved relevant contrary evidence?}
+  POL_ALL -->|yes| POL_READY[Return ready for owning completion procedure; not a completion verdict]
+  POL_ALL -->|no| POL_PARTIAL[Return honest partial or waiting status]
+  POL_SELECT -->|yes; exclude parked and human-waiting branches| POL_STATE{Selected work state?}
+  POL_STATE -->|required action not yet executed| POL_PLAN[Plan bounded action or corrective change; classify direct action-output verification versus later check]
+  POL_STATE -->|existing work or already-executed action| POL_EVIDENCE{Interpret actual retained evidence for criterion and target}
+  POL_STATE -->|exact human-owned decision or decisive input missing| POL_HUMAN[Return exact human request and waiting state]
+  POL_EVIDENCE -->|valid unchanged passing proof| POL_PROOF[Return supported criterion with original source and time; retain unresolved conditions]
+  POL_EVIDENCE -->|business result known; recording alone unresolved| POL_OBSPLAN[Select only affected observation or recording recovery]
+  POL_EVIDENCE -->|already-executed business state unknown| POL_OBSPLAN
+  POL_EVIDENCE -->|required existing-state verification not performed| POL_CHECKPLAN[Select owning verification with declared method and discriminating outcomes]
+  POL_EVIDENCE -->|confirmed noncompliance from actual relevant observation| POL_GROUP[Identify unresolved failure, affected criterion, stage and target]
+  POL_PLAN --> POL_AUTH{Inside actual authority and remaining applicable limits?}
+  POL_AUTH -->|yes| POL_ACTION[Return action request and its verification classification]
+  POL_AUTH -->|proposed boundary crossing| POL_HUMAN
+  POL_AUTH -->|exhausted or no admissible step| POL_PARK[Return parked affected continuation with unresolved state]
+  POL_CHECKPLAN --> POL_CHECKGATE{Required owning check, or specified outcomes discriminate different next decisions?}
+  POL_CHECKGATE -->|yes; authorized and within remaining limits| POL_VERIFY[Return verification request; applicable prospective capture precedes actual observation; use actual pretool preparation]
+  POL_CHECKGATE -->|proposed boundary crossing| POL_HUMAN
+  POL_CHECKGATE -->|no qualifying discretionary check; exhausted; or required check unavailable| POL_PARK
+  POL_OBSPLAN --> POL_OBSGATE{Selected affected step is authorized and within remaining resources; observation is required or discriminating; for recording recovery only, its owning rule permits the attempt?}
+  POL_OBSGATE -->|yes| POL_OBS[Return bounded observation or recording request]
+  POL_OBSGATE -->|proposed boundary crossing| POL_HUMAN
+  POL_OBSGATE -->|no admissible selected step; exhausted; or selected recording recovery has an identical unchanged failure| POL_PARK
+  POL_ACTION --> POL_OUT[Return selected request or status to the owning workflow]
+  POL_VERIFY --> POL_OUT
+  POL_OBS --> POL_OUT
+  POL_HUMAN --> POL_OUT
+  POL_PROOF --> POL_OUT
+  POL_READY --> POL_OUT
+  POL_PARTIAL --> POL_OUT
+  POL_PARK --> POL_OUT
+  POL_RESUME[Later workflow call: actual result matched to outstanding request, with source and time] --> POL_KIND{What actually returned?}
+  POL_KIND -->|action output directly satisfies declared verification method| POL_RESULT{Actual criterion observation?}
+  POL_KIND -->|completed action still needs an affected check| POL_CHECKPLAN
+  POL_KIND -->|actual action failure| POL_SUFFICIENT{Does actual failure evidence satisfy the declared observation method?}
+  POL_SUFFICIENT -->|yes| POL_RESULT
+  POL_SUFFICIENT -->|no; execution state known| POL_CHECKPLAN
+  POL_SUFFICIENT -->|execution state unknown| POL_OBSPLAN
+  POL_KIND -->|action execution uncertain or check inconclusive| POL_OBSPLAN
+  POL_KIND -->|actual separate verification observation| POL_RESULT
+  POL_KIND -->|actual observation or recording result| POL_EVIDENCE
+  POL_KIND -->|actual scoped human grant or decisive answer| POL_RENEW[Renew only affected plan and granted authority; retain criteria, attempts and parent limits]
+  POL_KIND -->|actual human denial| POL_PARK
+  POL_KIND -->|actual native completion or application finding| POL_EVIDENCE
+  POL_KIND -->|actual native permission denial; no business execution| PERMD{Exact human-owned permission decision available?}
+  PERMD -->|yes| POL_HUMAN
+  PERMD -->|no admissible decision or alternative| POL_PARK
+  POL_RENEW --> POL_SELECT
+  POL_RESULT -->|pass| POL_PROOF
+  POL_RESULT -->|confirmed noncompliance| POL_GROUP
+  POL_RESULT -->|unavailable or inconclusive| POL_OBSPLAN
+  POL_GROUP --> POL_ROUND{Corrective change plus completed relevant observation established the same unresolved failure?}
+  POL_ROUND -->|yes| POL_COUNT[Increment cumulative failed repair rounds]
+  POL_ROUND -->|no; initial failure is zero| POL_KEEP[Preserve actual evidence without failed-repair increment]
+  POL_COUNT --> POL_TRIGGER{New reassessment trigger?}
+  POL_KEEP --> POL_TRIGGER
+  POL_TRIGGER -->|first five reached and checkpoint unaddressed; new relevant contradiction; or current stopping condition| POL_REASSESS[Reassess implicated premise; retain cumulative attempts and addressed checkpoint]
+  POL_TRIGGER -->|none| POL_LEARN[Explain what result changes about cause, mapping, design or verification]
+  POL_LEARN -->|admissible corrected plan inside remaining allowance| POL_PLAN
+  POL_LEARN -->|no discriminating next step or exhausted allowance| POL_PARK
+  POL_REASSESS --> POL_NEXT{Distinguishable hypothesis and check plus explicit bounded continuation inside remaining parent resources?}
+  POL_NEXT -->|yes; checkpoint addressed; no count or resource reset| POL_PLAN
+  POL_NEXT -->|no; affected continuation exhausted| POL_PARK
+  end
+```
+
+The owning workflow calls the selected business action or corrective change and receives its actual result; declared action output may itself supply the verification observation. Domain verification returns actual observations, source and time to the workflow for criterion judgment. The applicable registered v2 pretool automatically prepares AP origin/receipt before the tool and returns current qualified command context. Reuse that valid prepared result; use an explicit returned preparation helper only when the applicable dependency remains genuinely unfulfilled. A recording gap affects capture/publication/application recordability; AP pretool continues and native tool permission remains with its host. Required or discriminating business observation follows its own authority and resource bounds; recording recovery rules govern recording attempts only. Preserve valid proof and its original source/time, including when recording is unavailable.
+
+For a candidate closure, the owning workflow obtains or reuses supported proof. Applicable AP publication uses the exact current qualified selection, prepared AP receipt and actual returned publish command to leave a pending-adapter request. Native candidate/final dispatch invokes its actually registered handlers: the completion guard checks candidate fields and applicable skill evidence; the privileged AP Stop adapter revalidates publication, proof, ownership and dependencies. Only accepted current publication reaches the exact Core criterion writer within the shared authority transaction. Missing, stale or invalid publication returns a recording diagnostic without a criterion write. Actual application status and remaining criteria determine unit recording/completion claims. The handlers retain their actual native invocation semantics. Core owns delivery policy and may assemble the permitted payload; the workflow/native host performs visible delivery. Candidate claims use the supported current scope, while actual recording/application and visibility results govern further repair and closure claims. Preserve already-visible unchanged business content for applicable control-only repair. Return an admissible affected step to the workflow, or honest partial/waiting status when no eligible continuation remains.

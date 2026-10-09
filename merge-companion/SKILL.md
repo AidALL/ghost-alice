@@ -70,7 +70,7 @@ All AI output in steps 3, 4, and 5 must pass adversarial-verification before it 
 
 - Decisions are persisted only in the current platform manifest by default.
 - After step 4, ask whether the same decision should apply to other platforms.
-- If yes, mark entries with the same `source_path` in other platform manifests.
+- If approved, inspect matching `source_path` entries in those platforms and stage their changes. Mark each entry decided only after its approved application or discard completes; the decision alone does not prove application.
 - If platform-specific outputs differ, mark propagation unavailable for that entry.
 
 ## Self-Call Restriction

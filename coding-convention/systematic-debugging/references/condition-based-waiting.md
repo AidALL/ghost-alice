@@ -8,7 +8,6 @@
 - [Implementation](#implementation)
 - [Common Mistakes](#common-mistakes)
 - [When an Arbitrary Timeout Is Correct](#when-an-arbitrary-timeout-is-correct)
-- [Real-World Effect](#real-world-effect)
 
 
 ## Overview
@@ -93,7 +92,7 @@ async function waitFor<T>(
 }
 ```
 
-See `condition-based-waiting-example.ts` in this directory for a complete implementation with domain-specific helpers (`waitForEvent`, `waitForEventCount`, `waitForEventMatch`) from a real debugging session.
+See `condition-based-waiting-example.ts` in this directory for a complete implementation with domain-specific helpers (`waitForEvent`, `waitForEventCount`, `waitForEventMatch`).
 
 ## Common Mistakes
 
@@ -120,12 +119,3 @@ Requirements.
 1. Wait for the trigger condition first
 2. Base it on known timing, not a guess
 3. Comment on why
-
-## Real-World Effect
-
-In a debugging session (2025-10-03).
-
-- Fixed 15 flaky tests across 3 files
-- Pass rate: 60% → 100%
-- Run time: cut by 40%
-- No more race conditions

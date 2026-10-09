@@ -444,7 +444,7 @@ run_uninstall_cleanup() {
 }
 
 _uninstall_all_addons_before_full() {
-  # Full uninstall must not orphan addon commands/resources (addon review): the install-state cleanup classifies skill-root dirs only and leaves command/resource FILES behind. Remove every installed addon via the hash-gated per-addon path (with the commands + resources allowed roots) BEFORE the cleanup wipes the sidecar registry that points at them.
+  # Full uninstall must not orphan addon commands/resources: the install-state cleanup classifies skill-root dirs only and leaves command/resource FILES behind. Remove every installed addon via the hash-gated per-addon path (with the commands + resources allowed roots) BEFORE the cleanup wipes the sidecar registry that points at them.
   local py adir sidecar aid failed=0
   py="$(_find_python_runtime || true)"
   [ -n "$py" ] || return 0

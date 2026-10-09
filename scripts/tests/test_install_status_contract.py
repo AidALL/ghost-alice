@@ -815,7 +815,7 @@ class InstallStatusContractTest(unittest.TestCase):
     def test_installers_write_empty_pending_merge_manifest_after_snapshot(self) -> None:
         sh = installer_bash_source()
         bash_writer = _extract_bash_function(sh, "_write_empty_pending_manifest_if_missing")
-        # The empty-manifest payload now lives in the extracted _shared writer module; the bash function delegates to it.
+        # The Bash function delegates empty-manifest serialization to the _shared writer.
         self.assertIn("pending_manifest_writer.py", bash_writer)
         writer_py = PENDING_MANIFEST_WRITER.read_text(encoding="utf-8")
         self.assertIn('"version": 1', writer_py)

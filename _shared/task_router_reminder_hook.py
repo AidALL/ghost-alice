@@ -124,7 +124,7 @@ def ledger_read_instruction(root: Path, platform: str, session_id: str) -> str:
 
 
 def intent_history_instruction(state: dict[str, Any]) -> list[str]:
-    """Diagnostic history only; accumulated conditions never select current work."""
+    """Diagnostic record only; accumulated conditions never select current work."""
     criteria = state.get("acceptance_criteria")
     if not isinstance(criteria, list):
         return []

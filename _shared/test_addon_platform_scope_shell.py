@@ -1,6 +1,5 @@
-"""Shell e2e for review finding M5: addon sidecars must be platform-scoped so
-installing the SAME addon to claude and codex keeps BOTH records (the last
-platform must not overwrite the first).
+"""Shell e2e: platform-scoped sidecars preserve independent addon records
+when the same addon is installed for Claude and Codex.
 
 Run: python3 -m pytest _shared/test_addon_platform_scope_shell.py -q
 """

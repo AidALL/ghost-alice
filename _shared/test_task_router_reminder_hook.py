@@ -59,7 +59,7 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.assertNotIn("silent allow", message)
 
     def test_without_marker_stale_anchor_still_releases_as_before(self) -> None:
-        # Control: pre-fix behavior preserved when no degrade marker exists.
+        # Control: an intact ledger releases routing when no degraded marker exists.
         message = trh.reminder_message("base", self.root, self.platform, self.payload)
         self.assertIn("intake-ready", message)
 
@@ -82,7 +82,7 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.assertNotIn("silent allow", message)
 
     def test_producer_marker_path_matches_consumer_lookup(self) -> None:
-        # Cross-module seam: the analyzer hook WRITES the marker with its own session-key derivation; this consumer LOOKS IT UP with resolve_session_id. If the two ever diverge, fail-closed silently stops working — the exact drift class that produced the N2 intent-root divergence.
+        # Analyzer and reminder must derive the same session marker path so degraded-ledger recovery remains visible.
         import shutil
         import subprocess
         base = Path(tempfile.mkdtemp())

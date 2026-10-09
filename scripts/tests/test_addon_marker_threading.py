@@ -1,9 +1,7 @@
-"""TDD for plan task C-THREAD-1: copy-mode ownership markers carry addon
-attribution end-to-end (CLI --addon-target + install.ps1 threading).
+"""Copy-mode ownership marker attribution checks across CLI and PowerShell.
 
-A copy-mode addon skill must receive a marker whose owner=addon and
-addon_id=<id>, so classify_skill_root(expected_addon_id=<id>) (plan task T2.9)
-can prove the addon owns its own copied skill instead of failing closed.
+The marker carries owner=addon and addon_id so the ownership classifier
+can validate the selected addon.
 
 Run: python3 -m pytest scripts/tests/test_addon_marker_threading.py -q
 """
@@ -62,7 +60,7 @@ class AddonTargetCliTest(unittest.TestCase):
         self.assertEqual(marker["owner"], "addon")
         self.assertEqual(marker["addon_id"], "noop")
         self.assertEqual(marker["provided_kind"], "skill")
-        # plan task T2.9: the addon can now prove ownership of its own copied skill.
+        # The addon proves ownership of its copied skill through the marker.
         self.assertEqual(
             classify_skill_root(dest, expected_addon_id="noop").ownership,
             OWNERSHIP_GHOST_ALICE_MANAGED)

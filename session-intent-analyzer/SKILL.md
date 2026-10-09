@@ -25,14 +25,14 @@ session-intent-analyzer maintains the user's actual objective, constraints, deci
 
 - The authoritative ledger lives in `.tmp/session-intent/ghost-state.sqlite3` in the Ghost-ALICE repo root, keyed by exact platform and session ID.
 - The installer passes `--root <repo>/.tmp/session-intent` to hook commands. Manual runs may override the root with `GHOST_ALICE_SESSION_INTENT_ROOT`.
-- SQLite stores the latest state and ordered semantic events in one transaction. `intent-state.json` and `intent-events.jsonl` are legacy inputs or explicit exports, never authority after import. Read with `scripts/session_intent_ledger.py --read-state --root <receipt.ledger_root> --platform <receipt.platform> --session-id <receipt.session_id>`; do not read or edit the compatibility path directly.
+- SQLite stores the latest state and ordered semantic events in one transaction. `intent-state.json` and `intent-events.jsonl` are compatibility import inputs or explicit exports, never runtime authority. Read with `scripts/session_intent_ledger.py --read-state --root <receipt.ledger_root> --platform <receipt.platform> --session-id <receipt.session_id>`; do not read or edit the compatibility path directly.
 - Hooks record digest-only observations and intake status. Agents add semantic deltas only when goals, constraints, decisions, or acceptance criteria materially change.
 - Scalar intent fields are replaced by the latest semantic delta. Lists such as constraints, non-goals, open questions, criteria, and decisions are deduped or merged by id.
 - `conduct_feedback` records compressed behavioral corrections, how the agent operated versus what the user asked, and merges by id while preserving `occurrence_count`. Repeated same-id corrections in one session increment `occurrence_count`; status-only updates do not. session-intent-analyzer captures it and skill-evolution consumes it, so the behavioral-correction loop is complete only across both skills, not in skill-evolution alone.
-- `model_security_decision` and its audit events are retained legacy history. Current consumers never interpret them as execution authorization or tool permission.
+- `model_security_decision` is compatibility audit data; it grants no execution authorization or tool permission.
 - The `--read-events` API returns input observations and normalized semantic changes with input and revision references. New change records preserve supported intermediate intent; they do not reconstruct missing historical dialogue.
-- Legacy `security-events.jsonl` remains historical audit material.
-- Database discovery metadata replaces the platform pointer for new writes. Legacy `../current-session.json` is only a discovery hint; it never supplies a write identity.
+- `security-events.jsonl` is audit input, not runtime authority.
+- Writes update SQLite discovery metadata. `../current-session.json` is only a discovery hint; it never supplies a write identity.
 - Raw prompts, full conversations, tool output, and secret values are never stored.
 - User input is stored only as digest and length.
 - Detailed schema lives in `references/ledger-schema.md`.
@@ -123,6 +123,6 @@ Without hooks, apply the same storage contract before the first response. Use th
 
 - This skill is not long-term memory.
 - Do not promote memory without user approval.
-- This skill records semantic context, not a current per-input classifier decision or native tool permission. Legacy classifier fields remain readable history.
+- This skill records semantic context and does not grant native tool permission.
 - skill-evolution may use this ledger only as report context.
 - Ledger text must be compressed intent, not raw quotes, secrets, system messages, or tool output.

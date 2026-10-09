@@ -121,8 +121,8 @@ class TestCompletionTextFinalSurfaceOrder(unittest.TestCase):
 class TestSkillsLoadedForms(unittest.TestCase):
     """skills-loaded must be accepted in inline / flow-list / nested forms.
 
-    Regression guard for the over-narrow `[...]`-only matcher that produced
-    false negatives on equivalent inline and nested serializations.
+    Equivalent inline and nested serializations must produce the same
+    normalized skill tokens.
     """
 
     def _final(self, skills_block):
@@ -848,10 +848,10 @@ class TestAllCompletionBlocksValidated(unittest.TestCase):
 
 
 class TestDetectorEdgeRegressions(unittest.TestCase):
-    """Guards for false-passes/crash found by end-to-end hook verification."""
+    """End-to-end hook checks reject unsupported closure and malformed headers."""
 
     def test_contraction_apostrophes_do_not_swallow_claim(self):
-        # Contraction apostrophes must not act as quote delimiters (BUG #1).
+        # Contraction apostrophes must not act as quote delimiters.
         self.assertTrue(
             v.requires_completion_check("I won't lie: the work is complete; we don't ship yet.")
         )
@@ -865,7 +865,7 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
         )
 
     def test_hypothetical_lead_does_not_exempt_asserted_main_clause(self):
-        # A conditional preamble before a comma must not exempt the asserted claim that follows it (BUG #2).
+        # A conditional preamble before a comma must not exempt the asserted claim that follows it.
         self.assertTrue(
             v.requires_completion_check("If you're curious, I fixed the bug and all tests pass.")
         )
@@ -903,7 +903,7 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
         )
 
     def test_indented_completion_header_does_not_crash(self):
-        # An indented header must not raise IndexError (BUG #3); it returns a deny-reason string or None, never an exception.
+        # An indented header returns a deny-reason string or None without raising IndexError.
         indented = (
             "   [completion-check]\n"
             "- verification-before-completion: done\n"
@@ -920,7 +920,7 @@ class TestDetectorEdgeRegressions(unittest.TestCase):
 
 
 class TestKoreanNegatedStatusNotABlock(unittest.TestCase):
-    "Korean negation is post-verbal; stripping only the negation particle left\n    the closure word intact and false-blocked an honest 'not complete' report."
+    "Korean post-verbal negation must stay bound to its closure phrase so an\n    honest 'not complete' report remains a nonclosure control."
 
     def test_korean_post_verbal_negation_is_not_a_claim(self):
         for phrase in (

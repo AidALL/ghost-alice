@@ -186,7 +186,7 @@ class AddonInstallerTest(unittest.TestCase):
         }), encoding="utf-8")
 
     def test_depends_on_core_absent_from_core_set_is_rejected(self) -> None:
-        # depends_on_core enforcement: a declared depends_on_core not in the known core skill set must fail closed at load time (decorative contract -> enforced contract).
+        # A declared depends_on_core outside the known core skill set must fail closed at load time.
         from addon_installer import AddonManifestError, load_addon_targets
         with tempfile.TemporaryDirectory() as temp_dir:
             source = Path(temp_dir)
@@ -335,7 +335,7 @@ class AddonInstallerTest(unittest.TestCase):
             target_names = {target["target_name"] for target in state["targets"]}
             self.assertIn("noop", target_names)
 
-            # End-to-end: the install path wrote the per-addon sidecar (T1.3), platform-scoped under addons/<platform>/ (review M5).
+            # End-to-end: the install path wrote the per-addon sidecar, platform-scoped under addons/<platform>/.
             sidecar = Path(temp_home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
             self.assertTrue(sidecar.exists(), msg=result.stderr + result.stdout)
             record = json.loads(sidecar.read_text(encoding="utf-8"))

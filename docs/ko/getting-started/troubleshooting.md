@@ -52,7 +52,7 @@ raw `git pull`이 이미 막혀서 checkout이 `--update-source`를 받지 못�
 cd ~/ghost-alice && git fetch origin main && git show FETCH_HEAD:scripts/bootstrap-source-update.sh | /bin/bash -s --
 ```
 
-bootstrap updater는 낡은 local installer가 아니라 새로 가져온 remote blob에서 실행됩니다. source의 tracked/untracked 변경을 `git stash`에 저장하고 `~/ghost-alice`를 fast-forward한 뒤 updated installer를 실행합니다. checkout 위치가 기본값이 아니면 command 앞에 `GHOST_ALICE_SOURCE_DIR=/path/to/ghost-alice`를 설정합니다.
+bootstrap updater는 local installer와 독립적으로 가져온 remote blob에서 실행됩니다. source의 tracked/untracked 변경을 `git stash`에 저장하고 `~/ghost-alice`를 fast-forward한 뒤 updated installer를 실행합니다. checkout 위치가 기본값이 아니면 command 앞에 `GHOST_ALICE_SOURCE_DIR=/path/to/ghost-alice`를 설정합니다.
 
 ### 1. Fix Identity Errors First
 
@@ -152,5 +152,5 @@ bash install.sh --status
 
 - update command는 기본적으로 safe installer updater를 씁니다. updater 내부에서 source-local changes를 저장한 뒤 checkout을 fast-forward합니다.
 - `git pull`이 merge conflict를 내면 installer가 그 conflict를 대신 풀어 주지 못합니다.
-- 막힌 사용자를 위한 guide는 repo 안에만 두면 부족합니다. Wiki나 release notes처럼 pull 없이 읽을 수 있는 위치에도 같은 recovery playbook을 둡니다.
+- 막힌 사용자를 위한 guide는 repo 안에만 두면 부족합니다. Wiki처럼 pull 없이 읽을 수 있는 위치에도 같은 recovery playbook을 둡니다.
 - Git status에 `UU` 또는 `AA`가 남아 있으면 installer를 실행하지 않습니다.

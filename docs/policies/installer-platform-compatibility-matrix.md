@@ -2,7 +2,7 @@
 
 Language: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/installer-platform-compatibility-matrix.md)
 
-This document is the Phase 7 compatibility test contract for the Ghost-ALICE installer.
+This document is the compatibility test contract for the Ghost-ALICE installer.
 ## Contents
 
 - [Runtime Contract](#runtime-contract)
@@ -55,7 +55,7 @@ Every user input is a `task-router` target. Simple questions, opinions, status c
 
 ### session-intent-analyzer
 
-Every user input is observed by the session intent ledger. Hooks store digest and event data, not raw prompts. When goals, constraints, decisions, or non-goals change, the agent records a compressed delta through the authoritative SQLite ledger API. Compatibility/export `intent-state.json` is update-plus-accumulate state: scalar intent fields are replaced by newer deltas, while list-like constraints, non-goals, questions, criteria, and decisions are deduped or merged by stable id. Task-router consumes this exact session context directly; skill-evolution consumes it as a report-only terminal branch. Legacy model judgments remain readable history and do not supply current execution permission. Native permission, credentials, provenance, and audit remain with their actual owners.
+Every user input is observed by the session intent ledger. Hooks store digest and event data, not raw prompts. When goals, constraints, decisions, or non-goals change, the agent records a compressed delta through the authoritative SQLite ledger API. Compatibility/export `intent-state.json` is update-plus-accumulate state: scalar intent fields are replaced by newer deltas, while list-like constraints, non-goals, questions, criteria, and decisions are deduped or merged by stable id. Task-router consumes this exact session context directly; skill-evolution consumes it as a report-only terminal branch. Native permission, credentials, provenance, and audit remain with their actual owners.
 
 ### pending merge precheck
 
@@ -82,7 +82,7 @@ Printed `[io-trace]` is optional and cannot gate completion by its presence, ord
 | WSL | same as Linux bash, with Windows path boundary smoke | manual or Windows CI |
 | Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, UTF-8 bridge | runtime detection and Codex hook config tests |
 | Windows native Codex hook smoke | Native Windows Codex installer path `.\install.cmd --platform codex` writes Codex bootstrap, `hooks.json`, and `config.toml` with hooks enabled; live smoke observes hook payload firing | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/policies/live-smoke-regression.md` |
-| Windows visibility preference smoke | Native wrapper visibility forwarding reaches `_shared/install_hooks.py --visibility`; legacy visibility aliases remain accepted as compatibility coverage, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
+| Windows visibility preference smoke | Native wrapper visibility forwarding reaches `_shared/install_hooks.py --visibility`; visibility aliases remain accepted as compatibility coverage, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible; PS5-incompatible syntax is caught by `PSUseCompatibleSyntax` static analysis when the analyzer is available | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | Windows PowerShell 7.4 LTS cleanup | Native Windows installer cleanup removes detected PowerShell 7.4.x MSI products by product-code scoped `msiexec.exe /x ... /quiet /norestart` before resolving the latest 7.6.x MSI; non-MSI entries without a product code are skipped, and 7.5/7.6+, Windows PowerShell 5.1, and unrelated products are not removed | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
 | PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output exposes the official addon alias and describes the native wrapper branch/tag option for git URL addon sources | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |

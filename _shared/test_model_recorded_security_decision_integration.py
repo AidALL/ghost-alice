@@ -1,4 +1,4 @@
-"""Public ledger legacy records remain readable without execution permission.
+"""Public ledger audit records remain readable without execution permission.
 
 Dependencies: Python 3.11+ standard library; Node on PATH.
 """
@@ -48,7 +48,7 @@ class ModelRecordedSecurityDecisionIntegration(unittest.TestCase):
         return json.loads(result.stdout)["latest_input_event_id"]
 
     def record_decision(self, decision_record: dict) -> None:
-        # Public historical import, exact receipt; no native permission is granted.
+        # Public audit import, exact receipt; no native permission is granted.
         subprocess.run(
             [sys.executable, str(LEDGER), "--root", str(self.tmp),
              "--platform", "claude", "--session-id", self.session,

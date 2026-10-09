@@ -26,7 +26,7 @@ _CONTROL_BLOCKS = frozenset(
     {"tool-checkpoint", "gate-state", "task-router", "boundary-contract", "io-trace"}
 )
 
-# Block header `^\[([a-z0-9-]+)\]`, case-insensitive. The position variant tolerates leading whitespace so an indented header is still located, keeping it consistent with extract_control_block (which matches on the stripped line). A mismatch here previously yielded zero positions for an indented header and crashed the position lookup with IndexError.
+# Match block headers case-insensitively and allow leading whitespace so position lookup agrees with control-block extraction.
 _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
 _BLOCK_HEADER_POSITION_RE = re.compile(r"^[ \t]*\[([a-z0-9-]+)\]", re.I | re.M)
 

@@ -25,9 +25,7 @@ Do not summarize the skill's process or workflow in the description.
 
 ### Why does this matter?
 
-Test result: when the description summarizes the skill's workflow, Claude is likely to follow the description instead of the body. A description such as "execute the implementation plan while doing code review between tasks" makes Claude run the review only once, even though the flowchart clearly shows two passes (spec compliance, code quality).
-
-What happens when the description simply changes to "use when executing an implementation plan as independent work in the current session"? Claude reads the body and correctly follows the two-stage review.
+A workflow summary in a description can invite metadata-only execution. Put the trigger in the description and the complete procedure in the body. For a two-stage review, require the body to define both spec compliance and code quality; a short phrase such as "code reviews" does not specify their order or acceptance conditions.
 
 Trap: a description that summarizes the workflow becomes a shortcut Claude takes. The skill body becomes a document it ignores.
 

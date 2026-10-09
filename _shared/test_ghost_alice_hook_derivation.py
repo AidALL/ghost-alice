@@ -1,4 +1,4 @@
-"""Historical model judgments never derive permission or gate files.
+"""Stored model judgments never derive permission or gate files.
 
 Dependencies: Python 3.11+ standard library; Node on PATH.
 """
@@ -179,7 +179,7 @@ class DerivationTests(unittest.TestCase):
         self.assertNotIn("permissionDecision", out.stdout)
 
     def test_existing_block_gate_not_clobbered_and_stale_allows(self) -> None:
-        # A prior block gate (e1) is on disk; this turn the model recorded allow and the latest event is e2. derive must NOT clobber the gate; the enforcer must treat the prior block gate as stale -> no deny.
+        # The stored e1 block record remains intact while e2 is current; neither record grants native tool permission.
         self.write_state({"decision": "allow", "risk_flags": [], "input_event_id": "sha256:e2"})
         self.write_event("sha256:e2")
         self.write_gate({
@@ -197,7 +197,7 @@ class DerivationTests(unittest.TestCase):
         gate = json.loads(self.gate_path().read_text(encoding="utf-8"))
         self.assertEqual(gate["decision"], "block")  # not clobbered
         self.assertEqual(gate["input_event_id"], "sha256:e1")  # untouched
-        self.assertNotIn("permissionDecision", out.stdout)  # stale -> enforcer allows
+        self.assertNotIn("permissionDecision", out.stdout)  # native permission remains with the host
 
 
 if __name__ == "__main__":

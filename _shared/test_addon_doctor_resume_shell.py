@@ -1,6 +1,5 @@
-"""Shell e2e for review finding M4 (plan task T2.7): `--doctor` must resume any
-pending addon uninstall at its start, and must report NON-ok when a `.removing`
-marker remains (a stuck uninstall), instead of silently saying overall ok.
+"""Shell e2e: doctor resumes pending addon uninstall and reports non-ok while
+a removal marker remains unresolved.
 
 Run: python3 -m pytest _shared/test_addon_doctor_resume_shell.py -q
 """

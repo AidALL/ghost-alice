@@ -1025,7 +1025,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("decision", payload)
 
     def test_claude_stop_hook_blocks_completion_claim_with_invalid_body(self):
-        # Completion-body-validation invariant: verification skill loaded, but the [completion-check] body is incomplete (no claim-evidence-map). The strengthened Claude Stop gate must block, matching the .mjs validator.
+        # Completion-body-validation invariant: verification skill loaded, but the [completion-check] body is incomplete (no claim-evidence-map). The Claude Stop gate must block, matching the .mjs validator.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1070,7 +1070,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("claim-evidence-map", payload["reason"])
 
     def test_claude_stop_hook_validates_only_final_response(self):
-        # Regression: AskUserQuestion answers / tool results are NOT real user prompts, so the turn boundary does not reset on them. The hook must validate only the FINAL response, not concatenate completion-checks from earlier responses in the span (which made it re-extract a stale/invalid earlier block and block).
+        # AskUserQuestion answers and tool results are not user prompts and do not reset the turn boundary. Validate only the final response in the span; earlier completion-checks cannot establish its closure.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1272,7 +1272,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIsNone(opaque_risk_code_re.search(result.stdout))
 
     def test_codex_dispatcher_tool_checkpoint_returns_pre_tool_use_context_shape_with_legacy_block_record(self):
-        """Codex PreToolUse tool-checkpoint preserves context without detector permission decisions."""
+        """Codex PreToolUse preserves context and leaves native permission to its host."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -1711,7 +1711,7 @@ class TestMessageLanguage(unittest.TestCase):
             source,
         )
 
-        self.assertLess(len(source.splitlines()), 880)  # bumped from 850 for expanded task-router reminder text (no new decision helpers)
+        self.assertLess(len(source.splitlines()), 880)  # Bound the task-router reminder size without removing its required decisions.
         self.assertNotIn("function buildAuditRef(", source)
         self.assertNotIn("function completionReminderDecision", source)
         self.assertNotIn("function validateCompletionResponse", source)
@@ -1789,7 +1789,7 @@ class TestMessageLanguage(unittest.TestCase):
                     os.environ["HOME"] = prev_home
 
     def test_codex_dispatcher_tool_checkpoint_does_not_deny_by_input_event_or_tool_input(self):
-        """Codex tool-checkpoint ignores input event/tool identity when downstream gate is open."""
+        """Codex checkpoints leave native permission with the host across input and tool identities."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -1920,7 +1920,7 @@ class TestMessageLanguage(unittest.TestCase):
                 self.assert_no_pretool_deny(json.loads(result.stdout))
 
     def test_codex_dispatcher_block_gate_denies_regardless_of_tool_shape(self):
-        """A historical closed record supplies no native permission decision."""
+        """A closed audit record supplies no native permission decision."""
         requests = [
             {"tool_name": "shell", "tool_input": {"cmd": "echo shell"}},
             {"tool_name": "read", "tool_input": {"file_path": "README.md"}},
@@ -2218,7 +2218,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
 
     def test_codex_dispatcher_tool_checkpoint_allows_shell_content_after_open_gate(self):
-        """Codex shell command text is not parsed once downstream gate is open."""
+        """Codex checkpoints do not classify shell payloads for native permission."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2275,7 +2275,7 @@ class TestMessageLanguage(unittest.TestCase):
                     self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
 
     def test_codex_dispatcher_tool_checkpoint_allows_functions_exec_command_inspection_after_intent_preflight(self):
-        """Codex app developer-tool shell reads follow the same open-gate state policy."""
+        """Codex developer-tool shell reads preserve the host native-permission boundary."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2414,7 +2414,7 @@ class TestMessageLanguage(unittest.TestCase):
 
 
     def test_codex_dispatcher_tool_checkpoint_does_not_parse_compound_shell_mutation(self):
-        """Compound shell content is not parsed as mutation when downstream gate is open."""
+        """Compound shell payloads do not create a checkpoint permission decision."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2458,7 +2458,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("rm -f README.md", json.dumps(payload, ensure_ascii=False))
 
     def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_decide_tool_permission(self):
-        """Legacy detector state does not grant or deny native tool permission."""
+        """Stored detector state does not grant or deny native tool permission."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2505,7 +2505,7 @@ class TestMessageLanguage(unittest.TestCase):
 
 
     def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_deny_session_intent_recovery(self):
-        """No command-shape exception bypasses a blocked downstream gate."""
+        """Stored gate records do not deny session-intent recovery calls."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2552,7 +2552,7 @@ class TestMessageLanguage(unittest.TestCase):
 
 
     def test_codex_dispatcher_tool_checkpoint_allows_governance_skill_doc_bootstrap_before_semantic_intent(self):
-        """Codex has no native Skill tool, so reading governance SKILL.md is a bootstrap lane."""
+        """Governance instruction reads remain available while semantic intake is pending."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2602,7 +2602,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assert_no_pretool_deny(payload)
 
     def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_deny_historical_doc_reads(self):
-        """A blocked downstream gate applies to bootstrap-looking tool calls too."""
+        """Stored gate records do not deny instruction calls or document reads."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2743,7 +2743,7 @@ class TestMessageLanguage(unittest.TestCase):
 
 
     def test_claude_dispatcher_tool_checkpoint_blocks_governance_skill_bootstrap_when_gate_blocks(self):
-        """Claude Skill-looking calls do not bypass a blocked downstream gate."""
+        """Claude Skill calls leave native permission with the host."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2787,7 +2787,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
 
     def test_claude_dispatcher_tool_checkpoint_returns_pre_tool_use_context_shape_with_legacy_block_record(self):
-        """Claude PreToolUse tool-checkpoint preserves context without detector permission decisions."""
+        """Claude PreToolUse preserves context and leaves native permission to its host."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2853,7 +2853,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("permissionDecision", second_payload.get("hookSpecificOutput", {}))
 
     def test_claude_dispatcher_tool_checkpoint_does_not_deny_by_input_event_or_tool_input(self):
-        """Claude tool-checkpoint matches Codex: open gate means tool identity is ignored."""
+        """Claude and Codex checkpoints leave tool permission to their native hosts."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -4093,7 +4093,7 @@ class TestInstallHook(TempHomeTestCase):
                 self.assertEqual(marker_order, expected)
 
     def test_install_replaces_legacy_pre_tool_checkpoint_marker(self):
-        """Old pre-tool checkpoint entries are removed when the new marker is installed."""
+        """Replace managed pre-tool checkpoint entries with the configured marker."""
         legacy_marker = f"[{'action'}-{'gate'}] pre-tool-check"
         self._write_settings(
             "codex",
@@ -5308,7 +5308,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             self.assertNotIn("Tech:", payload["systemMessage"])
 
     def test_install_codex_replaces_markerless_hook_runner_wrappers(self):
-        """Older hook-runner wrappers without outer markers are replaced without duplicate execution."""
+        """Hook-runner wrappers without outer markers are replaced without duplicate execution."""
 
         def markerless(entry: dict[str, Any]) -> dict[str, Any]:
             cloned = json.loads(json.dumps(entry))
@@ -5417,7 +5417,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self.assertNotIn("content", data)
 
     def test_install_codex_migrates_deprecated_hook_feature_flag(self):
-        """Migrate the deprecated codex_hooks feature flag to hooks=true."""
+        """Normalize the codex_hooks feature setting to hooks=true."""
         self._create_platform_dir("codex")
         config_toml = self._codex_config_toml()
         config_toml.write_text('[features]\ncodex_hooks = true\nmulti_agent = true\n', encoding="utf-8")
@@ -6185,7 +6185,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self._create_platform_dir("claude")
         install_hooks.install_hook("claude")
         settings = self._read_settings("claude")
-        settings["hooks"]["UserPromptSubmit"].append(install_hooks.WEB_SEARCH_FIRST_ENTRY)  # legacy install
+        settings["hooks"]["UserPromptSubmit"].append(install_hooks.WEB_SEARCH_FIRST_ENTRY)  # install fixture with codex_hooks enabled
         self._write_settings("claude", settings)
         result = install_hooks.uninstall_hook("claude")
         self.assertEqual(result, "removed")

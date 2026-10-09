@@ -57,7 +57,7 @@ TEMPLATE_SURFACES = (
 
 class GateSurfaceDesignTest(unittest.TestCase):
     def test_skill_call_templates_record_only_actual_calls(self) -> None:
-        # A pre-filled example list was copied as a claim without the calls being made.
+        # Skill-call records must be based on actual calls, not a pre-filled example.
         for rel in TEMPLATE_SURFACES:
             with self.subTest(surface=rel):
                 text = (REPO_ROOT / rel).read_text(encoding="utf-8")
@@ -71,8 +71,8 @@ class GateSurfaceDesignTest(unittest.TestCase):
         )
 
     def test_hard_sequence_accepts_evidence_already_returned_this_turn(self) -> None:
-        # Subjects wrote a file, called the verification skill, then re-read the same file only to
-        # satisfy the order; the order places the skill before the claim, not before the evidence.
+        # Writing an artifact supplies fresh evidence; do not re-read it solely to
+        # satisfy ordering. Load the verification skill before the closure claim.
         for rel in HARD_SEQUENCE_SURFACES:
             with self.subTest(surface=rel):
                 text = " ".join((REPO_ROOT / rel).read_text(encoding="utf-8").split())
@@ -80,7 +80,7 @@ class GateSurfaceDesignTest(unittest.TestCase):
                 self.assertIn(HARD_SEQUENCE_EVIDENCE, text)
 
     def test_finalization_steps_map_claims_to_returned_evidence(self) -> None:
-        # Steps 2-3 read as "run and read again after the skill loads", contradicting the hard-sequence clarification.
+        # Procedure wording must allow reuse of valid evidence after skill loading.
         body = (REPO_ROOT / "coding-convention" / "verification-before-completion" / "SKILL.md").read_text(encoding="utf-8")
         for step in FINALIZATION_STEPS:
             with self.subTest(step=step[:2]):
@@ -90,7 +90,7 @@ class GateSurfaceDesignTest(unittest.TestCase):
                 self.assertNotIn(stale, body)
 
     def test_user_claim_rule_follows_verify_or_reuse(self) -> None:
-        # Subjects refused or rewrote user-dictated lines worded as results; the verification duty covers the
+        # Preserve user-dictated claims as supplied; verification covers the
         # agent's own work, so the rule sits next to verify-or-reuse on every always-on surface.
         for rel in USER_CLAIM_SURFACES:
             with self.subTest(surface=rel):

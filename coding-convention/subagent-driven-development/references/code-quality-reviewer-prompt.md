@@ -39,4 +39,4 @@ Reviewer returns: Strengths, Issues (Critical/Important/Minor), Assessment
 □ Namespace and path
 
 - When calling the Task tool, standardize the agent namespace to `coding-convention:code-reviewer`
-- The template path is `requesting-code-review/references/code-reviewer.md` (after porting, it moved under references/)
+- The template path is `requesting-code-review/references/code-reviewer.md`

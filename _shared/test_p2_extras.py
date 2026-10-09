@@ -1,5 +1,4 @@
-"""TDD for remaining addon logic: marker v2 (T2.8/T2.9), collision detection
-(T2.1/T2.2), and core-dependency block (T2.11).
+"""Checks for ownership markers, collision detection and Core dependencies.
 
 Run: python3 -m pytest _shared/test_p2_extras.py -q
 """
@@ -120,7 +119,7 @@ class MarkerV2Test(unittest.TestCase):
             un._symlink_safe_remove(link)
 
     def test_classify_marker_without_addon_id_fails_closed(self):
-        # a v1-style marker (no addon_id) cannot prove addon ownership -> fail closed
+        # A marker without addon_id cannot prove addon ownership; fail closed.
         d = self.root / "foo"
         d.mkdir(parents=True)
         (d / "SKILL.md").write_text("body", encoding="utf-8")
@@ -129,7 +128,7 @@ class MarkerV2Test(unittest.TestCase):
         result = iassets.classify_skill_root(d, expected_addon_id="x")
         self.assertEqual(result.ownership, iassets.OWNERSHIP_CONFLICT)
         self.assertEqual(result.reason, "marker-addon-unattributed")
-        # without expected_addon_id (the core/legacy path) it is still managed
+        # without expected_addon_id (the Core path) it is still managed
         self.assertEqual(iassets.classify_skill_root(d).ownership, iassets.OWNERSHIP_GHOST_ALICE_MANAGED)
 
 
@@ -244,7 +243,7 @@ class CollisionTest(unittest.TestCase):
                          [("noop", "addon-drift", "noop")])
 
     def test_same_addon_skill_symlink_to_install_source_is_clean(self):
-        # wedge fix: a skill symlink already pointing at THIS install's source is the installer's own re-point, NOT user drift -- even if the recorded hash is stale.
+        # A skill symlink pointing at this install source is installer-owned even when its recorded hash is stale.
         import hash_utils  # noqa: PLC0415
         src_b = self.root / "srcB" / "noop"
         src_b.mkdir(parents=True)
@@ -288,7 +287,7 @@ class CollisionTest(unittest.TestCase):
         self.assertEqual(ai.detect_collisions([target], skills_dir=self.skills, addons_dir=self.addons), [])
 
     def test_legacy_same_addon_symlink_without_sidecar_is_not_a_collision(self):
-        # A pre-sidecar addon install may leave only a symlink in .claude/skills. If the symlink target's addon.json proves the same addon id and skill mapping, the installer should treat it as an update path, not as an arbitrary domain skill.
+        # An addon symlink without a sidecar requires target addon.json evidence of the same addon id and skill mapping to establish ownership.
         old_addon = self.root / "old-autopilot" / "addons" / "autopilot-mode"
         new_addon = self.root / "new-autopilot" / "addons" / "autopilot-mode"
         old_skill = old_addon / "skill"
@@ -447,11 +446,11 @@ class DependentsTest(unittest.TestCase):
         self.assertEqual(rc2, 0)
 
     def test_cli_dependents_fails_closed_on_skipped_sidecar(self):
-        # M6: an UNREADABLE / future-major sidecar might itself depend_on_core the core skill. scan_records skips it -> we must block (rc=2), not fail open.
+        # an UNREADABLE / future-major sidecar might itself depend_on_core the core skill. scan_records skips it -> we must block (rc=2), not fail open.
         self.addons.mkdir(parents=True, exist_ok=True)
         (self.addons / "corruptdep.json").write_text("{ not valid json", encoding="utf-8")
         rc = un.main(["--dependents", "nobody", "--addons-dir", str(self.addons)])
-        self.assertEqual(rc, 2)  # would be 0 (fail-open) before the fix
+        self.assertEqual(rc, 2)  # The missing runtime must surface a nonzero diagnostic result.
 
     def test_cli_dependents_fails_closed_on_future_major_sidecar(self):
         self.addons.mkdir(parents=True, exist_ok=True)

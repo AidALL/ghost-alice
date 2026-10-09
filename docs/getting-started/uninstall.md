@@ -74,7 +74,7 @@ Uninstall reads `targets` and `system_env_changes` from these manifests. If a ma
 5. Remove support state such as install-state manifests, install-state events, Codex hook feature rollback metadata, pending merge queues, installed hook dispatcher assets, and install rollbacks.
 6. Write a report under `~/.ghost-alice/uninstall-reports/`.
 
-The uninstall report directory and privacy-sensitive local files such as `~/.ghost-alice/secrets.env` are preserved unless a future explicit purge mode is added. Runtime audit traces such as `~/.ghost-alice/io-trace.jsonl` are treated as local audit records rather than install targets.
+The uninstall report directory and privacy-sensitive local files such as `~/.ghost-alice/secrets.env` are preserved. Runtime audit traces such as `~/.ghost-alice/io-trace.jsonl` are treated as local audit records rather than install targets.
 
 ## Recovery Principles
 

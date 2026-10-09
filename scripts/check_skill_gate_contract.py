@@ -854,7 +854,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
             continue
         text = _read_text(path)
         if rel_path in ("install.sh", "install.ps1"):
-            # install.sh / install.ps1 are modularized: function definitions (and the governance contract strings they carry, e.g. the codex bootstrap block) now live in installer_lib/*.sh and installer_lib/*.ps1. Validate the combined installer source so required patterns are found regardless of which module now holds them.
+            # Validate the combined installer entrypoint and installer_lib modules, including their governance strings.
             ext = ".sh" if rel_path == "install.sh" else ".ps1"
             lib_dir = root / "installer_lib"
             if lib_dir.is_dir():

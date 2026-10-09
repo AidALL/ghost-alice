@@ -70,7 +70,7 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             self.assertIn(("command", "richcmd"), kinds)
             self.assertIn(("resource", "ref.txt"), kinds)
 
-            # observational hook (Phase 4): recorded top-level + present in claude config
+            # Observational hook: recorded at top level and present in Claude config.
             self.assertEqual([h["marker"] for h in rec.get("hooks", [])], ["[addon:rich] richobs"])
             settings = json.loads((Path(home) / ".claude" / "settings.json").read_text(encoding="utf-8"))
             post = [h["command"] for e in settings["hooks"]["PostToolUse"] for h in e.get("hooks", [])]

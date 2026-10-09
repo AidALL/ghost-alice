@@ -88,7 +88,7 @@ description: Use before implementing a feature or a bug fix. Stop if you are alr
 
 ### ❌ Narrative example
 
-"In the 2025-10-03 session we had an empty projectDir that..."
+A session diary that lists implementation changes instead of teaching their applicable conditions.
 
 Why it is bad: too specific, not reusable
 

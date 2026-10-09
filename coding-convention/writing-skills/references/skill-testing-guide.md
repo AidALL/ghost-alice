@@ -35,14 +35,14 @@
 
 ### Baseline Scenario (RED)
 
-Run it with a subagent and no skill. Purpose: to see exactly what fails.
+Run the applicable baseline with a subagent. Record what it actually does, including compliance; source-contract repairs also preserve the exact contradicting instruction before editing.
 
 What to record:
 - Which choice did the agent make?
 - Exactly what words did it use to justify it? (verbatim)
 - Which pressure triggered the violation?
 
-This is "seeing the test fail". You must do it before writing the skill.
+Capture this evidence before editing. Preserve baseline passes and report any missed prerequisite honestly.
 
 ### Test Scenario (GREEN)
 
@@ -52,7 +52,7 @@ If it still violates, which part of the skill is insufficient?
 
 ## 2. Pressure Types
 
-For a rule skill, use at least three pressures in combination:
+For a rule skill, choose the pressures relevant to its known failure or uncertainty. Combine them when the interaction matters:
 
 ### Time Pressure
 
@@ -113,36 +113,27 @@ Does the agent follow the rule under these conditions? If it does not, that is a
 
 ### The Cycle
 
-1. Run the pressure scenario (no skill) -> record the baseline
-2. Write the skill -> respond to that specific violation
-3. Run the same scenario again (with the skill) -> confirm compliance
-4. Find a new violation -> add it to the table
-5. Add a skill section that explicitly responds to the new violation
-6. Re-test -> repeat
-
-This is the REFACTOR stage. Continue until there are no loopholes.
+1. Record the actual baseline decision or exact source-contract mismatch before editing.
+2. Repair the affected cause to sufficient depth and complete official package Phase 1 through Phase 5.
+3. Evaluate the affected scenario and relevant negative controls, recording the actual decision.
+4. If a new mismatch appears, reopen its affected instruction, mapping or premise and re-check that condition.
+5. Stop when no live uncertainty can change the next decision; retain unchanged valid results.
 
 ### Capturing Excuses and Tabulating Them
 
-On every test iteration:
-- Record the exact words the agent used
-- Analyze why that justification worked
-- Add an explicit response to the skill
-
-The excuse table helps other agents understand the skill. Each row is evidence that "in this situation you cannot rationalize this way".
+Record actual choices and rationales, including compliance. When an observed rationalization exposes a contract gap, explain that gap and choose a targeted repair. An excuse table is useful only when its rows represent real decision-relevant cases; do not create failures or prohibitions to fill a template.
 
 ## 5. Common Rationalizations and Reality
 
-| Justification | Reality |
-|--------|------|
-| "No need to test because it is clear" | Clear does not equal correct. Test. |
-| "Leave it as a reference" | A reference is a weird state. Same violation. |
-| "I followed the spirit" | Breaking the letter equals breaking the spirit. No distinction. |
-| "I will test it next time" | Next equals never. Test now. |
-| "I will refactor it later" | Refactoring comes after the test passes. This is not refactoring, it is writing. |
-| "I already verified it in my head" | In my head does not equal working. Written evidence is required. |
-| "It is too simple" | Simple does not equal correct. The test takes 30 seconds. |
-| "The senior says it is fine" | Authority cannot void the Iron Law either. Test. |
+| Justification | Required evidence or action |
+| --- | --- |
+| "The wording is clear, so the skill must work" | Evaluate the actual affected decision, not only recitation. |
+| "Both variants passed, so this edit improved behavior" | Preserve both passes and limit the claim to their checked conditions. |
+| "A baseline must fail before we can repair this source contradiction" | Preserve the exact contradiction; never invent a failed agent run. |
+| "I will evaluate it after distribution" | Finish the required package phases and affected checks before distribution. |
+| "The senior says it is fine" | Apply the actual user authority and owning verification contract; a role label is not evidence. |
+| "It is too simple" | Use a check proportionate to the actual uncertainty; simplicity alone is not proof. |
+| "One more unchanged passing run is safer" | Name the missing pressure or variance that could change the decision, or reuse the result. |
 
 ## 6. Meta Testing: Is the Test Itself Valid?
 
@@ -190,8 +181,16 @@ The skill does not respond to that specific excuse. Add it to the table. Respond
 
 ## 9. How Long Do You Keep Testing?
 
-- Minimum: pass under 3 different pressure scenarios
-- Recommended: pass under maximum pressure (all pressures at once)
-- When a loophole is found: respond to that loophole and re-test
+- Cover the known failure, relevant alternatives and meaningful negative controls.
+- Combine pressures only when their interaction changes the decision.
+- When a mismatch is found, repair and re-test its affected condition.
 
 Judge sufficiency by coverage of the known failure and live uncertainties. Stop when another unchanged run cannot change the decision. A pass remains a pass; do not manufacture pressure failures to justify an edit.
+
+## Check sufficiency and repair limits
+
+Before a discretionary check, name the unresolved criterion or competing explanation, why the method discriminates, and attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions. Mere potential to find something is insufficient. Stochastic repeats require uncertainty, sampling and stopping rules. Mandatory owning checks remain required; unavailable proof or unresolved required criteria prevent completion. Reuse valid unchanged passing proof at its original source and time; reopen only affected proof after observed change, contradiction or explicit recheck. Unknown already-executed business state calls for bounded affected observation, not automatic business replay; not-yet-executed required work still needs its actual action. Inconclusive checks give no business pass/fail verdict or failed-business-repair increment, but observation and recording attempts consume their bounded resources.
+
+A failed repair round requires a corrective change and a completed relevant observation of the same unresolved failure. Initial failure is zero. Group by unresolved failure, affected criterion, stage and target; explain what each result changes about cause, mapping, design or verification. Unknown causes cannot justify relabeling/reset, and identical error text cannot combine unrelated business and recording failures. Preserve cumulative attempts and the addressed first-five checkpoint across agents and handoffs. Demonstrated resolution followed by recurrence is a linked new incident. Five failed rounds is the maximum before the first mandatory premise reassessment, not a minimum retry count or whole-task limit. Once addressed, cumulative six or seven alone do not retrigger that checkpoint. New relevant contradiction or a current stopping condition can require reassessment. Continuation requires a distinguishable hypothesis, a discriminating check, an explicit additional-attempt or resource allowance and a stopping condition inside remaining parent resources. Reassessment resets neither attempts nor resources; exhaustion parks the affected continuation. Five alone does not require human escalation.
+
+Retain decisions in existing work context and handoffs; no counter hook, classifier, compulsory per-conversation record or new mandatory report is required. Recording-specific typed recovery parks an identical unchanged failure without waiting for five rounds. Preserve known business proof when only recording fails. Exclude parked and human-waiting branches until an actual relevant reopening event. If no eligible work remains, use valid proof for all required criteria and resolve relevant contrary evidence before owning completion verification; otherwise report honest partial/waiting status.

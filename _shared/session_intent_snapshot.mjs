@@ -78,7 +78,7 @@ function latestIntentEvent(sessionDir, platform, sessionId) {
   for (let index = rows.length - 1; index >= 0; index -= 1) {
     const row = rows[index];
     if (row && row.event === "user-input-observed") {
-      // A mixed latest input makes legacy freshness unknown. Do not revive
+      // A mixed latest input makes audit freshness unknown. Do not revive
       // an older own-session input from before a foreign/headerless row.
       if (!identityMatches(row, platform, sessionId)) return null;
       const eventId = typeof row.event_id === "string" ? row.event_id : "";

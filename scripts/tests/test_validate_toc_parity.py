@@ -1,15 +1,8 @@
-"""TDD suite for the SKILL.md Contents<->heading parity check in validate_skills.py.
+"""Structural checks for SKILL.md Contents and heading parity.
 
-Why this exists (review finding, this session): a new `## Section` was added to a
-SKILL.md but the `## Contents` list was not updated, and the validator passed
-because no check enforced Contents<->heading parity. The existing 4-1 TOC rule
-only checks TOC *presence* in references/*.md > 300 lines, not SKILL.md parity.
-
-The check is deterministic and structural:
-- It runs ONLY when a `## Contents` section exists (short skills without a TOC are exempt).
-- Every `##` (h2) section heading outside fenced code blocks must appear in Contents.
-- Every Contents anchor must resolve to some real heading anchor (no dangling links).
-- Headings inside fenced code blocks (``` or longer fences) are NOT sections.
+When Contents exists, every h2 outside fenced code must be listed and every
+Contents anchor must resolve. Short skills without Contents are exempt.
+Reference-file TOC presence is checked separately.
 
 Run: python3 -m pytest scripts/tests/test_validate_toc_parity.py -q
 """

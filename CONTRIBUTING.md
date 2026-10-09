@@ -65,7 +65,7 @@ When reporting a workflow case, include what you were trying to do, the platform
 1. Read [README.md](./README.md) for the project model.
 2. Read [AGENTS.md](./AGENTS.md) for the repository operating contract.
 3. Check [docs/getting-started/installation.md](./docs/getting-started/installation.md) for installer behavior and platform paths.
-4. For public surface changes, run the validation commands listed below before opening a pull request. Update English and paired polite Korean documentation together, preserve literal control/schema tokens, and keep dated historical release facts intact.
+4. For public surface changes, run the validation commands listed below before opening a pull request. Update English and paired polite Korean documentation together and preserve literal control/schema tokens.
 
 ## Development Setup
 

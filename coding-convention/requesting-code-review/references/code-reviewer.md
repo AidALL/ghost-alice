@@ -1,6 +1,6 @@
 # Code Review Agent Prompt Template
 
-This document is the LLM prompt template injected verbatim into the `code-reviewer` subagent. The English body is preserved in English for consistency of model instructions, and option 4 (uppercase emphasis on key verbs) is applied. Only the placeholders are filled in at dispatch time.
+This document is the LLM prompt template injected verbatim into the `code-reviewer` subagent. Keep the prompt body in English and express required emphasis with uppercase key verbs. Fill in only the placeholders at dispatch time.
 
 ````
 # Code Review Agent
@@ -171,7 +171,7 @@ Reasoning: Core implementation is solid with good architecture and tests. Import
 - `{PLAN_REFERENCE}` is the path to the plan or specification file.
 - `{BASE_SHA}` / `{HEAD_SHA}` are the git SHAs of the review range.
 
-□ Notes on applying option 4
+□ Prompt language and emphasis
 
 - In the English body, NEVER, MUST, STOP, ALWAYS, ONLY, EXACTLY, CRITICAL, and VERIFY are emphasized in uppercase.
 - Markdown bold (the emphasis notation wrapped in two asterisks) is not used per user policy. Emphasis is expressed instead with the uppercase tokens above plus headers and lists.

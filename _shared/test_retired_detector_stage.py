@@ -1,4 +1,4 @@
-"""Retired classifier history through real source hooks, not native host proof.
+"""Stored classifier records supply no permission through the source hooks.
 
 Dependencies: Python 3.11+ standard library, pytest and Node on PATH.
 """

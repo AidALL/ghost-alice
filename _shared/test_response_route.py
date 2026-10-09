@@ -282,7 +282,7 @@ class ResponseRouteTests(unittest.TestCase):
         self.record()
         with ledger.storage_transaction(self.root) as tx:
             state = ledger.read_session_state(**self.coords, transaction=tx)
-            state.pop("canonical_input_event_id")  # Genuine pre-upgrade SQLite shape.
+            state.pop("canonical_input_event_id")  # SQLite fixture with no response projection tables.
             tx.execute("DROP TABLE canonical_intakes")
             tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
                        (json.dumps(state), "codex", "current"))
@@ -332,7 +332,7 @@ class ResponseRouteTests(unittest.TestCase):
         paths["events"].write_text("".join(json.dumps(e) + "\n" for e in ledger.read_session_events(**self.coords)))
         coords = dict(root=copied, platform="codex", session_id="current")
         ledger.migrate_session(**coords)
-        # Older Core's generic import retained all accessory JSON state fields.
+        # Imported accessory JSON fields remain available for inspection.
         # Restore that exact persisted shape after importing its actual audit.
         with ledger.storage_transaction(copied) as tx:
             imported = ledger.read_session_state(**coords, transaction=tx)

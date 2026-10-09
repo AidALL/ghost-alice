@@ -36,7 +36,7 @@ session gate SSOT는 `skill-catalog/session-gates.json`입니다. 이 문서는 
 
 정상 경로는 `pending-merge precheck → session-intent-analyzer → task-router → downstream/tool-checkpoint`입니다. hook의 현재 pending-merge 결과를 먼저 사용하며, 결과가 없으면 실제 작업 전에 수동 확인을 마칩니다. bounded no-work terminal route만 이를 다음 실제 작업까지 미룰 수 있습니다.
 
-session-intent intake는 task-router에 직접 전달됩니다. 같은 정확한 세션의 skill-evolution은 report-only terminal branch이며 task-router나 자동 생산 작업으로 연결되지 않습니다. 독립적인 입력별 classifier와 downstream permission gate는 현재 경로에서 제거되었습니다. legacy 판단과 감사는 읽을 수 있는 이력이며 현재 실행 권한이 아닙니다.
+session-intent intake는 task-router에 직접 전달됩니다. 같은 정확한 세션의 skill-evolution은 report-only terminal branch이며 task-router나 자동 생산 작업으로 연결되지 않습니다. 네이티브 실행 권한은 host가 소유하며, 감사 기록에서 권한을 만들지 않습니다.
 
 task-router는 매 입력마다 현재 요청과 계속 승인된 작업을 대조하고 의미 분해, focus, skill assignment 및 현재 작업 선택을 소유합니다. intake, 원시 의도 추론, ledger update, credentials 또는 native permission은 소유하지 않습니다. 단순 질문이나 상태 질문도 routing 대상이지만 미완료 승인 작업을 자동으로 중단시키지 않습니다.
 
@@ -60,7 +60,7 @@ hook은 raw prompt 대신 digest, 길이, 정확한 입력 식별자와 순서�
 2. session-intent hook은 digest-only intake와 audit를 원자적으로 기록합니다. 필요한 semantic delta는 같은 정확한 입력에만 연결합니다.
 3. task-router는 exact intake를 소비해 현재 요청과 미완료 승인 작업을 대조한 뒤 현재 qualified execution 또는 nonexecution을 선택합니다. skill-evolution은 별도 report-only 종점입니다.
 4. conditional boundary 이후 domain owner가 생산과 검증을 수행합니다. Core가 criterion evidence, completion/publication route와 실제 host delivery를 구분하고 AP는 현재 선택된 단위의 결과만 기록합니다.
-5. `tool-checkpoint`는 `PreToolUse`/`BeforeTool` retry checkpoint입니다. 매 tool call의 strict audit를 유지하고 exact input lineage의 반복 surface만 줄입니다. legacy model judgment, tool-call identity, arbitrary payload 또는 audit metadata에서 native permission을 만들지 않습니다.
+5. `tool-checkpoint`는 `PreToolUse`/`BeforeTool` retry checkpoint입니다. 매 tool call의 strict audit를 유지하고 exact input lineage의 반복 surface만 줄입니다. tool-call identity, arbitrary payload 또는 audit metadata에서 native permission을 만들지 않습니다.
 
 surface에는 `hook-stage: PreToolUse`와 `meaning: tool-call retry checkpoint, not user-input intake`를 함께 둡니다. native tool permission은 host에 남으며 human authority, credentials, source/owner/lineage 검증도 유지합니다.
 
@@ -138,7 +138,7 @@ final response가 executed work의 complete, fixed, successful, freshly verified
 
 Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message.
 
-Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check. Verification output does not create a new obligation to verify the verification.
+Before a discretionary check, name the unresolved criterion or competing explanation, why the method discriminates, and attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions. Mere potential to find something is insufficient. Stochastic repeats require uncertainty, sampling and stopping rules. Mandatory owning checks remain required; unavailable proof or unresolved required criteria prevent completion. Reuse valid unchanged passing proof at its original source and time; reopen only affected proof after observed change, contradiction or explicit recheck. Unknown already-executed business state calls for bounded affected observation, not automatic business replay; not-yet-executed required work still needs its actual action. Inconclusive checks give no business pass/fail verdict or failed-business-repair increment, but observation and recording attempts consume their bounded resources. Verification output alone does not create a new obligation to verify the verification.
 
 Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists. Answer an objection that a check was redundant from the recorded mutation authority and events, not from hypothetical external changes. Say each fact, status, plan, and apology once; later messages carry only new results or decisions. canonical contract는 `coding-convention/verification-before-completion/references/verify-or-reuse.md`이며 Claude와 Codex가 같은 contract를 그대로 쓰고, platform adapter는 tool name mapping만 담당합니다.
 
@@ -193,7 +193,7 @@ Instruction body 재사용은 canonical `coding-convention/verification-before-c
 
 ## Managed Completion Recording Contract
 
-Core는 accepted response route와 owner, work-unit ID 및 contract revision을 기준으로 current-ready-owned 실행 단위만 선택합니다. AP v2는 해당 단위의 admitted 기준을 기록하며 누적 이력과 unadmitted 보호 조건을 실행 의무로 바꾸지 않습니다. 관리되는 no-argument 훅 경로는 `autopilot-completion-receipt.v2`를 선택하고 기존 공개 legacy API는 v1 기본값을 유지합니다. 위치와 protocol 전달은 session, origin, native trust, admission 또는 approval을 부여하지 않습니다.
+Core는 accepted response route와 owner, work-unit ID 및 contract revision을 기준으로 current-ready-owned 실행 단위만 선택합니다. AP v2는 해당 단위의 admitted 기준을 기록하며 누적 이력과 unadmitted 보호 조건을 실행 의무로 바꾸지 않습니다. 관리되는 no-argument 훅 경로는 `autopilot-completion-receipt.v2`를 선택하고 직접 호출하는 공개 API의 기본값은 v1입니다. 위치와 protocol 전달은 session, origin, native trust, admission 또는 approval을 부여하지 않습니다.
 
 새 publication request는 호환되는 기존 근거의 원본 source와 검증 시간을 유지한 채 현재 입력에 연결할 수 있습니다. 새 입력 자체는 변경되지 않은 업무 검증을 다시 열지 않습니다. 적용 여부는 Core, 기록 가능 여부는 AP가 소유합니다. recording-only 실패 시 intake와 binding 복구 도구는 계속 사용할 수 있으며 기록을 복구할 때까지 publication과 application을 차단합니다. 독립적으로 승인된 업무는 계속 진행하고 실제 기준, 관련 산출물 또는 owner/target이 바뀐 검증만 다시 수행합니다. 메타데이터만 고치는 응답은 사용 가능한 이전 답변이 실제로 보이고 claims가 같을 때만 허용됩니다. 그 외에는 완전한 답변을 조립하고 근거가 없으면 지원되지 않는 완료 주장을 정직하게 수정합니다. 출력 io-trace는 선택이며 strict audit은 유지합니다.
 
@@ -206,3 +206,17 @@ AP가 enabled이면 실제 current-ready qualified selected execution과 Core `p
 첫 recording-only failure는 bounded repair를 허용합니다. 동일한 실패가 변경 없이 반복되면 decision-relevant recording/dependency 변화까지 기록을 보류합니다. 독립적으로 승인된 작업은 계속하며 root, source, receipt, approval 또는 target을 추측하지 않습니다. supported business outcome, recording/application, whole-unit completion, delivery scope는 구별합니다.
 
 owner는 같은 승인 작업 안에서 artifact, mapping, composition, route 또는 inferred premise를 다시 열고 생산 작업으로 돌아갈 수 있습니다. micro/meso/macro/meta는 양방향 focus이며 순서대로 모두 올라가는 의식이 아닙니다. 정확한 human-owned decision이나 새로운 explicit authority가 필요할 때만 사용자에게 묻습니다. evolution은 report-only 종점입니다.
+
+## Repair and authority conditions
+
+현재 입력과 이전의 실제 사용자 지시가 목표·금지 사항·허용 행동과 대상·부수 효과·자원에 관한 권한의 출처입니다. 보관된 권한 사실과 신뢰된 system/project 제약에는 각각 출처를 유지합니다. intake와 router가 권한을 부여하지는 않습니다. 사용자가 정한 기준과 자원 한도는 에이전트가 도출한 해석이나 한정된 실행 계획과 구별합니다. 명시적 자원 한도가 없다는 이유로 승인된 한도를 만들지 않습니다. 실제 권한 안에서 구현 계획을 갱신하되 수락 기준을 약화하지 않습니다. 경계를 넘기 전에 정확한 사람 소유 결정을 요청합니다. 실제 승인만 해당 계획과 권한을 갱신하며, 거부는 해당 경로를 보류하고 응답이 없으면 대기를 유지합니다.
+
+실패한 복구 라운드는 수정과 완료된 해당 관측에서 같은 미해결 실패가 확인된 경우입니다. 최초 실패는 0회입니다. 미해결 실패·기준·단계·대상으로 사건을 구별하고 각 결과가 원인·매핑·설계·검증 판단에 무엇을 바꾸는지 설명합니다. 담당자나 세션이 바뀌어도 누적 시도와 최초 다섯 회 재평가의 처리 여부를 유지합니다. 원인을 모른다는 이유로 이름이나 횟수를 초기화하지 않으며, 같은 오류 문구만으로 서로 다른 업무·기록 실패를 합치지 않습니다. 해결이 입증된 뒤 재발하면 연결된 새 사건으로 다룹니다. 다섯 회는 최초 필수 전제 재평가 전의 최대 실패 횟수이며 최소 재시도 횟수나 전체 작업 한도가 아닙니다. 이 재평가를 처리했다면 누적 여섯·일곱 회라는 사실만으로 다시 발동하지 않습니다. 새로운 관련 반대 근거나 현재 중단 조건은 별도로 재평가를 요구할 수 있습니다. 계속하려면 구별 가능한 가설·검사·명시적인 추가 시도 또는 자원 한도·중단 조건이 남은 전체 자원 안에 있어야 합니다. 재평가는 횟수나 자원을 초기화하지 않으며 한도가 소진되면 해당 진행을 보류합니다. 다섯 회만으로 사람에게 결정을 요구하지 않습니다.
+
+재량 검사는 미해결 기준이나 경쟁 설명, 검사가 이를 구별하는 이유, 서로 다른 구체적 다음 행동·수락 판단·경계 결정으로 이어지는 결과를 명시합니다. 무언가 발견할 가능성만으로는 부족합니다. 확률적 반복에는 불확실성·표본 추출·중단 규칙이 필요합니다. 필수 검사는 유지하며 필수 근거가 없거나 기준이 미해결이면 완료할 수 없습니다. 변하지 않은 유효한 proof는 원래 출처와 시간으로 재사용합니다. 이미 실행한 업무의 상태가 불명확하면 해당 관측을 복구하며 업무를 자동 재실행하지 않습니다. 아직 실행하지 않은 필수 업무는 실제 실행이 필요합니다. 불확정 검사는 업무 성공·실패나 복구 실패 횟수를 확정하지 않지만 관측·기록 시도도 한정된 자원을 소비합니다.
+
+기존 작업 문맥과 인계에 판단을 유지하며 별도 counter hook·classifier·매 대화 기록·필수 보고서를 만들지 않습니다. 변하지 않은 동일 기록 실패는 담당 typed recovery에 따라 다섯 회를 기다리지 않고 보류합니다. 기록만 실패했다면 업무 proof를 유지합니다. 보류·사람 응답 대기 경로는 실제 재개 조건 전까지 선택에서 제외합니다. 선택할 업무가 없으면 모든 필수 기준의 유효한 proof와 관련 반대 근거를 확인하여 담당 완료 검증으로 진행하며, 충족하지 못하면 정직한 부분·대기 상태를 반환합니다.
+
+담당 workflow는 선택한 업무나 수정을 호출하고 실제 결과를 받으며, 선언한 실행 결과 자체가 검증 관측이 될 수 있습니다. 도메인 검증은 실제 관측·출처·시간을 workflow에 반환하여 기준을 판단하게 합니다. 적용되는 등록 v2 pretool은 도구 실행 전에 AP origin·receipt를 자동 준비하고 현재 qualified 명령 문맥을 반환합니다. 유효한 준비 결과를 재사용하며 적용되는 의존성이 실제 미충족일 때만 반환된 명시적 준비 helper를 사용합니다. 기록 누락은 capture·publication·application의 기록 가능성에 영향을 주며 AP pretool은 계속 진행하고 native 도구 권한은 host가 담당합니다. 필수 또는 판단을 구별하는 업무 관측은 자체 권한·자원 한도를 따르며 기록 복구 규칙은 기록 시도에만 적용됩니다. 기록이 불가능한 경우에도 유효한 proof와 원래 출처·시간을 유지합니다.
+
+후보 완료를 위해 담당 workflow가 근거를 얻거나 유효한 proof를 재사용합니다. 적용되는 AP publication은 정확한 현재 qualified 선택·prepared AP receipt·실제 반환된 publish 명령으로 pending-adapter 요청을 만듭니다. Native candidate/final dispatch는 실제 등록된 handler를 호출합니다. 완료 guard는 후보의 필드와 해당 skill 근거를 확인하고 privileged AP Stop adapter는 publication·proof·소유권·의존성을 재검증합니다. 현재 유효한 publication만 공유 권한 transaction에서 정확한 Core 기준 writer로 진행합니다. 누락·오래됨·무효 상태는 기준 기록 없이 기록 진단을 반환합니다. 실제 application 상태와 남은 기준이 단위별 기록·완료 주장의 근거입니다. Handler는 실제 native 호출 규칙을 따릅니다. Core는 전달 정책과 허용된 payload 조합을 담당하며 workflow/native host가 실제 화면에 전달합니다. 후보 주장은 현재 지원되는 범위를 사용하고 실제 기록·적용·관측된 전달 결과가 후속 복구와 완료 주장을 결정합니다. 이미 보이는 변경 없는 업무 본문은 해당 control-only repair로 보존합니다. 가능한 후속 조치는 workflow로 반환하고 선택 가능한 진행이 없으면 정직한 부분·대기 상태를 반환합니다.

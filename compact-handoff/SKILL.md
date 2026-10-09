@@ -67,3 +67,7 @@ Write a short handoff with these fields, then validate it with `scripts/compact_
 - Do not use compact-handoff as a reason to create extra reports or plans.
 - Do not use compaction to hide uncertainty.
 - A handoff is a continuity artifact, not evidence that the work is complete.
+
+## Unresolved repair continuity
+
+Carry the unresolved failure, affected criterion, stage, target, cumulative failed repair rounds, whether the first-five checkpoint is addressed, current cause hypothesis and remaining attempt/resource limit in the existing `in-progress` or `next-step` content. Preserve original outcome evidence and source/time. A handoff or agent change does not reset the count, change authority or refill resources. Demonstrated resolution and later recurrence remain linked as a new incident. Do not add a separate mandatory record.

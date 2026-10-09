@@ -1,23 +1,8 @@
-"""TDD suite for the report-only wiki integrity audit (scripts/audit_wiki_integrity.py).
+"""Report-only Wiki integrity checks.
 
-Why this exists (design+wiki review, this session): the project Wiki is a named
-design surface. architecture.md line 5 ("Long-form design background lives in
-the Wiki") and the Wiki design page ("normative SSOT ... remains in the main
-repository") set up a two-way repo<->wiki contract. Every comparable repo-internal
-doc surface has a validator (validate_entrypoints, check_skill_gate_contract,
-i18n parity, toc parity, public_surfaces, platform_adapters, pending_merge_layering),
-but the Wiki -- an external repo with no built-in link validation -- has zero
-automated integrity protection. This matches Workstream E ("wiki and repo recovery
-guide drift") of the prose-to-code separation direction.
-
-Scope is deliberately narrow. During discovery this session, content/path/skill-name
-drift heuristics were shown to over-flag (SKILL.md, settings.json, claim-evidence-map,
-recovery-action all falsely flagged). So this audit checks ONLY deterministic,
-zero/low-false-positive structural signals, mirroring the test_validate_toc_parity.py
-philosophy:
-- broken internal wiki links (a [text](Target) pointing at a non-existent wiki page)
-- en<->ko page pairing (handles both name<->name_ko and name_en<->name_ko)
-- it must NOT flag external links, image links, same-page anchors, or special pages
+Validate internal page links and English/Korean page pairing. External links,
+images, same-page anchors and special pages are excluded from page-target
+checks. Main-repository contracts remain normative.
 
 Run: python3 -m pytest scripts/tests/test_audit_wiki_integrity.py -q
 """
@@ -121,7 +106,7 @@ class TestEnKoPairing(unittest.TestCase):
     def test_ko_page_without_en_is_flagged(self):
         pages = dict(CLEAN)
         del pages["ghost-alice-os-design_en"]
-        # fix the now-dangling link so we isolate the pairing signal
+        # Resolve the dangling link to isolate the pairing signal.
         pages["ghost-alice-os-design_ko"] = "Language: 한국어\n본문."
         pages["Home"] = "Welcome. See [Addons](addon-authoring)."
         findings = awi.audit(pages)

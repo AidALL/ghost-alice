@@ -11,10 +11,9 @@
   - [5. Find the Original Trigger](#5-find-the-original-trigger)
 - [Adding Stack Traces](#adding-stack-traces)
 - [Finding Which Test Causes the Pollution](#finding-which-test-causes-the-pollution)
-- [Real Example: Empty projectDir](#real-example-empty-projectdir)
+- [Worked Example: Empty projectDir](#worked-example-empty-projectdir)
 - [Core Principle](#core-principle)
 - [Stack Trace Tips](#stack-trace-tips)
-- [Real Impact](#real-impact)
 
 
 ## Overview
@@ -29,13 +28,13 @@ A bug often surfaces deep in the call stack (git init in the wrong directory, a 
 digraph when_to_use {
     "Bug deep in the stack?" [shape=diamond];
     "Can you trace back?" [shape=diamond];
-    "Fix at the symptom point" [shape=box];
+    "Bounded investigation or exact human-owned blocker" [shape=box];
     "Trace to the original trigger" [shape=box];
     "Better: also add layered defense" [shape=box];
 
     "Bug deep in the stack?" -> "Can you trace back?" [label="yes"];
     "Can you trace back?" -> "Trace to the original trigger" [label="yes"];
-    "Can you trace back?" -> "Fix at the symptom point" [label="no - blocked"];
+    "Can you trace back?" -> "Bounded investigation or exact human-owned blocker" [label="no; keep dependent fix closed"];
     "Trace to the original trigger" -> "Better: also add layered defense";
 }
 ```
@@ -134,17 +133,17 @@ Use the bisection script `find-polluter.sh` in this directory.
 
 It runs the tests one by one and stops at the first source of pollution. See the script for usage.
 
-## Real Example: Empty projectDir
+## Worked Example: Empty projectDir
 
 Symptom: `.git` created in `packages/core/` (the source code)
 
 Trace chain.
 
-1. `git init` ran in `process.cwd()` ← empty cwd parameter
-2. WorktreeManager was called with an empty projectDir
-3. Session.create() passed an empty string
-4. The test accessed `context.tempDir` before beforeEach
-5. setupCoreTest() initially returned `{ tempDir: '' }`
+1. `git init` runs in `process.cwd()` ← empty cwd parameter
+2. WorktreeManager receives an empty projectDir
+3. Session.create() passes an empty string
+4. The test accesses `context.tempDir` before beforeEach
+5. setupCoreTest() returns `{ tempDir: '' }`
 
 Root cause: a top-level variable initialization that accesses an empty value
 
@@ -189,12 +188,3 @@ Never fix only where the error appears. Trace back and find the original trigger
 - Before the operation: log before the dangerous operation, not after the failure
 - Include context: directory, cwd, environment variables, timestamp
 - Capture the stack: `new Error().stack` shows the full call chain
-
-## Real Impact
-
-From a debugging session (2025-10-03).
-
-- A 5-step trace found the root cause
-- Fixed at the source (getter validation)
-- Added 4 defense layers
-- 1847 tests passed, zero pollution

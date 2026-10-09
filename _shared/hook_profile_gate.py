@@ -1067,7 +1067,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
         del args[index:index+2]
     normalized_args = _strip_trailing_marker_args(args)
     if normalized_args is None or normalized_args[0] != "run":
-        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|legacy-visibility-csv] <payload-b64>\n")
+        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
 
     payload = normalized_args[2] if len(normalized_args) == 3 else normalized_args[3]
@@ -1090,7 +1090,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
                     )
                 )
             raise SystemExit(run(normalized_args[1], payload,binding=binding))
-        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|legacy-visibility-csv] <payload-b64>\n")
+        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
     except HookCommandRejected as exc:
         rejection_stderr = f"hook command rejected: {exc}\n"

@@ -101,7 +101,7 @@ class StopRetrySurfaceTests(unittest.TestCase):
         self.assertNotIn("complete standalone final answer", payload["reason"])
 
     def test_native_interactive_cli_payload_preserves_visible_answer(self):
-        # The isolated native 2.1.287 probe supplied cli + scratchpad_dir at Stop.
+        # Stop payload fixture supplies cli and scratchpad_dir.
         payload = self.run_hook([prompt("Compute it."), skill_call(), reply(DEFECTIVE)], "cli",
                                 scratchpad_dir="/tmp/native-probe-scratchpad")
         self.assertIn("only the missing or corrected control blocks", payload["reason"])

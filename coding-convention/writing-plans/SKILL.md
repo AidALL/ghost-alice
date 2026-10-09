@@ -31,7 +31,7 @@ Assume the engineer is a capable developer but knows almost nothing about our to
 
 ○ Declare at the start: "I will write the implementation plan with the writing-plans skill."
 
-○ Context: this skill must run in the dedicated worktree created by the brainstorming skill.
+○ Context: use the authorized checkout. When isolation is needed, follow using-git-worktrees; brainstorming owns design, not worktree creation.
 
 ○ Plan storage location: `.tmp/implementation-plans/YYYY-MM-DD-<feature-name>.md`
 
@@ -44,7 +44,7 @@ If the spec covers several independent subsystems, it should have been split int
 
 ## File Structure
 
-Before defining tasks, map which files will be created or modified and write down the responsibility of each. The decomposition decision is locked here.
+Before defining tasks, map the files to create or modify and record each responsibility. Use that decomposition as the current plan. Contrary evidence may reopen an affected inferred premise, mapping or task within the accepted objective and authority; request only a human-owned change to explicit scope or another unresolved decision.
 
 - Design units with clear boundaries and well-defined interfaces. Each file holds one clear responsibility.
 - Code that fits in context at once is reasoned about best. Edits are more stable when files are small and focused. Prefer small, focused files over large files that do too much.
@@ -159,13 +159,13 @@ Search the plan for the patterns in the "No Placeholders" section above. Red fla
 
 Do the types, method signatures, and attribute names used in later tasks match those defined in earlier tasks? If a function called `clearLayers()` in Task 3 shows up as `clearFullLayers()` in Task 7, that is a bug.
 
-When you find an issue, fix it inline. No re-review needed. Just fix it and proceed. If a spec requirement has no task, add a task.
+When you find an issue, repair it within the accepted scope and re-check the affected requirement when the change or contradiction makes its evidence insufficient. If a required condition lacks a task, add the task. Retain unchanged valid checks and return to execution.
 
 If the self-review alone leaves you uneasy, dispatch a subagent to run one more review of the plan document. The dispatch prompt template is defined in references/plan-document-reviewer-prompt.md.
 
 ## Execution Handoff
 
-After saving the plan, present the execution options.
+After saving or repairing the plan, follow the already authorized execution path. Continue the supported work without asking the user to choose again. Present the execution options below only when that choice remains unresolved.
 
 ```
 Plan complete and saved to .tmp/implementation-plans/<filename>.md.

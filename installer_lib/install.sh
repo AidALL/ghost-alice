@@ -319,7 +319,7 @@ _run_preflight_before_install() {
     done < <(iter_install_targets "${skills[@]}")
 
     if [ "${#legacy_args[@]}" -gt 0 ] && [ -z "$py" ]; then
-      error "$(t 'Python 3.11+ not found; aborting because legacy target quarantine cannot run' 'Python 3.11+ not found; aborting because legacy target quarantine cannot run')"
+      error "$(t 'Python 3.11+ not found; aborting because unowned target quarantine cannot run' 'Python 3.11+ not found; aborting because unowned target quarantine cannot run')"
       return 1
     fi
 
@@ -333,7 +333,7 @@ _run_preflight_before_install() {
         --pending "$pending_root" \
         --manifest "$manifest" \
         --platform "$platform_dir"; then
-        error "$(t "legacy target quarantine failed; aborting install: ${target_name}" "legacy target quarantine failed; aborting install: ${target_name}")"
+        error "$(t "unowned target quarantine failed; aborting install: ${target_name}" "unowned target quarantine failed; aborting install: ${target_name}")"
         return 1
       fi
     done

@@ -1,7 +1,5 @@
-"""Shell e2e for plan task C-THREAD-1: a codex copy-mode addon install writes an
-ownership marker attributed to the addon (owner=addon, addon_id=<id>), so
-classify_skill_root(expected_addon_id=<id>) (plan task T2.9) proves addon
-ownership end-to-end instead of failing closed.
+"""Shell e2e: copy-mode addon installation writes an ownership marker with
+owner=addon and the exact addon_id for classify_skill_root validation.
 
 Run: python3 -m pytest _shared/test_addon_marker_threading_shell.py -q
 """

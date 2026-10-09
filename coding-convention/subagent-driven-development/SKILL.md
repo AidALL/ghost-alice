@@ -148,7 +148,7 @@ The implementer cannot complete the task. Assess the blocking factor.
 - If it is a context problem, give more context and redispatch with the same model
 - If more reasoning is needed, redispatch with a stronger model
 - If the task is too large, split it into smaller pieces
-- If the plan itself is wrong, escalate to a human
+- If an inferred plan premise, mapping or decomposition is wrong, return it to the owning plan workflow and repair the affected part within existing authority. Ask the human only for an unresolved human-owned decision or changed explicit scope; continue independent authorized tasks.
 
 Never ignore an escalation or make the same model retry without any change. When the implementer says it is blocked, something must change.
 

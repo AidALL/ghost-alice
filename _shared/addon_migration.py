@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
-"""Best-effort migration of a legacy install-state into per-addon sidecars.
+"""Import platform install-state attribution into per-addon sidecars.
 
-Plan tasks T1.6/T1.7/T1.8. The legacy platform install-state lists targets with
-no addon identity, so this migration is deliberately conservative:
+Read the source state without modification. Seed a sidecar only when a target has
+unambiguous ``addon_id`` ownership and no sidecar exists. Record unattributed
+non-core targets in ``~/.ghost-alice/addons/_migration-report.json`` for explicit
+reconciliation; do not invent ownership or discard unresolved targets.
 
-- T1.6 audit: read the existing install-state read-only.
-- T1.7 seed: write a sidecar ONLY when the install-state target already carries
-  unambiguous addon identity (``addon_id``) and no sidecar exists yet. We never
-  fabricate ownership for a target that lacks identity.
-- T1.8 report: every non-core target we cannot attribute is written to
-  ``~/.ghost-alice/addons/_migration-report.json`` as a reconciliation candidate
-  (the user should re-install that addon via ``--addon-source`` to get a real
-  sidecar) -- it is not silently dropped and not mis-attributed.
-
-Pure standard library.
+Dependencies: Python standard library.
 """
 
 from __future__ import annotations
@@ -74,7 +67,7 @@ def audit(
     addons_dir: str | Path,
     core_skill_names: Iterable[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Classify legacy targets into (seedable-with-identity, unresolved)."""
+    """Classify install-state targets into attributable and unresolved groups."""
     core = set(core_skill_names)
     state = _load_state(install_state_path)
     targets = state.get("targets") if isinstance(state.get("targets"), list) else []

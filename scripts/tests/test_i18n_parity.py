@@ -130,11 +130,7 @@ def _extract_pairs_from_text(text: str, call_re: re.Pattern) -> list[tuple[str, 
 
 
 def extract_sh_pairs(path: str = _SH_PATH) -> list[tuple[str, str]]:
-    """Return (ko, en) pairs from all ``t`` calls in install.sh and installer_lib/*.sh.
-
-    Bash modularization moved many ``t`` call sites out of install.sh into
-    installer_lib/*.sh, so parity with install.ps1 must scan the combined source.
-    """
+    """Return (ko, en) pairs from all ``t`` calls in install.sh and installer_lib/*.sh."""
     sources = [path]
     lib_dir = os.path.join(os.path.dirname(path), "installer_lib")
     if os.path.isdir(lib_dir):
@@ -151,11 +147,7 @@ def extract_sh_pairs(path: str = _SH_PATH) -> list[tuple[str, str]]:
 
 
 def extract_ps1_pairs(path: str = _PS1_PATH) -> list[tuple[str, str]]:
-    """Return (ko, en) pairs from all ``T`` calls in install.ps1 and installer_lib/*.ps1.
-
-    PowerShell modularization moved many ``T`` call sites out of install.ps1 into
-    installer_lib/*.ps1, so parity with install.sh must scan the combined source.
-    """
+    """Return (ko, en) pairs from all ``T`` calls in install.ps1 and installer_lib/*.ps1."""
     sources = [path]
     lib_dir = os.path.join(os.path.dirname(path), "installer_lib")
     if os.path.isdir(lib_dir):

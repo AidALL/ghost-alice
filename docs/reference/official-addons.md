@@ -26,7 +26,7 @@ bash install.sh --addon autopilot
 | --- | --- | --- | --- |
 | autopilot | Continue verified work items through the privileged autonomous adapter after explicit approval. | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-This source candidate pairs Core `0.5.0` with Autopilot `0.5.0` and requires Core `0.5.0` for the current routing and managed completion APIs. It is not a published release or installed-adoption claim. Source validation, native runtime verification and publication are separate evidence. The [0.4.1 release notes](../release/2026-10-01-release-notes.md) retain their historical scope.
+Core `0.5.0` and Autopilot `0.5.0` use the routing and managed completion APIs. Autopilot requires Core `0.5.0` or later. Source checks, native runtime validation and publication establish separate evidence.
 
 ## Custom, Tenant, And Local Development Addons
 

@@ -26,7 +26,7 @@ bash install.sh --addon autopilot
 | --- | --- | --- | --- |
 | autopilot | 명시적 승인 이후 privileged autonomous adapter로 검증된 work item을 이어서 진행합니다. | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-이 소스 후보는 Core `0.5.0`과 Autopilot `0.5.0`을 함께 사용하며 현재 routing과 managed completion API에 Core `0.5.0`이 필요합니다. 게시된 릴리즈나 설치된 환경의 적용 완료를 뜻하지 않습니다. 소스 검증, native runtime 검증과 게시 근거는 구분합니다. [0.4.1 릴리즈 안내](../release/2026-10-01-release-notes.md)는 당시의 검증 범위를 유지합니다.
+Core `0.5.0`과 Autopilot `0.5.0`은 routing과 managed completion API를 사용합니다. Autopilot에는 Core `0.5.0` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
 
 ## Custom, Tenant, And Local Development Addons
 

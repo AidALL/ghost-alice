@@ -102,7 +102,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             env["CLAUDE_CODE_ENTRYPOINT"] = host
         self.counter += 1
         payload = dict(extra or {})
-        # These e7 repair cases exercise an explicitly usable visible prior answer.
+        # These repair cases exercise an explicitly usable visible prior answer.
         # Final-only/unknown assembly and absent usable prior are covered in test_stop_retry_surface.
         payload.setdefault("host_context",{"delivery_surface":"visible_transcript"})
         payload.setdefault("prior_answer_ref","fixture:usable-business-answer")
@@ -165,7 +165,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
     def assert_audit_surface(self, result, profile):
-        # This is the existing wrapper projection, separate from the silent
+        # Wrapper projection is separate from the silent
         # child audit hook whose original stdout is kept in the strict log.
         self.assertEqual(result.stdout, "io-trace observed\n" if profile == "minimal" else "")
 

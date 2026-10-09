@@ -62,7 +62,7 @@ for offset in range(0, len(raw_targets), 4):
         }
     )
 
-# Derived aggregate (plan T1.4/T1.5): enrich/append addon targets from the cumulative per-addon sidecar scan. Separate-run addons persist because they are read from their own sidecars, not from this run's argv. This is a full rebuild, never a read-modify-write of the shared manifest. Fail-safe: if the registry is unavailable the install-state degrades to the core-only argv targets.
+# Derived aggregate: enrich/append addon targets from the cumulative per-addon sidecar scan. Separate-run addons persist because they are read from their own sidecars, not from this run's argv. This is a full rebuild, never a read-modify-write of the shared manifest. Fail-safe: if the registry is unavailable the install-state degrades to the core-only argv targets.
 try:
     import addon_registry
 
@@ -73,7 +73,7 @@ except Exception:
     sidecar_records, sidecar_skipped = [], []
 
 if sidecar_skipped:
-    # Fail-closed: do NOT overwrite install-state with a success manifest that would silently hide an unreadable / tampered / future-major sidecar. Emit a registry-health diagnostic and abort so the drop is visible (plan T1.4/T1.5).
+    # Fail-closed: do NOT overwrite install-state with a success manifest that would silently hide an unreadable / tampered / future-major sidecar. Emit a registry-health diagnostic and abort so the drop is visible.
     health_path = Path(state_path).with_name(f"{platform}-registry-health.json")
     try:
         health_path.parent.mkdir(parents=True, exist_ok=True)

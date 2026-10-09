@@ -98,7 +98,7 @@ class HookStatus:
     details: dict[str, Any]
     missing_reason: str | None = None
     unsupported: bool = False
-    # True when hook files are present but their runtime event semantics are not yet confirmed by a live smoke run. Per docs/policies/platform-adapter-compliance.md, Codex stays instruction-backed (pending smoke evidence) rather than being reported as native runtime-verified. This does not change install behavior; it only keeps the status report honest about unverified event semantics.
+    # Report instruction-backed hook installation separately from verified native event semantics; the structured status requires live smoke evidence.
     pending_smoke_evidence: bool = False
 
 # ── Hook Payload Definitions ──────────────────────────────
@@ -276,7 +276,7 @@ def _destination_action(platform_key, destination, action, *, dry_run=False):
         if action not in {"install", "status", "uninstall"}:
             raise ValueError("isolated destination does not support this action")
         if install_destination.current() is None and (os.environ.get("GHOST_ALICE_HOOK_SHARED_DIR") or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR")):
-            raise ValueError("isolated destination conflicts with legacy runtime overrides")
+            raise ValueError("isolated destination conflicts with runtime overrides")
     return resolved
 
 
@@ -441,7 +441,7 @@ SESSION_INTENT_INTERNAL = (
     "Agents add semantic summaries, constraints, and decisions only when intent materially changes. "
     "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
     "Use the ledger as context for task-router and report-only skill-evolution. "
-    "skill-evolution is a report-only branch that terminates and does not feed task-router. Legacy model judgments remain history and never determine current tool permission. "
+    "skill-evolution is a report-only branch that terminates and does not feed task-router. Native tool permission belongs to the host; stored model judgments grant no permission. "
     "Capture trigger: when this input corrects the agent's prior behavior or understanding, record a compressed conduct_feedback entry (id, failure_pattern, corrective_rule, pattern_class, source=user-explicit, status=open) with session_intent_ledger.py so skill-evolution and the /evolution backlog surface it. "
     "Basis for the correction judgment: a mismatch the input asserts between the agent's prior action/claim and the applicable goal, constraints, non_goals, decisions, and acceptance_criteria, not keyword matching. A direct assertion or clear contextual rejection supports user-explicit feedback even without a raw transcript. "
     "Evidence boundary: read supplied prior context before attributing a mismatch. New constraints, reminders, changed requirements, or refreshing a formerly valid result do not alone establish prior misconduct; record them as intent fields. Use source=inferred only for an actually observed behavior gap, not a hypothetical future violation or buggy task code. If no mismatch is supported, leave feedback absent. Increment occurrence_count only for another supported correction, not a repeated boundary or reread lesson."
@@ -585,7 +585,7 @@ SESSION_START_ENTRY_CODEX = {
 # 4. User input hook (auxiliary): require web search before external tool claims (rule 10).
 # This is an agent governance hook with the same shape as the task-router hook. It injects text on every user input to require community signal checks before external tool claims.
 WEB_SEARCH_FIRST_MARKER = "[web-search-first]"
-# Only platforms where the reminder reaches the model get the hook. On Claude Code its systemMessage output is shown to the user and never added to the model context, so it adds no model-facing layer of Rule 10 there; the installer leaves it out and removes an entry from an older install.
+# Register this reminder only where its output reaches model context. On Claude Code, systemMessage is user-facing; omit the reminder and remove any matching managed entry.
 WEB_SEARCH_FIRST_PLATFORMS = frozenset({"codex"})
 WEB_SEARCH_FIRST_INTERNAL = (
     "web-search-first: AGENTS.md Rule 10. Before factual claims about external tools, libraries, CLIs, SDKs, frameworks, versions, or platform behavior, cross-check at least three community sources with WebSearch. Official docs alone are not enough for runtime behavior."
@@ -702,9 +702,10 @@ def _print_addon_target_summary(addon_sources: list[str], platform: str | None =
 
 
 def _ghost_alice_installed_skill_names() -> list[str]:
-    """Return core skill names from the managed catalog only.
+    """Return Core skill names from the managed catalog.
 
-    The legacy function name is retained for internal callers, but arbitrary directories under an installed skills root are not an authority for Claude Skill permissions.
+    Arbitrary directories under an installed skills root do not authorize
+    Claude Skill permissions.
     """
     return _discover_ghost_alice_skill_names_from_catalog()
 
@@ -1183,7 +1184,7 @@ def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, An
 
 
 def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[str, str, str, str]]:
-    """Resolve observational addon hooks for one platform (plan Phase 4).
+    """Resolve observational addon hooks for one platform.
 
     Returns [(addon_id, hook_id, event_intent, script_abs_path)]. Re-uses
     addon_installer.load_addon_targets, which fail-closes on a forbidden hook
@@ -1210,7 +1211,7 @@ def _resolve_privileged_adapter_hooks(
     *,
     skills_dir: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Resolve core-owned privileged adapter hooks for one platform (plan Phase P5)."""
+    """Resolve core-owned privileged adapter hooks for one platform."""
     if not addon_sources:
         return []
     targets = addon_installer.load_addon_targets(list(addon_sources), platform=platform_key)
@@ -2080,7 +2081,7 @@ def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
     """Recognize the actual managed outer argv, including serialized binding.
 
     Marker text and a lookalike filename do not establish runner ownership.
-    Legacy no-binding commands remain removable without granting v2 capability.
+    Commands without an outer binding are removable without granting v2 capability.
     """
     if not hook_id:
         return False
@@ -2288,7 +2289,7 @@ def install_hook(
         destination = _default_destination(platform_key) if destination is None else destination
         resolved = _destination_action(platform_key,destination,"install",dry_run=dry_run)
         if resolved.mode == "isolated" and skills_dir is not None and Path(skills_dir) != Path(resolved.skills_dir):
-            raise ValueError("isolated destination conflicts with legacy skills override")
+            raise ValueError("isolated destination conflicts with skills override")
         if resolved.mode == "normal" and skills_dir is not None:
             resolved = __import__("dataclasses").replace(resolved,skills_dir=str(Path(skills_dir).expanduser().resolve()))
         with install_destination.use(resolved):
@@ -2617,7 +2618,7 @@ def install_hook(
     # Trust only exact event/command pairs produced by verified addon sources in
     # this install; marker text in pre-existing user hooks is not authority.
     verified_addon_commands: set[tuple[str, str]] = set()
-    # Tier-2 observational addon hooks (plan Phase 4), wired AFTER the core suite. When addon_sources is empty this loop runs zero times, so a core-only install stays byte-identical (no entry added, `changed` untouched).
+    # Wire observational addon hooks after the Core suite. Empty addon_sources leaves the hook configuration unchanged.
     for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
         event_name = _resolve_hook_event(event_intent, platform_key)
         marker = f"[addon:{addon_id}] {hook_id}"
@@ -2643,7 +2644,7 @@ def install_hook(
         else:
             _log(_t(f"  {event_name} addon hook already exists: {marker}", f"  {event_name} addon hook already exists: {marker}"))
 
-    # Privileged adapters (plan Phase P5) are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
+    # Privileged adapters are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
     privileged_adapter_specs = _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir)
     if platform_key == "claude" and any(spec.get("adapter_id") == "autopilot-mode" for spec in privileged_adapter_specs):
         removed = _remove_legacy_autopilot_hook_entries(hooks_obj)
@@ -2833,7 +2834,7 @@ def _remove_legacy_autopilot_hook_entries(hooks_obj: dict[str, Any]) -> int:
 
 
 def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
-    """Remove one addon's observational hook entries by exact marker (plan Phase 4).
+    """Remove one addon's observational hook entries by exact marker.
 
     SECURITY: only a well-formed ``[addon:<id>] <hook_id>`` marker is honored; any
     other string (e.g. a forged core marker like ``[completion-reminder] AGENTS.md``)
@@ -2867,7 +2868,7 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
 
 
 def remove_adapter_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
-    """Remove one core-owned privileged adapter hook by exact marker (plan Phase P5)."""
+    """Remove one core-owned privileged adapter hook by exact marker."""
     if not isinstance(marker, str) or not _ADAPTER_HOOK_MARKER_RE.fullmatch(marker):
         return 0
     platform = PLATFORMS.get(platform_key)
@@ -3040,7 +3041,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     if _hook_already_exists(pt_list, IO_TRACE_MARKER):
         total_removed += _remove_hook_entries(pt_list, IO_TRACE_MARKER)
 
-    # Full uninstall also strips every MANAGED addon observational hook (plan Phase 4) and every MANAGED privileged adapter hook (Phase P5), so neither a drifted addon hook nor an adapter hook is ever left firing live after a full uninstall.
+    # Full uninstall also strips every MANAGED addon observational hook and every MANAGED privileged adapter hook, so neither a drifted addon hook nor an adapter hook is ever left firing live after a full uninstall.
     for ev_list in hooks_obj.values():
         if isinstance(ev_list, list):
             total_removed += _remove_managed_addon_entries(ev_list)
@@ -3244,7 +3245,7 @@ def check_status_detail(
 
     if not incomplete:
         if platform_key == "codex":
-            # Codex hook files are wired, but its hook event semantics are not confirmed by a live runtime smoke. Stay instruction-backed rather than report native runtime-verified. legacy_status stays "installed" so the installer flow and legacy string API are unchanged; only the report surface and the structured flag are made honest.
+            # Report Codex hooks as instruction-backed until live event semantics are verified. The string API reports installed; the structured result carries the native-verification scope.
             _log(_t(
                 f"  {name}: hook files installed (instruction-backed, pending runtime smoke evidence)",
                 f"  {name}: hook files installed (instruction-backed, pending runtime smoke evidence)",
@@ -3301,7 +3302,7 @@ def check_status_detail(
 
 
 def check_status(platform_key: str, addon_sources: Any = (), *, destination=None) -> str:
-    """Return hook installation status through the legacy string API.
+    """Return hook installation status through the string status API.
 
     Return values:
       "installed" - hooks are installed
@@ -3461,7 +3462,7 @@ def main() -> int:
         if destination.mode == "isolated" and args.agent_visibility and (args.status or args.uninstall):
             parser.error("isolated visibility changes require install action")
         if destination.mode == "isolated" and (args.hook_shared_dir or args.skills_dir or args.list_addons):
-            parser.error("isolated destination conflicts with legacy override/list action")
+            parser.error("isolated destination conflicts with override/list action")
 
     if destination is not None:
         with install_destination.use(destination):

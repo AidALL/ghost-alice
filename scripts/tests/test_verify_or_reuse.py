@@ -35,9 +35,9 @@ VERIFY_OR_REUSE_PRECHECK = "Before re-reading an artifact to support a claim, ap
 CHANGE_DEFINITION = "A change is an observed mutation event, not a possibility, a storage location, or a new user message."
 TOOL_CHECKPOINT_FIELD_HOOK = "Add verify-or-reuse when a call re-reads an artifact to support a claim, with why naming the observed trigger."
 
-# The reported incident: the agent wrote a Markdown file in a chat sandbox, the
-# user could change it only by instructing the agent, no edit instruction or
-# other write followed, and the user asked whether content was already included.
+# Current scenario: an agent-authored Markdown file has agent-mediated mutation
+# authority. No mutation instruction or write event follows; a content question
+# can use the retained authored evidence.
 INCIDENT = {
     "claim_time": "authored-at",
     "claim_copy": "chat-sandbox:plan.md",

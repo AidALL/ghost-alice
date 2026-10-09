@@ -234,8 +234,8 @@ Always:
 ## Integration
 
 Called by:
-- subagent-driven-development (Step 7) - after all tasks are complete
-- executing-plans (Step 5) - after all batches are complete
+- subagent-driven-development - after all tasks and final review are complete
+- executing-plans (Step 3: Finish development) - after all tasks are complete and verified
 
 Pairs with:
 - using-git-worktrees - clean up worktrees created by that skill

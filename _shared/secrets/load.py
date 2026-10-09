@@ -12,7 +12,7 @@ Usage:
     # 1. Import the module
     import sys, os
     sys.path.insert(0, os.path.join("<project root>", "_shared", "secrets"))
-    from secrets_loader import get, get_or_prompt, set as set_secret
+    from load import get, get_or_prompt, set as set_secret
 
     # 2. Look up from env/file only (None when missing)
     key = get("CONTEXT7_API_KEY")

@@ -6,7 +6,7 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 
 쌍을 이루는 문서는 상단에서 언어를 전환하실 수 있습니다. 영어 문서에서는 한국어 링크를, 한국어 문서에서는 영어 링크를 제공합니다.
 
-최근 게시된 조합은 Core/Autopilot `0.4.1`이며 [릴리스 노트](./release/2026-10-01-release-notes.md)는 당시의 검증 범위를 유지합니다. 이 소스 후보는 Core/Autopilot `0.5.0`이며 최소 Core 버전도 `0.5.0`입니다. 소스 검증만으로 native 호환성, 설치된 환경의 적용이나 게시를 입증하지 않습니다.
+Core `0.5.0`과 Autopilot `0.5.0`은 routing과 managed completion API를 사용합니다. Autopilot에는 Core `0.5.0` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
 
 ## 빠른 설치
 
@@ -57,13 +57,12 @@ bash install.sh --addon autopilot
 | Platform adapter compliance | [../policies/platform-adapter-compliance.md](../policies/platform-adapter-compliance.md) | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) |
 | Live smoke regression | [../policies/live-smoke-regression.md](../policies/live-smoke-regression.md) | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [../policies/evaluator-artifact-contract.md](../policies/evaluator-artifact-contract.md) | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) |
-| Current release notes | [../release/2026-10-01-release-notes.md](../release/2026-10-01-release-notes.md) | [release/2026-10-01-release-notes.md](./release/2026-10-01-release-notes.md) |
 | Public release checklist | [../release/public-release-checklist.md](../release/public-release-checklist.md) | [release/public-release-checklist.md](./release/public-release-checklist.md) |
 | Planning policy | [../plans/README.md](../plans/README.md) | [plans/README.md](./plans/README.md) |
 
 ## 기준 기여자 문서
 
-`CONTRIBUTING.md`, `SUPPORT.md`, `CHANGELOG.md`와 `official-docs/`는 영어를 기준 기여자 경로로 사용합니다. 제어 토큰과 과거 릴리즈 기록은 그대로 보존하며, 현재 사용자용 한국어 문서는 위 표에서 제공합니다. 과거 릴리즈 안내는 해당 날짜의 버전과 검증 한계를 보존합니다.
+`CONTRIBUTING.md`, `SUPPORT.md`와 `official-docs/`는 영어를 기준 기여자 경로로 사용합니다. 제어 토큰은 그대로 유지하며, 사용자용 한국어 대응 문서는 위 표에서 제공합니다.
 
 ## Update Rule
 

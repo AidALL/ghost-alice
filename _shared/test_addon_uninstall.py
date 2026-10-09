@@ -1,8 +1,7 @@
-"""TDD for the per-addon uninstall core (plan tasks T2.3-T2.7, T2.10).
+"""Per-addon uninstall contract checks.
 
-Removes ONLY the requested addon's recorded targets, symlink-safe, preserves a
-target that drifted since install (user-modified), uses a two-phase
-<addon_id>.json.removing intent marker, deletes the sidecar last, and resumes.
+Remove only owned recorded targets; preserve drifted targets. Validate the
+two-phase removal marker, sidecar-last deletion and resumable cleanup.
 
 Run: python3 -m pytest _shared/test_addon_uninstall.py -q
 """

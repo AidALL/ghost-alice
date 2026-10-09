@@ -1,4 +1,4 @@
-"""Original trace-format failures must not replay an otherwise valid answer."""
+"""Trace-format recovery preserves a valid business answer."""
 
 import json
 import os

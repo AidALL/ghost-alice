@@ -9,7 +9,7 @@
   - [Layer 3: Environment guard](#layer-3-environment-guard)
   - [Layer 4: Debug instrumentation](#layer-4-debug-instrumentation)
 - [Applying the Pattern](#applying-the-pattern)
-- [Session Example](#session-example)
+- [Worked Example](#worked-example)
 - [Key Insight](#key-insight)
 
 
@@ -111,9 +111,9 @@ When you find a bug.
 3. Add verification at each layer. Entry, business, environment, debug
 4. Test each layer. Try to bypass Layer 1 and confirm Layer 2 catches it
 
-## Session Example
+## Worked Example
 
-Bug: an empty `projectDir` triggers `git init` in the source code
+For an empty `projectDir` that triggers `git init` in the source tree, apply these layers.
 
 Data flow.
 
@@ -122,22 +122,13 @@ Data flow.
 3. `WorkspaceManager.createWorkspace('')`
 4. `git init` runs in `process.cwd()`
 
-The four layers added.
+Apply these four layers:
 
 - Layer 1: `Project.create()` verifies non-empty, exists, and writable
 - Layer 2: `WorkspaceManager` verifies projectDir is non-empty
 - Layer 3: `WorktreeManager` rejects git init outside tmpdir during tests
 - Layer 4: stack-trace logging before git init
 
-Result: all 1847 tests pass, the bug cannot be reproduced
-
 ## Key Insight
 
-All four layers were needed. During testing, each layer caught a bug the others missed.
-
-- Another code path bypassed entry verification
-- A mock bypassed the business-logic check
-- An edge case on a different platform required the environment guard
-- Debug logging identified structural misuse
-
-Do not stop at one verification point. Add checks at every layer.
+Different paths can bypass different checks: an alternate caller can bypass entry verification, a mock can bypass business validation, and platform-specific conditions can require an environment guard. Debug logging helps locate misuse. Select the layers that cover the observed failure paths.

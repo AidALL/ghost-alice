@@ -7,8 +7,8 @@ Load this reference when: creating or editing skills, before deployment, to veri
 - [Overview](#overview)
 - [When to Use](#when-to-use)
 - [TDD Mapping for Skill Testing](#tdd-mapping-for-skill-testing)
-- [RED Phase: Baseline Testing (Watch It Fail)](#red-phase-baseline-testing-watch-it-fail)
-- [GREEN Phase: Write Minimal Skill (Make It Pass)](#green-phase-write-minimal-skill-make-it-pass)
+- [Baseline: Record the Actual Result](#baseline-record-the-actual-result)
+- [Candidate: Repair and Evaluate](#candidate-repair-and-evaluate)
 - [VERIFY GREEN: Pressure Testing](#verify-green-pressure-testing)
   - [Writing Pressure Scenarios](#writing-pressure-scenarios)
   - [Pressure Types](#pressure-types)
@@ -22,24 +22,19 @@ Load this reference when: creating or editing skills, before deployment, to veri
   - [4. Update description](#4-update-description)
   - [Re-verify After Refactoring](#re-verify-after-refactoring)
 - [Meta-Testing (When GREEN Isn't Working)](#meta-testing-when-green-isnt-working)
-- [When Skill is Bulletproof](#when-skill-is-bulletproof)
-- [Example: TDD Skill Bulletproofing](#example-tdd-skill-bulletproofing)
-  - [Initial Test (Failed)](#initial-test-failed)
-  - [Iteration 1 - Add Counter](#iteration-1---add-counter)
-  - [Iteration 2 - Add Foundational Principle](#iteration-2---add-foundational-principle)
+- [Scope of a Passing Result](#scope-of-a-passing-result)
 - [Testing Checklist (TDD for Skills)](#testing-checklist-tdd-for-skills)
 - [Common Mistakes (Same as TDD)](#common-mistakes-same-as-tdd)
 - [Quick Reference (TDD Cycle)](#quick-reference-tdd-cycle)
-- [The Bottom Line](#the-bottom-line)
-- [Real-World Impact](#real-world-impact)
+- [Evidence and Limits](#evidence-and-limits)
 
 ## Overview
 
 Testing skills is just TDD applied to process documentation.
 
-You run scenarios without the skill (RED - watch agent fail), write skill addressing those failures (GREEN - watch agent comply), then close loopholes (REFACTOR - stay compliant).
+Run relevant scenarios against the baseline, record actual behavior, repair evidenced instruction problems, and evaluate the affected conditions after official package validation.
 
-Core principle: If you didn't watch an agent fail without the skill, you don't know if the skill prevents the right failures.
+Preserve a baseline pass as a pass. A direct source-contract mismatch can justify an instruction repair without manufacturing behavioral failure. Two passing variants do not establish causal improvement.
 
 REQUIRED BACKGROUND: You MUST understand coding-convention:test-driven-development before using this skill. That skill defines the fundamental RED-GREEN-REFACTOR cycle. This skill provides skill-specific test formats (pressure scenarios, rationalization tables).
 
@@ -61,24 +56,24 @@ Do not use discipline-pressure tests for pure reference skills (API docs, syntax
 
 | TDD Phase | Skill Testing | What You Do |
 |-----------|---------------|-------------|
-| RED | Baseline test | Run scenario WITHOUT skill, watch agent fail |
-| Verify RED | Capture rationalizations | Document exact failures verbatim |
-| GREEN | Write skill | Address specific baseline failures |
+| RED | Baseline test | Run baseline scenario and record actual behavior |
+| Verify baseline | Capture decisions | Document actual decisions and any failures verbatim |
+| GREEN | Repair skill | Address observed failures or source-contract mismatches |
 | Verify GREEN | Pressure test | Run scenario WITH skill, verify compliance |
 | REFACTOR | Plug holes | Find new rationalizations, add counters |
 | Stay GREEN | Re-verify | Test again, ensure still compliant |
 
 Same cycle as code TDD, different test format.
 
-## RED Phase: Baseline Testing (Watch It Fail)
+## Baseline: Record the Actual Result
 
-Goal: Run test WITHOUT the skill - watch agent fail, document exact failures.
+Goal: run the applicable case without the candidate change and record the actual decision, including a pass. Capture exact failures only when they occur. A passing baseline does not establish that the candidate caused improvement.
 
-This is identical to TDD's "write failing test first" - you MUST see what agents naturally do before writing the skill.
+Preserve the baseline result or exact source mismatch before editing. If that prerequisite was missed, report the gap; do not backdate or reclassify evidence.
 
 Process:
 
-- [ ] Create pressure scenarios (3+ combined pressures)
+- [ ] Create scenarios for the named uncertainty; combine pressures when relevant
 - [ ] Run WITHOUT skill - give agents realistic task with pressures
 - [ ] Document choices and rationalizations word-for-word
 - [ ] Identify patterns - which excuses appear repeatedly?
@@ -101,17 +96,17 @@ C) Write tests now (30 min delay)
 Choose A, B, or C.
 ```
 
-Run this WITHOUT a TDD skill. Agent chooses B or C and rationalizes:
+Run this without a TDD skill and record the actual choice. If the agent chooses B or C, capture its actual rationale; possible rationalizations include:
 - "I already manually tested it"
 - "Tests after achieve same goals"
 - "Deleting is wasteful"
 - "Being pragmatic not dogmatic"
 
-NOW you know exactly what the skill must prevent.
+Use only the actually observed result to decide what the skill must address.
 
-## GREEN Phase: Write Minimal Skill (Make It Pass)
+## Candidate: Repair and Evaluate
 
-Write skill addressing the specific baseline failures you documented. Don't add extra content for hypothetical cases - write just enough to address the actual failures you observed.
+Repair the documented failure or source-contract mismatch to sufficient depth. Complete the official Phase 1 through Phase 5 package checks before candidate evaluation.
 
 Run same scenarios WITH skill. Agent should now comply.
 
@@ -167,7 +162,7 @@ Choose A, B, or C. Be honest.
 | Social | Looking dogmatic, seeming inflexible |
 | Pragmatic | "Being pragmatic vs dogmatic" |
 
-Best tests combine 3+ pressures.
+Combine pressures when their interaction is a live uncertainty; do not add pressures solely to force a failure.
 
 Why this works: See persuasion-principles.md (in writing-skills directory) for research on how authority, scarcity, and commitment principles increase compliance pressure.
 
@@ -188,7 +183,7 @@ Don't ask hypothetical questions - make the actual decision.
 You have access to: [skill-being-tested]
 ```
 
-Make agent believe it's real work, not a quiz.
+Require a concrete decision within the bounded scenario. Keep test side effects isolated and do not fabricate actual production authority.
 
 ## REFACTOR Phase: Close Loopholes (Stay Green)
 
@@ -207,17 +202,17 @@ Document every excuse. These become your rationalization table.
 
 ### Plugging Each Hole
 
-For each new rationalization, add:
+For an observed contract gap, choose the relevant reinforcement below. Do not add every item by default; change trigger wording only when discovery is implicated.
 
 ### 1. Explicit Negation in Rules
 
-<Before>
+Insufficient instruction:
 ```markdown
 Write code before test? Delete it.
 ```
-</Before>
 
-<After>
+
+Concrete instruction for this example:
 ```markdown
 Write code before test? Delete it. Start over.
 
@@ -227,7 +222,7 @@ No exceptions:
 - Don't look at it
 - Delete means delete
 ```
-</After>
+
 
 ### 2. Entry in Rationalization Table
 
@@ -258,157 +253,72 @@ Add symptoms of ABOUT to violate.
 
 Re-test same scenarios with updated skill.
 
-Agent should now:
-- Choose correct option
-- Cite new sections
-- Acknowledge their previous rationalization was addressed
+Record whether the agent chooses the contract-compliant action and why. A citation alone is insufficient, and an agent need not endorse a presumed earlier failure.
 
-If agent finds NEW rationalization: Continue REFACTOR cycle.
+If the agent exposes a new decision-relevant rationalization, repair that affected condition and re-test it. If no live uncertainty can change the decision, stop and retain the supported result.
 
-If agent follows rule: Success - skill is bulletproof for this scenario.
+If the agent follows the rule, record a pass for this scenario and the tested conditions.
 
 ## Meta-Testing (When GREEN Isn't Working)
 
-After agent chooses wrong option, ask:
+When a scenario exposes an actual mismatch, inspect whether its cause is the instruction, discovery, an ambiguous task, or the test's own premise. Ask the evaluator for a concrete explanation only when that answer can distinguish these causes. Its suggestion is diagnostic input, not authority or proof that the proposed wording works.
 
-```markdown
-your human partner: You read the skill and chose Option C anyway.
+Repair the affected instruction or scenario when supported. A skill can itself be wrong; evaluate contrary evidence against the user's actual objective and authority. Do not force the evaluator to agree with a presumed correct option. Complete official package phases after edits, then evaluate only the affected condition.
 
-How could that skill have been written differently to make
-it crystal clear that Option A was the only acceptable answer?
-```
+## Scope of a Passing Result
 
-Three possible responses:
+A concrete contract-compliant decision supports the conditions actually checked. A citation, agreement with the rule or an assertion of clarity is insufficient by itself. Record the case, actual choice, source and limits.
 
-1. "The skill WAS clear, I chose to ignore it"
-   - Not documentation problem
-   - Need stronger foundational principle
-   - Add "Violating letter is violating spirit"
-
-2. "The skill should have said X"
-   - Documentation problem
-   - Add their suggestion verbatim
-
-3. "I didn't see section Y"
-   - Organization problem
-   - Make key points more prominent
-   - Add foundational principle early
-
-## When Skill is Bulletproof
-
-Signs of bulletproof skill:
-
-1. Agent chooses correct option under maximum pressure
-2. Agent cites skill sections as justification
-3. Agent acknowledges temptation but follows rule anyway
-4. Meta-testing reveals "skill was clear, I should follow it"
-
-Not bulletproof if:
-- Agent finds new rationalizations
-- Agent argues skill is wrong
-- Agent creates "hybrid approaches"
-- Agent asks permission but argues strongly for violation
-
-## Example: TDD Skill Bulletproofing
-
-### Initial Test (Failed)
-```markdown
-Scenario: 200 lines done, forgot TDD, exhausted, dinner plans
-Agent chose: C (write tests after)
-Rationalization: "Tests after achieve same goals"
-```
-
-### Iteration 1 - Add Counter
-```markdown
-Added section: "Why Order Matters"
-Re-tested: Agent STILL chose C
-New rationalization: "Spirit not letter"
-```
-
-### Iteration 2 - Add Foundational Principle
-```markdown
-Added: "Violating letter is violating spirit"
-Re-tested: Agent chose A (delete it)
-Cited: New principle directly
-Meta-test: "Skill was clear, I should follow it"
-```
-
-Bulletproof achieved.
+Preserve a baseline pass. Two passing variants do not demonstrate causal improvement. Add pressure or repeat only for a named missing interaction, real mutation, contradiction or variance concern whose outcome can change the decision. Stop when no such uncertainty remains.
 
 ## Testing Checklist (TDD for Skills)
 
-Before deploying skill, verify you followed RED-GREEN-REFACTOR:
+Before evaluating or distributing the affected package:
 
-RED Phase:
-- [ ] Created pressure scenarios (3+ combined pressures)
-- [ ] Ran scenarios WITHOUT skill (baseline)
-- [ ] Documented agent failures and rationalizations verbatim
+- [ ] Bind the proposed change to a live uncertainty, observed failure or exact source-contract mismatch.
+- [ ] Preserve actual baseline decisions, including passes, before editing; report any missing prerequisite honestly.
+- [ ] Repair the cause and affected callers/references to sufficient depth.
+- [ ] Complete official Phase 1 through Phase 5 after the package edit and before evaluation.
+- [ ] Evaluate affected conditions with relevant application/pressure cases and negative controls.
+- [ ] Record the actual decision, source and checked limits.
+- [ ] Retain unchanged valid evidence and stop when another unchanged check cannot alter the next decision.
 
-GREEN Phase:
-- [ ] Wrote skill addressing specific baseline failures
-- [ ] Ran scenarios WITH skill
-- [ ] Agent now complies
+Conditional follow-up:
 
-REFACTOR Phase:
-- [ ] Identified NEW rationalizations from testing
-- [ ] Added explicit counters for each loophole
-- [ ] Updated rationalization table
-- [ ] Updated red flags list
-- [ ] Updated description with violation symptoms
-- [ ] Re-tested - agent still complies
-- [ ] Meta-tested to verify clarity
-- [ ] Agent follows rule under maximum pressure
+- An observed rationalization warrants an explicit counter only if it reveals a real contract gap.
+- Update a rationalization table, red flags or description only when the affected content needs that change. Trigger wording changes only when discovery is implicated.
+- Meta-test only when a concrete explanation can distinguish the cause of a mismatch.
+- Combine pressures only for a relevant interaction; maximum pressure is not a universal requirement.
+- For a resolved executable behavior change, use the owning code-TDD contract. A source-only instruction contradiction does not justify inventing a failed behavior test.
 
 ## Common Mistakes (Same as TDD)
 
-- ❌ Writing skill before testing (skipping RED)
-  - Reveals what YOU think needs preventing, not what ACTUALLY needs preventing.
-  - ✅ Fix: Always run baseline scenarios first.
-
-- ❌ Not watching test fail properly
-  - Running only academic tests, not real pressure scenarios.
-  - ✅ Fix: Use pressure scenarios that make agent WANT to violate.
-
-- ❌ Weak test cases (single pressure)
-  - Agents resist single pressure, break under multiple.
-  - ✅ Fix: Combine 3+ pressures (time + sunk cost + exhaustion).
-
-- ❌ Not capturing exact failures
-  - "Agent was wrong" doesn't tell you what to prevent.
-  - ✅ Fix: Document exact rationalizations verbatim.
-
-- ❌ Vague fixes (adding generic counters)
-  - "Don't cheat" doesn't work. "Don't keep as reference" does.
-  - ✅ Fix: Add explicit negations for each specific rationalization.
-
-- ❌ Stopping after first pass
-  - Tests pass once ≠ bulletproof.
-  - ✅ Fix: Continue REFACTOR cycle until no new rationalizations.
+- Assuming a baseline failure: preserve the actual pass/fail result and any independent source contradiction.
+- Testing only recitation: require an actual decision or application for the changed condition.
+- Missing a relevant pressure: add that named interaction; do not search for failure solely to justify the edit.
+- Recording only a vague verdict: retain the actual choice, rationale and source locator.
+- Adding generic prohibitions: fix the evidenced cause rather than closing hypothetical loopholes.
+- Repeating an unchanged passing case: name a decision-changing uncertainty or retain the existing result.
+- Treating every phase as a new human approval gate: repair within existing authority and ask only for an exact human-owned decision.
 
 ## Quick Reference (TDD Cycle)
 
-| TDD Phase | Skill Testing | Success Criteria |
-|-----------|---------------|------------------|
-| RED | Run scenario without skill | Agent fails, document rationalizations |
-| Verify RED | Capture exact wording | Verbatim documentation of failures |
-| GREEN | Write skill addressing failures | Agent now complies with skill |
-| Verify GREEN | Re-test scenarios | Agent follows rule under pressure |
-| REFACTOR | Close loopholes | Add counters for new rationalizations |
-| Stay GREEN | Re-verify | Agent still complies after refactoring |
+| Stage | Action | Evidence and stopping condition |
+| --- | --- | --- |
+| Baseline | Observe the applicable case or preserve an exact source mismatch | Actual pass/fail stays unchanged; missing proof is reported |
+| Candidate | Repair the affected contract and complete official package phases | Changes address the evidenced cause and preserve valid requirements |
+| Evaluation | Apply affected cases and relevant negative controls | Concrete decisions satisfy the current contract within stated limits |
+| Repair | Resolve a newly evidenced mismatch | Reopen only the affected instruction, mapping, composition or premise |
+| Stop | Retain supported results | No live uncertainty remains that can alter the next decision |
 
-## The Bottom Line
+## Evidence and Limits
 
-Skill creation IS TDD. Same principles, same cycle, same benefits.
+Use actual baseline evidence, sufficient repair and bounded candidate evaluation. Report a pass only for the conditions checked. Preserve original source and execution time; do not infer improvement or native adoption from source edits or two passing variants.
 
-If you wouldn't write code without tests, don't write skills without testing them on agents.
+## Check sufficiency and repair limits
 
-RED-GREEN-REFACTOR for documentation works exactly like RED-GREEN-REFACTOR for code.
+Before a discretionary check, name the unresolved criterion or competing explanation, why the method discriminates, and attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions. Mere potential to find something is insufficient. Stochastic repeats require uncertainty, sampling and stopping rules. Mandatory owning checks remain required; unavailable proof or unresolved required criteria prevent completion. Reuse valid unchanged passing proof at its original source and time; reopen only affected proof after observed change, contradiction or explicit recheck. Unknown already-executed business state calls for bounded affected observation, not automatic business replay; not-yet-executed required work still needs its actual action. Inconclusive checks give no business pass/fail verdict or failed-business-repair increment, but observation and recording attempts consume their bounded resources.
 
-## Real-World Impact
+A failed repair round requires a corrective change and a completed relevant observation of the same unresolved failure. Initial failure is zero. Group by unresolved failure, affected criterion, stage and target; explain what each result changes about cause, mapping, design or verification. Unknown causes cannot justify relabeling/reset, and identical error text cannot combine unrelated business and recording failures. Preserve cumulative attempts and the addressed first-five checkpoint across agents and handoffs. Demonstrated resolution followed by recurrence is a linked new incident. Five failed rounds is the maximum before the first mandatory premise reassessment, not a minimum retry count or whole-task limit. Once addressed, cumulative six or seven alone do not retrigger that checkpoint. New relevant contradiction or a current stopping condition can require reassessment. Continuation requires a distinguishable hypothesis, a discriminating check, an explicit additional-attempt or resource allowance and a stopping condition inside remaining parent resources. Reassessment resets neither attempts nor resources; exhaustion parks the affected continuation. Five alone does not require human escalation.
 
-From applying TDD to TDD skill itself (2025-10-03):
-- 6 RED-GREEN-REFACTOR iterations to bulletproof
-- Baseline testing revealed 10+ unique rationalizations
-- Each REFACTOR closed specific loopholes
-- Final VERIFY GREEN: 100% compliance under maximum pressure
-- Same process works for any discipline-enforcing skill
+Retain decisions in existing work context and handoffs; no counter hook, classifier, compulsory per-conversation record or new mandatory report is required. Recording-specific typed recovery parks an identical unchanged failure without waiting for five rounds. Preserve known business proof when only recording fails. Exclude parked and human-waiting branches until an actual relevant reopening event. If no eligible work remains, use valid proof for all required criteria and resolve relevant contrary evidence before owning completion verification; otherwise report honest partial/waiting status.

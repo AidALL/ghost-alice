@@ -1,4 +1,4 @@
-"""Legacy no-baseline target quarantine CLI wrapper.
+"""No-baseline target quarantine CLI wrapper.
 
 Dependencies: Python 3.11+ standard library + local merge-companion modules.
 """

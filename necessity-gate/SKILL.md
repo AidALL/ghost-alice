@@ -135,6 +135,12 @@ necessity-gate is an initialization-event gate. It runs when work is first defin
 - the next step after verification passes
 - improving the quality of an already approved artifact
 
+## Usefulness of discretionary checks
+
+Before a discretionary check, name the unresolved criterion or competing explanation, why the method discriminates, and attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions. Mere potential to find something is insufficient. Stochastic repeats require uncertainty, sampling and stopping rules. Mandatory owning checks remain required; unavailable proof or unresolved required criteria prevent completion. Reuse valid unchanged passing proof at its original source and time; reopen only affected proof after observed change, contradiction or explicit recheck. Unknown already-executed business state calls for bounded affected observation, not automatic business replay; not-yet-executed required work still needs its actual action. Inconclusive checks give no business pass/fail verdict or failed-business-repair increment, but observation and recording attempts consume their bounded resources.
+
+An approved retry loop still follows its current repair limits and authorization envelope. Reassessment is not authority to extend resources or manufacture new work.
+
 ## References
 
 - `AGENTS.md`

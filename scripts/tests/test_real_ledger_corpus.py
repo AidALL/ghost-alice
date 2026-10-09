@@ -1,4 +1,4 @@
-"""Checks against a user's private legacy ledger export; skipped unless its paths are supplied.
+"""Checks against a user's private ledger export; skipped unless its paths are supplied.
 
 Dependencies: Python 3.11+ standard library only. Set GHOST_ALICE_LEDGER_CORPUS to an
 extracted export root and GHOST_ALICE_LEDGER_CASE_MAP to a local JSON file shaped as

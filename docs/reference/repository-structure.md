@@ -2,7 +2,7 @@
 
 Language: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/repository-structure.md)
 
-This document is the repository map split out of the root README. The README stays a concise public entry point; this page carries the detailed structure.
+This document is the repository map. The README stays a concise public entry point; this page carries the detailed structure.
 ## Contents
 
 - [Top-Level Documents](#top-level-documents)

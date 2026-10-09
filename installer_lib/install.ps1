@@ -297,8 +297,8 @@ function Invoke-PreflightBeforeInstall {
             return
         }
         if (-not $py) {
-            Write-Err "Python 3.11+ not found; aborting because legacy target quarantine cannot run" "Python 3.11+ not found; aborting because legacy target quarantine cannot run"
-            throw "legacy target quarantine cannot run - aborting installation"
+            Write-Err "Python 3.11+ not found; aborting because unowned target quarantine cannot run" "Python 3.11+ not found; aborting because unowned target quarantine cannot run"
+            throw "unowned target quarantine cannot run - aborting installation"
         }
 
         foreach ($target in $legacyTargets) {
@@ -306,8 +306,8 @@ function Invoke-PreflightBeforeInstall {
                 --target $target.Path --target-name $target.Name `
                 --pending $pending --manifest $manifest --platform $TargetPlatform
             if ($LASTEXITCODE -ne 0) {
-                Write-Err "legacy target quarantine failed; aborting install: $($target.Name)" "legacy target quarantine failed; aborting install: $($target.Name)"
-                throw "legacy target quarantine failed - aborting installation"
+                Write-Err "unowned target quarantine failed; aborting install: $($target.Name)" "unowned target quarantine failed; aborting install: $($target.Name)"
+                throw "unowned target quarantine failed - aborting installation"
             }
         }
         return
@@ -601,7 +601,7 @@ function Invoke-WriteOwnershipMarker {
     foreach ($target in (Get-InstallTargetsForSkillNames -SkillNames $SkillNames -ExtraTargets $ExtraTargets)) {
         $dest = Join-Path $SkillsRoot $target.Name
         $mode = Get-InstallStateMode -Path $dest -CopyOnly:$CopyOnly
-        # Addon-provided skills carry AddonId so the marker is attributed to the addon (owner=addon), enabling classify (plan task T2.9/C-THREAD-1).
+        # Addon-provided skills carry AddonId so the marker is attributed to the addon (owner=addon), enabling classify.
         $addonId = if ($target.PSObject.Properties['AddonId']) { [string]$target.AddonId } else { "" }
         if ($addonId) {
             $markerArgs += @("--addon-target", $target.Name, $dest, $mode, $addonId)

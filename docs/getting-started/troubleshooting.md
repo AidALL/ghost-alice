@@ -52,7 +52,7 @@ If raw `git pull` is already blocked before the checkout can receive `--update-s
 cd ~/ghost-alice && git fetch origin main && git show FETCH_HEAD:scripts/bootstrap-source-update.sh | /bin/bash -s --
 ```
 
-The bootstrap updater runs from the fetched remote blob instead of the old local installer, saves source-local tracked and untracked changes in `git stash`, fast-forwards `~/ghost-alice`, and then runs the updated installer. For non-default checkout locations, set `GHOST_ALICE_SOURCE_DIR=/path/to/ghost-alice` before the command.
+The bootstrap updater runs from the fetched remote blob independently of the local installer, saves source-local tracked and untracked changes in `git stash`, fast-forwards `~/ghost-alice`, and then runs the updated installer. For non-default checkout locations, set `GHOST_ALICE_SOURCE_DIR=/path/to/ghost-alice` before the command.
 
 ### 1. Fix Identity Errors First
 
@@ -113,7 +113,7 @@ git stash list
 git stash show -p stash@{0}
 ```
 
-If that option is not available yet because the checkout cannot pull the new installer, use the one-command bootstrap updater instead:
+If the local installer does not provide that option and the checkout cannot update, use the one-command bootstrap updater instead:
 
 ```bash
 cd ~/ghost-alice && git fetch origin main && git show FETCH_HEAD:scripts/bootstrap-source-update.sh | /bin/bash -s --
@@ -152,5 +152,5 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 
 - Update commands should use the safe installer updater by default; the updater itself fast-forwards after saving source-local changes.
 - If `git pull` creates a merge conflict, the installer cannot resolve that conflict for the user.
-- A blocked-user guide is not enough when it exists only inside the repo. Keep the same recovery playbook somewhere readable without pulling, such as the Wiki or release notes.
+- A blocked-user guide is not enough when it exists only inside the repo. Keep the same recovery playbook somewhere readable without pulling, such as the Wiki.
 - Do not run the installer while `UU` or `AA` remains in Git status.

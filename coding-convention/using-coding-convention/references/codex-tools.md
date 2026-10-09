@@ -18,7 +18,6 @@ Skills are written against Claude Code tool names. When a skill references one o
 - [Subagent Dispatch Requires Multi-Agent Support](#subagent-dispatch-requires-multi-agent-support)
 - [Named Agent Dispatch](#named-agent-dispatch)
   - [Message Framing](#message-framing)
-  - [When This Workaround Can Be Removed](#when-this-workaround-can-be-removed)
 - [Environment Detection](#environment-detection)
 - [Closing Out in the Codex App](#closing-out-in-the-codex-app)
 
@@ -75,10 +74,6 @@ specified in the instructions above.
 - Use task-delegation framing ("Your task is...") instead of persona framing ("You are...")
 - Wrap the instructions in XML tags. The model treats a tagged block as authoritative.
 - End with an explicit execution instruction to prevent the model from summarizing the instructions
-
-### When This Workaround Can Be Removed
-
-This approach compensates for the fact that the Codex plugin system does not yet support the `agents` field in `plugin.json`. Once `RawPluginManifest` gains an `agents` field, a plugin can place `agents/` as a symbolic link (the same way as the existing `skills/` link) and skills can dispatch named agent types directly.
 
 ## Environment Detection
 

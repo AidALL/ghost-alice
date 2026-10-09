@@ -42,7 +42,7 @@ def destination_fixture(root):
 @pytest.mark.parametrize('action',(install_hooks.install_hook,install_hooks.check_status_detail,
                                   install_hooks.check_status,install_hooks.uninstall_hook))
 def test_malformed_supplied_destination_never_selects_normal_default(tmp_path,invalid,action):
-    # Sentinel stops the original wrong dispatch before it can read normal
+    # Sentinel stops any incorrect dispatch before it can read normal
     # locations or perform effects; the public API must reject the supplied value.
     with patch.object(install_hooks,'_default_destination',side_effect=AssertionError('normal fallback selected')) as default:
         with pytest.raises(ValueError):action('codex',destination=invalid)

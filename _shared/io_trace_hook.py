@@ -232,7 +232,7 @@ def _rotate(path: Path) -> None:
 
 
 def _ledger_dir_candidates() -> list[Path]:
-    # Mirrors session_intent_analyzer_hook: repo checkout first, then skill install locations. The runtime tree ships only _shared, so the repo-relative candidate always misses there; without the skill-install candidates this hook would fall back to a hardcoded legacy root and silently diverge from the ledger's repo-aware default root.
+    # Resolve the ledger from the repository checkout or installed skill locations. Runtime-core contains only _shared, so installed skills supply the ledger module and its matching authority root.
     if explicit := os.environ.get("GHOST_ALICE_CORE_ROOT"):
         return [Path(explicit)/"session-intent-analyzer/scripts"]
     home = _home()

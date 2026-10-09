@@ -73,7 +73,7 @@ The per-platform manifest is placed at the following paths.
 
 ## failure policy
 
-- If the manifest is absent, it is treated as a legacy install and the next preflight behaves conservatively.
+- If the manifest is absent, preflight treats ownership as unproven and behaves conservatively.
 - A manifest parse failure is not a silent success. It must be reported as a diagnostic failure.
 - The manifest is not a recovery source for user changes. Recovery of user changes is handled by the pending merge manifest and the quarantine backup.
 - When the manifest exists, installer doctor uses the `targets` array as the SSOT for that platform's managed targets. It does not fail merely because a catalog-wide skill that is absent from a partial-install manifest is missing.
@@ -87,14 +87,14 @@ Each entry is distinguished by the `kind` field. `source_repo_hook_path`, `codex
 
 | kind | meaning |
 | --- | --- |
-| `source_repo_hook_path` | Current. A record of changing the install source repository's `core.hooksPath` to the Ghost-ALICE post-merge hook path. `repo_root`, `before_present`, `before`, and `after` are recorded. Uninstall restores to `before` only when the current value equals `after`, or unsets it when there was no previous value. |
-| `codex_hooks_feature_flag` | Current. A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[features] hooks` to `true`. Records `path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores `before_state` only from this record. |
-| `codex_project_trust` | Current. A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted`. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
-| `ps_policy_change` | Reserved. A future self-applied change of the Windows PowerShell ExecutionPolicy (CurrentUser scope). The `before`/`after` policy values and the `rollback_command` are recorded together when implemented. |
-| `posix_rc_change` | Reserved. Future addition of a Ghost-ALICE managed block to a POSIX user shell rc file (`~/.bashrc`, `~/.zshrc`, `~/.profile`). `rc_path`, `block_marker`, and `added_lines` are recorded when implemented. |
-| `macos_quarantine_fix` | Reserved. Future automatic removal of the macOS `com.apple.quarantine` xattr. The array of target paths is recorded in `target_paths` when implemented. |
-| `posix_chmod_fix` | Reserved. Future self-restoration of POSIX execute bits (for example, files extracted from a ZIP). `target_paths`, `before_mode`, and `after_mode` are recorded when implemented. |
+| `source_repo_hook_path` | A record of changing the install source repository's `core.hooksPath` to the Ghost-ALICE post-merge hook path. `repo_root`, `before_present`, `before`, and `after` are recorded. Uninstall restores to `before` only when the current value equals `after`, or unsets it when there was no previous value. |
+| `codex_hooks_feature_flag` | A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[features] hooks` to `true`. Records `path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores `before_state` only from this record. |
+| `codex_project_trust` | A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted`. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
+| `ps_policy_change` | Reserved for changes to the Windows PowerShell ExecutionPolicy (CurrentUser scope). The `before`/`after` policy values and the `rollback_command` are recorded together if the kind is emitted. |
+| `posix_rc_change` | Reserved for a Ghost-ALICE managed block to a POSIX user shell rc file (`~/.bashrc`, `~/.zshrc`, `~/.profile`). `rc_path`, `block_marker`, and `added_lines` are recorded if the kind is emitted. |
+| `macos_quarantine_fix` | Reserved for removal of the macOS `com.apple.quarantine` xattr. The array of target paths is recorded in `target_paths` if the kind is emitted. |
+| `posix_chmod_fix` | Reserved for restoration of POSIX execute bits (for example, files extracted from a ZIP). `target_paths`, `before_mode`, and `after_mode` are recorded if the kind is emitted. |
 
-Each entry has an `applied_at` UTC ISO-8601 timestamp. Additional fields per kind (for example, `before`/`after`/`rollback_command` of `ps_policy_change`) are added to this schema document in the sub-phase that first uses that kind. This document is the SSOT for the system_env_changes definition.
+Each entry has an `applied_at` UTC ISO-8601 timestamp. Each emitted kind requires its documented rollback fields, such as `before`, `after`, and `rollback_command`. This document defines `system_env_changes`.
 
-The entry-building logic for reserved kinds and the doctor reader are added in later sub-phases while updating the same SSOT (this document).
+Reserved kinds do not imply that the installer currently performs those operations.

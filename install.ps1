@@ -17,7 +17,7 @@
 #   .\install.cmd --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
 #   .\install.cmd --status                         # Show current install status
 #   .\install.cmd --doctor                         # Diagnose install protection state
-#   .\install.cmd --cleanup-pending                # Clean false-positive legacy pending entries
+#   .\install.cmd --cleanup-pending                # Clean installer-created false-positive pending entries
 #   .\install.cmd --update-source                  # Stash source checkout local changes and fast-forward
 # Direct .ps1 form, only when .ps1 script execution is already allowed:
 #   .\install.ps1                                  # Install to detected AI tools
@@ -36,7 +36,7 @@
 #   .\install.ps1 --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
 #   .\install.ps1 --status                         # Show current install status
 #   .\install.ps1 --doctor                         # Diagnose install protection state
-#   .\install.ps1 --cleanup-pending                # Clean false-positive legacy pending entries
+#   .\install.ps1 --cleanup-pending                # Clean installer-created false-positive pending entries
 #   .\install.ps1 --update-source                  # Stash source checkout local changes and fast-forward
 
 param(
@@ -77,8 +77,7 @@ param(
 if ($PSBoundParameters.ContainsKey('DestinationFile')) {
     throw "Isolated destinations require the Python hook installer; PowerShell source integration is unsupported"
 }
-
-# Best-effort UTF-8 console output for Windows PowerShell 5.1 / legacy console hosts.
+# Best-effort UTF-8 console output for Windows PowerShell 5.1 and console hosts.
 $LegacyAsciiConsole = ($PSVersionTable.PSVersion.Major -lt 6 -and $Host.Name -eq "ConsoleHost")
 try {
     if ($LegacyAsciiConsole) {

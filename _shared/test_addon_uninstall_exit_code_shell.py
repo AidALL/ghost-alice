@@ -2,7 +2,7 @@
 
 `install.sh --uninstall --addon <id>` must return a NONZERO exit code on failure
 (unknown addon, or a partial/manual-review outcome) so automation can detect it.
-The Python CLI already returns 1/2; the bash wrapper used to swallow it to 0.
+The shell wrapper must preserve the Python CLI failure exit status.
 
 Run: python3 -m pytest _shared/test_addon_uninstall_exit_code_shell.py -q
 """

@@ -164,7 +164,7 @@ class InstallStateManifestTest(unittest.TestCase):
         body = installer_bash_source()
         writer = _extract_bash_function(body, "write_install_state_manifest")
         self.assertIn("GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED", writer)
-        # source_repo_hook_path is computed in the extracted Python module
+        # source_repo_hook_path is computed by the Python installer module
         writer_py = INSTALL_STATE_WRITER.read_text(encoding="utf-8")
         self.assertIn("source_repo_hook_path", writer_py)
 
