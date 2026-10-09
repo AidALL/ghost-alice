@@ -50,11 +50,25 @@ flowchart TB
   NS --> AS[Registered privileged AP Stop adapter]
   AS --> RV{Current publication, proof, ownership and dependencies valid?}
   RV -->|yes| CW[Exact Core criterion writer in shared authority transaction]
-  RV -->|no; no criterion write| APP[Actual recording/application status and recovery]
+  RV -->|no; no criterion write| APP[Actual application references, status and remaining criteria]
   CW -->|guarded update or actual failure| APP
-  CG --> ND[Actual native delivery or corrective disposition]
-  APP --> ND
-  ND -->|actual corrective result and visibility| P
+  CG --> ENV[Core native envelope boundary; supported host fields only]
+  APP --> APPLY{Actual application disposition?}
+  APPLY -->|applied; business remains; retain original proof; no recording recovery or replay| ENV
+  APPLY -->|applied; unit complete; or affected proof invalidation| ENV
+  APPLY -->|genuine recording failure| RF{First or changed failure versus identical unchanged failure?}
+  RF -->|first or changed; scoped recording diagnostic| ENV
+  RF -->|identical unchanged; park; no publish command or answer replay| ENV
+  ENV -->|outgoing applicable supported fields| NP[Native host parser; acceptance is not assumed]
+  W -->|actual host/tool output or selected transport observation; source and time| NO{Observed disposition supported?}
+  NP -.->|actual supplied result evidence only; no automatic feedback telemetry| NO
+  NO -->|evidenced acceptance| ND[Actual native delivery or corrective disposition]
+  NO -->|evidenced protocol rejection; preserve business and AP proof| TR[Owning workflow selects bounded Core transport repair]
+  NO -->|missing or inconclusive disposition; unresolved transport observation| P
+  TR -->|actual repair result or partial status| P
+  APP -.->|full internal output retained| AUD
+  CG -.->|full internal output retained| AUD
+  ND -->|actual partial status, corrective result and visibility; select current eligible work| P
   ND -->|host-supported visible payload/status| HUMAN[Human receives supported scope]
   HUMAN -->|actual new input or feedback| I
   P -->|initial failure zero; failed corrective rounds; first-five checkpoint unaddressed or new contradiction| RE[Reassess implicated premise without resetting attempts or resources]
@@ -182,3 +196,7 @@ Ghost-ALICE OS 프로젝트가 소유한 소스 코드와 문서는 Apache Licen
 연결된 master는 출처가 있는 목표·권한, 담당 정책 요청, 실제 native/tool 결과, 한정된 복구, 적용 대기 publication, 보호된 기준 적용, 사람의 피드백을 함께 보여 줍니다. 초점은 micro 산출물·meso 매핑·macro 구성·meta 추론 전제 사이를 직접 오갈 수 있으며 복구는 해당 담당 작업으로 돌아옵니다.
 
 [Connected master: sources, decisions and actual returns](https://github.com/AidALL/ghost-alice/blob/main/architecture.md#repair-entry-result-and-return-paths).
+
+적용에 성공했지만 업무 조건이 남아 있다면 적용 참조와 원래 증거를 보존하고, 현재 권한 안의 수행 가능한 남은 업무를 선택합니다. 이 상태는 기록 복구·증거 재제출·답변 재작성의 근거가 아닙니다. 실제 기록 실패의 최초 또는 관련 변화 후 진단은 한정되며, 변화 없는 동일 실패는 제출 명령이나 답변 재작성 없이 해당 기록 경로를 보류합니다.
+
+Core는 네이티브 훅 전달 경계를 담당합니다. Codex Stop/SubagentStop의 호스트 출력은 `continue`, `decision`, `reason`, `stopReason`, `suppressOutput`, `systemMessage`만 포함하고, 전체 내부 출력은 엄격 로그에 보존합니다. Core의 출력 정리는 파서의 피드백을 관측하거나 만들지 않습니다. 담당 워크플로는 실제 호스트·도구 출력 또는 선택된 전달 관측의 출처·시각을 미결 요청에 연결합니다. 실제 근거가 있는 프로토콜 거부만 한정된 Core 전달 복구로 연결하며, 예상 처리 결과가 없으면 거부로 확정하지 않고 미확인 전달 관측으로 유지합니다. 유효한 업무 증거와 AP 제출·적용 상태를 보존합니다.

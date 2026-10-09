@@ -90,11 +90,25 @@ flowchart TB
   NS --> AS[Registered privileged AP Stop adapter]
   AS --> RV{Current publication, proof, ownership and dependencies valid?}
   RV -->|yes| CW[Exact Core criterion writer in shared authority transaction]
-  RV -->|no; no criterion write| APP[Actual recording/application status and recovery]
+  RV -->|no; no criterion write| APP[Actual application references, status and remaining criteria]
   CW -->|guarded update or actual failure| APP
-  CG --> ND[Actual native delivery or corrective disposition]
-  APP --> ND
-  ND -->|actual corrective result and visibility| P
+  CG --> ENV[Core native envelope boundary; supported host fields only]
+  APP --> APPLY{Actual application disposition?}
+  APPLY -->|applied; business remains; retain original proof; no recording recovery or replay| ENV
+  APPLY -->|applied; unit complete; or affected proof invalidation| ENV
+  APPLY -->|genuine recording failure| RF{First or changed failure versus identical unchanged failure?}
+  RF -->|first or changed; scoped recording diagnostic| ENV
+  RF -->|identical unchanged; park; no publish command or answer replay| ENV
+  ENV -->|outgoing applicable supported fields| NP[Native host parser; acceptance is not assumed]
+  W -->|actual host/tool output or selected transport observation; source and time| NO{Observed disposition supported?}
+  NP -.->|actual supplied result evidence only; no automatic feedback telemetry| NO
+  NO -->|evidenced acceptance| ND[Actual native delivery or corrective disposition]
+  NO -->|evidenced protocol rejection; preserve business and AP proof| TR[Owning workflow selects bounded Core transport repair]
+  NO -->|missing or inconclusive disposition; unresolved transport observation| P
+  TR -->|actual repair result or partial status| P
+  APP -.->|full internal output retained| AUD
+  CG -.->|full internal output retained| AUD
+  ND -->|actual partial status, corrective result and visibility; select current eligible work| P
   ND -->|host-supported visible payload/status| HUMAN[Human receives supported scope]
   HUMAN -->|actual new input or feedback| I
   P -->|initial failure zero; failed corrective rounds; first-five checkpoint unaddressed or new contradiction| RE[Reassess implicated premise without resetting attempts or resources]
@@ -319,6 +333,8 @@ flowchart TB
   X -->|actual action output, failure or uncertain state| OBS
   V -->|actual completed or inconclusive observation| OBS
   OBS -->|owning workflow matches actual result to its outstanding request| POL_RESUME
+  K -->|selected Core transport repair| TRANSPORT[Core transport owner performs bounded envelope repair; preserve business and AP proof]
+  TRANSPORT -->|actual repair result or scoped unavailable status| POL_RESUME
   K -->|recording-only recovery| AREC[Applicable bounded AP recording command; no business replay]
   AREC -->|owning workflow matches actual recording result| POL_RESUME
   E -->|valid owning completion proof when completion is selected| CAND[Owning completion workflow prepares truthful candidate and supported fields]
@@ -336,9 +352,24 @@ flowchart TB
   AS --> AV[Revalidate current publication, proof, ownership and dependencies]
   AV -->|accepted current validated publication| CW[Core exact owned-criterion writer within shared authority transaction]
   AV -->|missing, stale or invalid publication; no criterion write| APP
-  CW -->|guarded update or actual failure| APP[Actual AP application reference/status, remaining criteria and bounded recovery]
-  CG -->|actual guard result| ND[Native supported delivery or corrective disposition]
-  APP -->|actual recording/application result| ND
+  CW -->|guarded update or actual failure| APP[Actual AP application references, status and remaining criteria]
+  APP --> APPLY{Actual application disposition?}
+  APPLY -->|applied; business criteria remain; preserve applied references and original proof; no recovery or replay| ENV
+  APPLY -->|applied; unit criteria complete| ENV
+  APPLY -->|actual affected proof invalidation; reopen only affected business verification| ENV
+  APPLY -->|genuine recording failure| RECFAIL{First or relevant changed recording failure versus identical unchanged failure?}
+  RECFAIL -->|first or changed; bounded diagnostic preserves business proof| ENV
+  RECFAIL -->|identical unchanged; park dependent recording; no publish command or answer replay| ENV
+  CG -->|actual guard result| ENV[Core native transport boundary: project Codex Stop/SubagentStop supported host fields; retain other native formats]
+  CG -.->|full output and internal records; strict audit only| AUDIT[Full strict hook audit; never grants authority]
+  APP -.->|full output and internal records; strict audit only| AUDIT
+  ENV -->|outgoing host envelope only: continue, decision, reason, stopReason, suppressOutput, systemMessage for Codex Stop/SubagentStop| PARSER[Actual native host parser; its result is not assumed observable]
+  W -->|actual host/tool output or selected owning transport observation; source and time| NOBS{Matched transport observation supports a disposition?}
+  PARSER -.->|only actual supplied host/tool result evidence; no automatic feedback telemetry| NOBS
+  NOBS -->|evidenced accepted native disposition| ND[Native supported delivery or corrective disposition]
+  NOBS -->|evidenced protocol rejection; preserve business and AP proof| POL_RESUME
+  NOBS -->|missing or inconclusive disposition; unresolved transport observation| POL_RESUME
+  AUDIT -.->|diagnostic source only; no business proof refresh| TRANSPORT
   ND -->|owner matches actual native corrective requirement and visibility| POL_RESUME
   ND -->|host-supported delivery| OUT[Actual visible supported payload or status]
   OUT --> HH
@@ -390,7 +421,11 @@ flowchart TB
   POL_KIND -->|actual observation or recording result| POL_EVIDENCE
   POL_KIND -->|actual scoped human grant or decisive answer| POL_RENEW[Renew only affected plan and granted authority; retain criteria, attempts and parent limits]
   POL_KIND -->|actual human denial| POL_PARK
+  POL_KIND -->|successful partial application; retain applied criteria and proof; select eligible remaining business work| POL_SELECT
   POL_KIND -->|actual native completion or application finding| POL_EVIDENCE
+  POL_KIND -->|actual native protocol rejection; preserve business and AP proof; plan only Core transport repair| POL_PLAN
+  POL_KIND -->|actual Core transport repair result; interpret only affected transport state| POL_EVIDENCE
+  POL_KIND -->|missing or inconclusive native disposition; no rejection or business verdict| POL_OBSPLAN
   POL_KIND -->|actual native permission denial; no business execution| PERMD{Exact human-owned permission decision available?}
   PERMD -->|yes| POL_HUMAN
   PERMD -->|no admissible decision or alternative| POL_PARK
@@ -407,6 +442,8 @@ flowchart TB
   POL_TRIGGER -->|none| POL_LEARN[Explain what result changes about cause, mapping, design or verification]
   POL_LEARN -->|admissible corrected plan inside remaining allowance| POL_PLAN
   POL_LEARN -->|no discriminating next step or exhausted allowance| POL_PARK
+  POL_LEARN -->|owning workflow returns actual relevant artifact, mapping, composition, route or inferred premise mismatch for scoped focus/route reopening; preserve human objective, authority, attempts and resource bounds| R
+  POL_REASSESS -->|owning workflow returns actual relevant artifact, mapping, composition, route or inferred premise mismatch for scoped focus/route reopening; preserve human objective, authority, attempts and resource bounds| R
   POL_REASSESS --> POL_NEXT{Distinguishable hypothesis and check plus explicit bounded continuation inside remaining parent resources?}
   POL_NEXT -->|yes; checkpoint addressed; no count or resource reset| POL_PLAN
   POL_NEXT -->|no; affected continuation exhausted| POL_PARK
@@ -416,3 +453,7 @@ flowchart TB
 The owning workflow calls the selected business action or corrective change and receives its actual result; declared action output may itself supply the verification observation. Domain verification returns actual observations, source and time to the workflow for criterion judgment. The applicable registered v2 pretool automatically prepares AP origin/receipt before the tool and returns current qualified command context. Reuse that valid prepared result; use an explicit returned preparation helper only when the applicable dependency remains genuinely unfulfilled. A recording gap affects capture/publication/application recordability; AP pretool continues and native tool permission remains with its host. Required or discriminating business observation follows its own authority and resource bounds; recording recovery rules govern recording attempts only. Preserve valid proof and its original source/time, including when recording is unavailable.
 
 For a candidate closure, the owning workflow obtains or reuses supported proof. Applicable AP publication uses the exact current qualified selection, prepared AP receipt and actual returned publish command to leave a pending-adapter request. Native candidate/final dispatch invokes its actually registered handlers: the completion guard checks candidate fields and applicable skill evidence; the privileged AP Stop adapter revalidates publication, proof, ownership and dependencies. Only accepted current publication reaches the exact Core criterion writer within the shared authority transaction. Missing, stale or invalid publication returns a recording diagnostic without a criterion write. Actual application status and remaining criteria determine unit recording/completion claims. The handlers retain their actual native invocation semantics. Core owns delivery policy and may assemble the permitted payload; the workflow/native host performs visible delivery. Candidate claims use the supported current scope, while actual recording/application and visibility results govern further repair and closure claims. Preserve already-visible unchanged business content for applicable control-only repair. Return an admissible affected step to the workflow, or honest partial/waiting status when no eligible continuation remains.
+
+A successfully applied request preserves its application references and original proof even when business criteria remain pending. Remaining work returns to current eligible selection inside existing authority; it does not enter recording recovery, republish unchanged proof or replay the answer. An actual recording failure permits a scoped first or changed diagnostic; an identical unchanged failure parks dependent recording without a publish command or answer replay. A relevant recording or dependency change can reopen only the affected parked branch.
+
+Core owns the native hook transport boundary. For Codex Stop and SubagentStop, the host envelope contains only `continue`, `decision`, `reason`, `stopReason`, `suppressOutput` and `systemMessage`; other stages retain their applicable native format. The strict audit retains the full hook output and internal domain records independently of this projection. The native parser consumes the host envelope; Core projection does not observe or manufacture native parser feedback. The owning workflow matches actual host/tool output or a selected transport observation to its request, source and time. Only evidenced protocol rejection can select bounded Core transport repair while preserving valid business proof and AP publication/application state. Missing expected disposition remains an unresolved transport observation, not proof of rejection, business failure or an AP recording retry.

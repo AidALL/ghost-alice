@@ -50,11 +50,25 @@ flowchart TB
   NS --> AS[Registered privileged AP Stop adapter]
   AS --> RV{Current publication, proof, ownership and dependencies valid?}
   RV -->|yes| CW[Exact Core criterion writer in shared authority transaction]
-  RV -->|no; no criterion write| APP[Actual recording/application status and recovery]
+  RV -->|no; no criterion write| APP[Actual application references, status and remaining criteria]
   CW -->|guarded update or actual failure| APP
-  CG --> ND[Actual native delivery or corrective disposition]
-  APP --> ND
-  ND -->|actual corrective result and visibility| P
+  CG --> ENV[Core native envelope boundary; supported host fields only]
+  APP --> APPLY{Actual application disposition?}
+  APPLY -->|applied; business remains; retain original proof; no recording recovery or replay| ENV
+  APPLY -->|applied; unit complete; or affected proof invalidation| ENV
+  APPLY -->|genuine recording failure| RF{First or changed failure versus identical unchanged failure?}
+  RF -->|first or changed; scoped recording diagnostic| ENV
+  RF -->|identical unchanged; park; no publish command or answer replay| ENV
+  ENV -->|outgoing applicable supported fields| NP[Native host parser; acceptance is not assumed]
+  W -->|actual host/tool output or selected transport observation; source and time| NO{Observed disposition supported?}
+  NP -.->|actual supplied result evidence only; no automatic feedback telemetry| NO
+  NO -->|evidenced acceptance| ND[Actual native delivery or corrective disposition]
+  NO -->|evidenced protocol rejection; preserve business and AP proof| TR[Owning workflow selects bounded Core transport repair]
+  NO -->|missing or inconclusive disposition; unresolved transport observation| P
+  TR -->|actual repair result or partial status| P
+  APP -.->|full internal output retained| AUD
+  CG -.->|full internal output retained| AUD
+  ND -->|actual partial status, corrective result and visibility; select current eligible work| P
   ND -->|host-supported visible payload/status| HUMAN[Human receives supported scope]
   HUMAN -->|actual new input or feedback| I
   P -->|initial failure zero; failed corrective rounds; first-five checkpoint unaddressed or new contradiction| RE[Reassess implicated premise without resetting attempts or resources]
@@ -182,3 +196,7 @@ For a candidate closure, the owning workflow obtains or reuses supported proof. 
 The connected master links sourced goals and authority, owning policy requests, actual native/tool results, bounded repair, pending publication, guarded criterion application and human feedback. Focus may move directly between micro artifacts, meso mappings, macro composition and meta inferred premises; every repair returns to the affected owning work.
 
 [Connected master: sources, decisions and actual returns](https://github.com/AidALL/ghost-alice/blob/main/architecture.md#repair-entry-result-and-return-paths).
+
+A successfully applied request preserves its application references and original proof even when business criteria remain pending. Remaining work returns to current eligible selection inside existing authority; it does not enter recording recovery, republish unchanged proof or replay the answer. An actual recording failure permits a scoped first or changed diagnostic; an identical unchanged failure parks dependent recording without a publish command or answer replay. A relevant recording or dependency change can reopen only the affected parked branch.
+
+Core owns the native hook transport boundary. For Codex Stop and SubagentStop, the host envelope contains only `continue`, `decision`, `reason`, `stopReason`, `suppressOutput` and `systemMessage`; other stages retain their applicable native format. The strict audit retains the full hook output and internal domain records independently of this projection. The native parser consumes the host envelope; Core projection does not observe or manufacture native parser feedback. The owning workflow matches actual host/tool output or a selected transport observation to its request, source and time. Only evidenced protocol rejection can select bounded Core transport repair while preserving valid business proof and AP publication/application state. Missing expected disposition remains an unresolved transport observation, not proof of rejection, business failure or an AP recording retry.
