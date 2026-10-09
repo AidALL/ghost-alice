@@ -34,6 +34,7 @@ A task-router no-work terminal route (`clarification-only` or `direct-response`)
 - [Coding-Convention Family](#coding-convention-family)
 - [Material Recommendations And Choices](#material-recommendations-and-choices)
 - [Final Self-Check](#final-self-check)
+- [Repair and verification ownership](#repair-and-verification-ownership)
 
 
 ## Priority

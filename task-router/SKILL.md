@@ -66,6 +66,7 @@ task-router scans available skill descriptions against the current session inten
 - [3. Relationship To using-coding-convention](#3-relationship-to-using-coding-convention)
 - [4. Reference](#4-reference)
 - [Failure Modes](#failure-modes)
+- [Bounded repair and authority](#bounded-repair-and-authority)
 
 
 ## Routing Contract

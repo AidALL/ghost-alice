@@ -28,6 +28,7 @@ compatibility:
 - [Evaluator Artifact Contract](#evaluator-artifact-contract)
 - [When To Apply](#when-to-apply)
 - [Final Self-Check](#final-self-check)
+- [Repair limits, authority and useful checks](#repair-limits-authority-and-useful-checks)
 
 
 ## Overview

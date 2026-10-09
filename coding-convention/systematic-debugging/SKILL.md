@@ -22,6 +22,7 @@ compatibility:
 - [Quick Reference](#quick-reference)
 - [When the Procedure Reveals "No Root Cause"](#when-the-procedure-reveals-no-root-cause)
 - [Supporting Techniques](#supporting-techniques)
+- [Repair limits, authority and useful checks](#repair-limits-authority-and-useful-checks)
 
 
 ## Overview

@@ -16,6 +16,7 @@ compact-handoff preserves task continuity before or after context compaction. It
 - [Resume Procedure](#resume-procedure)
 - [Validator Rules](#validator-rules)
 - [Warnings](#warnings)
+- [Unresolved repair continuity](#unresolved-repair-continuity)
 
 
 ## When To Use

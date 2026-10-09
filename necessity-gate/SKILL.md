@@ -33,6 +33,7 @@ necessity-gate checks whether a new task, file, audit cycle, skill change, or fo
 - [Relationship To Verification](#relationship-to-verification)
 - [What This Gate Does Not Block](#what-this-gate-does-not-block)
 - [References](#references)
+- [Usefulness of discretionary checks](#usefulness-of-discretionary-checks)
 
 
 ## Triggers

@@ -22,6 +22,7 @@ boundary-contract declares the work boundary before implementation, modification
 - [Tool-Checkpoint Link](#tool-checkpoint-link)
 - [Exact Protected-File Evidence](#exact-protected-file-evidence)
 - [Failure Modes](#failure-modes)
+- [Bounded repair and authority](#bounded-repair-and-authority)
 
 
 ## When To Use

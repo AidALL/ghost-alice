@@ -31,6 +31,7 @@ compatibility:
 - [STOP: Before Moving to the Next Skill](#stop-before-moving-to-the-next-skill)
 - [Discovery Workflow](#discovery-workflow)
 - [Summary](#summary)
+- [Check sufficiency and repair limits](#check-sufficiency-and-repair-limits)
 - [Reference Documents](#reference-documents)
 
 
