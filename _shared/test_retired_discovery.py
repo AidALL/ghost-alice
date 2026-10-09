@@ -447,13 +447,29 @@ def test_installer_cleanup_calls_retirement_with_explicit_owned_ghost_root(tmp_p
     (target/'.ghost-alice-install.json').write_text(json.dumps(dict(managed_by='Ghost-ALICE',
         asset_id='jailbreak-detector', content_hashes={'SKILL.md':hashlib.sha256(content.encode()).hexdigest()})))
     ghost = tmp_path/'explicit-ghost'
-    env = dict(os.environ, SCRIPT_DIR=str(SHARED.parent), PLATFORM=platform,
-        GHOST_ALICE_GHOST_ROOT=str(ghost), PATH=str(Path(sys.executable).parent)+os.pathsep+os.environ['PATH'])
-    command = 'source "$SCRIPT_DIR/installer_lib/python_runtime.sh"\nsource "$SCRIPT_DIR/installer_lib/targets.sh"\nDEPRECATED_INSTALLED_SKILLS=()\ncleanup_deprecated_installed_skills "$1"'
+    claude = tmp_path/'Configured Claude'
+    commands = claude/'commands'; commands.mkdir(parents=True)
+    wrapper = commands/'jailbreak-detector.md'
+    original = '@jailbreak-detector/SKILL.md\n\n$ARGUMENTS\n'
+    wrapper.write_text(original)
+    unknown = commands/'local-skill.md'; unknown.write_text('User-owned command')
+    env = {key:value for key,value in os.environ.items() if not key.startswith('GHOST_ALICE_')}
+    env.update(SCRIPT_DIR=str(SHARED.parent), PLATFORM=platform, HOME=str(tmp_path/'home'),
+        CLAUDE_CONFIG_DIR=str(claude), GHOST_ALICE_GHOST_ROOT=str(ghost),
+        PATH=str(Path(sys.executable).parent)+os.pathsep+os.environ['PATH'])
+    command = 'source "$SCRIPT_DIR/installer_lib/platform.sh"\nsource "$SCRIPT_DIR/installer_lib/python_runtime.sh"\nsource "$SCRIPT_DIR/installer_lib/targets.sh"\nDEPRECATED_INSTALLED_SKILLS=()\ncleanup_deprecated_installed_skills "$1"'
     result = subprocess.run(['/bin/bash','-c',command,'retirement-source-fixture',str(target.parent)],
         env=env, text=True, capture_output=True)
     assert result.returncode == 0, result.stdout+result.stderr
+    assert result.stderr == ''
     assert not target.exists()
     backup = next((ghost/'deprecated-skill-backups').glob('*/jailbreak-detector'))
     assert (backup/'SKILL.md').read_text() == content
     assert (ghost/'install-state'/f'{platform}-events.jsonl').is_file()
+    assert unknown.read_text() == 'User-owned command'
+    if platform == 'claude':
+        assert not wrapper.exists()
+        saved = next((claude/'retired-command-backups').glob('*/jailbreak-detector.md'))
+        assert saved.read_text() == original
+    else:
+        assert wrapper.read_text() == original
