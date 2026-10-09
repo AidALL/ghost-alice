@@ -262,8 +262,9 @@ REQUIRED_PATTERNS = {
         "test-purpose",
         "stop-conditions",
         "next-allowed-actions",
-        "Scope changes need renegotiation in both directions",
-        "Never shrink or grow the committed scope silently",
+        "Renew an agent-declared implementation contract before using an additional surface already inside the user authorization envelope",
+        "A changed user-owned boundary or committed objective requires the exact human decision",
+        "Do not silently narrow the requested outcome or infer new authority from a wider focus",
     ],
     "_shared/install_hooks.py": [
         "TOOL_CHECKPOINT_MARKER",

@@ -79,6 +79,35 @@ CONTRACT = {
 
 
 class SkillGateContractTest(unittest.TestCase):
+    def test_current_boundary_contract_distinguishes_local_plan_from_human_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            body = (REPO_ROOT / "boundary-contract" / "SKILL.md").read_text(encoding="utf-8")
+            self._write_file(root, "boundary-contract/SKILL.md", body)
+            issues = run_contract_checks(root)
+            boundary_issues = [issue for issue in issues if "boundary-contract/SKILL.md" in issue.path]
+            self.assertEqual(boundary_issues, [])
+
+    def test_boundary_contract_rejects_missing_authority_and_objective_protection(self) -> None:
+        obligations = (
+            "Renew an agent-declared implementation contract before using an additional surface already inside the user authorization envelope",
+            "A changed user-owned boundary or committed objective requires the exact human decision",
+            "Do not silently narrow the requested outcome or infer new authority from a wider focus",
+        )
+        body = (REPO_ROOT / "boundary-contract" / "SKILL.md").read_text(encoding="utf-8")
+        for obligation in obligations:
+            with self.subTest(obligation=obligation), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                self.assertEqual(body.count(obligation), 1)
+                self._write_file(root, "boundary-contract/SKILL.md", body.replace(obligation, ""))
+                issues = run_contract_checks(root)
+                self.assertTrue(any(
+                    "boundary-contract/SKILL.md" in issue.path and obligation in issue.message
+                    for issue in issues
+                ))
+
     def test_missing_clarification_only_machine_route_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -263,7 +292,7 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(
             root,
             "boundary-contract/SKILL.md",
-            "---\nname: boundary-contract\ndescription: Use after task-router routes boundary-contract: required.\n---\n\nKeep field names, enum values, literal tokens, gate schemas, and allowed/forbidden control values in English.\n[boundary-contract]\n- objective: <work-objective>\nphase\nobjective\nexplicit-non-goals\nallowed-surface\nprohibited-surface\nlocked-decisions\nacceptance-criteria\nopen-questions\ntest-purpose\nstop-conditions\nnext-allowed-actions\nScope changes need renegotiation in both directions\nNever shrink or grow the committed scope silently\n",
+            "---\nname: boundary-contract\ndescription: Use after task-router routes boundary-contract: required.\n---\n\nKeep field names, enum values, literal tokens, gate schemas, and allowed/forbidden control values in English.\n[boundary-contract]\n- objective: <work-objective>\nphase\nobjective\nexplicit-non-goals\nallowed-surface\nprohibited-surface\nlocked-decisions\nacceptance-criteria\nopen-questions\ntest-purpose\nstop-conditions\nnext-allowed-actions\nRenew an agent-declared implementation contract before using an additional surface already inside the user authorization envelope\nA changed user-owned boundary or committed objective requires the exact human decision\nDo not silently narrow the requested outcome or infer new authority from a wider focus\n",
         )
         self._write_file(
             root,
@@ -852,7 +881,8 @@ class SkillGateContractTest(unittest.TestCase):
                 "Items triaged as `watch` or `reject` still receive a closed disposition.",
                 "A closed disposition does not make a candidate an implementation candidate.",
                 "`dispositions[*].disposition` is a report-only classification and routing recommendation.",
-                "necessity-gate remains the execution authority",
+                "necessity-gate evaluates whether proposed skill, file, task or follow-up work is justified",
+                "it does not grant human authority or native tool permission",
                 "`owner` is the accountable contract or skill identifier",
                 "A `defer` or `reject` disposition authorizes no action.",
                 "Analyzer `decision` does not authorize a handoff.",
@@ -865,6 +895,7 @@ class SkillGateContractTest(unittest.TestCase):
             ("quality", "route through necessity-gate"),
             ("procedure", "as a debugging handoff rather than"),
             ("procedure", "sole action authority"),
+            ("procedure", "necessity-gate remains the execution authority"),
         ]
         self._assert_fragment_tables(normalized, required_by_section, forbidden_fragments)
 
