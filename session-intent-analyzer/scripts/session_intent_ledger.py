@@ -1534,6 +1534,86 @@ def mark_acceptance_criterion_met(
     return paths
 
 
+def invalidate_acceptance_criterion(
+    *, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+    criterion_id: str, expected_input_event_id: str,
+    expected_criterion: dict[str, Any], expected_completion_check_digest: str,
+    invalidation_reason: str, transaction: sqlite3.Connection | None = None,
+) -> dict[str, Path]:
+    """Reopen observed invalid evidence without changing its admitted meaning.
+
+    The caller owns dependency verification. This writer checks exact current
+    native selection, immutable definition and the currently met proof (CAS).
+    It cannot assert pass. Duplicate invalidation of that same proof/input is a
+    no-op only when the last proof event for this qualified criterion is the
+    matching invalidation. Newer proof is never withdrawn by an old request.
+    """
+    validate_identity(platform, session_id)
+    if (not isinstance(expected_input_event_id, str) or not expected_input_event_id
+            or not isinstance(expected_criterion, dict)
+            or not isinstance(expected_completion_check_digest, str)
+            or not COMPLETION_CHECK_DIGEST_PATTERN.fullmatch(expected_completion_check_digest)
+            or invalidation_reason != "dependency-mismatch"):
+        raise ValueError("invalidation requires current input, definition, proof digest and observed dependency mismatch")
+    digest = expected_completion_check_digest.removeprefix("sha256:").lower()
+    paths = session_paths(root, platform, session_id)
+    with _transaction(root, transaction) as connection:
+        state = _load_state_for_update(connection, paths, platform, session_id)
+        _check_expected(state, expected_input_event_id, None)
+        key = (expected_criterion.get("work_unit_id"), expected_criterion.get("contract_revision"), criterion_id)
+        if (not isinstance(key[0], str) or not key[0] or type(key[1]) is not int or key[1] < 1):
+            raise ValueError("invalidation requires an exact owned qualified criterion")
+        matches = [c for c in state.get("acceptance_criteria", [])
+                   if isinstance(c, dict) and acceptance_criterion_key(c) == key]
+        if len(matches) != 1 or matches[0].get("admitted") is not True:
+            raise ValueError("invalidation criterion is missing, ambiguous or not admitted")
+        criterion = matches[0]
+        for field in ("id", "summary", "source", "admitted", "work_unit_id", "contract_revision"):
+            if (field not in expected_criterion or expected_criterion[field] != criterion.get(field)
+                    or type(expected_criterion[field]) is not type(criterion.get(field))):
+                raise ValueError("stale expected criterion; no invalidation was applied")
+        state["canonical_input_event_id"] = (state["latest_input_event_id"]
+            if _canonical_input_bound(connection, root, state) else "")
+        route = _response_route_module().project_stored_response_route(state)
+        if (route is None or route["status"] != "ready" or not any(
+                (c["work_unit_id"], c["contract_revision"], c["criterion_id"]) == key
+                for c in route["selected_criteria"]) or not any(
+                u["work_unit_id"] == key[0] and u["contract_revision"] == key[1]
+                and u["owner"] == {"platform": platform, "session_id": session_id}
+                for u in route["work_units"])):
+            raise ValueError("invalidation requires the ready current native owner selection")
+        if criterion.get("status") != "met":
+            events = read_session_events(root=root, platform=platform, session_id=session_id, transaction=connection)
+            latest = next((e for e in reversed(events) if
+                (e.get("work_unit_id"), e.get("contract_revision"), e.get("criterion_id")) == key
+                and e.get("event") in {"acceptance-criterion-met", "acceptance-criterion-evidence-invalidated"}), None)
+            if (latest is not None and latest["event"] == "acceptance-criterion-evidence-invalidated"
+                    and latest.get("input_event_id") == expected_input_event_id
+                    and latest.get("prior_completion_check_digest", "").removeprefix("sha256:") == digest):
+                return paths
+            raise ValueError("criterion is not currently met by the expected proof")
+        prior_digest = criterion.get("met_completion_check_digest", "")
+        if prior_digest.removeprefix("sha256:") != digest:
+            raise ValueError("newer or different met proof; no invalidation was applied")
+        before = _semantic_projection(state)
+        prior_time = criterion.get("met_at")
+        criterion["status"] = "unmet"
+        criterion.pop("met_completion_check_digest", None)
+        criterion.pop("met_at", None)
+        now = utc_now()
+        state["updated_at"] = now
+        _persist_canonical_intake(connection, state)
+        _commit(connection, state, {
+            "ts": now, "event": "acceptance-criterion-evidence-invalidated",
+            "platform": platform, "session_id": session_id, "criterion_id": criterion_id,
+            "work_unit_id": key[0], "contract_revision": key[1], "input_event_id": expected_input_event_id,
+            "invalidation_reason": invalidation_reason, "criterion_source": criterion["source"],
+            "prior_completion_check_digest": prior_digest, "prior_met_at": prior_time,
+            "semantic_changes": _semantic_changes(before, state),
+        })
+    return paths
+
+
 def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
     if isinstance(state_or_path, Path):
         # A single read preserves both semantics and their actual metadata.
