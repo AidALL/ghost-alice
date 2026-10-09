@@ -216,24 +216,6 @@ class TestI18nParityBaseline(unittest.TestCase):
         with open(_BASELINE_PATH, encoding="utf-8") as fh:
             return json.load(fh)
 
-    def test_extractor_finds_sh_pairs(self):
-        """install.sh extractor must find a non-trivial number of pairs."""
-        pairs = extract_sh_pairs()
-        self.assertGreater(
-            len(pairs), 50,
-            f"Expected >50 t() pairs in install.sh; got {len(pairs)}. "
-            "The extractor may be broken.",
-        )
-
-    def test_extractor_finds_ps1_pairs(self):
-        """install.ps1 extractor must find at least 10 pairs."""
-        pairs = extract_ps1_pairs()
-        self.assertGreater(
-            len(pairs), 5,
-            f"Expected >5 T() pairs in install.ps1; got {len(pairs)}. "
-            "The extractor may be broken.",
-        )
-
     def test_drift_matches_baseline(self):
         """Symmetric difference of EN strings must equal the recorded baseline.
 

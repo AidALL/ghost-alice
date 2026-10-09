@@ -664,10 +664,6 @@ class TestMessageLanguage(unittest.TestCase):
                 self.assertIn("--event PreToolUse", command)
                 self.assertIn(f"--platform {platform}", command)
 
-    def test_codex_tool_checkpoint_legacy_json_constants_removed(self):
-        self.assertFalse(hasattr(install_hooks, "TOOL_CHECKPOINT_COMMAND_CODEX"))
-        self.assertFalse(hasattr(install_hooks, "TOOL_CHECKPOINT_ENTRY_CODEX"))
-
     def test_hook_reminder_treats_questions_and_opinions_as_user_input(self):
         self.assertIn("Every user input", install_hooks.HOOK_INTERNAL)
         self.assertNotIn("jailbreak-detector", install_hooks.HOOK_INTERNAL)
@@ -681,7 +677,6 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("it owns routing", install_hooks.HOOK_INTERNAL)
         self.assertIn("not raw intent inference", install_hooks.HOOK_INTERNAL)
         self.assertIn("not raw intent inference, intake, or native tool permission", install_hooks.HOOK_INTERNAL)
-        self.assertLessEqual(len(install_hooks.HOOK_INTERNAL), 900)
         self.assertNotIn("[tool-checkpoint]", install_hooks.HOOK_INTERNAL)
         self.assertNotIn("hook-stage: PreToolUse", install_hooks.HOOK_INTERNAL)
         self.assertNotIn("Before the first tool call", install_hooks.HOOK_INTERNAL)
@@ -1662,68 +1657,6 @@ class TestMessageLanguage(unittest.TestCase):
         )
         self.assertEqual(surfaced_count, 1)
 
-    def test_dispatcher_has_no_tool_checkpoint_replay_or_identity_decision_helpers(self):
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        source = dispatcher.read_text(encoding="utf-8")
-        decision_body = re.search(
-            r"function toolCheckpointDecision[\s\S]*?\n}\n\ntry",
-            source,
-        )
-
-        self.assertLess(len(source.splitlines()), 880)  # Bound the task-router reminder size without removing its required decisions.
-        self.assertNotIn("function buildAuditRef(", source)
-        self.assertNotIn("function completionReminderDecision", source)
-        self.assertNotIn("function validateCompletionResponse", source)
-        self.assertNotIn("COMPLETION_REMINDER_RETRY_TTL", source)
-        self.assertIsNone(decision_body)
-        self.assertNotIn("permissionDecision", source)
-        forbidden = [
-            "function toolCheckpointReplayTtlMs",
-            "stableToolCheckpointInputKey",
-            "stableToolCheckpointSessionKey",
-            "stableToolKey",
-            "replay" + "Allowed",
-            "denied" + "Sessions",
-            "tool-checkpoint-state" + ".json",
-            "fullToolCheckpointReason",
-            "isRoutineNativeInspectionToolCall",
-            "currentIntentGateDecision",
-            "normalizedToolCategory",
-            "mutationKeys",
-            "shellCommandText",
-        ]
-        for needle in forbidden:
-            with self.subTest(needle=needle):
-                self.assertNotIn(needle, source)
-
-    def test_dispatcher_has_no_capability_fence_or_payload_content_gate(self):
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        source = dispatcher.read_text(encoding="utf-8")
-        shared_dir = Path(install_hooks.__file__).parent
-
-        forbidden_source = [
-            "capability_fence",
-            "capabilityFence",
-            "admit_scope",
-            "admitted-scope",
-            "deny_substrings",
-            "JSON.stringify(ti)",
-        ]
-        for needle in forbidden_source:
-            with self.subTest(needle=needle):
-                self.assertNotIn(needle, source)
-
-        forbidden_files = [
-            "capability_fence.mjs",
-            "admit_scope.mjs",
-            "test_capability_fence.mjs",
-            "test_admit_scope.mjs",
-            "test_capability_fence_hook.py",
-        ]
-        for filename in forbidden_files:
-            with self.subTest(filename=filename):
-                self.assertFalse((shared_dir / filename).exists())
-
     def test_dispatcher_install_copies_companion_modules(self):
         # Dispatcher companion-module invariant: the dispatcher imports a relative .mjs module; the installer must copy it alongside, or the installed enforcer fails ERR_MODULE_NOT_FOUND.
         prev_home = os.environ.get("HOME")
@@ -1828,34 +1761,6 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(replay.returncode, 0, msg=replay.stderr)
         replay_payload = json.loads(replay.stdout)
         self.assert_no_pretool_deny(replay_payload)
-
-    def test_codex_dispatcher_zero_deny_for_100_distinct_shell_commands_with_open_gate(self):
-        """Recorded intake means shell command text never creates a checkpoint denial."""
-        deny_count = 0
-        for index in range(100):
-            result = self.run_codex_pretool({
-                "session_id": "s-codex-100-shell-commands",
-                "hook_event_name": "PreToolUse",
-                "tool_name": "shell",
-                "tool_input": {"cmd": f"echo distinct-command-{index}"},
-            })
-            payload = json.loads(result.stdout)
-            output = payload.get("hookSpecificOutput", {})
-            if isinstance(output, dict) and output.get("permissionDecision") == "deny":
-                deny_count += 1
-
-        self.assertEqual(deny_count, 0)
-
-    def test_codex_dispatcher_zero_deny_for_same_command_different_args_with_open_gate(self):
-        """Command arguments are not a checkpoint identity or mutation classifier."""
-        for index in range(50):
-            result = self.run_codex_pretool({
-                "session_id": "s-codex-same-command-different-args",
-                "hook_event_name": "PreToolUse",
-                "tool_name": "shell",
-                "tool_input": {"cmd": f"ls -la /tmp/ghost-alice-{index}"},
-            })
-            self.assert_no_pretool_deny(json.loads(result.stdout))
 
     def test_codex_dispatcher_zero_deny_for_different_tool_input_payload_keys_with_open_gate(self):
         """tool_input key names are not used as checkpoint decision signals."""

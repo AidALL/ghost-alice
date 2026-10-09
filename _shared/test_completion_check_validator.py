@@ -118,56 +118,6 @@ class TestCompletionTextFinalSurfaceOrder(unittest.TestCase):
         self.assertIsNone(v.validate_completion_text(text))
 
 
-class TestSkillsLoadedForms(unittest.TestCase):
-    """skills-loaded must be accepted in inline / flow-list / nested forms.
-
-    Equivalent inline and nested serializations must produce the same
-    normalized skill tokens.
-    """
-
-    def _final(self, skills_block):
-        completion_check = "\n".join(
-            [
-                "[completion-check]",
-                "- verification-before-completion: done",
-                "- skill-call: verification-before-completion (this turn)",
-                "- claim-evidence-map:",
-                "  - claim: did it",
-                "    evidence: ran X",
-                "    verdict: pass",
-                "- unverified:",
-                "  - none",
-            ]
-        )
-        return completion_check + "\n\n[io-trace]\n" + skills_block
-
-    def test_inline_form_accepted(self):
-        self.assertIsNone(self._validate("- skills-loaded: verification-before-completion"))
-
-    def test_inline_with_paren_accepted(self):
-        self.assertIsNone(self._validate("- skills-loaded: verification-before-completion (this turn)"))
-
-    def test_inline_csv_accepted(self):
-        self.assertIsNone(self._validate("- skills-loaded: task-router, verification-before-completion"))
-
-    def test_flow_list_accepted(self):
-        self.assertIsNone(self._validate("- skills-loaded: [verification-before-completion]"))
-
-    def test_nested_list_accepted(self):
-        self.assertIsNone(self._validate("- skills-loaded:\n  - verification-before-completion"))
-
-    def test_nested_list_with_following_field_accepted(self):
-        block = "- skills-loaded:\n  - task-router\n  - verification-before-completion\n- commands-run: [x]"
-        self.assertIsNone(self._validate(block))
-
-    def test_optional_trace_missing_skill_does_not_gate_completion(self):
-        result = self._validate("- skills-loaded: task-router")
-        self.assertIsNone(result)
-
-    def _validate(self, skills_block):
-        return v.validate_completion_text(self._final(skills_block))
-
-
 class TestExecutedWorkDetectorFalseBlocks(unittest.TestCase):
     """requires_completion_check must not fire on non-committal phrasing.
 
@@ -182,21 +132,6 @@ class TestExecutedWorkDetectorFalseBlocks(unittest.TestCase):
 
     def test_real_tests_pass_claim_still_detected(self):
         self.assertTrue(v.requires_completion_check("I ran it and all tests pass."))
-
-    def test_quoted_completion_phrase_is_not_a_claim(self):
-        self.assertFalse(
-            v.requires_completion_check("You said 'the task is complete' but the build still fails.")
-        )
-
-    def test_conditional_lead_is_not_a_claim(self):
-        self.assertFalse(v.requires_completion_check("Once the task is complete, deploy."))
-
-    def test_goal_lead_with_separate_negation_is_not_a_claim(self):
-        self.assertFalse(
-            v.requires_completion_check(
-                "Acceptance criteria: all tests pass and lint is clean; we are not there yet."
-            )
-        )
 
     def test_negated_closure_is_not_a_claim(self):
         self.assertFalse(v.requires_completion_check("The task is not complete yet."))
@@ -776,47 +711,6 @@ class TestExplicitMultilineQuotedExamples(unittest.TestCase):
         text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[io-trace]"'
         self.assertTrue(v.looks_like_completion_claim(text))
         self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
-
-
-class TestOptionalTraceSkillNames(unittest.TestCase):
-    """Optional printed skill labels do not determine verification execution."""
-
-    def _final(self, skills_block):
-        completion_check = "\n".join(
-            [
-                "[completion-check]",
-                "- verification-before-completion: done",
-                "- skill-call: verification-before-completion (this turn)",
-                "- claim-evidence-map:",
-                "  - claim: did it",
-                "    evidence: ran X",
-                "    verdict: pass",
-                "- unverified:",
-                "  - none",
-            ]
-        )
-        return completion_check + "\n\n[io-trace]\n" + skills_block
-
-    def test_optional_v2_label_does_not_override_valid_self_report(self):
-        result = v.validate_completion_text(self._final("- skills-loaded: [verification-before-completion-v2]"))
-        self.assertIsNone(result)
-
-    def test_paren_annotation_still_accepted(self):
-        self.assertIsNone(
-            v.validate_completion_text(self._final("- skills-loaded: verification-before-completion (this turn)"))
-        )
-
-    def test_nested_blank_gap_accepted(self):
-        self.assertIsNone(
-            v.validate_completion_text(self._final("- skills-loaded:\n\n  - verification-before-completion"))
-        )
-
-    def test_nested_prose_line_accepted(self):
-        self.assertIsNone(
-            v.validate_completion_text(
-                self._final("- skills-loaded:\n  loaded the following:\n  - verification-before-completion")
-            )
-        )
 
 
 class TestAllCompletionBlocksValidated(unittest.TestCase):

@@ -37,7 +37,6 @@ _NEWLINE_SPLIT_RE = re.compile(r"\r?\n")
 
 _VERIFICATION_DONE_RE = re.compile(r"-\s*verification-before-completion:\s*done\b")
 _SKILL_CALL_RE = re.compile(r"-\s*skill-call:\s*([^\n]+)")
-# skills-loaded accepts three equivalent serializations (inline CSV, flow-list `[...]`, or a nested bullet list). The header line is matched here; token extraction and nested-list collection happen in extract_skills_loaded().
 _ZERO_WIDTH_RE = re.compile("[​‌‍‎‏﻿]")
 
 _TOP_LEVEL_FIELD_RE = re.compile(r"^-\s*[A-Za-z0-9_-]+\s*:")
@@ -860,43 +859,6 @@ def extract_all_control_blocks(text, name):
     if current is not None:
         blocks.append("\n".join(current).strip())
     return blocks
-
-
-def extract_skills_loaded(io_trace, *, field="skills-loaded"):
-    """Return skill tokens from an io-trace `skills-loaded` field.
-
-    Accepts three equivalent serializations so the gate is format-agnostic:
-      - inline list:  ``- skills-loaded: a, b`` or ``a; b``
-      - flow list:    ``- skills-loaded: [a, b]``
-      - nested list:  ``- skills-loaded:`` then indented ``  - a`` / ``  - b`` lines
-    """
-    lines = _split_lines(io_trace)
-    for index, line in enumerate(lines):
-        header = re.match(r"^\s*-?\s*" + re.escape(field) + r"\s*:\s*(.*)$", line, re.I)
-        if not header:
-            continue
-        inline = header.group(1).strip()
-        if inline.startswith("[") and inline.endswith("]"):
-            inline = inline[1:-1]
-        if inline.strip():
-            return _split_skill_tokens(inline)
-        # Nested form: collect indented bullet lines. Blank-line gaps and non-bullet prose lines under the header are tolerated (skipped), so the list is not truncated by a stray blank line or an introductory line. Collection stops at the next top-level `- field:` entry or a non-indented line that is neither blank nor a bullet.
-        tokens = []
-        for nxt in lines[index + 1:]:
-            if not nxt.strip():
-                continue
-            if _TOP_LEVEL_FIELD_RE.search(nxt):
-                break
-            bullet = re.match(r"^\s*-\s*(.+?)\s*$", nxt)
-            if bullet:
-                tokens.extend(_split_skill_tokens(bullet.group(1)))
-                continue
-            if nxt[:1] in (" ", "\t"):
-                # Indented non-bullet prose under the header: ignore and keep scanning.
-                continue
-            break
-        return tokens
-    return []
 
 
 def validate_completion_text(text, *, require_completion_check=False, require_skill_self_report=True):

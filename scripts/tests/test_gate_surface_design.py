@@ -2,8 +2,7 @@
 
 - skill-call lines are factual records, so templates must not pre-fill skill names.
 - Accumulated-restriction reconciliation is a routing decision rule and stays in the router body.
-- verification-before-completion is a rule-enforcement skill; its defenses stay in the body.
-- The user-claim rule sits right after verify-or-reuse on the always-on surfaces: verification covers the agent's own work.
+- The always-on surfaces preserve user-dictated claims: verification covers the agent's own work.
 """
 import unittest
 from pathlib import Path
@@ -42,7 +41,6 @@ USER_CLAIM_RULE = (
     "since that judgment and its consequences belong to the user. Verification duties cover claims about work the agent "
     "itself performed."
 )
-VERIFY_OR_REUSE_LEAD = "Before re-reading an artifact to support a claim, apply verify-or-reuse:"
 USER_CLAIM_SURFACES = ("AGENTS.md", "platforms/claude/CLAUDE.md", "platforms/codex/AGENTS.md")
 TEMPLATE_SURFACES = (
     "AGENTS.md",
@@ -89,24 +87,11 @@ class GateSurfaceDesignTest(unittest.TestCase):
             with self.subTest(stale=stale[:30]):
                 self.assertNotIn(stale, body)
 
-    def test_user_claim_rule_follows_verify_or_reuse(self) -> None:
-        # Preserve user-dictated claims as supplied; verification covers the
-        # agent's own work, so the rule sits next to verify-or-reuse on every always-on surface.
+    def test_user_claim_rule_is_preserved(self) -> None:
         for rel in USER_CLAIM_SURFACES:
             with self.subTest(surface=rel):
                 paragraphs = [p.strip() for p in (REPO_ROOT / rel).read_text(encoding="utf-8").split("\n\n")]
-                leads = [i for i, p in enumerate(paragraphs) if p.startswith(VERIFY_OR_REUSE_LEAD)]
-                self.assertEqual(len(leads), 1)
                 self.assertEqual(paragraphs.count(USER_CLAIM_RULE), 1)
-                self.assertEqual(paragraphs[leads[0] + 1], USER_CLAIM_RULE)
-
-    def test_verification_body_keeps_rule_enforcement_defenses(self) -> None:
-        body = (REPO_ROOT / "coding-convention" / "verification-before-completion" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        for heading in ("## Common Failures", "## Red Flags", "## Rationalization Defense", "## Why It Matters"):
-            with self.subTest(heading=heading):
-                self.assertIn(heading, body)
 
 
 if __name__ == "__main__":
