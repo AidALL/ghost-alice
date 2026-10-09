@@ -2625,7 +2625,7 @@ def install_hook(
         # The generated command embeds "{marker} [hook-runner:...]", so the marker is always followed by a space. Matching on "marker " makes removal exact and prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
         match_marker = marker + " "
         inner = _hook_python_command(script_path, payload=True)
-        entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker)
+        entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker, platform_key=platform_key)
         command = _entry_command(entry)
         verified_addon_commands.add((event_name, command))
         if event_name not in hooks_obj:

@@ -418,7 +418,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 self.assertTrue(all(row["hook_id"] == "completion" and row["event"] == "Stop" for row in rows))
                 self.assertEqual(rows[1]["visible_decision"], "force_show")
 
-    def test_installed_security_negative_keeps_denial_and_strict_audit(self):
+    def test_installed_checkpoint_retains_block_data_without_widening_current_admission(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
             with self.subTest(platform=platform, profile=profile), self.installed(platform, profile) as (home, env, hooks):
                 session = f"security-{platform}-{profile}"
@@ -430,17 +430,61 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                                   "--expected-input-event-id", event_id,
                                   "--delta-json", json.dumps({"model_security_decision": decision})])
                 payload = {"session_id": session, "hook_event_name": "PreToolUse", "tool_name": "Read"}
-                denied = self.installed_hook(hooks, "PreToolUse", "tool-checkpoint", payload, env)
-                protocol = json.loads(denied.stdout)
-                self.assertEqual(protocol["hookSpecificOutput"]["permissionDecision"], "deny")
+                # Retained model-security data is a storage fact after removal
+                # of the standalone classifier, never native permission authority.
+                state_command = [sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
+                                 "--platform", platform, "--session-id", session, "--read-state"]
+                before = json.loads(self.run_process(state_command).stdout)
+                observed = self.installed_hook(hooks, "PreToolUse", "tool-checkpoint", payload, env)
+                protocol = json.loads(observed.stdout)
+                self.assertNotIn("permissionDecision", protocol.get("hookSpecificOutput", {}))
+                self.assertEqual(json.loads(self.run_process(state_command).stdout), before)
+                self.assertEqual(before["model_security_decision"]["decision"], "block")
+                self.assertEqual(before["model_security_decision"]["input_event_id"], event_id)
                 row = self.strict_rows(home, platform, session)[-1]
-                self.assertEqual(row["visible_decision"], "force_show")
-                self.assertEqual(row["surface_item"]["user_surface"], "forced")
-                self.assertEqual(row["stdout"], denied.stdout)
-                # A genuine new input invalidates the old-lineage block.
+                self.assertEqual(row["event"], "PreToolUse")
+                self.assertEqual(row["hook_id"], "tool-checkpoint")
+                self.assertIn("surface_item", row)
+                self.assertIn("observed_duration_source", row)
+                # The strict row retains the child protocol independently of visibility.
+                self.assertNotIn("permissionDecision", json.loads(row["stdout"]).get("hookSpecificOutput", {}))
+                # Current work admission remains a separate owning Core check.
+                # A checkpoint or broader focus cannot admit the prohibited unit.
+                criterion = dict(id="protected-resource", summary="Protected target requires admission",
+                                 source="user-explicit", admitted=False, status="unmet",
+                                 work_unit_id="protected-unit", contract_revision=1)
+                self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
+                    "--platform", platform, "--session-id", session, "--expected-input-event-id", event_id,
+                    "--delta-json", json.dumps({"constraints":["Do not use the protected target without admission."],
+                                                "acceptance_criteria":[criterion]})])
+                protected = json.loads(self.run_process(state_command).stdout)
+                candidate = dict(schema_version="response-route.v1", routing_surface={
+                    "intent_relation":"continuation", "primary_request":"Protected work",
+                    "causal_axis":"n/a", "response_mode":"normal",
+                    "response_order":"imperative-result-first-after-necessary-work", "change_depth":"structural",
+                    "focus_layer":"macro", "verification_complexity":"level-2", "boundary_contract":"required",
+                    "forced_visibility":"no", "reason":"Focus cannot grant resource authority"},
+                    work_units=[dict(work_unit_id="protected-unit", contract_revision=1, kind="execution", admitted=True,
+                                     owner=dict(platform=platform, session_id=session))],
+                    selected_work_unit_ids=["protected-unit"],
+                    selected_criteria=[dict(work_unit_id="protected-unit", contract_revision=1, criterion_id="protected-resource")])
+                rejected = subprocess.run([sys.executable, "-B", str(self.shared / "response_route.py"),
+                    "--root", str(self.ledger_root), "--platform", platform, "--session-id", session,
+                    "--expected-input-event-id", event_id, "--boundary-ref", "protected-boundary",
+                    "--candidate-json", json.dumps(candidate)], cwd=self.home, env=env, text=True, capture_output=True,
+                    timeout=30, check=False)
+                self.assertEqual(rejected.returncode, 1, rejected.stdout + rejected.stderr)
+                diagnostic = json.loads(rejected.stderr)
+                self.assertEqual(diagnostic["error"], "route-schema")
+                self.assertIn("admitted current owner and admitted ledger condition", diagnostic["message"])
+                self.assertEqual(json.loads(self.run_process(state_command).stdout), protected)
+                self.assertIsNone(protected["response_route"])
+                # New input changes lineage without relabeling retained history.
                 self.observe(platform, session)
-                allowed = json.loads(self.installed_hook(hooks, "PreToolUse", "tool-checkpoint", payload, env).stdout)
-                self.assertNotEqual(allowed.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+                current = json.loads(self.run_process(state_command).stdout)
+                self.assertNotEqual(current["latest_input_event_id"], event_id)
+                self.assertEqual(current["model_security_decision"], protected["model_security_decision"])
+                self.installed_hook(hooks, "PreToolUse", "tool-checkpoint", payload, env)
                 self.assertEqual(len(self.strict_rows(home, platform, session)), 2)
 
     def test_installed_posttool_audit_tool_forms_across_profiles(self):

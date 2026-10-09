@@ -194,7 +194,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 adapter_commands[0],
                 cwd=project,
                 env=env,
-                input="{}\n",
+                input=json.dumps({"hook_event_name":"Stop", "session_id":"remote-addon-smoke", "cwd":str(project)}),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -205,6 +205,26 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             )
             self.assertEqual(hook.returncode, 0, msg=hook.stderr + hook.stdout)
             self.assertIn("remote-clone-adapter-smoke", hook.stdout)
+
+            # Authentic registration still rejects another native event and
+            # changed installed bytes; fixing the fixture must not weaken it.
+            def invoke_adapter(event):
+                return subprocess.run(adapter_commands[0], cwd=project, env=env,
+                    input=json.dumps({"hook_event_name":event, "session_id":"remote-addon-smoke", "cwd":str(project)}),
+                    capture_output=True, text=True, shell=True, timeout=60, check=False)
+            rejected = invoke_adapter("PreToolUse")
+            self.assertEqual(rejected.returncode, 126)
+            self.assertIn("registered adapter event/source/hash mismatch", rejected.stderr)
+            installed_adapter = claude / "skills/autopilot-mode/adapters/autopilot_mode.py"
+            original = installed_adapter.read_bytes()
+            try:
+                installed_adapter.write_bytes(original + b"\n# changed installed fixture\n")
+                rejected = invoke_adapter("Stop")
+                self.assertEqual(rejected.returncode, 126)
+                self.assertIn("registered adapter event/source/hash mismatch", rejected.stderr)
+                self.assertNotIn("remote-clone-adapter-smoke", rejected.stdout)
+            finally:
+                installed_adapter.write_bytes(original)
 
             per_addon = run("--platform", "claude", "--uninstall", "--addon", "autopilot-mode")
             self.assertEqual(per_addon.returncode, 0, msg=per_addon.stderr + per_addon.stdout)
@@ -279,7 +299,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 adapter_commands[0],
                 cwd=project,
                 env=env,
-                input="{}\n",
+                input=json.dumps({"hook_event_name":"Stop", "session_id":"remote-addon-zsh-smoke", "cwd":str(project)}),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",

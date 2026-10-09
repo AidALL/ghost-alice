@@ -38,14 +38,21 @@ class HookRunnerPlatformTests(unittest.TestCase):
 
     @unittest.skipIf(os.name == "nt", "POSIX shell launcher")
     def test_prompt_hook_strict_log_lands_in_the_platform_folder(self):
-        command = install_hooks._entry_command(install_hooks._platform_web_search_entry("claude", "UserPromptSubmit"))
         payload = json.dumps({"session_id": "s-platform-log", "prompt": "x", "hook_event_name": "UserPromptSubmit"})
         with tempfile.TemporaryDirectory() as home:
+            root = Path(home)
+            destination = dict(mode="isolated", owned_root=home, platform_dir=str(root / "platform"),
+                skills_dir=str(root / "skills"), ghost_root=str(root / "ghost"), ledger_root=str(root / "ledger"),
+                project_root=str(root / "project"), core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
+            install_hooks.install_hook("claude", destination=destination)
+            hooks = json.loads((root / "platform/settings.json").read_text())["hooks"]
+            command = next(h["command"] for row in hooks["UserPromptSubmit"] for h in row["hooks"]
+                           if "[hook-runner:session-intent]" in h["command"])
             env = {k: v for k, v in os.environ.items() if k not in {"GHOST_ALICE_PLATFORM", "GHOST_ALICE_SESSION_ID"}}
             env["HOME"] = home
             result = subprocess.run(["/bin/sh", "-c", command], input=payload, capture_output=True, text=True,
                                     env=env, timeout=60)
-            logs = Path(home) / ".ghost-alice" / "session-logs"
+            logs = root / "ghost/session-logs"
             written = sorted(str(p.relative_to(logs)) for p in logs.rglob("strict-hook-output.jsonl"))
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertEqual(written, ["claude/s-platform-log/strict-hook-output.jsonl"])
