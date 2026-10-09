@@ -3,6 +3,7 @@
 Dependencies: Python 3.11+ standard library, pytest.
 """
 import json
+import errno
 from pathlib import Path
 import subprocess
 import sys
@@ -112,6 +113,274 @@ def test_failed_audit_never_leaves_pending_backup_reference(tmp_path):
         retire_command(command, source_root=SHARED.parent, pending_root=ghost)
     assert command.read_text() == content
     assert not (ghost/'pending-merges/claude/manifest.json').exists()
+
+
+def _collision_fixture(tmp_path, asset_kind):
+    if asset_kind == 'command':
+        path = tmp_path/'commands/jailbreak-detector.md'
+        path.parent.mkdir()
+        content = b'@jailbreak-detector/SKILL.md\n\n$ARGUMENTS\nUser correction\n'
+        path.write_bytes(content)
+        return path, content, lambda: retire_command(path, source_root=SHARED.parent, pending_root=tmp_path/'ghost')
+    path = tmp_path/'skills/jailbreak-detector'
+    path.parent.mkdir()
+    if asset_kind == 'skill-link':
+        target = SHARED.parent/'jailbreak-detector'
+        path.symlink_to(target, target_is_directory=True)
+        content = str(target)
+    else:
+        path.mkdir()
+        original = b'# Managed source fixture\n'
+        (path/'SKILL.md').write_bytes(original+b'User correction\n')
+        (path/'.ghost-alice-install.json').write_text(json.dumps(dict(managed_by='Ghost-ALICE',
+            asset_id='jailbreak-detector', content_hashes={'SKILL.md':hashlib.sha256(original).hexdigest()})))
+        content = {item.name:item.read_bytes() for item in path.iterdir()}
+    return path, content, lambda: retire_skill(path, platform='codex', source_root=SHARED.parent, pending_root=tmp_path/'ghost')
+
+
+def _replace_active_slot(path, kind, root):
+    if kind == 'file':
+        path.write_bytes(b'New user-owned active entry\n')
+    elif kind == 'directory':
+        path.mkdir()  # An empty replacement directory is still a distinct entry.
+    else:
+        target = root/'new-link-target'
+        if kind == 'link':
+            target.write_bytes(b'New target bytes\n')
+        path.symlink_to(target, target_is_directory=True)
+    return path.lstat().st_ino
+
+
+@pytest.mark.parametrize('failure_kind', ('audit', 'pending'))
+@pytest.mark.parametrize('asset_kind', ('command', 'skill-directory'))
+@pytest.mark.parametrize('replacement_kind', ('file', 'directory', 'link', 'broken-link'))
+def test_failed_retirement_preserves_replacement_and_original_backup(tmp_path, monkeypatch, failure_kind, asset_kind, replacement_kind):
+    import retired_assets
+    path, original, retire = _collision_fixture(tmp_path, asset_kind)
+    failure = OSError(f'fixture {failure_kind} persistence unavailable')
+    backup_paths = []
+    new_inode = []
+    phases = []
+    real_audit = retired_assets._audit
+    def audit(event, result, phase):
+        phases.append(phase)
+        real_audit(event, result, phase)
+        if failure_kind == 'audit' and phase == 'moved':
+            backup_paths.append(Path(result['backup_path']))
+            new_inode.append(_replace_active_slot(path, replacement_kind, tmp_path))
+            raise failure
+    def pending(entry, *args):
+        backup_paths.append(Path(entry['backup_path']))
+        new_inode.append(_replace_active_slot(path, replacement_kind, tmp_path))
+        raise failure
+    monkeypatch.setattr(retired_assets, '_audit', audit)
+    if failure_kind == 'pending':
+        monkeypatch.setattr(retired_assets, '_pending', pending)
+    location = InstallDestination(mode='isolated', owned_root=str(tmp_path),
+        platform_dir=str(tmp_path/'platform'), skills_dir=str(tmp_path/'skills'),
+        ghost_root=str(tmp_path/'ghost'), ledger_root=str(tmp_path/'ledger'),
+        project_root=str(tmp_path/'project'), core_source_root=str(SHARED.parent))
+    with use(location), pytest.raises(RuntimeError) as caught:
+        retire()
+    backup = backup_paths[0]
+    assert path.lstat().st_ino == new_inode[0]
+    if replacement_kind == 'file':
+        assert path.read_bytes() == b'New user-owned active entry\n'
+    elif replacement_kind.endswith('link'):
+        assert path.is_symlink() and path.readlink() == tmp_path/'new-link-target'
+    else:
+        assert path.is_dir() and list(path.iterdir()) == []
+    if asset_kind == 'command':
+        assert backup.read_bytes() == original
+    else:
+        assert {item.name:item.read_bytes() for item in backup.iterdir()} == original
+    assert caught.value.__cause__ is failure
+    assert str(path) in str(caught.value) and str(backup) in str(caught.value)
+    assert 'rollback' in str(caught.value)
+    assert phases == ['moved', 'rollback-failed']
+    events = tmp_path/'ghost/install-state'/f'{"claude" if asset_kind == "command" else "codex"}-events.jsonl'
+    last_event = json.loads(events.read_text().splitlines()[-1])
+    assert last_event['path'] == str(path) and last_event['backup_path'] == str(backup)
+    assert last_event['rollback_status'] == 'collision'
+    assert not list((tmp_path/'ghost/pending-merges').glob('*/manifest.json'))
+
+
+@pytest.mark.parametrize('replacement_kind', ('file', 'directory', 'link', 'broken-link'))
+def test_failed_retired_skill_link_preserves_both_link_entries(tmp_path, monkeypatch, replacement_kind):
+    import retired_assets
+    path, original_target, retire = _collision_fixture(tmp_path, 'skill-link')
+    failure = OSError('fixture audit unavailable')
+    observed = {}
+    phases = []
+    def audit(event, result, phase):
+        phases.append(phase)
+        if phase == 'moved':
+            observed['backup'] = Path(result['backup_path'])
+            observed['inode'] = _replace_active_slot(path, replacement_kind, tmp_path)
+            raise failure
+    monkeypatch.setattr(retired_assets, '_audit', audit)
+    with pytest.raises(RuntimeError) as caught:
+        retire()
+    assert path.lstat().st_ino == observed['inode']
+    assert observed['backup'].is_symlink()
+    assert str(observed['backup'].readlink()) == original_target
+    assert caught.value.__cause__ is failure
+    assert str(path) in str(caught.value) and str(observed['backup']) in str(caught.value)
+    assert 'rolled-back' not in phases
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='Darwin native no-replace collision boundary')
+def test_replacement_at_native_restore_call_is_not_overwritten(tmp_path, monkeypatch):
+    import ctypes
+    import retired_assets
+    path, original, retire = _collision_fixture(tmp_path, 'command')
+    failure = OSError('fixture pending unavailable')
+    observed = {}
+    def pending(entry, *args):
+        observed['backup'] = Path(entry['backup_path'])
+        raise failure
+    real_library = ctypes.CDLL(None, use_errno=True)
+    native = real_library.renamex_np
+    native.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint]
+    native.restype = ctypes.c_int
+    def at_native_window(source, destination, flags):
+        observed['inode'] = _replace_active_slot(path, 'file', tmp_path)
+        return native(source, destination, flags)
+    class Library:
+        renamex_np = staticmethod(at_native_window)
+    monkeypatch.setattr(retired_assets, '_pending', pending)
+    monkeypatch.setattr(ctypes, 'CDLL', lambda *args, **kwargs: Library())
+    with pytest.raises(RuntimeError) as caught:
+        retire()
+    assert path.read_bytes() == b'New user-owned active entry\n'
+    assert path.lstat().st_ino == observed['inode']
+    assert observed['backup'].read_bytes() == original
+    assert caught.value.__cause__ is failure
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='POSIX native symbol unavailable boundary')
+def test_unavailable_native_no_replace_preserves_backup_without_fallback(tmp_path, monkeypatch):
+    import ctypes
+    import retired_assets
+    path, original, retire = _collision_fixture(tmp_path, 'command')
+    failure = OSError('fixture pending unavailable')
+    observed = {}
+    def pending(entry, *args):
+        observed['backup'] = Path(entry['backup_path'])
+        raise failure
+    monkeypatch.setattr(retired_assets, '_pending', pending)
+    monkeypatch.setattr(ctypes, 'CDLL', lambda *args, **kwargs: object())
+    with pytest.raises(RuntimeError) as caught:
+        retire()
+    assert not path.exists()
+    assert observed['backup'].read_bytes() == original
+    assert caught.value.__cause__ is failure
+    assert str(path) in str(caught.value) and str(observed['backup']) in str(caught.value)
+
+
+@pytest.mark.parametrize('asset_kind,failure_kind', (('command','audit'), ('command','pending'),
+    ('skill-directory','audit'), ('skill-directory','pending'), ('skill-link','audit')))
+def test_empty_slot_rollback_preserves_original_entry_and_exception(tmp_path, monkeypatch, asset_kind, failure_kind):
+    import retired_assets
+    path, original, retire = _collision_fixture(tmp_path, asset_kind)
+    failure = OSError(f'fixture {failure_kind} unavailable')
+    observed = {}
+    phases = []
+    real_audit = retired_assets._audit
+    def audit(event, result, phase):
+        phases.append(phase)
+        if phase == 'moved' and failure_kind == 'audit':
+            observed['backup'] = Path(result['backup_path'])
+            raise failure
+        real_audit(event, result, phase)
+    def pending(entry, *args):
+        observed['backup'] = Path(entry['backup_path'])
+        raise failure
+    monkeypatch.setattr(retired_assets, '_audit', audit)
+    monkeypatch.setattr(retired_assets, '_pending', pending)
+    with pytest.raises(OSError) as caught:
+        retire()
+    assert caught.value is failure
+    assert 'rolled-back' in phases and 'rollback-failed' not in phases
+    assert not observed['backup'].exists() and not observed['backup'].is_symlink()
+    if asset_kind == 'command':
+        assert path.read_bytes() == original
+    elif asset_kind == 'skill-link':
+        assert str(path.readlink()) == original
+    else:
+        assert {item.name:item.read_bytes() for item in path.iterdir()} == original
+
+
+@pytest.mark.skipif(sys.platform != 'darwin', reason='Darwin native unsupported-flag failure boundary')
+@pytest.mark.parametrize('code', (errno.ENOTSUP, errno.EINVAL))
+def test_native_restore_failure_keeps_backup_and_records_failed_rollback(tmp_path, monkeypatch, code):
+    import ctypes
+    import retired_assets
+    path, original, retire = _collision_fixture(tmp_path, 'command')
+    failure = OSError('fixture pending unavailable')
+    observed = {}
+    def pending(entry, *args):
+        observed['backup'] = Path(entry['backup_path'])
+        raise failure
+    def failed_native(*args):
+        ctypes.set_errno(code)
+        return -1  # Failure injection; this is not native support proof.
+    class Library:
+        renamex_np = staticmethod(failed_native)
+    monkeypatch.setattr(retired_assets, '_pending', pending)
+    monkeypatch.setattr(ctypes, 'CDLL', lambda *args, **kwargs: Library())
+    with pytest.raises(RuntimeError) as caught:
+        retire()
+    assert not path.exists() and not path.is_symlink()
+    assert observed['backup'].read_bytes() == original
+    assert caught.value.__cause__ is failure
+    event = tmp_path/'ghost/install-state/claude-events.jsonl'
+    records = [json.loads(line) for line in event.read_text().splitlines()]
+    assert [row['phase'] for row in records] == ['moved', 'rollback-failed']
+    assert records[-1]['rollback_status'] == 'failed'
+    assert str(code) in records[-1]['rollback_error']
+
+
+def test_committed_pending_entry_keeps_recovery_backup_on_collision(tmp_path, monkeypatch):
+    import retired_assets
+    path, original, retire = _collision_fixture(tmp_path, 'command')
+    failure = OSError('fixture failure after pending persistence')
+    real_pending = retired_assets._pending
+    observed = {}
+    def pending(entry, *args):
+        real_pending(entry, *args)
+        observed['backup'] = Path(entry['backup_path'])
+        _replace_active_slot(path, 'file', tmp_path)
+        raise failure
+    monkeypatch.setattr(retired_assets, '_pending', pending)
+    with pytest.raises(RuntimeError) as caught:
+        retire()
+    assert caught.value.__cause__ is failure
+    assert path.read_bytes() == b'New user-owned active entry\n'
+    manifest = tmp_path/'ghost/pending-merges/claude/manifest.json'
+    entry = json.loads(manifest.read_text())['entries'][0]
+    assert Path(entry['backup_path']) == observed['backup']
+    assert Path(entry['backup_path']).read_bytes() == original
+    assert entry['decided'] is False
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Unknown POSIX platform fallback boundary')
+def test_unknown_platform_keeps_backup_without_unsafe_restore(tmp_path, monkeypatch):
+    import retired_assets
+    from types import SimpleNamespace
+    path, original, retire = _collision_fixture(tmp_path, 'command')
+    failure = OSError('fixture pending unavailable')
+    observed = {}
+    def pending(entry, *args):
+        observed['backup'] = Path(entry['backup_path'])
+        raise failure
+    monkeypatch.setattr(retired_assets, '_pending', pending)
+    monkeypatch.setattr(retired_assets, 'sys', SimpleNamespace(platform='unknown-fixture-platform'))
+    with pytest.raises(RuntimeError) as caught:
+        retire()
+    assert caught.value.__cause__ is failure
+    assert not path.exists() and observed['backup'].read_bytes() == original
+    assert 'unavailable on this platform' in str(caught.value)
 
 
 @pytest.mark.parametrize('owned', (True, False))
