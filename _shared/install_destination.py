@@ -104,12 +104,13 @@ def binding_environment(destination, env):
     result['GHOST_ALICE_HOOK_SHARED_DIR'] = result['GHOST_ALICE_RUNTIME_SHARED_DIR']
     result['PYTHONDONTWRITEBYTECODE'] = '1'
     result['GHOST_ALICE_GOVERNANCE_EVENTS'] = str(Path(destination.ghost_root)/'governance-events.jsonl')
-    result['GHOST_ALICE_AUTOPILOT_CWD'] = destination.project_root
-    result.pop('GHOST_ALICE_AUTOPILOT_RUN_DIR',None)
     if destination.mode == 'isolated':
+        result['GHOST_ALICE_AUTOPILOT_CWD'] = destination.project_root
+        result.pop('GHOST_ALICE_AUTOPILOT_RUN_DIR',None)
         result['GHOST_ALICE_OWNED_ROOT'] = destination.owned_root
         result['GHOST_ALICE_TEMP_ROOT'] = str(Path(destination.owned_root)/'tmp')
     else:
+        # Normal transport preserves caller targets; AP owns native discovery.
         result.pop('GHOST_ALICE_OWNED_ROOT',None)
     return result
 

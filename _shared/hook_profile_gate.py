@@ -900,14 +900,13 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     stdin_text = _read_stdin()
     if binding is not None:
         if binding['destination']['mode'] == 'normal':
-            # Normal global hooks retain the firing project's native cwd;
-            # installation source/project-trust location is not its run root.
+            # Core context follows the firing native cwd. AP retains explicit
+            # targets and owns platform-specific discovery from the input/CLI.
             native_cwd = _payload_from_stdin(stdin_text).get('cwd')
             if isinstance(native_cwd,str) and Path(native_cwd).is_absolute():
                 env['GHOST_ALICE_PROJECT_CWD'] = native_cwd
-                env['GHOST_ALICE_AUTOPILOT_CWD'] = native_cwd
             else:
-                env.pop('GHOST_ALICE_AUTOPILOT_CWD',None)
+                env.pop('GHOST_ALICE_PROJECT_CWD',None)
         for flag in ("--root","--session-intent-root"):
             if flag in argv and argv[argv.index(flag)+1] != env["GHOST_ALICE_SESSION_INTENT_ROOT"]:
                 raise HookCommandRejected("inner ledger root conflicts with trusted binding")
