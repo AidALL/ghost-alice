@@ -76,7 +76,7 @@ These paths live outside the repository under the user's home directory.
 | `~/.agents/skills/` | Codex user skill copy install target |
 | `~/.claude/skills/` | Claude Code skill install target |
 
-The Codex managed bootstrap selects a complete supplied project contract or the installed `~/.codex/ghost-alice-governance.md` fallback. The installer manages the full instruction budget in `~/.codex/config.toml`. Runtime session state is authoritative in `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root; JSON pointers and snapshots are compatibility/export material. Read state through `session_intent_ledger.py --read-state` with the receipt root, platform and session identity.
+The Codex managed bootstrap selects a complete supplied project contract or the installed `~/.codex/ghost-alice-governance.md` fallback. The Core repository's `.codex/config.toml` supplies its project instruction budget and accompanies `AGENTS.md` when copying a full Core project fixture. The installer does not manage an instruction budget for unrelated projects. Runtime session state is authoritative in `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root; JSON pointers and snapshots are compatibility/export material. Read state through `session_intent_ledger.py --read-state` with the receipt root, platform and session identity.
 
 ## Documentation Responsibility
 

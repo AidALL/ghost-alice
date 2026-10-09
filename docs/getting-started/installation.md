@@ -260,7 +260,7 @@ A full install deploys:
 - Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
 - Claude Code permission allowlist
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` global bootstrap
-- Codex `~/.codex/AGENTS.md` bootstrap, managed `~/.codex/ghost-alice-governance.md` fallback and project instruction budget in `~/.codex/config.toml`
+- Codex `~/.codex/AGENTS.md` bootstrap and managed `~/.codex/ghost-alice-governance.md` fallback
 - support state for install-state, pending merges, install rollbacks, and uninstall reports
 
 The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving adjacent user text. If the destination is a markerless user-owned file, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
@@ -269,7 +269,7 @@ The installer owns only the marked Ghost-ALICE block in each global rule file. I
 
 The managed `~/.codex/AGENTS.md` bootstrap selects the contract; it is not the complete fallback. If trusted project instructions already supply the complete `# Ghost-ALICE OS Project` contract through mandatory rule 12, use it directly. Otherwise, load the full managed sibling `~/.codex/ghost-alice-governance.md` before actionable work. A heading, excerpt or truncated project contract is insufficient. Missing or unreadable fallback keeps dependent work closed; bounded no-work answers can use the terminal route.
 
-The installer manages the full project instruction budget in `~/.codex/config.toml`, preserves user configuration and records rollback state. Status and doctor check the bootstrap, sibling governance file and instruction-budget configuration together. They preserve user-owned files and symlink targets; a proposal is not an installed contract.
+The installer preserves user configuration and records rollback state for its managed changes. Status and doctor check the bootstrap and sibling governance file together. They preserve user-owned files and symlink targets; a proposal is not an installed contract. The Core repository carries its own instruction budget in `.codex/config.toml` so its complete project contract can be loaded. A copied Core project fixture must retain that project configuration together with `AGENTS.md`; the installer does not change the instruction budget for unrelated projects.
 
 
 ### merge-companion

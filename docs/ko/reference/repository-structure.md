@@ -78,7 +78,7 @@ installer 전체 architecture는 [installer architecture](./installer-architectu
 | `~/.agents/skills/` | Codex user skill copy install target |
 | `~/.claude/skills/` | Claude Code skill install target |
 
-Codex의 관리 부트스트랩은 완전하게 제공된 프로젝트 계약 또는 설치된 `~/.codex/ghost-alice-governance.md` 대체 계약을 선택합니다. 설치기는 `~/.codex/config.toml`에서 전체 지침 예산을 관리합니다. 세션 실행 상태의 기준은 영수증의 저장소 루트에 있는 `.tmp/session-intent/ghost-state.sqlite3`입니다. JSON 포인터와 스냅샷은 호환성·내보내기 자료이며, 상태는 영수증의 root·platform·session identity를 사용하여 `session_intent_ledger.py --read-state`로 읽습니다.
+Codex의 관리 부트스트랩은 완전하게 제공된 프로젝트 계약 또는 설치된 `~/.codex/ghost-alice-governance.md` 대체 계약을 선택합니다. Core 저장소의 `.codex/config.toml`은 자체 프로젝트의 지침 예산을 지정하며, 완전한 Core 프로젝트를 테스트 환경에 복사할 때 `AGENTS.md`와 함께 보존합니다. 설치기는 다른 프로젝트의 지침 예산을 관리하지 않습니다. 세션 실행 상태의 기준은 영수증의 저장소 루트에 있는 `.tmp/session-intent/ghost-state.sqlite3`입니다. JSON 포인터와 스냅샷은 호환성·내보내기 자료이며, 상태는 영수증의 root·platform·session identity를 사용하여 `session_intent_ledger.py --read-state`로 읽습니다.
 
 ## Documentation Responsibility
 

@@ -260,7 +260,7 @@ Claude Code와 Codex의 훅을 설치하려면 `PATH`에서 Node.js를 찾을 �
 - `~/.ghost-alice/hooks/`의 Node 기반 훅 실행 파일
 - Claude Code 권한 허용 목록
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` 전역 부트스트랩
-- Codex `~/.codex/AGENTS.md` 부트스트랩, 관리되는 `~/.codex/ghost-alice-governance.md` 대체 계약과 `~/.codex/config.toml`의 프로젝트 지침 예산
+- Codex `~/.codex/AGENTS.md` 부트스트랩과 관리되는 `~/.codex/ghost-alice-governance.md` 대체 계약
 - 설치 상태, 미결 병합, 설치 복구와 제거 보고서의 지원 상태
 
 설치기는 전역 규칙 파일에서 표시된 Ghost-ALICE 블록만 관리합니다. 그 블록을 갱신하면서 주변 사용자 문구는 보존합니다. 대상이 표시 없는 사용자 파일이면 원본 대신 `<rule-file>.ghost-alice-proposed` 제안 파일을 작성하며, status와 doctor는 이를 설치된 전역 규칙으로 취급하지 않습니다.
@@ -269,7 +269,7 @@ Claude Code와 Codex의 훅을 설치하려면 `PATH`에서 Node.js를 찾을 �
 
 관리되는 `~/.codex/AGENTS.md` 부트스트랩은 사용할 계약을 선택합니다. 신뢰된 프로젝트 지침에 필수 규칙 12까지 포함하는 완전한 `# Ghost-ALICE OS Project` 계약이 있으면 그대로 사용합니다. 그렇지 않으면 실제 작업 전에 관리되는 전체 계약인 `~/.codex/ghost-alice-governance.md`를 읽습니다. 제목, 발췌문이나 잘린 지침은 완전한 계약으로 취급하지 않습니다. 대체 계약이 없거나 읽을 수 없으면 의존 작업을 진행하지 않으며, 도구가 필요 없는 제한된 답변은 종료 경로를 사용할 수 있습니다.
 
-설치기는 `~/.codex/config.toml`에서 전체 프로젝트 지침을 읽을 수 있는 예산을 관리하며 사용자 설정과 복구 상태를 보존합니다. Status와 doctor는 부트스트랩, 전체 거버넌스 파일과 지침 예산 설정을 함께 확인합니다. 사용자 파일과 심볼릭 링크 대상은 보존하며, 제안 파일을 설치된 계약으로 취급하지 않습니다.
+설치기는 사용자 설정을 보존하고 관리하는 변경의 복구 상태를 기록합니다. Status와 doctor는 부트스트랩과 전체 거버넌스 파일을 함께 확인합니다. 사용자 파일과 심볼릭 링크 대상은 보존하며, 제안 파일을 설치된 계약으로 취급하지 않습니다. Core 저장소는 완전한 프로젝트 계약을 읽을 수 있도록 자체 `.codex/config.toml`에 지침 예산을 지정합니다. Core 프로젝트를 복사한 테스트 환경은 `AGENTS.md`와 이 프로젝트 설정을 함께 보존해야 하며, 설치기는 다른 프로젝트의 지침 예산을 변경하지 않습니다.
 
 
 ### merge-companion
