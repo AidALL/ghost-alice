@@ -126,6 +126,30 @@ class CompletionRecoveryTests(unittest.TestCase):
         self.assertEqual(payload.get("decision"), "block")
         self.assertIn("must include evidence", payload["reason"])
 
+    def test_predicate_scope_nonclosures_allow_actual_stop(self):
+        for text in (
+            "I have not finished the review.", "I haven't finished the report.",
+            "I never finished the analysis.",
+            "By tomorrow, I will have completed the read-only review.",
+            "I will mark the review complete after checking the sources.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
+
+    def test_predicate_scope_actual_assertions_still_block_in_stop(self):
+        for text in (
+            "The read-only report has been completed.", "I completed a read-only review.",
+            "All reviews are complete.", "The analysis is now complete.",
+            "I have not finished the review; the report has been completed.",
+            "I will mark the review complete; the analysis is now complete.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry).get("decision"), "block")
+
     def test_inline_none_is_equivalent_to_nested_none(self):
         self.assertIsNone(self.check(VALID.replace("- unverified:\n  - none", "- unverified: none")))
 

@@ -266,6 +266,62 @@ class TestReadOnlyWorkClosure(unittest.TestCase):
         self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
 
 
+class TestReadOnlyClosurePredicateScope(unittest.TestCase):
+    def test_negated_finished_actions_are_not_completed_work(self):
+        for text in (
+            "I have not finished the review.",
+            "I haven't finished the report.",
+            "I never finished the analysis.",
+            "I haven't yet finished a review.",
+            "The report has not been finished.",
+            "The report isn't finished.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_future_actions_and_future_status_descriptions_are_not_closure(self):
+        for text in (
+            "By tomorrow, I will have completed the read-only review.",
+            "I will mark the review complete after checking the sources.",
+            "By noon, we will have finished all reviews.",
+            "I would mark the analysis complete after checking the sources.",
+            "I'll have completed the read-only report tomorrow.",
+            "I will mark the review complete and the report done tomorrow.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_asserted_aspect_article_plural_and_adverb_forms_require_proof(self):
+        for text in (
+            "The read-only report has been completed.",
+            "I completed a read-only review.",
+            "All reviews are complete.",
+            "The analysis is now complete.",
+            "The audits are already finished.",
+            "The analyses have now been completed.",
+            "I have now completed the analysis.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_nonasserted_predicate_does_not_hide_independent_current_predicate(self):
+        for text in (
+            "I have not finished the review; the report has been completed.",
+            "I haven't finished the report, but all reviews are complete.",
+            "I will mark the review complete; the analysis is now complete.",
+            "I will have completed the review, but the report is complete.",
+            "I will write the report and the review is complete.",
+            'The old reply said "The report has been completed." The analysis is now complete.',
+            "It may help to know the report is complete.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+
 class TestCompletionMarkerIsHeaderOnly(unittest.TestCase):
     """looks_like_completion_claim must require a real block header."""
 

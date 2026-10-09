@@ -67,7 +67,10 @@ _KOREAN_STATUS_END = (
 _VALID_VERDICTS = ("pass", "fail", "unverified")
 # Executed work includes read-only deliverables. Match their asserted closure,
 # not the word "complete" alone; the same clause/example filters apply below.
-_READ_ONLY_WORK_NOUNS = r"(?:review|report|analysis|audit|research|investigation)"
+_READ_ONLY_WORK_NOUNS = (
+    r"(?:reviews?|reports?|analys(?:is|es)|audits?|research|investigations?)"
+)
+_CLOSURE_ADVERBS = r"(?:now|already|fully|finally|successfully|completely|actually)"
 _EXECUTED_WORK_CLAIM_PATTERNS = (
     re.compile(
         r"\b(?:the\s+)?(?:requested\s+)?(?:work|task|change|fix|implementation|"
@@ -82,11 +85,14 @@ _EXECUTED_WORK_CLAIM_PATTERNS = (
     ),
     re.compile(
         r"\b" + _READ_ONLY_WORK_NOUNS
-        + r"\s+(?:is\s+)?(?:complete|completed|done|finished)\b",
+        + r"\s+(?:(?P<read_only_finite>(?:is|are|was|were)\s+|"
+        r"(?:has|have|had)\s+(?:" + _CLOSURE_ADVERBS + r"\s+)*been\s+))?"
+        r"(?:" + _CLOSURE_ADVERBS + r"\s+)*(?:complete|completed|done|finished)\b",
         re.I,
     ),
     re.compile(
-        r"\b(?:i\s+)?(?:completed|finished)\s+(?:the\s+)?"
+        r"\b(?P<read_only_action>completed|finished)\s+"
+        r"(?:(?:a|an|the|my|our|all)\s+)?"
         r"(?:requested\s+)?(?:read[- ]only\s+)?" + _READ_ONLY_WORK_NOUNS + r"\b",
         re.I,
     ),
@@ -137,6 +143,14 @@ _MULTILINE_QUOTED_SPAN_RE = re.compile(
 # hypothetical.
 _SENTENCE_SPLIT_RE = re.compile(r"[\n.!?]+")
 _COMMA_SPLIT_RE = re.compile(r",+")
+# A modal governs a bare status or participle only within its predicate scope.
+# Coordinated subjects and contrast/semicolon boundaries can start a separate
+# assertion; an explicit finite status predicate is evaluated independently.
+_PREDICATE_SCOPE_BOUNDARY_RE = re.compile(
+    r";|\b(?:but|however|yet)\b|\band\s+(?=(?:i|we|they|he|she|it)\b)",
+    re.I,
+)
+_FUTURE_PREDICATE_RE = re.compile(r"\b(?:will|would|shall|\w+['’]ll)\b", re.I)
 _GOAL_LEAD_RE = re.compile(
     r"^\s*(?:[>*\-]|\d+[.)])?\s*"
     r"(?:goal|goals|aim|aims|objective|objectives|target|targets|"
@@ -153,9 +167,11 @@ _CONDITIONAL_LEAD_RE = re.compile(
 )
 _NEGATED_CLOSURE_RE = re.compile(
     r"\b(?:not|never|isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|won['’]?t|"
-    r"cannot|can['’]?t|don['’]?t|doesn['’]?t|didn['’]?t|no\s+longer)\s+"
-    r"(?:yet\s+|fully\s+|completely\s+|quite\s+)*"
-    r"(?:complete|completed|done|fixed|resolved|implemented|passing|pass|"
+    r"haven['’]?t|hasn['’]?t|hadn['’]?t|cannot|can['’]?t|don['’]?t|"
+    r"doesn['’]?t|didn['’]?t|no\s+longer)\s+"
+    r"(?:(?:yet|fully|completely|quite|now|already|finally|successfully|"
+    r"actually|been|be|have)\s+)*"
+    r"(?:complete|completed|done|finished|fixed|resolved|implemented|passing|pass|"
     r"passed|green|clean|succeed|succeeded)\b"
     r"|\bnot\s+there\s+yet\b|\bnot\s+yet\b"
     # "미완료" means incomplete. Remove the whole negative token so the
@@ -507,9 +523,31 @@ def requires_completion_check(text):
                 continue
             claim_clause = _HONEST_NEGATIVE_STATUS_RE.sub(" ", clause)
             claim_clause = _NEGATED_CLOSURE_RE.sub(" ", claim_clause)
-            if any(pattern.search(claim_clause) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS):
-                return True
+            for pattern in _EXECUTED_WORK_CLAIM_PATTERNS:
+                for match in pattern.finditer(claim_clause):
+                    if _asserted_work_predicate(match, claim_clause):
+                        return True
     return False
+
+
+def _asserted_work_predicate(match, clause):
+    """Keep current read-only assertions distinct from a future predicate.
+
+    Only the read-only patterns need this distinction: their bare status and
+    past-participle forms can also occur under "will mark" or "will have".
+    A finite copula/perfect states its own status, even inside prose describing
+    a separate future action. Do not discard the whole clause for a modal.
+    """
+    groups = match.groupdict()
+    if not ("read_only_finite" in groups or "read_only_action" in groups):
+        return True
+    if groups.get("read_only_finite"):
+        return True
+    prefix = clause[:match.start()]
+    scope_start = 0
+    for boundary in _PREDICATE_SCOPE_BOUNDARY_RE.finditer(prefix):
+        scope_start = boundary.end()
+    return _FUTURE_PREDICATE_RE.search(prefix[scope_start:]) is None
 
 
 def extract_top_level_field_section(block, field_name):
