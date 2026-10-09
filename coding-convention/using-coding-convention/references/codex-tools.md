@@ -9,7 +9,7 @@ Skills are written against Claude Code tool names. When a skill references one o
 | Task result return | `wait` |
 | Task auto-close | release the slot with `close_agent` |
 | `TodoWrite` (task tracking) | `update_plan` |
-| `Skill` (skill invocation) | skills load natively, just follow the instructions |
+| `Skill` (skill invocation) | Use an actual host Skill invocation when available. Without that surface, read or validly reuse the instruction body and perform its current workflow before recording a skill call. Visible metadata alone does not complete the gate. |
 | `Read`, `Write`, `Edit` (files) | use the native file tools |
 | `Bash` (command execution) | use the native shell tool |
 ## Contents

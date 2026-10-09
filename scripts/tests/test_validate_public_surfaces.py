@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -252,6 +253,30 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
             result = self.run_validator(repo)
             self.assertEqual(result.returncode, 2)
             self.assertIn("homepage-copy-parity", result.stdout)
+
+    def test_validator_rejects_broken_navigation_in_identical_homepage_copies(self) -> None:
+        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+        normalizer = re.search(r"<script>.*?</script>", text, re.DOTALL).group(0)
+        candidates = {
+            "missing": text.replace(normalizer, ""),
+            "wrong_base": text.replace("new URL('../', location.href)", "new URL('./', location.href)"),
+            "wrong_scope": text.replace(r"/\/docs\/(?:index\.html)?$/", r"/./"),
+            "comment_only": text.replace(normalizer, "<!--" + normalizer + "-->"),
+        }
+        for case, candidate in candidates.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                repo = self.make_fixture(Path(td))
+                write_text(repo / "index.html", candidate)
+                write_text(repo / "docs" / "index.html", candidate)
+                (repo / "imgs").mkdir()
+                (repo / "imgs" / "Ghost-ALICE_logo.png").touch()
+                result = self.run_validator(repo)
+                self.assertEqual(result.returncode, 2, msg=result.stdout)
+                data = self.load_json_output(result)
+                self.assertTrue(any(f["check"] == "homepage-base-resolution"
+                                    for f in data["findings"]), msg=result.stdout)
+                self.assertFalse(any(f["check"] == "homepage-copy-parity"
+                                     for f in data["findings"]), msg=result.stdout)
 
     def test_validator_detects_repo_root_homepage_link_drift(self) -> None:
         with tempfile.TemporaryDirectory() as td:

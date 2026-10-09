@@ -56,11 +56,13 @@ If the user says, "Stop editing and only explain the existing result," stop edit
 request: "Schedule a meeting tomorrow at 3."
 [task-router]
 domain: operations
-output-skills: none
-verification-skills: none
+response-mode: normal
+output-skills: scheduling workflow if available
+verification-skills: verification-before-completion
 lifecycle: verification-before-completion
-boundary-contract: n/a
-next-required: none
+boundary-contract: required
+boundary-reason: scheduling creates an external side effect
+next-required: boundary-contract
 ```
 
 ### Clarification Only
@@ -120,9 +122,12 @@ domain: docs
 output-skills: document extraction if available
 verification-skills: adversarial-verification
 lifecycle: verification-before-completion
-boundary-contract: n/a
-next-required: text extraction addon if installed; otherwise ask for readable source text
+boundary-contract: required
+boundary-reason: requirements-table and body comparison is requested verification work
+next-required: boundary-contract
 ```
+
+The boundary owner establishes the comparison scope before extraction or verification. Then use an available extraction workflow when needed; if the supplied sources cannot be read, ask for the missing readable text. Read-only execution still requires the owning verification checks. The router does not invent filenames, scope permissions, or successful verification.
 
 ### Development
 
