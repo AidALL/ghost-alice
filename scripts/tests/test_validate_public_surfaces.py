@@ -174,7 +174,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         data = self.load_json_output(result)
         self.assertEqual(data["error_count"], 0, msg=result.stdout)
 
-    def test_homepage_foregrounds_intent_analyzer_not_internal_router(self) -> None:
+    def test_homepage_explains_intake_and_ownership_without_internal_badges(self) -> None:
         text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
 
         self.assertIn(
@@ -182,7 +182,8 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
             'scope, evidence, and runtime state across agent runtimes."',
             text,
         )
-        self.assertIn("session-intent-analyzer", text)
+        self.assertIn("semantic intake → router → owning workflow", text)
+        self.assertIn("Intake compresses facts and the router selects work without granting permission", text)
         self.assertNotIn("session-intent-" + "guard", text)
         for forbidden in (
             'class="gate-key">task-router',
@@ -231,14 +232,43 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
-    def test_homepage_has_accessible_same_work_returns(self) -> None:
-        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+    def assert_accessible_same_work_returns(self, text: str) -> None:
         for marker in ('class="flow-return"', 'class="flow-edge"', 'class="skip-link"',
-                       'aria-labelledby="focus-title focus-desc"', "Return unsupported criteria",
-                       "native permissions", "publication_route: none | prepare | publish | blocked",
-                       "Actually executed read-only review/report", "report-only"):
+                       'aria-labelledby="focus-title focus-desc"',
+                       "publication_route: none | prepare | publish | blocked"):
             self.assertIn(marker, text)
+        ids = set(re.findall(r'\bid="([^"]+)"', text))
+        for labels in re.findall(r'aria-labelledby="([^"]+)"', text):
+            self.assertTrue(set(labels.split()) <= ids, labels)
+        self.assertRegex(text, r'class="skip-link"[^>]*href="#main"|href="#main"[^>]*class="skip-link"')
+        self.assertIn("main", ids)
+        returns = " ".join(re.findall(r'<div class="flow-return">(.*?)</div>', text, re.S))
+        self.assertIn("Return to router when evidence reopens mapping, composition, route or an inferred premise", returns)
+        self.assertIn("Actual guard/application result and observed visibility return to the owning policy", returns)
+        self.assertIn("An admissible affected request resumes work", returns)
+        self.assertIn("return a new selected request to the owning workflow", returns)
+        for meaning in ("native host permission govern tool execution",
+                        "call owning executor or domain verifier; return the actual result",
+                        "unsupported scope → honest partial status",
+                        "Actual next human input returns to intake",
+                        "Intake and audit feed evolution only as a terminal report branch"):
+            self.assertIn(meaning, text)
         self.assertNotIn('class="gate-key">jailbreak-detector', text)
+
+    def test_homepage_has_accessible_same_work_returns(self) -> None:
+        self.assert_accessible_same_work_returns((REPO_ROOT / "index.html").read_text(encoding="utf-8"))
+
+    def test_homepage_return_contract_rejects_detached_or_reversed_paths(self) -> None:
+        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+        candidates = (
+            re.sub(r'<div class="flow-return">.*?</div>', "", text, flags=re.S),
+            text.replace("Return to router when evidence reopens", "Finish without repair when evidence reopens"),
+            text.replace("unsupported scope → honest partial status", "unsupported scope → complete"),
+            text.replace('id="focus-desc"', 'id="unrelated-description"'),
+        )
+        for number, candidate in enumerate(candidates):
+            with self.subTest(case=number), self.assertRaises(AssertionError):
+                self.assert_accessible_same_work_returns(candidate)
 
     def test_docs_homepage_matches_root_pages_entry(self) -> None:
         self.assertEqual((REPO_ROOT / "docs" / "index.html").read_bytes(),

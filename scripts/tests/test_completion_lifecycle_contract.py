@@ -5,6 +5,7 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -60,6 +61,36 @@ def _normalized(rel_path: str) -> str:
 
 
 class CompletionLifecycleContractTests(unittest.TestCase):
+    def assert_discriminating_check_contract(self, text: str) -> None:
+        text = " ".join(text.split())
+        for obligation in (
+            "Before a discretionary check, name the unresolved criterion or competing explanation",
+            "why the method discriminates",
+            "attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions",
+            "Mere potential to find something is insufficient",
+            "Stochastic repeats require uncertainty, sampling and stopping rules",
+            "Mandatory owning checks remain required",
+            "unavailable proof or unresolved required criteria prevent completion",
+            "Reuse valid unchanged passing proof at its original source and time",
+        ):
+            self.assertIn(obligation, text)
+
+    def assert_no_verification_recursion(self, text: str) -> None:
+        self.assertRegex(text, r"Verification output (?:alone )?does not create a new obligation to verify the verification\.")
+
+    def test_check_contract_rejects_removed_or_inverted_obligations(self) -> None:
+        text = _normalized("coding-convention/verification-before-completion/SKILL.md")
+        for old, new in (
+            ("why the method discriminates", "whether the method is convenient"),
+            ("attainable outcomes mapped to different specified actions, acceptance judgments or boundary decisions", "all outcomes lead to the same action"),
+            ("Mandatory owning checks remain required", "Mandatory owning checks may be skipped"),
+            ("Reuse valid unchanged passing proof at its original source and time", "Refresh unchanged proof on every input"),
+        ):
+            with self.subTest(obligation=old), self.assertRaises(AssertionError):
+                self.assert_discriminating_check_contract(text.replace(old, new))
+        with self.assertRaises(AssertionError):
+            self.assert_no_verification_recursion(text.replace("does not create a new obligation", "creates a new obligation"))
+
     def test_managed_publication_describes_current_units_and_original_proof_reuse(self):
         text=(REPO_ROOT/"coding-convention/verification-before-completion/references/autopilot-publication.md").read_text()
         self.assertIn("autopilot-completion-receipt.v2",text)
@@ -94,9 +125,8 @@ class CompletionLifecycleContractTests(unittest.TestCase):
                 text = " ".join(
                     (REPO_ROOT / rel_path).read_text(encoding="utf-8").split()
                 )
-                self.assertIn(UNCERTAINTY_GATE, text)
-                self.assertIn(NO_DECISION_EFFECT, text)
-                self.assertIn(NO_RECURSION, text)
+                self.assert_discriminating_check_contract(text)
+                self.assert_no_verification_recursion(text)
 
     def test_coding_convention_entrypoint_delegates_verification_details(self) -> None:
         text = " ".join((REPO_ROOT / "coding-convention/using-coding-convention/SKILL.md").read_text(encoding="utf-8").split())
@@ -143,10 +173,16 @@ class CompletionLifecycleContractTests(unittest.TestCase):
             text = " ".join(
                 (REPO_ROOT / rel_path).read_text(encoding="utf-8").split()
             )
-            with self.subTest(path=rel_path, required=LIVE_CHECKPOINT):
-                self.assertIn(LIVE_CHECKPOINT, text)
-            with self.subTest(path=rel_path, required=CHECKPOINT_STOP):
-                self.assertIn(CHECKPOINT_STOP, text)
+            with self.subTest(path=rel_path):
+                if rel_path == "architecture.md":
+                    self.assertIn("Each check must resolve a live uncertainty whose possible results change the next decision", text)
+                    self.assert_discriminating_check_contract(text)
+                    self.assertIn("Reassessment resets neither attempts nor resources; exhaustion parks the affected continuation", text)
+                    self.assertIn("If no eligible work remains", text)
+                    self.assertIn("otherwise report honest partial/waiting status", text)
+                else:
+                    self.assertIn(LIVE_CHECKPOINT, text)
+                    self.assertIn(CHECKPOINT_STOP, text)
             for fragment in forbidden:
                 with self.subTest(path=rel_path, forbidden=fragment):
                     self.assertNotIn(fragment, text)

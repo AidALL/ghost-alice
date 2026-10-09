@@ -29,6 +29,22 @@ def _load_global_rule_blocks():
 
 
 class GlobalRuleBlockTest(unittest.TestCase):
+    def assert_intake_routing_authority(self, body: str) -> None:
+        self.assertIn("Session-intent intake feeds task-router directly", body)
+        self.assertIn("report-only skill-evolution terminal branch, which does not feed task-router", body)
+        self.assertIn("Audit records do not grant execution permission", body)
+        self.assertNotIn("jailbreak-detector", body)
+
+    def test_rendered_fallback_rejects_classifier_or_audit_authority(self) -> None:
+        blocks = _load_global_rule_blocks()
+        for rel, render in (("platforms/codex/AGENTS.md", blocks.render_codex_bootstrap),
+                            ("platforms/claude/CLAUDE.md", blocks.render_claude_bootstrap)):
+            body = render((REPO_ROOT / rel).read_text(encoding="utf-8"))
+            for old, new in (("Session-intent intake feeds task-router directly", "Session intake requires jailbreak-detector permission before task-router"),
+                             ("Audit records do not grant execution permission", "Audit records grant execution permission")):
+                with self.subTest(path=rel, change=old), self.assertRaises(AssertionError):
+                    self.assert_intake_routing_authority(body.replace(old, new))
+
     def test_claude_bootstrap_is_created_when_destination_is_missing(self) -> None:
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -218,6 +234,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         body = blocks.render_codex_bootstrap(source)
 
+        self.assert_intake_routing_authority(body)
         self.assertEqual(body.count("## Codex Hookless Fallback"), 1)
         self.assertNotIn("## Codex Hook Enforcement And Hookless Fallback", body)
         self.assertEqual(body.count("If hooks are disabled in the Codex session"), 1)
@@ -233,13 +250,13 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertIn("[tool-checkpoint:continuation]", body)
         self.assertIn("user-input tool batch", body)
         self.assertIn("same session input lineage", body)
-        self.assertIn("new user input, current-lineage block/deny, mismatch", body)
+        self.assertIn("new user input, native denial, mismatch, or other state change", body)
         self.assertIn(
             "Do not infer whether an action is safe from tool-call identity or payload content",
             body,
         )
         self.assertIn(
-            "decision depends only on the current-lineage block gate and the silent allow invariant",
+            "This checkpoint does not replace native permission, credentials, provenance, or human authority.",
             body,
         )
 
@@ -270,7 +287,8 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertEqual(body.count("## Claude Hookless Fallback"), 1)
         self.assertEqual(body.count("If hooks are disabled in the Claude session"), 1)
         self.assertIn("`session-intent-analyzer`", body)
-        self.assertIn("`jailbreak-detector`", body)
+        self.assert_intake_routing_authority(body)
+        self.assertIn("Native permission remains with its host", body)
         self.assertIn("`task-router`", body)
         self.assertIn("`[completion-check]`", body)
         self.assertIn("`[io-trace]`", body)
