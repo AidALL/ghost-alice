@@ -33,6 +33,12 @@ class InstallDestination:
     core_source_root: str
     runtime_shared_dir: str = ""
 
+    def __post_init__(self):
+        # Normalize the optional constructor default before instance/asdict use.
+        # Supplied dictionary paths still pass the strict parse validation below.
+        if self.runtime_shared_dir == "" and isinstance(self.ghost_root, str):
+            object.__setattr__(self,"runtime_shared_dir",str(Path(self.ghost_root)/"runtime/current/_shared"))
+
     @classmethod
     def parse(cls, value):
         if isinstance(value, cls):

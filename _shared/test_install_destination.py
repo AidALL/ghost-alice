@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 import install_hooks
 import hook_profile_gate
+import pytest
 
 
 def test_explicit_ledger_is_independent_of_source_and_runtime():
@@ -35,6 +36,32 @@ def destination_fixture(root):
     return dict(mode='isolated',owned_root=str(root),platform_dir=str(root/'platform'),
         skills_dir=str(root/'skills'),ghost_root=str(root/'ghost'),ledger_root=str(root/'ledger'),
         project_root=str(root/'project'),core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
+
+
+@pytest.mark.parametrize('mode',('normal','isolated'))
+def test_constructor_default_matches_dictionary_and_asdict_without_aliasing(tmp_path,mode):
+    from dataclasses import asdict
+    from install_destination import InstallDestination
+    supplied=destination_fixture(tmp_path/'owned');supplied['mode']=mode
+    original=dict(supplied)
+    instance=InstallDestination(**supplied)
+    expected=str(Path(supplied['ghost_root'])/'runtime/current/_shared')
+    assert instance.runtime_shared_dir==expected
+    assert InstallDestination.parse(instance)==InstallDestination.parse(supplied)
+    assert InstallDestination.parse(asdict(instance))==instance
+    assert supplied==original
+    assert not (tmp_path/'owned').exists()
+
+
+def test_optional_default_preserves_explicit_path_schema_and_containment_guards(tmp_path):
+    from install_destination import InstallDestination
+    supplied=destination_fixture(tmp_path/'owned')
+    for change in ({'runtime_shared_dir':''},{'runtime_shared_dir':'relative'},
+                   {'runtime_shared_dir':str(tmp_path/'outside')},{'unknown_field':'value'}):
+        with pytest.raises(ValueError):InstallDestination.parse(dict(supplied,**change))
+    instance=InstallDestination(**supplied,runtime_shared_dir='relative')
+    with pytest.raises(ValueError,match='absolute'):InstallDestination.parse(instance)
+    assert not (tmp_path/'owned').exists()
 
 
 def test_isolated_validation_precedes_all_mutation(tmp_path):
