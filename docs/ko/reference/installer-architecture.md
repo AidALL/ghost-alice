@@ -32,7 +32,7 @@ installer는 세 layer로 볼 수 있습니다.
 | --- | --- | --- |
 | Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | platform-specific flags를 parse하고 encoding/runtime setup을 normalize한 뒤 Python-backed installer path로 진입합니다 |
 | Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | platforms와 targets를 resolve하고, skills와 hooks를 install하고, install state를 record하고, local edits를 protect하고, status를 report합니다 |
-| Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | installed skills, platform hook config, Codex bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, uninstall reports를 보관합니다 |
+| Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | installed skills, platform hook config, Claude와 Codex global bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, uninstall reports를 보관합니다 |
 
 중요한 mental model은 "file을 copy하고 끝"이 아닙니다. installer는 stateful governance synchronizer입니다. installed asset을 update하고, hook contract를 verify하고, user-modified installed file을 보존하고, status, doctor, update, uninstall path가 무엇이 일어났는지 판단할 수 있도록 state를 남깁니다.
 
@@ -54,11 +54,11 @@ shell entrypoint
 
 | Platform | Installed surfaces |
 | --- | --- |
-| Claude Code | `~/.claude/skills/`, `~/.claude/settings.json`, Claude command wrappers |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`, `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Claude command wrappers |
 | Codex | `~/.agents/skills/`, `~/.codex/AGENTS.md`, `~/.codex/ghost-alice-governance.md`, `~/.codex/hooks.json`, `~/.codex/config.toml` |
 | Shared state | `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
 
-Claude Code는 native skill invocation과 hook permissions를 expose할 수 있습니다. Codex는 같은 skill surface를 expose하지 않으므로 installer는 Codex bootstrap과 hook config도 설치해 required gate가 `SKILL.md` read record와 hook payload로 audit 가능하도록 합니다.
+Claude Code의 native skill invocation과 hook permission은 저장소 밖의 세션에 필요한 global instruction을 대신하지 않습니다. installer는 `platforms/claude/CLAUDE.md`의 managed block을 Claude config directory에 병합합니다. Codex의 별도 bootstrap과 hook config는 required gate를 `SKILL.md` read record와 hook payload로 감사할 수 있게 합니다. 두 global rule file은 managed block 밖의 사용자 텍스트를 보존하며, marker가 없는 사용자 파일에는 덮어쓰기 대신 `.ghost-alice-proposed` 제안 파일을 만듭니다.
 
 ## State And Safety Model
 

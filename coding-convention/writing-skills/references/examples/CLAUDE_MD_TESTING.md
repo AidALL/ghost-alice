@@ -4,12 +4,12 @@ Testing different documentation variants to find what actually makes agents disc
 ## Contents
 
 - [Test Scenarios](#test-scenarios)
-  - [Scenario 1: Time Pressure + Confidence](#scenario-1-time-pressure-confidence)
-  - [Scenario 2: Sunk Cost + Works Already](#scenario-2-sunk-cost-works-already)
-  - [Scenario 3: Authority + Speed Bias](#scenario-3-authority-speed-bias)
-  - [Scenario 4: Familiarity + Efficiency](#scenario-4-familiarity-efficiency)
+  - [Scenario 1: Time Pressure + Confidence](#scenario-1-time-pressure--confidence)
+  - [Scenario 2: Sunk Cost + Works Already](#scenario-2-sunk-cost--works-already)
+  - [Scenario 3: Authority + Speed Bias](#scenario-3-authority--speed-bias)
+  - [Scenario 4: Familiarity + Efficiency](#scenario-4-familiarity--efficiency)
 - [Documentation Variants to Test](#documentation-variants-to-test)
-  - [NULL (Baseline - no skills doc)](#null-baseline-no-skills-doc)
+  - [NULL (Baseline - no skills doc)](#null-baseline---no-skills-doc)
   - [Variant A: Soft Suggestion](#variant-a-soft-suggestion)
   - [Variant B: Directive](#variant-b-directive)
   - [Variant C: Claude.AI Emphatic Style](#variant-c-claudeai-emphatic-style)

@@ -45,7 +45,7 @@ High-signal feedback includes:
 - Reproducible cases where Ghost-ALICE OS prevented a real agent failure
 - Reproducible cases where a vanilla agent failed but Ghost-ALICE OS helped
 - Workflows where Ghost-ALICE OS blocked useful work, raised the wrong gate, or made recovery harder
-- False positives or false negatives in session intent, jailbreak detection, task routing, boundary contracts, completion checks, or io-trace behavior
+- False positives or false negatives in session intent, authority/provenance handling, current work routing, boundary contracts, completion checks, or io-trace behavior
 - Visibility profile ideas for `strict`, `dynamic`, and `minimal` modes that keep core gate execution intact
 - Cases where governance output was too verbose, too hidden, or poorly timed for the task risk
 - Missing gates for high-risk workflows, especially credentials, external side effects, legal or financial claims, code changes, and release steps

@@ -51,8 +51,8 @@ Each smoke record captures whether these signals were observed:
 - `harness validity`: the prompt permits the read-only tool action needed to satisfy the request. A contradictory prompt is `invalid-harness`, not `pass`.
 - `task-router`: routing is visible before the first tool action.
 - `session-intent-analyzer`: intent delta or hook observation is recorded without raw prompt storage.
-- `boundary-contract`: for read-only work, `n/a` or an explicit reason for non-use is visible.
-- `failure-mode-if-wrong`: concise failure surface is visible without routine recovery-cost or recovery-note fields.
+- `boundary-contract`: follows the current routing-surface decision; executed read-only verification may require a boundary contract. Record n/a only when that route does not require one.
+- Conditional `failure-mode-if-wrong`: appears when a side effect, forced signal, mismatch or meaningful user decision requires it; routine read-only checkpoints need intent and why.
 - conditional `recovery-action`: appears only when mismatch, scope reopen, external side effect, or hard-to-recover action needs a concrete next step.
 - `skill activation permission`: Claude Code and Antigravity-family runtimes are not blocked by a shortened allowlist that covers only core gates.
 - `verification-before-completion`: fresh evidence appears immediately before the completion claim.

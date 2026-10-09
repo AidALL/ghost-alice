@@ -150,15 +150,15 @@ The test design also needs verification:
 
 ### Is the Pressure Sufficient?
 
-Does the scenario reproduce real pressure? If the agent complies too easily, it means the pressure is insufficient.
+Does the scenario reproduce a realistic, decision-relevant pressure? Preserve observed compliance as a pass. Strengthen the scenario only when a concrete missing pressure justifies it; do not seek a failure solely to justify an edit.
 
--> Cut the time further. Raise the sunk cost. Add fatigue.
+-> If the named missing pressure matters to this task, model that pressure explicitly; otherwise retain the observed pass.
 
 ### Did the No-Skill Test Actually Fail?
 
 Did the agent actually violate the rule at the baseline? If it complies even without the skill, the skill itself may not be needed.
 
--> Increase the pressure. Or conclude that the skill is not needed.
+-> Preserve the baseline result. Change the scenario only for a concrete missing uncertainty, or reconsider whether the proposed skill change is necessary.
 
 ### Does the With-Skill Test Really Block the Excused Excuse?
 
@@ -178,7 +178,7 @@ Good: "Can you follow this rule in this situation?" (the agent actually follows 
 
 ### Complies (GREEN)
 
-Good. Move to the next pressure scenario. Or repeat the test (the same scenario 3 more times).
+Good. Preserve the pass. Run another scenario or repetition only when a named uncertainty or variance concern could change the decision.
 
 ### Partially Complies
 
@@ -194,4 +194,4 @@ The skill does not respond to that specific excuse. Add it to the table. Respond
 - Recommended: pass under maximum pressure (all pressures at once)
 - When a loophole is found: respond to that loophole and re-test
 
-Judging "have I tested enough?": when you can no longer find a new violation. If the agent complies even after you repeat the same scenario 5 times, it is probably enough.
+Judge sufficiency by coverage of the known failure and live uncertainties. Stop when another unchanged run cannot change the decision. A pass remains a pass; do not manufacture pressure failures to justify an edit.

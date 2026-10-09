@@ -11,10 +11,10 @@ Psychology background: understanding why persuasion techniques work lets you app
 - [4. Build a Red Flags List](#4-build-a-red-flags-list)
 - [5. Update Violation Symptoms in the Description](#5-update-violation-symptoms-in-the-description)
 - [Anti-patterns](#anti-patterns)
-  - [❌ Narrative example](#narrative-example)
-  - [❌ Multi-language dilution](#multi-language-dilution)
-  - [❌ Code in a flowchart](#code-in-a-flowchart)
-  - [❌ Generic labels](#generic-labels)
+  - [❌ Narrative example](#-narrative-example)
+  - [❌ Multi-language dilution](#-multi-language-dilution)
+  - [❌ Code in a flowchart](#-code-in-a-flowchart)
+  - [❌ Generic labels](#-generic-labels)
 - [Capture Rationalization Patterns in Tests](#capture-rationalization-patterns-in-tests)
 
 

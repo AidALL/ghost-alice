@@ -25,6 +25,7 @@ Create a public repository snapshot that includes the core Ghost-ALICE OS govern
 ## Include
 
 - `README.md`
+- `README_ko.md`
 - `LICENSE`
 - `NOTICE`
 - `THIRD_PARTY_NOTICES.md`

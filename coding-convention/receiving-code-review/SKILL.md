@@ -68,10 +68,11 @@ When you receive code review feedback:
 
 ```
 If any item is ambiguous:
-  Stop. Do not implement anything yet.
-  Request clarification on the ambiguous item.
+  Identify which changes depend on the ambiguous item.
+  Resolve it from supplied context or ask for the exact missing decision.
+  Keep dependent implementation closed; continue independent authorized fixes.
 
-Reason: items can be related to each other. Partial understanding = wrong implementation.
+Reason: related items share a dependency; ambiguity in one item does not block unrelated authorized work.
 ```
 
 Example
@@ -80,8 +81,8 @@ Example
 User: "Fix 1 through 6"
 You understand 1, 2, 3, and 6. Items 4 and 5 are ambiguous.
 
-❌ Implement 1, 2, 3, 6 first and ask about 4, 5 later
-✅ "I understand 1, 2, 3, and 6. I need clarification on 4 and 5 before proceeding."
+❌ Guess that 1, 2, 3, 6 are independent without checking their relationship to 4 and 5
+✅ "Items 1 and 2 are independent and I will fix them. Items 3 and 6 depend on the unresolved decision in 4 and 5; please clarify that decision."
 ```
 
 ## Handling by Source
@@ -131,7 +132,7 @@ When a reviewer suggests "implement it properly":
 
 ```
 Multi-item feedback:
-  1. Clarify the ambiguous ones first.
+  1. Identify dependencies and clarify ambiguity before dependent changes.
   2. Implement in this order:
      - Blocking issues (breakage, security)
      - Simple fixes (typos, imports)
@@ -204,7 +205,7 @@ Correct the record factually and proceed.
 | Batch processing then testing | One at a time, test each one |
 | Assuming the reviewer is right | Check whether it breaks |
 | Avoiding a rebuttal | Technical accuracy > comfort |
-| Partial implementation | Clarify all items first |
+| Guessing dependencies | Clarify dependent items; continue independent authorized fixes |
 | Proceeding when you cannot verify | State the limit, request direction |
 
 ## Examples
@@ -235,7 +236,7 @@ Reviewer: "Implement proper metrics tracking with a DB, date filters, and CSV ex
 ```
 User: "Fix 1 through 6"
 You understand 1, 2, 3, 6 and 4, 5 are ambiguous.
-✅ "I understand 1, 2, 3, 6. I need clarification on 4 and 5 before implementing."
+✅ "I can implement the independent fixes now; changes depending on 4 and 5 wait for that decision."
 ```
 
 ## Replying on a GitHub Thread

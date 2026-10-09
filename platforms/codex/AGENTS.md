@@ -39,9 +39,9 @@ Before constructing the first command of a tool-using turn, establish each path 
 
 1. Reuse a hook-provided pending-merge result first; without one, finish the manual fallback before actionable work, except for a no-work terminal route (`clarification-only` or `direct-response`).
 2. Connect the `session-intent-analyzer` intake.
-4. Run `task-router`.
-5. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
-6. Surface a `[tool-checkpoint]` once for the user-input tool batch. The hook still checks every tool call; repeated calls in the same session input lineage do not repeat the user-facing checkpoint text unless state changes.
+3. Run `task-router`.
+4. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
+5. Surface a `[tool-checkpoint]` once for the user-input tool batch. The hook still checks every tool call; repeated calls in the same session input lineage do not repeat the user-facing checkpoint text unless state changes.
 
 `tool-checkpoint` is not user-input intake. It is a tool-stage `PreToolUse` retry checkpoint.
 
@@ -64,7 +64,7 @@ Runtime notes:
 
 - Every Codex install path keeps `~/.agents/skills/` as a copy install. To protect locally modified skills and rules with snapshot and diff, you must run the installer again after an update.
 - The focus scope is not fixed and does not expand in only one direction. It moves back and forth across micro, meso, macro, and meta according to the mismatch location and the verification burden. When a large premise or logic is wrong, fix the higher scope. When a small work output is wrong, fix that lower unit.
-- After session-intent and downstream gate context are available, task-router emits a reusable routing-surface for work complexity, focus, verification burden, boundary need, and forced visibility. Session intent records semantic facts and decisions; governance surface consumers read the routing-surface instead of creating a competing complexity scale.
+- After exact session-intent context is available, task-router emits a reusable routing-surface for work complexity, focus, verification burden, boundary need, and forced visibility. Session intent records semantic facts and decisions; governance surface consumers read the routing-surface instead of creating a competing complexity scale.
 - The Ghost-ALICE installer aligns `~/.codex/hooks.json` together with `[features] hooks = true` in `~/.codex/config.toml` to re-enable a locally disabled setting.
 - The agent visibility profile defaults to `dynamic`. The canonical runtime config is `agent_visibility.profile`, and the allowed values are `strict | dynamic | minimal`. You can set the initial runtime preference with `--visibility` at install time; `--agent-visibility` remains accepted as a compatibility alias. In a Codex session where the hook is trusted after install you can inspect and change the runtime preference with `/visibility`, `/visibility strict`, `/visibility dynamic`, and `/visibility minimal`. This profile selects the governance message surface shown on the user's screen, and it does not reduce whether hooks such as `web-search-first` and `tool-checkpoint` are installed or executed. The strict-grade session log is preserved regardless of the profile. Codex slash commands are officially documented (https://developers.openai.com/codex/cli/slash-commands), but user-defined slash command behavior is version-dependent and Codex does not auto-invoke slash commands from instructions the way Claude does, so for a stable profile change prefer `python3 _shared/agent_visibility_cli.py set <profile>`.
 - Work-Impact Projection classifies hook-internal values by whether they change the work boundary, focus layer, verification burden, or recovery path. Hook execution and the strict audit log are never reduced.
@@ -138,7 +138,7 @@ Leave the block below when the final response claims executed work is complete, 
 - evidence: <fresh command or inspected file>
 ```
 
-Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Retain actual skill-read or valid-reuse execution evidence internally; a printed `[io-trace]` is optional and is not a verification prerequisite. A format repair returns only the corrected completion fields, preserves the substantive result and valid evidence, and never demands the business answer again or reruns unchanged checks.
+Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Retain actual skill-read or valid-reuse execution evidence internally; a printed `[io-trace]` is optional and is not a verification prerequisite. A format repair follows Core delivery selection. A usable already-visible prior answer with unchanged claims permits corrected control/metadata only. Final-only, unknown or missing usable prior delivery requires one complete assembled answer; actually changed claims require a corrected complete answer. Withdraw unsupported claims or report partial status when proof is unavailable. Preserve supported business payload and original evidence without repeating business operations or unchanged checks.
 
 The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each closure claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
 
@@ -161,6 +161,16 @@ Points to follow in an environment without a Codex visible Skill surface:
 - Do not treat a gate as complete based only on metadata, a description, a prior verdict, or an "already know it" reason.
 - If neither a fresh nor a valid retained instruction body is available, the gate is pending; do not list a skill-call.
 - Apply the same standard to simple tasks, already-routed tasks, and tasks where the metadata looks sufficient.
+
+## Current Work, Completion and Return Paths
+
+Core reconciles the current request with continuing authorized work before selecting execution/nonexecution. A bounded discussion with no currently selected execution has no AP publication; an actually executed read-only review/report or positive closure still follows owning verification. Core owns the reusable routing projection and current `response-route.v1` selection. Domain owners retain their criterion checks; a selector cannot waive them.
+
+When AP is enabled, it consumes only the actual current ready qualified selected execution and Core's `publication_route: none | prepare | publish | blocked`. Run existence and accumulated backlog are insufficient. Missing/stale route blocks dependent capture or advancement, not existing authorization or native tool permission. New input rebinds the request; unchanged valid proof keeps its original source and time. Relevant criterion, artifact or dependency changes reopen only affected proof. Per-criterion decisions remain distinct from aggregate publication and host delivery; aggregate decisions never rerun all checks.
+
+A first recording-only failure permits bounded repair. An identical unchanged failure parks recording until a decision-relevant recording/dependency change; independent authorized work continues. Supported business outcome, recording/application, whole-unit completion and delivery scope remain separate. Never guess a substitute root, source, receipt, approval or target to repair recording.
+
+Owners may reopen an artifact, mapping, composition, route or inferred premise in the same approved work and return to useful production. Micro, meso, macro and meta are bidirectional focus levels, not an ascending ritual. Ask only for an exact human-owned decision or changed explicit authority; existing authorization needs no automatic reapproval. Evolution remains a report-only terminal branch and cannot automatically enter production.
 
 ## Mandatory Rules
 

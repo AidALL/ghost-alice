@@ -7,10 +7,10 @@ This document is the contract for the install-state manifest that the Ghost-ALIC
 - [File location](#file-location)
 - [top-level fields](#top-level-fields)
 - [target fields](#target-fields)
-- [install_mode semantics](#installmode-semantics)
-- [managed_markers](#managedmarkers)
+- [install_mode semantics](#install_mode-semantics)
+- [managed_markers](#managed_markers)
 - [failure policy](#failure-policy)
-- [system_env_changes](#systemenvchanges)
+- [system_env_changes](#system_env_changes)
 
 
 ## Purpose

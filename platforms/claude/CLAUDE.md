@@ -114,6 +114,16 @@ When you confirm a flaw in a prompt or other deliverable you provided, return th
 
 At session start, use current Claude hook evidence if it reports the pending-merge precheck. Otherwise inspect `~/.ghost-alice/pending-merges/claude/manifest.json` before a normal route begins actionable work. If task-router terminates the turn as `clarification-only` or `direct-response`, defer the manual check until the next actionable turn. Surface known undecided entries through `merge-companion` before work. An explicit defer or skip leaves the entry undecided and allows work to continue. Missing, empty, fully decided, or unparsable manifests pass silently.
 
+## Current Work, Completion and Return Paths
+
+Core reconciles the current request with continuing authorized work before selecting execution/nonexecution. A bounded discussion with no currently selected execution has no AP publication; an actually executed read-only review/report or positive closure still follows owning verification. Core owns the reusable routing projection and current `response-route.v1` selection. Domain owners retain their criterion checks; a selector cannot waive them.
+
+When AP is enabled, it consumes only the actual current ready qualified selected execution and Core's `publication_route: none | prepare | publish | blocked`. Run existence and accumulated backlog are insufficient. Missing/stale route blocks dependent capture or advancement, not existing authorization or native tool permission. New input rebinds the request; unchanged valid proof keeps its original source and time. Relevant criterion, artifact or dependency changes reopen only affected proof. Per-criterion decisions remain distinct from aggregate publication and host delivery; aggregate decisions never rerun all checks.
+
+A first recording-only failure permits bounded repair. An identical unchanged failure parks recording until a decision-relevant recording/dependency change; independent authorized work continues. Supported business outcome, recording/application, whole-unit completion and delivery scope remain separate. Never guess a substitute root, source, receipt, approval or target to repair recording.
+
+Owners may reopen an artifact, mapping, composition, route or inferred premise in the same approved work and return to useful production. Micro, meso, macro and meta are bidirectional focus levels, not an ascending ritual. Ask only for an exact human-owned decision or changed explicit authority; existing authorization needs no automatic reapproval. Evolution remains a report-only terminal branch and cannot automatically enter production.
+
 ## Mandatory Rules
 
 ### 0. Task Routing Gate (required on user input)

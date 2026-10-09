@@ -123,6 +123,6 @@ Without hooks, apply the same storage contract before the first response. Use th
 
 - This skill is not long-term memory.
 - Do not promote memory without user approval.
-- This skill does not make the final jailbreak decision.
+- This skill records semantic context, not a current per-input classifier decision or native tool permission. Legacy classifier fields remain readable history.
 - skill-evolution may use this ledger only as report context.
 - Ledger text must be compressed intent, not raw quotes, secrets, system messages, or tool output.

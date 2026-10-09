@@ -144,8 +144,8 @@ The criterion that distinguishes "same attack" from "new attack". If this judgme
 
 - a mode where the caller skips collecting human responses
 - the rounds proceed with only the initial evidence-list
-- the no-response judgment triggers immediately, so the tendency toward convergence-reject is strong
-- in this mode, convergence-judge-deadlock condition 3 (no response for 3 consecutive rounds) does not apply. Instead, the human-response-based convergence conditions are entirely lifted
+- judge the available evidence after the complete attack cycle; absence of a human response alone is not a rejection criterion
+- In human-absent mode, omit response collection and judge the initial evidence after the complete independent attack cycle. Apply the same no-delta convergence/deadlock rules without waiting for a response-count threshold.
 
 ### Agent replacement
 

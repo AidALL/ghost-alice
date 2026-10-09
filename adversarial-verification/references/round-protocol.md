@@ -176,7 +176,7 @@ The response from the human side (or the evidence the caller submitted in the hu
 - switching to a different topic
 
 ○ no-response handling
-- when no response accumulates for 2 consecutive rounds, that claim starts accumulating convergence-reject
+- At the end of the complete independent attack cycle, if a decisive attack remains unanswered and no decision-relevant evidence is available, apply the configured convergence rule; do not wait for a response-count threshold.
 - when the caller has declared human-absent mode (automatic verification): proceed with the round on the initial evidence only, and skip the response stage
 
 ---

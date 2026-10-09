@@ -267,72 +267,23 @@ def check_docs_index(repo: Path, top_level: list[str], coding: list[str], findin
         return
 
     required_floor_markers = [
-        "Core philosophy. Quality floor first",
-        "Operating loop steps",
-        "Verification layers",
-        "Quality floor as root rule",
-        "verified state, not forward momentum",
+        "Keep the same work open to correction",
+        "Reconcile this request with continuing authorized work",
+        "Return to router",
+        "publication_route: none | prepare | publish | blocked",
+        "Run existence or backlog alone is insufficient",
+        "Final-only, unknown or no usable prior payload",
+        "Bidirectional focus across four scopes",
     ]
     missing_markers = [marker for marker in required_floor_markers if marker not in text]
     if missing_markers:
-        findings.append(
-            Finding(
-                "ERROR",
-                "docs/index.html",
-                "floor-first-contract",
-                "docs/index.html is missing floor-first homepage contract markers: "
-                + ", ".join(missing_markers),
-            )
-        )
-
-    if "Where to go next" in text and "hero-logo-lockup" in text:
-        required_docs_root_markers = [
-            'src="imgs/Ghost-ALICE_logo.png"',
-            'href="./getting-started/installation.html"',
-            'href="./getting-started/uninstall.html"',
-            'href="./policies/installer-platform-compatibility-matrix.html"',
-            'href="./ko/README.html"',
-        ]
-        missing_docs_root_markers = [
-            marker for marker in required_docs_root_markers if marker not in text
-        ]
-        if missing_docs_root_markers:
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "docs/index.html",
-                    "docs-root-links",
-                    "docs/index.html is missing docs-root-relative homepage links: "
-                    + ", ".join(missing_docs_root_markers),
-                )
-            )
-        forbidden_docs_root_markers = [
-            'href="./docs/',
-            'href="./README_ko.md"',
-        ]
-        stale_docs_root_markers = [
-            marker for marker in forbidden_docs_root_markers if marker in text
-        ]
-        if stale_docs_root_markers:
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "docs/index.html",
-                    "docs-root-links",
-                    "docs/index.html contains repo-root-only links that break from docs root: "
-                    + ", ".join(stale_docs_root_markers),
-                )
-            )
-        docs_logo = repo / "docs" / "imgs" / "Ghost-ALICE_logo.png"
-        if not docs_logo.is_file():
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "docs/index.html",
-                    "docs-root-asset",
-                    "docs/imgs/Ghost-ALICE_logo.png is missing for the docs-root homepage.",
-                )
-            )
+        findings.append(Finding("ERROR", "docs/index.html", "bidirectional-contract",
+                                "Homepage is missing current selection/return/delivery contract: "
+                                + ", ".join(missing_markers)))
+    root = repo / "index.html"
+    if root.is_file() and path.read_bytes() != root.read_bytes():
+        findings.append(Finding("ERROR", "docs/index.html", "homepage-copy-parity",
+                                "docs/index.html must byte-match the repository-root Pages entry."))
 
 
 def check_repo_index(repo: Path, findings: list[Finding]) -> None:

@@ -23,7 +23,7 @@ Ghost-ALICE OS is an open source project. Support is provided on a best-effort b
 - Troubleshooting: [docs/getting-started/troubleshooting.md](./docs/getting-started/troubleshooting.md)
 - Repository map: [docs/reference/repository-structure.md](./docs/reference/repository-structure.md)
 
-The recommended product pair is Core 0.4.1 and Autopilot 0.4.1; the addon technical minimum remains Core 0.4.0. For Codex contract-loading issues, include redacted status/doctor results for the managed bootstrap, `ghost-alice-governance.md` fallback and project instruction budget. For Autopilot issues, identify the selected platform and current session without sharing private run-state files.
+The source candidate pairs Core 0.5.0 and Autopilot 0.5.0; the addon requires Core 0.5.0 current routing and completion APIs. Candidate source checks do not establish native compatibility, installed adoption or publication. For Codex contract-loading issues, include redacted status/doctor results for the managed bootstrap, `ghost-alice-governance.md` fallback and project instruction budget. For Autopilot issues, identify the selected platform and current session without sharing private run-state files.
 
 ## Opening An Issue
 

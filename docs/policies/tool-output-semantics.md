@@ -15,7 +15,7 @@ This is the minimum contract for separating human-readable labels from machine-r
 
 Tool argument shape is owned by the host harness, not by Ghost-ALICE governance hooks. When a tool call omits a required field, the host validates the submitted arguments against that tool's JSON Schema before the tool body starts. A missing required array such as `questions` in an AskUserQuestion-style call is therefore a pre-execution validation failure: no user UI opens, no file or external side effect can occur, and recovery is to retry the same intent with schema-valid arguments.
 
-Ghost-ALICE hooks must not duplicate this by inspecting arbitrary serialized `tool_input` content, deny-list substrings, or inferred payload capabilities. The governance boundary is session intent, downstream gate state, completion evidence, IO trace, and documented work contracts. Malformed tool payloads remain the host schema validator's responsibility.
+Ghost-ALICE hooks must not duplicate this by inspecting arbitrary serialized `tool_input` content, deny-list substrings, or inferred payload capabilities. The governance boundary is session intent, current work routing, completion evidence, strict audit, and documented work contracts. Malformed tool payloads remain the host schema validator's responsibility.
 
 ## `_shared/install_hooks.py`
 
@@ -59,3 +59,11 @@ Hook status tokens:
 | `finding_count` | unique findings after resolved path dedupe | existing |
 | `finding_count_semantics` | literal semantics of `finding_count` | new |
 | `occurrence_count` | physical occurrence count including mirrors, if computed | optional |
+
+## Completion, Recording and Delivery
+
+Core's `completion-route.v1` separates `evidence_route` from `publication_route` (`none | prepare | publish | blocked`). Per-criterion `check_ids` identifies affected owner work; `required_check_ids` preserves the full owner plan. Aggregate priority is a summary, not a command to rerun every check. AP uses the actual current ready qualified selection, never historical backlog or run existence alone.
+
+A supported business criterion, a prepared/published request, an applied request and a complete work unit are distinct. Missing proof is unavailable, not pass. Original `proof_ref` and `verified_at` survive unchanged reuse across new input bindings. The first recording-only failure allows bounded repair; identical unchanged failure parks until relevant recording/dependency change. Existing human/native permission and independent authorized work remain intact.
+
+Core `response_delivery.py` returns `preserve_answer_and_patch_metadata` only for usable visible prior payload and unchanged claims; `assembled_complete_payload` covers final-only/unknown/missing prior payload; changed claims use `corrected_complete_answer`. These selectors neither verify domain truth nor execute permissions. Unsupported claims must be withdrawn or reported partial. JSON exports, printed io-trace and legacy classifier labels cannot substitute for runtime authority or completion evidence.

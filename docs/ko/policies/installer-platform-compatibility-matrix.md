@@ -55,7 +55,7 @@ Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니�
 
 ### session-intent-analyzer
 
-모든 user input은 session intent ledger가 observe합니다. Hooks는 digest와 event data만 저장하며 raw prompts를 저장하지 않습니다. goals, constraints, decisions, non-goals가 바뀌면 agent는 기준 상태인 SQLite 원장 API로 compressed delta를 기록합니다. 호환성·내보내기 자료인 `intent-state.json`은 update-plus-accumulate state입니다. scalar intent fields는 newer deltas로 replace되고, list-like constraints, non-goals, questions, criteria, decisions는 stable id 또는 dedupe로 merge됩니다. 이 context는 `skill-evolution`과 `jailbreak-detector`가 소비합니다. deterministic hard-block rules는 explicit attack signals에 대한 narrow regression guards이며 gradual multi-turn jailbreak resistance는 session-intent summary quality와 cumulative constraint comparison에 달려 있습니다.
+모든 user input은 session intent ledger가 observe합니다. Hooks는 digest와 event data만 저장하며 raw prompts를 저장하지 않습니다. goals, constraints, decisions, non-goals가 바뀌면 agent는 기준 상태인 SQLite 원장 API로 compressed delta를 기록합니다. 호환성·내보내기 자료인 `intent-state.json`은 update-plus-accumulate state입니다. scalar intent fields는 newer deltas로 replace되고, list-like constraints, non-goals, questions, criteria, decisions는 stable id 또는 dedupe로 merge됩니다. 이 context는 task-router와 report-only skill-evolution이 소비합니다. legacy classifier 판단은 이력으로만 남으며 현재 permission을 부여하지 않습니다.
 
 ### pending merge precheck
 
@@ -69,7 +69,7 @@ Runtime tool-checkpoint payload는 routine recovery cost 또는 recovery note fi
 
 executed work가 complete, fixed, successful, freshly verified라고 claim하기 전에는 `verification-before-completion`이 lifecycle gate입니다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않습니다. Claude Code처럼 visible Skill surface가 있는 환경에서는 `[completion-check]`에 skill-call 줄이 없고, Stop hook이 actual Skill call을 transcript에서 확인합니다. visible Skill surface가 없는 Codex에서는 current turn에 해당 `SKILL.md`를 실제로 읽고 workflow를 따른 경우에만 `skill-call: verification-before-completion (this turn)`를 사용합니다.
 
-화면의 `[io-trace]`는 선택 사항이며, 유무·순서·스킬 목록 표기로 완료를 차단하지 않습니다. 엄격한 내부 감사와 실제 검증은 유지합니다. Claude는 현재 턴의 실제 Skill 호출을 검사하고, Codex는 워크플로 실행 후 정확한 검증 스킬 선언을 요구합니다. 복구는 누락되거나 잘못된 완료 필드만 요청하며, 근거가 없으면 짧고 정직하게 완료 주장을 철회합니다. 업무 본문 반복이나 변경 없는 근거의 재검증은 요구하지 않습니다. Claude의 한 번 재시도와 미해결 결함 알림, Codex의 실제 완료 근거 결함 차단은 유지합니다. 마지막 응답만 반환하는 호출자는 원래 업무 결과와 정정 기록을 별도로 보존해야 합니다. 이 훅은 복구 상태를 반환하며 업무 본문을 재구성하지 않습니다.
+화면의 `[io-trace]`는 선택 사항이며 strict audit과 실제 현재 턴 검증은 유지합니다. Claude의 실제 Skill 호출과 Codex의 실제 body 사용 및 workflow 근거를 정직하게 기록합니다. Core는 사용 가능한 이전 업무 본문이 실제로 보이고 claims가 같을 때만 metadata-only repair를 선택합니다. final-only, unknown 또는 usable prior payload가 없으면 하나의 완전한 답변을 조립하고, claims가 바뀌면 교정된 완전한 답변을 제공합니다. 근거가 없는 주장은 철회하거나 partial로 보고합니다. 기록이나 형식을 고치기 위해 변경 없는 업무와 검증을 반복하지 않습니다. host는 업무 본문을 ledger 밖에 보존합니다.
 
 ## Shell Matrix
 

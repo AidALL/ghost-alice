@@ -6,7 +6,7 @@ Ghost-ALICE OS documentation is bilingual at the reader-facing documentation lay
 
 Every paired document should expose a language switch near the top. In an English document, the English side is plain text and the Korean side is a link. In a Korean document, the English side is a link and the Korean side is plain text.
 
-The coordinated current release is Ghost-ALICE OS `0.4.1` with Ghost-ALICE Autopilot `0.4.1`. Read the [release notes](./release/2026-10-01-release-notes.md) for current verification scope.
+The latest published pair remains Core/Autopilot `0.4.1`; its [release notes](./release/2026-10-01-release-notes.md) retain that verification scope. This source candidate is Core/Autopilot `0.5.0`, minimum Core `0.5.0`; source validation does not establish native compatibility, installed adoption or publication.
 
 ## Quick Install
 

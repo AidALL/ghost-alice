@@ -3,7 +3,7 @@
 
 - [Normal path (1 entry, integrate decision)](#normal-path-1-entry-integrate-decision)
 - [Conflict path (automatic merge not possible)](#conflict-path-automatic-merge-not-possible)
-- [Non-interactive path (CI / non-tty)](#non-interactive-path-ci-non-tty)
+- [Non-interactive path (CI / non-tty)](#non-interactive-path-ci--non-tty)
 - [Pattern 2 propagation path](#pattern-2-propagation-path)
 - [User decision data structure](#user-decision-data-structure)
 

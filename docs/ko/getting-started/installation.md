@@ -90,7 +90,7 @@ bash install.sh --platform codex --addon autopilot
 | --- | --- | --- | --- | --- |
 | autopilot | 명시적으로 승인된 자율 실행을 작업 항목 단위로 이어갑니다 | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-권장 제품 조합은 Core `0.4.1`과 Autopilot `0.4.1`입니다. 공유 SQLite 런타임에 필요한 애드온의 기술적 최소 Core 버전은 `0.4.0`으로 유지됩니다. 지원 범위는 애드온 호환성 표에서, 검증 범위는 [현재 릴리즈 안내](../release/2026-10-01-release-notes.md)에서 확인해 주세요.
+이 소스 후보는 Core `0.5.0`과 Autopilot `0.5.0`을 함께 사용하며 현재 routing과 managed completion API에 Core `0.5.0`이 필요합니다. 게시된 릴리즈나 설치된 환경의 적용 완료를 뜻하지 않습니다. 소스 검증, native runtime 검증과 게시 근거는 구분합니다. [0.4.1 릴리즈 안내](../release/2026-10-01-release-notes.md)는 당시의 검증 범위를 유지합니다.
 
 ## Install One Official Addon To One Platform
 

@@ -51,8 +51,8 @@ Antigravity adapter가 없으면 그 smoke item은 inconclusive로 기록합니�
 - `harness validity`: prompt가 request를 만족하는 데 필요한 read-only tool action을 허용합니다. 모순된 prompt는 `pass`가 아니라 `invalid-harness`입니다.
 - `task-router`: first tool action 전에 routing이 보입니다.
 - `session-intent-analyzer`: raw prompt 저장 없이 intent delta 또는 hook observation이 기록됩니다.
-- `boundary-contract`: read-only work에서는 `n/a` 또는 미사용 사유가 보입니다.
-- `failure-mode-if-wrong`: concise failure surface가 routine recovery-cost 또는 recovery-note fields 없이 보입니다.
+- `boundary-contract`: 현재 routing-surface의 결정을 따릅니다. 읽기 전용 검증에도 계약이 필요할 수 있으며 해당 경로가 요구하지 않을 때만 `n/a`를 기록합니다.
+- conditional `failure-mode-if-wrong`: side effect, forced signal, mismatch 또는 의미 있는 사용자 결정에 필요할 때 표시합니다. routine read-only checkpoint에는 `intent`와 `why`가 필요합니다.
 - conditional `recovery-action`: mismatch, scope reopen, external side effect, hard-to-recover action에 concrete next step이 필요할 때만 나타납니다.
 - `skill activation permission`: Claude Code와 Antigravity-family runtime이 core gate만 담은 줄인 allowlist 때문에 막히지 않습니다.
 - `verification-before-completion`: completion claim 직전에 fresh evidence가 나타납니다.

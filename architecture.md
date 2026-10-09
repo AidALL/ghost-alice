@@ -6,29 +6,10 @@ Documentation boundary: this repository document is the compact architecture map
 ## Contents
 
 - [0. Purpose and Non-Purpose](#0-purpose-and-non-purpose)
-  - [0.1 Purpose](#01-purpose)
-  - [0.2 Non-Purpose (what this system does not solve)](#02-non-purpose-what-this-system-does-not-solve)
-  - [0.3 User Spectrum (no single assumption)](#03-user-spectrum-no-single-assumption)
 - [1. Four-Layer Model (System Skeleton)](#1-four-layer-model-system-skeleton)
-  - [Layer 1: Request Decomposition (Decompose)](#layer-1-request-decomposition-decompose)
-  - [Layer 2: Simultaneous Synthesis of Production, Verification, and Debugging (Compose)](#layer-2-simultaneous-synthesis-of-production-verification-and-debugging-compose)
-  - [Layer 3: Consensus and Gate (Consensus & Gate)](#layer-3-consensus-and-gate-consensus-gate)
-  - [Layer 4: Governance and Contribution (Governance & Contribution)](#layer-4-governance-and-contribution-governance-contribution)
 - [2. Spectrum Adaptation Principle (Adaptive Activation)](#2-spectrum-adaptation-principle-adaptive-activation)
-  - [2.1 Activation Dimensions](#21-activation-dimensions)
-  - [2.2 Activation Matrix (example)](#22-activation-matrix-example)
-  - [2.3 Over-Engineering Prevention Principle](#23-over-engineering-prevention-principle)
 - [3. Non-Functional Constraints](#3-non-functional-constraints)
-  - [3.1 Korean Tone](#31-korean-tone)
-  - [3.2 Non-Coding Contributor Friendliness](#32-non-coding-contributor-friendliness)
-  - [3.3 Deployment Surface Separation](#33-deployment-surface-separation)
-  - [3.4 Connection to Per-Deployment Assets](#34-connection-to-per-deployment-assets)
 - [4. Design Decisions](#4-design-decisions)
-  - [Request Decomposition Engine](#request-decomposition-engine)
-  - [Semantic Calling Graph Representation](#semantic-calling-graph-representation)
-  - [Consensus Protocol](#consensus-protocol)
-  - [Complexity Classification and Verification Policy](#complexity-classification-and-verification-policy)
-  - [Runtime Value Judgment](#runtime-value-judgment)
 - [5. Mapping to Existing Components](#5-mapping-to-existing-components)
 
 
@@ -71,131 +52,123 @@ The domain is not a single one either. The same system handles everything from s
 
 ## 1. Four-Layer Model (System Skeleton)
 
+The four roles—decomposition, production with verification, criterion judgment, and governance support—describe responsibilities, not a compulsory sequence. Governance protects the current work throughout; report-only evolution is a separate terminal consumer. A production or verification mismatch can reopen the affected artifact, mapping, composition, route or inferred premise in the same work. Compose may return to decomposition when the decomposition is wrong. It must preserve the user's approved objective.
+
+### Ownership and current work
+
+Core reconciles the current request with continuing authorized work before selecting execution or nonexecution. A status question can receive a short answer while approved implementation continues. A bounded discussion with no currently selected execution has no AP publication obligation. An actually executed read-only review/report or positive closure still follows its owning verification; read-only does not mean nonexecution.
+
 ```mermaid
-flowchart BT
-    U([natural-language request<br/>any employee])
-    RequestDecompositionLayer["system layer 1. Request decomposition (Decompose)<br/>natural-language request → domain-breadth identification → subtask graph"]
-    ComposeLayer["system layer 2. Simultaneous synthesis of production, verification, and debugging (Compose)<br/>a semantic calling graph where production skills + verification skills + the debugging protocol<br/>are mobilized together at one node"]
-    ConsensusGateLayer["system layer 3. Consensus and gate (Consensus & Gate)<br/>parallel independent verification + adversarial rounds + human gate (optional)"]
-    GovernanceContributionLayer["system layer 4. Governance and contribution (Governance & Contribution)<br/>requester feedback → skill, verification, and debugging evolution input"]
-    U --> RequestDecompositionLayer --> ComposeLayer --> ConsensusGateLayer --> GovernanceContributionLayer
+flowchart TB
+  H[Human objective and explicit authority]
+  P[Pending-merge precheck]
+  I[Digest intake and changed semantic intent]
+  R[Core router: reconcile current request and continuing authorized work]
+  S{Current selected work}
+  D[Bounded discussion: no selected execution]
+  B{Boundary required?}
+  BC[Owning boundary contract]
+  W[Owning production and criterion verification]
+  N[Native tool execution]
+  NP[Native permissions and credential controls]
+  C[Core per-criterion completion and delivery policy]
+  AP[AP recording and unit advancement]
+  A[Supported complete or honest partial answer]
+  E[Skill-evolution: report-only terminal]
+  AU[Strict audit]
+  SC[Static sparse skill dependencies]
+  H -->|control: authorized request| P
+  P -->|call: intake| I
+  I -->|call: current intent| R
+  I -.->|report input only| E
+  SC -.->|dependency| R
+  R -->|control: current ready selection| S
+  S -->|nonexecution only| D
+  D -->|result: no AP publication| A
+  S -->|selected execution| B
+  B -->|yes: call| BC
+  B -->|no: continue| W
+  BC -->|control: authorized boundary| W
+  W -->|call: action| N
+  NP -->|native authority| N
+  N -->|return: output or failure| W
+  W -->|return: owner evidence and uncertainty| C
+  C -->|call only if AP enabled and current qualified selection; publication_route prepare or publish| AP
+  AP -->|return: recording and advancement status| C
+  C -->|result: visibility-aware delivery| A
+  A -->|return: result and exact open decision| H
+  W -->|repair: artifact or mapping| W
+  W -->|reopen: composition, route or inferred premise| R
+  C -->|reopen: affected criterion only| W
+  H -.->|authority: exact scope decisions| BC
+  N -.->|audit observation, never permission| AU
+  C -.->|audit: closure and delivery| AU
+  AU -.->|report input only| E
 ```
 
-### Layer 1: Request Decomposition (Decompose)
+Solid edges name calls, control, authority or result returns. Dashed edges name dependencies, human constraints, audit or report input. Neither audit nor evolution grants permission or automatically enters production. The diagram's AP edge consumes Core's `publication_route: none | prepare | publish | blocked`; the mere existence of an admitted run or old backlog cannot activate it. A missing/stale route blocks dependent capture or advancement, not existing human authorization or native tool permission.
 
-Responsibilities
-- Takes a natural-language request and identifies domain breadth, requester profile, and work complexity
-- Builds a single node for a single domain, and an N-node graph for multi-domain cross-cutting work
-- Identifies semantic calling candidate skills (the frontmatter description is the detection input)
-- When information is undecided, throws one clarification question at a time to the requester (borrowing the brainstorming pattern)
+### Bidirectional focus
 
-Non-Responsibilities
-- Does not produce output (layer 2 does that)
-- Does not make verification or debugging decisions (performs only complexity classification and domain identification)
+```mermaid
+flowchart LR
+  MI[Micro: artifact, source, argument or check]
+  ME[Meso: subtask and source-to-target mapping]
+  MA[Macro: combined result and cross-surface contract]
+  MT[Meta: inferred premise, route and necessity]
+  HD[Human-owned changed explicit decision]
+  MI <-->|repair and contrary evidence| ME
+  ME <-->|regroup and composition feedback| MA
+  MA <-->|revise premise and redesign result| MT
+  MT <-->|smallest useful work and local contradiction| MI
+  MT -->|ask only for exact changed authority| HD
+  HD -->|return: accepted decision| MT
+```
 
-- Input: one to several lines of natural language
-- Output: a subtask graph (node = task, edge = dependency), each node's semantic calling candidates + task-complexity-level-1/2/3 complexity + domain
+These connections are examples, not required adjacent steps. Move directly to the focus where the mismatch and next decision live; return to narrower work when that resolves the uncertainty. Reconsider inferred premises inside existing authority. Ask the human only for a decision the human owns, such as changed explicit scope or publication authority. Necessity review may reject speculative extra work; it cannot drop unfinished approved work.
 
-### Layer 2: Simultaneous Synthesis of Production, Verification, and Debugging (Compose)
+### Responsibilities
 
-Responsibilities
-- Calls production skills and verification skills together at each node of the graph
-- The debugging protocol steps in when the requester gets stuck during production (a non-coder demo failure) or the system gets stuck (a code error)
-- Debugging branches by mode according to the requester profile. Coder mode (systematic-debugging) and non-coder mode (screenshot and natural-language extraction + one change at a time)
-- A checkpoint runs only while a live uncertainty exists and its possible outcomes can change the next decision.
-- Stop the sequence when a checkpoint produces no relevant state delta or when further checking displaces the primary objective.
-- When node production finishes, passes the result to layer 3
+| Owner | Responsibility and return path |
+| --- | --- |
+| Core intake | Observe digest-only input and record compressed semantic changes through the public SQLite ledger API. Compatibility JSON is an export, not runtime authority. |
+| Core task-router | Own reusable `routing-surface.v1` complexity/focus/verification/boundary projection and propose `response-route.v1` current qualified selection. Reopen affected routing when owner evidence contradicts it. |
+| Owning workflow | Lock required boundaries, produce the output and perform its domain checks. Return unsupported criteria to the affected cause; a selector cannot waive owning verification. |
+| Core completion | Select per-criterion reuse, affected verification or cause/recording repair. Aggregate priority summarizes decisions; it does not order all checks to rerun. |
+| Core delivery | Repair visible unchanged payload with control/metadata only; assemble one complete answer for final-only, unknown or absent usable prior delivery. Correct actually changed claims and withdraw unsupported ones. |
+| Autopilot | Consume actual current-ready qualified selection and Core publication decision, record criterion outcomes, and determine unit advancement. Applied request is distinct from whole-unit completion. |
+| Governance support | Preserve authorization, credentials, exact owner/session/source/hash/lineage/criterion/proof and strict audit throughout the work. |
+| Skill-evolution | Consume intake/audit for a report-only terminal recommendation. Adoption requires its own authorized owning workflow. |
 
-Non-Responsibilities
-- Does not apply consensus rules (layer 3 does that)
-- Does not redo decomposition (follows the layer 1 result)
-
-Core principle: production skills and verification skills go into the same catalog as equals. A verification skill's frontmatter description also works as a detection input. The calls graph stays sparse; bounded checkpoints and their stop decisions remain runtime procedure.
-
-### Layer 3: Consensus and Gate (Consensus & Gate)
-
-Responsibilities
-- Verifies node results in parallel and independently (n agents independently evaluate the same result)
-- Runs mutually adversarial rounds (each agent attacks another agent's conclusion)
-- Decides pass or fail according to the consensus rule (unanimity / majority / weighted, differing by domain)
-- When a domain needs a human gate, requests review from the requester or an external expert
-- Delivers a passing result to the requester, and returns a failing result to layer 2 for the debugging loop
-
-Non-Responsibilities
-- Does not modify the production itself (modification is the layer 2 debugging loop)
-- Does not apply consensus rules uniformly regardless of domain (follows the domain policy)
-
-- Fixed zone: number of agents. Verification-complexity-level-1 exempt (no round entry), verification-complexity-level-2 fixed at 3, verification-complexity-level-3 fixed at 3 + dynamic selection of 2 from an expansion pool of 4 = 5. Consensus rule. Unanimity (default) / majority / weighted, caller-specified. Termination condition. Convergence judgment follows each complete independent cycle and stops when no decision-relevant uncertainty remains and another round cannot produce a relevant state delta, with a finite safety cap of 50 rounds.
-- Undecided zone: the human-gate trigger policy. This is set in a separate policy document.
-
-### Layer 4: Governance and Contribution (Governance & Contribution)
-
-Responsibilities
-- When the requester discovers a "better direction for next time" after production, receives that feedback as system evolution input
-- Provides both a coding-role contribution path (PR + code review) and a non-coding-role contribution path (natural-language feedback → the system generates skill-patch candidates)
-- Logs the source provenance of every output (which agent made which decision)
-- Tracks policy changes, new domain additions, and runtime contract changes
-
-Non-Responsibilities
-- Does not intervene directly in production, verification, or debugging (meta-management of the layer 1 to 3 results)
-
----
+The standalone per-input classifier and its downstream gate are retired without a renamed equivalent. Legacy model judgments and audit records remain readable history and confer no current routing or native permission authority. Snapshot helpers read identity/storage; they do not infer admission or security judgments.
 
 ## 2. Spectrum Adaptation Principle (Adaptive Activation)
 
-The four-layer model is the skeleton, and the activation intensity of each layer is determined dynamically by request complexity x domain x requester profile. Running all four layers at full power for every request is over-engineering and a system failure.
+The philosophy is a quality floor, not a fixed script. Core task-router owns the shared work judgment; domain owners select evidence and verification appropriate to their criteria. They can return a mismatch to the router instead of creating competing complexity scales.
 
 ### 2.1 Activation Dimensions
 
-Dimension A. Request complexity
-- task-complexity-level-1 simple: one node, single domain, self-evident output (example: a calendar entry)
-- task-complexity-level-2 medium: 5 to 10 nodes, 1 to 2 domains, needs format and citation verification (example: a regulation-based proposal draft)
-- task-complexity-level-3 cross-cutting: 10+ nodes, 3+ domains, multi-layer verification + debugging loop (example: a dataset validation tool full stack)
-- Complexity looks not only at node count but also at the verification burden together. That is, even a seemingly simple copy-paste can become task-complexity-level-2 or above if it needs source selection, format mapping, and after-the-fact comparison
+Complexity includes source selection, source-to-target mapping, combined behavior, format/schema constraints and recovery cost. Tool count, domain count and node count alone do not decide it. Level 1 uses light confirmation. Level 2 and above use bounded checkpoints; level 3 may need independent checks. Each check must resolve a live uncertainty whose possible results change the next decision. Independent consensus follows its selected owning skill, not a mandatory stage for all work.
 
-Dimension B. Domain
-- chores (calendar, email check, short official letter)
-- documents (proposals, reports, manuals, official letters, legal first drafts, academic papers)
-- research (experiment design, statistical analysis, citation verification, reproducibility)
-- development (code writing, debugging, packaging, deployment, security)
-- market research and marketing (factual grounding, source citation, tone consistency)
+### 2.2 Evidence and continuation
 
-Dimension C. Requester profile
-- coding-capable roles (developers, researchers): debugging coder mode, can review code directly.
-- coding-incapable roles (business, marketing, some PMs): debugging non-coder mode, demo-based review.
-- For domain experts, such as lawyers, accountants, or researchers in their own expert domain, the requester takes on part of the domain-meaning verification.
-- For domain non-experts, meaning roles outside the domain, the system takes on all of the domain-meaning verification.
+New input refreshes request identity and routing, not unchanged proof. Retain proof with its original source and verification time. Changed criteria, relevant artifacts or dependencies reopen only affected proof. Missing proof remains unavailable; another valid criterion or an applied recording request cannot establish whole-unit completion.
 
-### 2.2 Activation Matrix (example)
-
-| request example | complexity | domain | requester | layer 1 decomposition | layer 2 verification | layer 2 debugging | layer 3 gate |
-|-----------|--------|--------|--------|----------|----------|-----------|-----------|
-| book a meeting tomorrow at 3 | task-complexity-level-1 | chore | anyone | 1 node | time conflict only | none | none |
-| polish this paper abstract in English | task-complexity-level-1 | document | researcher | 1 to 2 | tone and grammar | none | self |
-| summarize the share of 5 competitors | task-complexity-level-2 | marketing | marketer | 3 to 5 | facts and sources | none | self |
-| fix this NeRF code error | task-complexity-level-1 to task-complexity-level-2 | development | developer | 1 to 3 | code multi-layer | strong coder mode | self |
-| regulation-based proposal draft | task-complexity-level-2 | document + regulation | operations team | 5 to 10 | format, evaluation metrics, regulation | short | expert option |
-| one core-technology paper | task-complexity-level-2 to task-complexity-level-3 | research + development | researcher | 8 to 15 | statistics, reproducibility, citation | coder mode | self + co-authors |
-| dataset validation tool full stack | task-complexity-level-3 | 9-domain cross-cutting | non-coding business team | 15+ | full power | non-coder 4-hop | auto-reinforced |
-
-This table is an example and is not exhaustive. Each skill performs its complexity branching at its own entry gate (distributed).
+A first recording-only failure permits bounded repair while preserving business evidence. The same unchanged failure parks that recording branch until a decision-relevant recording or dependency change. Independent authorized work continues. Never repeat business operations or unchanged checks merely to repair records, format or delivery.
 
 ### 2.3 Over-Engineering Prevention Principle
 
-- No adversarial consensus rounds for a task-complexity-level-1 request
-- No forced human gate for a task-complexity-level-1 request (the requester gets the result immediately)
-- The debugging protocol activates only when an actual block occurs (no preemptive activation)
-- The verification layer activates at each skill's entry gate according to complexity and domain
+Stop a check when no possible result can change the next decision. Stop repeated checking when it adds no relevant state delta. These stop rules do not terminate unfinished authorized production. Preserve distinctions among a supported business outcome, recording/application status, whole-unit completion and host delivery scope.
 
 ---
 
 ## 3. Non-Functional Constraints
 
 ### 3.1 Korean Tone
-All Korean outputs use the plain declarative style (the ~da / ~handa / ~ida / ~haera endings). English outputs follow the English convention. User-facing responses use the same tone (honorific and casual banmal endings prohibited). Markdown bold emphasis in output bodies is prohibited (express with the □ / ○ / - markers, headers, or structure).
+English is canonical. Reader-facing Korean documentation uses a consistent respectful, polite register; Korean skill instructions and formal reports default to plain declarative style unless the user specifies otherwise. Control fields and enum values stay English. Do not use Markdown bold in output bodies; use structure or □ / ○ / - markers.
 
 ### 3.2 Non-Coding Contributor Friendliness
-SKILL.md is a living doc, and contributions should come from outside coding roles too. That is, the frontmatter, CI, and compliance checklist must not become an absolute entry barrier for non-coding contributors. Non-coding feedback is received in natural language, and the system generates patch candidates (layer 4).
+SKILL.md is a living doc, and contributions should come from outside coding roles too. That is, the frontmatter, CI, and compliance checklist must not become an absolute entry barrier for non-coding contributors. Non-coding feedback is received in natural language, and governance support reports proposed improvements. Applying a candidate requires separately authorized owning work; report-only evolution never auto-edits production.
 
 ### 3.3 Deployment Surface Separation
 Ghost-ALICE OS core separates the publicly releasable governance layer from per-organization private profiles. Per-organization data is managed as separate profile/assets, and the core documents do not require any specific private deployment premise.
@@ -213,7 +186,7 @@ Ghost-ALICE OS core separates the publicly releasable governance layer from per-
 This chapter records the design decisions reflected in the current implementation and document contracts.
 
 ### Request Decomposition Engine
-- Resolution method: task-router semantically scans the skill descriptions in the system-reminder and matches production, verification, and lifecycle skills. The answer to the "classifier vs decomposer vs hybrid" question is "description-keyword semantic scan + distributed task-complexity-level-1/2/3 classification"
+- Resolution method: task-router semantically scans the skill descriptions in the system-reminder and matches production, verification, and lifecycle skills. The answer to the "classifier vs decomposer vs hybrid" question is "semantic skill matching + one Core-owned routing projection"
 - Clarification questions: the brainstorming skill handles them. task-router only performs matching
 - Semantic calling algorithm: the LLM directly compares the description text loaded into the system-reminder. No separate embedding or vector DB
 - No undecided items
@@ -233,7 +206,7 @@ This chapter records the design decisions reflected in the current implementatio
 - Implementation: adversarial-verification/SKILL.md
 
 ### Complexity Classification and Verification Policy
-- Resolution method: each skill performs the task-complexity-level-1/2/3 branching at its own entry gate. There is no central lookup table
+- Resolution method: Core task-router owns the shared complexity/focus/verification/boundary projection; domain owners retain criterion-specific verification and can reopen the affected projection
 - task-complexity-level-1/2/3 classification overview: defined in section 2.1 of this document
 - Per-domain verification intensity: decided by each skill's internal rules
 - Over-engineering prevention: enforced by section 2.3 of this document
@@ -251,18 +224,16 @@ This organizes where the current implementation components fit in the four-layer
 | component | location | note |
 |------|------|------|
 | task-router/SKILL.md | layer 1 runtime implementation | AGENTS.md rule 0 forces the call. Scans the skill descriptions in the system-reminder and matches production, verification, and lifecycle skills. Lifecycle includes necessity-gate |
-| session-intent-analyzer/SKILL.md | layer 1 intake and governance state | Records digest-only user-input observations and accumulates compressed session intent. It is the first user-input intake after pending-merge precheck and is consumed by jailbreak-detector, skill-evolution, and task-router |
-| jailbreak-detector/SKILL.md | governance gate before routing | Compares current intent against accumulated constraints and records `model_security_decision`. Only current-lineage block decisions are carried downstream |
-| downstream-gates.json | governance state between intake and tool use | Written only for current-lineage block decisions. Absence is silent allow. `tool-checkpoint` reads this state and does not inspect tool payload content |
+| session-intent-analyzer/SKILL.md | layer 1 intake and governance state | Records digest-only user-input observations and accumulates compressed session intent. It is the first user-input intake after pending-merge precheck and feeds task-router directly, with a separate report-only skill-evolution branch |
 | boundary-contract/SKILL.md | layer 1 / layer 2 boundary lock | Declares objective, non-goals, allowed surfaces, prohibited surfaces, acceptance criteria, and stop conditions before implementation or verification work |
-| tool-checkpoint | PreToolUse / BeforeTool governance checkpoint | Hook-enforced full-schema retry point. It is not user-input intake and is not a semantic safety classifier. Its decision depends only on the current-lineage downstream block gate |
-| verification-before-completion/SKILL.md | layer 3 completion evidence gate | Requires fresh verification evidence and claim-evidence mapping before completion, recommendation, choice, or success claims |
+| tool-checkpoint | PreToolUse / BeforeTool governance checkpoint | Hook-owned retry surface and input-lineage deduplication with strict audit. It is not user-input intake, an arbitrary payload classifier, or native tool permission policy |
+| verification-before-completion/SKILL.md | layer 3 completion evidence gate | Requires criterion/evidence mapping; reuse valid original proof and perform only decision-relevant affected verification before closure |
 | io-trace hook and prompt surface | governance transparency layer | PostToolUse audit log with an optional, decision-relevant `[io-trace]` summary. It records file/tool access metadata without storing raw prompts or secrets |
 | skill-evolution/SKILL.md | layer 4 report-only evolution input | Consumes session intent and io-trace patterns to produce Instinct candidate reports. It does not automatically modify skills |
 | compact-handoff/SKILL.md | governance continuity support | Preserves evidence, state, and next actions across context compaction without changing hook behavior |
 | agent-security-scan/SKILL.md | governance audit support | Performs report-only static scans of settings, hooks, skills, MCP config, credential surfaces, and exposure risks |
-| necessity-gate/SKILL.md | governance (layer 4), step 7 gate | Work-necessity verification. Fires on an initialization event. Blocks speculative, padding, and manufactured work. The step 7 implementation of the 8-step fallback-forwarding loop |
-| skill-catalog/skills.json | layer 1 input | Semantic calling candidate search index. The target of description embedding |
+| necessity-gate/SKILL.md | governance (layer 4), step 7 gate | Work-necessity verification. Fires on an initialization event. Blocks speculative, padding, and manufactured work. Preserves unfinished approved work while rejecting speculative additions |
+| skill-catalog/skills.json | layer 1 input | Semantic calling candidate search index. Semantic matching input; no embedding service is required |
 | skill-catalog/schema.json | layer 1 / layer 2 interface | The 6 calls-type enum values are fixed; see the Semantic Calling Graph Representation decision in section 4 |
 | frontmatter calls | layer 2 semantic calling graph | hard/soft/union/meta are static expressions. Used as a hint during dynamic synthesis |
 | scripts/build_catalog.py | governance (layer 4) | Index build |

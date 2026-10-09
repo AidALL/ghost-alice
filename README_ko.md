@@ -8,18 +8,37 @@ Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층�
 
 기존 에이전트 실행 환경 위에서 동작하며, 에이전트가 완료를 선언하기 전에 작업 과정과 근거를 검토할 수 있도록 돕습니다. 프롬프트 모음이나 챗봇 연결 도구, 독립 실행형 에이전트 런타임을 제공하는 저장소는 아닙니다.
 
-## 버전 0.4.1
+## 후보 버전 0.5.0
 
-[웹사이트](https://aidall.github.io/ghost-alice/) · [릴리즈 안내](./docs/ko/release/2026-10-01-release-notes.md) · [Core 릴리즈](https://github.com/AidALL/ghost-alice/releases/tag/v0.4.1) · [Autopilot 릴리즈](https://github.com/AidALL/ghost-alice-autopilot/releases/tag/v0.4.1)
+[웹사이트](https://aidall.github.io/ghost-alice/) · [아키텍처](./architecture.md) · [이전 릴리즈 안내](./docs/ko/release/2026-10-01-release-notes.md)
 
-Ghost-ALICE core 0.4.1과 공식 Autopilot 0.4.1 애드온을 함께 사용해 주세요. 애드온의 기술적 최소 core 버전은 0.4.0으로 유지됩니다. 두 프로젝트 모두 Apache-2.0 오픈소스로 제공됩니다.
+이 소스 후보는 Core 0.5.0과 Autopilot 0.5.0을 함께 사용하며, Autopilot의 최소 Core 버전은 0.5.0입니다. 현재 작업 선택과 완료 계약을 위한 버전이며, 태그·릴리즈·설치 적용·게시 완료를 의미하지 않습니다. 네이티브 검증과 게시에는 각각의 근거가 필요합니다. 두 프로젝트 모두 Apache-2.0으로 제공됩니다.
 
-- 상태 질문이나 교정 중에도 승인된 작업을 이어가며, 명시적인 중단과 현재 작업 범위를 존중합니다.
-- Codex의 자동 부트스트랩은 짧게 유지하고, 필요한 전체 거버넌스 계약과 프로젝트 지침을 보존합니다.
-- 완료를 보고하기 전에 항목별 실제 검증 범위를 구분하며, 한도 오류 반복 확인과 평가 도구의 불필요한 제품 반영을 줄입니다.
-- Autopilot은 현재 세션의 실행 상태를 선택하고, 다른 실행을 가져오지 않으면서 쓰기 불가능한 파생 경로를 처리합니다.
+## 승인된 작업의 진행과 복구
 
-선정한 독립 Codex 사례에서 유사한 실패 입력과 실제 범위 내 작업 수행을 확인했습니다. Claude 설치도 확인했으며, 이 결과가 새로운 Claude 모델 추론이나 모든 상황의 행동 신뢰성을 입증하는 것은 아닙니다. 지원 범위는 [Autopilot 호환성 표](https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json)에서 확인해 주세요.
+Ghost-ALICE는 승인된 목표를 유지하며 반대 근거가 나타난 작업을 수정합니다. micro 산출물, meso 매핑, macro 통합 결과, meta 추론 전제 사이에서 필요한 위치로 양방향 이동합니다. 철학은 품질의 하한선이며 모든 단계를 순회하는 절차가 아닙니다.
+
+```mermaid
+flowchart TB
+  I[Pending merge와 의도 intake] -->|call| R[Core router: 현재 요청과 계속 승인된 작업 조정]
+  I -.->|report-only terminal| E[Skill-evolution]
+  R -->|현재 실행 선택; 필요한 boundary| W[담당 생산과 검증]
+  R -->|선택된 실행 없는 한정된 논의| D[AP publication 없는 답변]
+  W -->|native permission 아래 call| N[Native 실행]
+  N -->|result| W
+  W -->|criterion evidence| C[Core 완료와 전달 정책]
+  C -->|AP enabled + 현재 qualified selection + prepare/publish| A[AP 기록과 진행]
+  A -->|기록 상태 return| C
+  C -->|근거 있는 완료 또는 정직한 부분 결과| O[답변]
+  W -->|해당 매핑·경로·추론 전제 reopen| R
+  C -->|해당 criterion만 repair| W
+```
+
+실제 작업을 수행한 읽기 전용 리뷰에도 담당 검증이 필요합니다. Core는 공통 라우팅과 기준별 완료·전달 결정을 소유하며, 도메인 담당자는 검증을 유지합니다. AP는 실행 상태의 존재나 누적 목록 대신 Core의 `publication_route: none | prepare | publish | blocked`를 사용합니다. 누락되거나 오래된 경로는 capture와 진행을 막지만, 기존 승인이나 네이티브 도구 권한을 취소하지 않습니다.
+
+새 입력은 요청을 다시 연결하며 유효하고 변하지 않은 증명의 원래 출처와 시간을 유지합니다. 기준·산출물·의존성이 변하면 해당 근거만 다시 검토합니다. 업무 결과, 기록 적용, 작업 단위 전체 완료, 전달 범위를 구분합니다. 기록만 실패하면 한정된 복구를 시도하고, 같은 실패가 변함없이 반복되면 관련 변경까지 해당 기록 경로를 보류합니다. 독립적으로 승인된 작업은 계속합니다.
+
+사용자 승인, 자격 증명, 네이티브 도구 권한은 각각의 담당자가 관리합니다. 엄격한 감사는 유지되며 화면 io-trace는 선택 사항입니다. 독립적인 입력별 분류기와 후속 gate는 대체 분류기 없이 폐기되었습니다. intake는 router로 직접 연결되며 evolution은 보고 전용입니다.
 
 ## Quick Start
 
@@ -56,7 +75,7 @@ Autopilot은 명시적으로 승인된 작업을 해당 세션의 범위와 예�
 
 - Ghost-ALICE OS는 에이전트 세션의 작업을 관리하는 운영 계층이며, 범용 운영체제는 아닙니다.
 - 사용자의 의도, 작업 범위, 검증 기준, 설치 상태를 핵심 관리 대상으로 다룹니다.
-- 세션 라우팅은 도구를 실행하기 전에 기록된 의도와 후속 검사 단계의 상태를 확인합니다.
+- Core 라우팅은 기록된 의도로 현재 작업을 선택하며, 담당 워크플로가 네이티브 권한 아래 실행합니다.
 - 실행, 수정, 검증이 끝났다고 선언하려면 현재 상태를 뒷받침하는 근거가 필요합니다.
 - 설치기는 자신이 관리하는 파일과 설정을 추적하며, 관리 대상임을 입증할 수 없으면 삭제 범위를 넓히지 않습니다.
 

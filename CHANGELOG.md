@@ -6,7 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## Unreleased
 
-Use this section for changes that have landed after the latest tagged public release.
+### Changed
+
+- Prepare the coordinated Core/Autopilot 0.5.0 source candidate with Core 0.5.0 as the addon minimum for current routing and completion APIs.
+- Align active instructions, paired documentation, Wiki candidates and homepage diagrams with direct intake, qualified current work selection, bidirectional same-work repair, original proof reuse, bounded recording recovery and visibility-aware delivery.
+- Keep legacy classifier records as history; preserve strict audit and human/native authority. Source checks do not establish native compatibility, installed adoption or publication.
 
 ## [0.4.1] - 2026-10-01
 

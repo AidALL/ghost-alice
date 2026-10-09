@@ -113,13 +113,16 @@ Use this flow for each user turn that touches coding, development, repository ma
 User message received
   -> pending-merge precheck
   -> session-intent-analyzer intake
-Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
   -> task-router
   -> using-coding-convention
   -> applicable process skill
   -> implementation, review, or verification work
   -> verification-before-completion before final claims
 ```
+
+Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
+
+The owner may reopen artifacts, mapping, composition, route or inferred premises in the same authorized work; focus moves bidirectionally with uncertainty. Preserve explicit authority and domain verification. Only an unresolved human-owned decision requires a question.
 
 When entering plan mode or creating a non-trivial plan, check whether `brainstorming` or `writing-plans` applies before drafting the plan.
 

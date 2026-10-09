@@ -25,8 +25,8 @@ Load this reference when: creating or editing skills, before deployment, to veri
 - [When Skill is Bulletproof](#when-skill-is-bulletproof)
 - [Example: TDD Skill Bulletproofing](#example-tdd-skill-bulletproofing)
   - [Initial Test (Failed)](#initial-test-failed)
-  - [Iteration 1 - Add Counter](#iteration-1-add-counter)
-  - [Iteration 2 - Add Foundational Principle](#iteration-2-add-foundational-principle)
+  - [Iteration 1 - Add Counter](#iteration-1---add-counter)
+  - [Iteration 2 - Add Foundational Principle](#iteration-2---add-foundational-principle)
 - [Testing Checklist (TDD for Skills)](#testing-checklist-tdd-for-skills)
 - [Common Mistakes (Same as TDD)](#common-mistakes-same-as-tdd)
 - [Quick Reference (TDD Cycle)](#quick-reference-tdd-cycle)
@@ -53,8 +53,7 @@ Test skills that:
 - Could be rationalized away ("just this once")
 - Contradict immediate goals (speed over quality)
 
-Don't test:
-- Pure reference skills (API docs, syntax guides)
+Do not use discipline-pressure tests for pure reference skills (API docs, syntax guides); use the applicable search and application checks described by writing-skills.
 - Skills without rules to violate
 - Skills agents have no incentive to bypass
 

@@ -75,13 +75,13 @@ When every task is completed and verified:
 
 ## When to stop and ask for help
 
-Stop execution immediately in the following situations:
+Stop the dependent work in the following situations:
 - A blocking situation occurs (a missing dependency, a test failure, an unclear instruction).
 - The plan has a critical gap that prevents starting.
 - You do not understand an instruction.
 - Verification fails repeatedly.
 
-Asking clearly is better than guessing.
+Route a mismatch to its owner and repair it within existing authority. Ask only for the exact unresolved human-owned decision. Continue independent authorized work and retain unchanged valid proof; a branch-local failure does not stop the whole objective.
 
 ## When revisiting an earlier step
 
@@ -89,7 +89,7 @@ When returning to review (Step 1):
 - The partner updates the plan based on feedback.
 - The base approach needs to be reconsidered.
 
-Do not force your way through a blocking situation. Stop and ask.
+Do not guess through a blocker. Reopen the affected artifact, mapping, composition, route or inferred premise; return to execution after repair. Ask when the needed decision belongs to the human.
 
 ## Things to remember
 
@@ -97,7 +97,7 @@ Do not force your way through a blocking situation. Stop and ask.
 - Follow the plan steps exactly.
 - Do not skip verification.
 - Use a skill when the plan references it.
-- When blocked, stop and do not guess.
+- When blocked, stop dependent work and do not guess; continue independent authorized work.
 - Do not start implementation on the main/master branch without explicit user consent.
 
 ## Integration

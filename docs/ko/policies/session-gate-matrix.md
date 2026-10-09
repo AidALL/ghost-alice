@@ -23,7 +23,7 @@ session gate SSOT는 `skill-catalog/session-gates.json`입니다. 이 문서는 
 | Situation | Required entrypoint |
 | --- | --- |
 | 모든 user input의 first intake | `session-intent-analyzer` |
-| session-intent intake와 jailbreak-detector downstream gate 이후, downstream work/tool calls 전 첫 agent routing step | `task-router` |
+| 정확한 session-intent intake 이후, downstream work/tool calls 전 첫 agent routing step | `task-router` |
 | development/coding request | `coding-convention/using-coding-convention` |
 | bug fix | `coding-convention/systematic-debugging` |
 | production code change | `coding-convention/test-driven-development` |
@@ -34,60 +34,35 @@ session gate SSOT는 `skill-catalog/session-gates.json`입니다. 이 문서는 
 
 ## Turn Routing Contract
 
-session-intent-analyzer intake가 user-input governance graph 안에서 first입니다. hook pending-merge result는 그 전에 consume합니다. hook evidence가 없으면 manual fallback은 actionable work 전에 끝나며 `clarification-only` 또는 `direct-response`에서만 defer할 수 있습니다. session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out합니다. current-lineage block gate가 없으면 session-intent preflight 뒤 task-router가 release됩니다. allow turn에서는 `downstream-gates.json`이 없을 수 있으며, current-lineage model block이 기록되지 않았다면 그 absence는 silent allow입니다. flow를 `task-router → session-intent-analyzer`, linear `session-intent-analyzer → skill-evolution → jailbreak-detector → task-router` chain, 또는 jailbreak-detector downstream gate를 bypass하는 task-router로 설명하면 contract violation입니다.
+정상 경로는 `pending-merge precheck → session-intent-analyzer → task-router → downstream/tool-checkpoint`입니다. hook의 현재 pending-merge 결과를 먼저 사용하며, 결과가 없으면 실제 작업 전에 수동 확인을 마칩니다. bounded no-work terminal route만 이를 다음 실제 작업까지 미룰 수 있습니다.
 
-`task-router`는 일이 커 보일 때만 쓰는 classifier가 아닙니다. user input이 감지된 모든 turn에서 session-intent-analyzer intake와 jailbreak-detector downstream gate 이후, downstream work 또는 tool call 전에 적용합니다.
+session-intent intake는 task-router에 직접 전달됩니다. 같은 정확한 세션의 skill-evolution은 report-only terminal branch이며 task-router나 자동 생산 작업으로 연결되지 않습니다. 독립적인 입력별 classifier와 downstream permission gate는 현재 경로에서 제거되었습니다. legacy 판단과 감사는 읽을 수 있는 이력이며 현재 실행 권한이 아닙니다.
 
-`task-router`는 `session-intent-analyzer`와 `jailbreak-detector/downstream-gates.json` context의 consumer이며 agent-side request decomposition step입니다. user-input intake, raw intent inference, ledger updates, jailbreak decisions, downstream gate state, tool permission을 소유하지 않습니다.
+task-router는 매 입력마다 현재 요청과 계속 승인된 작업을 대조하고 의미 분해, focus, skill assignment 및 현재 작업 선택을 소유합니다. intake, 원시 의도 추론, ledger update, credentials 또는 native permission은 소유하지 않습니다. 단순 질문이나 상태 질문도 routing 대상이지만 미완료 승인 작업을 자동으로 중단시키지 않습니다.
 
-task-router reminder hook은 session-intent preflight가 존재하고 current-lineage block check가 run될 수 있을 때까지 task-router를 withhold해야 합니다. current-lineage block gate가 없으면 absent `downstream-gates.json`은 silent allow입니다. release 이후 task-router는 session intent ledger를 읽고 atomic meaning decomposition을 수행한 뒤 output, verification, lifecycle, boundary skills를 assign합니다.
-
-다음은 모두 fresh routing targets입니다.
-
-- simple questions
-- opinions
-- status comments
-- previous work의 follow-up questions
-- "is this right?" 같은 judgment requests
-- quick checks or smoke tests
-
-previous turn이 routed 됐다는 사실은 next turn의 evidence가 아닙니다. hook payload가 current platform pending-merge precheck가 run됐고 pending warning이 없다는 contract를 제공하면 `merge-companion-precheck: clean (hook-verified)`를 기록하고 shell manifest check를 반복하지 않습니다. hook evidence가 없거나 hookless/manual environment일 때만 current platform manifest를 직접 읽습니다.
-
-runtime smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니다. 이 procedure는 동일한 README first 10 lines input을 Claude Code, Codex, Antigravity로 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission signal을 관찰합니다.
+정확한 intake가 부족하면 해당 기록의 복구를 진행합니다. 다른 root, session, receipt 또는 과거 판단으로 대체하지 않습니다. 설치 소스와 hook 설정만으로 native firing을 입증하지 않으며 실제 smoke 절차는 [live-smoke-regression](live-smoke-regression.md)을 따릅니다.
 
 ## Session Intent Ledger Contract
 
-`session-intent-analyzer`는 모든 user input마다 session intent ledger를 update합니다. Hooks는 input digest와 event metadata만 저장하며 raw prompts는 절대 저장하지 않습니다. user goal, constraints, decisions, non-goals가 바뀌면 agent는 compressed delta를 `intent-state.json`에 기록합니다.
+hook은 raw prompt 대신 digest, 길이, 정확한 입력 식별자와 순서가 있는 audit event를 기록합니다. 의도, 제약, 결정 또는 완료 기준이 바뀔 때만 agent가 압축 semantic delta를 같은 receipt의 root/platform/session/input에 대해 공개 ledger API로 추가합니다.
 
-`intent-state.json`은 update-plus-accumulate state입니다. `current_goal`, `user_intent_summary` 같은 latest scalar intent fields는 newer semantic deltas로 replace되고, constraints, non-goals, open questions, acceptance criteria, consumer hints, active decisions 같은 list-like fields는 stable identity 또는 deduped value로 merge됩니다. `intent-events.jsonl`은 append-only audit metadata이며 raw prompt transcript가 아닙니다.
+현재 runtime authority는 receipt-bound ledger root의 `ghost-state.sqlite3`와 공개 SQLite ledger API입니다. `intent-state.json`, `intent-events.jsonl`, `current-session.json`은 호환성 import/export 또는 discovery 자료이며 현재 write identity나 runtime authority가 아닙니다. scalar는 최신 의미로 교정하고 목록은 stable identity로 병합합니다.
 
-- Storage location: Ghost-ALICE repo root 아래 `.tmp/session-intent/<platform>/<session-id>/`
-- Consumers: `skill-evolution`, `jailbreak-detector`
-- Forbidden: raw prompt, full conversation, tool output, system/developer instruction text, secret values
-- Hookless/manual environment: first response 전에 session-intent-analyzer storage contract를 manual로 적용합니다.
-
-First-entry intake invariant:
-
-- every user input은 먼저 session-intent intake path에 연결됩니다.
-- hook pending-merge result 이후 session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out합니다. task-router는 session-intent preflight와 current-lineage block gate absence 이후에만 따릅니다. missing manual result는 work 전에 resolve하며 `clarification-only` 또는 `direct-response`에서만 defer합니다.
-- `skill-evolution`은 session-intent-analyzer의 report-only terminal branch이며 task-router로 feed하지 않습니다.
-- missing `current-session.json`, `intent-state.json`, hook payload, preflight evidence, semantic delta evidence는 first entry deny reason이 아닙니다.
-- missing session-intent evidence는 intake/bootstrap이 run 또는 continue되어야 한다는 뜻이지 tool-checkpoint가 absence에서 risk를 infer할 수 있다는 뜻이 아닙니다.
-- tool-checkpoint는 intake 전에 user's next input을 predict하거나 unknown intent를 block condition으로 취급하면 안 됩니다.
+- Consumers: 정확한 session context를 소비하는 task-router와 report-only skill-evolution입니다.
+- Forbidden: raw prompt, 전체 대화, tool output, system/developer instruction text, secret values입니다.
+- digest-only observation은 intake 증거입니다. 의미 변화가 없으면 semantic delta를 만들지 않습니다.
+- missing/degraded intake는 복구가 필요하다는 뜻이며 기존 human/native permission을 취소하지 않습니다.
+- hookless 환경에서도 같은 identity/storage 계약을 지킵니다. 식별자를 추측하거나 대체 원장을 만들지 않습니다.
 
 ## Runtime Hook Graph Contract
 
-Hook pending-merge precheck is a pre-routing/session-start layer. hook evidence가 없으면 manual fallback은 actionable downstream work 전에 끝나며 no-work terminal route (`clarification-only` 또는 `direct-response`)만 이를 defer할 수 있습니다. known undecided entry가 있으면 runtime은 `merge-companion`을 먼저 surface해야 하지만 user-explicit defer/skip은 해당 entry를 undecided로 남긴 채 계속 진행할 수 있습니다.
+1. hook pending-merge 결과를 먼저 처리합니다. known undecided entry는 merge-companion에 연결하며 사용자 명시적 defer/skip은 유효합니다.
+2. session-intent hook은 digest-only intake와 audit를 원자적으로 기록합니다. 필요한 semantic delta는 같은 정확한 입력에만 연결합니다.
+3. task-router는 exact intake를 소비해 현재 요청과 미완료 승인 작업을 대조한 뒤 현재 qualified execution 또는 nonexecution을 선택합니다. skill-evolution은 별도 report-only 종점입니다.
+4. conditional boundary 이후 domain owner가 생산과 검증을 수행합니다. Core가 criterion evidence, completion/publication route와 실제 host delivery를 구분하고 AP는 현재 선택된 단위의 결과만 기록합니다.
+5. `tool-checkpoint`는 `PreToolUse`/`BeforeTool` retry checkpoint입니다. 매 tool call의 strict audit를 유지하고 exact input lineage의 반복 surface만 줄입니다. legacy model judgment, tool-call identity, arbitrary payload 또는 audit metadata에서 native permission을 만들지 않습니다.
 
-user-input governance graph는 user intent first, downstream gate state second, tool-stage tool-checkpoint third 순서로 정렬됩니다. known pending result는 graph 밖에서 먼저 처리하고 missing manual result는 pre-work requirement로 유지합니다.
-
-`tool-checkpoint`는 PreToolUse/BeforeTool checkpoint이며 user-input intake order의 일부가 아닙니다. surfaced될 때 visible control schema에는 `hook-stage: PreToolUse`와 `meaning: tool-call retry checkpoint, not user-input intake`가 함께 있어야 합니다.
-
-1. user input은 every turn에서 `session-intent-analyzer`를 trigger합니다. hook은 input digest, session ledger, `current-session.json` pointer를 쓰고 agent turn을 allow합니다.
-2. `skill-evolution`과 `jailbreak-detector`는 platform과 session id로 keyed된 같은 session temp files를 consume합니다. skill-evolution은 report-only and self-terminating이며 downstream gates를 open/close하지 않고 task-router로 feed하지 않습니다.
-3. jailbreak-detector는 ledger에 `model_security_decision`을 기록하고 current-lineage block decisions만 downstream gateway인 `downstream-gates.json`으로 carry합니다. deterministic hard-block rules는 explicit high-confidence attack signals에 대한 narrow regression guards이며 모든 jailbreak attempts를 block한다는 proof가 아닙니다. gate block은 deterministic text matching이 아니라 model-recorded judgment (`model_security_decision`)에서만 derive됩니다. gradual multi-turn jailbreak resistance는 session-intent summary quality와 cumulative constraint comparison에 달려 있습니다. current-lineage block gate가 있으면 tool execution은 tool-shape review 전에 deny됩니다. current block gate가 없으면 absent `downstream-gates.json`은 silent allow입니다.
-4. task-router reminder hook은 session-intent preflight가 존재하고 current-lineage block check가 first chance를 가질 때까지 기다립니다. `opened=false` 또는 `decision=block`인 current-lineage block gate가 있으면 task-router를 withhold하고, absent `downstream-gates.json`은 silent allow입니다. release 이후 `task-router`가 current-session pointer와 session intent ledger를 읽고 accepted intent를 atomic meaning units로 decompose한 뒤 output, verification, lifecycle, boundary skills를 assign합니다. raw user intent를 infer하거나 tool permission을 decide하지 않습니다.
-5. `tool-checkpoint`는 session-intent-analyzer intake와 jailbreak-detector downstream gate가 first chance를 가진 뒤 tool stage에서 run합니다. missing intake evidence는 bootstrap/recovery를 시작할 이유이지 `task-router`를 `session-intent-analyzer`나 `jailbreak-detector`보다 앞세울 이유가 아닙니다. runtime decision은 current-lineage block gate만 읽습니다. `opened=false` 또는 `decision=block`이면 deny하고, absent gate 또는 다른 state는 silently allow합니다. tool-call identity, payload content, audit/log/correlation metadata는 decision inputs가 아닙니다. audit/log/correlation metadata는 decision path 밖에 둡니다.
+surface에는 `hook-stage: PreToolUse`와 `meaning: tool-call retry checkpoint, not user-input intake`를 함께 둡니다. native tool permission은 host에 남으며 human authority, credentials, source/owner/lineage 검증도 유지합니다.
 
 ## Dynamic Focus Contract
 
@@ -175,7 +150,7 @@ Hard sequence for a new current-turn closure claim: skill load/call -> decision-
 
 `verification-before-completion`은 executed-work closure claim 전 lifecycle gate입니다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않습니다. Claude Code에서는 `[completion-check]`에 `skill-call: verification-before-completion (this turn)` 줄이 없습니다. Stop hook이 visible Skill call을 transcript에서 확인합니다. Codex에서는 새로 읽거나 유효하게 보존된 instruction body로 해당 workflow를 따른 경우에만 그 줄을 씁니다.
 
-화면의 `[io-trace]`는 선택 사항이며, 유무·순서·스킬 목록 표기로 완료를 차단하지 않습니다. 엄격한 내부 감사와 실제 검증은 유지합니다. Claude는 현재 턴의 실제 Skill 호출을 검사하고, Codex는 워크플로 실행 후 정확한 검증 스킬 선언을 요구합니다. 복구는 누락되거나 잘못된 완료 필드만 요청하며, 근거가 없으면 짧고 정직하게 완료 주장을 철회합니다. 업무 본문 반복이나 변경 없는 근거의 재검증은 요구하지 않습니다. Claude의 한 번 재시도와 미해결 결함 알림, Codex의 실제 완료 근거 결함 차단은 유지합니다. 마지막 응답만 반환하는 호출자는 원래 업무 결과와 정정 기록을 별도로 보존해야 합니다. 이 훅은 복구 상태를 반환하며 업무 본문을 재구성하지 않습니다.
+화면의 `[io-trace]`는 선택 사항이며 strict audit과 실제 현재 턴 검증은 유지합니다. Claude의 실제 Skill 호출과 Codex의 실제 body 사용 및 workflow 근거를 정직하게 기록합니다. Core는 사용 가능한 이전 업무 본문이 실제로 보이고 claims가 같을 때만 metadata-only repair를 선택합니다. final-only, unknown 또는 usable prior payload가 없으면 하나의 완전한 답변을 조립하고, claims가 바뀌면 교정된 완전한 답변을 제공합니다. 근거가 없는 주장은 철회하거나 partial로 보고합니다. 기록이나 형식을 고치기 위해 변경 없는 업무와 검증을 반복하지 않습니다. host는 업무 본문을 ledger 밖에 보존합니다.
 
 Codex environments without a visible Skill surface:
 
@@ -186,9 +161,9 @@ Codex environments without a visible Skill surface:
 
 ## tool-checkpoint Visible Surface
 
-`tool-checkpoint`는 PreToolUse/BeforeTool checkpoint입니다. user-input intake order의 일부가 아니며 `session-intent-analyzer`, `jailbreak-detector`, `task-router`보다 먼저 run한다고 설명하면 안 됩니다.
+`tool-checkpoint`는 PreToolUse/BeforeTool checkpoint입니다. user-input intake order의 일부가 아니며 `session-intent-analyzer`, `task-router`보다 먼저 run한다고 설명하면 안 됩니다.
 
-default `[tool-checkpoint]` block은 `intent`와 `why`를 carries합니다. `procedure`는 next work decision을 바꾸거나 non-routine step을 명확히 할 때 추가합니다. `contract-ref`와 `contract-check`는 boundary-contract가 active일 때 추가합니다. `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`은 side effect, forced signal, mismatch, meaningful user decision point 때문에 field가 useful할 때만 추가합니다. 이렇게 checkpoint procedure는 유지하되 work boundary, focus layer, verification burden, recovery를 바꾸지 않는 low-impact tool call에 무의미한 값을 반복하지 않습니다. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger. 이 field는 model-side reasoning이며 hook decision은 여전히 current-lineage block gate만 읽습니다.
+default `[tool-checkpoint]` block은 `intent`와 `why`를 carries합니다. `procedure`는 next work decision을 바꾸거나 non-routine step을 명확히 할 때 추가합니다. `contract-ref`와 `contract-check`는 boundary-contract가 active일 때 추가합니다. `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`은 side effect, forced signal, mismatch, meaningful user decision point 때문에 field가 useful할 때만 추가합니다. 이렇게 checkpoint procedure는 유지하되 work boundary, focus layer, verification burden, recovery를 바꾸지 않는 low-impact tool call에 무의미한 값을 반복하지 않습니다. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger. 이 field는 model-side reasoning입니다. hook은 retry와 strict audit를 소유하며 native permission을 대신하지 않습니다.
 
 `recovery-action`은 conditional입니다. failure mode가 concrete recovery step, scope reopen, external side effect handling, 또는 hard-to-recover action을 요구할 때만 추가합니다. stable English action phrase 또는 slug로 유지합니다. mismatch가 scope를 바꾸면 `procedure` 또는 `recovery-action`에 `focus-layer`와 `scope-reopen` target을 적습니다.
 
@@ -200,7 +175,7 @@ Runtime hook은 session input lineage마다 full `[tool-checkpoint]`를 한 번 
 
 `[tool-checkpoint:batch]`와 `[tool-checkpoint:continuation]`은 repeated full-gate cost를 줄이는 compact forms입니다. new permission을 만들지 않고 new tool action이 safe하다고 infer하지 않습니다.
 
-`[tool-checkpoint:continuation]`은 same process/session/tool-call id의 output polling만 가리킵니다. new user input, current-lineage block/deny, mismatch, other state change는 surfaced `[tool-checkpoint]`로 돌아갑니다.
+`[tool-checkpoint:continuation]`은 same process/session/tool-call id의 output polling만 가리킵니다. new user input, 현재 상태의 실패 또는 authority 변화, mismatch, other state change는 surfaced `[tool-checkpoint]`로 돌아갑니다.
 
 same ref의 simple polling은 output을 영원히 반복하라는 의무가 아닙니다. compact form은 full gate 반복을 피합니다. input lineage의 first poll 또는 state change 때 expose합니다.
 
@@ -221,3 +196,13 @@ Instruction body 재사용은 canonical `coding-convention/verification-before-c
 Core는 accepted response route와 owner, work-unit ID 및 contract revision을 기준으로 current-ready-owned 실행 단위만 선택합니다. AP v2는 해당 단위의 admitted 기준을 기록하며 누적 이력과 unadmitted 보호 조건을 실행 의무로 바꾸지 않습니다. 관리되는 no-argument 훅 경로는 `autopilot-completion-receipt.v2`를 선택하고 기존 공개 legacy API는 v1 기본값을 유지합니다. 위치와 protocol 전달은 session, origin, native trust, admission 또는 approval을 부여하지 않습니다.
 
 새 publication request는 호환되는 기존 근거의 원본 source와 검증 시간을 유지한 채 현재 입력에 연결할 수 있습니다. 새 입력 자체는 변경되지 않은 업무 검증을 다시 열지 않습니다. 적용 여부는 Core, 기록 가능 여부는 AP가 소유합니다. recording-only 실패 시 intake와 binding 복구 도구는 계속 사용할 수 있으며 기록을 복구할 때까지 publication과 application을 차단합니다. 독립적으로 승인된 업무는 계속 진행하고 실제 기준, 관련 산출물 또는 owner/target이 바뀐 검증만 다시 수행합니다. 메타데이터만 고치는 응답은 사용 가능한 이전 답변이 실제로 보이고 claims가 같을 때만 허용됩니다. 그 외에는 완전한 답변을 조립하고 근거가 없으면 지원되지 않는 완료 주장을 정직하게 수정합니다. 출력 io-trace는 선택이며 strict audit은 유지합니다.
+
+## Current Selection and Bounded Recovery
+
+Core는 현재 요청과 계속 승인된 작업을 대조한 뒤 execution/nonexecution을 선택합니다. 현재 선택된 실행이 없는 bounded discussion은 AP publication을 하지 않습니다. 실제 실행한 read-only review/report나 positive closure는 owning verification을 따릅니다. Core가 routing projection과 `response-route.v1`을 소유하며 selector는 domain owner의 criterion check를 면제하지 못합니다.
+
+AP가 enabled이면 실제 current-ready qualified selected execution과 Core `publication_route: none | prepare | publish | blocked`를 소비합니다. run 존재나 누적 backlog만으로 publication을 시작하지 않습니다. missing/stale route는 종속 capture/advancement만 막고 기존 human/native permission을 바꾸지 않습니다. 새 입력은 request identity를 다시 연결하며 변경 없는 valid proof의 원본 source/time은 유지합니다. criterion, artifact 또는 dependency의 실제 변화가 있을 때 영향받은 proof만 다시 엽니다. criterion별 evidence 결정, aggregate publication, host delivery는 별개입니다.
+
+첫 recording-only failure는 bounded repair를 허용합니다. 동일한 실패가 변경 없이 반복되면 decision-relevant recording/dependency 변화까지 기록을 보류합니다. 독립적으로 승인된 작업은 계속하며 root, source, receipt, approval 또는 target을 추측하지 않습니다. supported business outcome, recording/application, whole-unit completion, delivery scope는 구별합니다.
+
+owner는 같은 승인 작업 안에서 artifact, mapping, composition, route 또는 inferred premise를 다시 열고 생산 작업으로 돌아갈 수 있습니다. micro/meso/macro/meta는 양방향 focus이며 순서대로 모두 올라가는 의식이 아닙니다. 정확한 human-owned decision이나 새로운 explicit authority가 필요할 때만 사용자에게 묻습니다. evolution은 report-only 종점입니다.
