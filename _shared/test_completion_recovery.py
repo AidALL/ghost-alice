@@ -152,6 +152,30 @@ class CompletionRecoveryTests(unittest.TestCase):
                     with self.subTest(text=text, platform=platform, retry=retry):
                         self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
 
+    def test_perfect_subject_contractions_require_proof_in_actual_stop(self):
+        for text in (
+            "I've completed the review.",
+            "We've finished the report.",
+            "They've read the source and completed the review.",
+            "I checked whether I've read the source and we've completed the review.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry).get("decision"), "block")
+
+    def test_perfect_subject_nonassertions_allow_actual_stop(self):
+        for text in (
+            "I've not read the source and completed the review.",
+            "I wonder whether I've read the source and completed the review.",
+            "I'll have completed the review tomorrow.",
+            "The team's completed review is an example.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
+
     def test_coordinated_actions_with_varied_heads_require_proof_in_actual_stop(self):
         for text in (
             "I read the source and completed the review.",

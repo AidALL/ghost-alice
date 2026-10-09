@@ -266,6 +266,37 @@ class TestReadOnlyWorkClosure(unittest.TestCase):
         self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
 
 
+class TestReadOnlyPerfectContractions(unittest.TestCase):
+    def test_perfect_subject_contractions_establish_executed_action_context(self):
+        for text in (
+            "I've completed the review.",
+            "We've finished the report.",
+            "I’ve already completed the review.",
+            "She's finished the report.",
+            "They've read the source and completed the review.",
+            "I checked whether I've read the source and we've completed the review.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_perfect_subject_context_keeps_nonasserted_and_attributive_forms_exempt(self):
+        for text in (
+            "I've not completed the review.",
+            "We've never finished the report.",
+            "I've not read the source and completed the review.",
+            "I wonder whether I've read the source and completed the review.",
+            "I wonder if she's read the source and finished the report.",
+            "I'll have completed the review tomorrow.",
+            "I've saved the completed review.",
+            "We've examined completed reviews and finished reports.",
+            "The team's completed review is an example.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+
 class TestReadOnlyActionVersusAttributive(unittest.TestCase):
     def test_coordinated_actions_do_not_depend_on_head_verb_inflection(self):
         for text in (

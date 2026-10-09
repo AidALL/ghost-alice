@@ -164,8 +164,10 @@ _COORDINATED_ASSERTION_PREDICATE_RE = re.compile(
     r"concluded|reported|stated|asserted|observed|proved|found|showed)\b",
     re.I,
 )
+# Pronoun subjects may carry contracted have/has. Noun-phrase possessives
+# remain distinct from those perfect auxiliaries.
 _ACTION_ACTOR = (
-    r"(?:i|we|you|he|she|it|they|"
+    r"(?:(?:i|we|you|they)(?:['’]ve)?|(?:he|she|it)(?:['’]s)?|"
     r"(?:the|our|my)\s+(?:team|agent|assistant|reviewer))"
 )
 _INQUIRY_ACTION_SUBJECT_RE = re.compile(
