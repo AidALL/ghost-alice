@@ -105,21 +105,6 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             self.assertEqual(row["platform"], "codex")
             self.assertFalse(_strict_log_path(temporary, "codex", "generic").exists())
 
-    def test_native_codex_block_is_visible_without_payload_session(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            for platform in ("codex", "claude"):
-                session = root / platform / "native"
-                session.mkdir(parents=True)
-                (root / platform / "current-session.json").write_text(json.dumps({"schema_version": "session-intent-current.v1", "session_id": "foreign"}))
-                (session / "intent-state.json").write_text(json.dumps({"schema_version": "session-intent-ledger.v1", "platform": platform, "session_id": "native"}))
-                (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "platform": platform, "session_id": "native", "event_id": "e-native", "input_digest": "sha256:native"}) + "\n")
-                (session / "downstream-gates.json").write_text(json.dumps({"schema_version": "downstream-gates.v1", "platform": platform, "session_id": "native", "gate": "jailbreak-detector", "decision": "block", "input_event_id": "e-native"}))
-            env = {"GHOST_ALICE_SESSION_INTENT_ROOT": str(root), "CODEX_THREAD_ID": "native", "GHOST_ALICE_SESSION_ID": "foreign"}
-            self.assertEqual(hook_profile_gate.session_material(root, "codex", "native")["latest_input"]["event_id"], "e-native")
-            self.assertFalse(hook_profile_gate.session_material(root, "codex", "foreign")["latest_input"])
-            self.assertNotIn("security_boundary", hook_profile_gate._visibility_context("prompt", "routine clean pass", "", 0, env=env, hook_payload={}))
-
     def test_runner_normalizes_child_stdio_to_utf8(self):
         code = (
             "import hashlib, json, sys; "
@@ -252,33 +237,17 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
         self.assertNotIn("LONG WORKFLOW INSTRUCTION", payload["systemMessage"])
         self.assertEqual(payload["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
 
-    def test_visibility_context_reads_current_downstream_block_gate(self):
+    def test_visibility_context_ignores_current_downstream_block_gate(self):
         with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as temp_root:
             root = Path(temp_root)
             session_dir = root / "codex" / "s-block"
             session_dir.mkdir(parents=True)
             (session_dir / "intent-state.json").write_text(json.dumps({
-                "schema_version": "session-intent-ledger.v1", "platform": "codex", "session_id": "s-block"}))
-            (root / "codex" / "current-session.json").write_text(
-                json.dumps({
-                    "schema_version": "session-intent-current.v1",
-                    "platform": "codex",
-                    "session_id": "s-block",
-                    "state_path": str(session_dir / "intent-state.json"),
-                })
-                + "\n",
-                encoding="utf-8",
-            )
-            (session_dir / "intent-events.jsonl").write_text(
-                json.dumps({
-                    "event": "user-input-observed",
-                    "platform": "codex", "session_id": "s-block",
-                    "event_id": "evt-current",
-                    "input_digest": "sha256:current",
-                })
-                + "\n",
-                encoding="utf-8",
-            )
+                "schema_version": "session-intent-ledger.v1",
+                "platform": "codex", "session_id": "s-block", "ledger_revision": 1,
+                "latest_input_event_id": "evt-current", "latest_input_digest": "sha256:current",
+                "latest_input_char_count": 1,
+            }))
             (session_dir / "downstream-gates.json").write_text(
                 json.dumps({
                     "schema_version": "downstream-gates.v1",
@@ -315,27 +284,11 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             session_dir = root / "codex" / "s-stale"
             session_dir.mkdir(parents=True)
             (session_dir / "intent-state.json").write_text(json.dumps({
-                "schema_version": "session-intent-ledger.v1", "platform": "codex", "session_id": "s-stale"}))
-            (root / "codex" / "current-session.json").write_text(
-                json.dumps({
-                    "schema_version": "session-intent-current.v1",
-                    "platform": "codex",
-                    "session_id": "s-stale",
-                    "state_path": str(session_dir / "intent-state.json"),
-                })
-                + "\n",
-                encoding="utf-8",
-            )
-            (session_dir / "intent-events.jsonl").write_text(
-                json.dumps({
-                    "event": "user-input-observed",
-                    "platform": "codex", "session_id": "s-stale",
-                    "event_id": "evt-new",
-                    "input_digest": "sha256:new",
-                })
-                + "\n",
-                encoding="utf-8",
-            )
+                "schema_version": "session-intent-ledger.v1",
+                "platform": "codex", "session_id": "s-stale", "ledger_revision": 1,
+                "latest_input_event_id": "evt-new", "latest_input_digest": "sha256:new",
+                "latest_input_char_count": 1,
+            }))
             (session_dir / "downstream-gates.json").write_text(
                 json.dumps({
                     "schema_version": "downstream-gates.v1",

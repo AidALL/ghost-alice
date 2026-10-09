@@ -546,26 +546,6 @@ def _has_pending_merge_undecided(env: dict[str, str], platform: str) -> bool:
     return any(isinstance(entry, dict) and entry.get("decided") is False for entry in entries)
 
 
-def _session_intent_root_candidates(env: dict[str, str]) -> list[Path]:
-    candidates: list[Path] = []
-    configured = str(env.get("GHOST_ALICE_SESSION_INTENT_ROOT") or "").strip()
-    if configured:
-        return [Path(configured).expanduser()]
-    candidates.append(Path(__file__).resolve().parents[1] / ".tmp" / "session-intent")
-    home = _home_from_env(env)
-    if home is not None:
-        candidates.append(home / ".ghost-alice" / "session-intent")
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = str(candidate)
-        if key not in seen:
-            seen.add(key)
-            unique.append(candidate)
-    return unique
-
-
-
 # A hook marks its own routine state with this private key; the runner strips it before the host sees the output.
 SURFACE_DECLARATION_KEY = "ghostAliceSurface"
 
