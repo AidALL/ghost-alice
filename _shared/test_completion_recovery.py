@@ -138,6 +138,31 @@ class CompletionRecoveryTests(unittest.TestCase):
                     with self.subTest(text=text, platform=platform, retry=retry):
                         self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
 
+    def test_dependent_status_nonclosures_allow_actual_stop(self):
+        for text in (
+            "I will check whether the read-only review is complete.",
+            "I will tell you when the report is complete.",
+            "I will check whether the review has been completed.",
+            "I will check if all reviews are complete.",
+            "I would notify you once the analysis is complete.",
+            "I'll tell you as soon as the report has been completed.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
+
+    def test_independent_assertions_after_dependent_status_still_block_actual_stop(self):
+        for text in (
+            "I will check whether the review is complete; the report is complete.",
+            "I will tell you when the report is complete, but the review is now complete.",
+            "I will check if the report is complete and I completed a read-only review.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry).get("decision"), "block")
+
     def test_predicate_scope_actual_assertions_still_block_in_stop(self):
         for text in (
             "The read-only report has been completed.", "I completed a read-only review.",

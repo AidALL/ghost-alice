@@ -267,6 +267,45 @@ class TestReadOnlyWorkClosure(unittest.TestCase):
 
 
 class TestReadOnlyClosurePredicateScope(unittest.TestCase):
+    def test_embedded_inquiry_status_is_not_an_asserted_outcome(self):
+        for text in (
+            "I will check whether the read-only review is complete.",
+            "I will check whether the review has been completed.",
+            "I will check if all reviews are complete.",
+            "The question is whether the report is complete.",
+            "I do not know whether the analysis is complete.",
+            "I will check whether the review is complete and the report has been completed.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_future_temporal_and_condition_status_is_not_an_asserted_outcome(self):
+        for text in (
+            "I will tell you when the report is complete.",
+            "I would notify you once the analysis is complete.",
+            "I will wait until the audits are finished.",
+            "I will publish after the analysis is complete.",
+            "I will continue only if the review is complete.",
+            "I'll tell you as soon as the report has been completed.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_dependent_status_does_not_hide_an_independent_asserted_status(self):
+        for text in (
+            "I will check whether the review is complete; the report is complete.",
+            "I will tell you when the report is complete, but the review is now complete.",
+            "I will check if the report is complete and I completed a read-only review.",
+            "I will write the report and the review is complete.",
+            "After much discussion, the report is complete.",
+            'The old reply said "I will tell you when the report is complete." The review is complete.',
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
     def test_negated_finished_actions_are_not_completed_work(self):
         for text in (
             "I have not finished the review.",

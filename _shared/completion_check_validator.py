@@ -151,6 +151,11 @@ _PREDICATE_SCOPE_BOUNDARY_RE = re.compile(
     re.I,
 )
 _FUTURE_PREDICATE_RE = re.compile(r"\b(?:will|would|shall|\w+['’]ll)\b", re.I)
+_INQUIRY_SUBORDINATOR_RE = re.compile(r"\b(?:whether|if)\b", re.I)
+_TEMPORAL_SUBORDINATOR_RE = re.compile(
+    r"\b(?:when|whenever|once|until|before|after|unless|as\s+soon\s+as)\b",
+    re.I,
+)
 _GOAL_LEAD_RE = re.compile(
     r"^\s*(?:[>*\-]|\d+[.)])?\s*"
     r"(?:goal|goals|aim|aims|objective|objectives|target|targets|"
@@ -535,19 +540,27 @@ def _asserted_work_predicate(match, clause):
 
     Only the read-only patterns need this distinction: their bare status and
     past-participle forms can also occur under "will mark" or "will have".
-    A finite copula/perfect states its own status, even inside prose describing
-    a separate future action. Do not discard the whole clause for a modal.
+    An inquiry does not assert its outcome, and a temporal/conditional status
+    governed by a future promise is not a current outcome either. A separate
+    finite status still states its own outcome; do not discard the whole clause
+    for a modal or dependent predicate.
     """
     groups = match.groupdict()
     if not ("read_only_finite" in groups or "read_only_action" in groups):
-        return True
-    if groups.get("read_only_finite"):
         return True
     prefix = clause[:match.start()]
     scope_start = 0
     for boundary in _PREDICATE_SCOPE_BOUNDARY_RE.finditer(prefix):
         scope_start = boundary.end()
-    return _FUTURE_PREDICATE_RE.search(prefix[scope_start:]) is None
+    scoped_prefix = prefix[scope_start:]
+    if _INQUIRY_SUBORDINATOR_RE.search(scoped_prefix):
+        return False
+    for subordinator in _TEMPORAL_SUBORDINATOR_RE.finditer(scoped_prefix):
+        if _FUTURE_PREDICATE_RE.search(scoped_prefix[:subordinator.start()]):
+            return False
+    if groups.get("read_only_finite"):
+        return True
+    return _FUTURE_PREDICATE_RE.search(scoped_prefix) is None
 
 
 def extract_top_level_field_section(block, field_name):
