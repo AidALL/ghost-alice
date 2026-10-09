@@ -38,7 +38,7 @@ import runtime_config
 import work_impact_projection
 import strict_session_log
 from session_intent_analyzer_hook import bound_session_identity
-from task_router_reminder_hook import session_material, gate_state
+from task_router_reminder_hook import session_material
 
 SAFE_BARE_COMMANDS = {
     "bash",
@@ -573,25 +573,6 @@ def _session_intent_root_candidates(env: dict[str, str]) -> list[Path]:
     return unique
 
 
-def _has_current_downstream_block(env: dict[str, str], payload: dict[str, object], platform: str) -> bool:
-    session_id = bound_session_identity(platform, payload, env)
-    if not session_id or session_id == "unknown":
-        return False
-    for root in _session_intent_root_candidates(env):
-        # Once a store contains this bound session, do not borrow a block from
-        # another root merely because the selected store has no current block.
-        material = session_material(root, platform, session_id)
-        if material.get("degraded"):
-            return False
-        if not material.get("state"):
-            continue
-        gate = gate_state(root, platform, session_id, material)
-        if not gate or gate.get("stale"):
-            return False
-        decision = str(gate.get("decision") or "").strip().lower()
-        return gate.get("opened") is False or decision == "block"
-    return False
-
 
 # A hook marks its own routine state with this private key; the runner strips it before the host sees the output.
 SURFACE_DECLARATION_KEY = "ghostAliceSurface"
@@ -655,8 +636,6 @@ def _visibility_context(
         pending = _has_pending_merge_undecided(source_env, platform)
     if pending:
         context["pending_merge_undecided"] = True
-    if _has_current_downstream_block(source_env, payload, platform):
-        context["security_boundary"] = True
     if declared:
         # A declaring hook's own wording is not evidence of state; only the real state above and the exit code count.
         context["declared_surface"] = declared

@@ -113,7 +113,7 @@ Use this flow for each user turn that touches coding, development, repository ma
 User message received
   -> pending-merge precheck
   -> session-intent-analyzer intake
-  -> jailbreak-detector downstream gate
+Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
   -> task-router
   -> using-coding-convention
   -> applicable process skill

@@ -141,7 +141,7 @@ next-required: boundary-contract
 ## Failure Modes
 
 - task-router runs before session-intent-analyzer.
-- task-router treats absent `downstream-gates.json` as denial when no current-lineage block exists.
+- task-router incorrectly waits for a legacy classifier judgment instead of using exact session-intent intake.
 - task-router writes `allowed-surface` instead of handing off to boundary-contract.
 - The agent opens files before routing.
 - Verification skills are deferred until after the work is already claimed complete.

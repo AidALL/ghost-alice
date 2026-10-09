@@ -389,9 +389,9 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             output = result.stderr + result.stdout
             self.assertEqual(result.returncode, 0, msg=output)
             self.assertIn("  Platform: claude, codex", result.stdout)
-            self.assertIn("  Skills: [26] common targets", result.stdout)
-            self.assertIn("[26/26] common targets synced on all platforms", result.stdout)
-            self.assertNotIn("[26/25]", result.stdout)
+            self.assertIn("  Skills: [25] common targets", result.stdout)
+            self.assertIn("[25/25] common targets synced on all platforms", result.stdout)
+            self.assertNotIn("[25/24]", result.stdout)
 
     def test_install_sh_auto_detect_accepts_git_addon_tag_after_parent_prepares_source(self) -> None:
         bash = _find_test_bash()

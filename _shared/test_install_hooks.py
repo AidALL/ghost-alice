@@ -503,20 +503,22 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
         self.assertNotIn("AGENTS.md", argv)
 
     def test_main_ignores_outer_marker_args_from_windows_shell(self):
-        command = f'"{sys.executable}" -c "import sys; sys.exit(0)"'
-        payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+        with tempfile.TemporaryDirectory() as owned, patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT":str(Path(owned)/"ghost")}):
+            command = f'"{sys.executable}" -c "import sys; sys.exit(0)"'
+            payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
 
-        with self.assertRaises(SystemExit) as cm:
-            hook_profile_gate.main([
-                "run",
-                "prompt",
-                payload,
-                "#",
-                "[hook-reminder]",
-                "AGENTS.md",
-            ])
+            with self.assertRaises(SystemExit) as cm:
+                hook_profile_gate.main([
+                    "run",
+                    "prompt",
+                    payload,
+                    "#",
+                    "[hook-reminder]",
+                    "AGENTS.md",
+                ])
 
-        self.assertEqual(cm.exception.code, 0)
+            self.assertEqual(cm.exception.code, 0)
+
 
 
 class TestMessageLanguage(unittest.TestCase):
@@ -708,18 +710,18 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertFalse(hasattr(install_hooks, "TOOL_CHECKPOINT_ENTRY_CODEX"))
 
     def test_hook_reminder_treats_questions_and_opinions_as_user_input(self):
-        self.assertIn("simple question", install_hooks.HOOK_INTERNAL)
-        self.assertIn("opinion", install_hooks.HOOK_INTERNAL)
+        self.assertIn("Every user input", install_hooks.HOOK_INTERNAL)
+        self.assertNotIn("jailbreak-detector", install_hooks.HOOK_INTERNAL)
         self.assertIn("user input", install_hooks.HOOK_INTERNAL)
         self.assertIn("task-router", install_hooks.HOOK_INTERNAL)
-        self.assertIn("task-router waits until session-intent preflight exists", install_hooks.HOOK_INTERNAL)
-        self.assertIn("Absent downstream-gates.json means silent allow", install_hooks.HOOK_INTERNAL)
+        self.assertIn("run task-router after exact session-intent preflight", install_hooks.HOOK_INTERNAL)
+        self.assertNotIn("downstream-gates.json", install_hooks.HOOK_INTERNAL)
         self.assertIn("atomic meaning units", install_hooks.HOOK_INTERNAL)
         self.assertIn("focus-layer", install_hooks.HOOK_INTERNAL)
         self.assertIn("scope-reopen", install_hooks.HOOK_INTERNAL)
-        self.assertIn("performs routing decisions", install_hooks.HOOK_INTERNAL)
-        self.assertIn("does not infer raw user intent", install_hooks.HOOK_INTERNAL)
-        self.assertIn("task-router consumes session-intent and jailbreak gate context", install_hooks.HOOK_INTERNAL)
+        self.assertIn("it owns routing", install_hooks.HOOK_INTERNAL)
+        self.assertIn("not raw intent inference", install_hooks.HOOK_INTERNAL)
+        self.assertIn("not raw intent inference, intake, or native tool permission", install_hooks.HOOK_INTERNAL)
         self.assertLessEqual(len(install_hooks.HOOK_INTERNAL), 900)
         self.assertNotIn("[tool-checkpoint]", install_hooks.HOOK_INTERNAL)
         self.assertNotIn("hook-stage: PreToolUse", install_hooks.HOOK_INTERNAL)
@@ -782,7 +784,7 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertEqual(first.returncode, 0, msg=first.stderr)
             first_payload = json.loads(first.stdout)
             first_message = first_payload["systemMessage"]
-            self.assertIn("gate-opened: jailbreak-detector silent allow", first_message)
+            self.assertIn("intake-ready: current input recorded", first_message)
             self.assertIn("task-router-step", first_message)
             self.assertNotIn("task-router withheld", first_message)
 
@@ -809,7 +811,7 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertEqual(second.returncode, 0, msg=second.stderr)
             second_payload = json.loads(second.stdout)
             message = second_payload["systemMessage"]
-            self.assertIn("gate-opened: jailbreak-detector silent allow", message)
+            self.assertIn("intake-ready: current input recorded", message)
             self.assertNotIn("decision=allow", message)
             import session_intent_ledger
             ledger_command = message.split("intent-ledger: use ", 1)[1].split(
@@ -824,7 +826,7 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertIn("reuse retained instructions, reload if lost", message)
             self.assertNotIn("task-router-step", message)
             self.assertNotIn("atomic meaning decomposition", message)
-            self.assertIn("downstream-gate:", message)
+            self.assertNotIn("downstream-gate:", message)
 
     def test_codex_task_router_reminder_releases_on_absent_gate_after_intent_preflight(self):
         script = Path(install_hooks.__file__).with_name("task_router_reminder_hook.py")
@@ -856,7 +858,7 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertEqual(result.returncode, 0, msg=result.stderr)
             payload = json.loads(result.stdout)
             message = payload["systemMessage"]
-            self.assertIn("gate-opened: jailbreak-detector silent allow", message)
+            self.assertIn("intake-ready: current input recorded", message)
             self.assertIn("task-router-step", message)
             self.assertNotIn("task-router withheld", message)
 
@@ -1269,8 +1271,8 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("compact " + "tool-checkpoint", result.stdout)
         self.assertIsNone(opaque_risk_code_re.search(result.stdout))
 
-    def test_codex_dispatcher_tool_checkpoint_returns_pre_tool_use_deny_shape_for_blocked_gate(self):
-        """Codex PreToolUse tool-checkpoint denies only when downstream gate blocks."""
+    def test_codex_dispatcher_tool_checkpoint_returns_pre_tool_use_context_shape_with_legacy_block_record(self):
+        """Codex PreToolUse tool-checkpoint preserves context without detector permission decisions."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -1324,19 +1326,19 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(first.returncode, 0, msg=first.stderr)
         first_payload = json.loads(first.stdout)
-        output = first_payload["hookSpecificOutput"]
-        self.assertEqual(output["hookEventName"], "PreToolUse")
-        self.assertEqual(output["permissionDecision"], "deny")
-        self.assertIn("jailbreak-detector blocked downstream tool execution", output["permissionDecisionReason"])
+        output = first_payload.get("hookSpecificOutput", {})
+        self.assertIn(output.get("hookEventName"), (None, "PreToolUse"))
+        self.assertNotIn("permissionDecision", output)
+
         self.assertNotIn("continue", first_payload)
         self.assertNotIn("systemMessage", first_payload)
 
         self.assertEqual(second.returncode, 0, msg=second.stderr)
         second_payload = json.loads(second.stdout)
-        self.assertEqual(second_payload["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn("permissionDecision", second_payload.get("hookSpecificOutput", {}))
 
     def test_codex_dispatcher_tool_checkpoint_surfaces_once_per_input_lineage(self):
-        """Open downstream gate keeps checking each tool call but surfaces once per user input."""
+        """Recorded intake keeps checking each tool call but surfaces once per user input."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -1714,9 +1716,8 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("function completionReminderDecision", source)
         self.assertNotIn("function validateCompletionResponse", source)
         self.assertNotIn("COMPLETION_REMINDER_RETRY_TTL", source)
-        self.assertIsNotNone(decision_body)
-        self.assertNotIn("auditRef", decision_body.group(0))
-        self.assertNotIn("buildAuditRef", decision_body.group(0))
+        self.assertIsNone(decision_body)
+        self.assertNotIn("permissionDecision", source)
         forbidden = [
             "function toolCheckpointReplayTtlMs",
             "stableToolCheckpointInputKey",
@@ -1774,7 +1775,7 @@ class TestMessageLanguage(unittest.TestCase):
                 hooks_dir = Path(temp_home) / ".ghost-alice" / "hooks"
                 self.assertTrue((hooks_dir / "ghost-alice-hook.mjs").exists())
                 self.assertTrue(
-                    (hooks_dir / "derive_downstream_gate.mjs").exists(),
+                    (hooks_dir / "session_intent_snapshot.mjs").exists(),
                     "dispatcher companion module must be installed alongside the dispatcher",
                 )
                 self.assertTrue(
@@ -1870,7 +1871,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assert_no_pretool_deny(replay_payload)
 
     def test_codex_dispatcher_zero_deny_for_100_distinct_shell_commands_with_open_gate(self):
-        """Open downstream gate means shell command text never creates a checkpoint denial."""
+        """Recorded intake means shell command text never creates a checkpoint denial."""
         deny_count = 0
         for index in range(100):
             result = self.run_codex_pretool({
@@ -1919,7 +1920,7 @@ class TestMessageLanguage(unittest.TestCase):
                 self.assert_no_pretool_deny(json.loads(result.stdout))
 
     def test_codex_dispatcher_block_gate_denies_regardless_of_tool_shape(self):
-        """Closed downstream gate is the only checkpoint denial source."""
+        """A historical closed record supplies no native permission decision."""
         requests = [
             {"tool_name": "shell", "tool_input": {"cmd": "echo shell"}},
             {"tool_name": "read", "tool_input": {"file_path": "README.md"}},
@@ -1934,8 +1935,8 @@ class TestMessageLanguage(unittest.TestCase):
                     **request,
                 }, downstream_decision="block")
                 payload = json.loads(result.stdout)
-                self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
-                self.assertIn("jailbreak-detector blocked downstream tool execution", payload["hookSpecificOutput"]["permissionDecisionReason"])
+                self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
+
 
     def test_codex_dispatcher_tool_checkpoint_does_not_deny_missing_session_intent_preflight(self):
         """Missing session-intent preflight evidence is not a first-entry deny reason."""
@@ -2401,7 +2402,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assert_no_pretool_deny(payload)
         self.assertNotIn("opaque shell text", json.dumps(payload, ensure_ascii=False))
 
-    def test_codex_dispatcher_still_respects_downstream_gate_for_shell(self):
+    def test_codex_dispatcher_ignores_legacy_gate_permission_for_shell(self):
         result = self.run_codex_pretool({
             "session_id": "s-shell-downstream-closed",
             "hook_event_name": "PreToolUse",
@@ -2409,8 +2410,8 @@ class TestMessageLanguage(unittest.TestCase):
             "tool_input": {"cmd": "opaque shell text"},
         }, downstream_decision="block")
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("downstream", payload["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
+
 
     def test_codex_dispatcher_tool_checkpoint_does_not_parse_compound_shell_mutation(self):
         """Compound shell content is not parsed as mutation when downstream gate is open."""
@@ -2456,8 +2457,8 @@ class TestMessageLanguage(unittest.TestCase):
         self.assert_no_pretool_deny(payload)
         self.assertNotIn("rm -f README.md", json.dumps(payload, ensure_ascii=False))
 
-    def test_codex_dispatcher_tool_checkpoint_honors_jailbreak_block_before_tool_shape(self):
-        """jailbreak-detector gate state controls downstream access before tool-shape review."""
+    def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_decide_tool_permission(self):
+        """Legacy detector state does not grant or deny native tool permission."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2499,11 +2500,11 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
         output = payload["hookSpecificOutput"]
-        self.assertEqual(output["permissionDecision"], "deny")
-        self.assertIn("jailbreak-detector", output["permissionDecisionReason"])
-        self.assertIn("decision=block", output["permissionDecisionReason"])
+        self.assertNotIn("permissionDecision", output)
 
-    def test_codex_dispatcher_tool_checkpoint_blocks_session_intent_recovery_when_gate_blocks(self):
+
+
+    def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_deny_session_intent_recovery(self):
         """No command-shape exception bypasses a blocked downstream gate."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
@@ -2547,8 +2548,8 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("jailbreak-detector", payload["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
+
 
     def test_codex_dispatcher_tool_checkpoint_allows_governance_skill_doc_bootstrap_before_semantic_intent(self):
         """Codex has no native Skill tool, so reading governance SKILL.md is a bootstrap lane."""
@@ -2600,7 +2601,7 @@ class TestMessageLanguage(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assert_no_pretool_deny(payload)
 
-    def test_codex_dispatcher_tool_checkpoint_blocks_jailbreak_detector_bootstrap_when_gate_blocks(self):
+    def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_deny_historical_doc_reads(self):
         """A blocked downstream gate applies to bootstrap-looking tool calls too."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
@@ -2660,9 +2661,9 @@ class TestMessageLanguage(unittest.TestCase):
             )
 
         self.assertEqual(skill_call.returncode, 0, msg=skill_call.stderr)
-        self.assertEqual(json.loads(skill_call.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn("permissionDecision", json.loads(skill_call.stdout).get("hookSpecificOutput", {}))
         self.assertEqual(doc_read.returncode, 0, msg=doc_read.stderr)
-        self.assertEqual(json.loads(doc_read.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn("permissionDecision", json.loads(doc_read.stdout).get("hookSpecificOutput", {}))
 
     def test_codex_dispatcher_blocks_mandatory_governance_skill_docs_while_blocked(self):
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
@@ -2725,7 +2726,7 @@ class TestMessageLanguage(unittest.TestCase):
                         )
                         self.assertEqual(result.returncode, 0, msg=result.stderr)
                         payload = json.loads(result.stdout)
-                        self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
+                        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
 
     def test_codex_dispatcher_does_not_bootstrap_untrusted_governance_named_skill_doc(self):
         result = self.run_codex_pretool({
@@ -2738,8 +2739,8 @@ class TestMessageLanguage(unittest.TestCase):
         }, downstream_decision="block")
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertIn("jailbreak-detector", payload["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
+
 
     def test_claude_dispatcher_tool_checkpoint_blocks_governance_skill_bootstrap_when_gate_blocks(self):
         """Claude Skill-looking calls do not bypass a blocked downstream gate."""
@@ -2783,10 +2784,10 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
 
-    def test_claude_dispatcher_tool_checkpoint_returns_pre_tool_use_deny_shape_for_blocked_gate(self):
-        """Claude PreToolUse tool-checkpoint denies only when downstream gate blocks."""
+    def test_claude_dispatcher_tool_checkpoint_returns_pre_tool_use_context_shape_with_legacy_block_record(self):
+        """Claude PreToolUse tool-checkpoint preserves context without detector permission decisions."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
 
@@ -2840,16 +2841,16 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(first.returncode, 0, msg=first.stderr)
         first_payload = json.loads(first.stdout)
-        output = first_payload["hookSpecificOutput"]
-        self.assertEqual(output["hookEventName"], "PreToolUse")
-        self.assertEqual(output["permissionDecision"], "deny")
-        self.assertIn("jailbreak-detector blocked downstream tool execution", output["permissionDecisionReason"])
+        output = first_payload.get("hookSpecificOutput", {})
+        self.assertIn(output.get("hookEventName"), (None, "PreToolUse"))
+        self.assertNotIn("permissionDecision", output)
+
         self.assertNotIn("continue", first_payload)
         self.assertNotIn("systemMessage", first_payload)
 
         self.assertEqual(second.returncode, 0, msg=second.stderr)
         second_payload = json.loads(second.stdout)
-        self.assertEqual(second_payload["hookSpecificOutput"]["permissionDecision"], "deny")
+        self.assertNotIn("permissionDecision", second_payload.get("hookSpecificOutput", {}))
 
     def test_claude_dispatcher_tool_checkpoint_does_not_deny_by_input_event_or_tool_input(self):
         """Claude tool-checkpoint matches Codex: open gate means tool identity is ignored."""

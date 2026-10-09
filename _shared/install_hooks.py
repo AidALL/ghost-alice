@@ -371,12 +371,11 @@ PROMPT_PENDING_MERGE_ENTRY_CODEX = {
 # 1-B. Work-start hook: reminder to call task-router.
 HOOK_MARKER = "[hook-reminder] AGENTS.md"
 HOOK_INTERNAL = (
-    "hook-reminder: task-router waits until session-intent preflight exists and no current-lineage block gate is recorded. "
-    "Absent downstream-gates.json means silent allow. "
-    "After release, read the ledger, decompose user input into atomic meaning units, choose focus-layer/scope-reopen, then assign output, verification, lifecycle, and boundary skills. "
-    "task-router consumes session-intent and jailbreak gate context; it performs routing decisions but does not infer raw user intent, own intake, or own tool permission. "
-    "Every user input requires task-router, including a simple question, opinion, clarification, status comment, or follow-up. "
-    "Do not skip task-router for answer-only turns or prior routing; never place task-router before session-intent-analyzer or the jailbreak-detector downstream gate."
+    "hook-reminder: run task-router after exact session-intent preflight. "
+    "Read the ledger, decompose user input into atomic meaning units, choose focus-layer/scope-reopen, then assign output, verification, lifecycle, and boundary skills. "
+    "task-router consumes session intent; it owns routing, not raw intent inference, intake, or native tool permission. "
+    "Every user input requires task-router, including simple questions, clarification, status, and follow-up. "
+    "Do not skip task-router for answer-only turns or prior routing; run it after session-intent-analyzer."
 )
 
 
@@ -404,8 +403,8 @@ def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: b
         return _shell_print_json({"continue": True, "systemMessage": HOOK_INTERNAL}, payload_mode=payload_mode) + f" # {HOOK_MARKER}"
     return _shell_print_message(_localized_bridge(
         HOOK_INTERNAL,
-        "After session-intent preflight, run task-router when there is no current-lineage block gate and the path is silent allow.",
-        "Run task-router after session-intent preflight; absent current-lineage block gate is silent allow.",
+        "After exact session-intent preflight, run task-router.",
+        "Run task-router after exact session-intent preflight; native permission belongs to its host.",
         "task-router reads the ledger, decomposes intent, chooses focus-layer and scope-reopen, then assigns skills.",
         "task-router reads the ledger, decomposes intent, chooses focus-layer and scope-reopen, then assigns skills.",
     ), payload=payload_mode) + f" # {HOOK_MARKER}"
@@ -441,8 +440,8 @@ SESSION_INTENT_INTERNAL = (
     "current-session pointer, and digest-only intake status. "
     "Agents add semantic summaries, constraints, and decisions only when intent materially changes. "
     "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
-    "Use the ledger as context for skill-evolution and jailbreak-detector. "
-    "skill-evolution is a report-only branch that terminates. jailbreak-detector records model_security_decision in the ledger; only current-lineage block decisions are carried to downstream-gates.json, and absent current block means silent allow. "
+    "Use the ledger as context for task-router and report-only skill-evolution. "
+    "skill-evolution is a report-only branch that terminates and does not feed task-router. Legacy model judgments remain history and never determine current tool permission. "
     "Capture trigger: when this input corrects the agent's prior behavior or understanding, record a compressed conduct_feedback entry (id, failure_pattern, corrective_rule, pattern_class, source=user-explicit, status=open) with session_intent_ledger.py so skill-evolution and the /evolution backlog surface it. "
     "Basis for the correction judgment: a mismatch the input asserts between the agent's prior action/claim and the applicable goal, constraints, non_goals, decisions, and acceptance_criteria, not keyword matching. A direct assertion or clear contextual rejection supports user-explicit feedback even without a raw transcript. "
     "Evidence boundary: read supplied prior context before attributing a mismatch. New constraints, reminders, changed requirements, or refreshing a formerly valid result do not alone establish prior misconduct; record them as intent fields. Use source=inferred only for an actually observed behavior gap, not a hypothetical future violation or buggy task code. If no mismatch is supported, leave feedback absent. Increment occurrence_count only for another supported correction, not a repeated boundary or reread lesson."
@@ -2174,8 +2173,8 @@ def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
     """Keep managed UserPromptSubmit hook entries in install-surface order.
 
     This is not the full semantic graph. session-intent-analyzer fans out to
-    skill-evolution (report-only) and jailbreak-detector; HOOK_MARKER is only
-    the task-router reminder that waits for downstream-gates.json.
+    task-router and skill-evolution (report-only); HOOK_MARKER is only
+    the task-router reminder that waits for exact intake.
     """
     ordered_markers = [
         PROMPT_PENDING_MERGE_MARKER,
@@ -2481,8 +2480,8 @@ def install_hook(
 
     if _reorder_user_prompt_governance_hooks(hook_list):
         _log(_t(
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder (-> web-search-first where installed)",
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder (-> web-search-first where installed)",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: task-router, skill-evolution report-only terminal) -> task-router-reminder (-> web-search-first where installed)",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: task-router, skill-evolution report-only terminal) -> task-router-reminder (-> web-search-first where installed)",
         ))
         changed = True
 

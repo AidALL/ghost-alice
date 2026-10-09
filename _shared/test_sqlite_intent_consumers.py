@@ -62,7 +62,7 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
         material = router.session_material(self.root, self.platform, self.sid)
         self.assertIsInstance(material["state"].get("model_security_decision"), dict)
         self.assertEqual(material["state"]["model_security_decision"]["decision"], "block")
-        self.assertEqual(self.node().get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+        self.assertNotIn("permissionDecision", self.node().get("hookSpecificOutput", {}))
 
     def test_missing_exports_do_not_hide_sqlite_preflight_or_block(self):
         self.block()
@@ -70,14 +70,14 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
             (self.directory / name).unlink(missing_ok=True)
         material = router.session_material(self.root, self.platform, self.sid)
         self.assertTrue(material["latest_input"])
-        self.assertTrue(profile._has_current_downstream_block(self.env, {"session_id": self.sid}, self.platform))
-        self.assertEqual(self.node().get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+        self.assertEqual(material["state"]["model_security_decision"]["decision"], "block")
+        self.assertNotIn("permissionDecision", self.node().get("hookSpecificOutput", {}))
 
     def test_stale_json_block_cannot_override_sqlite_no_decision(self):
         state = self.observe()
         state["model_security_decision"] = {"decision": "block", "input_event_id": state["latest_input_event_id"]}
         (self.directory / "intent-state.json").write_text(json.dumps(state))
-        self.assertFalse(router.gate_state(self.root, self.platform, self.sid))
+        self.assertIsNone(router.session_material(self.root, self.platform, self.sid)["state"].get("model_security_decision"))
         self.assertNotEqual(self.node().get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
 
     def test_diagnostic_reads_committed_events_without_jsonl_export(self):
@@ -113,14 +113,15 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
                         ignore=shutil.ignore_patterns("__pycache__", "test*"))
         installed = home / ".ghost-alice" / "hooks"
         installed.mkdir(parents=True)
-        for filename in ("ghost-alice-hook.mjs", "derive_downstream_gate.mjs", "reminder_texts.json"):
+        for filename in ("ghost-alice-hook.mjs", "session_intent_snapshot.mjs", "reminder_texts.json"):
             shutil.copy2(SHARED / filename, installed / filename)
         # A Node process launched by the selected Python runner must also work
         # when that interpreter is not discoverable through the child's PATH.
         env = dict(self.env, PATH="")
         (self.directory / "intent-state.json").unlink(missing_ok=True)
         result = self.node(script=installed / "ghost-alice-hook.mjs", env=env)
-        self.assertEqual(result.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
+        self.assertNotIn("permissionDecision", result.get("hookSpecificOutput", {}))
+        self.assertIn("intake-ready", json.dumps(self.node("hook-reminder", script=installed / "ghost-alice-hook.mjs", env=env)))
 
     def test_reading_hook_does_not_create_a_database_or_rewrite_legacy_export(self):
         self.directory.mkdir(parents=True, exist_ok=True)

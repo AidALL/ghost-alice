@@ -998,6 +998,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
     return [merged[criterion_id] for criterion_id in order]
 
 
+# Historical import/audit shape only; current consumers do not derive permission.
 def normalize_security_decision(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None

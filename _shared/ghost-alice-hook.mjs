@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
-import { deriveDownstreamGateFromDecision, DownstreamGatePersistenceError, isCanonicalIdentityComponent, readSessionIntentSnapshot, inputLineageMatches } from "./derive_downstream_gate.mjs";
+import { isCanonicalIdentityComponent, readSessionIntentSnapshot } from "./session_intent_snapshot.mjs";
 
 function parseArgs(argv) {
   const args = {};
@@ -214,7 +214,7 @@ function emit(payload) {
   process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
 
-function platformUsesPreToolPermissionDecision(platform, event) {
+function platformUsesPreToolContext(platform, event) {
   return ["claude", "codex"].includes(String(platform || "").toLowerCase())
     && event === "PreToolUse";
 }
@@ -227,56 +227,12 @@ function payloadFor(platform, event, message) {
   if (platformSuppressesPreToolAllowContext(platform, event)) {
     return {};
   }
-  if (platformUsesPreToolPermissionDecision(platform, event)) {
+  if (platformUsesPreToolContext(platform, event)) {
     return message ? { hookSpecificOutput: { hookEventName: event, additionalContext: message } } : {};
   }
   return message
     ? { continue: true, systemMessage: message, hookSpecificOutput: { hookEventName: event, additionalContext: message } }
     : { continue: true };
-}
-
-function denialPayload(platform, event, message, reason) {
-  if (platformUsesPreToolPermissionDecision(platform, event)) {
-    return { hookSpecificOutput: { hookEventName: event, permissionDecision: "deny", permissionDecisionReason: reason } };
-  }
-  return { continue: true, decision: "deny", reason, systemMessage: message, hookSpecificOutput: { hookEventName: event, additionalContext: message } };
-}
-
-function toolCheckpointEnforcementEnabled(platform = "codex", env = process.env) {
-  const platformKey = String(platform || "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, "_");
-  const raw = String(
-    env.GHOST_ALICE_TOOL_CHECKPOINT_ENFORCEMENT
-      || env[`GHOST_ALICE_${platformKey}_TOOL_CHECKPOINT_ENFORCEMENT`]
-      || env[`GHOST_ALICE_${platformKey}_ENFORCE_TOOL_CHECKPOINT`]
-      || "enforce",
-  ).trim().toLowerCase();
-  return !new Set(["0", "false", "off", "no", "reminder"]).has(raw);
-}
-
-function downstreamGateState(platform, input, root = "", intentSnapshot = undefined) {
-  const sessionId = inputSessionId(platform, input, root, "");
-  if (!sessionId) {
-    return null;
-  }
-  const gatePath = path.join(sessionIntentDir(platform, sessionId, root), "downstream-gates.json");
-  const state = readJsonFile(gatePath, null);
-  if (!state || state.schema_version !== "downstream-gates.v1"
-      || state.platform !== platform || state.session_id !== sessionId) {
-    return null;
-  }
-  if (state.gate !== "jailbreak-detector") {
-    return null;
-  }
-  const dirPath = sessionIntentDir(platform, sessionId, root);
-  const snapshot = intentSnapshot === undefined ? readSessionIntentSnapshot(dirPath, platform, sessionId) : intentSnapshot;
-  const latestEvent = snapshot?.latestInput;
-  const match = downstreamGateMatchesLatestEvent(state, latestEvent);
-  if (!match.ok) {
-    return { ...state, stale: true, stale_reason: match.reason, legacy: match.legacy === true };
-  }
-  return state;
 }
 
 function readJsonLine(line) {
@@ -323,80 +279,33 @@ function latestTranscriptUserDigest(transcriptPath) {
   return "";
 }
 
-function downstreamGateMatchesLatestEvent(gate, latestEvent) {
-  if (!gate) return { ok: true, legacy: true };
-  if (!gate.input_event_id && !gate.input_digest) {
-    return { ok: false, legacy: true, reason: "legacy downstream gate missing input lineage" };
-  }
-  if (!latestEvent) {
-    return { ok: false, legacy: false, reason: "stale downstream gate: latest input event missing" };
-  }
-  if (!inputLineageMatches(gate, latestEvent)) {
-    return { ok: false, legacy: false, reason: "stale downstream gate: input lineage mismatch" };
-  }
-  return { ok: true, legacy: false };
-}
-
-function taskRouterReleaseMessage(sessionId, statePath, gatePath, mode) {
-  const gateDetail = mode === "present-nonblock"
-    ? `downstream-gate: ${gatePath} contains no current block; silent allow invariant applies.`
-    : `downstream-gate: ${gatePath} absent; silent allow invariant applies unless a current-lineage model block is recorded.`;
+function taskRouterReleaseMessage(sessionId, statePath) {
   return [
-    "hook-reminder: task-router waits until session-intent preflight exists and no current-lineage block gate is recorded.",
-    "Absent downstream-gates.json means silent allow unless a current-lineage model block is recorded.",
-    "After release, read the ledger, decompose accepted intent into atomic meaning units, choose focus-layer micro|meso|macro|meta plus scope-reopen target on mismatch, then assign output, verification, lifecycle, and boundary skills before downstream work/tool calls.",
-    "task-router consumes session-intent and jailbreak gate context; it performs routing decisions but does not infer raw user intent, own intake, or own tool permission.",
-    "Every user input requires task-router, including a simple question, opinion, clarification, status comment, or follow-up.",
-    "Do not skip task-router because the turn looks like answer-only conversation or because a prior turn was already routed.",
-    "Do not describe the governance order as task-router before session-intent-analyzer or before the jailbreak-detector downstream gate.",
-    `gate-opened: jailbreak-detector silent allow for session ${sessionId}; no current block decision recorded.`,
-    `intent-ledger: use session_intent_ledger.py --read-state --root ${JSON.stringify(path.dirname(path.dirname(path.dirname(statePath))))} --platform ${JSON.stringify(path.basename(path.dirname(path.dirname(statePath))))} --session-id ${JSON.stringify(sessionId)} after session-intent preflight. Compatibility export: ${statePath} is not authoritative.`,
-    gateDetail,
-    "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
+    "hook-reminder: run task-router after exact session-intent preflight.",
+    "Read the authoritative ledger, decompose accepted intent into atomic meaning units, choose focus-layer micro|meso|macro|meta plus scope-reopen target on mismatch, then assign output, verification, lifecycle, and boundary skills.",
+    "task-router consumes session intent; it owns routing, not intake, raw intent inference, or native tool permission.",
+    "Every user input requires task-router, including explanation, clarification, status, and follow-up.",
+    `intake-ready: current input recorded for session ${sessionId}.`,
+    `intent-ledger: use session_intent_ledger.py --read-state --root ${JSON.stringify(path.dirname(path.dirname(path.dirname(statePath))))} --platform ${JSON.stringify(path.basename(path.dirname(path.dirname(statePath))))} --session-id ${JSON.stringify(sessionId)}. Compatibility export: ${statePath} is not authoritative.`,
+    "task-router-step: read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
   ].join("\n");
 }
 
 function taskRouterReminderMessage(platform, input, root = "") {
   const sessionId = inputSessionId(platform, input, root, "");
   if (!sessionId || sessionId === "unknown") {
-    return "hook-reminder: task-router withheld until session-intent-analyzer observes an explicitly bound session and the current-lineage block check can run. Do not run task-router yet.";
+    return "hook-reminder: task-router withheld until session-intent-analyzer observes an explicitly bound session. Do not run task-router yet.";
   }
 
   const sessionDirPath = sessionIntentDir(platform, sessionId, root);
   const snapshot = readSessionIntentSnapshot(sessionDirPath, platform, sessionId);
   if (snapshot?.degraded) {
-    return `hook-reminder: task-router withheld: the session-intent ledger is degraded for session ${sessionId}. Repair intake before routing; do not reuse the persisted prior-input decision.`;
+    return `hook-reminder: task-router withheld: the session-intent ledger is degraded for session ${sessionId}. Repair intake before routing; do not reuse a prior-input anchor.`;
   }
   if (!snapshot?.latestInput) {
     return `hook-reminder: task-router withheld until session-intent-analyzer records current input for session ${sessionId}. Continue intake/bootstrap; do not run task-router yet.`;
   }
-  const gate = downstreamGateState(platform, { ...input, session_id: sessionId }, root, snapshot);
-  if (!gate) {
-    const statePath = path.join(sessionDirPath, "intent-state.json");
-    return taskRouterReleaseMessage(sessionId, statePath, path.join(sessionDirPath, "downstream-gates.json"), "absent");
-  }
-  if (gate.stale) {
-    return `hook-reminder: jailbreak-detector downstream gate is stale for the latest input. ${gate.stale_reason}. Continue intake/routing; do not reuse the stale decision as current block/allow.`;
-  }
-  const decision = String(gate.decision || "unknown").trim() || "unknown";
-  if (gate.opened === false || decision === "block") {
-    return `hook-reminder: task-router withheld because jailbreak-detector downstream gate is not open. decision=${decision}. Do not run task-router or downstream work.`;
-  }
-
-  const statePath = path.join(sessionDirPath, "intent-state.json");
-  return taskRouterReleaseMessage(sessionId, statePath, path.join(sessionDirPath, "downstream-gates.json"), "present-nonblock");
-}
-
-function downstreamGateDenialReason(state) {
-  const decision = String(state?.decision || "").trim() || "unknown";
-  const rules = Array.isArray(state?.rules) && state.rules.length
-    ? ` rules=${state.rules.join(",")}.`
-    : "";
-  return [
-    "jailbreak-detector blocked downstream tool execution.",
-    `decision=${decision}.${rules}`,
-    "Resolve the user-intent gate before running tools.",
-  ].join(" ");
+  return taskRouterReleaseMessage(sessionId, path.join(sessionDirPath, "intent-state.json"));
 }
 
 function toolCheckpointSurfaceStatePath() {
@@ -460,18 +369,6 @@ function shouldSurfaceToolCheckpoint(platform, input, root = "") {
   });
 }
 
-function toolCheckpointDecision(platform, input, sessionIntentRootArg = "", intentSnapshot = undefined) {
-  if (!toolCheckpointEnforcementEnabled(platform)) {
-    return null;
-  }
-  const downstreamGate = downstreamGateState(platform, input, sessionIntentRootArg, intentSnapshot);
-  if (!downstreamGate?.stale
-    && (downstreamGate?.opened === false || downstreamGate?.decision === "block")) {
-    return { deny: true, reason: downstreamGateDenialReason(downstreamGate) };
-  }
-  return null;
-}
-
 try {
   const args = parseArgs(process.argv.slice(2));
   const platform = args.platform || "codex";
@@ -485,45 +382,6 @@ try {
   const message = body ? `${marker}${body}` : "";
 
   if (hook === "tool-checkpoint" && (event === "BeforeTool" || event === "PreToolUse")) {
-    const gateSession = inputSessionId(platform, input, args["session-intent-root"], "");
-    const snapshot = gateSession ? readSessionIntentSnapshot(
-      sessionIntentDir(platform, gateSession, args["session-intent-root"]), platform, gateSession) : null;
-    if (gateSession && gateSession !== "unknown") {
-      try {
-        const derived = deriveDownstreamGateFromDecision(sessionIntentDir(platform, gateSession, args["session-intent-root"]), platform, gateSession, snapshot);
-        // The model block was established from this coherent state snapshot.
-        // A concurrent projection writer must not erase it between derivation
-        // and enforcement by replacing/truncating the optional gate file.
-        if (derived && toolCheckpointEnforcementEnabled(platform)) {
-          emit(denialPayload(platform, event, message, downstreamGateDenialReason(derived)));
-          process.exit(0);
-        }
-      } catch (error) {
-        if (!(error instanceof DownstreamGatePersistenceError)) {
-          throw error;
-        }
-        process.stderr.write(`[ghost-alice-hook] ${error.message}\n`);
-        if (toolCheckpointEnforcementEnabled(platform)) {
-          const reason = `${downstreamGateDenialReason(error.gate)} Downstream gate persistence failed; the current model block remains in force.`;
-          emit(denialPayload(platform, event, message, reason));
-          process.exit(0);
-        }
-      }
-    }
-    const decision = toolCheckpointDecision(platform, input, args["session-intent-root"], snapshot);
-    if (decision && decision.deny) {
-      emit(denialPayload(platform, event, message, decision.reason));
-      process.exit(0);
-    }
-    if (decision && decision.suppressMessage) {
-      emit(payloadFor(platform, event, ""));
-      process.exit(0);
-    }
-    if (decision && decision.warning) {
-      const warningMessage = message ? `${message}\n${decision.warning}` : decision.warning;
-      emit(payloadFor(platform, event, warningMessage));
-      process.exit(0);
-    }
     const surfaceMessage = shouldSurfaceToolCheckpoint(platform, input, args["session-intent-root"])
       ? message
       : "";

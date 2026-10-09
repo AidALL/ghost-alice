@@ -354,33 +354,23 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(receipt_from(json.loads(result.stdout)["systemMessage"])["session_id"], "payload")
         self.assertEqual(self.state("native"), {})
 
-    def test_documented_security_write_uses_receipt_without_host_environment(self) -> None:
-        skill = SCRIPT.parents[1] / "jailbreak-detector/SKILL.md"
-        command = re.search(r"```bash\n(.*?)```", skill.read_text(), re.S).group(1)
+    def test_receipt_delta_write_needs_no_host_environment(self):
         ledger = SCRIPT.parents[1] / "session-intent-analyzer/scripts/session_intent_ledger.py"
         for platform in ("codex", "claude"):
             with self.subTest(platform=platform):
-                observed = self.run_hook({"session_id": "security", "prompt": "current input"},
-                                         "--platform", platform)
+                observed = self.run_hook({"session_id": "receipt-only", "prompt": "current input"}, "--platform", platform)
                 self.assertEqual(observed.returncode, 0, observed.stderr)
                 receipt = receipt_from(json.loads(observed.stdout)["systemMessage"])
-                rendered = command
-                for key, value in receipt.items():
-                    rendered = rendered.replace("<receipt." + key + ">", str(value))
-                rendered = rendered.replace("<latest event_id>", receipt["input_event_id"])
-                argv = shlex.split(rendered.replace("\\\n", ""))
-                self.assertEqual(pathlib.Path(argv[0]).name, "session_intent_ledger.py")
                 env = os.environ.copy()
                 for name in ("CODEX_THREAD_ID", "GHOST_ALICE_SESSION_ID", "GHOST_ALICE_SESSION_INTENT_ROOT"):
                     env.pop(name, None)
-                env["HOME"] = str(self.tmp_home)
-                result = subprocess.run([sys.executable, str(ledger), *argv[1:]],
-                                        env=env, cwd=self.tmp_home, capture_output=True, text=True, check=False)
+                result = subprocess.run([sys.executable, "-B", str(ledger), "--root", receipt["ledger_root"],
+                    "--platform", receipt["platform"], "--session-id", receipt["session_id"],
+                    "--expected-input-event-id", receipt["input_event_id"],
+                    "--delta-json", '{"current_goal":"receipt-bound goal"}'],
+                    env=env, cwd=self.tmp_home, capture_output=True, text=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                state = self.state(receipt["session_id"], receipt["platform"])
-                decision = state["model_security_decision"]
-                self.assertEqual(decision["decision"], "block")
-                self.assertEqual(decision["input_event_id"], receipt["input_event_id"])
+                self.assertEqual(self.state(receipt["session_id"], receipt["platform"])["current_goal"], "receipt-bound goal")
 
     def test_hook_cannot_use_shared_pointer_as_missing_write_identity(self) -> None:
         first = self.run_hook({
@@ -425,6 +415,8 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         # Exercise legacy provider discovery deliberately; an explicit Core source
         # is a different authoritative capability and must not be ignored.
         env.pop("GHOST_ALICE_CORE_ROOT", None)
+        env.pop("GHOST_ALICE_SESSION_INTENT_SCRIPT", None)
+        env["PYTHONPATH"] = str(self.hook.parent)
         return subprocess.run(
             [
                 sys.executable, str(self.hook),

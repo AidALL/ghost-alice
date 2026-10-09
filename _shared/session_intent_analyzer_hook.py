@@ -81,7 +81,7 @@ DEFAULT_INTERNAL = (
     "Agents add semantic summaries, constraints, and decisions only when intent materially changes. "
     "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
     "New input stales response-route authorization binding while preserving work units and business evidence. "
-    "Use the ledger as context for skill-evolution and jailbreak-detector."
+    "Use the ledger as context for task-router and report-only skill-evolution."
 )
 LEDGER_UNAVAILABLE_DEGRADE = (
     "Ledger dependency unavailable non-blockingly; continue without raw prompt persistence."
@@ -132,7 +132,7 @@ def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> 
 
 
 def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], reason: str) -> None:
-    # Durable, ledger-independent record that THIS turn's input was NOT observed, so freshness consumers (task-router reminder, gate lineage checks) can fail closed instead of riding a stale anchor. Best-effort: the audit marker must never break the hook itself.
+    # Durable, ledger-independent record that THIS turn's input was NOT observed, so freshness consumers (task-router reminder and input lineage checks) can fail closed instead of riding a stale anchor. Best-effort: the audit marker must never break the hook itself.
     try:
         path = _degrade_marker_path(root, platform, payload)
         if path is None:

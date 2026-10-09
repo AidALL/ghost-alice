@@ -19,20 +19,18 @@ CONTRACT = {
         "merge-companion-precheck",
         "session-intent-analyzer",
         "skill-evolution:report-only-terminal-branch",
-        "jailbreak-detector",
         "task-router",
         "tool-checkpoint",
     ],
     "intent_consumers": {
-        "session-intent-analyzer": ["skill-evolution", "jailbreak-detector"],
+        "session-intent-analyzer": ["skill-evolution", "task-router"],
         "skill-evolution": ["report-only-terminal-branch"],
-        "jailbreak-detector": ["task-router"],
     },
     "conditional_gates": [
         {
             "id": "session-intent-analyzer",
             "trigger": "every user input",
-            "position": "after-merge-companion-precheck-before-skill-evolution-and-jailbreak-detector",
+            "position": "after-merge-companion-precheck-before-task-router-and-report-only-skill-evolution",
         },
         {
             "id": "boundary-contract",
@@ -315,6 +313,14 @@ class SkillGateContractTest(unittest.TestCase):
         ):
             fixture_path = root / relative_path
             fixture_path.write_text(fixture_path.read_text(encoding="utf-8") + ambient_rule, encoding="utf-8")
+        graph = "Session-intent intake feeds task-router directly. Native tool permission stays with its host. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission."
+        for relative in ("AGENTS.md", "platforms/codex/AGENTS.md", "docs/policies/session-gate-matrix.md", "task-router/SKILL.md"):
+            target = root / relative
+            target.write_text(target.read_text() + "\n" + graph)
+        for relative, text in (("_shared/install_hooks.py", "run task-router after exact session-intent preflight"), ("_shared/ghost-alice-hook.mjs", "readSessionIntentSnapshot taskRouterReleaseMessage")):
+            target = root / relative
+            target.write_text(target.read_text() + "\n" + text)
+
 
     def test_missing_task_router_reference_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -571,8 +577,8 @@ class SkillGateContractTest(unittest.TestCase):
 
             issues = run_contract_checks(root)
             messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("skill-evolution is report-only and self-terminating", messages)
-            self.assertIn("only current-lineage block decisions are carried to `downstream-gates.json`", messages)
+            self.assertIn("does not feed task-router", messages)
+            self.assertIn("Session-intent intake feeds task-router directly", messages)
 
     def test_runtime_hook_graph_requires_hook_and_manual_pending_merge_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -689,55 +695,32 @@ class SkillGateContractTest(unittest.TestCase):
             messages = "\n".join(issue.message for issue in issues)
             self.assertIn("gate-state with task-router must include session-intent-analyzer", messages)
 
-    def test_detector_scope_contract_requires_long_horizon_limits(self) -> None:
+    def test_retired_classifier_and_nonterminal_evolution_are_rejected(self):
+        for mutation in ('detector', 'evolution'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / "skill-catalog/session-gates.json"
+                contract = json.loads(path.read_text())
+                if mutation == 'detector':
+                    contract['intent_consumers']['session-intent-analyzer'].append('jailbreak-detector')
+                else:
+                    contract['intent_consumers']['skill-evolution'].append('task-router')
+                path.write_text(json.dumps(contract))
+                messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+                self.assertIn('retired standalone classifier' if mutation == 'detector' else 'report-only-terminal-branch', messages)
+
+    def test_direct_intake_contract_rejects_a_renamed_intermediate_stage(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            self._write_file(
-                root,
-                "docs/policies/session-gate-matrix.md",
-                (
-                    "skill-catalog/session-gates.json\n"
-                    "task-router\n"
-                    "using-coding-convention\n"
-                    "boundary-contract\n"
-                    "session-intent-analyzer\n"
-                    "boundary-contract: required\n"
-                    "English canonical narrative + English control surface\n"
-                    "[gate-state]\n"
-                    "[completion-check]\n"
-                    "acceptance-criteria\n"
-                    "claim-evidence-map\n"
-                    "unverified\n"
-                    "skill-call:\n"
-                    "Required gate skills are not complete unless a fresh or valid retained instruction body was used\n"
-                    "Read or validly reuse the relevant instruction body before marking a required gate done\n"
-                    "Runtime Hook Graph Contract\n"
-                    "Pending-merge precheck runs before the user-input governance graph begins\n"
-                    "downstream-gates.json\n"
-                    "skill-evolution is report-only and self-terminating\n"
-                    "only current-lineage block decisions are carried to `downstream-gates.json`\n"
-                    "session-intent-analyzer intake is first\n"
-                    "session-intent-analyzer → task-router\n"
-                    "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage\n"
-                    "keep checking later tool calls silently\n"
-                    "new user input, current-lineage block/deny, mismatch\n"
-                    "first poll in the input lineage\n"
-                ),
-            )
-            self._write_file(
-                root,
-                "session-intent-analyzer/references/ledger-schema.md",
-                "acceptance_criteria\nverifiable completion criterion\n",
-            )
-            self._write_file(root, "jailbreak-detector/SKILL.md", "")
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-
-            self.assertIn("Deterministic hard-block rules are narrow regression guards", messages)
-            self.assertIn("Gradual multi-turn jailbreak resistance depends on session-intent summary quality", messages)
-            self.assertIn("intent-state.json is update-plus-accumulate state", messages)
+            path = root / "skill-catalog/session-gates.json"
+            contract = json.loads(path.read_text())
+            contract['user_input_graph'].insert(2, 'input-policy-review')
+            contract['intent_consumers']['session-intent-analyzer'].append('input-policy-review')
+            path.write_text(json.dumps(contract))
+            messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+            self.assertIn('direct intake ownership', messages)
 
     def test_valid_contract_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

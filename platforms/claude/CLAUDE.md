@@ -10,7 +10,6 @@ When a user turn begins in a Claude session, apply this contract before any long
 
 1. Reuse a hook-provided pending-merge result first; without one, finish the manual fallback before actionable work, except for a no-work terminal route (`clarification-only` or `direct-response`).
 2. Connect the `session-intent-analyzer` intake.
-3. Give `jailbreak-detector` the opportunity to record a current-lineage downstream block.
 4. If no block exists, run `task-router`.
 5. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
 6. Surface one full `[tool-checkpoint]` for the user-input tool batch. Runtime hooks continue checking later tool calls silently unless state changes.
@@ -46,10 +45,10 @@ When trusted hook payload evidence exists, use it. After a hook denial, leave th
 
 If hooks are disabled in the Claude session, hook review or trust is incomplete, or no relevant hook payload evidence has been observed, do not claim hook-enforced intake, routing, completion, or io-trace evidence. Apply the following manual fallback instead.
 
-- Apply the `Claude First-Turn Contract` in order. `session-intent-analyzer` fans out to the report-only `skill-evolution` branch and to `jailbreak-detector`; `task-router` runs only after the detector opportunity and only when no current-lineage block exists.
+- Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
 - Store no raw prompt. Record digest-only intake, and add a compressed semantic delta only when goals, constraints, decisions, non-goals, open questions, or acceptance criteria materially change.
-- Treat an absent `downstream-gates.json` as silent allow when no current-lineage block exists. Do not infer risk from tool identity, payload content, audit metadata, or missing optional evidence.
-- Run `task-router` after intake and the detector opportunity, then call every routed skill through Claude's `Skill` tool before following its workflow.
+- Preserve legacy model judgments and downstream gate files as history; do not interpret them as current execution permission. Native permission remains with its host.
+- Run `task-router` after exact session-intent intake, then call every routed skill through Claude's `Skill` tool before following its workflow.
 - When task-router returns `boundary-contract: required`, run `boundary-contract` before file discovery, modification, or verification.
 - Surface one full `[tool-checkpoint]` per user-input lineage. A declared routine batch may use `[tool-checkpoint:batch]`; polling the same already-started process may use `[tool-checkpoint:continuation]`. New user input, a block or denial, a mismatch, or any other decision-relevant state change returns to the full checkpoint.
 - Keep gate schemas and canonical operating narrative in English.
@@ -62,7 +61,7 @@ If hooks are disabled in the Claude session, hook review or trust is incomplete,
 The repository `skill-catalog/session-gates.json` and `docs/policies/session-gate-matrix.md` are the SSOT. The installed Claude session follows this minimum order.
 
 - First intake: `session-intent-analyzer`
-- Security opportunity: `jailbreak-detector`; a missing current-lineage block is silent allow
+- Native permission, human authority, credentials, and provenance remain with their actual owners.
 - Request decomposition and routing: `task-router`
 - Development turn: `using-coding-convention`
 - Bug fix: `systematic-debugging` then `test-driven-development`
@@ -119,7 +118,7 @@ At session start, use current Claude hook evidence if it reports the pending-mer
 
 ### 0. Task Routing Gate (required on user input)
 
-After `session-intent-analyzer` intake and the `jailbreak-detector` downstream-gate opportunity, and before downstream work or a tool call, invoke `task-router` through the Claude Skill tool. A known pending-merge result still precedes routing; a missing manual result may be deferred only through a no-work terminal route. task-router performs atomic meaning decomposition and skill routing; it does not own raw intent inference, ledger storage, the security decision, downstream gate state, or tool permission.
+After exact session-intent-analyzer intake and before downstream work or a tool call, invoke task-router through the host skill surface. Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
 
 ### 0-A. merge-companion Self-Check Gate (pending-merge prose-rule layer)
 
@@ -127,9 +126,9 @@ Reuse a current-platform hook precheck when present. Without it, inspect the Cla
 
 ### 0-B. Session Intent Ledger Gate
 
-On every input, `session-intent-analyzer` records digest and length, never raw input, full conversation, tool output, system instructions, or secrets. Add semantic deltas only for material changes and accumulate deduplicated constraints, decisions, non-goals, open questions, criteria, and compressed conduct feedback. The ledger supplies context to `skill-evolution` and `jailbreak-detector`; it is not long-term memory and must not be promoted without user approval.
+Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
 
-Only a model-recorded, current-lineage `block` is carried to `downstream-gates.json`. Missing or non-block state is silent allow. tool-checkpoint considers that gate state only; audit and correlation metadata remain outside the decision body.
+Legacy model judgments and gate files remain historical artifacts. They are not current routing prerequisites or native permission decisions. Checkpoint deduplication and strict audit logging remain active.
 
 ### 1. Mandatory Official Spec Verification After Writing or Modifying a Skill
 

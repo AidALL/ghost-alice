@@ -25,7 +25,7 @@ class VisibilityIntentBoundaryTests(unittest.TestCase):
         self.sid = "bound-session"
         self.session = self.root / "codex" / self.sid
         self.session.mkdir(parents=True)
-        self.env = dict(os.environ, HOME=str(self.home), CODEX_THREAD_ID="", GHOST_ALICE_SESSION_ID="",
+        self.env = dict(os.environ, GHOST_ALICE_GHOST_ROOT=str(self.home / ".ghost-alice"), CODEX_THREAD_ID="", GHOST_ALICE_SESSION_ID="",
                         GHOST_ALICE_PLATFORM="codex", GHOST_ALICE_SESSION_INTENT_ROOT=str(self.root),
                         GHOST_ALICE_AGENT_VISIBILITY="minimal")
 
@@ -67,9 +67,9 @@ class VisibilityIntentBoundaryTests(unittest.TestCase):
             "schema_version": "session-intent-current.v1", "platform": "codex", "session_id": self.sid}))
         self.assertEqual(self.native_visible_decision({}), "hide")
 
-    def test_native_current_model_block_surfaces_before_gate_projection(self):
+    def test_legacy_model_block_does_not_force_visibility(self):
         self.seed(model_block=True, event_id="old-input")
-        self.assertEqual(self.native_visible_decision({"session_id": self.sid}), "force_show")
+        self.assertEqual(self.native_visible_decision({"session_id": self.sid}), "hide")
 
     def test_native_old_gate_and_audit_do_not_override_new_state_input(self):
         self.seed(gate=True, event_id="old-input")
@@ -94,9 +94,9 @@ class VisibilityIntentBoundaryTests(unittest.TestCase):
         self.seed(gate=True, directory=other)
         self.assertNotIn("security_boundary", self.context())
 
-    def test_canonical_current_gate_still_forces_visibility(self):
+    def test_legacy_gate_does_not_force_visibility(self):
         self.seed(gate=True)
-        self.assertTrue(self.context()["security_boundary"])
+        self.assertNotIn("security_boundary", self.context())
 
     def test_failed_intake_marker_invalidates_prior_block_visibility(self):
         self.seed(model_block=True, gate=True)

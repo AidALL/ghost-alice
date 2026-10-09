@@ -1,6 +1,6 @@
 ---
 name: task-router
-description: "Runs after session-intent-analyzer and jailbreak-detector/downstream gate as their consumer. Decomposes the request and routes output, verification, lifecycle, and boundary skills without owning intake, raw intent inference, or tool permission."
+description: "Use after session-intent intake to decompose requests and route output, verification, lifecycle, and boundary skills without owning intake, raw intent inference, or native tool permission."
 calls:
   - "meta:*"
 compatibility:
@@ -19,16 +19,16 @@ Language contract: English canonical narrative + English control surface.
 Stable contract phrases:
 - request decomposition, work placement, skill routing
 - raw user intent inference
-- current-lineage block gate
+- exact current input binding
 - pending merge remains undecided when deferred
 
-task-router is a consumer of session-intent-analyzer and jailbreak-detector/downstream gate context. It does not own user-input intake, raw intent inference, semantic intent updates, accumulated intent storage, jailbreak decisions, downstream gate state, or tool permission. It owns the current response-route candidate; Core validates and persists that projection through the ledger API.
+Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission. It owns the current response-route candidate; Core validates and persists that projection through the ledger API.
 
 This is a routing decision only. task-router does not perform raw user intent inference and does not decide tool permission.
 
-task-router starts after session-intent preflight when jailbreak-detector has not recorded a current-lineage block for the current input. Missing `downstream-gates.json` is `silent allow` when no current-lineage block exists. An explicit allow gate may be used as release evidence. A current-lineage block gate pauses task-router and downstream work.
+task-router starts directly after exact session-intent preflight. Missing or degraded intake calls for recording recovery, never a substituted legacy judgment or invented native permission.
 
-task-router is not a tool permission owner and not a tool-checkpoint owner. Tool execution permission, full `[tool-checkpoint]` schema, tool-stage decision policy, and downstream gate state belong to runtime hooks and dedicated skills. `tool-checkpoint` is a tool-stage `PreToolUse`/`BeforeTool` checkpoint, not user-input intake.
+task-router is not a tool permission owner and not a tool-checkpoint owner. Native tool permission belongs to its host. Runtime hooks own the full `[tool-checkpoint]` schema, input-lineage surface deduplication, and strict audit logging. `tool-checkpoint` is a tool-stage `PreToolUse`/`BeforeTool` checkpoint, not user-input intake.
 
 Stable checkpoint phrases: `hook-stage: PreToolUse` and `meaning: tool-call retry checkpoint, not user-input intake`.
 </ROLE-SCOPE>
@@ -38,9 +38,9 @@ This gate is a quality-maintenance procedure that realigns the goal, the output,
 </QUALITY-RATIONALE>
 
 <ROUTING-CONTRACT>
-When there is user input, call this skill after the session-intent-analyzer intake and the jailbreak-detector/downstream gate. This gate is the mandatory starting point for agent-side request decomposition after the session-intent intake, and it runs before any downstream work or tool call. Check its applicability regardless of domain, including coding, documentation, and chores.
+When there is user input, call this skill after exact session-intent intake and before downstream work or tool calls. Check applicability regardless of domain, including coding, documentation, and chores.
 
-This skill never runs before session-intent-analyzer or the jailbreak-detector/downstream gate. The normal order is `pending-merge precheck -> session-intent-analyzer -> jailbreak-detector/downstream-gates -> task-router`. `skill-evolution` is a report-only terminal branch of session-intent-analyzer and is not a path that feeds task-router.
+This skill never runs before session-intent-analyzer. The normal order is `pending-merge precheck -> session-intent-analyzer -> task-router`. skill-evolution is a report-only terminal branch and does not feed task-router.
 
 Do not skip it on the agent's own judgment alone, such as "already routed on a previous input", "the same domain", or "a simple follow-up". A subagent-delegated task that is clearly outside task-router's scope follows the `SUBAGENT-STOP` contract.
 </ROUTING-CONTRACT>
@@ -72,7 +72,7 @@ task-router scans available skill descriptions against the current session inten
 
 The normative routing contract is the `<ROUTING-CONTRACT>` block above. This section is an index pointer, not a second source of truth.
 
-Stable index phrase: after session-intent-analyzer intake and jailbreak-detector/downstream gate opportunity.
+Stable index phrase: after exact session-intent-analyzer intake.
 
 ## 1. Procedure
 
@@ -90,7 +90,7 @@ At task-router start, before consuming session intent context:
 
 ### 1.1 Consume Session Intent Context
 
-Use the current intent summary and downstream gate context first. The raw user input is not the source of truth. Surface signals may supplement missing context.
+Use the exact current session-intent summary first. The raw user input is not the source of truth. Surface signals may supplement missing context.
 
 Use exact file and executable paths established by runtime, tool, or source evidence rather than deriving directory structure from a skill-family label; when a binding is missing, perform one bounded file inventory and reuse the established path.
 

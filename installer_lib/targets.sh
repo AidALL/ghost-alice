@@ -374,6 +374,12 @@ cleanup_deprecated_installed_skills() {
     fi
   done
 
+  local retirement_py
+  retirement_py="$(_find_python_runtime || true)"
+  [ -n "$retirement_py" ] || return 1
+  "$retirement_py" -B "${SCRIPT_DIR}/_shared/retired_assets.py" \
+    --skills-root "$skills_root" --source-root "$SCRIPT_DIR" \
+    --ghost-root "${GHOST_ALICE_GHOST_ROOT:-${HOME}/.ghost-alice}" --platform "$PLATFORM" || return 1
   return 0
 }
 

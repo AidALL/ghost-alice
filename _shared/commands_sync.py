@@ -1,4 +1,6 @@
 import json, os, sys
+from pathlib import Path
+from retired_assets import retire_command
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -26,6 +28,11 @@ def sync_platform(commands_dir, ext, make_content, label):
     """Generic sync logic for one platform."""
     global exit_code
     os.makedirs(commands_dir, exist_ok=True)
+    retired = Path(commands_dir) / "jailbreak-detector.md"
+    if mode != "check" and retired.exists():
+        result = retire_command(retired, source_root=Path(__file__).resolve().parents[1])
+        if result["action"] == "retired-managed":
+            print(f"  {info_c} Retired managed command preserved at {result['backup_path']}")
 
     existing = set()
     for entry in os.listdir(commands_dir):

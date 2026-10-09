@@ -22,7 +22,7 @@ class JavascriptLedgerBoundaryTests(unittest.TestCase):
         self.sid = "session-a"
         self.directory = self.root / self.platform / self.sid
         self.directory.mkdir(parents=True)
-        self.env = dict(os.environ, HOME=str(self.root / "home"), CODEX_THREAD_ID="", GHOST_ALICE_SESSION_ID="")
+        self.env = dict(os.environ, GHOST_ALICE_GHOST_ROOT=str(self.root / "ghost"), CODEX_THREAD_ID="", GHOST_ALICE_SESSION_ID="")
 
     def save(self, name, value):
         (self.directory / name).write_text(json.dumps(value) + "\n")
@@ -62,16 +62,16 @@ class JavascriptLedgerBoundaryTests(unittest.TestCase):
     def denied(self, **kwargs):
         return self.run_hook(**kwargs).get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
-    def test_authoritative_anchor_carries_current_block_without_audit_file(self):
+    def test_authoritative_anchor_routes_without_projecting_legacy_block(self):
         self.state({"decision": "block", "input_event_id": "new-input"})
-        self.assertTrue(self.denied())
-        gate = json.loads((self.directory / "downstream-gates.json").read_text())
-        self.assertEqual(gate["input_event_id"], "new-input")
+        self.assertFalse(self.denied())
+        self.assertFalse((self.directory / "downstream-gates.json").exists())
+        self.assertIn("intake-ready", json.dumps(self.run_hook(reminder=True)))
 
     def test_pending_audit_cannot_hide_current_block(self):
         self.state({"decision": "block", "input_event_id": "new-input"}, pending_audit_event={"event_id": "new-input"})
         self.event("old-input", input_digest="sha256:old")
-        self.assertTrue(self.denied())
+        self.assertFalse(self.denied())
 
     def test_old_audit_cannot_revive_old_decision_or_gate(self):
         self.state({"decision": "block", "input_event_id": "old-input"})
@@ -149,10 +149,10 @@ class JavascriptLedgerBoundaryTests(unittest.TestCase):
         self.event()
         self.assertFalse(self.denied())
 
-    def test_valid_legacy_identity_and_event_still_carry_current_block(self):
+    def test_valid_legacy_identity_and_event_remain_routing_context(self):
         self.state({"decision": "block", "input_event_id": "new-input"}, legacy=True)
         self.event()
-        self.assertTrue(self.denied())
+        self.assertFalse(self.denied())
 
     def test_missing_state_creates_no_block_from_a_gate_and_event(self):
         self.event()

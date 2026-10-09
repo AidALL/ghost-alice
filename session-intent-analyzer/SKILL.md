@@ -1,17 +1,16 @@
 ---
 name: session-intent-analyzer
-description: "Update the per-session intent ledger for every user input and provide current intent as semantic context consumed by gates, skill-evolution, and jailbreak-detector. Keep intent summaries without storing raw prompts."
+description: "Use after every user input to maintain exact session intent and provide context for task-router and report-only skill-evolution without storing raw prompts."
 compatibility:
   - "Python 3.11+ standard library"
   - "hook-capable environments plus hookless/manual fallback"
 calls:
-  - "soft:jailbreak-detector"
   - "soft:skill-evolution"
 ---
 
 # session-intent-analyzer
 
-session-intent-analyzer maintains a small per-session ledger of the user's current goal, constraints, decisions, non-goals, open questions, and acceptance criteria. It lets skill-evolution interpret tool sequences with intent context and lets jailbreak-detector compare current requests against accumulated session intent.
+session-intent-analyzer maintains the user's actual objective, constraints, decisions, non-goals, open questions, and acceptance criteria. It supplies exact session context for task-router and report-only skill-evolution; both preserve the quality floor through contrary evidence, mismatch repair, and adaptive focus and verification.
 ## Contents
 
 - [Storage Contract](#storage-contract)
@@ -30,10 +29,9 @@ session-intent-analyzer maintains a small per-session ledger of the user's curre
 - Hooks record digest-only observations and intake status. Agents add semantic deltas only when goals, constraints, decisions, or acceptance criteria materially change.
 - Scalar intent fields are replaced by the latest semantic delta. Lists such as constraints, non-goals, open questions, criteria, and decisions are deduped or merged by id.
 - `conduct_feedback` records compressed behavioral corrections, how the agent operated versus what the user asked, and merges by id while preserving `occurrence_count`. Repeated same-id corrections in one session increment `occurrence_count`; status-only updates do not. session-intent-analyzer captures it and skill-evolution consumes it, so the behavioral-correction loop is complete only across both skills, not in skill-evolution alone.
-- `model_security_decision` is owned by jailbreak-detector. Intake preserves it and must not clobber it.
-- Only a current-lineage block decision is carried to `downstream-gates.json`. Non-block decisions and non-current-lineage decisions are not carried.
+- `model_security_decision` and its audit events are retained legacy history. Current consumers never interpret them as execution authorization or tool permission.
 - The `--read-events` API returns input observations and normalized semantic changes with input and revision references. New change records preserve supported intermediate intent; they do not reconstruct missing historical dialogue.
-- `security-events.jsonl` records security judgments.
+- Legacy `security-events.jsonl` remains historical audit material.
 - Database discovery metadata replaces the platform pointer for new writes. Legacy `../current-session.json` is only a discovery hint; it never supplies a write identity.
 - Raw prompts, full conversations, tool output, and secret values are never stored.
 - User input is stored only as digest and length.
@@ -44,7 +42,7 @@ session-intent-analyzer maintains a small per-session ledger of the user's curre
 - Immediately after every user input, before task-router.
 - When the user changes goals, constraints, priority, or acceptance criteria.
 - When passing `--intent-ledger` to skill-evolution.
-- When jailbreak-detector needs current intent context.
+- When task-router needs exact current intent context.
 
 ## Procedure
 
@@ -52,9 +50,9 @@ session-intent-analyzer maintains a small per-session ledger of the user's curre
 2. For hook observation, store only `input_digest`, `input_char_count`, `intake_status=observed`, and `intent_delta_status=not-provided`.
 3. Add a semantic delta only when `current_goal`, `user_intent_summary`, `constraints`, `non_goals`, `decisions`, `open_questions`, or `acceptance_criteria` materially changes. When a completion, recommendation, or choice is anticipated, record verifiable `acceptance_criteria` from user intent so the final `[completion-check]` can carry them into `acceptance-criteria` and bind each claim in `claim-evidence-map`. When the user explicitly revises a boundary, record a decision naming the replaced restriction, the authorized exception, and the restrictions that still apply. Accumulating a new goal alone does not make that relationship clear.
 4. Keep corrective lessons general. Do not store long episode details. Preserve the reusable reasoning pattern, not case detail. When the user corrects the agent's conduct (under-delivery, silent scope narrowing, reporting or asking instead of executing, punting a decision the content could resolve, an unrequested trace, a redundant check without an actual mutation path, explaining a confirmed flaw in a provided deliverable without returning the corrected deliverable), record compressed `conduct_feedback` with a stable `id`, a reusable `summary` or `corrective_rule`, and a `pattern_class` from `references/ledger-schema.md` so recurrence stays visible across sessions. Judge correction by the asserted mismatch between a prior agent action or claim and the applicable `current_goal`, `constraints`, `non_goals`, `decisions`, or `acceptance_criteria`, not by keywords. Apply the evidence boundary below before recording or incrementing a correction. skill-evolution consumes these entries as recommendations; apply changes only when the user asks to update.
-5. Use `consumer_hints` when downstream gates need immediate caution or completion criteria.
+5. Use `consumer_hints` when routing consumers need decision-relevant context or completion criteria.
 6. Use `scripts/session_intent_ledger.py` to update the SQLite state and audit atomically. An active input requires the expected input ID. If a newer input invalidates the receipt, read and interpret that input before deciding what to write; never attach a stale judgment to a fresh ID. The writer also accepts `--expected-revision` when a decision must match an exact inspected state revision.
-7. If security signals exist, pass `intent_summary` and the authoritative state returned by `--read-state` to jailbreak-detector.
+7. Supply the exact authoritative state returned by `--read-state` to task-router; skill-evolution consumes the same session through its report-only terminal branch.
 8. For repeated-action analysis, pass `--intent-ledger <receipt.state_path>` to skill-evolution; its reader resolves that compatibility locator through the storage API.
 
 Substitute the current receipt and a compressed semantic delta in this example:
@@ -81,7 +79,7 @@ If no delta is needed, leave `last_semantic_delta_status=not-provided` and mark 
 
 Snapshots use snake_case `acceptance_criteria`. Final `[completion-check]` surfaces convert that to the English control field `acceptance-criteria`.
 
-Snapshots preserve non-superseded decision bodies in `active_decisions` and the recorded `latest_scope` object, alongside the existing `decision_count`. These fields carry semantic context for interpreting corrections; they do not grant tool permission, clear a security block, retire accumulated constraints, or prove that a recorded action occurred. Absent or non-object scope becomes `{}`. Consumers must reconcile a changed decision with the preserved constraints rather than infer authority from the field's presence.
+Snapshots preserve non-superseded decision bodies in `active_decisions` and the recorded `latest_scope` object, alongside the existing `decision_count`. These fields carry semantic context for interpreting corrections; they do not grant tool permission, retire accumulated constraints, or prove that a recorded action occurred. Absent or non-object scope becomes `{}`. Consumers must reconcile a changed decision with the preserved constraints rather than infer authority from the field's presence.
 
 Accumulated lists can contain restrictions from earlier turns. Compare them with the current goal, scope, active decisions, and criteria before deciding the next action. Honor an explicit user revision within its stated exception; preserve the remaining restrictions. If the supplied context does not resolve a conflict, name the conflicting boundary and ask only for the missing decision while continuing uncontroversial work when possible. Do not silently downgrade an edit request to analysis, discard a restriction because a goal is newer, or require renewed approval when the existing revision already resolves the conflict.
 

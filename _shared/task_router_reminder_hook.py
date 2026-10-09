@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prompt hook that releases task-router after intent preflight or explicit gate allow.
+"""Prompt hook that releases task-router after exact intent preflight.
 
 Dependencies: Python 3.11+ standard library and the sibling intake hook.
 """
@@ -21,7 +21,10 @@ from session_check_cache import instruction_delivery
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1] / ".tmp" / "session-intent"
 DEFAULT_INTERNAL = (
-    "hook-reminder: task-router waits until session-intent preflight exists and no current-lineage block gate is recorded. " "Absent downstream-gates.json means silent allow unless a current-lineage model block is recorded. " "After release, read the ledger, decompose accepted intent into atomic meaning units, choose focus-layer micro|meso|macro|meta " "plus scope-reopen target on mismatch, then assign output, verification, lifecycle, and boundary skills before downstream work/tool calls."
+    "hook-reminder: run task-router after exact session-intent preflight. "
+    "Read the ledger, decompose accepted intent into atomic meaning units, choose focus-layer "
+    "micro|meso|macro|meta plus scope-reopen target on mismatch, then assign output, verification, "
+    "lifecycle, and boundary skills. Task-router owns routing, not intake or native tool permission."
 )
 
 
@@ -51,30 +54,6 @@ def resolve_session_id(root: Path, platform: str, payload: dict[str, Any]) -> st
 def session_dir(root: Path, platform: str, session_id: str) -> Path:
     return root / safe_path_component(platform) / safe_path_component(session_id)
 
-
-def gate_state(root: Path, platform: str, session_id: str,
-               material: dict[str, Any] | None = None) -> dict[str, Any]:
-    material = session_material(root, platform, session_id) if material is None else material
-    latest = material['latest_input']
-    record = material['state'].get('model_security_decision')
-    if isinstance(record, dict) and record.get('decision') == 'block':
-        if downstream_gate_matches_latest_event(record, latest).get('ok'):
-            # A routing hint must not call a known current model block absent
-            # merely because its derived gate file has not been published yet.
-            return {'decision': 'block', 'opened': False}
-    gate = read_json(session_dir(root, platform, session_id) / "downstream-gates.json")
-    if gate.get("schema_version") != "downstream-gates.v1":
-        return {}
-    if gate.get("gate") != "jailbreak-detector":
-        return {}
-    if gate.get("platform") != platform or gate.get("session_id") != session_id:
-        return {}
-    match = downstream_gate_matches_latest_event(gate, latest)
-    if not match.get("ok", False):
-        gate["stale"] = True
-        gate["stale_reason"] = match.get("reason", "stale downstream gate")
-        gate["legacy"] = match.get("legacy", False)
-    return gate
 
 
 def session_material(root: Path, platform: str, session_id: str) -> dict[str, Any]:
@@ -130,19 +109,6 @@ def _input_from_state(state: dict[str, Any], directory: Path,
     return {}
 
 
-def downstream_gate_matches_latest_event(gate: dict[str, Any], latest_event: dict[str, Any]) -> dict[str, Any]:
-    if not gate.get("input_event_id") and not gate.get("input_digest"):
-        return {"ok": False, "legacy": True, "reason": "legacy downstream gate missing input lineage"}
-    if not latest_event:
-        return {"ok": False, "legacy": False, "reason": "stale downstream gate: latest input event missing"}
-    if latest_event.get("event_id") and gate.get("input_event_id") != latest_event.get("event_id"):
-        return {"ok": False, "legacy": False, "reason": "stale downstream gate: input_event_id mismatch"}
-    if gate.get("input_event_id") and not latest_event.get("event_id"):
-        return {"ok": False, "legacy": True, "reason": "legacy input cannot verify supplied event ID"}
-    if gate.get("input_digest") and gate["input_digest"] != latest_event.get("input_digest"):
-        return {"ok": False, "legacy": False, "reason": "stale downstream gate: input_digest mismatch"}
-    return {"ok": True, "legacy": False}
-
 
 def ledger_state_path(root: Path, platform: str, session_id: str) -> str:
     return str(session_dir(root, platform, session_id) / "intent-state.json")
@@ -157,24 +123,23 @@ def ledger_read_instruction(root: Path, platform: str, session_id: str) -> str:
             f"Compatibility export: {ledger_state_path(root, platform, session_id)} is not authoritative.")
 
 
-def unresolved_work_instruction(state: dict[str, Any]) -> list[str]:
-    """Expose existing admitted work, without interpreting the new input or granting authority."""
+def intent_history_instruction(state: dict[str, Any]) -> list[str]:
+    """Diagnostic history only; accumulated conditions never select current work."""
     criteria = state.get("acceptance_criteria")
     if not isinstance(criteria, list):
         return []
-    pending = [item["id"] for item in criteria
-               if isinstance(item, dict) and item.get("admitted") is True
-               and item.get("status") == "unmet"
+    history = [{key: item[key] for key in ("id", "work_unit_id", "contract_revision", "status")
+                if key in item}
+               for item in criteria if isinstance(item, dict)
+               and item.get("admitted") is True and item.get("status") == "unmet"
                and isinstance(item.get("id"), str) and item["id"]]
-    if not pending:
+    if not history:
         return []
     return [
-        "unresolved-work: " + json.dumps(pending, ensure_ascii=False),
-        "Reconcile the current input with these criteria and existing authorization. "
-        "During actionable authorized work, answer status questions in commentary and continue; "
-        "partial verification or a branch-local blocker does not finish the task. "
-        "Respect an explicit stop, pause, cancellation, or replacement. "
-        "This reminder does not authorize work or decide tool permission.",
+        "intent-history-diagnostic: " + json.dumps(history, ensure_ascii=False),
+        "These accumulated conditions are history, not a current work selection or execution authorization. "
+        "Use the current Core response-route and exact owned contract revision to select work. "
+        "Reconcile existing authorization with the current input; respect stop, pause, cancellation, or replacement.",
     ]
 
 
@@ -183,11 +148,11 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
 
 
 def reminder_result(base_message: str, root: Path, platform: str, payload: dict[str, Any]) -> tuple[str, bool]:
-    """(message, routine). Only a release with no current block is routine; every withheld or stale state is not."""
+    """(message, routine). Only successful exact intake is routine; every unavailable input state is not."""
     session_id = resolve_session_id(root, platform, payload)
     if session_id == "unknown":
         return (
-            "hook-reminder: task-router withheld until the current host supplies a valid session identity " "and the current-lineage block check can run. Do not run task-router yet."
+            "hook-reminder: task-router withheld until the current host supplies a valid session identity. " "Do not run task-router yet."
         ), False
 
     # Fail-closed on a degraded ledger: when session-intent-analyzer could not record the latest input (broken import or write failure), the "latest event" anchor is stale, so releasing routing here would ride a previous turn's lineage. The marker is cleared by the analyzer hook on the next successful observation.
@@ -215,40 +180,12 @@ def reminder_result(base_message: str, root: Path, platform: str, payload: dict[
             "hook-reminder: task-router withheld until session-intent-analyzer records the current input "
             f"for session {session_id}. Continue intake/bootstrap; do not ask the user for another input."
         ), False
-    gate = gate_state(root, platform, session_id, material)
-    if not gate:
-        gate_path = str(session_dir(root, platform, session_id) / "downstream-gates.json")
-        return "\n".join([
-            base_message,
-            f"gate-opened: jailbreak-detector silent allow for session {session_id}; no current block decision recorded.",
-            ledger_read_instruction(root, platform, session_id),
-            f"downstream-gate: {gate_path} absent; silent allow invariant applies unless a current-lineage model block is recorded.",
-            "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
-            *unresolved_work_instruction(material['state']),
-        ]), True
-
-    if gate.get("stale"):
-        reason = str(gate.get("stale_reason") or "stale downstream gate")
-        return (
-            "hook-reminder: jailbreak-detector downstream gate is stale for the latest input. "
-            f"{reason}. Continue intake/routing; do not reuse the stale decision as current block/allow."
-        ), False
-
-    decision = str(gate.get("decision") or "unknown")
-    if gate.get("opened") is False or decision == "block":
-        return (
-            "hook-reminder: task-router withheld because jailbreak-detector downstream gate recorded a current-lineage block. "
-            f"decision={decision}. Do not run task-router or downstream work."
-        ), False
-
-    gate_path = str(session_dir(root, platform, session_id) / "downstream-gates.json")
     return "\n".join([
         base_message,
-        f"gate-opened: jailbreak-detector silent allow for session {session_id}; no current block decision recorded.",
+        f"intake-ready: current input recorded for session {session_id}.",
         ledger_read_instruction(root, platform, session_id),
-        f"downstream-gate: {gate_path} contains no block; silent allow invariant applies.",
-        "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
-        *unresolved_work_instruction(material['state']),
+        "task-router-step: read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
+        *intent_history_instruction(material['state']),
     ]), True
 
 
@@ -269,14 +206,14 @@ def render_payload(output_format: str, message: str, *, routine: bool = False) -
         return json.dumps(body, ensure_ascii=False)
     return "\n".join([
         f"Internal instruction: {message}",
-        "User: Run task-router after session-intent preflight; absent current-lineage block gate is silent allow.",
+        "User: Run task-router after exact session-intent preflight; native permission stays with its host.",
         "Tech: After release, task-router reads the ledger, chooses focus-layer/scope-reopen, and assigns skills.",
         "",
     ])
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Release task-router reminder after intent preflight or explicit gate allow.")
+    parser = argparse.ArgumentParser(description="Release task-router reminder after exact intent preflight.")
     parser.add_argument("--platform", default="codex")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--root", default=str(DEFAULT_ROOT))
@@ -295,7 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root).expanduser()
     payload = read_payload()
     message, routine = reminder_result(base_message, root, args.platform, payload)
-    # The current input/gate was evaluated above. Only repeated prose is cached.
+    # The current input binding was evaluated above. Only repeated prose is cached.
     if routine:
         # Bind to the inspected material's session, never the discovery pointer.
         session_id = resolve_session_id(root, args.platform, payload)

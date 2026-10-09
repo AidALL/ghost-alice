@@ -55,7 +55,7 @@ Every user input is a `task-router` target. Simple questions, opinions, status c
 
 ### session-intent-analyzer
 
-Every user input is observed by the session intent ledger. Hooks store digest and event data, not raw prompts. When goals, constraints, decisions, or non-goals change, the agent records a compressed delta through the authoritative SQLite ledger API. Compatibility/export `intent-state.json` is update-plus-accumulate state: scalar intent fields are replaced by newer deltas, while list-like constraints, non-goals, questions, criteria, and decisions are deduped or merged by stable id. This context is consumed by `skill-evolution` and `jailbreak-detector`. Deterministic hard-block rules are narrow regression guards for explicit attack signals; gradual multi-turn jailbreak resistance depends on session-intent summary quality and cumulative constraint comparison.
+Every user input is observed by the session intent ledger. Hooks store digest and event data, not raw prompts. When goals, constraints, decisions, or non-goals change, the agent records a compressed delta through the authoritative SQLite ledger API. Compatibility/export `intent-state.json` is update-plus-accumulate state: scalar intent fields are replaced by newer deltas, while list-like constraints, non-goals, questions, criteria, and decisions are deduped or merged by stable id. Task-router consumes this exact session context directly; skill-evolution consumes it as a report-only terminal branch. Legacy model judgments remain readable history and do not supply current execution permission. Native permission, credentials, provenance, and audit remain with their actual owners.
 
 ### pending merge precheck
 

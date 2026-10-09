@@ -10,27 +10,23 @@
     "merge-companion-precheck",
     "session-intent-analyzer",
     "skill-evolution:report-only-terminal-branch",
-    "jailbreak-detector",
     "task-router",
     "tool-checkpoint"
   ],
   "intent_consumers": {
     "session-intent-analyzer": [
-      "skill-evolution",
-      "jailbreak-detector"
+      "task-router",
+      "skill-evolution"
     ],
     "skill-evolution": [
       "report-only-terminal-branch"
-    ],
-    "jailbreak-detector": [
-      "task-router"
     ]
   },
   "conditional_gates": [
     {
       "id": "session-intent-analyzer",
       "trigger": "every user input; hook records digest-only intake status and agent updates semantic intent delta only when intent materially changes",
-      "position": "after-merge-companion-precheck-before-skill-evolution-and-jailbreak-detector",
+      "position": "after-merge-companion-precheck-before-task-router-and-report-only-skill-evolution",
       "state_path": ".tmp/session-intent/<platform>/<session-id>/intent-state.json",
       "raw_prompt_policy": "do-not-persist"
     },
@@ -47,10 +43,13 @@
       "skill": "merge-companion",
       "trigger": "pending-merges manifest entries where decided=false",
       "manifest_path": "~/.ghost-alice/pending-merges/<platform>/manifest.json",
-      "platforms": ["claude", "codex"],
+      "platforms": [
+        "claude",
+        "codex"
+      ],
       "on_missing_or_empty": "silent-pass",
       "priority": "before-task-router-when-known",
-    "manual_fallback_priority": "before-actionable-work-except-no-work-terminal-routes"
+      "manual_fallback_priority": "before-actionable-work-except-no-work-terminal-routes"
     }
   ],
   "domain_routes": {

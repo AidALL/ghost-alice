@@ -23,7 +23,7 @@ The session gate SSOT is `skill-catalog/session-gates.json`. This document is th
 | Situation | Required entrypoint |
 | --- | --- |
 | First intake for every user input | `session-intent-analyzer` |
-| First agent routing step after session-intent intake and jailbreak-detector downstream gate, before downstream work/tool calls | `task-router` |
+| First agent routing step after exact session-intent intake, before downstream work/tool calls | `task-router` |
 | Development/coding request | `coding-convention/using-coding-convention` |
 | Bug fix | `coding-convention/systematic-debugging` |
 | Production code change | `coding-convention/test-driven-development` |
@@ -34,9 +34,9 @@ The session gate SSOT is `skill-catalog/session-gates.json`. This document is th
 
 ## Turn Routing Contract
 
-session-intent-analyzer intake is first inside the user-input governance graph. A hook pending-merge result is consumed before it; without hook evidence, the manual fallback completes before actionable work and may be deferred only through `clarification-only` or `direct-response`. session-intent-analyzer fans out to `skill-evolution` (report-only terminal branch) and `jailbreak-detector`; task-router is released after session-intent preflight when no current-lineage block gate exists. `downstream-gates.json` may be absent on allow turns; that absence is silent allow unless a current-lineage model block is recorded. Describing the flow as `task-router → session-intent-analyzer`, as a linear `session-intent-analyzer → skill-evolution → jailbreak-detector → task-router` chain, or as task-router bypassing the jailbreak-detector downstream gate is a contract violation.
+session-intent-analyzer intake is first inside the user-input governance graph. Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission. A hook pending-merge result precedes it; without hook evidence, the manual fallback completes before actionable work except no-work terminal routes.
 
-`task-router` is not a classifier used only when work looks large. It applies after session-intent-analyzer intake and jailbreak-detector downstream gate, before downstream work or tool calls on every turn where user input is detected. `task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context and an agent-side request decomposition step. It does not own user-input intake, raw intent inference, ledger updates, jailbreak decisions, downstream gate state, or tool permission. The task-router reminder hook must withhold task-router until session-intent preflight exists and the current-lineage block check can run. If no current-lineage block gate exists, absent `downstream-gates.json` is silent allow. Once released, task-router reads the session intent ledger, performs atomic meaning decomposition, and assigns output, verification, lifecycle, and boundary skills.
+Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission. It applies to every user input after exact intake and before downstream work or tool calls, including bounded explanation and clarification routes.
 
 The following are all fresh routing targets:
 
@@ -58,14 +58,14 @@ Runtime smoke uses `docs/policies/live-smoke-regression.md`. That procedure send
 intent-state.json is update-plus-accumulate state. Latest scalar intent fields such as `current_goal` and `user_intent_summary` are replaced by newer semantic deltas, while list-like fields such as constraints, non-goals, open questions, acceptance criteria, consumer hints, and active decisions are merged by stable identity or deduped value. The ordered database events are append-only audit metadata, exposed through `--read-events` and explicit `intent-events.jsonl` exports, not a raw prompt transcript.
 
 - Storage location: `.tmp/session-intent/<platform>/<session-id>/` under the Ghost-ALICE repo root
-- Consumers: `skill-evolution`, `jailbreak-detector`
+- Consumers: `task-router`, report-only `skill-evolution`
 - Forbidden: raw prompt, full conversation, tool output, system/developer instruction text, secret values
 - Hookless/manual environment: apply the session-intent-analyzer storage contract manually before the first response.
 
 
 First-entry intake invariant:
 - Every user input is connected to the session-intent intake path first.
-- After any hook pending-merge result, session-intent-analyzer fans out to `skill-evolution` (report-only terminal branch) and `jailbreak-detector`; task-router follows only after session-intent preflight and no current-lineage block gate. A missing manual result is resolved before work unless the route terminates as `clarification-only` or `direct-response`.
+- Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
 - `skill-evolution` is a report-only terminal branch from session-intent-analyzer and does not feed task-router.
 - Missing `current-session.json`, `intent-state.json`, hook payload, preflight evidence, or semantic delta evidence is not a deny reason for first entry.
 - Missing session-intent evidence means intake/bootstrap must run or continue; it does not mean tool-checkpoint may infer risk from absence.
@@ -75,13 +75,13 @@ First-entry intake invariant:
 
 Hook pending-merge precheck is a pre-routing/session-start layer. When hook evidence is absent, the manual fallback still completes before actionable downstream work; only a no-work terminal route (`clarification-only` or `direct-response`) may defer it because no work begins. If an undecided entry is known, the runtime must surface `merge-companion` first, but a user-explicit defer/skip may continue with that entry still undecided.
 
-The user-input governance graph is ordered by user intent first, then downstream gate state, then tool-stage tool-checkpoint. A known pending-merge result remains outside and before that graph; a missing manual result is a pre-work requirement rather than a reason to inspect state during a no-work clarification. `tool-checkpoint` is a PreToolUse/BeforeTool checkpoint, not part of user-input intake order. When surfaced, the visible control schema must include `hook-stage: PreToolUse` for Claude/Codex and `meaning: tool-call retry checkpoint, not user-input intake`.
+The user-input governance graph is ordered by exact session intake, then task-router, then tool-stage tool-checkpoint. A known pending-merge result remains outside and before that graph; a missing manual result is a pre-work requirement rather than a reason to inspect state during a no-work clarification. `tool-checkpoint` is a PreToolUse/BeforeTool checkpoint, not part of user-input intake order. When surfaced, the visible control schema must include `hook-stage: PreToolUse` for Claude/Codex and `meaning: tool-call retry checkpoint, not user-input intake`.
 
 1. User input triggers `session-intent-analyzer` on every turn. The hook atomically writes the input digest, session ledger, ordered event and database discovery metadata, then allows the agent turn to continue.
-2. `skill-evolution` and `jailbreak-detector` consume the same session through the authoritative storage API keyed by platform and session id. skill-evolution is report-only and self-terminating; it does not open or close downstream gates and does not feed task-router.
-3. jailbreak-detector records `model_security_decision` in the ledger and only current-lineage block decisions are carried to `downstream-gates.json` as the downstream gateway. Deterministic hard-block rules are narrow regression guards for explicit high-confidence attack signals, not proof that all jailbreak attempts are blocked. A gate block is derived only from the model's recorded judgment (`model_security_decision`), not from deterministic text matching. Gradual multi-turn jailbreak resistance depends on session-intent summary quality and cumulative constraint comparison. If a current-lineage block gate exists, tool execution is denied before tool-shape review; if no current block gate exists, absent `downstream-gates.json` is silent allow.
-4. The task-router reminder hook waits until session-intent preflight exists and the current-lineage block check has had its first chance to run. A current-lineage block gate with `opened=false` or `decision=block` withholds task-router; an absent `downstream-gates.json` is silent allow. After release, `task-router` reads the current-session pointer and session intent ledger, decomposes the accepted intent into atomic meaning units, and assigns output, verification, lifecycle, and boundary skills. It does not infer raw user intent or decide tool permission.
-5. `tool-checkpoint` runs at tool stage after session-intent-analyzer intake and jailbreak-detector downstream gate have had the first chance to run. Missing intake evidence starts bootstrap/recovery; it is not a reason to put `task-router` before `session-intent-analyzer` or before `jailbreak-detector`. The runtime decision reads only the current-lineage block gate: `opened=false` or `decision=block` denies, absent gate or every other state silently allows. Tool-call identity, payload content, and audit/log/correlation metadata are not decision inputs; audit/log/correlation metadata belongs outside the decision path.
+2. task-router and report-only skill-evolution consume the same exact session through the authoritative storage API.
+3. Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission. Legacy model judgment fields/events remain history; no classifier prerequisite or permission derivation is generated.
+4. The task-router reminder requires exact session-intent preflight and a usable current input anchor. Missing identity or degraded recording receives truthful recovery guidance. Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
+5. tool-checkpoint is a PreToolUse/BeforeTool checkpoint, not user-input intake. It deduplicates routine surface by exact input lineage and preserves strict audit logging. It does not decide native tool permission from legacy model judgments, tool-call identity, payload content, or audit metadata. Native tool permission stays with its host; human authority, credentials, and provenance remain applicable.
 
 ## Dynamic Focus Contract
 
@@ -184,9 +184,9 @@ In Codex environments without a visible Skill surface:
 
 ## tool-checkpoint Visible Surface
 
-`tool-checkpoint` is a PreToolUse/BeforeTool checkpoint. It is not part of the user-input intake order and must not be described as running before `session-intent-analyzer`, `jailbreak-detector`, or `task-router`.
+Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
 
-The default `[tool-checkpoint]` block carries `intent` and `why`. Add `procedure` when it changes the next work decision or clarifies a non-routine step. Add `contract-ref` and `contract-check` when a boundary-contract is active. Add `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong` only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful. This preserves the checkpoint procedure without forcing low-impact tool calls to repeat values that do not change the work boundary, focus layer, verification burden, or recovery. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger. This field is model-side reasoning; the hook decision still reads only the current-lineage block gate.
+The default `[tool-checkpoint]` block carries `intent` and `why`. Add `procedure` when it changes the next work decision or clarifies a non-routine step. Add `contract-ref` and `contract-check` when a boundary-contract is active. Add `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong` only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful. This preserves the checkpoint procedure without forcing low-impact tool calls to repeat values that do not change the work boundary, focus layer, verification burden, or recovery. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger. This field is model-side reasoning; it does not grant native tool permission.
 
 `recovery-action` is conditional. Add it only when the failure mode requires a concrete recovery step, scope reopen, external side effect handling, or another hard-to-recover action. Keep it as a stable English action phrase or slug. If mismatch changes scope, state the `focus-layer` and `scope-reopen` target in `procedure` or `recovery-action`.
 
@@ -198,7 +198,7 @@ Runtime hooks surface one full `[tool-checkpoint]` per session input lineage and
 
 `[tool-checkpoint:batch]` and `[tool-checkpoint:continuation]` are compact forms to reduce repeated full-gate cost. They do not create new permission and do not infer that a new tool action is safe.
 
-`[tool-checkpoint:continuation]` refers only to output polling for the same process/session/tool-call id. A new user input, current-lineage block/deny, mismatch, or other state change returns to a surfaced `[tool-checkpoint]`.
+`[tool-checkpoint:continuation]` refers only to output polling for the same process/session/tool-call id. A new user input, native denial, mismatch, or other state change returns to a surfaced `[tool-checkpoint]`.
 
 Simple polling of the same ref is not a duty to repeat output forever; the compact form avoids repeating the full gate. Expose it on the first poll in the input lineage or when state changes.
 

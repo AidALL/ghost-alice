@@ -105,7 +105,6 @@ ALL_SKILLS=(
   coding-convention
   skill-evolution
   agent-security-scan
-  jailbreak-detector
   merge-companion
   necessity-gate
   session-intent-analyzer

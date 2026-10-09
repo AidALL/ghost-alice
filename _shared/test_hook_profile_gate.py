@@ -116,9 +116,9 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 (session / "intent-events.jsonl").write_text(json.dumps({"event": "user-input-observed", "platform": platform, "session_id": "native", "event_id": "e-native", "input_digest": "sha256:native"}) + "\n")
                 (session / "downstream-gates.json").write_text(json.dumps({"schema_version": "downstream-gates.v1", "platform": platform, "session_id": "native", "gate": "jailbreak-detector", "decision": "block", "input_event_id": "e-native"}))
             env = {"GHOST_ALICE_SESSION_INTENT_ROOT": str(root), "CODEX_THREAD_ID": "native", "GHOST_ALICE_SESSION_ID": "foreign"}
-            self.assertTrue(hook_profile_gate._has_current_downstream_block(env, {}, "codex"))
-            self.assertFalse(hook_profile_gate._has_current_downstream_block(env, {"session_id": "foreign"}, "codex"))
-            self.assertFalse(hook_profile_gate._has_current_downstream_block(env, {}, "claude"))
+            self.assertEqual(hook_profile_gate.session_material(root, "codex", "native")["latest_input"]["event_id"], "e-native")
+            self.assertFalse(hook_profile_gate.session_material(root, "codex", "foreign")["latest_input"])
+            self.assertNotIn("security_boundary", hook_profile_gate._visibility_context("prompt", "routine clean pass", "", 0, env=env, hook_payload={}))
 
     def test_runner_normalizes_child_stdio_to_utf8(self):
         code = (
@@ -307,7 +307,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 hook_payload={"session_id": "s-block"},
             )
 
-        self.assertTrue(context["security_boundary"])
+        self.assertNotIn("security_boundary", context)
 
     def test_visibility_context_ignores_stale_downstream_block_gate(self):
         with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as temp_root:
@@ -1881,22 +1881,26 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertNotIn("must-not-be-stored", json.dumps(event))
 
     def test_cli_accepts_current_runner_shape_without_visibility_csv(self):
-        executable = sys.executable.replace("\\", "/")
-        payload = base64.urlsafe_b64encode(f"{executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
+        with tempfile.TemporaryDirectory() as owned, mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT":str(Path(owned)/"ghost")}):
+            executable = sys.executable.replace("\\", "/")
+            payload = base64.urlsafe_b64encode(f"{executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
 
-        with self.assertRaises(SystemExit) as cm:
-            hook_profile_gate.main(["run", "prompt", payload])
+            with self.assertRaises(SystemExit) as cm:
+                hook_profile_gate.main(["run", "prompt", payload])
 
-        self.assertEqual(cm.exception.code, 0)
+            self.assertEqual(cm.exception.code, 0)
+
 
     def test_cli_keeps_legacy_runner_shape_for_installed_wrappers(self):
-        executable = sys.executable.replace("\\", "/")
-        payload = base64.urlsafe_b64encode(f"{executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
+        with tempfile.TemporaryDirectory() as owned, mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT":str(Path(owned)/"ghost")}):
+            executable = sys.executable.replace("\\", "/")
+            payload = base64.urlsafe_b64encode(f"{executable} -c 'import sys; sys.exit(0)'".encode("utf-8")).decode("ascii")
 
-        with self.assertRaises(SystemExit) as cm:
-            hook_profile_gate.main(["run", "prompt", "strict,dynamic,minimal", payload])
+            with self.assertRaises(SystemExit) as cm:
+                hook_profile_gate.main(["run", "prompt", "strict,dynamic,minimal", payload])
 
-        self.assertEqual(cm.exception.code, 0)
+            self.assertEqual(cm.exception.code, 0)
+
 
     def test_runner_hides_clean_pass_after_strict_log_append(self):
         message = "No pending warning from this hook means merge-companion-precheck is clean."
@@ -2189,37 +2193,39 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(result.stderr, "")
 
     def test_runner_platform_argument_reaches_child_environment(self):
-        code = (
-            "import json, os; "
-            "print(json.dumps({'continue': True, 'systemMessage': "
-            "os.environ.get('GHOST_ALICE_PLATFORM', '')}))"
-        )
-        payload = base64.urlsafe_b64encode(
-            _python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")
-        ).decode("ascii")
-        env = os.environ.copy()
-        env.pop("GHOST_ALICE_PLATFORM", None)
-        env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
+        with tempfile.TemporaryDirectory() as owned, mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT":str(Path(owned)/"ghost")}):
+            code = (
+                "import json, os; "
+                "print(json.dumps({'continue': True, 'systemMessage': "
+                "os.environ.get('GHOST_ALICE_PLATFORM', '')}))"
+            )
+            payload = base64.urlsafe_b64encode(
+                _python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")
+            ).decode("ascii")
+            env = os.environ.copy()
+            env.pop("GHOST_ALICE_PLATFORM", None)
+            env["GHOST_ALICE_AGENT_VISIBILITY"] = "strict"
 
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(Path(__file__).with_name("hook_profile_gate.py")),
-                "run",
-                "completion",
-                "codex",
-                payload,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=False,
-        )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(Path(__file__).with_name("hook_profile_gate.py")),
+                    "run",
+                    "completion",
+                    "codex",
+                    payload,
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)["systemMessage"], "codex")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["systemMessage"], "codex")
+
 
     def test_runner_force_shows_pending_manifest_after_strict_log_append(self):
         message = "routine clean pass already persisted"

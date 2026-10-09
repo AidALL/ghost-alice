@@ -46,11 +46,6 @@ REQUIRED_PATTERNS = {
         "boundary-contract",
         "session-intent-analyzer",
         "session-intent-analyzer intake is first",
-        "session-intent-analyzer fans out to `skill-evolution` (report-only terminal branch) and `jailbreak-detector`",
-        "`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context",
-        "task-router is released after session-intent preflight when no current-lineage block gate exists",
-        "absent `downstream-gates.json` is silent allow",
-        "atomic meaning decomposition",
         "boundary-contract: required",
         "English canonical narrative + English control surface",
         "[gate-state]",
@@ -65,20 +60,14 @@ REQUIRED_PATTERNS = {
         "Hook pending-merge precheck is a pre-routing/session-start layer",
         "manual fallback still completes before actionable downstream work",
         "intent-state.json is update-plus-accumulate state",
-        "downstream-gates.json",
-        "skill-evolution is report-only and self-terminating",
         "does not feed task-router",
-        "only current-lineage block decisions are carried to `downstream-gates.json`",
         "user-explicit defer/skip may continue",
-        "Deterministic hard-block rules are narrow regression guards",
-        "Gradual multi-turn jailbreak resistance depends on session-intent summary quality",
         "PreToolUse/BeforeTool checkpoint",
         "hook-stage: PreToolUse",
         "meaning: tool-call retry checkpoint, not user-input intake",
         "session-intent-analyzer intake is first",
         "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage",
         "keep checking later tool calls silently",
-        "new user input, current-lineage block/deny, mismatch",
         "first poll in the input lineage",
         "Dynamic Focus Contract",
         "mismatch location",
@@ -105,16 +94,14 @@ REQUIRED_PATTERNS = {
         "session-intent-analyzer records semantic facts and accumulated decisions",
         "governance surface policy consumes routing-surface",
         "token reduction is a secondary consequence, not a success metric",
+        "Session-intent intake feeds task-router directly",
+        "Native tool permission stays with its host",
     ],
     "AGENTS.md": [
         "skill-catalog/session-gates.json",
         "docs/policies/session-gate-matrix.md",
         "boundary-contract",
         "session-intent-analyzer",
-        "session-intent-analyzer fans out to skill-evolution(report-only terminal branch) and jailbreak-detector",
-        "`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context",
-        "task-router reminder hook withholds task-router until session-intent preflight exists and jailbreak-detector has had the first chance to record a current-lineage block",
-        "absent `downstream-gates.json` is silent allow",
         "atomic meaning decomposition",
         "boundary-contract: required",
         "hook-verified",
@@ -130,12 +117,8 @@ REQUIRED_PATTERNS = {
         "Hook pending-merge precheck is a pre-routing/session-start layer",
         "manual fallback still completes before actionable downstream work",
         "explicit user defer or skip",
-        "downstream-gates.json",
-        "current-lineage block gate",
-        "silent allow",
         "tool-call identity",
         "payload content",
-        "outside the decision body",
         "hook-stage: PreToolUse",
         "meaning: tool-call retry checkpoint, not user-input intake",
         "The focus scope is not fixed and does not expand in only one direction",
@@ -148,15 +131,13 @@ REQUIRED_PATTERNS = {
         "Do not validate or rebut that premise",
         "Route classification precedes evidence planning",
         "Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`",
+        "Session-intent intake feeds task-router directly",
+        "Native tool permission stays with its host",
     ],
     "platforms/codex/AGENTS.md": [
         "Session Gate Contract",
         "boundary-contract",
         "session-intent-analyzer",
-        "`session-intent-analyzer` branches to the `skill-evolution` report-only branch and to `jailbreak-detector`",
-        "task-router is a consumer of the session-intent and jailbreak gate context",
-        "The task-router reminder hook releases task-router when a session-intent preflight exists and there is no current-lineage block gate",
-        "The absence of `downstream-gates.json` is treated as a silent allow meaning there is no current-lineage block",
         "atomic meaning decomposition",
         "boundary-contract: required",
         "hook-verified",
@@ -167,22 +148,16 @@ REQUIRED_PATTERNS = {
         "claim-evidence-map",
         "unverified",
         "skill-call:",
-        "After the session-intent-analyzer intake and the jailbreak-detector downstream gate, read or validly reuse `~/.agents/skills/task-router/SKILL.md`",
         "A required gate skill is not satisfied by a metadata-only match",
         "Read or validly reuse the skill's instruction body before marking a required gate as complete",
         "Hook pending-merge precheck is a pre-routing/session-start layer",
         "manual fallback still completes before actionable downstream work",
         "explicit user defer or skip",
-        "downstream-gates.json",
         "hook-stage: PreToolUse",
         "meaning: tool-call retry checkpoint, not user-input intake",
         "the same process, session, or tool-call id",
-        "new user input, current-lineage block/deny, mismatch",
-        "current-lineage block gate",
-        "silent allow",
         "tool-call identity",
         "payload content",
-        "outside the decision body",
         "The focus scope is not fixed and does not expand in only one direction",
         "the mismatch location and the verification burden",
         "micro, meso, macro, and meta",
@@ -193,6 +168,8 @@ REQUIRED_PATTERNS = {
         "Ambient working directory",
         "Do not validate or rebut that premise",
         "Route classification precedes evidence planning",
+        "Session-intent intake feeds task-router directly",
+        "Native tool permission stays with its host",
     ],
     "platforms/claude/CLAUDE.md": [
         "clarification-only",
@@ -233,12 +210,8 @@ REQUIRED_PATTERNS = {
         "[gate-state]",
         "request-routing gate",
         "request decomposition, work placement, skill routing",
-        "consumer of session-intent-analyzer and",
         "routing decision",
         "raw user intent inference",
-        "after session-intent-analyzer intake and",
-        "silent allow",
-        "current-lineage block gate",
         "atomic meaning",
         "not a tool permission owner",
         "not a tool-checkpoint owner",
@@ -270,6 +243,8 @@ REQUIRED_PATTERNS = {
         "unknown routing-surface values fail closed",
         "user corrects the agent for changing, narrowing, widening, relabeling, or",
         "substituting the requested objective, scope, selection criterion",
+        "Session-intent intake feeds task-router directly",
+        "not intake, raw intent inference, credentials, or native tool permission",
     ],
     "boundary-contract/SKILL.md": [
         "name: boundary-contract",
@@ -298,20 +273,17 @@ REQUIRED_PATTERNS = {
         "do not run an extra shell manifest check",
         "hook-enforced retry point",
         "task_router_reminder_hook.py",
-        "task-router waits until session-intent preflight exists",
-        "Absent downstream-gates.json means silent allow",
         "atomic meaning units",
         "focus-layer",
         "scope-reopen",
         "tool-call retry checkpoint, not user-input intake",
-        "jailbreak-detector downstream gate",
-        "task-router consumes session-intent and jailbreak gate context",
         "intent",
+        "run task-router after exact session-intent preflight",
     ],
     "_shared/ghost-alice-hook.mjs": [
         "PreToolUse",
-        "permissionDecision",
-        "downstream-gates.json",
+        "readSessionIntentSnapshot",
+        "taskRouterReleaseMessage",
     ],
     "_shared/reminder_texts.json": [
         "hook-enforced retry point",
@@ -365,10 +337,6 @@ REQUIRED_PATTERNS = {
         "acceptance_criteria",
         "verifiable completion criterion",
         "intent-state.json is update-plus-accumulate state",
-    ],
-    "jailbreak-detector/SKILL.md": [
-        "Deterministic hard-block rules are narrow regression guards",
-        "Gradual multi-turn jailbreak resistance depends on session-intent summary quality",
     ],
     "session-intent-analyzer/scripts/session_intent_ledger.py": [
         "acceptance_criteria",
@@ -649,10 +617,14 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
         issues.append(ContractIssue("ERROR", str(contract_path), "agent_first_after_intake must include task-router"))
 
     user_input_graph = contract.get("user_input_graph", [])
+    allowed_nodes = {'merge-companion-precheck', 'session-intent-analyzer',
+                     'skill-evolution:report-only-terminal-branch', 'task-router', 'tool-checkpoint'}
+    if len(user_input_graph) != len(allowed_nodes) or set(user_input_graph) != allowed_nodes:
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'direct intake ownership forbids intermediate input policy stages'))
     expected_order = [
         "merge-companion-precheck",
         "session-intent-analyzer",
-        "jailbreak-detector",
         "task-router",
         "tool-checkpoint",
     ]
@@ -688,7 +660,10 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
 
     intent_consumers = contract.get("intent_consumers", {})
     session_consumers = intent_consumers.get("session-intent-analyzer", [])
-    for required_consumer in ("skill-evolution", "jailbreak-detector"):
+    if len(session_consumers) != 2 or set(session_consumers) != {'task-router', 'skill-evolution'}:
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'direct intake ownership requires only task-router and report-only skill-evolution consumers'))
+    for required_consumer in ("skill-evolution", "task-router"):
         if required_consumer not in session_consumers:
             issues.append(
                 ContractIssue(
@@ -697,7 +672,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
                     f"intent_consumers.session-intent-analyzer must include {required_consumer}",
                 )
             )
-    if "report-only-terminal-branch" not in intent_consumers.get("skill-evolution", []):
+    if intent_consumers.get("skill-evolution") != ["report-only-terminal-branch"]:
         issues.append(
             ContractIssue(
                 "ERROR",
@@ -705,12 +680,13 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
                 "intent_consumers.skill-evolution must be report-only-terminal-branch",
             )
         )
-    if "task-router" not in intent_consumers.get("jailbreak-detector", []):
+    if ("jailbreak-detector" in graph_positions or "jailbreak-detector" in intent_consumers
+            or "jailbreak-detector" in session_consumers):
         issues.append(
             ContractIssue(
                 "ERROR",
                 str(contract_path),
-                "intent_consumers.jailbreak-detector must feed task-router",
+                "retired standalone classifier must not participate in the active graph",
             )
         )
 

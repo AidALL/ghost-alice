@@ -12,6 +12,6 @@ User instructions and project-local rules take precedence. This entrypoint selec
 
 ## Execution invariants
 
-On a normal route follow pending-merge precheck -> session-intent-analyzer -> jailbreak-detector/downstream gate -> task-router, then the workflows selected by the applicable contract. A current block remains a block; absence is silent allow only when there is no known current block. Do not treat missing intake evidence as permission to bypass intake, or manufacture coordinates, hook trust, approval, verification or completion evidence.
+Session-intent intake feeds task-router directly. The same exact session supplies the report-only skill-evolution terminal branch, which does not feed task-router. Task-router owns routing and current work selection, not intake, raw intent inference, credentials, or native tool permission.
 
 Use decision-relevant checks, reuse unchanged evidence, and reopen only the affected uncertainty after a real change or contradiction. Preserve strict hook execution and audit logs. Show required control fields according to the applicable contract; do not repeat routine governance prose merely to look compliant. A completion claim requires the actual verification workflow and evidence for the requested outcome. Observing a problem, recording feedback, or reporting compatibility does not satisfy an authorized implementation request.

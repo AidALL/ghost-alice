@@ -1,25 +1,9 @@
-#!/usr/bin/env node
-// Derive the downstream gate from the model-recorded security decision.
-//
-// Write-on-block-only: write a block gate ONLY when the model recorded a block
-// that matches the current input lineage. Never overwrite an existing gate on
-// allow / absent / stale. The enforcer's staleness check neutralizes prior-turn
-// block gates, and absence means silent allow. This keeps the
-// tool-checkpoint dispatcher a dumb reader and preserves its size/contract.
-
+// Authoritative session identity and input snapshot reader. No permission policy.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-
-export class DownstreamGatePersistenceError extends Error {
-  constructor(gate, cause) {
-    super("Downstream gate persistence failed after a current model block was verified.", { cause });
-    this.name = "DownstreamGatePersistenceError";
-    this.gate = gate;
-  }
-}
 
 let ledgerPython;
 
@@ -44,7 +28,6 @@ function pythonExecutable() {
   }
   throw new Error("Session intent reader requires Python 3.11+");
 }
-
 function ledgerScript() {
   if (process.env.GHOST_ALICE_CORE_ROOT) {
     const explicit = path.join(process.env.GHOST_ALICE_CORE_ROOT, "session-intent-analyzer", "scripts", "session_intent_ledger.py");
@@ -76,11 +59,6 @@ function readLedger(sessionDir, platform, sessionId, mode) {
     throw new Error("Authoritative session intent read failed");
   }
   return JSON.parse(result.stdout);
-}
-
-function writeJsonFile(filePath, value) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
 export function isCanonicalIdentityComponent(value) {
@@ -144,55 +122,4 @@ export function readSessionIntentSnapshot(sessionDir, platform, sessionId) {
     process.stderr.write("[ghost-alice-hook] authoritative session intent reader degraded\n");
     return { state: {}, lineageSource: "degraded", degraded: true, latestInput: null };
   }
-}
-
-export function inputLineageMatches(record, latestInput) {
-  if (!record || !latestInput) return false;
-  const recEvent = typeof record.input_event_id === "string" ? record.input_event_id : "";
-  const recDigest = typeof record.input_digest === "string" ? record.input_digest : "";
-  if (recEvent && recEvent !== latestInput.event_id) return false;
-  if (latestInput.event_id) {
-    if (!recEvent || recEvent !== latestInput.event_id) return false;
-  } else if (latestInput.authoritative || !recDigest || recDigest !== latestInput.input_digest) {
-    return false;
-  }
-  if (recDigest && recDigest !== latestInput.input_digest) return false;
-  return true;
-}
-
-// Returns the written gate object, or null when nothing is written (allow/absent/stale).
-export function deriveDownstreamGateFromDecision(sessionDir, platform, sessionId,
-                                                 snapshot = readSessionIntentSnapshot(sessionDir, platform, sessionId)) {
-  if (!snapshot) return null;
-  const { state, latestInput } = snapshot;
-  const record = state.model_security_decision;
-  if (!record || typeof record !== "object") {
-    return null;
-  }
-  if (String(record.decision || "").trim().toLowerCase() !== "block") {
-    return null;
-  }
-  if (!inputLineageMatches(record, latestInput)) {
-    return null;
-  }
-  const gate = {
-    schema_version: "downstream-gates.v1",
-    platform,
-    session_id: sessionId,
-    gate: "jailbreak-detector",
-    decision: "block",
-    opened: false,
-    rules: Array.isArray(record.risk_flags) ? record.risk_flags.map(String) : [],
-    evidence_summary: "carried model block decision; raw prompt omitted",
-    input_digest: latestInput.input_digest || "",
-    input_event_id: latestInput.event_id || "",
-    input_char_count: latestInput.input_char_count || 0,
-    updated_at: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-  };
-  try {
-    writeJsonFile(path.join(sessionDir, "downstream-gates.json"), gate);
-  } catch (error) {
-    throw new DownstreamGatePersistenceError(gate, error);
-  }
-  return gate;
 }
