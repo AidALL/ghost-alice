@@ -93,8 +93,11 @@ executed work가 complete, fixed, successful, freshly verified라고 claim하기
 minimum cross-platform Python gate:
 
 ```bash
+python3 -m pip install pytest
 python3 scripts/run_installer_compat_tests.py
 ```
+
+`shared-all` 그룹은 shared unittest discovery와 `_shared/test_install_destination.py`, `_shared/test_retired_detector_stage.py`, `_shared/test_retired_discovery.py`의 pytest 함수를 실행합니다. 어느 실행에서든 실패하면 해당 그룹은 실패합니다.
 
 focused groups:
 

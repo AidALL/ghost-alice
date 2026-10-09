@@ -93,8 +93,11 @@ Printed `[io-trace]` is optional and cannot gate completion by its presence, ord
 Minimum cross-platform Python gate:
 
 ```bash
+python3 -m pip install pytest
 python3 scripts/run_installer_compat_tests.py
 ```
+
+The `shared-all` group runs shared unittest discovery and the pytest functions in `_shared/test_install_destination.py`, `_shared/test_retired_detector_stage.py`, and `_shared/test_retired_discovery.py`; either execution failing fails the group.
 
 Focused groups:
 

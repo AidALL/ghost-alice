@@ -3,6 +3,7 @@ import runpy
 import subprocess
 import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -17,6 +18,76 @@ SKILL_GATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "skill-gate-contract
 
 
 class InstallerCompatMatrixTest(unittest.TestCase):
+    def _run_shared_function_fixtures(self, failing_module: str | None = None):
+        with tempfile.TemporaryDirectory(dir=REPO_ROOT / ".tmp") as temp_dir:
+            root = Path(temp_dir)
+            (root / "scripts").mkdir()
+            shared = root / "_shared"
+            shared.mkdir()
+            shutil.copy2(RUNNER, root / "scripts" / RUNNER.name)
+            shutil.copy2(REPO_ROOT / "_shared" / "project_runtime.py", shared)
+            modules = (
+                "test_install_destination.py",
+                "test_retired_detector_stage.py",
+                "test_retired_discovery.py",
+            )
+            for module in modules:
+                (shared / module).write_text(
+                    "from pathlib import Path\nimport pytest\n"
+                    "@pytest.mark.parametrize('variant', ('first', 'second'))\n"
+                    "def test_owned_function(tmp_path, variant):\n"
+                    "    assert tmp_path.is_dir()\n"
+                    "    with Path(__file__).with_suffix('.executed').open('a') as stream:\n"
+                    "        stream.write(variant + '\\n')\n"
+                    f"    assert {module != failing_module!r}, 'owned function failure'\n",
+                    encoding="utf-8",
+                )
+            (shared / "test_unit_control.py").write_text(
+                "from pathlib import Path\nimport unittest\n"
+                "class Control(unittest.TestCase):\n"
+                "    def test_unit_control(self):\n"
+                "        Path(__file__).with_suffix('.executed').write_text('unit\\n')\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(
+                [sys.executable, str(root / "scripts" / RUNNER.name), "--group", "shared-all"],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60,
+            )
+            observed = {
+                path.stem: path.read_text(encoding="utf-8").splitlines()
+                for path in shared.glob("*.executed")
+            }
+        return result, observed
+
+    def test_shared_all_executes_three_owned_function_modules(self) -> None:
+        result, observed = self._run_shared_function_fixtures()
+        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+        self.assertEqual(observed, {
+            "test_install_destination": ["first", "second"],
+            "test_retired_detector_stage": ["first", "second"],
+            "test_retired_discovery": ["first", "second"],
+            "test_unit_control": ["unit"],
+        })
+
+    def test_shared_all_propagates_owned_function_failure(self) -> None:
+        result, observed = self._run_shared_function_fixtures("test_retired_discovery.py")
+        self.assertEqual(result.returncode, 1, msg=result.stderr + result.stdout)
+        self.assertEqual(observed.get("test_retired_discovery"), ["first", "second"])
+        self.assertIn("owned function failure", result.stdout + result.stderr)
+
+    def test_shared_workflows_install_pytest_before_owning_suite(self) -> None:
+        for path in (CI_WORKFLOW, SKILL_VALIDATION_WORKFLOW):
+            with self.subTest(workflow=path.name):
+                workflow = path.read_text(encoding="utf-8")
+                install_command = "python3 -m pip install pytest"
+                self.assertIn(install_command, workflow)
+                self.assertLess(workflow.index(install_command), workflow.index("scripts/run_installer_compat_tests.py"))
+
     def test_matrix_document_covers_required_shell_and_python_contracts(self) -> None:
         matrix = MATRIX_DOC.read_text(encoding="utf-8")
 

@@ -269,11 +269,11 @@ def test_normal_generated_chain_keeps_authority_across_source_and_runtime_reloca
     assert not (source/'.tmp/session-intent').exists()
 
 
-def test_conflicting_isolated_legacy_override_is_rejected_before_mkdir(tmp_path):
+def test_conflicting_isolated_runtime_override_is_rejected_before_mkdir(tmp_path):
     import pytest
     root=tmp_path/'owned'
-    with patch.dict(os.environ,{'GHOST_ALICE_HOOK_SHARED_DIR':'/legacy/runtime'}):
-        with pytest.raises(ValueError,match='legacy'):
+    with patch.dict(os.environ,{'GHOST_ALICE_HOOK_SHARED_DIR':'/conflicting/runtime'}):
+        with pytest.raises(ValueError,match='runtime overrides'):
             install_hooks.install_hook('codex',destination=destination_fixture(root))
     assert not root.exists()
 

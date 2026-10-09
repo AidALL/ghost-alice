@@ -33,7 +33,7 @@ def _py(*args: str) -> tuple[str, ...]:
 TEST_GROUPS: tuple[TestGroup, ...] = (
     TestGroup(
         "shared-all",
-        "all shared runtime unit tests",
+        "all shared runtime unit tests and owned function tests",
         _py("-m", "unittest", "discover", "-v", "-s", "_shared", "-p", "test_*.py"),
     ),
     TestGroup(
@@ -174,6 +174,24 @@ def run(groups: Sequence[TestGroup]) -> int:
             if result.returncode != 0:
                 print(f"FAILED {group.name}: exit {result.returncode}", file=sys.stderr)
                 return result.returncode
+            if group.name == "shared-all":
+                print("Shared function tests: install destination and retired stage/discovery", flush=True)
+                result = runtime.run(
+                    _py(
+                        "-m", "pytest", "-q",
+                        "_shared/test_install_destination.py",
+                        "_shared/test_retired_detector_stage.py",
+                        "_shared/test_retired_discovery.py",
+                        "--basetemp", str(runtime.temp_dir / "shared-pytest"),
+                        "-p", "no:cacheprovider",
+                    ),
+                    cwd=REPO_ROOT,
+                    runner=subprocess.run,
+                    check=False,
+                )
+                if result.returncode != 0:
+                    print(f"FAILED {group.name} function tests: exit {result.returncode}", file=sys.stderr)
+                    return result.returncode
     return 0
 
 
