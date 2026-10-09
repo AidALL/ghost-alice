@@ -174,10 +174,11 @@ _ACTION_PREDICATE_PREFIX_RE = re.compile(
     re.I,
 )
 _ACTION_OBJECT_DETERMINER_RE = re.compile(r"\s+(?:a|an|the|my|our|all)\b", re.I)
-_FINITE_ACTION_HEAD_RE = re.compile(
+_ACTION_CLAUSE_HEAD_RE = re.compile(
     r"^\s*(?:[>*\-]\s+)?" + _ACTION_ACTOR + r"\s+"
-    r"(?:(?:have|has|had)\s+)?(?:" + _CLOSURE_ADVERBS + r"\s+)*"
-    r"(?:[a-z]+ed|found|said|showed)\b",
+    r"(?P<shared_negative>(?:(?:have|has|had|do|does|did)\s+)?"
+    r"(?:not|never)\b|(?:haven['’]?t|hasn['’]?t|hadn['’]?t|"
+    r"don['’]?t|doesn['’]?t|didn['’]?t)\b)?",
     re.I,
 )
 _GOAL_LEAD_RE = re.compile(
@@ -604,7 +605,9 @@ def _read_only_action_has_predicate(match, clause):
 
     An actor or perfect auxiliary establishes a finite action. An explicit
     object determiner distinguishes a bare initial/coordinated action from an
-    attributive noun phrase; coordinated actions also require a finite head.
+    attributive noun phrase. A declarative actor supplies the shared subject
+    for a coordinated action regardless of the preceding verb's inflection;
+    a shared negative auxiliary still governs that action.
     """
     prefix = clause[:match.start()]
     scope_start = 0
@@ -617,7 +620,8 @@ def _read_only_action_has_predicate(match, clause):
         return False
     if re.fullmatch(r"\s*(?:[>*\-]\s+)?", scoped_prefix):
         return True
-    if not _FINITE_ACTION_HEAD_RE.search(scoped_prefix):
+    head = _ACTION_CLAUSE_HEAD_RE.match(scoped_prefix)
+    if head is None or head.group("shared_negative"):
         return False
     return any(predicate.start("verb") == match.start()
                for predicate in _COORDINATED_ASSERTION_PREDICATE_RE.finditer(clause, scope_start))

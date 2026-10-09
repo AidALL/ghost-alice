@@ -267,6 +267,45 @@ class TestReadOnlyWorkClosure(unittest.TestCase):
 
 
 class TestReadOnlyActionVersusAttributive(unittest.TestCase):
+    def test_coordinated_actions_do_not_depend_on_head_verb_inflection(self):
+        for text in (
+            "I read the source and completed the review.",
+            "I ran the checks and finished the report.",
+            "We took notes and completed the review.",
+            "I wrote the findings and finished the report.",
+            "I read the source and have completed the review.",
+            "I ran the checks and have finally finished the report.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_coordinated_action_context_preserves_shared_governors(self):
+        for text in (
+            "I will have read the source and completed the review.",
+            "I will have run the checks and finished the report.",
+            "I have not read the source and completed the review.",
+            "I haven't run the checks and finished the report.",
+            "I have never read the source and completed the review.",
+            "Whether I read the source and completed the review is still unknown.",
+            "I read completed reviews and finished reports.",
+            "I ran checks on completed reviews and finished reports.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(v.requires_completion_check(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+
+    def test_independent_action_after_shared_negative_remains_asserted(self):
+        for text in (
+            "I have not read the source; I completed the review.",
+            "I haven't run the checks, but I finished the report.",
+            "I have never read the source and I completed the review.",
+            "I read the source (not the notes) and completed the review.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(v.requires_completion_check(text))
+                self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
+
     def test_attributive_participles_are_descriptions_not_executed_actions(self):
         for text in (
             "A completed review should include evidence.",

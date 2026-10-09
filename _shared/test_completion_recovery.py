@@ -152,6 +152,31 @@ class CompletionRecoveryTests(unittest.TestCase):
                     with self.subTest(text=text, platform=platform, retry=retry):
                         self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
 
+    def test_coordinated_actions_with_varied_heads_require_proof_in_actual_stop(self):
+        for text in (
+            "I read the source and completed the review.",
+            "I ran the checks and finished the report.",
+            "We took notes and completed the review.",
+            "I wrote the findings and finished the report.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry).get("decision"), "block")
+
+    def test_shared_governors_and_attributive_objects_allow_actual_stop(self):
+        for text in (
+            "I will have read the source and completed the review.",
+            "I have not read the source and completed the review.",
+            "I haven't run the checks and finished the report.",
+            "Whether I read the source and completed the review is still unknown.",
+            "I read completed reviews and finished reports.",
+        ):
+            for platform in ("codex", "claude"):
+                for retry in (False, True):
+                    with self.subTest(text=text, platform=platform, retry=retry):
+                        self.assertEqual(self.hook(text, platform=platform, retry=retry), {"continue": True})
+
     def test_attributive_descriptions_allow_actual_stop(self):
         for text in (
             "A completed review should include evidence.",
