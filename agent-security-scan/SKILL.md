@@ -5,43 +5,43 @@ compatibility:
   - "Python 3.11+ standard library"
 ---
 
-# agent-security-scan
+# Agent Security Scan
 
-agent-security-scan performs report-only static review of agent execution surfaces. It scans settings, hooks, skills, Model Context Protocol configuration, and skill text for credential, remote fetch, shell side-effect, package-manager, protocol exposure, and broad execution risks.
+The current-session assistant uses this skill for a report-only static review of agent settings, hooks, skill text and Model Context Protocol configuration. The default scanner reads local files and reports credential exposure, remote fetch/instruction surfaces, shell side effects, package-manager use and broad execution/protocol exposure. External security runtimes are optional.
 
-The default implementation reads local files only. External security runtimes such as AgentShield are optional dependencies, not required behavior.
-## Contents
+## Scope and trigger
 
-- [Scan Targets](#scan-targets)
-- [When To Use](#when-to-use)
-- [Procedure](#procedure)
-- [Severity Values](#severity-values)
-- [Output Format](#output-format)
-- [Warnings](#warnings)
+Apply the scan after relevant hooks, skills, server configuration, credential surfaces or external governance logic change, or when the user requests inspection of suspicious commands. The current-session assistant selects the authorized repository and home targets before invocation; this inventory does not expand the user's scope.
 
-
-## Scan Targets
-
-- Claude Code: `~/.claude/settings.json`, `~/.claude/skills/*/SKILL.md`
-- Codex: `~/.codex/hooks.json`, `~/.codex/config.toml`, `~/.agents/skills/*/SKILL.md`
-- Repo: `<root>/*/SKILL.md`, `<root>/.mcp.json`, `<root>/.env`
-- HOME: `~/.mcp.json`, `~/.env`
-
-## When To Use
-
-- After adding hooks, skills, Model Context Protocol servers, or credential surfaces.
-- After absorbing external agent governance logic.
-- When `settings.json`, `hooks.json`, `.mcp.json`, or `SKILL.md` may contain suspicious execution commands, remote fetches, or credential access.
+| Surface | Candidate paths |
+| --- | --- |
+| Claude Code | `~/.claude/settings.json`, `~/.claude/skills/*/SKILL.md` |
+| Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, `~/.agents/skills/*/SKILL.md` |
+| Repository | `<root>/*/SKILL.md`, `<root>/.mcp.json`, `<root>/.env` |
+| Home | `~/.mcp.json`, `~/.env` |
 
 ## Procedure
 
-1. Choose the repository root and HOME candidates.
-2. Run `scripts/scan_agent_security_surface.py --root <repo> --home <home> --json`.
-3. Inspect each finding's `severity`, `rule`, and `mitigation`.
-4. Treat `mitigation=reject`, `critical - ...`, and `high - ...` findings as blockers that need a separate fix plan.
-5. Do not delete or modify anything automatically from scanner output alone.
+1. The current-session assistant establishes the repository root and home candidates from authorized context.
+2. When both the repository and home candidate sets are authorized, it invokes `python3 <loaded-skill-directory>/scripts/scan_agent_security_surface.py --root <absolute-repo> --home <absolute-home> --json` through the exposed shell tool. The bundled command scans both sets and has no path allowlist. For a narrower request, inspect only the named allowed files through the host's readers and report that limited coverage; do not broaden the request or invent an empty home path to imitate a scope flag.
+3. It reads the exit status and returned JSON `root`, `home`, `finding_count` and `findings`, then each finding's severity, rule and mitigation. The scanner's root skill enumeration matches immediate `*/SKILL.md`; do not claim recursive family coverage from that command. An unavailable observation leaves that coverage unresolved.
+4. It reports `mitigation=reject`, critical and high findings as blockers requiring a separately authorized fix workflow. Scanner output alone does not authorize deletion, edits or disabling servers.
 
-## Severity Values
+## Output
+
+```json
+{
+  "findings": [{
+    "severity": "high - command can run without protective gate",
+    "rule": "unprofiled-shell-command",
+    "path": "/path/settings.json",
+    "message": "hook command executes through shell without Ghost-ALICE profile gate",
+    "mitigation": "mitigate"
+  }]
+}
+```
+
+The scanner's severity values are:
 
 - `critical - credential exposure or secret access`
 - `high - command can run without protective gate`
@@ -51,25 +51,6 @@ The default implementation reads local files only. External security runtimes su
 - `low - unclear provenance or ownership`
 - `low - hygiene or configuration issue`
 
-## Output Format
-
-```json
-{
-  "findings": [
-    {
-      "severity": "high - command can run without protective gate",
-      "rule": "unprofiled-shell-command",
-      "path": "/path/settings.json",
-      "message": "hook command executes through shell without Ghost-ALICE profile gate",
-      "mitigation": "mitigate"
-    }
-  ]
-}
-```
-
 ## Warnings
 
-- Never print raw secret values. Report only paths, rules, and redacted messages.
-- Do not apply automatic fixes, deletes, or Model Context Protocol disables.
-- agent-security-scan is not adversarial-verification. It reviews the Ghost-ALICE execution surface, not the truth of claims and evidence.
-- Do not call external network resources during the default scan.
+The current-session assistant reports paths, rules and redacted messages, never raw secrets. The default scan makes no network call and applies no automatic fix. This skill inspects execution surfaces; adversarial-verification separately evaluates claims and evidence.

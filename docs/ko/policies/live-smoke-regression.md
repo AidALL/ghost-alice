@@ -2,7 +2,8 @@
 
 언어: [🇺🇸 English](../../policies/live-smoke-regression.md) | 🇰🇷 한국어
 
-이 procedure는 실제 agent runtime에서 같은 작은 request를 돌려 hook, gate, permission, completion contract가 살아 있는지 검증합니다. automated unit test가 hook payload와 file contract를 확인한다면, 이 smoke는 실제 session surface에서 마지막 연결을 닫습니다.
+검증 담당자는 이 절차로 실제 에이전트 실행 환경에 같은 작은 요청을 보내 훅, 검사 절차, 권한과 완료 계약이 실제로 동작하는지 관측합니다. 단위 테스트는 훅 입력·출력과 파일 계약을 확인하며, 이 점검은 실제 세션에서 그 연결을 확인합니다.
+
 ## Contents
 
 - [Purpose](#purpose)
@@ -18,17 +19,17 @@
 
 ## Purpose
 
-- Claude Code, Codex, Antigravity에서 같은 input을 실행합니다.
+- 지원을 주장하는 설치된 Claude Code·Codex 대상에서 같은 입력을 실행합니다. 지원 어댑터 집합은 `skill-catalog/platform-adapters.json`을 따르며 `terminal-only`는 수동 대체 경로입니다.
 - README 첫 10줄 읽기처럼 작고 되돌릴 수 있는 request를 씁니다.
 - summary 품질이 아니라 runtime gate가 관찰되는지를 검증합니다.
 - experiment note는 smoke record로 저장하되 raw prompt, secret, full transcript는 저장하지 않습니다.
 
 ## Standard Input
 
-각 runtime에서 repo root를 열고 이 request를 보냅니다.
+검증 담당자는 각 실행 환경에서 저장소 루트를 열고 다음 요청을 보냅니다.
 
 ```text
-Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion and include [io-trace].
+Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion.
 ```
 
 ## Target Runtimes
@@ -38,25 +39,23 @@ Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one pa
 | Claude Code | Ghost-ALICE install 뒤 fresh session | Skill permission, SessionStart/UserPromptSubmit hook, completion reminder |
 | Codex | Ghost-ALICE install 뒤 fresh session | `AGENTS.md` bootstrap, `~/.codex/hooks.json`, `~/.codex/config.toml`, `SKILL.md` read records, runtime이 hooks를 지원하면 observed hook payload firing, 그렇지 않으면 explicit hookless/manual fallback wording |
 | Codex native Windows | Windows native environment에서 Ghost-ALICE install 뒤 fresh session | actual hook payload firing, `~/.codex/hooks.json`, `~/.codex/config.toml`, `SKILL.md` read records |
-| Antigravity | adapter implementation 전에는 inconclusive. implementation 뒤 같은 prompt를 실행합니다. | skill activation permission, hook or instruction-backed fallback, smoke record |
 
-Antigravity adapter가 없으면 그 smoke item은 inconclusive로 기록합니다.
 
 ## Expected Signals
 
-각 smoke record는 다음 signal이 관찰됐는지 기록합니다.
+검증 담당자는 각 점검 기록에 다음 신호의 실제 관측 여부를 남깁니다.
 
 - `agent-run result`: agent process가 timeout 안에 exit 0으로 종료하고 non-empty last-message artifact를 씁니다.
 - `tool/runtime errors`: log에 tool router error, hook failure, traceback, runtime panic, cache initialization error가 없습니다.
 - `harness validity`: prompt가 request를 만족하는 데 필요한 read-only tool action을 허용합니다. 모순된 prompt는 `pass`가 아니라 `invalid-harness`입니다.
 - `task-router`: first tool action 전에 routing이 보입니다.
 - `session-intent-analyzer`: raw prompt 저장 없이 intent delta 또는 hook observation이 기록됩니다.
-- `boundary-contract`: read-only work에서는 `n/a` 또는 미사용 사유가 보입니다.
-- `failure-mode-if-wrong`: concise failure surface가 routine recovery-cost 또는 recovery-note fields 없이 보입니다.
+- `boundary-contract`: 현재 routing-surface의 결정을 따릅니다. 읽기 전용 검증에도 계약이 필요할 수 있으며 해당 경로가 요구하지 않을 때만 `n/a`를 기록합니다.
+- conditional `failure-mode-if-wrong`: side effect, forced signal, mismatch 또는 의미 있는 사용자 결정에 필요할 때 표시합니다. routine read-only checkpoint에는 `intent`와 `why`가 필요합니다.
 - conditional `recovery-action`: mismatch, scope reopen, external side effect, hard-to-recover action에 concrete next step이 필요할 때만 나타납니다.
-- `skill activation permission`: Claude Code와 Antigravity-family runtime이 core gate만 담은 줄인 allowlist 때문에 막히지 않습니다.
-- `verification-before-completion`: completion claim 직전에 fresh evidence가 나타납니다.
-- `[io-trace]`: 읽은 file, 실행한 command, load한 skill이 auditable하게 남습니다.
+- `skill activation permission`: Claude Code가 Core 검사 스킬만 담은 축소된 허용 목록 때문에 막히지 않습니다.
+- `verification-before-completion`: 워크플로가 각 완료 주장을 해당 근거와 연결하며 변경 없는 유효한 근거는 원래 출처와 시각을 유지합니다.
+- `internal audit`: 화면의 `[io-trace]`를 요구하지 않고도 도구 접근 기록을 감사할 수 있습니다.
 - pending merge precheck: hook evidence가 있으면 hook-verified reuse로 분기하고, 없으면 current platform manifest를 직접 inspect합니다.
 
 ## Verification Layers
@@ -68,11 +67,11 @@ Antigravity adapter가 없으면 그 smoke item은 inconclusive로 기록합니�
 | Automated blind screening | fresh session의 installed subject를 held-out authentic prompt로 평가합니다. | prompt와 ordinary runtime context만 보입니다. | 반복 가능한 behavior screening입니다. purpose, rubric, expected answer, pass criteria, prior output, experiment label은 evaluator-private 상태로 남습니다. |
 | Manual clean-terminal acceptance | canonical install 뒤 사람이 새 terminal에서 held-out case를 실행합니다. | authentic request만 subject에 전달합니다. | final live acceptance gate입니다. Computer Use로 이 terminal을 자동화하지 않습니다. |
 
-Automated blind screening은 direct process만 사용합니다. controller packet과 subject packet을 구조적으로 분리하고, separate evaluator가 verdict를 반환할 때까지 subject output을 memory에만 유지합니다. controller가 sealed case file을 직접 load하고 exact loaded bytes의 digest와 validated case의 canonical hash를 계산하며 caller가 공급한 freshness, isolation, digest field를 거부합니다. installed provenance는 `~/.ghost-alice/install-state/<platform>.json`의 schema-version-1 installer state에서만 가져오며 caller나 subject self-attestation은 provenance가 아닙니다.
+자동 비공개 평가는 에이전트 프로세스를 직접 실행합니다. 컨트롤러는 자기 입력과 평가 대상 에이전트의 입력을 구조적으로 분리합니다. 독립 평가 도구가 판단을 반환할 때까지 대상의 응답은 메모리에만 보관합니다. 컨트롤러가 봉인된 사례 파일을 직접 읽고, 읽은 정확한 바이트의 digest와 검증된 사례의 canonical hash를 계산합니다. 호출자가 공급한 freshness, isolation, digest 필드는 거부합니다. 설치 출처는 `~/.ghost-alice/install-state/<platform>.json`의 schema-version-1 설치 기록에서만 읽습니다. 호출자나 대상 에이전트의 자기 선언은 설치 출처의 근거가 아닙니다.
 
 ## Smoke Record
 
-repo에 record를 저장할 때는 `tmp/` 또는 local scratch만 씁니다. remote Wiki나 user home settings는 mutate하지 않습니다.
+검증 담당자는 점검 결과를 저장소의 `.tmp/` 또는 로컬 임시 작업 공간에만 기록합니다. 원격 Wiki나 사용자 홈 설정은 변경하지 않습니다.
 
 ```text
 platform:
@@ -86,7 +85,7 @@ observed:
   recovery-action:
   skill activation permission:
   verification-before-completion:
-  io-trace:
+  internal-audit:
 failure triage:
   status: pass | fail | invalid-harness | inconclusive
   reason:
@@ -111,11 +110,11 @@ reasons:
 
 Blind record는 governance-smoke summary와 별도 schema를 사용합니다. case id/hash, exact-file suite digest, source/version, installed provenance, mode, verdict/dimensions, sanitized reason, minimal process status인 `exit_code`와 `timed_out`만 포함할 수 있습니다. raw prompt, rubric, expected answer, subject response나 full transcript, raw stdout/stderr log, pass criteria, prior output, experiment label, credential, evaluator-private note를 저장하지 않습니다.
 
-Persisted dimension key는 constrained opaque id를 사용합니다. private criterion text를 durable dimension key로 사용하지 않습니다.
+컨트롤러는 영속 기록의 평가 항목 키에 제약된 불투명 ID만 사용합니다. 비공개 기준 문구를 영속 키로 사용하지 않습니다.
 
-`_shared/blind_behavior.py`가 dedicated automated screening path입니다. blind evaluation을 `_shared/live_agent_smoke.py`의 mode로 추가하지 않습니다. controller는 loaded case와 evaluator-private type을 검증한 뒤 subject execution을 `_shared/fresh_agent_session.py`에 위임합니다. 이 owner만 Claude no-persistence 또는 Codex ephemeral command를 구성하고 resume/session argument를 거부하며 empty run cwd를 만듭니다. subject stdin에는 authentic prompt만 보내고 case/private argv를 추가하지 않습니다. ordinary runtime value와 설정된 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`만 전달하며 rubric, purpose, expected-answer, controller-private environment value는 제거합니다. response와 private state는 separate evaluator process에 전달합니다.
+`_shared/blind_behavior.py` 컨트롤러가 자동 비공개 평가를 담당합니다. 비공개 평가를 `_shared/live_agent_smoke.py`의 모드로 추가하지 않습니다. 컨트롤러는 읽은 사례와 비공개 평가 자료의 형식을 검증한 뒤, 대상 실행을 `_shared/fresh_agent_session.py`에 위임합니다. 이 실행 담당자만 Claude의 no-persistence 또는 Codex의 ephemeral 명령을 구성하고, resume/session 인수를 거부하며 빈 실행 디렉터리를 만듭니다. 컨트롤러는 대상의 stdin에 실제 요청만 전달하고 사례·비공개 자료를 argv에 추가하지 않습니다. 일반 실행 환경 값과 설정된 `CLAUDE_CONFIG_DIR`, `CODEX_HOME`만 전달하며 rubric, purpose, expected-answer와 컨트롤러 비공개 환경 값은 제거합니다. 컨트롤러는 대상의 응답과 비공개 평가 상태를 별도 평가 프로세스에 전달합니다.
 
-Subject/evaluator timeout, non-zero exit, empty subject response, malformed evaluator output, invalid evaluator state, overall/dimension disagreement는 모두 fail-closed 처리하며 conduct-feedback candidate를 만들지 않습니다. Evaluator-confirmed behavioral failure만 exactly one canonical report-only candidate를 만듭니다. optional record write는 atomic하며 sanitized record만 저장합니다.
+컨트롤러는 대상·평가 도구의 시간 초과, 0이 아닌 종료 코드, 빈 대상 응답, 잘못된 평가 출력·상태와 전체·항목별 판단 불일치를 실패로 닫고 conduct-feedback 후보를 만들지 않습니다. 평가 도구가 확인한 행동 실패만 정규 보고 전용 후보 하나를 만듭니다. 선택적인 기록 저장은 원자적으로 수행하며 민감 내용이 제거된 기록만 저장합니다.
 
 ## Failure Triage
 
@@ -126,14 +125,13 @@ Subject/evaluator timeout, non-zero exit, empty subject response, malformed eval
 | routine tool-checkpoint output requires recovery-cost or recovery-note fields | tool-checkpoint surface failure | `docs/ko/policies/session-gate-matrix.md`, platform bootstrap, hook message wording을 맞춥니다. |
 | skill activation permission allows only core gates | permission scope failure | installer hook permission sync와 platform policy files를 inspect합니다. |
 | smoke record stores raw prompt or transcript | audit hygiene failure | session-intent-analyzer storage contract를 먼저 fix합니다. |
-| agent command times out | runtime smoke failure | loop를 닫지 않습니다. log를 inspect하고, failing behavior를 fix하거나 좁힌 뒤 reinstall하고 fresh session에서 rerun합니다. |
+| agent command times out | runtime smoke failure | 해당 실패를 조사하고 세션 게이트 매트릭스의 한정된 복구 조건을 따릅니다. 영향받은 실행 파일만 다시 설치하며 구별되는 가설과 남은 권한·자원이 있을 때 재시도합니다. |
 | log contains `ERROR codex_core::tools::router`, hook failure, traceback, panic, or cache initialization error | runtime smoke failure | 나중의 다른 prompt가 pass해도 이 run은 failed로 처리합니다. failing case를 reproduce하거나 source-grounded reason으로 retire합니다. |
 | output file is missing or empty | runtime smoke failure | partial log activity만으로 success를 추론하지 않습니다. agent command 또는 output path를 고친 뒤 rerun합니다. |
 | Windows resolves `codex` to different shim or binary across PowerShell, CMD, and automation | harness drift | `agent_command`를 기록하고, Codex smoke에서는 의도한 `codex.cmd` shim 또는 explicit absolute path를 우선합니다. |
 | prompt forbids the only available read-only method needed by the task | invalid harness | harness를 고친 뒤 rerun합니다. 이것은 product pass evidence가 아닙니다. |
-| a later bounded pass follows an earlier unresolved failure in the same loop | partial status | failed case가 fix되거나, 근거와 함께 retire되거나, 명시적으로 out of scope 처리될 때까지 loop를 열어 둡니다. |
-| Antigravity adapter is not ready | inconclusive | compatibility discovery가 끝난 뒤 같은 input을 다시 돌립니다. |
+| a later bounded pass follows an earlier unresolved failure in the same loop | partial status | 미해결 사례를 유지하고 부분 상태를 보고합니다. 세션 게이트 매트릭스에 따라 적격한 승인 복구만 계속하며 이후의 한정된 통과로 앞선 기준을 닫지 않습니다. |
 
 ## Automated Verification Boundary
 
-Runtime smoke records는 manual evidence이며 keyword-presence unit test target이 아닙니다. static hook payload와 gate wording contract는 `scripts/check_skill_gate_contract.py`, `scripts/validate_entrypoints.py`, `_shared.test_install_hooks`가 cover합니다. `_shared/live_agent_smoke.py`는 process-level evidence를 classify하고 Codex fresh-session smoke case를 실행할 수 있지만, 이 policy와 design documents에 대한 adversarial review를 대체하지 않습니다. Automated blind screening은 evidence를 강화하지만 human-operated clean-terminal final acceptance gate를 대체하지 않습니다.
+검증 담당자는 실행 환경 점검 기록을 실제 관측 근거로 사용하며 키워드 존재 여부만 검사하는 단위 테스트로 대체하지 않습니다. `scripts/check_skill_gate_contract.py`, `scripts/validate_entrypoints.py`, `_shared.test_install_hooks`는 정적 훅 입력·출력과 검사 문구의 계약을 확인합니다. `_shared/live_agent_smoke.py`는 프로세스 근거를 분류하고 Codex의 새 세션 점검 사례를 실행하지만, 이 정책과 설계 문서의 독립 검토를 대신하지 않습니다. 자동 비공개 평가는 근거를 보강하며 사람이 깨끗한 새 터미널에서 수행하는 최종 수락 검사를 대신하지 않습니다.

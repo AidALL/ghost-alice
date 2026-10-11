@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+from reminder_texts import reminder_text
+
 import argparse
 import base64
+import hashlib
 import json
 import os
 import re
@@ -15,6 +18,7 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+import install_destination
 
 
 def _home() -> Path:
@@ -30,6 +34,9 @@ def _home() -> Path:
 
 
 def _ledger_dir_candidates() -> list[Path]:
+    explicit = os.environ.get("GHOST_ALICE_CORE_ROOT")
+    if explicit:
+        return [Path(explicit)/"session-intent-analyzer/scripts"]
     home = _home()
     candidates = [
         REPO_ROOT / "session-intent-analyzer" / "scripts",
@@ -52,6 +59,7 @@ try:
         DEFAULT_ROOT,
         build_input_observation,
         record_turn,
+        stage_native_input,
         resolve_session_id,
     )
     _LEDGER_IMPORT_BROKEN = False
@@ -60,6 +68,7 @@ except ImportError as _ledger_exc:
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
+    stage_native_input = None
     resolve_session_id = None
     _LEDGER_IMPORT_BROKEN = getattr(_ledger_exc, "name", None) not in (None, "session_intent_ledger")
 except Exception:
@@ -67,28 +76,50 @@ except Exception:
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
+    stage_native_input = None
     resolve_session_id = None
     _LEDGER_IMPORT_BROKEN = True
 
 
-DEFAULT_INTERNAL = (
-    "session-intent-analyzer: Observe every user input by recording an input digest, " "current-session pointer, and digest-only intake status. " "Agents add semantic summaries, constraints, and decisions only when intent materially changes. " "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. " "Use the ledger as context for skill-evolution and jailbreak-detector."
-)
-LEDGER_UNAVAILABLE_DEGRADE = (
-    "Ledger dependency unavailable non-blockingly; continue without raw prompt persistence."
-)
-LEDGER_WRITE_FAILED_DEGRADE = (
-    "Ledger write failed non-blockingly; continue without raw prompt persistence."
-)
-LEDGER_BROKEN_DEGRADE = (
-    "Ledger module present but failed to load non-blockingly; " "continue without raw prompt persistence."
-)
+TERMINAL_ROUTING_INSTRUCTION = reminder_text('terminal-routing')
+
+
+def terminal_routing_instruction(root: Path, platform: str, session_id: str,
+                                 input_event_id: str | None) -> str:
+    """Deliver once within an exact native input; never cache a routing decision."""
+    if not input_event_id or not session_id or session_id == "unknown":
+        return TERMINAL_ROUTING_INSTRUCTION
+    try:
+        from session_check_cache import observe_check
+        binding = {"input_event_id": input_event_id}
+        delivery = observe_check(root, platform, session_id, "hook-terminal-routing", Path(__file__),
+                                 lambda: binding, validate=lambda value: value == binding)
+        if delivery["status"] == "reused":
+            return ""
+    except (ImportError, OSError, ValueError, TypeError, KeyError):
+        pass
+    return TERMINAL_ROUTING_INSTRUCTION
+
+
+DEFAULT_INTERNAL = reminder_text('session-intent')
+# Exact managed-message hashes authorize canonical instruction replacement.
+# Custom text remains verbatim; substrings do not establish ownership.
+BUILTIN_INTERNAL_DIGESTS = frozenset({
+    '516411ca63efee6770666220f1f95fe3f8e883246b7bd0730996639bf2ca2fca',
+    '99616de4dd8dfee6a9cd62a130a042f03848abb0fedd7c42f9009f37fcdb99d1',
+    '13bedc717127f5ebf23cdf68edd268aba2c4668fe67f87a649ce4b8f267a5df0',
+    "4ac1f065346edc273d079dcf0dba602bf3a34871d2f78eed2e05c12b9ecbdecb",
+    "f0903ce21fe35669afb2b25d9567839529c96f301b84d69f2f084b7c95791162",
+})
+LEDGER_UNAVAILABLE_DEGRADE = 'The intake hook cannot load the ledger dependency. The current-session assistant must not claim intake was recorded or substitute another ledger. Authorized ledger repair and a tool-free explanation remain possible.'
+LEDGER_WRITE_FAILED_DEGRADE = 'The intake hook could not write this input to the ledger. The current-session assistant must not claim persistence or use an old input binding. Authorized ledger repair and a tool-free explanation remain possible.'
+LEDGER_BROKEN_DEGRADE = 'The ledger module exists but the intake hook could not load it. The current-session assistant must not claim intake was recorded or substitute another ledger. Authorized module repair and a tool-free explanation remain possible.'
 DEGRADE_MARKER_FILE = "ledger-degraded.json"
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.=-]+")
 
 
 def _safe_component(value: Any) -> str:
-    # Must stay character-identical to task_router_reminder_hook.safe_path_component: the router rebuilds this path itself to find the degrade marker, so any charset/normalization drift silently hides the marker (fail-open) -- the exact cross-module-drift class this marker exists to prevent.
+    # The router imports this normalizer so both hooks address the same degrade marker.
     text = str(value or "unknown").strip()
     text = _SAFE_COMPONENT_RE.sub("-", text)
     text = re.sub(r"^[.-]+|[.-]+$", "", text)
@@ -123,11 +154,12 @@ def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> 
 
 
 def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], reason: str) -> None:
-    # Durable, ledger-independent record that THIS turn's input was NOT observed, so freshness consumers (task-router reminder, gate lineage checks) can fail closed instead of riding a stale anchor. Best-effort: the audit marker must never break the hook itself.
+    # Durable, ledger-independent record that THIS turn's input was NOT observed, so freshness consumers (task-router reminder and input lineage checks) can fail closed instead of riding a stale anchor. Best-effort: the audit marker must never break the hook itself.
     try:
         path = _degrade_marker_path(root, platform, payload)
         if path is None:
             return
+        install_destination.assert_mutation_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps(
@@ -203,13 +235,13 @@ def extract_prompt(payload: dict[str, Any]) -> str:
     )
 
 
-def observation_receipt(paths: dict[str, Path], observation: dict[str, Any], *, compact: bool = False) -> str:
-    """Bind the semantic writer to this completed observation, not a mutable pointer."""
+def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | None, *, compact: bool = False) -> str:
+    """Expose canonical intake identity only after native actor reconciliation."""
     state_path = Path(paths["state"]).resolve()
     events_path = Path(paths["events"]).resolve()
     receipt = {
-        "schema_version": "session-intent-observation-receipt.v1",
-        "intake_status": "observed",
+        "schema_version": "session-intent-observation-receipt.v1" if observation else "session-intent-transport-receipt.v1",
+        "intake_status": "observed" if observation else "pending-native-origin",
         "ledger_root": str(state_path.parents[2]),
         "platform": state_path.parents[1].name,
         "session_id": state_path.parent.name,
@@ -217,29 +249,31 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any], *, 
         "events_path": str(events_path),
         "database_path": str(state_path.parents[2] / "ghost-state.sqlite3"),
         "storage_backend": "sqlite",
-        "input_event_id": observation["input_event_id"],
     }
+    if observation is not None:
+        receipt["input_event_id"] = observation["input_event_id"]
     binding = (
         "\n[session-intent-receipt]\n"
         + json.dumps(receipt, ensure_ascii=True, separators=(",", ":"))
         + "\n[/session-intent-receipt]\n"
     )
-    if compact:
-        return binding + "Use exact receipt bindings for ledger reads/deltas; reject stale input IDs. No raw text or alternate ledger. Read the skill if its body is lost."
+    if observation is None:
+        return binding + (
+            "This receipt records native transport only; user authority awaits committed native actor evidence. "
+            "The first native PreToolUse or Stop reconciles that evidence. For normal work, the current-session "
+            "assistant reads session_intent_ledger.py --read-state using this receipt's --root ledger_root "
+            "--platform platform --session-id session_id. After reconciliation, a material semantic update binds "
+            "--expected-input-event-id to latest_input_event_id returned by that read. Pending transport has no "
+            "input event token and cannot authorize a route or semantic update. A confirmed native notification "
+            "retains the preceding human input and route."
+        )
     return binding + (
-        "For a semantic delta, use session_intent_ledger.py with this receipt's exact "
-        "--root ledger_root, --platform platform, --session-id session_id, and "
-        "--expected-input-event-id input_event_id. Keep the receipt used to make the decision; "
-        "if it is stale, re-evaluate against the new input before writing. "
-        "For downstream intent context, use session_intent_ledger.py --read-state with "
-        "the same exact root, platform, and session ID. state_path and events_path are "
-        "compatibility exports, not the authority. Do not select another ledger from "
-        "a later current-session pointer or an installed script's default root. "
-        "This receipt confirms input observation only; it grants no additional permission "
-        "and does not claim a semantic delta was recorded. If writing to this ledger is "
-        "not permitted or fails, report semantic persistence as failed. "
-        "Do not create an alternate ledger, move historical ledgers, or expand permissions "
-        "to bypass the failure."
+        "For a normal route, the current-session assistant reads SQLite with session_intent_ledger.py --read-state "
+        "using this receipt's --root ledger_root --platform platform --session-id session_id. "
+        "A material intent update also binds --expected-input-event-id input_event_id. "
+        "This receipt confirms input observation only. The current-session assistant must not use an export, default root or another session as the authoritative ledger. "
+        "After applying task-router and any required boundary-contract, the current-session assistant registers the current Core response-route. "
+        "If a ledger operation fails, the current-session assistant reports that failure and leaves dependent registration incomplete. "
     )
 
 
@@ -286,9 +320,13 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             message = DEFAULT_INTERNAL
 
+    if hashlib.sha256(message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS:
+        message = DEFAULT_INTERNAL
+
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
     routine = False
+    terminal = TERMINAL_ROUTING_INSTRUCTION
     try:
         ledger_available = all(
             callable(func)
@@ -310,6 +348,15 @@ def main(argv: list[str] | None = None) -> int:
                 for_write=True,
             )
             prompt = extract_prompt(payload)
+            if prompt and args.platform == 'claude':
+                paths = stage_native_input(root=ledger_root, platform=args.platform, session_id=session_id,
+                    raw_input=prompt, prompt_id=payload.get('prompt_id'),
+                    transcript_path=payload.get('transcript_path') or payload.get('transcriptPath'))
+                _clear_degrade_marker(ledger_root, args.platform, payload)
+                message = terminal + "\n" + observation_receipt(paths, None)
+                sys.stdout.write(render_payload(args.format, message, ledger_root, routine=True)
+                                 + ('\n' if args.format == 'json' else ''))
+                return 0
             if prompt:
                 observation = build_input_observation(
                     platform=args.platform,
@@ -328,18 +375,31 @@ def main(argv: list[str] | None = None) -> int:
                 _clear_degrade_marker(ledger_root, args.platform, payload)
                 try:
                     from session_check_cache import instruction_delivery
-                    full = instruction_delivery(ledger_root, args.platform, session_id, "hook-intake-instructions", Path(__file__), message)
+                    builtin = (message == DEFAULT_INTERNAL
+                               or hashlib.sha256(message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS)
+                    full = not builtin or instruction_delivery(ledger_root, args.platform, session_id,
+                                                               "hook-intake-instructions", Path(__file__), message)
                 except (ImportError, OSError):
                     # Cache delivery is optional; a successful intake stays valid.
                     full = True
                 if not full:
                     message = "session-intent-analyzer: input observed; apply the retained skill to current meaning; add only material semantic deltas."
                 message += observation_receipt(paths, observation, compact=not full)
+                try:
+                    from claim_evidence_runtime import retained_results_hint
+                    message += retained_results_hint(args.platform, dict(payload, session_id=session_id),
+                        dict(os.environ, GHOST_ALICE_SESSION_INTENT_ROOT=str(ledger_root.resolve())))
+                except (ImportError, OSError, ValueError, TypeError):
+                    # Advisory discovery cannot change intake or invent proof.
+                    pass
                 routine = True
+                terminal = terminal_routing_instruction(ledger_root, args.platform, session_id,
+                                                        observation["input_event_id"])
     except Exception:
         _write_degrade_marker(ledger_root, args.platform, payload, "ledger-write-failed")
         message = message + " " + LEDGER_WRITE_FAILED_DEGRADE
 
+    message = terminal + "\n" + message
     sys.stdout.write(render_payload(args.format, message, ledger_root, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")

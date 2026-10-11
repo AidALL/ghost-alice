@@ -9,17 +9,7 @@ compatibility:
 
 Dispatch the `code-reviewer` subagent to catch issues before they accumulate. The reviewer receives only the context prepared for evaluation. It never receives the session history. This keeps the reviewer focused on the work output rather than on your thought process, and preserves your own context for follow-up work.
 
-○ Core principle: review early, review often
-## Contents
-
-- [When to Request a Review](#when-to-request-a-review)
-- [How to Request](#how-to-request)
-- [Remote Pull Request Review Gate](#remote-pull-request-review-gate)
-- [Example](#example)
-- [Workflow Integration](#workflow-integration)
-- [Red Flags](#red-flags)
-
-
+The parent assistant requests review at required milestones and when a specific unresolved concern warrants independent inspection.
 ## When to Request a Review
 
 □ Required
@@ -36,16 +26,13 @@ Dispatch the `code-reviewer` subagent to catch issues before they accumulate. Th
 
 ## How to Request
 
-□ 1. Capture the git commit hashes
+□ 1. Establish the review target
 
-```bash
-BASE_SHA=$(git rev-parse HEAD~1)  # or origin/main
-HEAD_SHA=$(git rev-parse HEAD)
-```
+Use the accepted task's starting commit and current head for committed work. Identify any uncommitted diff separately; a commit range cannot include it. Do not guess the base from HEAD~1 or a commit-message match.
 
 □ 2. Dispatch the code-reviewer subagent
 
-Use the `Task` tool with the `code-reviewer` type. Fill in the `references/code-reviewer.md` template.
+Use the host's exposed agent API and the actual `references/code-reviewer.md` template. Supply a role parameter only when the host schema defines one.
 
 Placeholders
 
@@ -55,14 +42,14 @@ Placeholders
 - `{HEAD_SHA}`: the ending commit.
 - `{DESCRIPTION}`: a short summary.
 
-For a change being prepared for push or amend, include the actual workflow/job inventory and local preflight evidence from `finishing-a-development-branch` Step 1: all relevant locally executable CI equivalents, tested tree, runtime versions, and unavoidable runner differences. A focused subset is not the full preflight. A reviewer should identify missing checks, not treat an unexplained local pass as CI parity. Changes after those checks invalidate affected results; repeat them before publishing the replacement, without adding skip flags or weakening CI.
+For publication review, the parent supplies the preflight matrix produced by finishing-a-development-branch Step 1. The reviewer reports any missing required result or unaccounted environment difference; that owning procedure determines affected reruns before publication.
 
 □ 3. Respond to the feedback
 
-- Critical issues: fix immediately
-- Important issues: fix before proceeding
-- Minor issues: note for later
-- If the reviewer is wrong, push back (with evidence)
+- Evaluate each finding through receiving-code-review before changing code.
+- Fix valid critical and important findings before the dependent integration.
+- Retain minor advisory findings without silently adding them to the accepted scope.
+- Reject incorrect findings with code or test evidence.
 
 ## Remote Pull Request Review Gate
 
@@ -76,75 +63,8 @@ A local reviewer and passing CI do not establish that remote review is complete.
 
 Record a compact result with the PR URL, head SHA, review sources and completion evidence, finding dispositions with code/test evidence, unresolved items, and integration decision. A provider's successful merge response is not retrospective evidence that this gate ran.
 
-| Temptation | Required response |
-| --- | --- |
-| CI passed and the local reviewer approved | Read remote reviews, comments, and unresolved threads before merging. |
-| Focused tests passed; the remote runner can find the rest | Inventory the actual workflows and run every relevant local equivalent before push; record only unavoidable runner gaps. |
-| Remote review is clean, so pending CI is enough | Wait for successful applicable CI on the exact head; review and CI prove different things. |
-| The old PR is merged, or the comment is outdated | Check whether the finding still applies to current code; carry it forward until reconciled. |
-| The bot was quiet after the amend | Confirm completion for the new head; silence or a review of the old SHA is insufficient. |
-| The bot demands behavior contrary to the user | Evaluate and reject it with evidence; do not implement it blindly. |
-| The user already said to merge | Finish the required checks and merge without asking them to select the workflow again. |
+## Failure modes and result
 
-## Example
+Do not substitute a reviewer's confidence or CI status for the required review result. receiving-code-review owns each finding's disposition; retain unresolved conditions before dependent integration.
 
-```
-[Task 2 complete: validation function added]
-
-You: Request a code review before proceeding.
-
-BASE_SHA=$(git log --oneline | grep "Task 1" | head -1 | awk '{print $1}')
-HEAD_SHA=$(git rev-parse HEAD)
-
-[dispatch code-reviewer subagent]
-  WHAT_WAS_IMPLEMENTED: conversation index validation and repair functions
-  PLAN_OR_REQUIREMENTS: Task 2 of .tmp/implementation-plans/deployment-plan.md
-  BASE_SHA: a7981ec
-  HEAD_SHA: 3df7661
-  DESCRIPTION: added verifyIndex() and repairIndex(), four issue types
-
-[subagent returns]:
-  Strengths: clean architecture, real tests
-  Issues:
-    Important: progress indicator missing
-    Minor: reporting interval magic number (100)
-  Assessment: ok to proceed
-
-You: [fix the progress indicator]
-[proceed to Task 3]
-```
-
-## Workflow Integration
-
-□ Subagent-Driven Development
-
-- Review after each task
-- Catch issues before they accumulate
-- Fix before the next task
-
-□ Executing Plans
-
-- Review after each batch (3 tasks)
-- Take the feedback, apply it, then proceed
-
-□ Ad-Hoc Development
-
-- Review before merge
-- Review when stuck
-
-## Red Flags
-
-□ Never do
-
-- Skipping review because the change "is simple"
-- Ignoring Critical issues
-- Proceeding with unfixed Important issues
-- Arguing with valid technical feedback
-
-□ When the reviewer is wrong
-
-- Push back with technical evidence
-- Present code and tests that prove the behavior
-- Ask for clarification
-
-Template: `references/code-reviewer.md`
+Template: `references/code-reviewer.md`. Verification-before-completion owns final claim scope and evidence; a reviewer verdict alone does not establish integration readiness.

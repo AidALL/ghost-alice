@@ -5,8 +5,7 @@
     "(source missing)",
     "Available skills:`n",
     "Choose the target AI tool:",
-    "Enter a number or name",
-    "[2/5] Skill sync"
+    "Enter a number or name"
   ],
   "sh_only": [
     " sub-skills",
@@ -51,7 +50,7 @@
     "Check workspace commands only",
     "Checkout branch/tag for git URL addon sources",
     "Choose claude | codex",
-    "Clean false-positive legacy pending entries",
+    "Clean false-positive pending entries",
     "Cloning addon source: ${source}",
     "Cloning addon source: ${source} (${ref})",
     "Codex AGENTS.md Ghost-ALICE block removed; user content preserved",
@@ -124,7 +123,7 @@
     "Python 3.11+ not found; aborting because encoding guard cannot run",
     "Python 3.11+ not found; aborting because install lock cannot be acquired",
     "Python 3.11+ not found; aborting because install-state manifest cannot be written",
-    "Python 3.11+ not found; aborting because legacy target quarantine cannot run",
+    "Python 3.11+ not found; aborting because unowned target quarantine cannot run",
     "Python 3.11+ not found; aborting because merge-companion preflight diff cannot run",
     "Python 3.11+ not found; aborting because merge-companion snapshot cannot run",
     "Python 3.11+ not found; aborting because ownership markers cannot be written",
@@ -221,7 +220,7 @@
     "git not found; cannot update source checkout",
     "git not found; source health is unverified (continuing)",
     "install_hooks.py not found: ${hook_py}",
-    "legacy target quarantine failed; aborting install: ${target_name}",
+    "unowned target quarantine failed; aborting install: ${target_name}",
     "merge-companion preflight change detection failed; aborting install",
     "merge-companion snapshot capture failed; aborting install",
     "merge-companion snapshot directory cannot be created; aborting install: ${pending_root}",

@@ -68,14 +68,17 @@ class RunnerHonorsDeclarationTests(unittest.TestCase):
         self.assertEqual(host["systemMessage"], "hook-reminder: routine release")
         self.assertNotIn(KEY, host)
 
-    def test_undecided_pending_merge_entry_forces_the_notice_despite_a_routine_declaration(self):
+    def test_undecided_pending_merge_entry_forces_only_its_owner_notice(self):
         with tempfile.TemporaryDirectory() as home:
             manifest = Path(home) / ".ghost-alice" / "pending-merges" / "claude" / "manifest.json"
             manifest.parent.mkdir(parents=True)
             manifest.write_text(json.dumps({"entries": [{"skill": "task-router", "decided": False}]}), encoding="utf-8")
-            host = gate("pending-merge-prompt", declared("merge-companion prompt-check: clean"), home=home)
-        self.assertIn("systemMessage", host)
-        self.assertNotIn(KEY, host)
+            for hook_id in ("session-intent", "prompt", "completion", "pending-merge-prompt"):
+                with self.subTest(hook_id=hook_id):
+                    host = gate(hook_id, declared("routine notice", context=CONTEXT), home=home)
+                    self.assertEqual("systemMessage" in host, hook_id == "pending-merge-prompt")
+                    self.assertEqual(host["hookSpecificOutput"]["additionalContext"], CONTEXT)
+                    self.assertNotIn(KEY, host)
 
     def test_nonzero_exit_forces_the_notice_despite_a_routine_declaration(self):
         host = gate("prompt", declared("hook-reminder: routine release"), exit_code=3)

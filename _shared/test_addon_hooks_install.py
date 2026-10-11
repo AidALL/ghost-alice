@@ -1,7 +1,5 @@
-"""TDD for plan Phase 4 (addon-hook-ordering + core-only-snapshot-compatibility +
-addon-hook-runner-namespace): install_hook appends observational addon hook
-entries AFTER the core suite, the inner command passes the hook-runner allowlist,
-and a core-only install stays byte-identical.
+"""Observational addon hook installation checks: append after the Core suite,
+validate the runner namespace and preserve Core-only configuration.
 
 Run: python3 -m pytest _shared/test_addon_hooks_install.py -q
 """
@@ -11,6 +9,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -21,6 +21,7 @@ sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 import install_hooks  # noqa: E402
 import hook_profile_gate  # noqa: E402
+import install_destination  # noqa: E402
 from test_addon_hooks import _make_addon  # noqa: E402
 
 
@@ -96,13 +97,35 @@ class AddonHookInstallTest(unittest.TestCase):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
         install_hooks.install_hook("claude", addon_sources=[str(src)])
         cmd = self._addon_entries("PostToolUse")[0]
-        # command ends (before the " # <marker>" comment) with: "run" "<id>" "<b64payload>"
-        cmd_part = cmd.split(" # ")[0].rstrip()
-        payload = cmd_part.rsplit('"', 2)[1]
+        # The public runner argv carries command and transport separately:
+        # run ID [PLATFORM] COMMAND_B64 --binding-b64 BINDING_B64.
+        outer = shlex.split(cmd, comments=True)
+        run = outer.index("run")
+        payload_index = run + 3 if outer[run + 2] in {"claude", "codex"} else run + 2
+        payload = outer[payload_index]
+        self.assertEqual(outer[payload_index + 1], "--binding-b64")
+        binding = install_destination.decode_binding(outer[payload_index + 2])
+        self.assertEqual(binding["destination"]["platform_dir"], str(self.claude))
         inner = base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
-        argv = hook_profile_gate._validate_shell_command(inner)  # raises if outside allowlist
+        env = install_destination.binding_environment(binding["destination"], os.environ)
+        argv = hook_profile_gate._validate_shell_command(inner, env=env)  # raises if outside allowlist
         self.assertTrue(argv[0].endswith("python") or "python" in argv[0])
         self.assertTrue(argv[-1].endswith("hooks/obs.py"))
+
+    @unittest.skipIf(os.name == "nt", "POSIX shell launcher")
+    def test_observational_addon_runner_logs_the_registered_platform(self):
+        src = _make_addon(self.tmp, [{"id":"obs", "event":"post_tool_use", "script":"hooks/obs.py"}])
+        install_hooks.install_hook("claude", addon_sources=[str(src)])
+        command = self._addon_entries("PostToolUse")[0]
+        env = {k:v for k,v in os.environ.items() if k not in {
+            "GHOST_ALICE_PLATFORM", "GHOST_ALICE_SESSION_ID", "CODEX_THREAD_ID"}}
+        result = subprocess.run(["/bin/sh", "-c", command], cwd=self.tmp, env=env,
+            input=json.dumps({"hook_event_name":"PostToolUse", "session_id":"addon-platform-session"}),
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        logs = self.tmp / ".ghost-alice/session-logs"
+        written = sorted(str(path.relative_to(logs)) for path in logs.rglob("strict-hook-output.jsonl"))
+        self.assertEqual(written, ["claude/addon-platform-session/strict-hook-output.jsonl"])
 
     def test_idempotent_reinstall_no_duplicate(self):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])

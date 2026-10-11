@@ -2,20 +2,20 @@
 
 언어: [🇺🇸 English](../../reference/skills.md) | 🇰🇷 한국어
 
-installable skill catalog의 source of truth는 [skill-catalog/skills.json](../../../skill-catalog/skills.json)입니다.
+설치 가능한 스킬 목록의 기준 자료는 [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json)입니다.
 
-이 문서는 contributor가 확인할 위치를 안내합니다. 현재 skill 개수, skill 목록, routing metadata는 catalog에서 바뀌므로 이 문서가 중복 기록하지 않습니다.
+이 문서는 기여자가 확인할 자료의 위치를 안내합니다. 관리자는 현재 스킬 수, 목록과 라우팅 메타데이터를 카탈로그에 기록하며, 이 문서에는 중복 기록하지 않습니다.
 
 ## 확인 위치
 
-- 공개 skill 제공 상태: [skill-catalog/skills.json](../../../skill-catalog/skills.json)
-- session gate routing: [skill-catalog/session-gates.json](../../../skill-catalog/session-gates.json)
-- skill 작성 규칙: [AGENTS.md](../../../AGENTS.md)
-- compliance checklist: [official-docs/derived/skill-compliance-checklist.md](../../../official-docs/derived/skill-compliance-checklist.md)
+- 공개 스킬 제공 상태: [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json)
+- 세션 검사 절차의 라우팅: [skill-catalog/session-gates.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/session-gates.json)
+- 스킬 작성 규칙: [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)
+- 준수 점검표: [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md)
 
 ## 업데이트 규칙
 
-공개 skill 제공 상태가 바뀌면 먼저 `skill-catalog/skills.json`을 수정한 뒤 public surface를 rebuild 또는 validate합니다.
+관리자는 공개 스킬 제공 상태가 바뀌면 먼저 `skill-catalog/skills.json`을 수정한 뒤 공개 안내를 다시 생성하거나 다음 명령으로 검증합니다.
 
 ```bash
 python3 scripts/validate_public_surfaces.py

@@ -10,9 +10,11 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
+import textwrap
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +25,7 @@ import hash_utils
 from project_runtime import project_runtime
 import runtime_config
 from encoding_guard import validate_repo
+from global_rule_blocks import codex_requires_governance_companion
 from installer_assets import (
     OWNERSHIP_ABSENT,
     OWNERSHIP_GHOST_ALICE_MANAGED,
@@ -64,7 +67,6 @@ RUNTIME_SHARED_FILES = (
     "session_intent_analyzer_hook.py",
     "task_router_reminder_hook.py",
 )
-LEDGER_UNAVAILABLE_DEGRADE = "Ledger dependency unavailable non-blockingly"
 RUNTIME_MANAGED_MARKERS = (
     "[merge-companion] prompt-check",
     "[hook-reminder] AGENTS.md",
@@ -88,7 +90,7 @@ def _addon_registry_audit(ghost_alice_root: Path, platform: str) -> tuple[str, l
     """Verify each addon sidecar's recorded content_hash against the live target.
 
     Read-only integrity check for addon registry entries. A target whose live hash
-    no longer matches the recorded hash is a content_hash mismatch (tamper /
+    differs from the recorded hash is a content_hash mismatch (tamper /
     bit-rot, ERROR); an absent target is a WARNING; an unreadable sidecar (corrupt
     / future major) is an ERROR so a dropped record is never mistaken for absence.
     The platform-scoped addons dir keeps each platform's registry independent.
@@ -520,9 +522,9 @@ def _node_runtime_status(
 
     The PreToolUse gate runs the configured Node runtime with ghost-alice-hook.mjs.
     The installer blocks hook install when no usable node runtime is available, but
-    that runtime can be removed afterward. Since Claude Code treats a non-2 PreToolUse
-    exit as non-blocking, a missing node makes the gate fail open silently, so doctor
-    flags it. Under --strict it is an error.
+    that runtime can be removed afterward. A missing Node runtime prevents the checkpoint from executing; native
+    tool permission remains the host’s responsibility. Doctor reports the missing
+    runtime and treats it as an error under --strict.
     """
     registration_state, registered_node = (
         _registered_node_runtime_status(platform, ghost_alice_root)
@@ -556,7 +558,7 @@ def _node_runtime_status(
     return (
         status,
         "missing (required for tool-checkpoint hook dispatcher; "
-        f"gate fails open without it; {_node_full_capability_guidance()})",
+        f"checkpoint cannot execute without it; {_node_full_capability_guidance()})",
     )
 
 
@@ -724,8 +726,6 @@ def _runtime_validator_golden_status(runtime_shared: Path) -> tuple[str, str]:
             "- next-required: none\n"
             "\n"
             "[completion-check]\n"
-            "- verification-before-completion: done\n"
-            "- skill-call: verification-before-completion (this turn)\n"
             "- acceptance-criteria:\n"
             "  - crit-a: golden sample [source: system-doc]\n"
             "- claim-evidence-map:\n"
@@ -751,18 +751,49 @@ def _runtime_session_intent_golden_status(
     platform: str,
     *,
     repo_root: Path | str | None = None,
+    hook_commands: list[str] | None = None,
 ) -> tuple[str, str]:
     hook = runtime_shared / "session_intent_analyzer_hook.py"
     if not hook.exists():
         return STATUS_ERROR, "hook-missing"
-    payload = json.dumps({
-        "hook_event_name": "UserPromptSubmit",
-        "session_id": "doctor-runtime-golden",
-        "prompt": "runtime session intent golden",
-    })
     owning_root = Path(repo_root).resolve() if repo_root else CODE_OWNER_ROOT
-    with project_runtime(owning_root, "install-doctor-session-intent") as runtime:
+    destination = None
+    if hook_commands is not None:
+        import install_destination
+        from install_hooks import _managed_prompt_instruction
+
+        destinations = {}
+        for command in hook_commands:
+            if _managed_prompt_instruction(command, "session-intent") is None:
+                continue
+            outer = shlex.split(command, comments=True)
+            script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
+            args = outer[script_index + 1:]
+            binding = install_destination.decode_binding(args[-1])
+            candidate = install_destination.InstallDestination.parse(binding["destination"])
+            if (args[2] != platform
+                    or Path(candidate.runtime_shared_dir).resolve() != runtime_shared.resolve()
+                    or Path(candidate.core_source_root).resolve() != owning_root):
+                return STATUS_ERROR, "session-intent-binding-mismatch"
+            destinations[json.dumps(binding, sort_keys=True)] = candidate
+        if len(destinations) != 1:
+            return STATUS_ERROR, "session-intent-binding-missing-or-ambiguous"
+        destination = next(iter(destinations.values()))
+    scratch_owner = Path(destination.owned_root) if destination and destination.mode == "isolated" else owning_root
+    with project_runtime(scratch_owner, "install-doctor-session-intent") as runtime:
         root = runtime.work_dir / "session-intent"
+        child_env = (install_destination.binding_environment(destination, os.environ)
+                     if destination else dict(os.environ))
+        # Preserve the installed provider binding while keeping golden input
+        # outside the live session ledger.
+        child_env["GHOST_ALICE_SESSION_INTENT_ROOT"] = str(root)
+        transcript = runtime.work_dir / 'native-intake.jsonl'
+        transcript.write_text('', encoding='utf-8')
+        prompt = 'runtime session intent golden'
+        payload = json.dumps({
+            "hook_event_name": "UserPromptSubmit", "session_id": "doctor-runtime-golden",
+            "prompt": prompt, "prompt_id": "doctor-runtime-prompt", "transcript_path": str(transcript),
+        })
         proc = runtime.run(
             [
                 sys.executable,
@@ -780,6 +811,7 @@ def _runtime_session_intent_golden_status(
             ],
             cwd=owning_root,
             runner=subprocess.run,
+            env=child_env,
             input=payload,
             capture_output=True,
             text=True,
@@ -797,14 +829,54 @@ def _runtime_session_intent_golden_status(
             return STATUS_ERROR, "hook-output-invalid-json"
         if data.get("continue") is not True:
             return STATUS_ERROR, "hook-output-not-continue"
-        from task_router_reminder_hook import session_material
-        material = session_material(root, platform, "doctor-runtime-golden")
+        # Read through the installed provider too: a module cached by doctor's
+        # own process must not substitute for the hook's bound ledger module.
+        read_material = textwrap.dedent('''\
+            import json, sys
+            from pathlib import Path
+            sys.path.insert(0, sys.argv[1])
+            import session_intent_analyzer_hook as hook
+            if getattr(hook, "_LEDGER_IMPORT_BROKEN", True):
+                result = {"dependency": "broken"}
+            elif not all(callable(getattr(hook, name, None)) for name in
+                         ("resolve_session_id", "build_input_observation", "record_turn")):
+                result = {"dependency": "unavailable"}
+            else:
+                from task_router_reminder_hook import session_material
+                root, platform = Path(sys.argv[2]), sys.argv[3]
+                material = session_material(root, platform, "doctor-runtime-golden")
+                if platform == "claude" and material["state"].get("pending_native_inputs"):
+                    # Native actor evidence follows UserPromptSubmit.
+                    Path(sys.argv[4]).write_text(json.dumps(dict(type="user",
+                        sessionId="doctor-runtime-golden", promptId="doctor-runtime-prompt",
+                        origin=dict(kind="human"), promptSource="sdk", turnOrigin="human",
+                        message=dict(role="user", content=sys.argv[5]))) + "\\n", encoding="utf-8")
+                    from session_intent_ledger import reconcile_native_inputs
+                    reconcile_native_inputs(root=root, platform=platform, session_id="doctor-runtime-golden")
+                    material = session_material(root, platform, "doctor-runtime-golden")
+                result = {"dependency": "available", "material": material}
+            print(json.dumps(result))
+        ''')
+        observed = runtime.run([sys.executable, "-c", read_material, str(runtime_shared),
+            str(root), platform, str(transcript), prompt], cwd=owning_root,
+            runner=subprocess.run, env=child_env, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", check=False)
+        if observed.returncode != 0:
+            return STATUS_ERROR, "session-intent-reconciliation-failed"
+        try:
+            observation = json.loads(observed.stdout)
+        except json.JSONDecodeError:
+            return STATUS_ERROR, "session-intent-observation-invalid-json"
+        if observation.get("dependency") == "unavailable":
+            return STATUS_WARNING, "ledger-unavailable-degraded"
+        if observation.get("dependency") != "available":
+            return STATUS_ERROR, "ledger-dependency-broken"
+        material = observation["material"]
         if material["degraded"] or not material["latest_input"]:
-            system_message = str(data.get("systemMessage") or "")
-            if LEDGER_UNAVAILABLE_DEGRADE in system_message:
-                # The intent-audit surface is the governance input anchor; an install without it must not read as fully healthy. WARNING, not ERROR: the absent-ledger degrade is documented behavior.
-                return STATUS_WARNING, "ledger-unavailable-degraded"
             return STATUS_ERROR, "session-intent-not-committed"
+        if (material['state'].get('pending_native_inputs')
+                or material['latest_input'].get('input_digest') != 'sha256:' + hashlib.sha256(prompt.encode()).hexdigest()):
+            return STATUS_ERROR, 'session-intent-not-committed'
     return STATUS_OK, "golden-pass"
 
 
@@ -846,6 +918,7 @@ def _runtime_core_audit(
         runtime_shared,
         platform,
         repo_root=source_shared.parent,
+        hook_commands=commands,
     )
     findings.append({
         "status": session_status,
@@ -909,9 +982,9 @@ def run(args: argparse.Namespace) -> int:
             body = Path(rule_path).read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             continue  # Existing ownership diagnostics handle the primary.
-        # Legacy full ports do not require a sibling. Only the conditional
-        # selector introduces this installation dependency.
-        if "## Select the applicable contract" in body and "ghost-alice-governance.md" in body:
+        # The managed loader declares its sibling dependency; user appendices
+        # and section-heading edits do not define installation ownership.
+        if codex_requires_governance_companion(body):
             global_rules.append(("codex-governance", str(Path(rule_path).with_name("ghost-alice-governance.md")), marker, begin, end))
     global_rule_results = [
         (

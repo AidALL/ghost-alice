@@ -2,157 +2,74 @@
 
 Language: 🇺🇸 English | [🇰🇷 한국어](../ko/release/public-release-checklist.md)
 
-This checklist prepares a clean Ghost-ALICE OS public repository snapshot without private repository history.
+Use this checklist to release the current Ghost-ALICE Core repository and its public documentation. Keep the existing repository history and prepare only the authorized release scope. This page defines release requirements; it does not attest that a particular candidate has passed them.
+
 ## Contents
 
-- [Release Goal](#release-goal)
-- [Include](#include)
-- [Exclude](#exclude)
-- [Pre-Export Checks](#pre-export-checks)
+- [Release Scope](#release-scope)
+- [Documentation And Public Surfaces](#documentation-and-public-surfaces)
+- [Source Verification](#source-verification)
 - [Installed Behavior Gates](#installed-behavior-gates)
-- [License And Provenance Gates](#license-and-provenance-gates)
-- [Sensitive String Scan](#sensitive-string-scan)
-- [GitHub Community File Check](#github-community-file-check)
-- [Clean Export Procedure](#clean-export-procedure)
-- [GitHub Repository Setup](#github-repository-setup)
-- [Public Smoke Test](#public-smoke-test)
+- [License And Private Material](#license-and-private-material)
+- [Publication](#publication)
 
+## Release Scope
 
-## Release Goal
+- Identify the candidate commit and include the reviewed Core, installer, public skills, schemas, tests and documentation that belong to this release. Preserve unrelated local changes.
+- Keep `VERSION`, addon requirements and the current compatibility records consistent. Core and Ghost-ALICE Autopilot are separate packages; a Core source update does not publish or install Ghost-ALICE Autopilot.
+- Keep `.tmp/`, local worktrees, install reports, session records, credentials, private addons, tenant material and generated caches outside the public artifact. Do not include installed home-directory copies or local agent settings.
+- Distinguish source preparation, local installation, native host adoption, integration and public publication. Evidence for one does not establish the others.
 
-Create a public repository snapshot that includes the core Ghost-ALICE OS governance layer, public installer, public skills, public docs, and validation scripts, while excluding local state, secrets, private addons, tenant content, and private development artifacts.
+## Documentation And Public Surfaces
 
-## Include
+- Synchronize `README.md`/`README_ko.md`, architecture, paired `docs/`/`docs/ko/`, Wiki pages and the English/Korean GitHub Pages entrypoints in the same release scope.
+- Describe current responsibilities, commands and limits in documentation, Wiki and Pages. Record what changed and how only in commit messages; omit change histories, before/after comparisons and upgrade narratives from active documentation.
+- Preserve literal command, path, hook, schema and enum tokens across languages. Check counterpart links and generated public surfaces against their owning catalogs.
+- Keep repository docs authoritative for implementation contracts. The Wiki provides paired explanation and recovery guidance; Pages provides the public entrypoint. Publish their current meaning consistently.
+- Keep `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, the code of conduct and issue/PR templates consistent with actual project policy.
 
-- `README.md`
-- `LICENSE`
-- `NOTICE`
-- `THIRD_PARTY_NOTICES.md`
-- `CONTRIBUTING.md`
-- `SECURITY.md`
-- `CODE_OF_CONDUCT.md`
-- `SUPPORT.md`
-- `CHANGELOG.md`
-- `AGENTS.md`, `CLAUDE.md`
-- `install.sh`, `install.ps1`, `install.cmd`
-- `installer_lib/`
-- `_shared/`
-- public skill directories
-- `skill-catalog/`
-- `scripts/`
-- `platforms/`
-- `.claude/commands/`
-- `docs/`
-- `official-docs/`
-- public images under `imgs/`
-- `.github/`
+## Source Verification
 
-## Exclude
+Build the verification plan from the candidate's affected contracts. Reuse valid unchanged proof with its original source and verification time. Do not repeat already covered business checks because of a new status request, documentation edit or recording repair. Missing required coverage remains unresolved.
 
-- `.git/` history from the private development repo
-- `.tmp/`
-- `.worktrees/`
-- local install logs and reports
-- `~/.ghost-alice/` runtime state
-- `~/.agents/`, `~/.claude/`, `~/.codex/` installed copies
-- `.claude/settings.local.json`
-- `.claude/settings.json`
-- `~/.ghost-alice/secrets.env`
-- private addons and tenant skills
-- customer, grant, company, or credential files
-- generated caches such as `__pycache__/`
-- local editor state
-
-## Pre-Export Checks
-
-Run from the private working repo before creating the clean export.
+Available source checks include:
 
 ```bash
-git status --short
 python3 scripts/validate_public_surfaces.py
 python3 scripts/check_skill_gate_contract.py
 python3 scripts/check_prose_wrapping.py
-python3 scripts/run_installer_compat_tests.py --group shared-all
-python3 scripts/run_installer_compat_tests.py --group scripts-all
-```
-
-For installer-heavy releases, also run:
-
-```bash
-python3 scripts/run_installer_compat_tests.py
 python3 scripts/validate_platform_adapters.py
+python3 scripts/run_installer_compat_tests.py --list
 ```
+
+Use the focused compatibility groups for affected installer behavior. A release that changes shared runtime or scripts needs the applicable coverage from `shared-all` and `scripts-all`; use the full compatibility matrix when the change spans its contracts. Consult the [installer compatibility matrix](../policies/installer-platform-compatibility-matrix.md) for test owners. Passing static checks does not establish native firing or model behavior.
 
 ## Installed Behavior Gates
 
-Run the evaluator-visible governance live smoke from `docs/policies/live-smoke-regression.md` to verify hooks, gates, and control-surface markers. This smoke is runtime-plumbing evidence and does not satisfy the blind behavior gate.
+For an installed-runtime claim, retain candidate installation provenance and actual native hook observations from the [live smoke procedure](../policies/live-smoke-regression.md). Hook configuration on disk, native trust and the running host's adoption are separate; use the [reload recovery guide](../getting-started/troubleshooting.md#native-hook-trust-and-reload) when needed.
 
-In a disposable environment with the candidate installed canonically and its installer-owned manifest present, run the separate blind fresh-session controller once for each installed subject. Replace the sealed case and trusted evaluator placeholders with release-owned paths or commands; do not put evaluator-private material in the subject command or environment.
+Governance smoke establishes runtime connections and control surfaces. It does not satisfy the separate blind behavior gate. In a disposable environment with the candidate installed through its canonical installer and its installer-owned manifest present, use the fresh-session controller for each claimed installed subject. Replace the placeholders with release-owned case and evaluator paths; keep evaluator-private material outside the subject command and environment.
 
 ```bash
 python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform claude --subject-command '["claude"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-claude.json
 python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform codex --subject-command '["codex"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-codex.json
 ```
 
-Both commands must exit zero and produce sanitized records with `verdict=pass`, the expected installed platform provenance, the controller-computed suite digest, and no prompt, rubric, purpose, expected answer, subject response, or evaluator-private text. A pass from one platform does not cover the other, and neither automated blind result replaces the human-operated clean-terminal acceptance gate.
+Required records must have exit code zero, `verdict=pass`, the intended installed platform provenance and the controller-computed suite digest. Store no raw prompt, rubric, expected answer, subject response or evaluator-private text. One platform's pass does not cover another. Automated blind screening does not replace the human-operated clean-terminal acceptance gate. Valid unchanged evidence may be retained; absent or affected evidence must be obtained before making its release claim.
 
-## License And Provenance Gates
+## License And Private Material
 
-- Confirm `LICENSE` is the unmodified Apache License, Version 2.0 text.
-- Confirm `README.md`, `NOTICE`, and `THIRD_PARTY_NOTICES.md` agree on the project license boundary.
-- Confirm bundled third-party reference material has source URL, license, copyright notice, and local path when any is included.
-- Do not publish copied upstream documentation snapshots. Keep only original project commentary with short citations and source locators.
-- Confirm no contributor-facing file implies a CLA, DCO, or inbound license rule that maintainers do not actually enforce.
+- Confirm `LICENSE` contains the unmodified Apache License, Version 2.0 text and both READMEs agree with `NOTICE` and `THIRD_PARTY_NOTICES.md` on the license boundary.
+- Included third-party material requires a source URL, license, copyright notice and local path. Keep original project commentary with short citations instead of copied upstream documentation snapshots.
+- Do not imply a CLA, DCO, ownership rule or approval process that maintainers do not enforce. `CODEOWNERS`, if present, names real users or teams with the required access.
+- Route vulnerability reports through `SECURITY.md` or private vulnerability reporting, not public issues.
+- Review the candidate artifact for secrets and private material. Search hits in policy text and credential-helper examples require context; a keyword alone is not a leak verdict.
 
-## Sensitive String Scan
+## Publication
 
-Before export, scan for obvious private material.
-
-```bash
-rg -n --hidden --glob '!/.git/**' --glob '!/.tmp/**' \
-  'api[_-]?key|token|password|secret|private[_-]?key|BEGIN [A-Z ]*PRIVATE KEY|secrets.env|company-info-files|customer|grant'
-```
-
-Review hits manually. Some hits are expected in policy text and secret helper documentation.
-
-## GitHub Community File Check
-
-- Confirm `README.md`, `LICENSE`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, issue templates, and pull request template are present.
-- Confirm `.github/CODEOWNERS` is absent until real maintainers or teams exist, or contains only real GitHub users or teams with write access.
-- Confirm there is no duplicate issue template pair for the same workflow.
-- Confirm security reports route to `SECURITY.md` or GitHub private vulnerability reporting, not public issues.
-
-## Clean Export Procedure
-
-1. Create a fresh directory outside the private repo.
-2. Copy only included paths.
-3. Run the pre-export checks inside the export.
-4. Initialize a new Git repository.
-5. Commit the clean snapshot as the initial public commit.
-6. Push to the public repository.
-7. Confirm GitHub community profile status.
-8. Confirm CI passes on the public repository.
-9. Confirm branch protection and CODEOWNERS review settings only after real maintainers or teams exist.
-
-## GitHub Repository Setup
-
-Enable or configure:
-
-- Private vulnerability reporting, if available
-- Branch protection for the default branch
-- Required CI checks
-- Dependabot or equivalent dependency update automation, when package manifests are introduced
-- OpenSSF Scorecard workflow, once the public repository is stable
-
-## Public Smoke Test
-
-After publication, test a clean clone.
-
-```bash
-git clone <public-repo-url> ghost-alice-public-smoke
-cd ghost-alice-public-smoke
-python3 scripts/validate_public_surfaces.py
-bash install.sh --status
-```
-
-Do not run install commands that mutate your main development environment unless the smoke test is intentionally using a disposable account or machine.
+1. Integrate only the reviewed release scope through the repository's existing branch and review process. Do not initialize a replacement repository or rewrite history as a release step.
+2. Confirm the required source, installation and behavior evidence covers the candidate and record any unsupported platform or scope explicitly.
+3. Publish the authorized commit, version tag and release artifact. Release and pull request descriptions state the current package behavior, installation, validation and limitations; change history belongs only in commit messages.
+4. Publish the paired Wiki and GitHub Pages content from their reviewed sources and confirm that the published pages match the intended candidate.
+5. Check the actual CI and publication results. A local commit, queued deployment or successful upload request is not proof of visible publication.
+6. When distribution or installer paths changed, use a clean clone in a disposable account or machine for the affected public-install check. Preserve unrelated development installations.

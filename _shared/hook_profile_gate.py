@@ -9,6 +9,7 @@ wrapped command, and then runs it.
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
 import os
 import re
@@ -19,15 +20,26 @@ import sys
 import tomllib
 import time
 from collections.abc import Mapping
+from contextlib import nullcontext
 from pathlib import Path
 from typing import NoReturn
+
+import install_destination
+
+# Bind transport before source-provider imports. Invalid transport cannot open audit writes.
+if "--binding-b64" in sys.argv:
+    try:
+        _early_binding = install_destination.decode_binding(sys.argv[sys.argv.index("--binding-b64")+1])
+        os.environ.update(install_destination.binding_environment(_early_binding["destination"],os.environ))
+    except (ValueError, IndexError) as error:
+        sys.stderr.write(f"hook binding rejected: {error}\n")
+        raise SystemExit(126)
 
 import agent_visibility_policy
 import runtime_config
 import work_impact_projection
 import strict_session_log
 from session_intent_analyzer_hook import bound_session_identity
-from task_router_reminder_hook import session_material, gate_state
 
 SAFE_BARE_COMMANDS = {
     "bash",
@@ -44,6 +56,12 @@ VALID_HOOK_PLATFORMS = {"claude", "codex"}
 
 class HookCommandRejected(ValueError):
     """Raised when a wrapped hook command is outside the allowlist."""
+
+    def __init__(self, message, *, hook_payload=None, audit_details=None):
+        super().__init__(message)
+        # Transient audit context only; it does not grant command authority.
+        self.hook_payload = hook_payload
+        self.audit_details = audit_details
 
 
 def normalize_hook_id(value: str) -> str:
@@ -109,6 +127,8 @@ def _configured_node_runtime_from_value(value: str | None) -> Path | None:
 
 
 def _codex_config_candidates(env: dict[str, str]) -> list[Path]:
+    if env.get("GHOST_ALICE_PLATFORM_DIR") and env.get("GHOST_ALICE_PLATFORM")=="codex":
+        return [Path(env["GHOST_ALICE_PLATFORM_DIR"])/"config.toml"]
     codex_home = env.get("CODEX_HOME")
     if codex_home:
         return [Path(codex_home).expanduser() / "config.toml"]
@@ -492,13 +512,6 @@ def _read_json(path: Path) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
 
 
-def _safe_path_component(value: object) -> str:
-    text = str(value or "unknown").strip()
-    text = re.sub(r"[^A-Za-z0-9_.=-]+", "-", text)
-    text = re.sub(r"^[.-]+|[.-]+$", "", text)
-    return text or "unknown"
-
-
 def _first_text(*values: object) -> str:
     for value in values:
         if value is None:
@@ -527,7 +540,7 @@ def _pending_merge_manifest_path(env: dict[str, str], platform: str) -> Path | N
     home = _home_from_env(env)
     if home is None or bound_session_identity(platform, {"session_id": "pending-merge"}, {}) is None:
         return None
-    return home / ".ghost-alice" / "pending-merges" / platform / "manifest.json"
+    return install_destination.ghost_root(home,env) / "pending-merges" / platform / "manifest.json"
 
 
 def _has_pending_merge_undecided(env: dict[str, str], platform: str) -> bool:
@@ -539,45 +552,6 @@ def _has_pending_merge_undecided(env: dict[str, str], platform: str) -> bool:
     if not isinstance(entries, list):
         return False
     return any(isinstance(entry, dict) and entry.get("decided") is False for entry in entries)
-
-
-def _session_intent_root_candidates(env: dict[str, str]) -> list[Path]:
-    candidates: list[Path] = []
-    configured = str(env.get("GHOST_ALICE_SESSION_INTENT_ROOT") or "").strip()
-    if configured:
-        return [Path(configured).expanduser()]
-    candidates.append(Path(__file__).resolve().parents[1] / ".tmp" / "session-intent")
-    home = _home_from_env(env)
-    if home is not None:
-        candidates.append(home / ".ghost-alice" / "session-intent")
-    unique: list[Path] = []
-    seen: set[str] = set()
-    for candidate in candidates:
-        key = str(candidate)
-        if key not in seen:
-            seen.add(key)
-            unique.append(candidate)
-    return unique
-
-
-def _has_current_downstream_block(env: dict[str, str], payload: dict[str, object], platform: str) -> bool:
-    session_id = bound_session_identity(platform, payload, env)
-    if not session_id or session_id == "unknown":
-        return False
-    for root in _session_intent_root_candidates(env):
-        # Once a store contains this bound session, do not borrow a block from
-        # another root merely because the selected store has no current block.
-        material = session_material(root, platform, session_id)
-        if material.get("degraded"):
-            return False
-        if not material.get("state"):
-            continue
-        gate = gate_state(root, platform, session_id, material)
-        if not gate or gate.get("stale"):
-            return False
-        decision = str(gate.get("decision") or "").strip().lower()
-        return gate.get("opened") is False or decision == "block"
-    return False
 
 
 # A hook marks its own routine state with this private key; the runner strips it before the host sees the output.
@@ -594,6 +568,53 @@ def _take_surface_declaration(stdout: str) -> tuple[str, str]:
         return "", stdout
     declared = protocol.pop(SURFACE_DECLARATION_KEY)
     return ("routine" if declared == "routine" else ""), json.dumps(protocol, ensure_ascii=False) + "\n"
+
+
+def _strip_private_protocol_metadata(stdout: str) -> str:
+    """Remove consumed internal receipts at the host boundary; retain raw audit."""
+    try:
+        protocol = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return stdout
+    if not isinstance(protocol, dict) or "ghostAlicePendingMergeCheck" not in protocol:
+        return stdout
+    protocol.pop("ghostAlicePendingMergeCheck")
+    return json.dumps(protocol, ensure_ascii=False) + "\n"
+
+
+def _native_protocol_output(stdout: str, *, platform: str, event: str) -> str:
+    """Project only the host envelope; raw output and domain state stay intact."""
+    pretool = platform in {"codex", "claude"} and event == "PreToolUse"
+    if not pretool and (platform != "codex" or event not in {"Stop", "SubagentStop"}):
+        return stdout
+    try:
+        protocol = json.loads(stdout)
+    except (json.JSONDecodeError, TypeError):
+        return stdout
+    if not isinstance(protocol, dict):
+        return stdout
+    if pretool:
+        # Ghost-ALICE Autopilot's recording result is retained in the raw strict audit. It is not
+        # a native PreToolUse field; permissions and all host controls survive.
+        if "completion_recording" not in protocol:
+            return stdout
+        protocol.pop("completion_recording")
+        return json.dumps(protocol, ensure_ascii=False) + "\n"
+    # Codex Stop accepts universal fields plus the block decision and its reason.
+    # Internal recording and recovery records belong in the domain and strict log.
+    fields = {"continue", "decision", "reason", "stopReason", "suppressOutput", "systemMessage"}
+    projected = {key: value for key, value in protocol.items() if key in fields}
+    if projected.get("decision") == "block":
+        reason = projected.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            projected["reason"] = next(
+                (value for key in ("systemMessage", "stopReason")
+                 if isinstance(value := protocol.get(key), str) and value.strip()),
+                "A registered Stop hook blocked completion without a usable reason. Inspect the strict hook output.",
+            )
+    if projected == protocol:
+        return stdout
+    return json.dumps(projected, ensure_ascii=False) + "\n"
 
 
 def _visibility_context(
@@ -616,22 +637,22 @@ def _visibility_context(
         routing_surface = payload.get("routing-surface")
     if isinstance(routing_surface, dict):
         context["routing_surface"] = routing_surface
-    pending = None
-    if hook_id in {"pending-merge-prompt", "session-start"} and exit_code == 0:
-        try:
-            receipt = json.loads(stdout).get("ghostAlicePendingMergeCheck")
-            if (isinstance(receipt, dict) and receipt.get("platform") == platform
-                    and receipt.get("manifest_path") == str(_pending_merge_manifest_path(source_env, platform))
-                    and type(receipt.get("undecided_count")) is int and receipt["undecided_count"] >= 0):
-                pending = receipt["undecided_count"] > 0
-        except (ValueError, TypeError, AttributeError):
-            pass
-    if pending is None:
-        pending = _has_pending_merge_undecided(source_env, platform)
-    if pending:
-        context["pending_merge_undecided"] = True
-    if _has_current_downstream_block(source_env, payload, platform):
-        context["security_boundary"] = True
+    if hook_id in {"pending-merge-prompt", "session-start"}:
+        # Pending state belongs to its check result, not every hook in the session.
+        pending = None
+        if exit_code == 0:
+            try:
+                receipt = json.loads(stdout).get("ghostAlicePendingMergeCheck")
+                if (isinstance(receipt, dict) and receipt.get("platform") == platform
+                        and receipt.get("manifest_path") == str(_pending_merge_manifest_path(source_env, platform))
+                        and type(receipt.get("undecided_count")) is int and receipt["undecided_count"] >= 0):
+                    pending = receipt["undecided_count"] > 0
+            except (ValueError, TypeError, AttributeError):
+                pass
+        if pending is None:
+            pending = _has_pending_merge_undecided(source_env, platform)
+        if pending:
+            context["pending_merge_undecided"] = True
     if declared:
         # A declaring hook's own wording is not evidence of state; only the real state above and the exit code count.
         context["declared_surface"] = declared
@@ -761,6 +782,7 @@ def _labeled(value_key: str, value: str) -> str:
 
 
 def _render_model_surface(item: dict[str, object], stdout: str, stderr: str) -> str:
+    stdout = _strip_private_protocol_metadata(stdout)
     level = str(item.get("model_surface") or "")
     value_key = str(item.get("value_key") or "surface-item")
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
@@ -791,6 +813,7 @@ def _is_hook_noop_json(stdout: str) -> bool:
 
 
 def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> tuple[str, str]:
+    stdout = _strip_private_protocol_metadata(stdout)
     level = str(item.get("user_surface") or "")
     if _is_hook_noop_json(stdout):
         return (stdout, "" if level in {"hidden", "compact", "focused"} else stderr)
@@ -843,8 +866,72 @@ def _emit_rendered_user_surface(user_stdout: str, user_stderr: str) -> None:
         _write(sys.stderr, user_stderr)
 
 
-def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
+def run(hook_id: str, payload: str, *, platform: str | None = None, binding=None) -> int:
+    if binding is None:
+        return _run(hook_id,payload,platform=platform)
+    binding = install_destination.decode_binding(install_destination.encode_binding(binding))
+    with install_destination.use(binding["destination"]):
+        return _run(hook_id,payload,platform=platform,binding=binding)
+
+
+def _current_adapter_hash(binding, hook_id, platform, payload):
+    """Resolve a managed update from current registration, never from observed bytes.
+
+    A host can retain an older command after installation. Only the hash may
+    change: destination, adapter identity, event, script and command must match.
+    Missing, conflicting or malformed registrations retain the original pin.
+    """
+    filename = {'codex': 'hooks.json', 'claude': 'settings.json'}.get(platform)
+    if not filename:
+        return None
+    try:
+        config = json.loads((Path(binding['destination']['platform_dir']) / filename).read_text())
+        hashes = []
+        for group in config.get('hooks', {}).get(binding['adapter']['event'], []):
+            for entry in group.get('hooks', []):
+                if entry.get('type') != 'command':
+                    continue
+                parts = shlex.split(entry['command'])
+                if '--binding-b64' not in parts or 'run' not in parts:
+                    continue
+                run = parts.index('run')
+                if parts[run + 1:run + 4] != [hook_id, platform, payload]:
+                    continue
+                current = install_destination.decode_binding(parts[parts.index('--binding-b64') + 1])
+                adapter = dict(current.get('adapter', {}))
+                digest = adapter.pop('content_hash', None)
+                expected = dict(binding['adapter']); expected.pop('content_hash', None)
+                if (current['destination'] == binding['destination'] and adapter == expected
+                        and isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{64}', digest)):
+                    hashes.append(digest)
+        return hashes[0] if len(hashes) == 1 else None
+    except (OSError, ValueError, KeyError, IndexError, TypeError):
+        return None
+
+
+def _reconcile_native_intake(env, hook_payload):
+    """One native lifecycle transition, shared by every bound tool/Stop hook."""
+    event = hook_payload.get('hook_event_name') or hook_payload.get('hookEventName')
+    if env.get('GHOST_ALICE_PLATFORM') != 'claude' or event not in ('PreToolUse', 'Stop'):
+        return
+    session = bound_session_identity('claude', hook_payload, env)
+    if session is None:
+        return
+    path = Path(env['GHOST_ALICE_CORE_ROOT']) / 'session-intent-analyzer/scripts/session_intent_ledger.py'
+    spec = importlib.util.spec_from_file_location('_native_intake_ledger', path)
+    if spec is None or spec.loader is None:
+        raise HookCommandRejected('Core native intake ledger is unavailable', hook_payload=hook_payload)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.reconcile_native_inputs(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
+                                   platform='claude', session_id=session)
+
+
+def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=None) -> int:
     env = dict(os.environ)
+    if binding is not None:
+        binding = install_destination.decode_binding(install_destination.encode_binding(binding))
+        env = install_destination.binding_environment(binding["destination"],env)
     if platform is not None:
         env["GHOST_ALICE_PLATFORM"] = platform
     if not is_hook_enabled(hook_id, env):
@@ -854,6 +941,70 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
     force_success = _has_allowed_success_suffix(command)
     argv = _validate_shell_command(command, env=env)
     stdin_text = _read_stdin()
+    hook_payload = _payload_from_stdin(stdin_text)
+    registration_refresh = None
+    if binding is not None:
+        if binding['destination']['mode'] == 'normal':
+            # Core context follows the firing native cwd. Ghost-ALICE Autopilot retains explicit
+            # targets and owns platform-specific discovery from the input/CLI.
+            native_cwd = _payload_from_stdin(stdin_text).get('cwd')
+            if isinstance(native_cwd,str) and Path(native_cwd).is_absolute():
+                env['GHOST_ALICE_PROJECT_CWD'] = native_cwd
+            else:
+                env.pop('GHOST_ALICE_PROJECT_CWD',None)
+        for flag in ("--root","--session-intent-root"):
+            if flag in argv and argv[argv.index(flag)+1] != env["GHOST_ALICE_SESSION_INTENT_ROOT"]:
+                raise HookCommandRejected("inner ledger root conflicts with trusted binding", hook_payload=hook_payload)
+        if adapter := binding.get("adapter"):
+            from addon_installer import load_privileged_adapter_allowlist, privileged_adapter_runner_id
+            spec = load_privileged_adapter_allowlist(official_path=Path(env["GHOST_ALICE_CORE_ROOT"])/"skill-catalog/privileged-adapters.json").get(adapter.get("adapter_id"))
+            if (not spec or spec.get("args_policy") != "no_args" or adapter.get("runner_id") != hook_id
+                    or len(argv) != 2 or argv[1] != adapter.get("script")):
+                raise HookCommandRejected("registered adapter identity/arguments mismatch", hook_payload=hook_payload)
+            event = _payload_from_stdin(stdin_text).get("hook_event_name") or _payload_from_stdin(stdin_text).get("hookEventName")
+            semantic = "on_agent_stop" if adapter.get("event") == "Stop" else "pre_tool_use"
+            script = Path(argv[1])
+            expected_rel = Path(spec["script_rel_by_event"][semantic])
+            mismatch = None
+            if event != adapter.get("event"):
+                mismatch = dict(mismatch="event", expected_event=adapter.get("event"), actual_event=event)
+            elif (hook_id != privileged_adapter_runner_id(adapter["adapter_id"],spec["hook_id_by_event"][semantic])
+                    or script.parts[-len(expected_rel.parts):] != expected_rel.parts):
+                mismatch = dict(mismatch="source", expected_relative_source=str(expected_rel), actual_source=str(script))
+            else:
+                actual_hash = __import__('hashlib').sha256(script.read_bytes()).hexdigest()
+                expected_hash = adapter.get("content_hash")
+                if actual_hash != expected_hash:
+                    expected_hash = _current_adapter_hash(binding, hook_id, platform, payload) or expected_hash
+                    if actual_hash == expected_hash:
+                        registration_refresh = dict(source='current-platform-registration',
+                            previous_hash=adapter.get('content_hash'), verified_hash=expected_hash)
+                if actual_hash != expected_hash:
+                    mismatch = dict(mismatch="hash", expected_hash=expected_hash if isinstance(expected_hash,str)
+                        and re.fullmatch(r"[0-9a-fA-F]{64}",expected_hash) else "invalid-sha256", actual_hash=actual_hash)
+            if mismatch:
+                message = f"registered adapter {mismatch['mismatch']} mismatch. Adapter was not executed. "
+                if mismatch["mismatch"] == "hash":
+                    message += (
+                        f"expected={mismatch['expected_hash']} actual={mismatch['actual_hash']}. "
+                        "Check the installed adapter and current registration. If they match, "
+                        "refresh the host's loaded hook commands; otherwise repair the managed "
+                        "installation/registration. Do not bypass hash validation or repeat "
+                        "unchanged business verification."
+                    )
+                else:
+                    message += "Repair the registered adapter event/source through the Core installer."
+                raise HookCommandRejected(message,
+                    hook_payload=hook_payload, audit_details=mismatch)
+            env["GHOST_ALICE_COMPLETION_SCHEMA"] = "autopilot-completion-receipt.v2"
+        elif hook_id.startswith("adapter-"):
+            raise HookCommandRejected("adapter missing registered transport descriptor", hook_payload=hook_payload)
+    if binding is not None:
+        try:
+            _reconcile_native_intake(env, hook_payload)
+        except (ImportError, OSError, ValueError, RuntimeError) as error:
+            raise HookCommandRejected(f'native intake reconciliation failed: {error}',
+                                      hook_payload=hook_payload) from error
     child_env = dict(env)
     # subprocess.run encodes the pipe as UTF-8 below; Python children must decode the same bytes independently of the Windows console code page.
     child_env["PYTHONIOENCODING"] = "utf-8"
@@ -908,8 +1059,11 @@ def run(hook_id: str, payload: str, *, platform: str | None = None) -> int:
         profile=profile,
         strict_log_ref=log_ref,
     )
+    if registration_refresh is not None:
+        item['adapter_registration'] = registration_refresh
     model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
-    user_stdout, user_stderr = _render_user_surface(item, host_stdout, result.stderr)
+    native_stdout = _native_protocol_output(host_stdout, platform=platform, event=event)
+    user_stdout, user_stderr = _render_user_surface(item, native_stdout, result.stderr)
     strict_session_log.append_event(
         home=_home_from_env(env),
         platform=platform,
@@ -959,10 +1113,11 @@ def _rejection_audit_platform(payload: str, env: Mapping[str, str]) -> str:
     return inner_platform or "unknown"
 
 
-def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str) -> None:
+def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str,
+                            hook_payload=None, audit_details=None) -> None:
     env = os.environ
-    stdin_text = _read_stdin()
-    hook_payload = _payload_from_stdin(stdin_text)
+    if hook_payload is None:
+        hook_payload = _payload_from_stdin(_read_stdin())
     config = runtime_config.load_config(env=env, home=_home_from_env(env))
     profile = config["agent_visibility"]["profile"]
     session_id = strict_session_log.session_id_from_payload(hook_payload, env=env, platform=platform)
@@ -976,6 +1131,8 @@ def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str) -> None
         source_hook=hook_id,
         value=_one_line(stderr),
     )
+    if audit_details:
+        item["rejection_diagnostic"] = audit_details
     strict_session_log.append_event(
         home=_home_from_env(env),
         platform=platform,
@@ -1007,9 +1164,20 @@ def _strip_trailing_marker_args(args: list[str]) -> list[str] | None:
 
 def main(argv: list[str] | None = None) -> NoReturn:
     args = list(sys.argv[1:] if argv is None else argv)
+    binding = None
+    if "--binding-b64" in args:
+        index = args.index("--binding-b64")
+        if index + 1 >= len(args):
+            raise SystemExit(126)
+        try:
+            binding = install_destination.decode_binding(args[index+1])
+        except ValueError as error:
+            sys.stderr.write(f"hook binding rejected: {error}\n")
+            raise SystemExit(126)
+        del args[index:index+2]
     normalized_args = _strip_trailing_marker_args(args)
     if normalized_args is None or normalized_args[0] != "run":
-        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|legacy-visibility-csv] <payload-b64>\n")
+        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
 
     payload = normalized_args[2] if len(normalized_args) == 3 else normalized_args[3]
@@ -1020,7 +1188,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
             positional_platform = candidate
     try:
         if len(normalized_args) == 3:
-            raise SystemExit(run(normalized_args[1], payload))
+            raise SystemExit(run(normalized_args[1], payload,binding=binding))
         if len(normalized_args) == 4:
             if positional_platform is not None:
                 raise SystemExit(
@@ -1028,24 +1196,28 @@ def main(argv: list[str] | None = None) -> NoReturn:
                         normalized_args[1],
                         payload,
                         platform=positional_platform,
+                        binding=binding,
                     )
                 )
-            raise SystemExit(run(normalized_args[1], payload))
-        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|legacy-visibility-csv] <payload-b64>\n")
+            raise SystemExit(run(normalized_args[1], payload,binding=binding))
+        sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|visibility-csv] <payload-b64>\n")
         raise SystemExit(2)
     except HookCommandRejected as exc:
         rejection_stderr = f"hook command rejected: {exc}\n"
         sys.stderr.write(rejection_stderr)
         try:
-            audit_platform = positional_platform or _rejection_audit_platform(
-                payload,
-                os.environ,
-            )
-            _append_rejection_audit(
-                normalized_args[1],
-                rejection_stderr,
-                platform=audit_platform,
-            )
+            with install_destination.use(binding["destination"]) if binding else nullcontext():
+                audit_platform = positional_platform or _rejection_audit_platform(
+                    payload,
+                    os.environ,
+                )
+                _append_rejection_audit(
+                    normalized_args[1],
+                    rejection_stderr,
+                    platform=audit_platform,
+                    hook_payload=exc.hook_payload,
+                    audit_details=exc.audit_details,
+                )
         except Exception as audit_exc:  # noqa: BLE001 - audit is best-effort.
             try:
                 sys.stderr.write(f"hook rejection audit failed: {audit_exc}\n")

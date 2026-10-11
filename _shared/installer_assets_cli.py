@@ -15,7 +15,7 @@ MARKER_INSTALL_MODES = {"copy", "copy-fallback"}
 def write_markers(args: argparse.Namespace) -> int:
     # Unify core (--target, owner=ghost-alice) and addon (--addon-target,
     # owner=addon, addon_id=<id>) targets into one ordered write list so a
-    # copy-mode addon skill is attributed to its addon for classify (T2.9).
+    # copy-mode addon skill is attributed to its addon for classify.
     jobs: list[tuple[str, str, str, str, str | None]] = [
         (asset_id, dest_path, install_mode, "ghost-alice", None)
         for asset_id, dest_path, install_mode in args.target

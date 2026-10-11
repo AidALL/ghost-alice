@@ -2,7 +2,8 @@
 
 언어: [🇺🇸 English](../../policies/session-gate-matrix.md) | 🇰🇷 한국어
 
-session gate SSOT는 `skill-catalog/session-gates.json`입니다. 이 문서는 human-readable matrix입니다.
+기계가 읽는 게이트 인덱스는 [skill-catalog/session-gates.json](../../../skill-catalog/session-gates.json)입니다. 이 문서는 각 조건의 절차 담당자를 연결합니다. [아키텍처](../../../architecture_ko.md)는 구성요소의 책임을, 연결된 스킬은 에이전트의 행동을 정의합니다.
+
 ## Contents
 
 - [Required Entrypoints](#required-entrypoints)
@@ -16,202 +17,125 @@ session gate SSOT는 `skill-catalog/session-gates.json`입니다. 이 문서는 
 - [tool-checkpoint Visible Surface](#tool-checkpoint-visible-surface)
 - [tool-checkpoint Batch / Continuation Compression](#tool-checkpoint-batch--continuation-compression)
 - [Notes](#notes)
+- [Managed Completion Recording Contract](#managed-completion-recording-contract)
+- [Current Selection and Bounded Recovery](#current-selection-and-bounded-recovery)
+- [Repair and authority conditions](#repair-and-authority-conditions)
 
 
 ## Required Entrypoints
 
-| Situation | Required entrypoint |
+| 조건 | 현재 세션 어시스턴트가 따를 절차 |
 | --- | --- |
-| 모든 user input의 first intake | `session-intent-analyzer` |
-| session-intent intake와 jailbreak-detector downstream gate 이후, downstream work/tool calls 전 첫 agent routing step | `task-router` |
-| development/coding request | `coding-convention/using-coding-convention` |
-| bug fix | `coding-convention/systematic-debugging` |
-| production code change | `coding-convention/test-driven-development` |
-| executed work가 complete, fixed, successful, freshly verified라고 claim하는 final response | `coding-convention/verification-before-completion` |
-| commit/push 직전 | `coding-convention/finishing-a-development-branch` |
-| 새 task, sub-task, follow-up item 정의 시 | `necessity-gate` |
-| task-router가 `boundary-contract: required`를 route한 직후 | `boundary-contract` |
+| 모든 사용자 입력 | session-intent-analyzer 접수 후 task-router |
+| task-router가 boundary-contract: required를 선택 | 의존 작업 전에 boundary-contract |
+| 개발 작업 시작 | coding-convention/using-coding-convention |
+| 버그 원인 조사 | coding-convention/systematic-debugging |
+| 구현할 동작이 알려져 있고 검사 가능 | coding-convention/test-driven-development |
+| 실행한 작업의 완료 또는 부분 성공 주장 | coding-convention/verification-before-completion |
+| 커밋·푸시 또는 브랜치 통합 | coding-convention/finishing-a-development-branch |
+| 새 작업·파일·검사 주기·후속 작업 정의 | necessity-gate |
 
 ## Turn Routing Contract
 
-session-intent-analyzer intake가 user-input governance graph 안에서 first입니다. hook pending-merge result는 그 전에 consume합니다. hook evidence가 없으면 manual fallback은 actionable work 전에 끝나며 `clarification-only` 또는 `direct-response`에서만 defer할 수 있습니다. session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out합니다. current-lineage block gate가 없으면 session-intent preflight 뒤 task-router가 release됩니다. allow turn에서는 `downstream-gates.json`이 없을 수 있으며, current-lineage model block이 기록되지 않았다면 그 absence는 silent allow입니다. flow를 `task-router → session-intent-analyzer`, linear `session-intent-analyzer → skill-evolution → jailbreak-detector → task-router` chain, 또는 jailbreak-detector downstream gate를 bypass하는 task-router로 설명하면 contract violation입니다.
+정상 순서는 `pending-merge precheck -> session-intent-analyzer -> task-router -> downstream/tool-checkpoint`입니다. 현재 세션 어시스턴트는 현재 훅의 병합 확인 결과를 재사용합니다. 결과가 없으면 실제 작업 전에 수동 확인을 하며, 실제 작업이 없는 종결 답변에서는 이를 미룹니다. 이미 알려진 미결 항목은 merge-companion으로 안내하고, 사용자가 명시적으로 미루거나 건너뛰면 미결 상태를 유지합니다.
 
-`task-router`는 일이 커 보일 때만 쓰는 classifier가 아닙니다. user input이 감지된 모든 turn에서 session-intent-analyzer intake와 jailbreak-detector downstream gate 이후, downstream work 또는 tool call 전에 적용합니다.
+현재 세션 어시스턴트는 후속 질문이나 상태 질문도 현재 의도와 계속 유효한 권한으로 분류합니다. 이전 경로는 현재 입력의 경로가 아닙니다. 현재 세션 어시스턴트는 필요할 때 같은 정확한 세션에 skill-evolution을 별도로 적용하여 보고합니다. 이 절차는 task-router에 입력을 전달하거나 작업을 배정하지 않습니다.
 
-`task-router`는 `session-intent-analyzer`와 `jailbreak-detector/downstream-gates.json` context의 consumer이며 agent-side request decomposition step입니다. user-input intake, raw intent inference, ledger updates, jailbreak decisions, downstream gate state, tool permission을 소유하지 않습니다.
-
-task-router reminder hook은 session-intent preflight가 존재하고 current-lineage block check가 run될 수 있을 때까지 task-router를 withhold해야 합니다. current-lineage block gate가 없으면 absent `downstream-gates.json`은 silent allow입니다. release 이후 task-router는 session intent ledger를 읽고 atomic meaning decomposition을 수행한 뒤 output, verification, lifecycle, boundary skills를 assign합니다.
-
-다음은 모두 fresh routing targets입니다.
-
-- simple questions
-- opinions
-- status comments
-- previous work의 follow-up questions
-- "is this right?" 같은 judgment requests
-- quick checks or smoke tests
-
-previous turn이 routed 됐다는 사실은 next turn의 evidence가 아닙니다. hook payload가 current platform pending-merge precheck가 run됐고 pending warning이 없다는 contract를 제공하면 `merge-companion-precheck: clean (hook-verified)`를 기록하고 shell manifest check를 반복하지 않습니다. hook evidence가 없거나 hookless/manual environment일 때만 current platform manifest를 직접 읽습니다.
-
-runtime smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니다. 이 procedure는 동일한 README first 10 lines input을 Claude Code, Codex, Antigravity로 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission signal을 관찰합니다.
+현재 세션 어시스턴트는 [task-router](../../../task-router/SKILL.md)를 적용하여 작업을 선택하고 현재 경로 후보를 작성합니다. [boundary-contract](../../../boundary-contract/SKILL.md)를 적용하여 허용 대상·제외 항목·자원을 선언합니다. 이 절차들은 네이티브 권한을 부여하지 않습니다. 사용자의 도구 허용 목록이나 호출 횟수에는 관리용 호출도 포함됩니다.
 
 ## Session Intent Ledger Contract
 
-`session-intent-analyzer`는 모든 user input마다 session intent ledger를 update합니다. Hooks는 input digest와 event metadata만 저장하며 raw prompts는 절대 저장하지 않습니다. user goal, constraints, decisions, non-goals가 바뀌면 agent는 compressed delta를 `intent-state.json`에 기록합니다.
+Core는 원문을 저장하지 않고 확정된 사용자 입력의 다이제스트·문자 수·순서가 있는 이벤트를 기록합니다. Codex는 접수 시 바로 기록합니다. Claude UserPromptSubmit은 다이제스트·문자 수·네이티브 연결 정보를 임시 기록하며, 신뢰된 PreToolUse 또는 Stop 래퍼가 호스트의 대화 기록 추가 후 발신 정보를 대조합니다. 사용자 입력은 기준 입력을 갱신하고, 작업 알림은 마지막 사용자 입력과 경로를 유지하며, 미확정 관찰은 pending으로 남습니다. 현재 세션 어시스턴트는 목표·제약·결정·질문·기준이 실질적으로 바뀔 때만 압축된 의미 변경을 기록합니다.
 
-`intent-state.json`은 update-plus-accumulate state입니다. `current_goal`, `user_intent_summary` 같은 latest scalar intent fields는 newer semantic deltas로 replace되고, constraints, non-goals, open questions, acceptance criteria, consumer hints, active decisions 같은 list-like fields는 stable identity 또는 deduped value로 merge됩니다. `intent-events.jsonl`은 append-only audit metadata이며 raw prompt transcript가 아닙니다.
+실행 소비자는 정확한 영수증의 root/platform/session/input으로 공개 API를 호출합니다. SQLite가 권위 있는 저장소입니다. intent-state.json과 intent-events.jsonl은 가져오기·내보내기 형식이며 current-session.json은 탐색 힌트입니다. 어느 것도 쓰기 식별자를 대신하지 않습니다. 기록이 없으면 의존 작업은 미해결로 남습니다. 어시스턴트는 목적이나 필수 의존 관계에 필요하며 기존 권한 안에 있는 복구만 선택하고, 식별자나 권한을 추측하지 않습니다.
 
-- Storage location: Ghost-ALICE repo root 아래 `.tmp/session-intent/<platform>/<session-id>/`
-- Consumers: `skill-evolution`, `jailbreak-detector`
-- Forbidden: raw prompt, full conversation, tool output, system/developer instruction text, secret values
-- Hookless/manual environment: first response 전에 session-intent-analyzer storage contract를 manual로 적용합니다.
-
-First-entry intake invariant:
-
-- every user input은 먼저 session-intent intake path에 연결됩니다.
-- hook pending-merge result 이후 session-intent-analyzer는 `skill-evolution` (report-only terminal branch)와 `jailbreak-detector`로 fan out합니다. task-router는 session-intent preflight와 current-lineage block gate absence 이후에만 따릅니다. missing manual result는 work 전에 resolve하며 `clarification-only` 또는 `direct-response`에서만 defer합니다.
-- `skill-evolution`은 session-intent-analyzer의 report-only terminal branch이며 task-router로 feed하지 않습니다.
-- missing `current-session.json`, `intent-state.json`, hook payload, preflight evidence, semantic delta evidence는 first entry deny reason이 아닙니다.
-- missing session-intent evidence는 intake/bootstrap이 run 또는 continue되어야 한다는 뜻이지 tool-checkpoint가 absence에서 risk를 infer할 수 있다는 뜻이 아닙니다.
-- tool-checkpoint는 intake 전에 user's next input을 predict하거나 unknown intent를 block condition으로 취급하면 안 됩니다.
+[Session-intent-analyzer](../../../session-intent-analyzer/SKILL.md)는 접수와 정정 출처를 담당합니다. [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)는 상태 필드·트랜잭션·이관 해시·현재 응답 경로를 정의합니다. 접수 이벤트와 intent-state 필드에는 원문 프롬프트·전체 대화·도구 출력·시스템/개발자 지침·비밀 값을 저장하지 않습니다. 별도의 Core 검토 테이블(`core_completion_candidates`, `core_completion_assessments`, `core_completion_responses`)은 승인된 답변·원본 출처 스냅샷과 모델의 검토 판단을 보존합니다. 이 검토 기록은 세션 의도 요약과 구별됩니다. 훅 없는 정상 작업도 같은 식별 계약을 따르며, 작업 없는 답변은 제공된 종결 절차를 사용합니다.
 
 ## Runtime Hook Graph Contract
 
-Hook pending-merge precheck is a pre-routing/session-start layer. hook evidence가 없으면 manual fallback은 actionable downstream work 전에 끝나며 no-work terminal route (`clarification-only` 또는 `direct-response`)만 이를 defer할 수 있습니다. known undecided entry가 있으면 runtime은 `merge-companion`을 먼저 surface해야 하지만 user-explicit defer/skip은 해당 entry를 undecided로 남긴 채 계속 진행할 수 있습니다.
+1. session-intent-analyzer UserPromptSubmit 훅이 접수 상태와 종결/task-router 안내를 제공합니다. Core는 Codex의 직접 접수 또는 Claude의 신뢰된 대조 절차로 정확한 기준 사용자 입력을 확정합니다. Read-state는 읽기만 수행합니다. 현재 세션 어시스턴트는 task-router를 적용하여 작업을 선택하며, 보고가 필요하면 같은 접수에 skill-evolution을 별도로 적용합니다.
+2. 현재 세션 어시스턴트는 정상 경로 후보를 Core에 제출합니다. Core Python 코드는 현재 입력·소유권·승인·선택 기준을 확인한 뒤 ready 경로를 기록합니다.
+3. 현재 세션 어시스턴트는 필요한 경계와 담당 스킬을 따릅니다. 호스트는 도구 권한을 적용하고 허용된 호출을 실행합니다. 해당 Ghost-ALICE Autopilot 사전 훅은 출처를 기록하고 PostToolUse는 엄격한 감사를 유지합니다.
+4. 완료 시 가드와 Ghost-ALICE Autopilot 어댑터는 같은 입력·본문에 연결된 Core 평가를 호출합니다. 독립적으로 등록된 훅 사이의 정책 실행 순서를 가정하지 않습니다.
 
-user-input governance graph는 user intent first, downstream gate state second, tool-stage tool-checkpoint third 순서로 정렬됩니다. known pending result는 graph 밖에서 먼저 처리하고 missing manual result는 pre-work requirement로 유지합니다.
-
-`tool-checkpoint`는 PreToolUse/BeforeTool checkpoint이며 user-input intake order의 일부가 아닙니다. surfaced될 때 visible control schema에는 `hook-stage: PreToolUse`와 `meaning: tool-call retry checkpoint, not user-input intake`가 함께 있어야 합니다.
-
-1. user input은 every turn에서 `session-intent-analyzer`를 trigger합니다. hook은 input digest, session ledger, `current-session.json` pointer를 쓰고 agent turn을 allow합니다.
-2. `skill-evolution`과 `jailbreak-detector`는 platform과 session id로 keyed된 같은 session temp files를 consume합니다. skill-evolution은 report-only and self-terminating이며 downstream gates를 open/close하지 않고 task-router로 feed하지 않습니다.
-3. jailbreak-detector는 ledger에 `model_security_decision`을 기록하고 current-lineage block decisions만 downstream gateway인 `downstream-gates.json`으로 carry합니다. deterministic hard-block rules는 explicit high-confidence attack signals에 대한 narrow regression guards이며 모든 jailbreak attempts를 block한다는 proof가 아닙니다. gate block은 deterministic text matching이 아니라 model-recorded judgment (`model_security_decision`)에서만 derive됩니다. gradual multi-turn jailbreak resistance는 session-intent summary quality와 cumulative constraint comparison에 달려 있습니다. current-lineage block gate가 있으면 tool execution은 tool-shape review 전에 deny됩니다. current block gate가 없으면 absent `downstream-gates.json`은 silent allow입니다.
-4. task-router reminder hook은 session-intent preflight가 존재하고 current-lineage block check가 first chance를 가질 때까지 기다립니다. `opened=false` 또는 `decision=block`인 current-lineage block gate가 있으면 task-router를 withhold하고, absent `downstream-gates.json`은 silent allow입니다. release 이후 `task-router`가 current-session pointer와 session intent ledger를 읽고 accepted intent를 atomic meaning units로 decompose한 뒤 output, verification, lifecycle, boundary skills를 assign합니다. raw user intent를 infer하거나 tool permission을 decide하지 않습니다.
-5. `tool-checkpoint`는 session-intent-analyzer intake와 jailbreak-detector downstream gate가 first chance를 가진 뒤 tool stage에서 run합니다. missing intake evidence는 bootstrap/recovery를 시작할 이유이지 `task-router`를 `session-intent-analyzer`나 `jailbreak-detector`보다 앞세울 이유가 아닙니다. runtime decision은 current-lineage block gate만 읽습니다. `opened=false` 또는 `decision=block`이면 deny하고, absent gate 또는 다른 state는 silently allow합니다. tool-call identity, payload content, audit/log/correlation metadata는 decision inputs가 아닙니다. audit/log/correlation metadata는 decision path 밖에 둡니다.
+Tool-checkpoint는 `PreToolUse`/`BeforeTool` 재시도 점검이며 사용자 입력 접수가 아닙니다. 도구 입력이나 감사 메타데이터는 네이티브 권한을 부여하지 않습니다. 설치 설정만으로 훅 호출이나 호스트 실행을 입증할 수 없으며, 필요한 실행 관찰은 [live-smoke-regression](live-smoke-regression.md)이 담당합니다.
 
 ## Dynamic Focus Contract
 
-Dynamic focus control은 session gate contract의 일부입니다. work는 semantic atoms로 나뉘지만 attention scope는 고정되지 않고 한 방향으로만 expand하지 않습니다. user interaction, mismatch location, verification burden, recovery cost는 current focus를 micro, meso, macro, meta layers 사이에서 이동시킬 수 있습니다.
+현재 세션 어시스턴트는 판단 대상을 선택합니다. micro는 개별 결과나 필드, meso는 하위 작업이나 출처와 대상의 대응 관계, macro는 통합 결과와 문서 간 일관성, meta는 필요성·작업 정의·전제를 다룹니다. 불일치가 관찰된 위치가 반드시 원인은 아닙니다. 조사가 필요하면 근거에 따라 범위를 넓히거나 좁히거나 같은 범위의 다른 대상으로 옮길 수 있습니다. 판단 범위는 검증 부담과 독립적이며, 이 계층은 차례로 올라가는 절차도 권한 확장도 아닙니다. meta 검토 자체가 사용자 질문을 요구하지는 않습니다.
 
-- micro: tool call, command result, format check, single semantic atom
-- meso: sub-task, boundary-contract surface, local source-target mapping
-- macro: integrated output, SSOT alignment, user constraint alignment, cross-document logic
-- meta: task necessity, task definition, scope expansion, premise validity
-
-mismatch가 나타나면 runtime procedure는 cause를 포함하는 가장 작은 layer를 reopen합니다. larger premise 또는 integrated logic이 틀렸으면 macro 또는 meta를 repair합니다. atomic output 또는 local sub-task가 틀렸으면 micro 또는 meso를 repair합니다. `calls`는 static and sparse 상태로 남습니다. A checkpoint runs only while a live uncertainty exists and its possible outcomes can change the next decision. Stop the sequence when a checkpoint produces no relevant state delta or when further checking displaces the primary objective.
+작업 선택이 달라져야 할 때 현재 세션 어시스턴트는 결과와 반대 근거를 입력으로 task-router를 다시 적용합니다. 결과를 관련 대조 기준과 비교하고 필요한 승인 수정을 선택할 만큼 원인을 조사합니다. 목적과 필수 의존 관계에 영향이 없으면 해당 사항을 미해결로 남기거나 비필수 작업을 제외할 수 있으며, 불일치가 있다는 이유만으로 복구 작업을 만들지 않습니다. 전체 결과를 포함한 필수 조건에는 여전히 뒷받침하는 근거가 필요합니다. 필수 검사는 유지합니다. 재량 검사는 가능한 결과가 다음 판단을 바꿀 때만 실행하며, 중단 조건은 아래 근거 선택 담당 절차가 정의합니다. 정적인 calls 그래프가 반복 검사를 지시하지는 않습니다.
 
 ## Routing Surface Contract
 
-`task-router`는 current turn의 reusable work judgment를 소유하고, accepted session intent에서 `primary-request`, `causal-axis`, `response-order`를 보존합니다. `session-intent-analyzer`는 semantic facts와 accumulated decisions를 기록하며 competing routing scale을 만들지 않습니다.
+현재 세션 어시스턴트는 session-intent-analyzer를 적용하여 의미 사실과 누적 결정을 Python 원장 기록기에 제출합니다. 현재 대화의 응답 모델은 task-router를 적용하여 작업을 판단합니다. 표시 코드와 어시스턴트는 routing-surface의 기존 change-depth·focus-layer·verification-complexity 값을 사용하고 별도 척도를 만들지 않습니다. 알 수 없거나 모순되는 값은 더 충분히 표시하고 영향받은 선택을 다시 판단합니다.
 
-The user's terminal objective outranks investigative means. investigation, provenance reconstruction, artifact preservation, worktree inspection은 user가 deliverable로 explicit하게 요청하지 않는 한 means입니다. Do not let a means replace, narrow, or expand the terminal objective.
+task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 목적을 보존합니다. 조사나 worktree 확인은 사용자가 산출물로 요구하지 않았다면 수단입니다. Accepted-continuation에는 기록된 수락이 필요하며 근거 요구를 낮추지 않습니다.
 
-`response-mode: clarification-only`는 current conversation에 essential referent 또는 decisive input이 없어 answer나 safe action을 시작할 수 없는 terminal route입니다. Intake and routing still run internally. Ask only for the minimum decisive information. context를 guess하기 위해 files, repositories, manifests, tools, credentials, external state를 inspect하지 않습니다. manual pending-merge check는 next actionable turn까지 defer합니다. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging은 active 상태로 남습니다. the content already resolves the question이거나 user가 lookup/status check를 요청했거나 explicit assumption으로 bounded answer가 가능하면 이 route를 사용하지 않습니다.
-
-`response-mode: direct-response`는 file change, side effect, current-state lookup, tool call, fresh verification 없이 current input과 conversation만으로 resolved content를 답할 수 있는 no-work terminal route입니다. `response-order: resolved-intent-first`를 사용합니다. Route classification precedes evidence planning. causal premise 자체는 inspection request가 아니고 verification burden은 current-state referent를 만들 수 없습니다. explicit inspection request 또는 conversation에서 이미 established된 referent만 local diagnosis를 허용합니다. An established referent authorizes inspection but does not require it. explicit correction 또는 non-goal을 먼저 accept하고, superseded means보다 terminal objective를 우선하며, current repository나 machine을 inspect하지 않고 general explanation 또는 stable low-risk how-to를 답합니다. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. general why/how question에 나온 technical state는 active workspace에 대한 evidence가 아니라 explanation topic으로 취급합니다. Do not validate or rebut that premise before explaining. first-person, past-cause, deictic wording, tense, technical-state language, ambient context, tool availability은 question을 workspace에 bind하지 않으며, user가 workspace를 identify하거나 workspace evidence를 제공하거나 exact diagnosis/inspection을 명시적으로 요청할 때만 workspace가 target이 됩니다. Intake and routing still run internally; strict hook logging은 active입니다. missing manual pending-merge check를 defer하고 downstream skill을 load하지 않으며, decision-relevant caveat 최대 하나와 resolved content만 emit합니다. `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, `[io-trace]`를 emit하지 않습니다. current/version-specific fact, support/regression claim, high-risk advice, lookup, inspection, modification, verification request는 normal route를 사용합니다.
-
-`routing-surface`의 `change-depth`, `focus-layer`, `verification-complexity`는 English canonical enum을 그대로 사용합니다. unknown, ambiguous, contradictory value는 fuller surface로 fail closed하고 existing scope reopen point를 통해 focus를 reopen합니다.
+[종결 경로 계약](../../../task-router/references/routing-details.md)은 clarification-only와 direct-response를 정상 작업과 구별합니다. 일반적인 이유·방법 질문의 전제나 열린 작업 공간만으로 로컬 진단을 승인하지 않습니다. 상태 질문이나 정정은 보통 미완료 승인 작업을 조정하며, 명시적 중단·일시정지는 계속 여부를 바꿉니다. 실제 작업이 없는 종결 답변은 제공된 대화를 사용하고 에이전트 측 도구나 메타데이터 복구 없이 답변 또는 결정적인 질문만 반환합니다. 이 조건은 정상 완료 경로의 승인된 경로 등록을 금지하지 않습니다.
 
 ## Work-Impact Projection Contract
 
-Work-Impact Projection은 hook-internal value를 다음 work decision을 바꾸는지 기준으로 분류합니다. value는 work boundary, focus layer, verification burden, recovery path를 바꿀 수 있을 때 중요합니다.
+훅은 다음 작업의 경계·초점·검증 부담·복구를 바꾸는지에 따라 값을 분류합니다.
 
-- hook execution과 strict audit log는 줄이지 않습니다.
-- `agent_visibility.profile`은 user-screen verbosity를 선택합니다. hook execution, strict logging, work-impact classification을 gate하지 않습니다.
-- Forced/risk/gate values와 failed verification은 항상 user surface forced, model hint full로 break through합니다.
-- Routine/debug values는 strict log에 full로 남지만 focus, boundary, verification, recovery를 바꾸지 않으면 model hints에서 omit합니다.
-- Low-usefulness suspects, 예를 들어 duplicate reminders, clean-pass status, noop audit rows, debug counters, correlation ids, historical wording은 default로 `routine` 또는 `audit-only`입니다. active boundary, focus target, verification burden, recovery action을 바꿀 때만 promote합니다.
-- Unknown, ambiguous, failed values는 fuller surface로 fail closed하고 existing scope-reopen path를 통해 focus를 reopen합니다.
-- Goal: hook values는 task quality를 바꿀 수 있을 때만 focus, boundary, verification, recovery를 drive합니다. Token reduction은 secondary consequence이며 success metric이 아닙니다.
+- agent_visibility.profile은 표시량을 조정하며 훅 실행이나 엄격한 감사를 끄지 않습니다.
+- 강제·위험·게이트 값과 검증 실패는 전체 모델 안내와 강제 표시를 유지합니다.
+- 일상·디버그 값은 엄격한 로그에 남고 작업 판단에 영향을 줄 때만 모델 안내에 포함됩니다.
+- 알 수 없거나 모호하거나 실패한 값은 더 충분한 맥락을 표시하고 해당 판단을 다시 검토합니다.
+
+중복된 정상 안내·변화 없는 감사 항목·상관관계 메타데이터만으로 새 작업을 만들지 않습니다. 토큰 감소는 결과이며 성공 지표가 아닙니다.
 
 ## Runtime Checkpoints
 
-Ghost-ALICE OS documents는 English canonical narrative + English control surface를 default coordination contract로 사용합니다. reader-facing documentation tree가 pair를 expose하는 곳에는 Korean paired counterpart를 둡니다. field names, enum values, literal tokens, gate schemas, allowed/forbidden values는 English로 유지하고 번역하지 않습니다.
+정상 경로의 첫 gate-state와 경로 출력 형식은 [task-router](../../../task-router/SKILL.md#routing-records)가 담당합니다. 현재 세션 어시스턴트는 새로 읽거나 유효하게 보관한 스킬 본문을 사용하고 실제 절차를 수행한 뒤에만 호출을 기록합니다. 메타데이터 일치는 실행이 아닙니다.
 
-Active work continuation: no-work terminal route를 선택하기 전에 current input과 미완료 승인 작업을 대조합니다. 진행 중인 작업의 상태 질문, 설명 요청, 교정에는 짧은 commentary로 답하고 지원되는 작업을 계속합니다. 명시적인 stop, pause, cancellation, incompatible replacement를 따릅니다. ambient context나 미해결 ledger flag만으로 작업 권한을 추론하지 않습니다. 고정된 branch-local limit는 그에 의존하는 작업만 막습니다. conduct feedback 기록이나 검증된 보고서는 요청된 구현의 완료 기준을 충족하지 않습니다. 사용자가 교정을 승인하면 해당 workflow에서 구현하고 원래 실패를 회귀 테스트합니다.
+[Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md#completion-check-format)은 공통 completion-check·partial-check 형식과 기준·주장·근거 대응을 담당합니다. Core는 현재 소유 경로에 연결된 주장·원본 자료·응답 전체의 검토를 인증하여 완료 제출을 수락합니다. 스킬 로드는 절차 안내와 감사 활동이며 별도의 완료 선행 조건이 아닙니다. 최종 완료에는 미검증 기준 없이 근거가 지원하는 판정이 필요합니다. 부분 성공은 전체 계약과 미해결 기준을 유지하며 성공한 일부를 전체 완료로 제시하지 않습니다.
 
-first commentary는 normal route에서 다음 block을 포함해야 하며 no-work terminal route는 control block을 emit하지 않습니다.
-
-```text
-[gate-state]
-- merge-companion-precheck: clean | pending=N | unsupported
-- session-intent-analyzer: done | hook-observed | pending
-- task-router: done
-- using-coding-convention: done | n/a
-- boundary-contract: required | done | n/a
-- skill-call: <each skill actually called this turn, as name (this turn)> | n/a
-- next-required: <skill-name|none>
-```
-
-final response가 executed work의 complete, fixed, successful, freshly verified 상태를 claim할 때 다음 block을 포함해야 합니다.
-
-```text
-[completion-check]
-- acceptance-criteria:
-  - <criterion-id>: <user-intent-or-contract-condition> [source: user-explicit | inferred | previous-tool | system-doc]
-- claim-evidence-map:
-  - claim: <completion-or-recommendation-claim>
-    criterion: <criterion-id>
-    evidence: <fresh command, inspected file, source locator, or tool output>
-    verdict: pass | fail
-- unverified:
-  - none
-- evidence: <fresh command or inspected file>
-```
-
-`acceptance-criteria`는 user intent, locked decisions, boundary-contract에서 추출한 verifiable criteria입니다. `claim-evidence-map`은 closure claim을 criterion과 fresh evidence에 연결합니다. `unverified`가 `none`이 아니면 completion 또는 success가 settled된 것처럼 말하지 않습니다. finalized `[completion-check]`는 `verdict: pass | fail`과 `unverified: none`을 사용합니다. unverified item이 있으면 finalizing하지 말고 prose로 partial state와 remaining verification을 보고합니다. Installed Stop completion hooks는 executed-work closure claim에 `[completion-check]`를 요구하고 routine non-closure response는 allow합니다.
-
-Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message.
-
-Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check. Verification output does not create a new obligation to verify the verification.
-
-Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists. Answer an objection that a check was redundant from the recorded mutation authority and events, not from hypothetical external changes. Say each fact, status, plan, and apology once; later messages carry only new results or decisions. canonical contract는 `coding-convention/verification-before-completion/references/verify-or-reuse.md`이며 Claude와 Codex가 같은 contract를 그대로 쓰고, platform adapter는 tool name mapping만 담당합니다.
-
-When you confirm a flaw in a prompt or other deliverable you provided, return the corrected complete deliverable unless the user asked only for diagnosis (`confirmed-flaw-not-propagated`).
-
-Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check. 해당 claim 전에 current turn에서 `verification-before-completion`을 load/call하고, decision-relevant fresh verification을 run/read한 뒤에만 `[completion-check]`를 씁니다. If any step is missing or out of order, the completion-check is invalid.
-
-`skill-call:` line은 그 skill workflow가 current turn에서 실제로 실행됐다는 record입니다. Claude Code에서는 visible Skill call 이후에만 씁니다. Codex처럼 visible Skill tool이 없는 환경에서는 새로 읽거나 유효하게 보존된 instruction body를 사용하여 current turn의 workflow를 따른 뒤에만 씁니다.
-
-`verification-before-completion`은 executed-work closure claim 전 lifecycle gate입니다. Routine explanations, meta-discussion, options는 finished work 또는 verified result를 claim하지 않는 한 이 gate를 요구하지 않습니다. Claude Code에서는 `[completion-check]`에 `skill-call: verification-before-completion (this turn)` 줄이 없습니다. Stop hook이 visible Skill call을 transcript에서 확인합니다. Codex에서는 새로 읽거나 유효하게 보존된 instruction body로 해당 workflow를 따른 경우에만 그 줄을 씁니다.
-
-Codex에서 `[completion-check]`가 `skill-call: verification-before-completion (this turn)`를 claim하면 같은 final response의 `[io-trace]` `skills-loaded` 또는 `skills-reused`도 `verification-before-completion`을 포함해야 합니다. Claude Code에서는 Stop hook이 `skills-loaded`를 대조하지 않습니다. Stop completion hook이 final response를 validate하는 곳에서는 이런 결함을 턴당 최대 한 번 block합니다. 이전 메시지가 화면에 남는 host에서는 빠졌거나 고친 control block만 요청하고, headless 또는 알 수 없는 host에서는 완전한 단독 답변을 요청하며, 그 한 번의 재시도 뒤에도 남는 결함은 또 다른 재작성 대신 보이는 notice와 함께 턴을 끝냅니다.
-
-Codex environments without a visible Skill surface:
-
-- required gate complete로 표시하기 전에 relevant instruction body를 새로 읽거나 유효하게 재사용합니다.
-- metadata, descriptions, prior verdict, "이미 안다"는 이유로 gate를 complete 처리하지 않습니다.
-- 새로 읽은 body도 유효하게 보존된 body도 없으면 gate는 pending입니다. `skill-call:`에 쓰지 않습니다.
-- simple tasks, already-routed tasks, metadata가 충분해 보이는 cases에도 같은 기준을 적용합니다.
+현재 세션 어시스턴트는 변하지 않은 유효한 근거의 원본 출처와 시각을 재사용합니다. 형식이나 경로 오류만으로 업무를 다시 검증하지 않습니다. 화면 io-trace는 선택 사항이며 엄격한 내부 감사와 실제 절차 근거는 유지합니다. 제어 필드와 열거 값은 두 언어 문서 모두 영어를 유지합니다.
 
 ## tool-checkpoint Visible Surface
 
-`tool-checkpoint`는 PreToolUse/BeforeTool checkpoint입니다. user-input intake order의 일부가 아니며 `session-intent-analyzer`, `jailbreak-detector`, `task-router`보다 먼저 run한다고 설명하면 안 됩니다.
+현재 세션 어시스턴트는 입력 배치에 한 번 tool-checkpoint를 표시하며 `hook-stage: PreToolUse`, `meaning: tool-call retry checkpoint, not user-input intake`, intent, why를 포함합니다. 판단에 영향을 주는 비일상 절차에는 procedure를, 경계가 활성화되면 contract-ref와 contract-check를 추가합니다.
 
-default `[tool-checkpoint]` block은 `intent`와 `why`를 carries합니다. `procedure`는 next work decision을 바꾸거나 non-routine step을 명확히 할 때 추가합니다. `contract-ref`와 `contract-check`는 boundary-contract가 active일 때 추가합니다. `localized-human-note`, `rejected-alternatives`, `unverified-premises`, `failure-mode-if-wrong`은 side effect, forced signal, mismatch, meaningful user decision point 때문에 field가 useful할 때만 추가합니다. 이렇게 checkpoint procedure는 유지하되 work boundary, focus layer, verification burden, recovery를 바꾸지 않는 low-impact tool call에 무의미한 값을 반복하지 않습니다. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger. 이 field는 model-side reasoning이며 hook decision은 여전히 current-lineage block gate만 읽습니다.
+현재 세션 어시스턴트는 부수 효과·강제 신호·불일치·중요한 사용자 결정이 있을 때만 localized-human-note, rejected-alternatives, unverified-premises, failure-mode-if-wrong을 추가합니다. 구체적 복구가 필요하면 recovery-action을 추가합니다. 복구로 초점이 바뀌면 procedure 또는 recovery-action에 focus-layer와 scope-reopen 대상을 명시합니다.
 
-`recovery-action`은 conditional입니다. failure mode가 concrete recovery step, scope reopen, external side effect handling, 또는 hard-to-recover action을 요구할 때만 추가합니다. stable English action phrase 또는 slug로 유지합니다. mismatch가 scope를 바꾸면 `procedure` 또는 `recovery-action`에 `focus-layer`와 `scope-reopen` target을 적습니다.
-
-routine tool checkpoint에서는 별도의 `recovery-cost` 또는 `recovery-note` fields를 요구하지 않습니다. Recovery cost는 work-impact projection, verification planning, high-impact exception handling에 속하며, every PreToolUse message에 속하지 않습니다. human-facing recovery explanation은 operator의 next decision을 바꿀 때만 `localized-human-note` 또는 conditional `recovery-action`에 둡니다.
+주장의 근거로 파일을 다시 읽기 전에 verify-or-reuse를 적용하고 why에 관찰된 계기를 명시합니다. 점검은 네이티브 권한을 부여하지 않으며 일상적인 recovery-cost나 recovery-note 필드를 요구하지 않습니다.
 
 ## tool-checkpoint Batch / Continuation Compression
 
-Runtime hook은 session input lineage마다 full `[tool-checkpoint]`를 한 번 surface하고, 같은 lineage의 later tool call은 계속 check하되 user-facing text는 반복하지 않습니다.
+훅은 모든 호출을 검사하고 엄격한 감사를 보존하며 같은 입력에서 변하지 않은 사용자 표시만 생략합니다. Batch와 continuation 형식은 권한을 부여하지 않습니다.
 
-`[tool-checkpoint:batch]`와 `[tool-checkpoint:continuation]`은 repeated full-gate cost를 줄이는 compact forms입니다. new permission을 만들지 않고 new tool action이 safe하다고 infer하지 않습니다.
-
-`[tool-checkpoint:continuation]`은 same process/session/tool-call id의 output polling만 가리킵니다. new user input, current-lineage block/deny, mismatch, other state change는 surfaced `[tool-checkpoint]`로 돌아갑니다.
-
-same ref의 simple polling은 output을 영원히 반복하라는 의무가 아닙니다. compact form은 full gate 반복을 피합니다. input lineage의 first poll 또는 state change 때 expose합니다.
+Continuation은 같은 process/session/tool-call ID의 출력을 기다리는 경우에만 사용합니다. 첫 조회나 새 입력·거부·불일치·관련 상태 변경이 있으면 점검을 다시 표시합니다. 짧은 조회 형식은 무기한 반복하라는 지시가 아닙니다.
 
 ## Notes
 
-- recommendations는 casual opinions가 아니라 verification이 필요한 claims로 취급합니다.
-- relevant state와 criterion이 unchanged이면 existing evidence를 reuse하고, 그 age를 밝히되 current-turn verification으로 relabel하지 않습니다.
-- each turn마다 `task-router`를 reapply합니다.
-- `task-router`는 `boundary-contract` 필요 여부만 결정합니다. allowed-surface, file names, test-purpose는 `boundary-contract`가 소유합니다.
-- task-router가 `boundary-contract: required`를 output하면 next required gate는 boundary-contract입니다.
-- `skill-call:` field는 form completion과 actual obligation completion이 섞이는 것을 구조적으로 막습니다.
-- metadata-only skill matching은 candidate discovery이지 execution이 아닙니다. Required gate skills는 fresh 또는 valid retained instruction body를 사용하고 현재 입력의 workflow를 따를 때만 complete입니다.
+절차 담당자를 지정하면 중복 규칙의 불일치를 줄일 수 있습니다. 현재 세션 어시스턴트는 [지침 본문 재사용](../../../coding-convention/verification-before-completion/references/verify-or-reuse.md)을 따르고 실제 읽기 또는 유효한 재사용을 내부에 기록합니다. 일상적인 정상 상태는 반복하지 않으며 미결·변경·실패 상태는 판단에 필요한 안내를 유지합니다.
 
-Instruction body 재사용은 canonical `coding-convention/verification-before-completion/references/verify-or-reuse.md`의 Instruction Body Reuse를 따릅니다. 동일 세션의 코드 기록과 실제로 보존된 body가 필요합니다. 현재 입력의 의미 판단과 gate workflow는 계속 수행합니다. 실제 읽기는 `skills-loaded`, 유효한 재사용은 `skills-reused`에 기록합니다.
+소스 수정, 지정 검사 통과, 설치된 바이트, 네이티브 실행, 수락된 접수, 적용된 기준과 보이는 답변은 각각 다른 주장입니다. 한 단계의 근거가 다른 단계를 입증하지는 않습니다.
+
+## Managed Completion Recording Contract
+
+새 완료 또는 부분 완료 제출에서 Core Python 코드는 증거 형식과 인증된 의미 검토보다 현재 소유 경로를 먼저 확인합니다. 따라서 경로가 없으면 증거 필드 수정을 요구하기 전에 경로 오류를 반환합니다.
+
+이 조건에서는 응답 모델이 [담당 검토 절차](../../../coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review)에 따라 두 판단을 기록합니다. [아키텍처 전달 표](../../../architecture_ko.md#2-답변과-원본-출처를-core에-전달)는 호출 주체·입력·반환을 설명하고, [출력 의미](tool-output-semantics.md#completion-recording-and-delivery)는 지원·미지원 결과를 구분합니다.
+
+등록된 관리 훅은 v2의 작업 단위별 승인 기준을 사용하고 직접 공개 API는 v1 기본값을 유지합니다. 소스 API·실행 모듈·원장·프로젝트·설치 스킬·플랫폼 상태는 별도의 위치 연결을 유지합니다. 일반 업데이트는 원장 권위를 보존하며 전송 방식이 origin·세션·접수·승인을 부여하지 않습니다.
+
+관리형 네이티브 Stop에서는 Ghost-ALICE Autopilot 어댑터가 준비된 출처 영수증과 Core가 인증한 검토로 해당 근거를 기록합니다. 모델이 이 경로를 위해 별도 게시 명령을 실행하지 않습니다. 수락된 접수는 pending-adapter이며 적용된 완료가 아닙니다. Ghost-ALICE Autopilot 어댑터는 기록을 인증하고 Core에 보호된 기준 갱신을 요청합니다. 근거가 없거나 미해결인 기준은 unmet으로 남습니다. 근거가 있는 보고도 작업 기준을 충족하지 않을 수 있으며 이때 제출이 필요하지 않을 수 있습니다.
+
+## Current Selection and Bounded Recovery
+
+Core는 task-router를 따르는 모델이 제출한 현재 응답 경로를 검증합니다. 종결 경로는 실행 단위를 선택하지 않으며 요청된 조회는 정상 작업입니다. 새 입력은 경로 연결을 바꾸되 안정된 작업 단위와 변경 없는 원본 근거를 보존합니다.
+
+구체적인 경로·증거·기록 오류는 아래의 담당 절차로 돌아갑니다. 모델은 목적이나 필수 의존 관계에 필요하고 권한 안에 있을 때만 수정을 선택합니다. 지원되지 않는 주장은 수정·철회하며 필수 미해결 기준은 미충족 상태로 남습니다. 동일한 기록 실패가 반복되면 의존 적용을 보류하되 업무를 재실행하거나 독립적인 승인 작업을 막지 않습니다.
+
+[검토·전달 절차](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)가 호출 순서와 정정 답변의 형태를 담당합니다. [출력 의미](tool-output-semantics.md#completion-recording-and-delivery)는 반환 선택 값을 정의합니다. Core의 과거 결과 보고 경로는 원본 적용 근거가 정확한 문장 전체를 뒷받침할 때만 적용하며, 추가 문구나 더 넓은 주장에는 별도 검토가 필요합니다.
+
+## Repair and authority conditions
+
+- [Boundary-contract: Authority and renewal](../../../boundary-contract/SKILL.md#authority-and-renewal)은 사용자 권한·허용 대상·자원 제한을 담당합니다.
+- [Systematic-debugging: Incident accounting and continuation](../../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation)은 실패한 수정 회차·재평가·한정된 계속 진행을 담당합니다.
+- [Verification-before-completion: Evidence Selection And Stop Gate](../../../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate)은 유용한 검사와 근거 재사용을 담당합니다.
+- [Ghost-ALICE Autopilot publication contract](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)는 캡처·접수·적용·기록 복구를 담당합니다.
+
+담당 절차는 누적 시도·원본 출처와 시각·영향 없는 기준을 보존합니다. 한 경로의 실패는 그 의존 작업만 막으며 다른 승인 작업을 막지 않습니다. 사용자 한도에는 관리용 호출도 포함되며 내부 호출이라는 예외를 만들지 않습니다.

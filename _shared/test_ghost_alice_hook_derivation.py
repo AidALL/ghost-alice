@@ -1,18 +1,6 @@
-"""Integration tests for PreToolUse gate derivation.
+"""Stored model judgments never derive permission or gate files.
 
-The covered behavior is write-on-block-only downstream gate derivation from the
-model-recorded security decision.
-
-The dispatcher (ghost-alice-hook.mjs) calls deriveDownstreamGateFromDecision
-(_shared/derive_downstream_gate.mjs) at PreToolUse. It writes a block gate ONLY
-when the model recorded a block matching the current input lineage; it never
-overwrites an existing gate on allow / absent / stale. The unchanged enforcer
-then reads the gate. Existing block gates are preserved (enforcer staleness
-neutralizes prior-turn blocks); absence means silent allow.
-
-Invokes the hook as a subprocess (node), the same way the runtime does.
-
-Dependencies: Python 3.11+ standard library only; node on PATH.
+Dependencies: Python 3.11+ standard library; Node on PATH.
 """
 
 from __future__ import annotations
@@ -88,8 +76,8 @@ class DerivationTests(unittest.TestCase):
             check=True,
         )
 
-    def test_native_codex_identity_carries_block_without_payload_sid(self) -> None:
-        for platform, payload, blocked in (("codex", {}, True), ("codex", {"session_id": "foreign"}, False), ("claude", {}, False)):
+    def test_native_identity_selection_does_not_project_legacy_blocks(self) -> None:
+        for platform, payload in (("codex", {}), ("codex", {"session_id": "foreign"}), ("claude", {})):
             with self.subTest(platform=platform, payload=payload):
                 session_dir = self.tmp / platform / "native"
                 session_dir.mkdir(parents=True, exist_ok=True)
@@ -107,13 +95,9 @@ class DerivationTests(unittest.TestCase):
                                      input=json.dumps({"tool_name": "Bash", **payload}), env=env,
                                      capture_output=True, text=True, check=False)
                 self.assertEqual(out.returncode, 0, out.stderr)
-                self.assertEqual(gate_path.exists(), blocked, out.stdout)
+                self.assertFalse(gate_path.exists(), out.stdout)
                 response = json.loads(out.stdout)
-                self.assertEqual(response.get("hookSpecificOutput", {}).get("permissionDecision") == "deny", blocked, out.stdout)
-                if blocked:
-                    gate = json.loads(gate_path.read_text())
-                    self.assertEqual(gate["decision"], "block")
-                    self.assertEqual(gate["input_event_id"], "e-native")
+                self.assertNotIn("permissionDecision", response.get("hookSpecificOutput", {}))
 
     def test_native_reminder_does_not_recommend_foreign_pointer_state(self) -> None:
         session_dir = self.tmp / "codex/native"
@@ -132,18 +116,16 @@ class DerivationTests(unittest.TestCase):
         self.assertIn(str(session_dir / "intent-state.json"), out.stdout)
         self.assertNotIn(str(self.tmp / "codex/foreign/intent-state.json"), out.stdout)
 
-    def test_block_decision_matching_lineage_writes_block_and_denies(self) -> None:
+    def test_legacy_block_matching_lineage_stays_history(self):
         self.write_state({"decision": "block", "risk_flags": ["credential-reveal"], "input_event_id": "sha256:e1"})
         self.write_event("sha256:e1")
+        before = (self.session_dir / "intent-state.json").read_bytes()
         out = self.run_pretool()
-        gate = json.loads(self.gate_path().read_text(encoding="utf-8"))
-        self.assertEqual(gate["decision"], "block")
-        self.assertFalse(gate["opened"])
-        self.assertIn("credential-reveal", gate["rules"])
-        self.assertIn("permissionDecision", out.stdout)
-        self.assertIn("deny", out.stdout)
+        self.assertFalse(self.gate_path().exists())
+        self.assertNotIn("permissionDecision", out.stdout)
+        self.assertEqual((self.session_dir / "intent-state.json").read_bytes(), before)
 
-    def test_current_block_denies_when_gate_persistence_fails(self) -> None:
+    def test_legacy_block_does_not_attempt_gate_persistence(self) -> None:
         for platform in ("codex", "claude"):
             with self.subTest(platform=platform):
                 session = self.tmp / platform / "write-failure"
@@ -160,9 +142,9 @@ class DerivationTests(unittest.TestCase):
                                      capture_output=True, text=True, check=False)
                 self.assertEqual(out.returncode, 0, out.stderr)
                 response = json.loads(out.stdout)
-                self.assertEqual(response.get("hookSpecificOutput", {}).get("permissionDecision"), "deny", out.stdout)
-                self.assertIn("persistence", response["hookSpecificOutput"]["permissionDecisionReason"])
-                self.assertIn("persistence", out.stderr)
+                self.assertNotIn("permissionDecision", response.get("hookSpecificOutput", {}))
+                self.assertTrue((session / "downstream-gates.json").is_dir())
+                self.assertEqual(out.stderr, "")
 
     def test_unwritable_gate_does_not_invent_block_for_absent_or_stale_decision(self) -> None:
         self.write_event("e-current")
@@ -197,7 +179,7 @@ class DerivationTests(unittest.TestCase):
         self.assertNotIn("permissionDecision", out.stdout)
 
     def test_existing_block_gate_not_clobbered_and_stale_allows(self) -> None:
-        # A prior block gate (e1) is on disk; this turn the model recorded allow and the latest event is e2. derive must NOT clobber the gate; the enforcer must treat the prior block gate as stale -> no deny.
+        # The stored e1 block record remains intact while e2 is current; neither record grants native tool permission.
         self.write_state({"decision": "allow", "risk_flags": [], "input_event_id": "sha256:e2"})
         self.write_event("sha256:e2")
         self.write_gate({
@@ -215,7 +197,7 @@ class DerivationTests(unittest.TestCase):
         gate = json.loads(self.gate_path().read_text(encoding="utf-8"))
         self.assertEqual(gate["decision"], "block")  # not clobbered
         self.assertEqual(gate["input_event_id"], "sha256:e1")  # untouched
-        self.assertNotIn("permissionDecision", out.stdout)  # stale -> enforcer allows
+        self.assertNotIn("permissionDecision", out.stdout)  # native permission remains with the host
 
 
 if __name__ == "__main__":

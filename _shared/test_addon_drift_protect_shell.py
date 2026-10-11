@@ -1,7 +1,6 @@
-"""Shell e2e for review finding H1: reinstalling the SAME addon over a target the
-user has drifted (repointed symlink / edited copy) must ABORT instead of silently
-clobbering the user's change. The collision gate now hash-checks same-addon targets.
+"""Shell e2e: reinstalling an addon must preserve drifted user targets.
 
+Hash-check same-addon targets and reject a repointed link or edited copy.
 Run: python3 -m pytest _shared/test_addon_drift_protect_shell.py -q
 """
 

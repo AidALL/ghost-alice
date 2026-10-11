@@ -4,8 +4,8 @@
 The tool-checkpoint PreToolUse gate is dispatched through `node ghost-alice-hook.mjs`.
 The installer blocks hook install when node is absent, but node can be removed from
 PATH after install. Doctor is the read-only diagnostic that must surface that drift,
-because Claude Code treats a non-2 PreToolUse exit (a missing-node crash) as
-non-blocking, so the gate would silently fail open.
+because a missing Node runtime prevents the checkpoint hook from executing.
+The checkpoint is guidance and audit; the native host owns tool permission.
 """
 
 import contextlib
@@ -103,7 +103,7 @@ class AddonRegistryAuditTest(unittest.TestCase):
         codex_dir = self.gar / "addons" / "codex"
         reg.write_record(_sidecar("other", self.skills / "ghost", content_hash="x"),
                          addons_dir=codex_dir)
-        status, findings = install_doctor._addon_registry_audit(self.gar, "claude")
+        _, findings = install_doctor._addon_registry_audit(self.gar, "claude")
         self.assertEqual([f["addon_id"] for f in findings], ["noop"])  # codex 'other' excluded
 
 
@@ -1074,38 +1074,50 @@ class RuntimeCoreAuditTest(unittest.TestCase):
 
     def test_session_intent_golden_flags_missing_ledger_dependency_as_warning(self):
         # First-layer install: no intent-audit capability at all must not read as fully healthy — the ledger is the governance input anchor. WARNING (documented degrade), not OK, not ERROR.
-        hook = self.runtime / "session_intent_analyzer_hook.py"
-        hook.write_text(
-            "import json\n"
-            "print(json.dumps({"
-            "\"continue\": True, "
-            "\"systemMessage\": \"Ledger dependency unavailable non-blockingly; continue without raw prompt persistence.\""
-            "}))\n",
-            encoding="utf-8",
-        )
-
-        status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+        source_shared = Path(__file__).resolve().parent
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_CORE_ROOT": str(self.root / "absent-provider")}):
+            status, detail = install_doctor._runtime_session_intent_golden_status(source_shared, "claude")
 
         self.assertEqual(status, install_doctor.STATUS_WARNING)
         self.assertEqual(detail, "ledger-unavailable-degraded")
 
+    def test_session_intent_golden_reconciles_real_claude_human_observation(self):
+        source_shared = Path(__file__).resolve().parent
+        result = install_doctor._runtime_session_intent_golden_status(
+            source_shared, "claude", repo_root=source_shared.parent)
+        self.assertEqual(result, (install_doctor.STATUS_OK, "golden-pass"))
+
+    def test_session_intent_golden_uses_installed_binding_without_ambient_provider(self):
+        import shutil
+        import install_destination
+        import install_hooks
+
+        source_shared = Path(__file__).resolve().parent
+        shutil.copytree(source_shared, self.runtime, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("test_*", "tests", "__pycache__"))
+        destination = install_destination.InstallDestination(
+            mode="normal", owned_root=str(self.root), platform_dir=str(self.root / "platform"),
+            skills_dir=str(self.root / "skills"), ghost_root=str(self.root / "ghost"),
+            ledger_root=str(self.root / "installed-ledger"), project_root=str(source_shared.parent),
+            core_source_root=str(source_shared.parent), runtime_shared_dir=str(self.runtime))
+        with install_destination.use(destination):
+            entry = install_hooks._platform_session_intent_entry("claude", "UserPromptSubmit")
+        self.config.write_text(json.dumps({"hooks": {"UserPromptSubmit": [entry]}}))
+        with mock.patch.dict(os.environ, {"HOME": str(self.root),
+                                          "GHOST_ALICE_CORE_ROOT": str(self.root / "foreign-provider")}):
+            status, findings = install_doctor._runtime_core_audit(
+                source_shared, self.runtime, self.config, "claude")
+        self.assertEqual(status, install_doctor.STATUS_OK, findings)
+        self.assertFalse(Path(destination.ledger_root).exists(), "golden wrote the installed ledger")
+
     def test_session_intent_golden_uses_repo_local_child_temp(self):
-        hook = self.runtime / "session_intent_analyzer_hook.py"
-        hook.write_text("# subprocess replaced by focused test runner\n", encoding="utf-8")
+        source_shared = Path(__file__).resolve().parent
         calls = []
+        real_run = install_doctor.subprocess.run
 
         def run_process(command, **kwargs):
             calls.append((command, kwargs))
-            ledger_root = Path(command[command.index("--root") + 1])
-            from session_intent_analyzer_hook import record_turn
-            record_turn(root=ledger_root, platform="claude", session_id="doctor-runtime-golden",
-                        raw_user_input="runtime session intent golden")
-            return install_doctor.subprocess.CompletedProcess(
-                command,
-                0,
-                json.dumps({"continue": True}),
-                "",
-            )
+            return real_run(command, **kwargs)
 
         repo_root = Path(__file__).resolve().parents[1]
         hostile = r"C:\Users\Public\Documents\ESTsoft\CreatorTemp"
@@ -1130,7 +1142,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
                 ).parameters,
             )
             status, detail = install_doctor._runtime_session_intent_golden_status(
-                self.runtime,
+                source_shared,
                 "claude",
                 repo_root=repo_root,
             )
@@ -1143,7 +1155,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             )
 
         self.assertEqual((status, detail), (install_doctor.STATUS_OK, "golden-pass"))
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 2)
         command, kwargs = calls[0]
         self.assertEqual(Path(kwargs["cwd"]).resolve(), repo_root.resolve())
         run_root = Path(kwargs["env"]["TMPDIR"]).parent
@@ -1152,35 +1164,44 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             Path(command[command.index("--root") + 1]).is_relative_to(run_root)
         )
         self.assertFalse(run_root.exists())
+        for _, child_kwargs in calls:
+            self.assertEqual(child_kwargs["env"]["TMPDIR"], kwargs["env"]["TMPDIR"])
+            self.assertEqual(child_kwargs["env"]["GHOST_ALICE_SESSION_INTENT_ROOT"],
+                             command[command.index("--root") + 1])
 
     def test_session_intent_golden_verifies_database_without_pointer_export(self):
-        hook = self.runtime / "session_intent_analyzer_hook.py"
-        hook.write_text("# subprocess replaced by focused test runner\n", encoding="utf-8")
+        source_shared = Path(__file__).resolve().parent
+        real_run = install_doctor.subprocess.run
+        removed_pointers = []
 
         def run_process(command, **kwargs):
-            from session_intent_analyzer_hook import record_turn
-            root = Path(command[command.index("--root") + 1])
-            record_turn(root=root, platform="claude", session_id="doctor-runtime-golden",
-                        raw_user_input="runtime session intent golden")
-            (root / "claude" / "current-session.json").unlink(missing_ok=True)
-            return install_doctor.subprocess.CompletedProcess(command, 0, json.dumps({"continue": True}), "")
+            result = real_run(command, **kwargs)
+            if "--root" in command:
+                root = Path(command[command.index("--root") + 1])
+                pointer = root / "codex" / "current-session.json"
+                self.assertTrue((root / "ghost-state.sqlite3").is_file())
+                pointer.unlink(missing_ok=True)
+                removed_pointers.append(pointer)
+            else:
+                self.assertTrue(removed_pointers)
+                self.assertFalse(removed_pointers[0].exists())
+            return result
 
         with mock.patch.object(install_doctor.subprocess, "run", run_process):
-            result = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+            result = install_doctor._runtime_session_intent_golden_status(source_shared, "codex")
         self.assertEqual(result, (install_doctor.STATUS_OK, "golden-pass"))
 
     def test_session_intent_golden_rejects_pointerless_write_failure(self):
-        hook = self.runtime / "session_intent_analyzer_hook.py"
-        hook.write_text(
-            "import json\n"
-            "print(json.dumps({"
-            "\"continue\": True, "
-            "\"systemMessage\": \"Ledger write failed non-blockingly; continue without raw prompt persistence.\""
-            "}))\n",
-            encoding="utf-8",
-        )
+        source_shared = Path(__file__).resolve().parent
+        real_run = install_doctor.subprocess.run
 
-        status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
+        def run_process(command, **kwargs):
+            if "--root" in command:
+                return install_doctor.subprocess.CompletedProcess(command, 0, json.dumps({"continue": True}), "")
+            return real_run(command, **kwargs)
+
+        with mock.patch.object(install_doctor.subprocess, "run", run_process):
+            status, detail = install_doctor._runtime_session_intent_golden_status(source_shared, "claude")
 
         self.assertEqual(status, install_doctor.STATUS_ERROR)
         self.assertEqual(detail, "session-intent-not-committed")

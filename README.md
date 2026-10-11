@@ -8,22 +8,29 @@ Ghost-ALICE OS is an agent governance layer for AI work. It keeps intent, bounda
 
 It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It is the operating layer that makes agent work auditable before the agent claims completion.
 
-## Version 0.4.1
+## Version 0.5.0
 
-[Website](https://aidall.github.io/ghost-alice/) · [Release notes](./docs/release/2026-10-01-release-notes.md) · [Core release](https://github.com/AidALL/ghost-alice/releases/tag/v0.4.1) · [Autopilot release](https://github.com/AidALL/ghost-alice-autopilot/releases/tag/v0.4.1)
+[Website](https://aidall.github.io/ghost-alice/) · [Architecture](./architecture.md)
 
-Use Ghost-ALICE core 0.4.1 with the official Autopilot 0.4.1 addon. The addon's technical minimum remains core 0.4.0. Both projects remain open source under Apache-2.0.
+Core 0.5.0 and Ghost-ALICE Autopilot 0.5.0 use the current response-route and completion contract. Ghost-ALICE Autopilot requires Core 0.5.0 or later. Both projects use Apache-2.0.
 
-- Keep approved work moving across status questions and corrections; honor explicit pauses and preserve current scope.
-- Load the full governance contract when needed, while keeping Codex's automatic bootstrap short and preserving complete project instructions.
-- Distinguish each repair's actual verification scope before reporting completion; avoid quota retry loops and evaluation-only runtime additions.
-- Select Autopilot state for the exact current session and handle unwritable derived paths without taking over another run.
+## How governed work proceeds
 
-Selected independent Codex cases exercised similar failure inputs and actual scoped work. Claude installation was checked; these cases do not establish fresh Claude model inference or universal behavior reliability. See the [Autopilot compatibility matrix](https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json) for supported surfaces.
+The responding model keeps the user's objective and constraints, performs authorized work, and judges whether contrary evidence affects a required result or dependency. It corrects affected work when needed and preserves supported results and unresolved requirements.
+
+1. Input hooks record the current human input without storing the raw prompt. The responding model selects authorized work; a host tool passes that selection to Core for validation and storage.
+2. The model asks the host to run the needed tools and reads their actual observations. Valid unchanged evidence retains its original source and verification time.
+3. Through a host execution tool, the model sends Core its complete answer draft and original source paths. Core saves and returns the exact review inputs. The model first judges each claim against those sources, then judges the whole answer against the user's objective and constraints.
+4. The model submits both judgments through a host tool. Core validates and records them together, returning the exact answer only when supported. Recording does not perform the model's meaning judgment.
+5. At Stop, the host independently invokes the Core guard and Ghost-ALICE Autopilot adapter. Each reads Core's authenticated result. Ghost-ALICE Autopilot records supported criteria and may return a task from a plan the model already registered using actual user approval. The host delivers any task request to the triggering conversation.
+
+A route or saved plan does not grant permission. A supported answer can accurately report unfinished work. New input reopens routing without invalidating unchanged evidence; recording errors do not require replaying the business operation.
+
+See the [architecture](./architecture.md) for the responsibility diagram and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract.
 
 ## Quick Start
 
-From the cloned Ghost-ALICE repository, install Core and the official Autopilot addon together. The installer automatically detects the available agent platforms:
+From the cloned Ghost-ALICE repository, install Core and the official Ghost-ALICE Autopilot addon together. The installer automatically detects the available agent platforms:
 
 ```bash
 bash install.sh --addon autopilot
@@ -33,7 +40,7 @@ See the [detailed installation guide](./docs/getting-started/installation.md) fo
 
 ## Official Addons
 
-Autopilot continues explicitly approved work one item at a time within its session, scope and budget. Installation does not grant run approval. It is maintained in [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot).
+Ghost-ALICE Autopilot continues explicitly approved work one item at a time within its session, scope and budget. Installation does not grant run approval. It is maintained in [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot).
 
 For native commands, custom addon sources, platform selection and removal, use the [installation guide](./docs/getting-started/installation.md) and [official addon reference](./docs/reference/official-addons.md).
 
@@ -49,15 +56,15 @@ For native commands, custom addon sources, platform selection and removal, use t
 | Session gate contract | [Session gate matrix](./docs/policies/session-gate-matrix.md) |
 | Installer compatibility contract | [Installer platform compatibility](./docs/policies/installer-platform-compatibility-matrix.md) |
 | Team onboarding and background | [GitHub Wiki](https://github.com/AidALL/ghost-alice/wiki) |
-| Official addon usage | [Wiki: official addons](./docs/reference/official-addons.md) |
+| Official addon usage | [Official addon reference](./docs/reference/official-addons.md) |
 | Addon authoring | [Wiki: addon authoring](https://github.com/AidALL/ghost-alice/wiki/addon-authoring) |
 
 ## Project Guarantees
 
 - Ghost-ALICE OS is a governance operating layer for agent sessions, not a general-purpose operating system.
 - User intent, boundaries, verification criteria, and install state are first-class surfaces.
-- Session routing consumes recorded intent and downstream gate state before tool execution.
-- Completion claims require fresh evidence when the work has been executed, fixed, or verified.
+- The responding model selects current work from recorded intent; Core validates the submitted route before host tools execute permitted actions.
+- Completion claims require owning evidence; valid unchanged proof is reused at its original source and time.
 - The installer tracks managed surfaces and avoids broad deletion when ownership cannot be proven.
 
 Agent visibility command surface:
@@ -80,7 +87,7 @@ bash install.sh --uninstall
 
 ## Contributing And Validation
 
-Before changing skills, installer behavior, or public command surfaces, read [AGENTS.md](./AGENTS.md). After creating or modifying a skill, pass Phases 1-5 of [official-docs/derived/skill-compliance-checklist.md](./official-docs/derived/skill-compliance-checklist.md).
+Before changing skills, installer behavior, or public command surfaces, read [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md). After creating or modifying a skill, pass Phases 1-5 of [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md).
 
 Public surface validation:
 
@@ -103,4 +110,4 @@ python3 scripts/run_installer_compat_tests.py --group public-surface-contract
 
 ## License
 
-Ghost-ALICE OS project-owned source code and documentation are licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE), [NOTICE](./NOTICE), and [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md).
+Ghost-ALICE OS project-owned source code and documentation are licensed under the Apache License, Version 2.0. See [LICENSE](./LICENSE), [NOTICE](./NOTICE), and [THIRD_PARTY_NOTICES.md](https://github.com/AidALL/ghost-alice/blob/main/THIRD_PARTY_NOTICES.md).

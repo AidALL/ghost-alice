@@ -1,6 +1,6 @@
 // Complete implementation of condition-based waiting utilities
-// From: Lace test infrastructure improvements (2025-10-03)
-// Context: Fixed 15 flaky tests by replacing arbitrary timeouts
+// Requires the project ThreadManager and LaceEvent types.
+// Context: Replace arbitrary timeouts with waits for observable conditions.
 
 import type { ThreadManager } from '~/threads/thread-manager';
 import type { LaceEvent, LaceEventType } from '~/threads/types';
@@ -35,7 +35,7 @@ export function waitForEvent(
       } else if (Date.now() - startTime > timeoutMs) {
         reject(new Error(`Timeout waiting for ${eventType} event after ${timeoutMs}ms`));
       } else {
-        setTimeout(check, 10); // Poll every 10ms for efficiency
+        setTimeout(check, 10); // Illustrative interval; choose from the operation and environment
       }
     };
 
@@ -135,24 +135,10 @@ export function waitForEventMatch(
   });
 }
 
-// Usage example from actual debugging session:
-//
-// BEFORE (flaky):
-// ---------------
+// Usage: wait for tool calls before aborting, then wait for their results.
 // const messagePromise = agent.sendMessage('Execute tools');
-// await new Promise(r => setTimeout(r, 300)); // Hope tools start in 300ms
+// await waitForEventCount(threadManager, threadId, 'TOOL_CALL', 2);
 // agent.abort();
 // await messagePromise;
-// await new Promise(r => setTimeout(r, 50));  // Hope results arrive in 50ms
-// expect(toolResults.length).toBe(2);         // Fails randomly
-//
-// AFTER (reliable):
-// ----------------
-// const messagePromise = agent.sendMessage('Execute tools');
-// await waitForEventCount(threadManager, threadId, 'TOOL_CALL', 2); // Wait for tools to start
-// agent.abort();
-// await messagePromise;
-// await waitForEventCount(threadManager, threadId, 'TOOL_RESULT', 2); // Wait for results
-// expect(toolResults.length).toBe(2); // Always succeeds
-//
-// Result: 60% pass rate → 100%, 40% faster execution
+// await waitForEventCount(threadManager, threadId, 'TOOL_RESULT', 2);
+// expect(toolResults.length).toBe(2);

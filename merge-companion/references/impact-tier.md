@@ -1,35 +1,11 @@
-# Impact tier
+# Impact Tier
 
-The tier classification is for UI ordering and display (impact-tier display classification). Because adversarial-verification fires with no exception, no tier bypasses verification.
+The reviewing agent assigns one display tier to each pending change. Adversarial-verification checks the classification along with the decision aid; no tier waives verification.
 
-## Trivial
+| Tier | Observed change | Display treatment |
+| --- | --- | --- |
+| Trivial | Only whitespace, line endings, indentation, comment text, final newline or frontmatter order changes; frontmatter values stay identical | Show last; recommend merge as the user choice |
+| Semantic | One file's meaning or frontmatter value changes, a section is added/deleted, or a function/variable is added/deleted within that file | Show after structural changes and explain the changed meaning |
+| Structural | Multiple files, references/call graph, a skill/user-change scope conflict, a governance file, or frontmatter name/type changes | Show first with the most detailed workflow impact |
 
-- only whitespace, line endings, or indentation changed
-- frontmatter field order changed (values identical)
-- only comment text changed
-- end-of-file newline added or removed
-
-UI ordering: last. The recommended default user decision is "merge".
-
-## Semantic
-
-- the body meaning of a single file changed
-- a frontmatter value changed
-- a new section added or an existing section deleted
-- a function or variable added or deleted (within one file)
-
-UI ordering: middle. Decide with care.
-
-## Structural
-
-- a change spanning multiple files
-- a call-graph change (one file adds or removes a reference to another file)
-- a scope conflict between a new skill and a user change (for example, a helper the user created overlapping with a new sub-skill feature)
-- a change to a governance file such as AGENTS.md
-- a frontmatter `name` or `type` change
-
-UI ordering: first. The user decision needs the most care. The AI analysis is the most detailed.
-
-## Measuring classification accuracy
-
-Because the tier classification itself is also performed by the AI, misclassification is possible. The impact-tier classification result is included in the adversarial-verification verification output and is confirmed by multi-agent consensus.
+The classification remains a decision aid; the user-authorized workflow in `../SKILL.md` controls application.

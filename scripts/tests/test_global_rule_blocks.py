@@ -11,8 +11,6 @@ from _installer_source import installer_bash_source, installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 GLOBAL_RULE_BLOCKS = REPO_ROOT / "_shared" / "global_rule_blocks.py"
 
 
@@ -29,6 +27,22 @@ def _load_global_rule_blocks():
 
 
 class GlobalRuleBlockTest(unittest.TestCase):
+    def assert_intake_routing_authority(self, body: str) -> None:
+        self.assertIn("Session-intent intake feeds task-router directly", body)
+        self.assertIn("Skill-evolution consumes the same session as a report-only terminal branch; it does not feed task-router", body)
+        self.assertIn("the native host enforces tool permission", body)
+        self.assertNotIn("jailbreak-detector", body)
+
+    def test_rendered_fallback_rejects_classifier_or_audit_authority(self) -> None:
+        blocks = _load_global_rule_blocks()
+        for rel, render in (("platforms/codex/AGENTS.md", blocks.render_codex_bootstrap),
+                            ("platforms/claude/CLAUDE.md", blocks.render_claude_bootstrap)):
+            body = render((REPO_ROOT / rel).read_text(encoding="utf-8"))
+            for old, new in (("Session-intent intake feeds task-router directly", "Session intake requires jailbreak-detector permission before task-router"),
+                             ("the native host enforces tool permission", "Audit records grant execution permission")):
+                with self.subTest(path=rel, change=old), self.assertRaises(AssertionError):
+                    self.assert_intake_routing_authority(body.replace(old, new))
+
     def test_claude_bootstrap_is_created_when_destination_is_missing(self) -> None:
         blocks = _load_global_rule_blocks()
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -218,30 +232,13 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         body = blocks.render_codex_bootstrap(source)
 
-        self.assertEqual(body.count("## Codex Hookless Fallback"), 1)
-        self.assertNotIn("## Codex Hook Enforcement And Hookless Fallback", body)
-        self.assertEqual(body.count("If hooks are disabled in the Codex session"), 1)
-        self.assertIn("`[tool-checkpoint]`", body)
-        self.assertIn("rejected-alternatives", body)
-        self.assertIn("unverified-premises", body)
-        self.assertIn("failure-mode-if-wrong", body)
-        self.assertIn("recovery-action", body)
-        self.assertNotIn("recovery-cost", body)
-        self.assertNotIn("recovery-note", body)
-        self.assertNotIn("compact `[tool-checkpoint]`", body)
-        self.assertIn("[tool-checkpoint:batch]", body)
-        self.assertIn("[tool-checkpoint:continuation]", body)
-        self.assertIn("user-input tool batch", body)
-        self.assertIn("same session input lineage", body)
-        self.assertIn("new user input, current-lineage block/deny, mismatch", body)
-        self.assertIn(
-            "Do not infer whether an action is safe from tool-call identity or payload content",
-            body,
-        )
-        self.assertIn(
-            "decision depends only on the current-lineage block gate and the silent allow invariant",
-            body,
-        )
+        self.assert_intake_routing_authority(body)
+        self.assertEqual(body.count("When hooks are unavailable"), 1)
+        self.assertIn("manual", body)
+        self.assertIn("within the user's tool budget", body)
+        self.assertIn("does not claim native hook execution or invent a session receipt", body)
+        self.assertIn("once per input lineage", body)
+        self.assertIn("strict audit", body)
 
     def test_claude_source_owns_rules_zero_through_twelve_and_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
@@ -267,13 +264,13 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         body = blocks.render_claude_bootstrap(source)
 
-        self.assertEqual(body.count("## Claude Hookless Fallback"), 1)
-        self.assertEqual(body.count("If hooks are disabled in the Claude session"), 1)
-        self.assertIn("`session-intent-analyzer`", body)
-        self.assertIn("`jailbreak-detector`", body)
-        self.assertIn("`task-router`", body)
-        self.assertIn("`[completion-check]`", body)
-        self.assertIn("`[io-trace]`", body)
+        self.assertEqual(body.count("When hooks are disabled, unavailable, or not trusted"), 1)
+        self.assertIn("within the user's tool budget", body)
+        self.assertIn("does not claim native intake, routing, Stop or audit observations", body)
+        self.assert_intake_routing_authority(body)
+        self.assertIn("task-router", body)
+        self.assertIn("[completion-check]", body)
+        self.assertIn("[io-trace]", body)
 
     def test_installers_route_global_rule_files_through_block_helper(self) -> None:
         sh = installer_bash_source()
@@ -282,7 +279,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertIn("claude-remove", sh)
         self.assertIn("ensure_claude_bootstrap", sh)
         self.assertIn("remove_claude_bootstrap_if_unused", sh)
-        self.assertIn('claude) run_logged_if_compact ensure_claude_bootstrap "${SKILLS_DIR}"', sh)
+        self.assertIn('claude) run_logged_if_compact ensure_claude_bootstrap ;;', sh)
         self.assertNotIn("remove_claude_bootstrap || return 1", sh)
         self.assertIn("codex-merge", sh)
         self.assertIn("codex-remove", sh)

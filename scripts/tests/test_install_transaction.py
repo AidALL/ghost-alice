@@ -11,8 +11,6 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALL_LOCK = REPO_ROOT / "_shared" / "install_lock.py"
 INSTALL_TRANSACTION = REPO_ROOT / "_shared" / "install_transaction.py"
 CLEANUP_FALSE_POSITIVE_LEGACY = REPO_ROOT / "merge-companion" / "scripts" / "cleanup_false_positive_legacy.py"

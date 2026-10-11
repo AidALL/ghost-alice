@@ -9,21 +9,6 @@ compatibility:
 ---
 
 # Finishing a Development Branch
-## Contents
-
-- [Overview](#overview)
-- [Process](#process)
-  - [Step 1: CI preflight](#step-1-ci-preflight)
-  - [Step 2: Determine the base branch](#step-2-determine-the-base-branch)
-  - [Step 3: Resolve the integration path](#step-3-resolve-the-integration-path)
-  - [Step 4: Execute the selection](#step-4-execute-the-selection)
-    - [Before integrating a pull request](#before-integrating-a-pull-request)
-  - [Step 5: Worktree cleanup](#step-5-worktree-cleanup)
-- [Quick reference](#quick-reference)
-- [Common mistakes](#common-mistakes)
-- [Red flags](#red-flags)
-- [Integration](#integration)
-
 
 ## Overview
 
@@ -56,18 +41,13 @@ Tests failing (<N> failures). Must fix before completing:
 Cannot push or integrate until runnable checks pass.
 ```
 
-Stop. Do not proceed to Step 2.
+Suspend the push or integration that depends on those checks. Correct the observed failure within existing authority; independent authorized work may continue.
 
 When runnable checks pass and runner gaps are recorded: proceed to Step 2. After pushing, require successful applicable remote CI for the exact head before integration. A green older SHA, local pass, clean code review, pending job, or silently skipped required job does not satisfy that condition.
 
 ### Step 2: Determine the base branch
 
-```bash
-# Try the common base branch
-git merge-base HEAD main 2>/dev/null || git merge-base HEAD master 2>/dev/null
-```
-
-Or ask: "This branch split from main - is that correct?"
+Use the PR target, user's specified target or inspected repository default. A merge-base with main or master shows ancestry but does not by itself identify the intended integration target. Ask only when the authorized target remains unresolved.
 
 ### Step 3: Resolve the integration path
 
@@ -92,11 +72,7 @@ Keep the options concise and explain only a concrete blocker or consequence the 
 
 #### Before integrating a pull request
 
-Load `requesting-code-review` and complete its Remote Pull Request Review Gate before merging, fast-forwarding the base branch, or claiming the PR is ready to integrate. Read the current head's submitted reviews, inline findings, conversation summaries, and unresolved threads, including relevant findings carried from earlier PRs. Passing CI and local review do not replace this readback. Pending, unavailable, or stale review remains unverified until reconciled; do not merge merely because the checks are green.
-
-Also confirm the applicable remote CI jobs succeeded for that exact head. CI and review are separate conditions; neither substitutes for the other. After changes prompted by either one, repeat affected local preflight before pushing and obtain both remote results for the replacement head.
-
-Fix valid findings within the user's scope, and reject incorrect or conflicting suggestions with code/test evidence. Record the reviewed head, source completion, finding dispositions, and remaining limitations. After any amend, rebase, or squash, reread and obtain required review for the new head. Recheck the remote head immediately before integration; if it differs from the reconciled head, repeat the gate. If no PR exists for a purely local integration, do not invent a remote review dependency.
+The current-session assistant follows requesting-code-review's [Remote Pull Request Review Gate](../requesting-code-review/SKILL.md#remote-pull-request-review-gate). That procedure returns the reconciled head, required review/CI results and finding dispositions. Integrate only the head those results support. A purely local integration without a PR has no invented remote-review dependency.
 
 When the user requests one commit, consolidate the unmerged work before the final review. An authorized replacement of a published PR branch uses `--force-with-lease` with the expected prior head and targets only that PR branch. A one-commit request alone does not authorize rewriting published `main` or another shared base branch. Work already merged needs a follow-up commit unless the user specifically authorizes replacing an identified published range. With that separate authorization, preserve recovery refs, verify that the replacement contains exactly the authorized work without dropping unrelated changes, and use an explicit expected-head lease on the authorized target ref. If the remote head moves or the range cannot be reconciled, stop the push and inspect; do not broaden the authorization or overwrite the new work. Do not re-ask for permission already granted for that exact operation. A rewritten head invalidates the prior review's freshness even when tests remain green.
 
@@ -181,61 +157,19 @@ git worktree remove <worktree-path>
 
 For an open PR or keep-as-is choice (options 2 and 3): keep the worktree. A PR may need review fixes even when CI has passed.
 
-## Quick reference
+## Failure modes
 
-| Option | Merge | Push | Keep worktree | Clean up branch |
-|--------|------|------|------------|---------|
-| 1. Local merge | ✓ | - | - | ✓ |
-| 2. Create PR | - | ✓ | ✓ | - |
-| 3. Keep as-is | - | - | ✓ | - |
-| 4. Discard | - | - | - | ✓ (forced) |
+The process above defines each prerequisite once. Do not substitute a representative test subset for required preflight, local review for remote review, or an older successful head for the head being integrated. A new remote head requires its affected checks and review.
 
-## Common mistakes
+A published-history rewrite needs the exact authorization and expected-head lease defined in Step 4. A selected integration path does not authorize unrelated changes or messages. Keep the checkout while an open PR, uncommitted work or active task needs it.
 
-Partial CI preflight
-- Problem: pushing after a focused subset passes, then discovering a locally reproducible workflow failure remotely
-- Fix: inspect the actual workflow jobs and execute all relevant local equivalents; disclose unavoidable runner differences
-
-Open questions
-- Problem: "What should I do next?" -> ambiguous
-- Fix: honor the existing integration instruction; offer 4 structured options only when the path is undecided
-
-Unread remote review
-- Problem: treating green checks or a local review as proof that automated PR findings were handled
-- Fix: read every remote review surface, reconcile relevant earlier findings, and bind completion to the head being integrated
-
-Automatic worktree cleanup
-- Problem: removing a worktree that may still be needed (options 2, 3)
-- Fix: clean up only for options 1 and 4
-
-No discard confirmation
-- Problem: deleting work by mistake
-- Fix: require a typed "discard" confirmation
-
-## Red flags
-
-Never:
-- proceed with failing tests
-- push with known runnable preflight failures, stale affected results, or checks omitted in favor of a representative subset
-- bypass CI with skip flags or weakened checks to manufacture a pass
-- merge without verifying tests on the result
-- integrate before applicable remote CI succeeds for the exact head
-- merge with unread remote findings or a pending, unavailable, or stale required review
-- delete work without confirmation
-- force push without authorization, or rewrite published base history outside a specifically authorized range
-
-Always:
-- complete workflow-derived local preflight before pushing or publishing an amend
-- follow the user's selected path without repeating the option question
-- complete the remote review gate on the current PR head before integration
-- get a typed confirmation for option 4
-- clean up the worktree only for options 1 and 4
+Verification-before-completion owns completion claims and evidence reuse; systematic-debugging owns failed attempts. The output states the actual integration result, verified head, remaining gaps and preserved or removed checkout.
 
 ## Integration
 
 Called by:
-- subagent-driven-development (Step 7) - after all tasks are complete
-- executing-plans (Step 5) - after all batches are complete
+- subagent-driven-development - after all tasks and final review are complete
+- executing-plans (Step 3: Finish development) - after all tasks are complete and verified
 
 Pairs with:
 - using-git-worktrees - clean up worktrees created by that skill

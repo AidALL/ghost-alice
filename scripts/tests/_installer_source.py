@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 def installer_bash_source() -> str:
     """Return combined source from install.sh plus every installer_lib/*.sh file.
 
-    After module extraction, function definitions may live in install.sh or
+    Function definitions may live in install.sh or
     installer_lib/<name>.sh, so static tests for function existence/content should
     scan this combined source to preserve intent regardless of location.
     """
@@ -21,7 +21,7 @@ def installer_bash_source() -> str:
 def installer_ps1_source() -> str:
     """Return combined source from install.ps1 plus every installer_lib/*.ps1 file.
 
-    After PowerShell module extraction, function definitions may live in install.ps1
+    PowerShell function definitions may live in install.ps1
     or installer_lib/<name>.ps1, so static tests for function existence/content
     should scan this combined source to preserve intent regardless of location.
     install.ps1 and its modules use a UTF-8 BOM, so read with utf-8-sig to strip it.

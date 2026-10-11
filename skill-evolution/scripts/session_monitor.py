@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Report-only monitor for loop, scope, and repeated failure signals.
 
+Thresholds select observations to display. The current-conversation model judges
+their relevance to the user's objective and current conditions before choosing
+the next action; counts alone establish neither a cause nor a required action.
+
 Dependencies: Python 3.11+ standard library only.
 """
 
@@ -119,7 +123,7 @@ def analyze(rows: list[dict[str, Any]], recent_window: int = 5) -> dict[str, Any
                     "scope:file-surface",
                     "notice",
                     len(paths),
-                    "large file surface in one session; verify scope before continuing",
+                    f"{len(paths)} distinct paths observed in one session; the current-conversation model first evaluates whether this observation affects the next decision under the user's objective and current conditions",
                 )
             )
 
@@ -131,7 +135,7 @@ def analyze(rows: list[dict[str, Any]], recent_window: int = 5) -> dict[str, Any
                     "test:repeated-failure",
                     "critical",
                     count,
-                    "same failing test command repeated; switch to root-cause debugging",
+                    f"{count} failures of the same command observed in one session; the current-conversation model first evaluates whether this observation affects the next decision under the user's objective and current conditions",
                 )
             )
 

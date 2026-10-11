@@ -1,245 +1,98 @@
 # Round Protocol
 
-This document defines the round execution protocol of the adversarial-verification skill, the utterance pattern constraints, the list of forbidden utterances, and the sycophancy audit procedure.
+The coordinating assistant coordinates independent attacks, proponent evidence, its own meaning review of each utterance and convergence. Fixed review criteria do not make that semantic judgment a deterministic code operation. Normal rounds have no mediator. The coordinating assistant records every phase so that a later meta-judge or human can inspect the reasoning.
 
-## Table of Contents
+## Round sequence
 
-- [Round Basic Structure](#round-basic-structure)
-- [Agent Utterance Format](#agent-utterance-format)
-- [Allowed Utterance Patterns](#allowed-utterance-patterns)
-- [Forbidden Utterance Patterns](#forbidden-utterance-patterns)
-- [Concession Utterance Rules](#concession-utterance-rules)
-- [human-proponent Response Rules](#human-proponent-response-rules)
-- [sycophancy Audit](#sycophancy-audit)
-- [rounds-log Format](#rounds-log-format)
+1. Phase A: the first cycle includes every required distinct axis. In a later cycle, the coordinating assistant assigns the axes affected by changed claims, assumptions, evidence or eligible prior-round challenges and retains unaffected valid findings. Each assigned agent independently submits an own-axis attack or reasoned no-attack declaration, plus any prior-round meta-attack or reasoned no-meta-attack declaration. Current-cycle submissions are unavailable to peers.
+2. Phase B: the proponent, or caller in that role, reads the attacks and may submit new evidence, resolve a mistaken premise or withdraw part/all of the claim. The coordinating assistant records absent, repeated or irrelevant responses as no new evidence. In declared human-absent mode, it skips collection and uses the initial evidence.
+3. Phase C: the coordinating assistant audits every utterance under the rules below. It checks the claim-card/evidence-list against the source of truth only when new evidence, changed schema or an observed mismatch can affect the verdict. A mismatch becomes factual attack material, not a compromise judgment. Deleted source evidence or material schema change requires escalation.
+4. Phase D: the coordinating assistant records the cycle and applies convergence-rules.md immediately. It continues only when another round can change an identified decision.
 
----
+Parallel dispatch preserves independent submissions. If parallel dispatch or sufficient capacity is unavailable, use sequential isolated assignments; each receives only prior-round utterances and an explicit instruction not to reference current-round peers. In asynchronous collection, use a bounded wait within the task's resources; timeout records no response, never a favorable verdict.
 
-## Round Basic Structure
+### Dispatch and collect through the host
 
-One round consists of the following sequence (there is no physical ordering, but a recording order does exist).
+The coordinating assistant reads the current host's actual delegation schema. On Codex it loads `using-coding-convention` from the current skill catalog, then its `references/codex-tools.md` section `Agent dispatch`; the [source navigation link](../../coding-convention/using-coding-convention/references/codex-tools.md#agent-dispatch) is not an installed path recipe. It submits a self-contained prompt containing the assigned axis, current claim-card, original source locators/content, schema context, only completed prior-round submissions, allowed actions/resource limits and the submission format below. Require every accessed absolute path and evidence limit in the result. A role label in this prompt is a task assignment, not an invented tool parameter or higher-priority instruction.
 
-- Phase A is Agent parallel utterance.
-  - Every agent independently writes its own-axis attack plus a meta attack
-  - Submitted simultaneously, mutual reference is forbidden (referenced in the next round)
-- Phase B is Human-proponent response.
-  - Read every attack from Phase A and submit response evidence
-  - If there is no response or it merely repeats existing evidence, reject accumulates
-- Phase C is Decision-relevant checkpoint and audit.
-  - Run the deterministic sycophancy audit every round, and re-check the claim-card and evidence-list against the SSOT only when new evidence, a schema change, or a detected mismatch can affect the verdict
-  - When a decision-relevant mismatch is found, provide it as attack material to the next-round agents. The checkpoint does not judge
-  - Switch to verdict=escalate only when the evidence has been deleted from the SSOT or the schema has changed
-  - The checkpoint does not mediate. A judgment such as "both sides have a point" is forbidden. Perform fact-checking only
-  - If no decision-relevant uncertainty and no relevant state delta remains after the audit, apply convergence and stop. Do not continue only to satisfy a round-count minimum
-- Phase D is Round close record.
-  - Record the Phase A, Phase B, and Phase C utterances in the rounds-log
-  - Check the convergence condition immediately after the complete independent attack cycle
+Retain the dispatch tool's returned handle with its claim ID, round and axis. Use that same API's documented wait/result operation to collect the corresponding submission. The coordinating assistant places results in the round log, checks required fields, then performs Phase C; a spawn acknowledgment or agent status is not the review. If no supported delegation tool exists, report the required independent review as unavailable rather than inventing agents or replacing it with self-agreement.
 
-○ parallel vs sequential
-- Dispatching Phase A as parallel subagents forces independent utterance with no mutual reference. This is ideal
-- In an environment where parallel dispatch is not possible, run sequentially, but state in each agent prompt "do not reference the other agents' utterances from this round. Reference only up to the previous round"
+## Agent submission
 
-○ round interval
-- Secure time between rounds to collect the human-proponent response. In asynchronous mode, set a response timeout
-- Default behavior on response timeout: continue the round, and record that there was no response for that claim
-
----
-
-## Agent Utterance Format
-
-Each agent utters in the following structure every round.
-
-```
-agent-id: <e.g., agent-C-internal-logic>
-round: <N>
+```text
+agent-id: <assigned agent>
+round: <round number>
 axis-attack:
-  - target-claim-id: <claim ID or sub-element>
+  - target-claim-id: <claim or subclaim>
     attack-type: <logical-gap | contradiction | hidden-premise | term-equivocation | ...>
-    attack-content: "one concrete attack sentence"
-    referenced-evidence: <evidence ID, if applicable>
+    attack-content: <concrete defect and resolution condition>
+    referenced-evidence: <evidence ID when applicable>
   OR
-  declared: "no attack point"
-  reason: "the reason no new attack point was found in this round"
+  declared: no attack point
+  reason: <why no semantically new own-axis attack remains>
 meta-attack:
-  - target-agent: <other agent id>
-    target-round: <previous round N>
-    attack-content: "one meta attack sentence"
+  - target-agent: <agent>
+    target-round: <prior round>
+    attack-content: <specific defect in that prior submission>
   OR
-  declared: "no meta attack"
-final-verdict-this-round: <accept | reject | hold>
+  declared: no meta attack
+final-verdict-this-round: accept | reject | hold
 ```
 
-○ required fields
-- axis-attack: cannot be empty. Either an attack or "no attack point"
-- meta-attack: required from round 2. Round 1 has no meta attack target, so it can be omitted
-- final-verdict-this-round: submitted every round. Used to record the mid-round judgment
+Every submission includes axis-attack and final-verdict. Round 1 may omit meta-attack because no prior-round target exists. A bare verdict or empty axis response is invalid. Meta-attack cannot hide an ordinary off-axis claim attack.
 
-○ forbidden
-- writing another agent's axis attack in axis-attack
-- writing a general axis attack in meta-attack
-- submitting final-verdict without an utterance
+## Attack, concession and response rules
 
----
+An attack identifies a concrete claim, source, clause or reasoning step, states the defect and explains what could resolve it. General suspicion or a demand for unspecified checking is invalid.
 
-## Allowed Utterance Patterns
+A concession identifies the assigned review assistant's own defeated attack/evidence, the opposing evidence/response and the resolution path, then states the remaining claim boundary:
 
-○ attack utterance
-- Points at a concrete claim, evidence, document, or clause
-- The logical structure of the attack is stated
-- Presents together what is needed for the attack to be resolved
-
-○ concession utterance (allowed format only)
-- "my evidence X is negated by the counterpart's evidence Y. Negation path: ~~~"
-- "my attack Z is resolved by response R. Resolution condition: ~~~"
-- A concession must state the negation or resolution path
-
-○ "no attack point" declaration
-- "I could not find a new attack point beyond the attacks up to the previous round on my own axis"
-- A bare "none" is forbidden. The reason is required
-
----
-
-## Forbidden Utterance Patterns
-
-The following utterances are invalidated at the audit stage. The agent that uttered them is asked to re-utter for that round.
-
-○ agreement without evidence
-- "I think that is correct"
-- "that seems right"
-- "good point"
-- "I agree" (without a path)
-
-○ generalities
-- "it is a bit odd"
-- "something is lacking"
-- "it needs more checking" (without stating what to check)
-
-○ compromise or mediation
-- "both sides have a point"
-- "let us settle at a reasonable middle"
-- "this is good enough"
-
-○ personal attack or bias
-- "agent-X is biased" (without evidence)
-- "the human-proponent is emotional"
-
-○ out of domain
-- an attack on an axis that is not one's own
-- a judgment beyond one's own role
-
----
-
-## Concession Utterance Rules
-
-A concession is the most dangerous point of this skill. It is where sycophancy leaks the most. Concession is allowed, but the format is strictly constrained.
-
-○ concession allowed conditions (AND)
-1. One's own attack or one's own evidence has been "concretely" negated by the counterpart
-2. The negation path can be stated in 1 to 2 sentences
-3. What part of the claim remains after the negation can be stated
-
-○ concession forbidden conditions (OR)
-- a sense of "somehow being persuaded"
-- the negation path cannot be stated
-- pressure to finish quickly because the round count has dropped
-
-○ concession record format
-```
-agent-id: <e.g., agent-C-internal-logic>
-round: <N>
+```text
+agent-id: <agent>
+round: <round>
 concession:
-  target-own-attack-id: <previous round attack ID>
-  negated-by: <response or counter-attack ID>
-  negation-path: "1 to 2 sentence negation path"
-  remaining-claim-part: "the claim part that remains after the concession"
+  target-own-attack-id: <prior attack>
+  negated-by: <response or counterattack>
+  negation-path: <one or two sentences>
+  remaining-claim-part: <surviving part>
 ```
 
-○ a concession is different from no attack point
-- concession: acknowledging that one's own previous attack was negated
-- no attack point: failing to find new attack material
-- both are possible, but record them separately
+The assigned review assistant may concede only when the opposing material concretely defeats its attack and it can state both the path and surviving scope. Feeling persuaded or pressure to finish does not support concession. A concession concerns an old attack; no attack point concerns absence of a new one. The assigned review assistant records them separately when both apply.
 
----
+The proponent may add a file/link/logical path, explain that an attacked premise is absent from the claim, or withdraw a part while retaining a narrower claim. Repetition, summarizing without answering and changing topic add no evidence.
 
-## human-proponent Response Rules
+## Mandatory utterance audit
 
-The response from the human side (or the evidence the caller submitted in the human role) also has format constraints. Defending unconditionally also runs counter to the skill's intent.
+In Phase C of every round, the coordinating assistant checks for:
 
-○ allowed response format
-- submit new evidence: add an evidence file, link, or logical path that did not exist before
-- resolution explanation: show that the attack started from a specific premise, and explain that the premise is not in the claim
-- partial withdrawal: "I concede this part. I keep only this part"
+- unsupported agreement or concession without its required resolution path;
+- vague attacks or bare no-attack declarations;
+- compromise/mediation instead of a factual or logical judgment;
+- personal attacks or unsupported motive claims;
+- own-axis violations or a generic axis attack disguised as meta-attack.
 
-○ forbidden responses
-- repeating existing evidence without adding any ("as I already said")
-- only summarizing the attack without responding
-- switching to a different topic
+The coordinating assistant invalidates a violating utterance and asks that agent to resubmit; the round is extended once. Cumulative audit failure over three rounds requires agent replacement under convergence-rules.md. Every submission must pass before the cycle can close as accepted.
 
-○ no-response handling
-- when no response accumulates for 2 consecutive rounds, that claim starts accumulating convergence-reject
-- when the caller has declared human-absent mode (automatic verification): proceed with the round on the initial evidence only, and skip the response stage
+The coordinating assistant performs this semantic review without a separate routine audit agent. For an ambiguous concrete-versus-general judgment, it may dispatch one bounded auxiliary judgment containing the disputed utterance, required criterion and source context; retain the returned reasoning in the log. Matching IDs and field presence are mechanical checks, not substitutes for that judgment.
 
----
+## Log and retention
 
-## sycophancy Audit
-
-Periodically audit whether the round protocol is working correctly.
-
-○ audit timing
-- automatically run in Phase C of every round
-- before the round closes, all utterances of that round must pass the audit
-
-○ audit items
-- detection of forbidden utterance patterns
-- whether a concession utterance kept the format constraints
-- whether a "no attack point" declaration has a reason
-- whether a meta attack is disguised as a general axis attack
-- whether each agent stayed within its own axis
-
-○ behavior on audit failure
-- a violating utterance is invalidated
-- the agent is asked to re-utter (the round is extended once)
-- when audit failures accumulate over 3 rounds, replace that agent (spawn a new subagent)
-
-○ audit executor
-- the audit runs with this skill's own logic
-- a separate audit agent is not needed (a deterministic check)
-- however, when the "generality vs concrete" boundary judgment is ambiguous, one auxiliary LLM judgment is allowed
-
----
-
-## rounds-log Format
-
-The record of every round accumulates in the rounds-log. The log is used for traceability, audit, and meta-judge input.
-
-○ log structure
-```
+```text
 rounds-log:
-  claim-id: <verification target>
+  claim-id: <target>
   rounds:
     - round: 1
       phase-a:
-        - <agent utterance>
-        - <agent utterance>
-        - ...
+        - <independent agent submission>
       phase-b:
-        human-response: <response content or "none">
+        human-response: <response or none>
       phase-c:
         audit-result: pass | fail
-        audit-violations: [...]
-    - round: 2
-      ...
+        audit-violations: <violations>
   summary:
-    total-rounds: N
+    total-rounds: <count>
     convergence: accept | reject | judge-deadlock
-    retracted-claims: [...]
+    retracted-claims: <withdrawn claims>
 ```
 
-○ log splitting
-- save the full log to a file. Return only the summary to the caller
-- summary format: claim-id + total-rounds + convergence + the issue list (up to 10)
-- the caller references the full log file path on meta-judge or human escalation
-
-○ log retention
-- minimum retention period: 30 days after the skill call result is reflected in the deliverable
-- because caller-provided evidence may contain sensitive information, do not export it outside the authorized workspace
+The coordinating assistant saves the full log in the existing authorized evidence location and returns its exact locator with the claim ID, round count, convergence and up to ten issues. The meta-judge/human escalation receives that log and the current claim-card. If no file storage is authorized, retain the log in task context and report the durable-retention limit; do not create a new storage boundary. For a stored log, retain it for at least 30 days after the result is reflected in the deliverable, within applicable retention authority; do not export sensitive evidence beyond the authorized workspace.

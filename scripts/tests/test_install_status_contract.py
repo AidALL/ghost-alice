@@ -11,8 +11,6 @@ from _installer_source import installer_bash_source, installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALL_DOCTOR = REPO_ROOT / "_shared" / "install_doctor.py"
 PENDING_MANIFEST_WRITER = REPO_ROOT / "_shared" / "pending_manifest_writer.py"
 CODEX_MARKER = "# Ghost-ALICE Codex Bootstrap"
@@ -815,7 +813,7 @@ class InstallStatusContractTest(unittest.TestCase):
     def test_installers_write_empty_pending_merge_manifest_after_snapshot(self) -> None:
         sh = installer_bash_source()
         bash_writer = _extract_bash_function(sh, "_write_empty_pending_manifest_if_missing")
-        # The empty-manifest payload now lives in the extracted _shared writer module; the bash function delegates to it.
+        # The Bash function delegates empty-manifest serialization to the _shared writer.
         self.assertIn("pending_manifest_writer.py", bash_writer)
         writer_py = PENDING_MANIFEST_WRITER.read_text(encoding="utf-8")
         self.assertIn('"version": 1', writer_py)

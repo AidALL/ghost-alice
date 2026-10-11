@@ -117,7 +117,7 @@ function Uninstall-PowerShell74LtsInstallations {
         if ($process.ExitCode -ne 0) {
             throw ("PowerShell {0} removal failed with exit code {1}" -f $product.DisplayVersion, $process.ExitCode)
         }
-        Write-Ok ("PowerShell {0} legacy LTS install removed." -f $product.DisplayVersion) ("PowerShell {0} legacy LTS install removed." -f $product.DisplayVersion)
+        Write-Ok ("PowerShell {0} LTS install removed." -f $product.DisplayVersion) ("PowerShell {0} LTS install removed." -f $product.DisplayVersion)
     }
 }
 

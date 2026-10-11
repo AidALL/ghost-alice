@@ -1,15 +1,4 @@
 # Condition-Based Waiting
-## Contents
-
-- [Overview](#overview)
-- [When to Use](#when-to-use)
-- [Core Pattern](#core-pattern)
-- [Quick Patterns](#quick-patterns)
-- [Implementation](#implementation)
-- [Common Mistakes](#common-mistakes)
-- [When an Arbitrary Timeout Is Correct](#when-an-arbitrary-timeout-is-correct)
-- [Real-World Effect](#real-world-effect)
-
 
 ## Overview
 
@@ -53,7 +42,7 @@ const result = getResult();
 expect(result).toBeDefined();
 
 // ✅ AFTER: waiting on a condition
-await waitFor(() => getResult() !== undefined);
+await waitFor(() => getResult() !== undefined, "result availability");
 const result = getResult();
 expect(result).toBeDefined();
 ```
@@ -93,18 +82,13 @@ async function waitFor<T>(
 }
 ```
 
-See `condition-based-waiting-example.ts` in this directory for a complete implementation with domain-specific helpers (`waitForEvent`, `waitForEventCount`, `waitForEventMatch`) from a real debugging session.
+See `condition-based-waiting-example.ts` in this reference directory for a complete implementation with domain-specific helpers (`waitForEvent`, `waitForEventCount`, `waitForEventMatch`).
 
 ## Common Mistakes
 
-- ❌ Polling too fast: `setTimeout(check, 1)` causes wasted CPU
-- ✅ Fix: poll every 10ms
+Read the state inside the polling callback so each attempt observes the current condition. Use a bounded timeout and an error identifying the unmet condition. Choose the polling interval from the operation and environment; the sample's 10ms interval is illustrative, not a universal requirement.
 
-- ❌ No timeout: loops forever if the condition is never satisfied
-- ✅ Fix: always include a timeout with a clear error
-
-- ❌ Stale data: caching state before the loop
-- ✅ Fix: call the getter inside the loop for fresh data
+The sample treats falsy results as “not ready”. For a valid result of zero, false or an empty string, return an explicit readiness condition or adapt the helper's sentinel contract.
 
 ## When an Arbitrary Timeout Is Correct
 
@@ -120,12 +104,3 @@ Requirements.
 1. Wait for the trigger condition first
 2. Base it on known timing, not a guess
 3. Comment on why
-
-## Real-World Effect
-
-In a debugging session (2025-10-03).
-
-- Fixed 15 flaky tests across 3 files
-- Pass rate: 60% → 100%
-- Run time: cut by 40%
-- No more race conditions

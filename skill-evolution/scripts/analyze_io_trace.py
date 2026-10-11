@@ -10,7 +10,6 @@ import argparse
 import importlib.util
 import json
 import re
-import sys
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
@@ -392,10 +391,10 @@ def sequence_instincts(events: list[Event], total: int, min_count: int) -> list[
 def conduct_feedback_instincts(context: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Emit a first-class evolution candidate for each open conduct_feedback entry.
 
-    Tool-frequency mining finds workflow automation. Behavioral correction comes
-    from conduct_feedback that session-intent-analyzer records when the user
-    corrects the agent. Each open entry routes through necessity-gate to propose
-    a gate-skill update.
+    Tool-frequency patterns and supported conduct_feedback supply candidate data.
+    The returned decision label is triage data. The consuming model evaluates it
+    under skill-evolution and follows necessity-gate only when proposing
+    separately authorized work.
     """
     if not context:
         return []

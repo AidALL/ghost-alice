@@ -4,7 +4,6 @@ Dependencies: Python 3.11+ standard library only.
 """
 import importlib.util
 import json
-import os
 import sqlite3
 from pathlib import Path
 import subprocess

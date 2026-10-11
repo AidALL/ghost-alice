@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Use when an implementation plan already exists. Execute it in a separate session with review checkpoints.
+description: Use when an accepted implementation plan is ready for inline execution in the authorized checkout, with required review checkpoints.
 calls:
   - "hard:finishing-a-development-branch"
   - "hard:using-git-worktrees"
@@ -9,100 +9,25 @@ compatibility:
 ---
 
 # Executing Plans
-## Contents
 
-- [Overview](#overview)
-- [Process](#process)
-  - [Step 1: Load and review the plan](#step-1-load-and-review-the-plan)
-  - [Step 2: Execute the tasks](#step-2-execute-the-tasks)
-  - [Step 2.1: Keep the plan current](#step-21-keep-the-plan-current)
-  - [Step 3: Finish development](#step-3-finish-development)
-- [Failure modes and cautions](#failure-modes-and-cautions)
-- [When to stop and ask for help](#when-to-stop-and-ask-for-help)
-- [When revisiting an earlier step](#when-revisiting-an-earlier-step)
-- [Things to remember](#things-to-remember)
-- [Integration](#integration)
+The implementing agent executes an accepted plan inline, updates tasks when evidence changes the implementation, and completes the authorized integration workflow. Announce use of this skill once. Use subagent-driven-development when that execution choice is authorized and appropriate; tool availability alone does not replace the chosen workflow.
 
+## Procedure
 
-## Overview
+1. Read the accepted plan and its requirements. Identify missing prerequisites, contradictions and human-owned decisions before starting dependent tasks. Resolve implementation details within existing authority; ask only for a decision the user must supply.
+2. Apply using-git-worktrees to reuse or establish the authorized checkout. Do not implement on main/master without explicit user consent.
+3. Create or update the host's task tracker from the plan. For each ready task, mark it in progress, execute its steps and required skills, obtain the specified evidence, then mark only the supported task complete.
+4. When an observation contradicts the plan's order, commands, behavior or file mapping, edit the affected task and update the tracker before continuing. Keep the plan as current execution instructions, without appended attempt histories. A change to the user's objective or explicit boundary requires that user's decision; an implementation correction inside the boundary does not.
+5. After all required tasks and checks satisfy the plan, invoke finishing-a-development-branch and follow the already authorized integration choice.
 
-Load the plan, review it critically, execute every task, and report on completion.
+## Failure modes and continuation
 
-Announce at the start: "I'm using the executing-plans skill to implement this plan."
+A missing dependency, failed check or unclear instruction stops only tasks that depend on it. Use systematic-debugging to investigate a failure; use boundary-contract for an unresolved authority decision. Continue independent authorized tasks.
 
-Note: when running on a platform that supports subagents (Claude Code, Codex, and so on), use coding-convention:subagent-driven-development instead of this skill. Execution efficiency is much higher in an environment with subagent access.
+Do not execute example commands as though they were the actual plan, add unrelated refactors, bypass a required check, or declare the whole plan complete from a successful subset. Preserve valid evidence through verification-before-completion; do not rerun successful task actions to correct a tracker entry.
 
-## Process
+## Output and integration
 
-### Step 1: Load and review the plan
+Report the implemented tasks, evidence for their acceptance criteria, changed plan decisions and unresolved dependencies. Verification-before-completion owns closure controls and claim scope.
 
-1. Read the plan file.
-2. Review it critically. Identify questions or concerns about the plan.
-3. If there are concerns: discuss them with the user partner before starting.
-4. If there are no concerns: create the TodoWrite and proceed.
-
-### Step 2: Execute the tasks
-
-For each task:
-1. Mark it in_progress.
-2. Follow each step exactly (the plan is composed of bite-sized steps).
-3. Run verification as specified.
-4. Mark it completed.
-
-### Step 2.1: Keep the plan current
-
-If execution or verification proves the plan's scope, order, expected behavior, or task wording is wrong, update the plan before continuing. The plan is the current execution contract, not a log of earlier attempts.
-
-- Edit the existing task text so it reflects the current decision.
-- Do not append changelogs, past rationale, previous attempts, or case notes.
-- Keep only information needed for future execution: current scope, order, commands, acceptance criteria, and open blockers.
-- After editing task text or order, update the active TodoWrite/task tracker so it matches the revised plan before continuing.
-- If the change widens or narrows the committed objective, stop and confirm before editing the plan.
-
-### Step 3: Finish development
-
-When every task is completed and verified:
-- Announce: "I'm using the finishing-a-development-branch skill to complete this work."
-- Required sub-skill: use coding-convention:finishing-a-development-branch.
-- Follow that skill to verify, present options, and execute the choice.
-
-## Failure modes and cautions
-
-- Do not mistake the plan file for execution commands.
-- Do not arbitrarily add files, tests, or refactors that are not in the plan.
-- Do not pass over a blocking situation by guessing.
-- Do not skip verification before completion or the finishing-a-development-branch call.
-
-## When to stop and ask for help
-
-Stop execution immediately in the following situations:
-- A blocking situation occurs (a missing dependency, a test failure, an unclear instruction).
-- The plan has a critical gap that prevents starting.
-- You do not understand an instruction.
-- Verification fails repeatedly.
-
-Asking clearly is better than guessing.
-
-## When revisiting an earlier step
-
-When returning to review (Step 1):
-- The partner updates the plan based on feedback.
-- The base approach needs to be reconsidered.
-
-Do not force your way through a blocking situation. Stop and ask.
-
-## Things to remember
-
-- Review the plan critically first.
-- Follow the plan steps exactly.
-- Do not skip verification.
-- Use a skill when the plan references it.
-- When blocked, stop and do not guess.
-- Do not start implementation on the main/master branch without explicit user consent.
-
-## Integration
-
-Required workflow skills:
-- coding-convention:using-git-worktrees - required: set up an isolated workspace before starting.
-- coding-convention:writing-plans - writes the plan that this skill executes.
-- coding-convention:finishing-a-development-branch - finishes development after every task is complete.
+Writing-plans supplies this workflow's input; the procedure above defines its checkout and integration handoffs.

@@ -1,130 +1,68 @@
 ---
 name: session-intent-analyzer
-description: "Update the per-session intent ledger for every user input and provide current intent as semantic context consumed by gates, skill-evolution, and jailbreak-detector. Keep intent summaries without storing raw prompts."
+description: "Use after every user input to maintain exact session intent and provide context for task-router and report-only skill-evolution without storing raw prompts."
 compatibility:
   - "Python 3.11+ standard library"
   - "hook-capable environments plus hookless/manual fallback"
 calls:
-  - "soft:jailbreak-detector"
   - "soft:skill-evolution"
 ---
 
-# session-intent-analyzer
+# Session Intent Analyzer
 
-session-intent-analyzer maintains a small per-session ledger of the user's current goal, constraints, decisions, non-goals, open questions, and acceptance criteria. It lets skill-evolution interpret tool sequences with intent context and lets jailbreak-detector compare current requests against accumulated session intent.
-## Contents
+The native host invokes Core intake code. Codex records canonical digest-only input directly. Claude UserPromptSubmit stages the digest, character count and native correlation; the trusted PreToolUse or Stop wrapper reconciles that observation with native actor rows after the host appends the transcript. A human input advances canonical input authority; a task notification retains the last human input and route. Unresolved actor evidence remains pending. The current-session assistant records compressed changes to the user's goal, constraints, decisions, non-goals, questions, criteria and conduct feedback against canonical input authority, and uses that exact session for task-router or report-only skill-evolution.
 
-- [Storage Contract](#storage-contract)
-- [When To Use](#when-to-use)
-- [Procedure](#procedure)
-- [Consumer Snapshot](#consumer-snapshot)
-- [Hookless Fallback](#hookless-fallback)
-- [Warnings](#warnings)
+## Entry and tool budget
 
+The common First-Entry Contract determines whether this input needs normal work before agent-side tools. On that route, the current-session assistant performs the intake procedure below within the authority and resource limits owned by boundary-contract. Missing persistence remains visible; it does not change the user's authorization.
 
-## Storage Contract
+## Storage and identity
 
-- The authoritative ledger lives in `.tmp/session-intent/ghost-state.sqlite3` in the Ghost-ALICE repo root, keyed by exact platform and session ID.
-- The installer passes `--root <repo>/.tmp/session-intent` to hook commands. Manual runs may override the root with `GHOST_ALICE_SESSION_INTENT_ROOT`.
-- SQLite stores the latest state and ordered semantic events in one transaction. `intent-state.json` and `intent-events.jsonl` are legacy inputs or explicit exports, never authority after import. Read with `scripts/session_intent_ledger.py --read-state --root <receipt.ledger_root> --platform <receipt.platform> --session-id <receipt.session_id>`; do not read or edit the compatibility path directly.
-- Hooks record digest-only observations and intake status. Agents add semantic deltas only when goals, constraints, decisions, or acceptance criteria materially change.
-- Scalar intent fields are replaced by the latest semantic delta. Lists such as constraints, non-goals, open questions, criteria, and decisions are deduped or merged by id.
-- `conduct_feedback` records compressed behavioral corrections, how the agent operated versus what the user asked, and merges by id while preserving `occurrence_count`. Repeated same-id corrections in one session increment `occurrence_count`; status-only updates do not. session-intent-analyzer captures it and skill-evolution consumes it, so the behavioral-correction loop is complete only across both skills, not in skill-evolution alone.
-- `model_security_decision` is owned by jailbreak-detector. Intake preserves it and must not clobber it.
-- Only a current-lineage block decision is carried to `downstream-gates.json`. Non-block decisions and non-current-lineage decisions are not carried.
-- The `--read-events` API returns input observations and normalized semantic changes with input and revision references. New change records preserve supported intermediate intent; they do not reconstruct missing historical dialogue.
-- `security-events.jsonl` records security judgments.
-- Database discovery metadata replaces the platform pointer for new writes. Legacy `../current-session.json` is only a discovery hint; it never supplies a write identity.
-- Raw prompts, full conversations, tool output, and secret values are never stored.
-- User input is stored only as digest and length.
-- Detailed schema lives in `references/ledger-schema.md`.
+The authoritative ledger is `<ledger_root>/ghost-state.sqlite3`, keyed by exact platform and session ID. The installer supplies the repository's `.tmp/session-intent` root; an authorized manual run may explicitly set `GHOST_ALICE_SESSION_INTENT_ROOT`. Compatibility JSON/JSONL paths are import inputs or explicit exports, not runtime authority.
 
-## When To Use
+The current-session assistant reads through `scripts/session_intent_ledger.py --read-state` or the public API. These reads neither reconcile staged input nor mint authority. It uses the current receipt's `ledger_root`, `platform` and `session_id`; `state_path` is only a compatibility locator and may not exist. A Claude pending receipt has no `input_event_id`: its first permitted read follows the trusted wrapper's reconciliation attempt; only resolved state supplies the canonical `latest_input_event_id` for subsequent writes. Until staging is resolved, dependent semantic and route writes remain pending. A Codex canonical receipt supplies the event directly. The current-session assistant must not substitute an installed default root or `current-session.json` pointer.
 
-- Immediately after every user input, before task-router.
-- When the user changes goals, constraints, priority, or acceptance criteria.
-- When passing `--intent-ledger` to skill-evolution.
-- When jailbreak-detector needs current intent context.
+Mutating Codex CLI calls bind to native `CODEX_THREAD_ID` when available; otherwise the host may bind `GHOST_ALICE_SESSION_ID`. A conflicting explicit ID fails. Without a host binding, the caller must explicitly select the session ID. Hook intake resolves payload identity before environment identity and records no guessed session when both are missing.
 
-## Procedure
+SQLite commits state, ordered events and advisory discovery metadata atomically. Scalars use the latest semantic delta; lists deduplicate or merge by their documented identity. The complete state, ownership, schema, mutation and route contracts are in `references/ledger-schema.md`.
 
-1. When the current hook supplies a `[session-intent-receipt]`, pass its exact `ledger_root`, `platform`, `session_id`, and `input_event_id` as explicit `--root`, `--platform`, `--session-id`, and `--expected-input-event-id` arguments for semantic updates; read downstream context with `--read-state` using the same coordinates; `state_path` is a compatibility locator and may not exist. Do not replace them with an installed script's default root or a later shared pointer. Codex CLI writes are bound to the native `CODEX_THREAD_ID` when available; other hosts may supply `GHOST_ALICE_SESSION_ID`. A conflicting explicit id is rejected before writing. Without either binding, writes require an explicitly selected `--session-id`. Hook intake resolves identity from payload fields and then the appropriate host environment; it never uses the shared pointer as write identity. Missing identity produces a degraded observation without writing a guessed session.
-2. For hook observation, store only `input_digest`, `input_char_count`, `intake_status=observed`, and `intent_delta_status=not-provided`.
-3. Add a semantic delta only when `current_goal`, `user_intent_summary`, `constraints`, `non_goals`, `decisions`, `open_questions`, or `acceptance_criteria` materially changes. When a completion, recommendation, or choice is anticipated, record verifiable `acceptance_criteria` from user intent so the final `[completion-check]` can carry them into `acceptance-criteria` and bind each claim in `claim-evidence-map`. When the user explicitly revises a boundary, record a decision naming the replaced restriction, the authorized exception, and the restrictions that still apply. Accumulating a new goal alone does not make that relationship clear.
-4. Keep corrective lessons general. Do not store long episode details. Preserve the reusable reasoning pattern, not case detail. When the user corrects the agent's conduct (under-delivery, silent scope narrowing, reporting or asking instead of executing, punting a decision the content could resolve, an unrequested trace, a redundant check without an actual mutation path, explaining a confirmed flaw in a provided deliverable without returning the corrected deliverable), record compressed `conduct_feedback` with a stable `id`, a reusable `summary` or `corrective_rule`, and a `pattern_class` from `references/ledger-schema.md` so recurrence stays visible across sessions. Judge correction by the asserted mismatch between a prior agent action or claim and the applicable `current_goal`, `constraints`, `non_goals`, `decisions`, or `acceptance_criteria`, not by keywords. Apply the evidence boundary below before recording or incrementing a correction. skill-evolution consumes these entries as recommendations; apply changes only when the user asks to update.
-5. Use `consumer_hints` when downstream gates need immediate caution or completion criteria.
-6. Use `scripts/session_intent_ledger.py` to update the SQLite state and audit atomically. An active input requires the expected input ID. If a newer input invalidates the receipt, read and interpret that input before deciding what to write; never attach a stale judgment to a fresh ID. The writer also accepts `--expected-revision` when a decision must match an exact inspected state revision.
-7. If security signals exist, pass `intent_summary` and the authoritative state returned by `--read-state` to jailbreak-detector.
-8. For repeated-action analysis, pass `--intent-ledger <receipt.state_path>` to skill-evolution; its reader resolves that compatibility locator through the storage API.
+## Record the current intent
 
-Substitute the current receipt and a compressed semantic delta in this example:
+1. Core records `input_digest`, `input_char_count`, `intake_status=observed` and `intent_delta_status=not-provided` for canonical human input without storing its raw text. Claude staging waits for trusted native actor reconciliation; Codex intake records directly.
+2. The current-session assistant compares current intent with retained intent. It writes a delta only for a material change to `current_goal`, `user_intent_summary`, `constraints`, `non_goals`, `decisions`, `open_questions` or `acceptance_criteria`.
+3. Before anticipated completion, recommendation or choice, the current-session assistant records verifiable acceptance criteria from the user intent. An explicit boundary revision records the replaced restriction, authorized exception and remaining restrictions; a newer goal label alone does not supersede a restriction.
+4. The current-session assistant records supported conduct corrections under the rules below and supplies decision-relevant `consumer_hints` when needed.
+5. The current-session assistant submits the compressed delta through session_intent_ledger.py using the exact receipt coordinates and canonical event as `--expected-input-event-id`. It also supplies `--expected-revision` when its judgment depends on an exact inspected revision. If a newer input invalidates the receipt, the current-session assistant interprets that input before forming a new judgment; it never attaches an old judgment to a fresh ID.
+6. The current-session assistant uses the authoritative state returned by `--read-state` while applying task-router. For report-only repeated-action analysis, it invokes the skill-evolution analyzer script for the same session using `--intent-ledger <receipt.state_path>`; that reader resolves the locator through the storage API.
 
 ```bash
-session_intent_ledger.py --root "<receipt.ledger_root>" --platform "<receipt.platform>" --session-id "<receipt.session_id>" --expected-input-event-id "<receipt.input_event_id>" --delta-json '{"current_goal":"<compressed-current-goal>"}'
+session_intent_ledger.py --root "<receipt.ledger_root>" --platform "<receipt.platform>" --session-id "<receipt.session_id>" --expected-input-event-id "<canonical-input-event-id>" --delta-json '{"current_goal":"<compressed current goal>"}'
 ```
 
-Correction evidence boundary:
+Canonical digest observation completes intake when no semantic change is needed: retain `last_semantic_delta_status=not-provided` and report `session-intent-analyzer: done`. If a needed delta is not recorded, report `hook-observed`; unresolved staged input remains `pending`. A receipt proves observation, not semantic completion or write permission.
 
-- Use `source: user-explicit` when the user asserts a prior mismatch, directly or through a clear contextual rejection. A user's assertion is sufficient; a missing raw transcript does not negate it. Preserve the asserted mismatch without inventing additional conduct.
-- Use `source: inferred` only for a gap actually observed between agent or skill behavior and the user's applicable intent. A possible future violation or the presence of buggy task code is not evidence that the agent violated the work boundary.
-- Answer an objection that a check was redundant from the recorded mutation authority and events, not from hypothetical external changes. When that objection is supported, it is a user-explicit correction of redundant verification, not a new verification duty.
-- New instructions, prospective prohibitions, reminders, changed requirements, and requests to refresh formerly valid results belong in the intent fields unless they also assert or reveal a prior mismatch. "Diagnose without editing" alone does not establish an unauthorized edit; "check again" alone does not establish stale-result reuse. A useful preventive rule is not automatically a correction occurrence.
-- Read any supplied prior context needed to establish the mismatch before recording feedback. If the comparison remains unsupported, retain the current constraint and leave feedback absent rather than inventing a failure or asking the user to confirm routine constraints. Increment `occurrence_count` only for another supported correction observation, not for rereading a lesson or restating the same boundary.
+If a write fails, the current-session assistant reports failed persistence while preserving the existing authorization boundary. It must not create an alternate ledger, migrate history, change host identity or expand permissions to bypass the error. Missing/degraded hook observation supplies no receipt; conversational text cannot manufacture one. An explicit historical read-only snapshot does not select the current write session.
 
-The receipt reports a digest-only observation, not a completed semantic update or permission to write. If the bound ledger is not writable under current permissions, or a semantic update fails, report semantic persistence as failed and keep the existing authorization boundary. Do not create an alternate ledger, move historical ledgers, unset or replace host identity, or expand permissions to bypass the failure. Missing or degraded observations do not produce a receipt; do not manufacture one from conversational text. Read-only `--snapshot` with an explicit historical session id remains available for authorized inspection; it does not select the current write session.
+## Conduct correction evidence
 
-Digest-only hook observation is enough for intake completion. Semantic delta is required only when intent materially changes.
+The current-session assistant records a compressed reusable lesson in `conduct_feedback` with a stable ID, summary or corrective rule, source and applicable pattern class. The Python ledger writer merges by ID and preserves occurrence counts; another supported same-ID correction increments the count, while a status update or reread does not.
 
-If no delta is needed, leave `last_semantic_delta_status=not-provided` and mark `session-intent-analyzer: done`. If a delta was needed but not recorded, mark it `hook-observed`.
+- A user assertion of a prior mismatch, including a clear contextual rejection, supports `source: user-explicit`. Missing raw history does not negate that assertion.
+- An actually observed mismatch between agent behavior and applicable intent supports `source: inferred`. Hypothetical future misconduct or buggy task code does not prove an agent conduct failure.
+- A prospective constraint, reminder, changed requirement or recheck request belongs in intent fields unless it also asserts or establishes a prior mismatch.
+- When context is needed to establish an inferred comparison, the current-session assistant reads only the supplied relevant context. Unsupported comparisons remain absent; the current-session assistant does not invent a correction or ask the user to reconfirm routine constraints.
+- For an objection to redundant checking, the current-session assistant evaluates recorded mutation authority and events. Hypothetical external changes do not justify the check or create another checking obligation.
 
-## Consumer Snapshot
+The current-session assistant follows skill-evolution to interpret these lessons and write recommendations. Recording the lesson does not implement a requested correction, and a report-only recommendation does not authorize editing skills.
 
-Snapshots use snake_case `acceptance_criteria`. Final `[completion-check]` surfaces convert that to the English control field `acceptance-criteria`.
+## Consumer interpretation
 
-Snapshots preserve non-superseded decision bodies in `active_decisions` and the recorded `latest_scope` object, alongside the existing `decision_count`. These fields carry semantic context for interpreting corrections; they do not grant tool permission, clear a security block, retire accumulated constraints, or prove that a recorded action occurred. Absent or non-object scope becomes `{}`. Consumers must reconcile a changed decision with the preserved constraints rather than infer authority from the field's presence.
+Snapshots use `acceptance_criteria`; final control output uses `acceptance-criteria`. The snapshot preserves active decision bodies in `active_decisions`, recorded `latest_scope` or `{}`, and the existing `decision_count`. These are semantic facts, not tool permission, proof of action or automatic revocation of accumulated constraints.
 
-Accumulated lists can contain restrictions from earlier turns. Compare them with the current goal, scope, active decisions, and criteria before deciding the next action. Honor an explicit user revision within its stated exception; preserve the remaining restrictions. If the supplied context does not resolve a conflict, name the conflicting boundary and ask only for the missing decision while continuing uncontroversial work when possible. Do not silently downgrade an edit request to analysis, discard a restriction because a goal is newer, or require renewed approval when the existing revision already resolves the conflict.
+Before acting on conflicting retained facts, the current-session assistant follows task-router's [Boundary reconciliation](../task-router/references/routing-details.md#boundary-reconciliation). The ledger stores the facts; that procedure determines how the assistant interprets their authority and chronology.
 
-Do not invent the chronology of a boundary. A timestamp on a decision does not date an undated restriction; active status, admitted criteria, and reports of prior edits alone do not establish that the restriction was later replaced. Distinguish a current user instruction or supplied conversation/event evidence from a compressed current_goal label. A clear current instruction can authorize a bounded change without formal revocation wording. If only conflicting snapshot fields are available, keep that conflict unresolved rather than calling one field initial or outdated without evidence. Ask about the contested authority only; missing task files are a separate issue.
+## Hookless fallback and warnings
 
-```json
-{
-  "schema_version": "session-intent-ledger.v1",
-  "current_goal": "current goal",
-  "user_intent_summary": "compressed intent summary",
-  "constraints": ["constraint"],
-  "non_goals": ["non-goal"],
-  "open_questions": ["open question"],
-  "acceptance_criteria": [
-    {
-      "id": "criterion-id",
-      "summary": "verifiable completion condition",
-      "source": "user-explicit | inferred | previous-tool | system-doc"
-    }
-  ],
-  "decision_count": 1,
-  "active_decisions": [
-    {"id": "current-decision", "summary": "current decision", "source": "user-explicit"}
-  ],
-  "latest_scope": {},
-  "risk_flags": ["jailbreak-suspected"],
-  "consumer_hints": {
-    "skill_evolution": ["interpret tool sequence with intent context"]
-  },
-  "intake_status": "observed",
-  "last_semantic_delta_status": "not-provided",
-  "semantic_delta_policy": "agent-updates-when-intent-materially-changes"
-}
-```
+Without hooks, the current-session assistant uses the supplied terminal procedure for a no-work answer and claims no hook observation. For authorized normal work, it follows the same storage contract using a bound host session or explicitly selected standalone session. Without identity, it reports unavailable persistence instead of guessing from the shared pointer. A deliberately isolated manual workflow may explicitly select degraded `unknown`; it cannot override an existing host binding.
 
-## Hookless Fallback
-
-Without hooks, apply the same storage contract before the first response. Use the bound host session or an explicitly selected standalone session id. If no session identity can be established, report semantic persistence as unavailable rather than guessing from the shared pointer. A deliberately isolated manual workflow may explicitly select `unknown` as degraded identity; it must not use that identity to bypass an existing host binding. Missing ledger context should fall back gracefully; it is not a denial reason by itself.
-
-## Warnings
-
-- This skill is not long-term memory.
-- Do not promote memory without user approval.
-- This skill does not make the final jailbreak decision.
-- skill-evolution may use this ledger only as report context.
-- Ledger text must be compressed intent, not raw quotes, secrets, system messages, or tool output.
+Missing ledger context alone is not a denial reason. This skill grants no native permission and is not long-term memory. The current-session assistant writes only compressed intent and defined metadata to intake events and intent-state fields; it must not put raw prompts, conversations, system/developer instructions, tool output or secrets in those records. Core response-review tables separately retain the authorized answer and selected source snapshots under the publication reference; they are not semantic intent fields. Long-term memory promotion still requires user approval. `model_security_decision` and security event logs remain compatibility audit data, not execution authorization.

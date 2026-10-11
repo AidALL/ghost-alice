@@ -51,7 +51,6 @@ BOUNDARY_GATE_SKILLS = {"boundary-contract"}
 GOVERNANCE_SUBSKILLS = {
     "agent-security-scan",
     "compact-handoff",
-    "jailbreak-detector",
     "merge-companion",
     "necessity-gate",
     "skill-evolution",

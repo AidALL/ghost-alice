@@ -5,236 +5,62 @@ compatibility:
   - "Python 3.11+ standard library"
 ---
 
-<SUBAGENT-STOP>
-Skip this skill when you were dispatched as a subagent for one narrow task.
-</SUBAGENT-STOP>
+# Using Coding Convention
 
-<QUALITY-RATIONALE>
-This workflow is a quality-maintenance device confirmed through repeated user work. It protects user intent, work scope, and verification quality when an agent is tempted to simplify the process from its own judgment.
+The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again. A task-router terminal explanation or clarification ends before this development workflow.
 
-If a skill may apply, check it first even when the workflow looks heavier than the visible task. Skip only when it clearly does not apply, and leave a short reason for the skip. When the user explicitly requires the procedure, do not bypass it from the agent's judgment alone.
-</QUALITY-RATIONALE>
+## Priority and loading
 
-<USE-CONTRACT>
-If there is even a one percent (1%) chance that a coding-convention family skill applies to the next action, load that skill first. After loading it, if the skill does not fit the current request, record that fact and continue.
+User instructions and project rules govern the task; family skills govern the implementation procedure within that authority. Load or validly reuse the family skill selected for the next development action. When uncertain applicability would change that action, read the body and decide; otherwise continue with the established workflow.
 
-A task-router no-work terminal route (`clarification-only` or `direct-response`) exits before a development turn begins and does not load this skill. The next actionable user input runs routing again.
-</USE-CONTRACT>
-## Contents
+Use the host's actual skill mechanism:
 
-- [Priority](#priority)
-- [Platform Loading](#platform-loading)
-- [Instruction Body Reuse](#instruction-body-reuse)
-- [Core Rule](#core-rule)
-- [Skill Flow](#skill-flow)
-- [Red Flags](#red-flags)
-- [Skill Priority](#skill-priority)
-- [Skill Types](#skill-types)
-- [User Instruction Interpretation](#user-instruction-interpretation)
-- [Coding-Convention Family](#coding-convention-family)
-- [Material Recommendations And Choices](#material-recommendations-and-choices)
-- [Final Self-Check](#final-self-check)
+- Claude Code: invoke the visible Skill tool and follow the returned body.
+- Codex: read or validly reuse the body, then perform its workflow for the current input. Metadata and a prior verdict cannot substitute for that workflow.
+- Copilot CLI: use its exposed skill capability and [references/copilot-tools.md](references/copilot-tools.md).
+- Other hosts: map operations to the exposed tool schemas; do not invent unavailable tools.
 
+For Codex operations, delegated-task boundaries and checkout selection, use [references/codex-tools.md](references/codex-tools.md). Instruction body reuse is defined in verification-before-completion's [Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse). On a new input, the current-session assistant applies the workflow to that input; it need not reread a valid retained body.
 
-## Priority
+## Workflow
 
-The coding-convention family overrides default agent habits. User instructions and project rules still come first.
+After normal routing selects development work, the current-session assistant uses the table below to choose its family workflow. The common First-Entry Contract owns earlier intake and terminal classification.
 
-Priority order:
+Before the next file read, command, edit, plan, review or development-status claim, select the applicable workflow below. Reuse accepted design and authorization. If evidence contradicts the plan, revise the implicated assumption or task within that authorization. Follow boundary-contract to distinguish an implementation change within existing authority from a change requiring the user’s decision.
 
-- User instructions, `CLAUDE.md`, `AGENTS.md`, project rules, and direct request constraints
-- Coding-convention family skills
-- Default agent behavior
-
-If a user or project file says not to use TDD and a skill says to use TDD, follow the user or project file. The user keeps control of the workflow.
-
-## Platform Loading
-
-Use the host runtime's real skill surface when it exists.
-
-- Claude Code: use the `Skill` tool. Follow the loaded skill body. Do not use `Read` to load the skill file directly.
-- Copilot CLI: use the platform skill tool. Use `references/copilot-tools.md` when tool names or async shell behavior need mapping.
-- Codex: visible metadata is not a skill call. A required gate is complete only after a fresh or valid retained instruction body has been used and its current workflow followed. Use `references/codex-tools.md` for Codex tool mapping, named-agent workarounds, and environment detection.
-- Other environments: use the host documentation and preserve the same semantic order.
-
-## Instruction Body Reuse
-
-Use a fresh or valid retained instruction body under `verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse. The installed `_shared/session_check_cache.py` stores/query-checks exact session-bound load records. New inputs rerun workflow judgments; unchanged retained bodies do not need reloading. Read on first use, changed source/session/copy, lost body or missing record. Metadata alone never qualifies.
-
-## Core Rule
-
-After task-router begins a normal development route, before any response, clarification question, file read, shell command, code edit, plan, review, recommendation, or status judgment, ask whether a coding-convention family skill applies.
-
-If there is any chance that a skill applies, load it first. If it does not fit after loading, record the skip reason and continue.
-
-The first commentary in a development turn must include:
-
-```text
-[gate-state]
-- merge-companion-precheck: clean | pending=N | unsupported
-- session-intent-analyzer: done | hook-observed | pending
-- task-router: done
-- using-coding-convention: done
-- skill-call: <each skill actually called this turn, as name (this turn)> | n/a
-- next-required: <skill-name|none>
-```
-
-Before any claim that executed work is complete, fixed, successful, or freshly verified, emit:
-
-Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check. Load or call `verification-before-completion` for this turn first, run and read the decision-relevant fresh verification second, and only then write `[completion-check]`. If any step is missing or out of order, the completion-check is invalid.
-
-Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message.
-
-```text
-[completion-check]
-- acceptance-criteria:
-  - <criterion-id>: <user-intent-or-contract-condition> [source: user-explicit | inferred | previous-tool | system-doc]
-- claim-evidence-map:
-  - claim: <completion-or-recommendation-claim>
-    criterion: <criterion-id>
-    evidence: <fresh command, inspected file, source locator, or tool output>
-    verdict: pass | fail
-- unverified:
-  - none
-- evidence: <fresh command or inspected file>
-```
-
-On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after a fresh or valid retained instruction body was used and the workflow followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
-
-A `[completion-check]` is not complete without `acceptance-criteria` and `claim-evidence-map`. If evidence does not directly prove a criterion, leave that criterion in `unverified` and do not speak as though the work is complete or successful.
-
-The `skill-call:` line records that the skill workflow actually ran in this turn. It is not a substitute for loading the skill. On Claude Code, write it only after the visible Skill call. On Codex, write it only after using a fresh or valid retained instruction body and following the current workflow.
-
-## Skill Flow
-
-Use this flow for each user turn that touches coding, development, repository maintenance, skill authoring, review, or verification.
-
-```text
-User message received
-  -> pending-merge precheck
-  -> session-intent-analyzer intake
-  -> jailbreak-detector downstream gate
-  -> task-router
-  -> using-coding-convention
-  -> applicable process skill
-  -> implementation, review, or verification work
-  -> verification-before-completion before final claims
-```
-
-When entering plan mode or creating a non-trivial plan, check whether `brainstorming` or `writing-plans` applies before drafting the plan.
-
-## Red Flags
-
-Stop and load the relevant skill when any of these thoughts appear.
-
-| Thought | Real situation |
+| Condition | Workflow |
 | --- | --- |
-| "This is only a simple question." | A question can still be a task. Check skills first. |
-| "I need context before the skill." | The skill tells you how to gather context. |
-| "I will just inspect Git or files first." | Files do not contain the current conversation contract. Check skills first. |
-| "I remember this skill." | Skills evolve. Read the current version. |
-| "The formal workflow is too much." | The workflow exists to preserve user intent, work scope, and verification quality. |
-| "I will only do this one small action first." | Check applicability before the action. |
-| "A recommendation is not work." | Recommendations and choices are claims and require verification. |
-| "I just checked this in the previous turn." | New user input reopens routing. Reuse unchanged evidence; reverify only on a state, criterion, error, contradiction, instability, or explicit-request trigger. |
-| "Let me skim the codebase first." | The skill tells you how to skim. Check first. |
-| "Let me gather information first." | The skill tells you how to gather information. |
-| "I do not really need a formal skill here." | If a skill exists, use it. |
-| "This is not a task." | An action is a task. Check skills. |
-| "This feels productive right now." | Undisciplined action only wastes time. The skill prevents this. |
-| "I know that concept." | Knowing a concept differs from using the skill. Load it. |
-| "I will report what I found instead of doing it." | The user asked you to do it. Execute this turn, do not stop at a report. |
-| "I will reinterpret the requested scope into a more practical scope." | Scope changes already belong to boundary-contract. Stop and renew or confirm before changing the committed scope. |
-| "Just the key spots is enough." | The committed scope is the whole set. Cover all of it. |
-| "Grep found nothing, so it is clean." | If you already judged the search method incomplete, read the files. Do not trust the weaker method. |
-| "I will ask the user which one." | If the content answers it, inspect and decide. Punt only when the action is irreversible and unresolvable. |
-| Unrequested historical trace | Do not add unrequested historical or trace notes. Change it cleanly; ask before leaving any trace. |
+| Design or expected behavior remains unresolved | brainstorming |
+| Multi-step requirements are known | writing-plans |
+| A failure needs a cause and a correction | systematic-debugging |
+| Known behavior can be exercised by a meaningful test | test-driven-development |
+| Independent tasks can run concurrently | dispatching-parallel-agents |
+| An accepted plan will run through task-specific subagents | subagent-driven-development |
+| An accepted plan will run inline | executing-plans |
+| The task needs an isolated checkout | using-git-worktrees |
+| Implementation needs review | requesting-code-review |
+| A reviewer proposes changes | receiving-code-review |
+| A skill or its references need authoring | writing-skills |
+| The branch is ready for its authorized integration choice | finishing-a-development-branch |
+| The answer claims verified work, completion, or rereads evidence | verification-before-completion |
 
-## Skill Priority
+Use the selected skill's body for its procedure, required calls and output format. Do not infer its procedure from this table.
 
-When several skills apply, use this order.
+## Control fields and final claims
 
-- Process skills decide the approach: `brainstorming`, `systematic-debugging`, `writing-plans`, `verification-before-completion`, `dispatching-parallel-agents`.
-- Implementation skills guide execution: `test-driven-development`, `subagent-driven-development`, `using-git-worktrees`, `executing-plans`, `finishing-a-development-branch`.
-- Review and meta skills protect judgment: `requesting-code-review`, `receiving-code-review`, `writing-skills`, `using-coding-convention`.
+The project session contract owns the opening `[gate-state]` schema. Mark this entrypoint `done` only after loading or validly reusing its body and applying the current workflow. A printed `skill-call` line records execution; it does not prove execution.
 
-Examples:
+Verification-before-completion owns acceptance criteria, evidence reuse, completion and partial-control formats, and the finalization sequence. Invoke it before a new completion, fix, success, verified-status or material recommendation claim. Explaining an unchanged prior result preserves its original evidence and time; another input alone does not authorize repeating its check.
 
-- "Build X" -> `brainstorming` when the requirement is underspecified, then `writing-plans` for non-trivial implementation, then the relevant implementation skill.
-- "Fix this bug" -> `systematic-debugging`, then the relevant domain skill or `test-driven-development`.
-- "Tests are failing" -> `systematic-debugging`, then `test-driven-development` when a code fix is needed.
-- "Review Claude's feedback" -> `receiving-code-review`, then modify only the accepted findings.
+For repair attempts, follow systematic-debugging's [Incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). For authorization, follow boundary-contract. Do not copy either procedure into a task-specific plan.
 
-## Skill Types
+## Failure modes
 
-Rigid skills must be followed exactly. Do not weaken their discipline in the name of adaptation.
+- Familiarity with a skill name does not satisfy body loading.
+- A small change does not excuse skipping an applicable required workflow.
+- Tool availability does not grant authority to use the tool.
+- An agent's plan cannot weaken the user's acceptance criteria.
+- A passed diagnostic or report cannot complete an implementation request.
+- Repeating a check requires the evidence trigger defined by verification-before-completion.
 
-- `test-driven-development`
-- `verification-before-completion`
-- `systematic-debugging`
-
-Flexible skills provide patterns and judgment aids. Apply the principles to the current context.
-
-- `brainstorming`
-- `writing-plans`
-- `requesting-code-review`
-- `receiving-code-review`
-
-The skill body itself decides whether it is rigid or flexible when it states a stricter rule.
-
-## User Instruction Interpretation
-
-User instructions usually state what to do, not which governance path to skip.
-
-- "Add X" does not mean skip planning, tests, or verification.
-- "Fix Y" does not mean skip root-cause investigation.
-- "Do it quickly" does not mean skip verification.
-- "What do you recommend?" does not allow an unverified recommendation.
-- "Which option is correct?" does not allow a judgment without fresh evidence.
-- "Remove X", "do X", or "fix X" is an execution order. Carry it out fully in this turn. Do not downgrade it to a report of what you found, or to a question about whether to proceed. Reporting or asking when execution was requested is a failure, not caution.
-- When the target is ambiguous but the actual content can resolve it, inspect the content and decide. Do not hand the choice back to the user as the first move. Escalate only when the action is irreversible and the content cannot tell you which option is safe, such as real data loss.
-- Do not lean on a search method you have already judged incomplete. If grep can miss the target, read the files. Use the method that actually covers the committed scope, and do not claim "none found" from the weaker method.
-
-Only skip a required workflow when the user explicitly says to skip that workflow for this session or task.
-
-## Coding-Convention Family
-
-Process:
-
-- `brainstorming`: turn vague requirements into concrete decisions.
-- `writing-plans`: document non-trivial implementation before execution.
-- `systematic-debugging`: reproduce, hypothesize, verify, and fix bugs.
-- `verification-before-completion`: run fresh checks before completion claims.
-- `dispatching-parallel-agents`: split independent tasks across subagents.
-
-Implementation:
-
-- `test-driven-development`: start known-contract fixes or features with a failing test; use bounded discovery or a proof first when the premise or target behavior is unknown, then convert the discovered behavior contract into regression coverage.
-- `subagent-driven-development`: execute independent implementation tasks through subagents.
-- `using-git-worktrees`: isolate parallel git work.
-- `executing-plans`: carry out an existing implementation plan.
-- `finishing-a-development-branch`: choose and execute the branch finishing path.
-
-Review and meta:
-
-- `requesting-code-review`: ask a reviewer to inspect completed work.
-- `receiving-code-review`: evaluate feedback critically before accepting it.
-- `writing-skills`: create, modify, and verify skills.
-- `using-coding-convention`: load this entrypoint and route the family.
-
-Read the relevant skill's own `SKILL.md` for trigger details and output format.
-
-## Material Recommendations And Choices
-
-Advice about finished work, verified results, or a decision that materially changes the user's next action is a verification-routing signal. Route a new closure claim, verified-result claim, or recommendation that materially changes the user's next action to `verification-before-completion`. That skill owns evidence selection, evidence reuse, stop conditions, and the final completion format; this entrypoint does not duplicate those rules.
-
-Prose paragraphs stay on one physical source line unless a semantic, syntax, Markdown-structural, or protocol boundary requires a newline.
-
-## Final Self-Check
-
-Before answering or acting, ask:
-
-- Is there any skill that should be loaded before this response or tool call?
-- Am I skipping the skill for a reason listed in the Red Flags table?
-- Have I loaded `verification-before-completion` before claiming executed work is complete, fixed, successful, or freshly verified?
-- If a gate block says `skill-call:`, did the skill workflow actually run in this turn?
+Write prose paragraphs on one physical source line unless Markdown, syntax or protocol fields require separate lines.

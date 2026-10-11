@@ -1,27 +1,6 @@
 #!/usr/bin/env bash
-# Ghost-ALICE shared secrets loader for bash
-#
-# All skills and scripts retrieve login information such as API keys, tokens, passwords, and email credentials through the same path. Once a value is registered, later calls retrieve it automatically instead of prompting each time.
-#
-# Location: ~/.ghost-alice/secrets.env (mode 600)
-# Format: KEY=value (.env style)
-#
-# Usage:
-#   source _shared/secrets/load.sh
-#
-#   # 1. Look up from env var/file only (fail when missing)
-#   key=$(secrets_get CONTEXT7_API_KEY) || { echo "missing key"; exit 1; }
-#
-#   # 2. Look up env/file/prompt in order (asks whether to save entered values)
-#   key=$(secrets_get_or_prompt CONTEXT7_API_KEY "Context7 API key") || exit 1
-#
-#   # 3. Store directly
-#   secrets_set MY_KEY "value"
-#
-# Lookup order for every function:
-#   1) Already exported environment variable
-#   2) ~/.ghost-alice/secrets.env
-#   3) prompt (interactive environments only; secrets_get_or_prompt only).
+# Shared credential lookup: environment, managed file, then optional interactive prompt.
+# Only secrets_get_or_prompt may prompt. The adjacent README.md owns usage and storage rules.
 
 set -u
 
@@ -31,9 +10,9 @@ GHOST_ALICE_SECRETS_FILE="${GHOST_ALICE_SECRETS_FILE:-$HOME/.ghost-alice/secrets
 if [ -z "${C_RESET:-}" ]; then
   if [ -t 2 ]; then
     C_CYAN=$'\033[0;36m'; C_GREEN=$'\033[0;32m'; C_YELLOW=$'\033[0;33m'
-    C_RED=$'\033[0;31m'; C_RESET=$'\033[0m'
+    C_RESET=$'\033[0m'
   else
-    C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RED=""; C_RESET=""
+    C_CYAN=""; C_GREEN=""; C_YELLOW=""; C_RESET=""
   fi
 fi
 

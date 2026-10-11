@@ -28,7 +28,7 @@ Use the browser when the content itself is visual:
 - Design refinement: when the question is about look and feel, spacing, or visual hierarchy
 - Spatial relationships: state machines, flowcharts, or entity relationships drawn as diagrams
 
-Use the terminal when the content is text or a table:
+Use the conversation when the content is text or a table:
 
 - Requirements and scope questions: "What does X mean?" or "Which feature is in scope?"
 - Conceptual A/B/C choices: picking among approaches described in words
@@ -36,7 +36,7 @@ Use the terminal when the content is text or a table:
 - Technical decisions: choosing an API design, data modeling, or architecture approach
 - Clarifying questions: anything whose answer is words, not a visual preference
 
-A question about a UI topic is not automatically a visual question. "What kind of wizard do you want?" is conceptual, so use the terminal. "Which of these wizard layouts is right?" is visual, so use the browser.
+A question about a UI topic is not automatically a visual question. "What kind of wizard do you want?" is conceptual, so use the conversation. "Which of these wizard layouts is right?" is visual, so use the browser.
 
 ## How It Works
 
@@ -45,6 +45,8 @@ The server watches a directory for HTML files and serves the most recent one to 
 Content fragment vs. full document: if the HTML file starts with `<!DOCTYPE` or `<html`, the server serves it as is (injecting only the helper script). Otherwise the server automatically wraps it in the frame template, adding the header, CSS theme, selection indicators, and all interaction infrastructure. By default, write a content fragment. Write a full document only when you need complete control over the page.
 
 ## Starting a Session
+
+Resolve every `scripts/` path below relative to the loaded brainstorming skill directory, and invoke it through the host's exposed shell tool. Bind the project path from the accepted task, not the shell's incidental working directory.
 
 ```bash
 # Start the server with persistence for the project (mockups are saved)
@@ -55,43 +57,21 @@ scripts/start-server.sh --project-dir /path/to/project
 #           "state_dir":"/path/to/project/.coding-convention/brainstorm/12345-1706000000/state"}
 ```
 
-Save `screen_dir` and `state_dir` from the response. Tell the user to open the URL.
+Retain the startup JSON and its `url`, `screen_dir` and `state_dir`. Bind `STATE_DIR` to that exact returned `state_dir` and `SESSION_DIR` to its parent after confirming that `screen_dir` is the sibling `content` directory. These are execution-local bindings for this one returned session, not global defaults. Tell the user to open the returned URL only after successful startup. Missing or inconsistent returned paths leave dependent writes and cleanup unavailable; do not guess another session directory.
 
 Finding the connection info: the server writes the startup JSON to `$STATE_DIR/server-info`. If you start the server in the background and do not capture stdout, read this file to obtain the URL and port. When using `--project-dir`, look for the session directory under `<project>/.coding-convention/brainstorm/`.
 
 Note: if you pass the project root as `--project-dir`, the mockups persist in `.coding-convention/brainstorm/` and survive a server restart. Without it, the files go to `/tmp` and get cleaned up. Remind the user to add `.coding-convention/` to `.gitignore` (if it is not there yet).
 
-Starting the server per platform:
+Select the process mode from the actual host execution capability:
 
-Claude Code (macOS / Linux):
+- The script uses foreground mode when `CODEX_CI` is set or its Windows environment checks match, unless `--background` explicitly overrides that choice.
+- `--foreground` keeps the server attached to the shell session. Use the host's exposed persistent terminal or background-execution mechanism when that session must survive a tool return.
+- The default background path starts the server and checks that it remains alive. A returned startup error is not a usable session; follow its persistent-terminal recovery instruction.
 
-```bash
-# The default mode works: the script itself runs the server in the background
-scripts/start-server.sh --project-dir /path/to/project
-```
+Do not infer process lifetime from a product name. Read the returned startup JSON or the exact session's `state/server-info` before presenting a URL.
 
-Claude Code (Windows):
-
-```bash
-# Windows is auto-detected and uses foreground mode, which blocks the tool call.
-# Set run_in_background: true on the Bash tool call so that
-# the server survives across conversation turns.
-scripts/start-server.sh --project-dir /path/to/project
-```
-
-When you call this with the Bash tool, set `run_in_background: true`. On the next turn, read `$STATE_DIR/server-info` to obtain the URL and port.
-
-Codex:
-
-```bash
-# Codex reclaims background processes. The script auto-detects CODEX_CI and
-# switches to foreground mode. Run it as usual: there are no extra flags.
-scripts/start-server.sh --project-dir /path/to/project
-```
-
-Other environments: the server must keep running in the background across conversation turns. If the environment reclaims detached processes, use `--foreground` and start the server with the platform's background execution mechanism.
-
-If the URL is not reachable from the browser (common in remote or container setups), bind to a non-loopback host:
+If the returned URL is unreachable and the accepted environment permits non-loopback binding, use the host and URL hostname appropriate to that environment. The following is an example, not authorization to expose a server:
 
 ```bash
 scripts/start-server.sh \
@@ -106,35 +86,34 @@ Use `--url-host` to control which hostname the printed URL JSON shows.
 
 1. Confirm the server is alive, then write HTML to a new file in `screen_dir`:
    - Before each write, confirm that `$STATE_DIR/server-info` exists. If it is missing or `$STATE_DIR/server-stopped` exists, the server has shut down, so restart it with `start-server.sh` before continuing. The server auto-stops after 30 minutes of inactivity.
-   - Use meaningful filenames: `platform.html`, `visual-style.html`, `layout.html`
-   - Do not reuse filenames: each screen is a new file
-   - Use the Write tool: do not use cat/heredoc (it dumps noise to the terminal)
+   - Use the [Filename Convention](#filename-convention) for each new screen
+   - Use the host's available file-writing tool and avoid printing the full HTML into the conversation
    - The server serves the most recent file automatically
 
 2. Tell the user what to expect and end the turn:
-   - Remind the URL every time (not only the first time)
+   - Include the current URL when presenting a new screen
    - Give a short summary of what is on the screen (for example, "Showing 3 layout options for the home page")
-   - Ask the user to respond in the terminal: "Take a look and let me know what you think. If you like, click to select an option."
+   - Ask the user to respond in the conversation: "Take a look and let me know what you think. If you like, click to select an option."
 
-3. The next turn, after the user responds in the terminal:
+3. The next turn, after the user responds in the conversation:
    - If it exists, read `$STATE_DIR/events`, which contains JSON lines of the user's browser interactions (clicks and selections)
-   - Merge it with the user's terminal text to get the complete picture
-   - The terminal message is the primary feedback. `state_dir/events` provides structured interaction data
+   - Merge it with the user's conversation text to get the complete picture
+   - The conversation message is the primary feedback. `state_dir/events` provides structured interaction data
 
-4. Iterate or proceed: if the feedback changes the current screen, write a new file (for example, `layout-v2.html`). Move to the next question only when the current step is validated.
+4. Iterate or proceed: if the feedback changes the current screen, write a new file (for example, `layout-v2.html`). Move to the next dependent question when the user's response settles the current decision.
 
-5. Unload when returning to the terminal: if the next step does not need the browser (for example, a clarifying question or a tradeoff discussion), push a waiting screen to clear the content you posted:
+5. Unload when returning to the conversation: if the next step does not need the browser (for example, a clarifying question or a tradeoff discussion), push a waiting screen to clear the content you posted:
 
    ```html
    <!-- filename: waiting.html (or waiting-2.html, etc.) -->
    <div style="display:flex;align-items:center;justify-content:center;min-height:60vh">
-     <p class="subtitle">Continuing in the terminal...</p>
+     <p class="subtitle">Continuing in the conversation...</p>
    </div>
    ```
 
    This keeps the user from staring blankly at a resolved choice. When the next visual question comes up, push a new content file as usual.
 
-6. Repeat until done.
+6. Continue only while an unsettled visual decision remains; stop the server through Cleanup when the companion is no longer needed.
 
 ## Writing a Content Fragment
 
@@ -264,9 +243,9 @@ When the user clicks an option in the browser, the interaction is recorded in `$
 {"type":"click","choice":"b","text":"Option B - hybrid","timestamp":1706000115}
 ```
 
-The full event stream shows the user's exploration path: they may click several options before confirming. The last `choice` event is usually the final selection, but the click pattern can reveal hesitation or preference.
+The full event stream shows the user's exploration path: they may click several options before confirming. A click records interaction, not necessarily a final decision. Use the user's conversation response as the primary instruction, and do not infer hesitation or consent from a click sequence.
 
-If `$STATE_DIR/events` does not exist, the user did not interact with the browser, so use the terminal text only.
+If `$STATE_DIR/events` does not exist, no browser-event evidence is available. Use the user's conversation text; do not infer that they never interacted.
 
 ## Design Tips
 
@@ -287,10 +266,10 @@ If `$STATE_DIR/events` does not exist, the user did not interact with the browse
 ## Cleanup
 
 ```bash
-scripts/stop-server.sh $SESSION_DIR
+bash <loaded-skill-directory>/scripts/stop-server.sh "$SESSION_DIR"
 ```
 
-If the session used `--project-dir`, the mockup files persist in `.coding-convention/brainstorm/` (for later reference). Only `/tmp` sessions are deleted on stop.
+Use the exact `SESSION_DIR` retained from startup. Read exit status and JSON `status`: `stopped` confirms the process stopped, `not_running` reports no recorded running process, and `failed` leaves cleanup unresolved. If the session used `--project-dir`, the mockup files persist in `.coding-convention/brainstorm/` for later reference. Only `/tmp` sessions are deleted on stop. Cleanup status is separate from whether the design is accepted.
 
 ## References
 

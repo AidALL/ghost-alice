@@ -6,97 +6,35 @@ compatibility:
   - "Python 3.11+ standard library"
 ---
 
-# merge-companion
+# Merge Companion
 
-merge-companion protects local user changes during skill updates. The installer backs up changed installed files into `~/.ghost-alice/pending-merges/<platform>/` and records them in a manifest. At session start, the platform hook checks the manifest and surfaces this skill when undecided entries exist.
-## Contents
+The current-session assistant uses this lifecycle workflow to protect user changes backed up by a skill installer. The installer records changed installed files under `~/.ghost-alice/pending-merges/<platform>/`; the current-session assistant reviews undecided manifest entries before applying a user's chosen result.
 
-- [Entry Conditions](#entry-conditions)
-- [Silent Pass Conditions](#silent-pass-conditions)
-- [Activation Guarantee](#activation-guarantee)
-- [Six-Step Review UX](#six-step-review-ux)
-- [Mandatory Adversarial Verification](#mandatory-adversarial-verification)
-- [Pattern-Two Isolation And Propagation](#pattern-two-isolation-and-propagation)
-- [Self-Call Restriction](#self-call-restriction)
-- [io-trace](#io-trace)
-- [References](#references)
-- [Warnings](#warnings)
+## Entry and activation
 
+The current-session assistant applies this skill when the current-platform pending-merge check finds an undecided entry, including after an explicit user request for pending-merge review. It performs that check before task-router under AGENTS.md rule 0-A, or reuses the result supplied by the SessionStart or UserPromptSubmit hook. Other skills must not invoke it speculatively. At least one current-platform entry must have `decided=false`. A missing manifest, empty entries or JSON parse failure passes silently.
 
-## Entry Conditions
+The SessionStart and UserPromptSubmit hooks, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and SessionStart failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge; the current-session assistant follows AGENTS.md rule 0-A before normal routing.
 
-- `~/.ghost-alice/pending-merges/<current-platform>/manifest.json` exists.
-- At least one entry has `decided=false`.
+## Review and apply
 
-## Silent Pass Conditions
+1. The current-session assistant explains that the installer detected local changes and gives the backup location.
+2. It classifies each change as trivial, semantic or structural using `references/impact-tier.md`. The tier controls display order and detail only.
+3. It presents a natural-language diff and workflow impact, with raw diff on request. Hash/provenance evidence establishes identity, drift and merge safety; current contract and behavior evidence determine which semantics to retain.
+4. It offers integrate, discard or later. Later is the default and leaves the entry pending. An advanced flow may offer a partial merge.
+5. For integration, it prepares the proposed result under `~/.ghost-alice/staged/<entry-id>/` without changing the live file.
+6. After approval of the staged result, it follows [Apply and record a decision](references/manifest-schema.md#apply-and-record-a-decision): apply the live change through the host file tool, then record the exact manifest entry through the importable helper. If the user rejects the proposal, it removes the staged result and leaves the entry undecided. A recording failure does not justify applying the live change again.
 
-Use the manifest-missing-or-invalid silent-pass rule:
+All AI decision-aid content in steps 3–5 passes adversarial-verification before presentation or application. Low impact and cost do not waive that requirement. The current-session assistant must not use a tier as verification evidence.
 
-- manifest missing
-- `entries` empty
-- JSON parse failure
+## Propagation and decision state
 
-All three pass without user-facing noise.
+The default decision affects only the current platform manifest. After step 4, the current-session assistant asks whether the decision also applies to other platforms unless the user's existing instruction already supplies that choice. If authorized, it inspects matching source_path entries and stages each result under that platform's contract. Platform-specific differing outputs make propagation unavailable for that entry.
 
-## Activation Guarantee
+The current-session assistant marks an entry merged or discarded only after the corresponding approved application or discard completes. Approval or staging alone does not prove application. Later records deferred while keeping decided=false. The lifecycle and safety fields are in `references/manifest-schema.md`; the worked flow is in `references/merge-flow.md`.
 
-This skill is expected to surface if any of these layers are alive:
+## Audit and warnings
 
-- pending-merge-session-start layer: SessionStart hook registered by `install_hooks.py`
-- pending-merge-user-prompt layer: UserPromptSubmit hook payload text
-- pending-merge-prose-rule layer: AGENTS.md rule 0-A
-- pending-merge-task-router-precheck layer: task-router 1.0 manifest precheck
-- pending-merge-bootstrap-self-check layer: platform bootstrap such as `~/.codex/AGENTS.md`
-- pending-merge-install-tail layer: `install.sh` / `install.ps1` tail message
-- pending-merge-readme layer: `~/.ghost-alice/pending-merges/<platform>/READ-ME-FIRST.md`
-- pending-merge-session-start-failsafe layer: SessionStart hook command ending in `|| true`
+The current-session assistant retains manifest operations, backup reads/copies, staged writes and confirmation evidence internally. PostToolUse audit stays active. It shows a concise trace or locator when requested or decision-relevant; this skill does not require a printed io-trace block.
 
-This eight-layer list is the current operating contract.
-
-## Six-Step Review UX
-
-1. Notify: explain that changes were detected after the last install and show the backup location.
-2. Classify: label each change as trivial, semantic, or structural using `references/impact-tier.md`. This is display sorting only; it does not bypass verification.
-3. Show differences: provide a natural-language summary by default, plus raw diff on request and workflow impact. Use hashes and provenance only to establish artifact identity, drift, and merge safety. Choose semantic behavior by current contract and behavior evidence, not by recency, authorship, or hash equality.
-4. Ask: offer integrate, discard, or later. `later` is the default and keeps the entry pending. Advanced flows may offer AI partial merge.
-5. Stage merge: create the proposed result under `~/.ghost-alice/staged/<entry-id>/`. Do not touch the live file yet.
-6. Confirm: after user approval, overwrite the live file and mark the manifest entry decided. If rejected, discard the staged output and leave the manifest entry undecided so it stays pending for a later decision.
-
-## Mandatory Adversarial Verification
-
-All AI output in steps 3, 4, and 5 must pass adversarial-verification before it is shown as a decision aid or applied. Do not skip this for cost reasons or for low-tier changes. Block immediately the moment a rationalization to skip begins.
-
-## Pattern-Two Isolation And Propagation
-
-- Decisions are persisted only in the current platform manifest by default.
-- After step 4, ask whether the same decision should apply to other platforms.
-- If yes, mark entries with the same `source_path` in other platform manifests.
-- If platform-specific outputs differ, mark propagation unavailable for that entry.
-
-## Self-Call Restriction
-
-This skill may be surfaced only by:
-
-- task-router 1.0
-- AGENTS.md rule 0-A
-- SessionStart hook
-- explicit user request
-
-Other skills must not call it speculatively.
-
-## io-trace
-
-Record manifest reads/writes, backup reads/copies, staged writes, and user confirmation prompts in the final `[io-trace]` block.
-
-## References
-
-- `references/manifest-schema.md`
-- `references/impact-tier.md`
-- `references/merge-flow.md`
-
-## Warnings
-
-- Do not overwrite live installed files before user confirmation.
-- Do not collapse integrate, discard, and later into a single default.
-- Do not treat impact tier as verification.
-- Do not propagate decisions across platforms without asking.
+The current-session assistant must not overwrite live files before required approval, merge the three choices into one default, bypass adversarial verification or propagate without authority. Already supplied authorization applies to its actual scope and does not require redundant confirmation.

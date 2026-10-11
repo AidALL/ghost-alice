@@ -1,6 +1,11 @@
 """Regression tests for pending-merge/session-start layered gate validation."""
 from __future__ import annotations
 import os
+from dataclasses import replace
+import tempfile
+from unittest.mock import patch
+
+from scripts import validate_pending_merge_layering as validator
 import subprocess
 import sys
 import unittest
@@ -69,17 +74,36 @@ class TestPendingMergeLayeredGate(unittest.TestCase):
         self.assertIn("accepted verifier-result", text)
         self.assertIn("rejected candidate", text)
 
-    def test_verification_skills_reference_evaluator_artifact_contract(self):
-        files = [
-            REPO_ROOT / "adversarial-verification" / "SKILL.md",
-            REPO_ROOT / "coding-convention" / "verification-before-completion" / "SKILL.md",
-        ]
+    def test_verification_skills_reach_the_evaluator_contract_owner(self):
+        checks = [check for check in validator.CHECKS if check.layer == "EVAL" and check.owner]
+        self.assertEqual(len(checks), 2)
+        for check in checks:
+            with self.subTest(consumer=check.file):
+                ok, message = validator.check_layer(check)
+                self.assertTrue(ok, message)
 
-        for path in files:
-            with self.subTest(path=path):
-                text = path.read_text(encoding="utf-8")
-                self.assertIn("evaluator-artifact-contract.md", text)
-                self.assertIn("verifier-result.json", text)
+    def test_owned_contracts_reject_broken_reference_or_missing_requirements(self):
+        for check in validator.CHECKS:
+            if check.owner is None:
+                continue
+            consumer = check.file.read_text(encoding="utf-8")
+            owner = check.owner.read_text(encoding="utf-8")
+            for defect in ("reference", "owner", "heading", "requirements"):
+                with self.subTest(layer=check.layer, consumer=check.file, defect=defect):
+                    with tempfile.TemporaryDirectory() as temporary:
+                        root = Path(temporary)
+                        caller = root / "consumer.md"
+                        target = root / "owner.md"
+                        caller.write_text("" if defect == "reference" else consumer, encoding="utf-8")
+                        if defect != "owner":
+                            target.write_text(
+                                "# Unrelated owner\n" if defect == "heading" else
+                                "# " + check.owner_section + "\n\n# Unrelated\n" + owner
+                                if defect == "requirements" else owner, encoding="utf-8")
+                        with patch.object(validator, "REPO", root):
+                            ok, message = validator.check_layer(replace(check, file=caller, owner=target))
+                        self.assertFalse(ok, message)
+
 
 
 if __name__ == "__main__":

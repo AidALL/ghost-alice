@@ -29,16 +29,17 @@ Ask the AI chat:
 
     Please review backed-up changes.
 
-## Automatic Activation Paths (eight-surface activation guarantee)
+## Review procedure
 
-pending-merge-session-start layer. SessionStart hook
-pending-merge-user-prompt layer. UserPromptSubmit hook payload
-pending-merge-prose-rule layer. AGENTS.md rule 0-A
-pending-merge-task-router-precheck layer. task-router 1.0 manifest check
-pending-merge-bootstrap-self-check layer. platform bootstrap self-check rule
-pending-merge-install-tail layer. install completion tail guidance
-pending-merge-readme layer. this READ-ME-FIRST.md file itself
-pending-merge-session-start-failsafe layer. SessionStart hook fail-safe || true
+The current-conversation assistant obtains the current platform's pending-merge
+result under the installed common governance First-Entry Contract. It follows
+the installed merge-companion skill for any undecided entry, using the exact
+manifest entry's id, source_path and backup_path. The user's integrate, discard
+or defer choice supplies the decision; this generated guide supplies no approval.
+
+The merge-companion reference `references/manifest-schema.md`, section
+`Apply and record a decision`, owns staged application and manifest recording.
+A successful file application and its recorded decision are separate results.
 
 ## Directory Structure
 

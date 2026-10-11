@@ -13,6 +13,10 @@ defaults:
     values: { layout: none }
   - scope: { path: "docs/index.html" }
     values: { layout: none }
+  - scope: { path: "index_ko.html" }
+    values: { layout: none }
+  - scope: { path: "docs/index_ko.html" }
+    values: { layout: none }
 include:
   - "README.md"
 exclude:
@@ -35,7 +39,6 @@ exclude:
   - "boundary-contract/"
   - "coding-convention/"
   - "compact-handoff/"
-  - "jailbreak-detector/"
   - "merge-companion/"
   - "necessity-gate/"
   - "session-intent-analyzer/"
@@ -47,6 +50,5 @@ exclude:
   - "CODE_OF_CONDUCT.md"
   - "SECURITY.md"
   - "SUPPORT.md"
-  - "CHANGELOG.md"
   - "THIRD_PARTY_NOTICES.md"
   - "PSScriptAnalyzerSettings.psd1"

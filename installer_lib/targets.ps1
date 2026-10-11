@@ -70,6 +70,15 @@ function Invoke-DeprecatedInstalledSkillCleanup {
             "Deprecated installed skill moved out of discovery path: $skill -> $quarantine" `
             "Deprecated installed skill moved out of discovery path: $skill -> $quarantine"
     }
+    $retirementPython = Find-PythonExe
+    if (-not $retirementPython) { throw "Python runtime unavailable for managed retirement" }
+    $retirementGhostRoot = if ($env:GHOST_ALICE_GHOST_ROOT) { $env:GHOST_ALICE_GHOST_ROOT } else { Join-Path (Resolve-UserHome) ".ghost-alice" }
+    & $retirementPython -B (Join-Path $ScriptDir "_shared/retired_assets.py") `
+        --skills-root $SkillsRoot --source-root $ScriptDir `
+        --ghost-root $retirementGhostRoot --platform $Platform `
+        --commands-root (Join-Path (Resolve-ClaudeHome) "commands")
+    if ($LASTEXITCODE -ne 0) { throw "Managed retirement failed" }
+
 }
 
 function Assert-SkillNames {

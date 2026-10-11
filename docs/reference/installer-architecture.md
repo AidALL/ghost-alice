@@ -34,19 +34,17 @@ The installer has three layers.
 | Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | Resolve platforms and targets, install skills and hooks, record install state, protect local edits, and report status |
 | Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | Hold installed skills, platform hook config, Claude and Codex global bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, and uninstall reports |
 
-The important mental model is not "copy files, then done." The installer is a stateful governance synchronizer. It updates installed assets, verifies hook contracts, preserves user-modified installed files, and writes enough state for status, doctor, update, and uninstall paths to reason about what happened.
+The installer updates assets and hooks while protecting user edits and recording its own changes. Status, doctor, update and uninstall commands consume those records to identify the actual installed state and changes they can safely restore.
 
 ## Install Flow
 
-```text
-shell entrypoint
--> runtime and source-health preflight
--> platform and skill target resolution
--> skill and shared-helper copy install
--> platform hook and bootstrap sync
--> install-state and event recording
--> status/report output
-```
+| Sender → receiver | Input passed | Result used by the next step |
+| --- | --- | --- |
+| User command → shell entrypoint | Install/update/removal flags, platform choice and optional addon source. | Parsed options and a usable Python runtime. |
+| Entrypoint → installer orchestration | Parsed options, source checkout and selected platforms. | Selected skill packages and exact installation targets. |
+| Orchestration → platform deployment | Source assets and target paths. | Installed skills/helpers and preserved local edits. |
+| Deployment → hook/bootstrap synchronization | Managed payloads, platform paths and registration commands. | Updated managed rule blocks and hook registrations. |
+| Installer → install-state writer → status output | Actual changed targets, hashes and rollback information. | Per-platform manifest and an install report for status, doctor and uninstall. |
 
 `install.cmd` is only a Windows wrapper. The substantive Windows path is `install.ps1`. On Unix-like environments, `install.sh` owns the shell entry path and re-enters Bash when needed.
 
@@ -59,6 +57,10 @@ shell entrypoint
 | Shared state | `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
 
 Claude Code can expose native skill invocation and hook permissions, but those surfaces do not replace a global instruction port for sessions outside the repository. The installer therefore merges the managed block from `platforms/claude/CLAUDE.md` into the Claude config directory. Codex does not expose the same skill surface, so its separate bootstrap and hook config make required gates auditable through `SKILL.md` read records and hook payloads. Both global rule files preserve text outside their managed blocks; a markerless user-owned destination receives a `.ghost-alice-proposed` file instead of an overwrite.
+
+Normal Core hook transport preserves the firing native cwd as Core context and explicit Ghost-ALICE Autopilot target overrides. Ghost-ALICE Autopilot owns project discovery: Claude uses an absolute CLI project directory before payload cwd; Codex uses payload cwd and ignores the Claude-specific hint. Installation source and project-trust paths do not select a Ghost-ALICE Autopilot target; isolated bindings retain their owned project target. Pretool and Stop resolve that target and read OFF before accessing Core authority. OFF returns quiet continue without capture context or authority reads/writes; an active target proceeds to the existing qualified-selection checks. Target selection grants no authority.
+
+Managed hook commands and native trust entries must agree with the reviewed installed payload. A running host can retain its previously loaded registration. Verify adoption through an actual native callback after the appropriate reload; refer to [hook trust and reload](../getting-started/troubleshooting.md#native-hook-trust-and-reload). Installation state alone is not native execution evidence.
 
 ## State And Safety Model
 

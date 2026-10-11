@@ -14,7 +14,7 @@ For the full install command surface, read [installation](../getting-started/ins
 
 ## Official Addons
 
-Official addons are maintained alongside the Ghost-ALICE core and are installed from the core checkout with a short alias. You do not need to know the repository URL; the alias resolves to the maintained source.
+Official addons are maintained alongside the Ghost-ALICE core and are installed from the core checkout with a short alias. You pass the alias to the Core installer; the installer resolves it to the maintained source and reads that package’s addon manifest.
 
 Install an official addon by passing its alias to the installer:
 
@@ -24,9 +24,11 @@ bash install.sh --addon autopilot
 
 | Addon | Purpose | Install | Details |
 | --- | --- | --- | --- |
-| autopilot | Continue verified work items through the privileged autonomous adapter after explicit approval. | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
+| autopilot | Return eligible tasks from the model’s explicitly approved plan through the registered Stop adapter. | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-The recommended product pair is Core `0.4.1` and Autopilot `0.4.1`. Autopilot's technical minimum remains Core `0.4.0` for the shared SQLite runtime. Check the addon compatibility matrix for support boundaries and the [current release notes](../release/2026-10-01-release-notes.md) for verification scope.
+Core `0.5.0` and Ghost-ALICE Autopilot `0.5.0` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.0` or later. Source checks, native runtime validation and publication establish separate evidence.
+
+The responding model judges work and meaning; Core authenticates the review records. Ghost-ALICE Autopilot consumes that result and selects eligible work from the model’s admitted plan. See the [architecture](../../architecture.md) for inputs, returns and host delivery.
 
 ## Custom, Tenant, And Local Development Addons
 
@@ -43,7 +45,7 @@ bash install.sh --addon-source https://github.com/your-org/your-addon.git
 ```
 
 - Custom repositories: install an addon you maintain or fork by pointing `--addon-source` at its repository URL. The installer reads the addon manifest from that source instead of an official alias.
-- Tenant packages: distribute an organization-specific or customer-specific addon bundle by pointing `--addon-source` at the tenant package location, so each tenant installs only the addons it is entitled to.
+- Tenant packages: the tenant operator selects a bundle authorized for that organization or customer and passes its location through `--addon-source`. The installer reads that source’s addon manifest; choosing a source does not itself grant entitlement.
 - Local development addons: while authoring an addon, point `--addon-source` at the working checkout on disk (for example `/path/to/addon-repo`) to install and re-test it without publishing first.
 
 ## Where To Go Next

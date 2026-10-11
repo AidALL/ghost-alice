@@ -2,9 +2,9 @@
 
 언어: [🇺🇸 English](../../reference/installer-architecture.md) | 🇰🇷 한국어
 
-이 문서는 빠른 설치 문서와 installer compatibility contract 사이의 contributor bridge입니다. installer 전체가 단순하다고 주장하지 않습니다. contributor가 installer, hook payload, install state, test를 따라가기 전에 필요한 architecture map을 제공합니다.
+이 문서는 기여자가 빠른 설치 안내에서 설치기 호환성 계약으로 넘어갈 때 사용하는 구조 안내입니다. 설치기, 훅 입력·출력, 설치 상태와 테스트 사이의 연결을 설명합니다.
 
-빠른 사용자용 절차는 [installation](../getting-started/installation.md)을 봅니다. compatibility requirement와 test ownership은 [installer platform compatibility](../policies/installer-platform-compatibility-matrix.md)를 봅니다.
+사용자는 [설치 안내](../getting-started/installation.md)에서 실행 절차를 확인하실 수 있습니다. 기여자는 [플랫폼 호환성 계약](../policies/installer-platform-compatibility-matrix.md)에서 요구 조건과 담당 테스트를 확인합니다.
 ## Contents
 
 - [읽는 순서](#읽는-순서)
@@ -20,57 +20,59 @@
 ## 읽는 순서
 
 1. 이 문서에서 구성 요소와 호출 방향을 파악합니다.
-2. file 위치는 [repository structure](./repository-structure.md)에서 찾습니다.
-3. 사용자-facing behavior는 [installation](../getting-started/installation.md)과 [uninstall](../getting-started/uninstall.md)에서 확인합니다.
-4. contract와 verification burden은 [installer platform compatibility](../policies/installer-platform-compatibility-matrix.md), [tool output semantics](../policies/tool-output-semantics.md), [live smoke regression](../policies/live-smoke-regression.md)에서 확인합니다.
+2. 파일 위치는 [repository structure](./repository-structure.md)에서 찾습니다.
+3. 사용자에게 보이는 동작은 [installation](../getting-started/installation.md)과 [uninstall](../getting-started/uninstall.md)에서 확인합니다.
+4. 계약과 필요한 검증은 [installer platform compatibility](../policies/installer-platform-compatibility-matrix.md), [tool output semantics](../policies/tool-output-semantics.md), [live smoke regression](../policies/live-smoke-regression.md)에서 확인합니다.
 
 ## Architecture Summary
 
-installer는 세 layer로 볼 수 있습니다.
+설치기 구성 요소는 다음 세 계층에서 역할을 나눕니다.
 
 | Layer | Main files | Responsibility |
 | --- | --- | --- |
-| Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | platform-specific flags를 parse하고 encoding/runtime setup을 normalize한 뒤 Python-backed installer path로 진입합니다 |
-| Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | platforms와 targets를 resolve하고, skills와 hooks를 install하고, install state를 record하고, local edits를 protect하고, status를 report합니다 |
-| Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | installed skills, platform hook config, Codex bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, uninstall reports를 보관합니다 |
+| Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | 셸 진입점이 플랫폼별 옵션을 해석하고 인코딩과 실행 환경을 준비한 뒤 Python 설치 절차를 호출합니다 |
+| Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | 설치 조정 코드가 플랫폼과 대상을 선택하고 스킬과 훅을 설치합니다. 설치 상태를 기록하고 로컬 수정을 보호하며 결과를 보고합니다 |
+| Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | 설치된 스킬, 플랫폼 훅 설정, Claude·Codex 전역 부트스트랩 지침, 설치 상태 매니페스트, 훅 기능 복원 메타데이터, 병합 대기 자료와 제거 결과를 보관합니다 |
 
-중요한 mental model은 "file을 copy하고 끝"이 아닙니다. installer는 stateful governance synchronizer입니다. installed asset을 update하고, hook contract를 verify하고, user-modified installed file을 보존하고, status, doctor, update, uninstall path가 무엇이 일어났는지 판단할 수 있도록 state를 남깁니다.
+설치기는 설치 파일과 훅을 갱신하면서 사용자가 수정한 파일을 보호하고 자신의 변경을 기록합니다. `status`, `doctor`, 업데이트와 제거 절차는 이 기록을 읽어 실제 설치 상태와 복원 가능한 변경을 판단합니다.
 
 ## Install Flow
 
-```text
-shell entrypoint
--> runtime and source-health preflight
--> platform and skill target resolution
--> skill and shared-helper copy install
--> platform hook and bootstrap sync
--> install-state and event recording
--> status/report output
-```
+| 전달 주체 | 입력으로 넘기는 내용 | 다음 단계에서 사용하는 결과 |
+| --- | --- | --- |
+| 사용자 명령 → 셸 진입점 | 설치·갱신·제거 옵션, 플랫폼 선택, 선택적 애드온 출처. | 해석한 옵션과 사용 가능한 Python 실행 환경. |
+| 진입점 → 설치 조정 코드 | 옵션, 소스 체크아웃, 선택 플랫폼. | 선택한 스킬 패키지와 정확한 설치 대상. |
+| 조정 코드 → 플랫폼 배포 | 소스 파일과 대상 경로. | 설치한 스킬·도우미와 보존한 로컬 수정. |
+| 배포 → 훅·부트스트랩 동기화 | 관리 파일 내용, 플랫폼 경로, 등록 명령. | 갱신한 관리 규칙 블록과 훅 등록. |
+| 설치기 → 설치 상태 기록기 → 상태 출력 | 실제 변경 대상·해시·복원 정보. | Status·doctor·제거에서 읽을 플랫폼 매니페스트와 설치 보고서. |
 
-`install.cmd`는 Windows wrapper일 뿐입니다. 실질적인 Windows path는 `install.ps1`입니다. Unix-like environment에서는 `install.sh`가 shell entry path를 소유하고 필요할 때 Bash로 다시 진입합니다.
+Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달하고 실제 설치는 `install.ps1`이 담당합니다. Unix 계열 환경에서는 `install.sh`가 셸 진입점을 담당하며 필요할 때 Bash로 다시 실행합니다.
 
 ## Platform Surfaces
 
 | Platform | Installed surfaces |
 | --- | --- |
-| Claude Code | `~/.claude/skills/`, `~/.claude/settings.json`, Claude command wrappers |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`, `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Claude command wrappers |
 | Codex | `~/.agents/skills/`, `~/.codex/AGENTS.md`, `~/.codex/ghost-alice-governance.md`, `~/.codex/hooks.json`, `~/.codex/config.toml` |
 | Shared state | `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
 
-Claude Code는 native skill invocation과 hook permissions를 expose할 수 있습니다. Codex는 같은 skill surface를 expose하지 않으므로 installer는 Codex bootstrap과 hook config도 설치해 required gate가 `SKILL.md` read record와 hook payload로 audit 가능하도록 합니다.
+Claude Code의 native skill invocation과 hook permission은 저장소 밖의 세션에 필요한 global instruction을 대신하지 않습니다. installer는 `platforms/claude/CLAUDE.md`의 managed block을 Claude config directory에 병합합니다. Codex의 별도 bootstrap과 hook config는 required gate를 `SKILL.md` read record와 hook payload로 감사할 수 있게 합니다. 두 global rule file은 managed block 밖의 사용자 텍스트를 보존하며, marker가 없는 사용자 파일에는 덮어쓰기 대신 `.ghost-alice-proposed` 제안 파일을 만듭니다.
+
+일반 Core hook 전달은 실제 native cwd를 Core 맥락으로 유지하고 명시된 Ghost-ALICE Autopilot 대상 override를 보존합니다. 프로젝트 선택은 Ghost-ALICE Autopilot이 담당합니다. Claude는 절대 CLI 프로젝트 경로를 payload cwd보다 먼저 선택하며, Codex는 payload cwd를 사용하고 Claude 전용 힌트를 무시합니다. 설치 source와 프로젝트 신뢰 경로는 Ghost-ALICE Autopilot 대상을 선택하지 않으며, 격리 바인딩은 소유 프로젝트 대상을 유지합니다. Pretool과 Stop은 해당 대상을 선택하고 OFF를 읽은 뒤 Core 권한 자료에 접근합니다. OFF는 캡처 맥락이나 권한 읽기·쓰기 없이 조용히 계속 진행을 반환하며, 활성 대상은 기존 적격 선택 검사로 진행합니다. 대상 선택은 권한을 부여하지 않습니다.
+
+관리 훅 명령과 네이티브 신뢰 항목은 검토한 설치 내용과 일치해야 합니다. 실행 중인 호스트가 이전 등록을 유지할 수 있으므로 적절히 재로드한 뒤 실제 네이티브 콜백으로 반영을 확인합니다. [훅 신뢰와 재로드](../getting-started/troubleshooting.md#native-hook-trust-and-reload)를 참고해 주세요. 설치 상태만으로 네이티브 실행을 입증하지 않습니다.
 
 ## State And Safety Model
 
-installer는 cleanup 때 추측하지 않기 위해 변경 내용을 기록합니다.
+설치기는 제거·복원할 대상을 추측하지 않도록 변경 내용을 기록합니다.
 
 | State path | Why it exists |
 | --- | --- |
-| `~/.ghost-alice/install-state/<platform>.json` | status와 uninstall을 위해 installer-owned targets와 environment changes를 기록합니다 |
-| `~/.ghost-alice/pending-merges/<platform>/` | silently overwrite할 수 없는 user-modified installed files를 보존합니다 |
-| `~/.ghost-alice/install/` | audit와 recovery를 위해 install reports와 event traces를 보관합니다 |
+| `~/.ghost-alice/install-state/<platform>.json` | 설치기가 관리한 대상과 환경 변경을 기록하며 상태 조회와 제거 명령이 읽습니다 |
+| `~/.ghost-alice/pending-merges/<platform>/` | 설치기가 덮어쓰지 않은 사용자 수정 파일을 보존하며 merge-companion과 사용자가 병합 여부를 결정합니다 |
+| `~/.ghost-alice/install/` | 감사와 복구에 필요한 설치 결과와 이벤트를 보관합니다 |
 
-이 때문에 update와 uninstall은 installer architecture 밖의 별도 작업이 아닙니다. copied asset, hook, runtime config에 영향을 주는 change는 보통 status, doctor, pending merge behavior, uninstall rollback에도 영향을 줍니다.
+설치된 파일, 훅이나 실행 설정을 바꾸는 개발자는 상태 조회, 진단, 병합 대기 처리와 제거 복원에 미치는 영향도 확인해야 합니다. 이 절차들은 같은 설치 기록에 의존합니다.
 
 ## Contributor Entry Points
 
@@ -82,15 +84,15 @@ installer는 cleanup 때 추측하지 않기 위해 변경 내용을 기록합�
 | Public docs or command surface | `README.md`, `docs/`, `docs/index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
 | Platform compatibility rule | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list` and policy가 지정한 focused group |
 
-한 부분을 바꿀 때는 paired contract를 찾습니다. compatibility matrix가 이름 붙인 test owner가 regression surface를 가장 빨리 찾는 길입니다.
+기여자는 구성 요소를 바꿀 때 연결된 계약을 확인합니다. 호환성 표가 지정한 담당 테스트에서 영향을 받는 회귀 검사를 찾습니다.
 
 ## What Not To Infer
 
-- hook file이 disk에 존재한다는 사실은 hook payload가 current라는 증거가 아닙니다.
-- copied skill directory는 platform이 그 skill을 invoke하거나 audit할 수 있다는 증거가 아닙니다.
-- passing install smoke는 status, doctor, update, pending merge, uninstall path가 정렬됐다는 증거가 아닙니다.
-- user-facing install command는 architecture 설명이 아니라 entrypoint일 뿐입니다.
+- 훅 파일의 존재만으로 현재 입력·출력 계약과 일치한다고 판단하지 않습니다.
+- 복사된 스킬 디렉터리만으로 플랫폼이 해당 스킬을 호출하거나 감사할 수 있다고 판단하지 않습니다.
+- 설치 점검의 통과만으로 상태 조회·진단·업데이트·병합 대기·제거 절차의 일관성을 판단하지 않습니다.
+- 사용자용 설치 명령은 진입점을 안내하며 내부 구조 설명을 대신하지 않습니다.
 
 ## Full Understanding
 
-contributor는 보통 몇 분 안에 방향을 잡을 수 있습니다. 그러나 installer 전체를 이해하려면 하나의 change를 entrypoint, orchestration layer, runtime surface, state file, test owner까지 따라가야 합니다. 이 문서는 그 trace를 위한 첫 map입니다. 관련 implementation과 compatibility contract를 읽는 일을 대체하지 않습니다.
+기여자는 검토할 변경이 셸 진입점에서 설치 조정 코드, 설치 대상, 상태 기록과 담당 테스트로 어떻게 이어지는지 확인합니다. 이 문서는 그 연결을 찾는 안내이며, 관련 구현과 호환성 계약을 읽는 절차를 대신하지 않습니다.

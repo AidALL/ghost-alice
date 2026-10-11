@@ -29,6 +29,10 @@ Keep these tokens literal across languages:
 
 Translate the surrounding explanation, not the token.
 
+## Intentionally Unpaired Sources
+
+Reader documentation, architecture, Wiki explanations and GitHub Pages remain paired in English and Korean. Runtime instruction bodies (`AGENTS.md`, platform bootstraps and `SKILL.md`), schemas, maintainer procedures, community policies, legal notices and provenance records intentionally retain one canonical English source. This includes `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `.github/` templates and `official-docs/`. Their reader-facing explanations can link to the canonical source from either language; a second translated control or legal source is not implied.
+
 ## Drift Control
 
 Update the English default document first, then update the Korean counterpart in the same change when user-facing meaning changes. Remove stale partial pages rather than preserving misleading duplicates. If a document intentionally has no Korean counterpart, explain the exception from the nearest documentation index.

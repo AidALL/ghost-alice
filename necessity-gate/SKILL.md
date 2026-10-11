@@ -5,138 +5,48 @@ compatibility:
   - "Python 3.11+ standard library"
 ---
 
-<SUBAGENT-STOP>
-If this agent was dispatched to perform only a specific subtask, skip this skill.
-</SUBAGENT-STOP>
+# Necessity Gate
 
-<EXTREMELY-IMPORTANT>
-Do not bypass this gate by expert judgment. If the work "obviously" seems needed, still run the gate. This friction protects novice-day and bad-day agent behavior.
+The current-session assistant applies this gate when defining a new task, skill, file, audit/verification cycle, follow-up, tool, script or reference, including production skill edits and task-plan registration. It determines whether proposed work is justified; it does not grant human authority or native tool permission. A subagent assigned only a specific subtask skips this gate.
 
-Starting a new task without this gate is a rule violation.
-</EXTREMELY-IMPORTANT>
+## Entry and existing authority
 
-# necessity-gate
+The current-session assistant records one of the following when the proposal already belongs to authorized work:
 
-necessity-gate checks whether a new task, file, audit cycle, skill change, or follow-up is justified by real evidence and recovery value. It blocks padding, speculative cleanup, manufactured follow-ups, and scope creep.
-## Contents
+- `user-directed: <instruction>` for explicit user-directed work;
+- a reference to the approved task and applicable substep;
+- a retry inside an approved loop, whose checks belong to verification-before-completion.
 
-- [Triggers](#triggers)
-- [Escape Hatch](#escape-hatch)
-- [Procedure](#procedure)
-  - [1. State The Work](#1-state-the-work)
-  - [2. Classify The Problem](#2-classify-the-problem)
-  - [3. Assess Harm If Skipped](#3-assess-harm-if-skipped)
-  - [4. Assess Regression Risk](#4-assess-regression-risk)
-  - [5. Decide](#5-decide)
-- [Output Format](#output-format)
-- [Habitual Failure Patterns](#habitual-failure-patterns)
-- [Relationship To Verification](#relationship-to-verification)
-- [What This Gate Does Not Block](#what-this-gate-does-not-block)
-- [References](#references)
+The recorded reason satisfies this gate; the current-session assistant must not infer a need for renewed approval. Without one of these reasons, it performs the assessment below. Expert confidence that work is “obvious” does not replace the assessment.
 
+## Assess the proposal
 
-## Triggers
+1. State one concrete proposed action and outcome.
+2. Classify its basis as `reproducible` (observed failing test/command or repeated user-reported symptom), `evidenced` (a mismatch shown by logs, files, schemas or dependencies), or `speculative` (preference or possible future value).
+3. Identify harm if omitted: system breakage, an unmet explicit request, or accumulated future cost. Future cost needs evidence; cleaner presentation alone is not harm.
+4. Assess regression risk to working behavior, dependents, recovery and scope. Reconsider a zero-risk assertion.
+5. Select `APPROVE` when supported harm outweighs regression risk, `MODIFY` when harm is real but scope is wrong, or `REJECT` when the proposal is speculative, riskier than its benefit or padding. Record the reason. Speculative work defaults to rejection unless the assessment establishes exceptional justification.
 
-Run this gate when you are about to:
+For an explicitly requested evaluation deliverable, benchmarking or comparison may be the proper means. For runtime improvement, the current-session assistant names the observed behavior gap and expected correction; usefulness of an evaluation tool does not justify adopting a runtime feature or replacing the requested repair with a new product.
 
-- define a new task, skill, or file
-- start a new audit or verification cycle
-- edit frontmatter, body, or `calls` for a production skill
-- add a "follow-up", "open issues", or "improvements" section to a report
-- register new tasks with TodoWrite/update_plan
-- create a new tool, script, or reference file
-- promote an emergent subtask into real work
-
-## Escape Hatch
-
-The gate is considered passed only when a reason is recorded:
-
-- `user-directed: <quote>` for explicit user instructions
-- reference to a previously approved task and substep
-- retry inside an already approved loop, where verification-before-completion absorbs the check
-
-No silent pass is allowed.
-
-## Procedure
-
-### 1. State The Work
-
-Write one concrete sentence for the proposed work. Do not use vague phrasing.
-
-### 2. Classify The Problem
-
-Choose exactly one:
-
-- `reproducible`: a test fails, a command errors, or the user repeatedly reports the same symptom
-- `evidenced`: logs, files, schemas, or dependencies show a mismatch
-- `speculative`: the reason is "maybe", "cleaner", "could be useful", or expert preference
-
-`speculative` defaults to reject unless later evaluation is exceptionally strong.
-
-Separate evaluation means from runtime adoption. Benchmarking or A/B comparison can serve an explicitly requested evaluation deliverable, but evaluation usefulness alone does not justify adding runtime features. For runtime adoption or improvement, name the observed runtime behavior gap and the expected correction; assess the harm and regression risk of that correction. Do not substitute a new evaluation tool or product when the authorized objective is to improve current runtime behavior. Genuine user-directed evaluation work and evidenced runtime improvements remain permitted within their authorized scope.
-
-### 3. Assess Harm If Skipped
-
-Use one of these harm shapes:
-
-- system breakage
-- explicit user request unmet
-- future work cost accumulation, which is always suspect and is treated together with speculative
-
-"The output would look cleaner" is not harm.
-
-### 4. Assess Regression Risk
-
-Consider whether the work touches a working system, is relied on by other skills or runtime paths, is hard to recover, or creates more scope expansion. If risk is written as zero, re-evaluate; true zero is rare.
-
-### 5. Decide
-
-- `APPROVE`: harm is clearly larger than regression risk
-- `MODIFY`: harm is real but the proposed scope is too broad or too narrow
-- `REJECT`: harm is speculative, smaller than risk, or the work is padding
-
-Record the decision and reasoning.
-
-## Output Format
+## Output
 
 ```text
-[necessity-gate] <one-sentence task>
+[necessity-gate] <concrete proposed task>
 - classification: reproducible | evidenced | speculative
-- harm: <one line>
-- regression-risk: <one line>
+- harm: <supported harm>
+- regression-risk: <risk>
 - decision: APPROVE | MODIFY | REJECT
-- reason: <one or two sentences>
-- escape-hatch: <reason, if used>
+- reason: <decision basis>
+- escape-hatch: <existing authorization reason, when used>
 ```
 
-## Habitual Failure Patterns
+## Failure modes
 
-| Thought | Classification | Default |
-| --- | --- | --- |
-| "This is worth checking too" | speculative | reject |
-| "It works, but cleanup would be nicer" | speculative cleanup | reject |
-| "There are TODOs, so create a cycle" | manufactured cycle | reject (unless the TODO itself is evidence-backed) |
-| "Add follow-ups to make the report complete" | padding | reject |
-| "Apply the same pattern everywhere" | scope creep | reject |
-| "Check everything just in case" | premature audit | reject |
-| "Clean up other places at once" | batch creep | reject |
-| "Make the docs look richer" | aesthetic padding | reject |
+Without evidence or a user directive, the current-session assistant rejects blanket checking, aesthetic cleanup, follow-ups added to fill a report, applying a pattern everywhere, and work inferred merely from a marker in a file. It must not disguise scope expansion as quality improvement.
 
-This table is not exhaustive. The threshold is that work without clear evidence or a user directive defaults to reject.
+This gate runs when work is defined or a genuinely new subtask appears. It does not restart for each already approved substep, ordinary artifact improvement or next action after verification passes. Verification-before-completion owns checks inside the existing loop.
 
-## Relationship To Verification
+## Check usefulness and resources
 
-necessity-gate is an initialization-event gate. It runs when work is first defined or when a loop discovers a new subtask. Inside an already approved loop, verification-before-completion handles the "did this step actually work" question.
-
-## What This Gate Does Not Block
-
-- explicit user-directed work
-- execution of a substep under already approved work
-- the next step after verification passes
-- improving the quality of an already approved artifact
-
-## References
-
-- `AGENTS.md`
-- `task-router/SKILL.md`
-- `coding-convention/verification-before-completion/SKILL.md`
+For checks within existing work, follow verification-before-completion's [Evidence selection and stop gate](../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate). Boundary-contract owns authorization and resource renewal; task-router owns work selection.

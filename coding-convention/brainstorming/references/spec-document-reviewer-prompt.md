@@ -1,58 +1,11 @@
-# Spec Document Reviewer Prompt Template
+# Specification Document Reviewer Assignment
 
-Use this template when dispatching a spec document reviewer subagent.
+The parent assistant assigns this bounded review to a delegated assistant and receives its findings.
 
-Purpose: verify that the spec is complete, consistent, and ready for implementation planning.
+The parent assistant supplies the absolute spec path, accepted requirements and review scope after drafting. The reviewer reads the actual document and compares it with those requirements.
 
-Dispatch timing: after writing the spec document to docs/coding-convention/specs/.
+Check for missing required content, contradictions, ambiguous behavior that could change implementation, unsupported additions and task boundaries that prevent execution. Check component responsibilities, interfaces and verification criteria.
 
-```
-Task tool (general-purpose):
-  description: "spec document review"
-  prompt: |
-    You are a spec document reviewer. You MUST verify this spec is complete and ready for planning.
+Flag an issue only when it could cause an incorrect or blocked implementation. Word-choice preferences and unequal section lengths are advisory. Return Approved or Issues Found, with section/task locators, the affected decision, why it matters, supporting evidence and accessed absolute paths.
 
-    Spec to review: [SPEC_FILE_PATH]
-
-    ## What to Check
-
-    | Category | What to Look For |
-    |----------|------------------|
-    | Completeness | TODOs, placeholders, "TBD", incomplete sections |
-    | Consistency | Internal contradictions, conflicting requirements |
-    | Clarity | Requirements ambiguous enough to cause someone to build the wrong thing |
-    | Scope | Focused enough for a single plan. It is not covering multiple independent subsystems|
-    | YAGNI | Unrequested features, over-engineering |
-
-    ## Calibration
-
-    ONLY flag issues that would cause real problems during implementation planning.
-    A missing section, a contradiction, or a requirement so ambiguous it could be
-    interpreted two different ways. Those are issues. Minor wording improvements,
-    stylistic preferences, and "sections less detailed than others" are NOT.
-
-    APPROVE unless there are serious gaps that would lead to a flawed plan.
-
-    ## Output Format
-
-    ## Spec Review
-
-    Status: Approved | Issues Found
-
-    Issues (if any):
-    - [Section X]: [specific issue] - [why it matters for planning]
-
-    Recommendations (advisory, do not block approval):
-    - [suggestions for improvement]
-```
-
-The reviewer returns: status, issues (if any), and recommendations.
-
-## Guide Notes
-
-Points to note when using this prompt template:
-
-- [SPEC_FILE_PATH]: replace it with the absolute path of the spec document to review.
-- Preserve the English prompt body for LLM consistency.
-- Emphasize that the reviewer evaluates the five review categories (completeness, consistency, clarity, scope, YAGNI) in detail.
-- The reviewer is instructed to flag only issues that would cause real problems during implementation planning. Minor wording improvements and differences in detail between sections are not issues.
+Approval covers this document's readiness for planning; it does not prove implementation or runtime behavior. The parent assistant corrects in-scope defects and requests only an unresolved human-owned decision.

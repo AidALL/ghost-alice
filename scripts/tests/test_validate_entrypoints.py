@@ -1,3 +1,4 @@
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,12 +6,31 @@ from pathlib import Path
 from scripts.validate_entrypoints import (
     Finding,
     check_platform_ports,
+    check_ssot_rules,
     check_task_router_body,
     check_using_cc_body,
 )
 
 
 class EntrypointBodyContractTest(unittest.TestCase):
+    def copy_owner_contract(self, repo: Path) -> None:
+        source = Path(__file__).resolve().parents[2]
+        for rel in (
+            "AGENTS.md",
+            "task-router/SKILL.md",
+            "coding-convention/using-coding-convention/SKILL.md",
+            "boundary-contract/SKILL.md",
+            "session-intent-analyzer/SKILL.md",
+            "session-intent-analyzer/references/ledger-schema.md",
+            "coding-convention/systematic-debugging/SKILL.md",
+            "coding-convention/verification-before-completion/SKILL.md",
+            "coding-convention/verification-before-completion/references/verify-or-reuse.md",
+            "coding-convention/verification-before-completion/references/autopilot-publication.md",
+        ):
+            target = repo / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source / rel, target)
+
     def test_platform_port_parity_includes_claude_global_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -40,61 +60,95 @@ class EntrypointBodyContractTest(unittest.TestCase):
                 [finding.to_dict() for finding in findings],
             )
 
-    def test_task_router_accepts_quality_rationale_contract(self) -> None:
+    def test_current_entrypoints_accept_consolidated_owner_contract(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
-            skill = repo / "task-router" / "SKILL.md"
-            skill.parent.mkdir(parents=True)
-            skill.write_text(
-                "\n".join(
-                    [
-                        "---",
-                        "name: task-router",
-                        "calls:",
-                        '  - "meta:*"',
-                        "---",
-                        "<QUALITY-RATIONALE>",
-                        "quality-maintenance procedure.",
-                        "</QUALITY-RATIONALE>",
-                        "<ROUTING-CONTRACT>",
-                        "runs before downstream work.",
-                        "</ROUTING-CONTRACT>",
-                    ]
-                ),
-                encoding="utf-8",
-            )
+            self.copy_owner_contract(repo)
 
             findings: list[Finding] = []
+            check_ssot_rules(repo, findings)
             check_task_router_body(repo, findings)
-
-            self.assertEqual([], [f.to_dict() for f in findings])
-
-    def test_using_coding_convention_accepts_quality_rationale_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            skill = repo / "coding-convention" / "using-coding-convention" / "SKILL.md"
-            skill.parent.mkdir(parents=True)
-            skill.write_text(
-                "\n".join(
-                    [
-                        "---",
-                        "name: using-coding-convention",
-                        "---",
-                        "<QUALITY-RATIONALE>",
-                        "quality-maintenance device.",
-                        "</QUALITY-RATIONALE>",
-                        "<USE-CONTRACT>",
-                        "check first when there is even a 1% chance.",
-                        "</USE-CONTRACT>",
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            findings: list[Finding] = []
             check_using_cc_body(repo, findings)
 
             self.assertEqual([], [f.to_dict() for f in findings])
+
+    def test_first_entry_contract_requires_its_section_not_only_a_mention(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            self.copy_owner_contract(repo)
+            ssot = repo / "AGENTS.md"
+            ssot.write_text(
+                ssot.read_text(encoding="utf-8").replace("## First-Entry Contract\n", "## Other section\n"),
+                encoding="utf-8",
+            )
+
+            findings: list[Finding] = []
+            check_ssot_rules(repo, findings)
+
+            self.assertTrue(any("First-Entry Contract" in f.message for f in findings))
+
+    def test_missing_owner_reference_is_rejected(self) -> None:
+        cases = (
+            ("AGENTS.md", check_ssot_rules, "boundary-contract/SKILL.md"),
+            ("task-router/SKILL.md", check_task_router_body,
+             "../boundary-contract/SKILL.md#authority-and-renewal"),
+            ("coding-convention/using-coding-convention/SKILL.md", check_using_cc_body,
+             "../systematic-debugging/SKILL.md#incident-accounting-and-continuation"),
+        )
+        for rel, check, reference in cases:
+            with self.subTest(entrypoint=rel), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                self.copy_owner_contract(repo)
+                entrypoint = repo / rel
+                entrypoint.write_text(
+                    entrypoint.read_text(encoding="utf-8").replace(reference, "other-owner.md"),
+                    encoding="utf-8",
+                )
+
+                findings: list[Finding] = []
+                check(repo, findings)
+
+                self.assertTrue(
+                    any(f.check == "owner-reference" and reference in f.message for f in findings),
+                    [f.to_dict() for f in findings],
+                )
+
+    def test_missing_owner_file_is_rejected(self) -> None:
+        for check in (check_ssot_rules, check_task_router_body, check_using_cc_body):
+            with self.subTest(check=check.__name__), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                self.copy_owner_contract(repo)
+                (repo / "coding-convention/systematic-debugging/SKILL.md").unlink()
+
+                findings: list[Finding] = []
+                check(repo, findings)
+
+                self.assertTrue(
+                    any(f.check == "owner-missing" and "systematic-debugging" in f.message for f in findings),
+                    [f.to_dict() for f in findings],
+                )
+
+    def test_missing_owner_heading_is_rejected(self) -> None:
+        for check in (check_task_router_body, check_using_cc_body):
+            with self.subTest(check=check.__name__), tempfile.TemporaryDirectory() as tmp:
+                repo = Path(tmp)
+                self.copy_owner_contract(repo)
+                owner = repo / "coding-convention/systematic-debugging/SKILL.md"
+                owner.write_text(
+                    owner.read_text(encoding="utf-8").replace(
+                        "## Incident accounting and continuation", "## Other section"
+                    ),
+                    encoding="utf-8",
+                )
+
+                findings: list[Finding] = []
+                check(repo, findings)
+
+                self.assertTrue(
+                    any(f.check == "owner-anchor" and "incident-accounting-and-continuation" in f.message
+                        for f in findings),
+                    [f.to_dict() for f in findings],
+                )
 
 
 if __name__ == "__main__":

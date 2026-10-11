@@ -1,35 +1,17 @@
-# Verification detail
+# Verification Patterns
 
-Detail moved out of `verification-before-completion/SKILL.md` for progressive disclosure: worked verification patterns.
+Use these patterns after applying the main skill's evidence selection and reuse decision.
 
-## Verification Patterns
+| Claim | Relevant observation |
+| --- | --- |
+| Target tests passed | Actual output and status from those tests, with target and failures identified. |
+| Regression detects the original defect | Required RED/GREEN evidence from test-driven-development; retained original results remain usable. |
+| Build succeeded | Actual build result for the claimed tree and environment. |
+| Requirements satisfied | A claim-evidence mapping covering each accepted criterion. |
+| Delegated task completed | Inspected target plus criterion-relevant evidence, not the agent's status alone. |
+| Source guidance corrected | Changed instruction and its affected source-contract validation. |
+| Host behavior corrected | Observation of the relevant host execution, beyond source or installation evidence. |
 
-Tests:
+Do not reverse a valid fix solely to recreate existing RED evidence. If the required original failure proof is unavailable, follow test-driven-development’s applicability and RED-evidence instructions within the authorized target, and report which required observation is missing.
 
-```text
-Run the test command, read the result, then claim only the observed result.
-```
-
-Regression tests:
-
-```text
-Write the test -> run and observe pass -> revert or disable the fix -> observe fail -> restore fix -> observe pass.
-```
-
-Builds:
-
-```text
-Run the build command and read exit code 0 before claiming build success.
-```
-
-Requirements:
-
-```text
-Re-read the user intent and contract -> write acceptance criteria -> verify each criterion -> report missing criteria or verified completion.
-```
-
-Agent delegation:
-
-```text
-Read the agent report -> inspect current accessible behavior when needed -> apply the uncertainty gate -> run only a decision-relevant check -> report the supported state.
-```
+The main skill owns [useful-check selection](../SKILL.md#evidence-selection-and-stop-gate). Systematic-debugging owns [incident accounting](../../systematic-debugging/SKILL.md#incident-accounting-and-continuation). A failed diagnostic or unavailable infrastructure does not itself count as a failed corrective round.

@@ -9,7 +9,7 @@ This guide is the command reference for installing, updating, checking, and repa
 
 On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`. This handles PowerShell execution policy blocks and does not change the user or machine execution policy.
 
-## Core and Autopilot together
+## Core and Ghost-ALICE Autopilot together
 
 After cloning this repository, use the platform-auto-detect installation:
 
@@ -72,15 +72,7 @@ Windows Command Prompt and PowerShell use the same official alias through `.\ins
 
 Run this from the Ghost-ALICE core checkout. Normal users do not clone the autopilot addon repository or run an installer inside that repository; the core installer fetches the official addon package. This install example is not a full runtime compatibility claim; read the addon repository `compatibility-matrix.json` before making one.
 
-To install the official addon for one platform only, add `--platform`:
-
-```bash
-bash install.sh --platform codex --addon autopilot
-```
-
-```cmd
-.\install.cmd --platform codex --addon autopilot
-```
+For platform-specific commands, see [Install one official addon to one platform](#install-one-official-addon-to-one-platform).
 
 Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository. The core checkout owns the common install command.
 
@@ -90,7 +82,7 @@ Addon-specific behavior, state files, pause/resume controls, and removal details
 | --- | --- | --- | --- | --- |
 | autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-The recommended product pair is Core `0.4.1` and Autopilot `0.4.1`. Autopilot's technical minimum remains Core `0.4.0` for the shared SQLite runtime. Check the addon compatibility matrix for support boundaries and the [current release notes](../release/2026-10-01-release-notes.md) for verification scope.
+Core `0.5.0` and Ghost-ALICE Autopilot `0.5.0` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.0` or later. Source checks, native runtime validation and publication establish separate evidence.
 
 ## Install One Official Addon To One Platform
 
@@ -118,7 +110,7 @@ For git URL addon sources, `--addon-tag` selects the branch or tag to clone into
 
 ## Install One Platform
 
-The following commands install Core only. Add `--addon autopilot` to include Autopilot for the selected platform.
+The following commands install Core only. Add `--addon autopilot` to include Ghost-ALICE Autopilot for the selected platform.
 
 | Target | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |
@@ -165,15 +157,11 @@ cd %USERPROFILE%\ghost-alice
 .\install.cmd --update-source
 ```
 
-If the checkout is too old to receive that option because raw `git pull` is already blocked by local changes, use the bootstrap updater.
-
-```bash
-cd ~/ghost-alice && git fetch origin main && git show FETCH_HEAD:scripts/bootstrap-source-update.sh | /bin/bash -s --
-```
+If the local installer lacks the update option, follow [bootstrap update recovery](./troubleshooting.md#git-update-recovery).
 
 If source update stops with conflicts, divergent branches, or non-fast-forward state, do not rerun the installer repeatedly. Follow [troubleshooting](./troubleshooting.md) first.
 
-`--update-source` updates the Core source checkout; it does not update the addon package. Reinstall Core and Autopilot together, then check the installed state. The bootstrap updater may reinstall Core only, so follow it with this same paired command.
+`--update-source` updates the Core source checkout; it does not update the addon package. Reinstall Core and Ghost-ALICE Autopilot together, then check the installed state. The bootstrap updater may reinstall Core only, so follow it with this same paired command.
 
 ```bash
 bash install.sh --addon autopilot
@@ -218,7 +206,7 @@ The default profile is `dynamic`. The profile controls how much governance surfa
 
 ### Slash Commands By Platform
 
-Claude Code treats slash commands as a first-class feature. Codex supports built-in slash commands and a custom prompt path, but stable Ghost-ALICE profile changes should use `_shared/agent_visibility_cli.py` when a trusted runtime command is not available.
+Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code workspace command. Codex handles `/visibility` through the trusted `UserPromptSubmit` hook pseudo-command. Use `_shared/agent_visibility_cli.py` to inspect or change the same profile directly when that trusted command path is unavailable.
 
 ### Python Contract
 
@@ -234,7 +222,7 @@ On macOS and other POSIX hosts, installed hooks try `GHOST_ALICE_PYTHON` first, 
 
 ### Node.js Contract
 
-Claude Code and Codex hook-enabled installs require Node.js on `PATH` because the `tool-checkpoint` PreToolUse gate runs `ghost-alice-hook.mjs`. The installer blocks hook installation when the target platform is present but `node` is unavailable.
+Claude Code and Codex hook-enabled installs require a resolvable Node.js runtime because the `tool-checkpoint` PreToolUse gate runs `ghost-alice-hook.mjs`. The installer checks configured runtimes, the platform registration and `PATH`, including the configured Codex runtime fallback. It blocks hook installation only when the target platform requires hooks and no usable Node runtime resolves.
 
 ### Platform Update Behavior
 
@@ -248,6 +236,8 @@ Claude Code and Codex hook-enabled installs require Node.js on `PATH` because th
 
 Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are installer-managed runtime surfaces, so rerun the installer when they change.
 
+Installation on disk and adoption by a running host are separate. After a hook command changes, confirm its native trust entry and observe a subsequent native callback; use the host's reload or full restart controls if it retains the previous registration. See [native hook trust and reload](./troubleshooting.md#native-hook-trust-and-reload). Do not repeat unchanged business verification to check host adoption.
+
 ### Installed Surfaces
 
 A full install deploys:
@@ -260,16 +250,27 @@ A full install deploys:
 - Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
 - Claude Code permission allowlist
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` global bootstrap
-- Codex `~/.codex/AGENTS.md` bootstrap, managed `~/.codex/ghost-alice-governance.md` fallback and project instruction budget in `~/.codex/config.toml`
+- Codex `~/.codex/AGENTS.md` loader and managed `~/.codex/ghost-alice-governance.md` common contract
 - support state for install-state, pending merges, install rollbacks, and uninstall reports
 
 The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving adjacent user text. If the destination is a markerless user-owned file, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
 
-### Codex Governance Contract
+### Common Governance and Project Instructions
 
-The managed `~/.codex/AGENTS.md` bootstrap selects the contract; it is not the complete fallback. If trusted project instructions already supply the complete `# Ghost-ALICE OS Project` contract through mandatory rule 12, use it directly. Otherwise, load the full managed sibling `~/.codex/ghost-alice-governance.md` before actionable work. A heading, excerpt or truncated project contract is insufficient. Missing or unreadable fallback keeps dependent work closed; bounded no-work answers can use the terminal route.
+Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the current-session assistant reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. User instructions and project-specific constraints retain precedence.
 
-The installer manages the full project instruction budget in `~/.codex/config.toml`, preserves user configuration and records rollback state. Status and doctor check the bootstrap, sibling governance file and instruction-budget configuration together. They preserve user-owned files and symlink targets; a proposal is not an installed contract.
+```mermaid
+flowchart LR
+    S["Platform common-contract source"] --> I["Installer replaces owned block"]
+    I --> C["Codex loader + common-contract file"]
+    I --> H["Claude global common-contract block"]
+    C --> M["Model applies common procedures"]
+    H --> M
+    P["Project-specific constraints"] --> M
+    U["User objective and instructions"] --> M
+```
+
+If Codex cannot read the named common file, the assistant reports that missing input and stops only work that requires it. Answers fully supported by supplied conversation can use the loader's tool-free terminal procedure. Status and doctor check the loader and its declared companion together. The installer preserves adjacent user text and markerless user-owned rule files; it refuses to replace a Codex common contract through a symlink. A proposal is not an installed contract. The installer does not change unrelated projects' instruction budgets or rewrite their local rules.
 
 
 ### merge-companion
@@ -300,4 +301,4 @@ See [uninstall cleanup](./uninstall.md) for the full cleanup contract.
 
 When an update is blocked during `git pull`, a merge conflict, or an installer rerun, start with [troubleshooting](./troubleshooting.md).
 
-The same recovery playbook is mirrored in the GitHub Wiki `install-troubleshooting` page for people who cannot pull the repo yet.
+The GitHub Wiki `install-troubleshooting` page links to the online source guide, which can be read without updating a local checkout.

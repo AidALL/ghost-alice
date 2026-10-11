@@ -2,16 +2,16 @@
 
 Language: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/skills.md)
 
-The installable skill catalog source of truth is [skill-catalog/skills.json](../../skill-catalog/skills.json).
+The installable skill catalog source of truth is [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json).
 
 This page is only a pointer for contributors. It should not duplicate the current skill count, skill list, or routing metadata, because those values change in the catalog.
 
 ## Where To Look
 
-- Public skill availability: [skill-catalog/skills.json](../../skill-catalog/skills.json)
-- Session gate routing: [skill-catalog/session-gates.json](../../skill-catalog/session-gates.json)
-- Skill authoring rules: [AGENTS.md](../../AGENTS.md)
-- Compliance checklist: [official-docs/derived/skill-compliance-checklist.md](../../official-docs/derived/skill-compliance-checklist.md)
+- Public skill availability: [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json)
+- Session gate routing: [skill-catalog/session-gates.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/session-gates.json)
+- Skill authoring rules: [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)
+- Compliance checklist: [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md)
 
 ## Update Rule
 

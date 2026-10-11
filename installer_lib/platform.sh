@@ -40,18 +40,6 @@ resolve_ghost_alice_runtime_shared_dir() {
   printf '%s\n' "${GHOST_ALICE_RUNTIME_SHARED_DIR:-${HOME}/.ghost-alice/runtime/current/_shared}"
 }
 
-is_windows_like_runtime() {
-  case "${OSTYPE:-}" in
-    msys*|cygwin*|win32*) return 0 ;;
-  esac
-
-  case "$(uname -s 2>/dev/null || echo "")" in
-    MINGW*|MSYS*|CYGWIN*) return 0 ;;
-  esac
-
-  return 1
-}
-
 codex_prefers_copy_install() {
   if [ "$PLATFORM" != "codex" ]; then
     return 1

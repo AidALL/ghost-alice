@@ -26,7 +26,7 @@ STALE_PATTERNS = [
     "test " + LEGACY_TERM,
 ]
 
-# Legacy skill names intentionally referenced for deprecated-install cleanup, NOT stale current usages. install.sh keeps DEPRECATED_INSTALLED_SKILLS to remove old installs by their original directory name; install.ps1 mirrors that list; and test_installer_default_auto.py verifies the cleanup. These references must keep the old name to find and remove old installs, so they are exempt term-by-term here. (Built from LEGACY_TERM so this file does not trip its own scan.)
+# Exact retired asset names are required cleanup selectors. The installer and its tests use those identifiers to identify managed assets for removal; exempt only those specific technical occurrences.
 ALLOWED_TERM_OCCURRENCES = {
     "install.sh": {LEGACY_TERM + "-security-scan"},
     "install.ps1": {LEGACY_TERM + "-security-scan"},

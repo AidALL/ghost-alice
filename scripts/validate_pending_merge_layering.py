@@ -55,6 +55,9 @@ class LayerCheck:
     pattern: str
     multiline: bool = False
     must_exist: bool = True
+    owner: Path | None = None
+    owner_section: str = ""
+    owner_pattern: str = ""
 
 
 CHECKS: list[LayerCheck] = [
@@ -90,15 +93,21 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-task-router-precheck",
-        description="task-router/SKILL.md includes the pending-merge precheck stage",
+        description="task-router delegates pending-merge intake to the common First-Entry Contract",
         file=REPO / "task-router" / "SKILL.md",
-        pattern=r"1\.0\s+Pending-Merge\s+Precheck",
+        pattern=r"common governance First-Entry Contract.*pending-merge intake order",
+        owner=REPO / "AGENTS.md",
+        owner_section="First-Entry Contract",
+        owner_pattern=r"Reuse the current pending-merge precheck.*rule 0-A",
     ),
     LayerCheck(
         layer="pending-merge-bootstrap-self-check",
-        description="platforms/codex/AGENTS.md contains the self-check section",
+        description="Codex common governance owns the pending-merge self-check",
         file=REPO / "platforms" / "codex" / "AGENTS.md",
-        pattern=r"Pending\s+Skill\s+Merge\s+Self-Check",
+        pattern=r"0-A\. merge-companion Self-Check Gate",
+        owner=REPO / "platforms" / "codex" / "AGENTS.md",
+        owner_section="0-A. merge-companion Self-Check Gate (pending-merge prose-rule layer)",
+        owner_pattern=r"pending-merges/<platform>/manifest\.json[\s\S]*undecided[\s\S]*decided=false",
     ),
     LayerCheck(
         layer="pending-merge-install-tail",
@@ -148,9 +157,12 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="WEB-SEARCH-FIRST",
-        description="install_hooks.py WEB_SEARCH_FIRST_INTERNAL body contains WebSearch",
+        description="web-search reminder delegates its evidence requirement to common Rule 10",
         file=REPO / "_shared" / "install_hooks.py",
-        pattern=r"WEB_SEARCH_FIRST_INTERNAL[\s\S]+?WebSearch",
+        pattern=r'WEB_SEARCH_FIRST_INTERNAL\s*=\s*"[^"\n]*AGENTS\.md Rule 10',
+        owner=REPO / "AGENTS.md",
+        owner_section="10. Mandatory Web Search Before External Tool Claims",
+        owner_pattern=r"official specifications[\s\S]*at least three community searches[\s\S]*source locator",
         multiline=True,
     ),
     LayerCheck(
@@ -161,15 +173,21 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="WEB-SEARCH-FIRST",
-        description="adversarial-verification SKILL.md includes the external-tool web-search-first injection section (web-search-guard-layer-3)",
+        description="adversarial-verification delegates external-tool evidence to its installed owner",
         file=REPO / "adversarial-verification" / "SKILL.md",
-        pattern=r"External Tool Claim Web Search",
+        pattern=r"verification-before-completion[^\n]*`references/external-tool-evidence\.md`",
+        owner=REPO / "coding-convention/verification-before-completion/references/external-tool-evidence.md",
+        owner_section="External Tool Web-Search-First Gate",
+        owner_pattern=r"Category B[\s\S]*at least three WebSearch queries[\s\S]*accessible_url[\s\S]*source-locator",
     ),
     LayerCheck(
         layer="WEB-SEARCH-FIRST",
-        description="verification-before-completion SKILL.md contains the external-tool web-search-first gate section (web-search-guard-layer-4)",
+        description="verification-before-completion links its external-tool evidence owner",
         file=REPO / "coding-convention" / "verification-before-completion" / "SKILL.md",
-        pattern=r"Rule 10|web.?search.?first|external tool claim",
+        pattern=r"\]\(references/external-tool-evidence\.md\)",
+        owner=REPO / "coding-convention/verification-before-completion/references/external-tool-evidence.md",
+        owner_section="External Tool Web-Search-First Gate",
+        owner_pattern=r"Category B[\s\S]*at least three WebSearch queries[\s\S]*accessible_url[\s\S]*source-locator",
     ),
     LayerCheck(
         layer="EVAL",
@@ -182,14 +200,20 @@ CHECKS: list[LayerCheck] = [
         layer="EVAL",
         description="adversarial-verification references the evaluator artifact contract",
         file=REPO / "adversarial-verification" / "SKILL.md",
-        pattern=r"evaluator-artifact-contract\.md[\s\S]+verifier-result\.json",
+        pattern=r"docs/policies/evaluator-artifact-contract\.md",
+        owner=REPO / "docs/policies/evaluator-artifact-contract.md",
+        owner_section="Promotion Rules",
+        owner_pattern=r"read-only evaluator pass must not mutate installed assets[\s\S]*accepted verifier-result[\s\S]*accepted: false[\s\S]*stop installed asset changes",
         multiline=True,
     ),
     LayerCheck(
         layer="EVAL",
         description="verification-before-completion references the evaluator artifact contract",
         file=REPO / "coding-convention" / "verification-before-completion" / "SKILL.md",
-        pattern=r"evaluator-artifact-contract\.md[\s\S]+verifier-result\.json",
+        pattern=r"\]\(references/evaluator-artifacts\.md\)",
+        owner=REPO / "coding-convention/verification-before-completion/references/evaluator-artifacts.md",
+        owner_section="Evaluator Artifact Contract",
+        owner_pattern=r"docs/policies/evaluator-artifact-contract\.md[\s\S]*accepted `verifier-result\.json`[\s\S]*Missing required evidence",
         multiline=True,
     ),
 ]
@@ -200,7 +224,7 @@ def check_layer(c: LayerCheck) -> tuple[bool, str]:
         return False, f"{c.layer}: file missing. {c.file}"
     text = c.file.read_text(encoding="utf-8")
     if c.file.name in ("install.sh", "install.ps1"):
-        # install.sh / install.ps1 are modularized; tail/installer content may now live in installer_lib/*.sh and installer_lib/*.ps1. Scan the combined installer source so install.sh / install.ps1 layer checks find the content.
+        # Scan installer entrypoints and installer_lib modules together for pending-merge layers.
         ext = ".sh" if c.file.name == "install.sh" else ".ps1"
         lib_dir = c.file.parent / "installer_lib"
         if lib_dir.is_dir():
@@ -212,6 +236,19 @@ def check_layer(c: LayerCheck) -> tuple[bool, str]:
         return False, f"{c.layer}: pattern not found. {c.description} ({c.file.relative_to(REPO)})"
     if not c.must_exist and found:
         return False, f"{c.layer}: forbidden pattern found. {c.description} ({c.file.relative_to(REPO)})"
+    if c.owner is not None:
+        if not c.owner.is_file():
+            return False, f"{c.layer}: contract owner missing. {c.owner}"
+        owner_text = c.owner.read_text(encoding="utf-8")
+        heading = re.search(r"^(#{1,6}) " + re.escape(c.owner_section) + r"$", owner_text, re.MULTILINE)
+        if heading is None:
+            return False, f"{c.layer}: contract owner section missing. {c.owner_section}"
+        body = owner_text[heading.end():]
+        following = re.search(r"^#{1," + str(len(heading.group(1))) + r"} ", body, re.MULTILINE)
+        if following:
+            body = body[:following.start()]
+        if not re.search(c.owner_pattern, body, re.MULTILINE):
+            return False, f"{c.layer}: contract owner requirements missing. {c.owner_section}"
     return True, f"{c.layer}: OK. {c.description}"
 
 

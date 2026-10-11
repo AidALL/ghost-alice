@@ -6,248 +6,82 @@ compatibility:
   - "Python 3.11+ standard library"
 ---
 
-# adversarial-verification
+# Adversarial Verification
 
-adversarial-verification validates claims by making independent agents attack the claim, the evidence, and each other's reasoning. It is a cross-cutting governance engine, not a domain-specific optional helper.
+The current-session assistant coordinates this review and uses this skill when governance assigns an evidence-bearing claim to adversarial review. Independent agents challenge the claim, evidence and prior-round reasoning. The coordinating assistant records the verdict and its supported boundary; agreement alone does not establish truth.
 
-Use it when a claim carries real evidence burden: legal, financial, research, grant, patent, investor relations, prior-art, numeric, novelty, consistency, or source-grounded statements.
-## Contents
+## Roles and input
 
-- [Core Principles](#core-principles)
-- [Position In The System](#position-in-the-system)
-- [Input Shape](#input-shape)
-- [Output Shape](#output-shape)
-- [Step 0: Entry Gate](#step-0-entry-gate)
-- [Step 1: Normalize Claim Card](#step-1-normalize-claim-card)
-- [Step 2: Assign Agents](#step-2-assign-agents)
-- [Step 3: Adversarial Rounds](#step-3-adversarial-rounds)
-- [Step 4: Convergence](#step-4-convergence)
-- [Step 4.5: Meta-Judge](#step-45-meta-judge)
-- [Step 5: Return Result](#step-5-return-result)
-- [External Tool Claim Web Search](#external-tool-claim-web-search)
-- [Evaluator Artifact Contract](#evaluator-artifact-contract)
-- [References](#references)
-- [Gotchas](#gotchas)
+The coordinating assistant normalizes claims, supplies evidence/source locators and relevant schema or source-of-truth context, assigns verification burden, and identifies external-tool claims. The coordinating assistant assigns attack roles, enforces the round protocol and returns a verdict. Following a domain procedure does not exempt that assistant from a required governance review.
 
+The coordinating assistant supplies:
 
-## Core Principles
+- claim-card and evidence;
+- schema-context when relevant;
+- verification-complexity: level-1-simple, level-2-evidence-required or level-3-high-stakes;
+- domain-axes;
+- optional consensus-rule: unanimity (default), majority or weighted;
+- optional upstream-note on prior search, experiment or normalization.
 
-1. Easy convergence is suspicious, so every assigned agent must complete the independent attack cycle before convergence is checked; after that cycle, continue only while a decision-relevant uncertainty remains and another round can produce a relevant state delta. Do not continue only to satisfy a round-count minimum.
-2. There is no mediator during normal rounds. Agents attack, respond, and checkpoint against the claim card and evidence. A meta-judge appears only at deadlock.
-3. Concessions must be evidence-bound. The only valid concession shape is: "my evidence X was specifically defeated by opposing evidence Y."
-4. Three agents are the minimum for attack diversity. Two agents collapse too easily into attacker/defender roles.
-5. Unresolved disagreement fails closed to deadlock/escalation unless the configured consensus rule is satisfied.
-6. This skill is cross-cutting and injected by the governance layer. A domain skill does not choose whether to use it. Any claim that carries a verification grade must pass through this skill, and the choice belongs to the governance layer.
-7. Cost is controlled at the entry gate, not by weakening the adversarial round once a claim is admitted.
+## Entry gate
 
-## Position In The System
+The coordinating assistant admits claims marked required/recommended for verification, claims using external documents/legal conditions/numbers or sources outside approved context, and claims of guarantees, compatibility, novelty, prior-art difference, reproducibility, theoretical result or experimental effect.
 
-Caller responsibilities:
+Before spawning agents, the coordinating assistant applies the existing bypass conditions:
 
-- normalize claim units
-- provide evidence and source locators
-- provide schema or SSOT context when needed
-- decide which claims carry verification burden
-- inject external-tool web-search requirements when Category B or C claims are present
+- Level 1 uses evidence precheck only: accept when sufficient evidence exists; otherwise reject or escalate.
+- A self-identical fixed fact, plan, question/non-assertive statement or internal calculation for which external comparison is irrelevant returns accept with zero rounds.
 
-This skill responsibilities:
+The entry gate controls cost. After admission, the coordinating assistant must not reduce required attack diversity because the result seems obvious or expensive.
 
-- assign adversarial roles
-- run structured adversarial rounds
-- enforce convergence rules
-- return `accept`, `reject`, or `escalate`
-- preserve the surviving claim boundary and required assumptions
+## Normalize the claim
 
-## Input Shape
+The claim-card includes claim-id, claim-text, claim-type (`empirical | theoretical | methodological | composition | prior-art`), claim-shape (fact/logic/mixed), abstraction-level (`theory | method | experiment | system | product`), guarantees, non-guarantees, assumptions, possible-conflicts, evidence-list and owner-approval-flag.
 
-- `claim-card`: one normalized claim
-- `evidence`: source links, citations, local locators, or logical chains
-- `schema-context`: caller-provided schema or SSOT snapshot
-- `verification-complexity`: `level-1-simple | level-2-evidence-required | level-3-high-stakes`
-- `domain-axes`: applicable domain axes
-- `consensus-rule`: optional, `unanimity | majority | weighted`; default is `unanimity`
-- `upstream-note`: optional note about prior search, experiment, or normalization scope
+The coordinating assistant rejects an empty evidence-list, removes inaccessible evidence and rejects if none remains. For theoretical/composition/prior-art claims, missing guarantees, non-guarantees or assumptions requires escalation. An unclear abstraction level also requires escalation.
 
-## Output Shape
+Every web source includes accessible_url, the supported finding/value and source-locator.source_type=web. Local/attached sources include file_path or filename, page, region (`top | middle | bottom | n/a`) and locator_note when needed. Numbers, tables, figures and source claims require exact locators.
 
-- `verdict`: `accept | reject | escalate | escalate-human`
-- `surviving-claim`: the narrow claim that survived attack
-- `required-assumptions`: assumptions that remain required
-- `guarantee-boundary`: what the claim does and does not guarantee
-- `rounds-log`: all attacks and responses
-- `retracted-claims`: claims withdrawn during rounds
-- `escalation-issues`: unresolved issues for a human decision
+## Assign independent agents
 
-## Step 0: Entry Gate
+Level 2 uses three agents: internal-logic, external-fact and internal-fact. Level 3 adds two distinct roles selected from external-logic, edge-case, prior-art and incentive according to the claim and domain. `references/agent-roles.md` defines their axes and assignment constraints.
 
-Admit a claim if any condition is true:
+Each assigned review assistant attacks the claim on its assigned axis or explicitly reports no attack point with a reason. It may challenge another agent's prior-round verdict on any axis. Silence is not a verdict. Research review distinguishes guarantees from non-guarantees, tests assumptions and abstraction levels, checks composition interfaces and challenges inflated first/only novelty wording.
 
-- claim has verification metadata marked required or recommended
-- claim includes external documents, legal conditions, or numeric claims
-- claim references information outside caller-approved source context
-- claim asserts guarantees, state-of-the-art status, theory, component compatibility, novelty, prior-art difference, reproducibility, or experimental effect
+## Run and judge rounds
 
-Reject or bypass adversarial rounds when:
+The coordinating assistant follows [the round protocol and host dispatch procedure](references/round-protocol.md#dispatch-and-collect-through-the-host), supplying the complete role assignment and retaining each returned agent handle with its axis. The round protocol defines first-cycle participation and affected-axis follow-up. Assigned agents receive the same current claim context without access to peers' current-cycle submissions.
 
-- `verification-complexity=level-1-simple`
-- the claim is a self-identical fixed fact
-- the claim is only a plan, question, or non-assertive statement
-- caller-internal calculation makes external comparison irrelevant
+After each cycle, the proponent may supply new evidence. An absent response supplies no new evidence, not automatic rejection. The coordinating assistant runs the mandatory utterance audit and performs a schema/source-of-truth checkpoint only when new evidence, changed schema or an observed mismatch can affect the verdict. The checkpoint supplies factual attack material; it does not mediate.
 
-For `level-1-simple`, perform evidence precheck only. Return `accept` when evidence exists, otherwise `reject` or `escalate`.
+The coordinating assistant retains each locator, assumption and guarantee while updating the claim-card. A response that changes none of the surviving claim, assumptions or evidence is no new evidence. Repeated attacks without a new distinction require claim narrowing or escalation rather than paraphrased no-op rounds. Deleted source evidence or a material schema change produces escalate.
 
-For the other bypass conditions, a self-identical fixed fact, a plan or non-assertive statement, or a caller-internal calculation, return `accept` immediately with zero rounds.
+After collecting the required submissions, apply [convergence-rules.md](references/convergence-rules.md). Return its accepted/rejected boundary, continue only for its decision-relevant partial state, or use the deadlock handoff below.
 
-## Step 1: Normalize Claim Card
+## Deadlock and output
 
-Required fields:
+At deadlock, including the cap, the coordinating assistant delegates the dispute-summary subtask to a review assistant called the meta-judge. The meta-judge does not decide the claim. It reports agreed and unresolved subclaims, each issue, supporting evidence and final attack by side, deadlock cause, and missing information or user-owned decisions. The coordinating assistant retains a factual disagreement as unresolved with verdict `escalate`; lack of convergence cannot become acceptance. It asks the user only when the next action needs missing human authorization or a user-owned choice, using `escalate-human` for that condition. A human choice determines authorized action or scope, not factual support. The assistant preserves unmet claim criteria and continues independent authorized work.
 
-- `claim-id`
-- `claim-text`
-- `claim-type`: `empirical | theoretical | methodological | composition | prior-art`
-- `claim-shape`: fact, logic, or mixed
-- `abstraction-level`: `theory | method | experiment | system | product`
-- `guarantees`
-- `non-guarantees`
-- `assumptions`
-- `possible-conflicts`
-- `evidence-list`
-- `owner-approval-flag`
-
-Evidence precheck:
-
-- Empty `evidence-list` means `verdict=reject`.
-- Inaccessible evidence is removed.
-- If all evidence is removed, return `reject`.
-- If `claim-type` is `theoretical`, `composition`, or `prior-art` and `guarantees`, `assumptions`, or `non-guarantees` are missing, return `escalate`.
-- If `abstraction-level` is unclear, return `escalate`.
-
-Source-locator requirements:
-
-- Web source: `accessible_url`, finding/value, and `source-locator.source_type=web`.
-- Local or attached source: `file_path` or filename, `page`, `region`, and `locator_note` when needed.
-- `region` enum: `top | middle | bottom | n/a`.
-- Numeric values, tables, figures, and source claims need exact locators.
-
-## Step 2: Assign Agents
-
-`verification-complexity-level-2` uses 3 agents:
-
-- `agent-C-internal-logic`
-- `agent-C-external-fact`
-- `agent-C-internal-fact`
-
-`verification-complexity-level-3` uses those 3 plus 2 selected from:
-
-- `agent-C-external-logic`
-- `agent-C-edge-case`
-- `agent-C-prior-art`
-- `agent-C-incentive`
-
-Each agent must attack from its axis or explicitly declare "no attack point". Silence is not allowed. Agents may attack other agents' verdicts from any axis.
-
-For a research claim, each agent especially checks:
-
-- guarantees mixed with non-guarantees
-- assumptions weaker than the conclusion, or missing
-- different abstraction levels merged to exaggerate a result
-- a composition claim that hides an interface conflict between parts
-- novelty inflated with "first" or "only" wording
-
-## Step 3: Adversarial Rounds
-
-- One round means every agent speaks once against the same round context.
-- Each response contains an attack on the claim or "no attack point", plus optional meta-attack on previous agent claims.
-- The human proponent or caller may add evidence after each round. If no response is available, the initial evidence stays fixed.
-- Run one complete independent attack cycle, then apply the convergence rules immediately.
-- Continue only while a live decision-relevant uncertainty exists and another attack, response, or evidence check can produce a relevant state delta. Do not continue only to satisfy a round-count minimum.
-- Use a finite safety cap of 50 rounds; at the cap, stop and escalate.
-- Checkpoint the claim-card and evidence-list against schema and SSOT when new evidence, a changed schema, or a detected mismatch can affect the verdict or surviving-claim. The checkpoint does not mediate; it only feeds a decision-relevant mismatch into the next attack round. Switch the verdict to `escalate` when evidence was deleted from the SSOT or the schema changed materially.
-
-Decision-relevant checkpoint when triggered, before the attacks:
-
-- Re-collate the claim-card against the evidence-list and confirm no locator, guarantee, or assumption went missing.
-- After a proponent response, check whether the new evidence actually changes the surviving-claim or the required-assumptions. If it does not, treat the round as no new evidence.
-- If the same attack repeats, do not just reword it. Shrink the claim-card or switch to escalation.
-
-The full speech constraints live in `references/round-protocol.md`.
-
-## Step 4: Convergence
-
-- `convergence-accept`: every assigned agent completed the independent attack cycle, all report no new attack point or eligible meta-attack, the consensus rule passes, and no unresolved decision-relevant uncertainty or relevant state delta remains.
-- `convergence-reject`: a decisive attack remains unanswered, the proponent supplies no decision-relevant new evidence, and the applicable consensus rule supports rejection.
-- `convergence-judge-deadlock`: the finite safety cap is reached, or agents report no new attack point and no relevant state delta while verdicts still conflict.
-- `convergence-partial`: a named decision-relevant uncertainty remains and another round can produce a relevant state delta; continue rounds.
-
-Unresolved disagreement fails closed to `convergence-judge-deadlock`; never spend no-op rounds hoping a split verdict changes without new evidence or attack material.
-
-"No attack point" means no semantically novel attack remains, not that an agent is unwilling to attack further.
-
-No majority vote is used unless the caller explicitly configured it.
-
-## Step 4.5: Meta-Judge
-
-The meta-judge appears only at deadlock and has no decision authority. At the round cap it must appear, because silently escalating a deadlock without it abdicates the verdict duty. It writes a `deadlock-report`:
-
-- agreed subclaims
-- unresolved subclaims
-- one-sentence issue summary for each deadlock
-- final supporting evidence by side
-- final attack by side
-- deadlock cause: missing evidence, evidence interpretation, domain expertise, value judgment, or other
-- information or human judgment needed
-
-Allowed meta-judge wording: "Issue X is deadlocked. Support uses evidence Y. Opposition attacks with Z. Cause is W. Human decision required."
-
-After the deadlock-report, the verdict becomes `escalate-human`. The caller relays the report to a human and records the final accept or reject. This skill does not collect the human decision; the human interface is the caller's responsibility.
-
-## Step 5: Return Result
-
-For `accept`, return the surviving claim, required assumptions, guarantee boundary, and rounds log.
-
-For `reject`, return retracted claims and rejection reasons.
-
-For `escalate`, return structured escalation issues and required missing fields or decisions.
-
-## External Tool Claim Web Search
-
-For Category B or C claims about external tools, libraries, CLIs, SDKs, frameworks, versions, or platform behavior, inject this requirement into every adversarial agent prompt:
+The returned record uses:
 
 ```text
-Identify Category B/C external-tool claims. For each, run at least three
-independent community-report searches: `<tool> github issue <year>`,
-`<tool> reddit`, and `<tool> not working <version>`. Cite accessible URLs and
-source-locators. Treat official-doc-only evidence as an unverified echo.
+verdict: accept | reject | escalate | escalate-human
+surviving-claim: <supported narrowed claim>
+required-assumptions: <remaining assumptions>
+guarantee-boundary: <what the claim guarantees and excludes>
+rounds-log: <full log locator and summary>
+retracted-claims: <withdrawn claims>
+escalation-issues: <unresolved fields or human decisions>
 ```
 
-Without this injection, the adversarial result is not trusted for those claims.
+For reject, include rejection reasons and retracted claims. For escalate, identify missing fields/evidence/decisions. For accept, retain the surviving claim and its assumptions rather than endorsing the original overbroad wording.
 
-## Evaluator Artifact Contract
+## External-tool and evaluator requirements
 
-For `verification-complexity-level-3` and higher, external governance logic absorption, or RAG/evaluator-based candidate promotion, apply `docs/policies/evaluator-artifact-contract.md`.
+For material external-tool claims, the coordinating assistant loads verification-before-completion's `references/external-tool-evidence.md` from the installed skill and supplies its applicable category, evidence requirements and exact claim scope in each reviewer assignment. That reference owns query patterns and source-locator fields.
 
-Required artifact set:
-
-- `scenario.json`
-- `trace.json`
-- `report.json`
-- `candidate-playbook.md`
-- `verifier-result.json`
-
-Read-only evaluator passes do not modify installed assets. Do not promote a candidate without an accepted verifier result. At least one rejected candidate must exist to prove the verifier can say no.
-
-## References
-
-- `references/agent-roles.md`
-- `references/round-protocol.md`
-- `references/convergence-rules.md`
+For level-3 evaluation, external governance absorption or evaluator candidate promotion, follow `docs/policies/evaluator-artifact-contract.md` for its required artifacts and accepted result. The coordinating assistant retains the returned verifier result and its supported scope; this skill does not redefine the evaluation protocol.
 
 ## Gotchas
 
-- Do not skip Step 0; otherwise cost explodes.
-- `verification-complexity-level-1` never enters adversarial rounds.
-- Do not continue only to satisfy a round-count minimum; stop or escalate as soon as the decision-relevant convergence gate resolves.
-- Do not assign two agents to the same axis.
-- Agent agreement is not truth if speech constraints were ignored.
-- Separate `guarantees` and `non-guarantees` or the round becomes wording debate.
-- Do not mix theory, experiment, and system guarantees in one claim.
+The coordinating assistant must not skip the entry gate, put level 1 into rounds, duplicate an attack axis, infer truth from unaudited agreement, or merge theory/experiment/system guarantees into one unsupported claim. Concessions must identify which evidence or attack was defeated and how; pressure to finish is not evidence.

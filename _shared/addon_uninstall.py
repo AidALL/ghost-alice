@@ -36,7 +36,6 @@ import json
 import os
 import shutil
 import stat
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -317,8 +316,7 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -
     """Remove (or, in dry-run, preview) the addon's observational hooks by exact marker.
 
     Hook markers are recorded top-level in the sidecar (kind not in provided[]); each
-    is stripped from the platform hook config via install_hooks.remove_addon_hook
-    (plan Phase 4 / addon-hook-uninstall-cleanup). Best-effort: a hook already gone
+    is stripped from the platform hook config via install_hooks.remove_addon_hook. Best-effort: a hook already gone
     is reported "missing", never blocks the uninstall.
     """
     specs = record.get("hooks")
@@ -398,7 +396,7 @@ def uninstall_addon(
     *,
     addons_dir: str | os.PathLike[str],
     allowed_roots: list[Path],
-    platform: str = "claude",  # reserved for future per-platform scoping; sidecars record absolute targets
+    platform: str = "claude",  # selects hook removal and install/pending-state cleanup
     confirm: bool = True,
 ) -> dict[str, Any]:
     """Uninstall one addon. Returns a report dict with status + per-target items.
@@ -428,7 +426,7 @@ def uninstall_addon(
     if confirm:
         _write_marker(marker, addon_id, provided)  # intent marker BEFORE any removal
 
-    # Adapter entries are intentionally excluded from the hash-gated file removal below. A privileged adapter's script lives inside its owning skill directory, so the skill target is the file deletion unit and the adapter entry is an install-time integrity/ownership snapshot (T0.3), not a second uninstall-time delete gate. If the skill target is fully removable, its own hash gate covers the adapter script along with the rest of the skill tree. If the skill target is blocked for manual review, the script stays with it. In both cases only the adapter HOOK is removed here, by exact marker, via _adapter_hook_items.
+    # Adapter entries are intentionally excluded from the hash-gated file removal below. A privileged adapter's script lives inside its owning skill directory, so the skill target is the file deletion unit and the adapter entry is an install-time integrity/ownership snapshot, not a second uninstall-time delete gate. If the skill target is fully removable, its own hash gate covers the adapter script along with the rest of the skill tree. If the skill target is blocked for manual review, the script stays with it. In both cases only the adapter HOOK is removed here, by exact marker, via _adapter_hook_items.
     file_targets = [entry for entry in provided if entry.get("kind") != "adapter"]
     items = [_process_target(entry, allowed_roots=allowed_roots, confirm=confirm) for entry in file_targets]
     blocked = [item for item in items if item["action"] in _BLOCKED_ACTIONS]
@@ -443,7 +441,7 @@ def uninstall_addon(
         hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
         return {"addon_id": addon_id, "status": "partial", "items": items + hook_items}
 
-    # Fully removable: strip the addon's observational hooks from the platform config (plan Phase 4) before deleting the sidecar that records their markers.
+    # Fully removable: strip the addon's observational hooks from the platform config before deleting the sidecar that records their markers.
     hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
     addon_registry.remove_record(addon_id, addons_dir=addons_dir)  # sidecar deleted LAST
     _prune_install_state(addon_id, addons_dir=addons_dir, platform=platform)

@@ -1,18 +1,11 @@
 #!/usr/bin/env python3
 """audit_wiki_integrity.py. Report-only structural integrity audit for the Wiki.
 
-The project Wiki (`<repo>.wiki.git`) is a named design surface: architecture.md
-states "Long-form design background lives in the Wiki", and the Wiki design page
-names the main repository as the executable-contract SSOT. Unlike every
-repo-internal doc surface, the Wiki is a separate repository not covered by the
-repo test suites, so drift stays invisible until a human rereads every page.
-
-This audit closes that gap with DETERMINISTIC, low-false-positive structural
-checks only. It deliberately does NOT attempt prose, skill-name, or path-content
-drift detection, which was shown to over-flag. It is report-only (no edits, no
-runtime deny path); it exits non-zero when findings exist so it can run as a
-local or CI audit, but it is intentionally not wired into the repo merge gate
-because the Wiki lives in a separate repository.
+The Wiki is a separate checkout containing guides and links to the canonical
+repository contracts. This command checks local wiki page links and language
+pairs. It does not validate architecture prose, runtime behavior or remote
+publication state. Findings produce a nonzero exit status; the audit neither
+edits pages nor controls runtime permission.
 
 Checks:
 - broken-link : a [text](Target) link pointing at a non-existent wiki page.

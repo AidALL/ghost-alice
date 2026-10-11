@@ -164,21 +164,20 @@ class PublicCommandSurfaceTest(unittest.TestCase):
             self.skipTest("set GHOST_ALICE_WIKI_DIR or place ghost-alice.wiki next to the repo")
         self.assertEqual([], _scan_files(_markdown_files(wiki), self.PUBLIC_DOC_FORBIDDEN_PATTERNS))
 
-    def test_wiki_docs_include_windows_native_wrapper_examples_when_available(self) -> None:
+    def test_wiki_install_pages_reach_canonical_windows_commands_when_available(self) -> None:
         wiki = _wiki_root()
         if wiki is None:
             self.skipTest("set GHOST_ALICE_WIKI_DIR or place ghost-alice.wiki next to the repo")
-        requirements = {
-            wiki / "team-onboarding.md": r".\install.cmd --addon autopilot",
-            wiki / "team-onboarding_ko.md": r".\install.cmd --addon autopilot",
-            wiki / "windows-install-tips.md": r".\install.cmd --addon autopilot",
-            wiki / "windows-install-tips_ko.md": r".\install.cmd --addon autopilot",
-        }
-        missing: list[str] = []
-        for path, phrase in requirements.items():
-            if phrase not in path.read_text(encoding="utf-8"):
-                missing.append(f"{path.relative_to(REPO_ROOT.parent)} missing {phrase!r}")
-        self.assertEqual([], missing)
+        for page in ("team-onboarding", "windows-install-tips"):
+            for language in ("", "_ko"):
+                path = wiki / f"{page}{language}.md"
+                guide = f"docs/{'ko/' if language else ''}getting-started/installation.md"
+                with self.subTest(page=path.name):
+                    self.assertIn(
+                        "https://github.com/AidALL/ghost-alice/blob/main/" + guide,
+                        path.read_text(encoding="utf-8"))
+                    self.assertIn(r".\install.cmd --addon autopilot",
+                                  (REPO_ROOT / guide).read_text(encoding="utf-8"))
 
     def test_autopilot_docs_avoid_powershell_style_installer_command_surface_when_available(self) -> None:
         autopilot = _autopilot_root()

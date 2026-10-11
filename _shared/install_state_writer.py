@@ -1,36 +1,13 @@
-import hashlib
 import json
 import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from hash_utils import hash_target
 
 
 def as_posix(path):
     return Path(path).as_posix()
-
-
-def hash_target(path, install_mode):
-    target = Path(path)
-    if install_mode in {"symlink", "junction"}:
-        try:
-            link_target = os.readlink(target)
-        except OSError:
-            link_target = as_posix(path)
-        return hashlib.sha256(f"link:{link_target}".encode("utf-8")).hexdigest()
-    if install_mode == "missing" or not target.exists():
-        return "missing"
-    if target.is_file():
-        return hashlib.sha256(target.read_bytes()).hexdigest()
-
-    digest = hashlib.sha256()
-    for child in sorted(p for p in target.rglob("*") if p.is_file()):
-        rel = child.relative_to(target).as_posix()
-        digest.update(rel.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(child.read_bytes())
-        digest.update(b"\0")
-    return digest.hexdigest()
 
 
 def managed_markers(name, source_path, dest_path):
@@ -62,18 +39,18 @@ for offset in range(0, len(raw_targets), 4):
         }
     )
 
-# Derived aggregate (plan T1.4/T1.5): enrich/append addon targets from the cumulative per-addon sidecar scan. Separate-run addons persist because they are read from their own sidecars, not from this run's argv. This is a full rebuild, never a read-modify-write of the shared manifest. Fail-safe: if the registry is unavailable the install-state degrades to the core-only argv targets.
+# Derived aggregate: enrich/append addon targets from the cumulative per-addon sidecar scan. Separate-run addons persist because they are read from their own sidecars, not from this run's argv. This is a full rebuild, never a read-modify-write of the shared manifest. Fail-safe: if the registry is unavailable the install-state degrades to the core-only argv targets.
 try:
     import addon_registry
 
-    # Platform-scoped (review M5): each platform owns ~/.ghost-alice/addons/<platform>/ so the same addon installed on claude and codex keeps independent records and this aggregate never picks up the other platform's targets.
+    # Platform-scoped: each platform owns ~/.ghost-alice/addons/<platform>/ so the same addon installed on claude and codex keeps independent records and this aggregate never picks up the other platform's targets.
     addons_dir = Path(state_path).resolve().parent.parent / "addons" / platform
     sidecar_records, sidecar_skipped = addon_registry.scan_records(addons_dir=addons_dir)
 except Exception:
     sidecar_records, sidecar_skipped = [], []
 
 if sidecar_skipped:
-    # Fail-closed: do NOT overwrite install-state with a success manifest that would silently hide an unreadable / tampered / future-major sidecar. Emit a registry-health diagnostic and abort so the drop is visible (plan T1.4/T1.5).
+    # Fail-closed: do NOT overwrite install-state with a success manifest that would silently hide an unreadable / tampered / future-major sidecar. Emit a registry-health diagnostic and abort so the drop is visible.
     health_path = Path(state_path).with_name(f"{platform}-registry-health.json")
     try:
         health_path.parent.mkdir(parents=True, exist_ok=True)

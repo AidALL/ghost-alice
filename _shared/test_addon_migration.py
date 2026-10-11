@@ -1,6 +1,5 @@
-"""TDD for plan tasks T1.6/T1.7/T1.8: read-only migration audit of an existing
-install-state, seed sidecars ONLY when attribution is unambiguous, and write
-unattributable targets to _migration-report.json (never fabricate ownership).
+"""Read-only install-state attribution checks. Seed sidecars only for unambiguous
+addon identity and report unresolved targets without inventing ownership.
 
 Run: python3 -m pytest _shared/test_addon_migration.py -q
 """

@@ -1,8 +1,8 @@
 """Tests for completion_check_validator.
 
-These cover the deny conditions and ordering of `validate_completion_text`: the
-claim-evidence-map honesty core (claim + evidence + verdict, unverified=none) is
-always required, while the separate acceptance-criteria enumeration is optional.
+These cover structural rejection and ordering in `validate_completion_text`,
+including compact full-control compatibility. Native proof acceptance also
+requires the owning Core assessment; parser acceptance alone is not completion.
 """
 
 import importlib.util
@@ -65,7 +65,7 @@ class LooksLikeCompletionClaimTest(unittest.TestCase):
         self.assertTrue(MOD.looks_like_completion_claim("[completion-check]\n- x"))
 
     def test_keyword_in_prose_without_marker_is_not_a_claim(self) -> None:
-        # Claim detection is marker-only: prose completion keywords and generic success-criteria phrases do NOT make a claim. Only the explicit [completion-check] marker does. The model declares its own claims.
+        # This marker helper detects explicit completion controls only. Native routing also checks executed-work assertions through requires_completion_check.
         self.assertFalse(MOD.looks_like_completion_claim("The build is done."))
         self.assertFalse(MOD.looks_like_completion_claim("work complete"))
         self.assertFalse(MOD.looks_like_completion_claim("I recommend option A."))
@@ -75,7 +75,7 @@ class LooksLikeCompletionClaimTest(unittest.TestCase):
         self.assertFalse(MOD.looks_like_completion_claim("Here is some neutral text about cats."))
 
     def test_done_only_inside_control_blocks_is_not_a_claim(self) -> None:
-        # No [completion-check] marker -> not a claim (marker-only detection). The "done" words inside other control blocks are irrelevant; only the marker counts.
+        # Other control blocks do not count as explicit completion markers for this helper.
         text = (
             "[tool-checkpoint]\n"
             "- verification-before-completion: done\n"
@@ -194,7 +194,7 @@ class ValidateCompletionResponseTest(unittest.TestCase):
     def test_explanatory_final_response_does_not_require_completion_check(self) -> None:
         reason = MOD.validate_completion_text(
             "Here is what happened: the hook treated a routine answer as closure.",
-            require_completion_check=True,
+            require_completion_check=False,
         )
 
         self.assertIsNone(reason)
@@ -210,44 +210,39 @@ class ValidateCompletionResponseTest(unittest.TestCase):
         self.assertIsNotNone(reason)
         self.assertIn("[completion-check]", reason)
 
-    def test_missing_verification_before_completion_done(self) -> None:
+    def test_missing_verification_audit_does_not_change_evidence_structure(self) -> None:
         text = VALID_TEXT.replace("- verification-before-completion: done\n", "")
         reason = MOD.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("verification-before-completion: done", reason)
+        self.assertIsNone(reason)
 
-    def test_skill_call_missing(self) -> None:
+    def test_skill_call_audit_is_optional(self) -> None:
         text = VALID_TEXT.replace(
             "- skill-call: verification-before-completion (this turn)\n", ""
         )
         reason = MOD.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("verification-reminder", reason)
+        self.assertIsNone(reason)
 
-    def test_skill_call_without_verification_skill(self) -> None:
+    def test_skill_call_audit_does_not_establish_or_block_evidence(self) -> None:
         text = VALID_TEXT.replace(
             "- skill-call: verification-before-completion (this turn)\n",
             "- skill-call: task-router (this turn)\n",
         )
         reason = MOD.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("verification-reminder", reason)
+        self.assertIsNone(reason)
 
-    def test_missing_io_trace(self) -> None:
+    def test_missing_io_trace_is_allowed(self) -> None:
         # Remove the whole [io-trace] block (last block in VALID_TEXT).
         text = VALID_TEXT.split("[io-trace]")[0]
         reason = MOD.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("[io-trace]", reason)
+        self.assertIsNone(reason)
 
-    def test_io_trace_skills_loaded_missing_verification(self) -> None:
+    def test_optional_trace_skills_do_not_gate_completion(self) -> None:
         text = VALID_TEXT.replace(
             "- skills-loaded: [verification-before-completion]\n",
             "- skills-loaded: [task-router]\n",
         )
         reason = MOD.validate_completion_text(text)
-        self.assertIsNotNone(reason)
-        self.assertIn("skills-loaded", reason)
+        self.assertIsNone(reason)
 
     def test_compact_form_without_acceptance_criteria_is_accepted(self) -> None:
         # Compact form: no acceptance-criteria enumeration, but the claim-evidence-map still binds each claim to evidence and a verdict.

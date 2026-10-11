@@ -25,8 +25,8 @@ Schema:
   }
 }
 
-The legacy "files" mapping is intentionally retained. Existing installers and
-tests read that key directly, while newer diff code uses file_records.
+The "files" mapping supplies path hashes; file_records supplies structured
+metadata. Both fields are part of the snapshot contract.
 
 Note on symlinks:
 file_hash opens and reads the target. Symlinks are followed (correct: we hash

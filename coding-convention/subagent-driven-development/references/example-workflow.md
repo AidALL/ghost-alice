@@ -1,75 +1,14 @@
-# Subagent-Driven Development Example Workflow
+# Delegated Development Example
 
-This file is a reference that splits out the long example from `subagent-driven-development/SKILL.md`.
+This illustrative sequence shows evidence handoffs. Its labels and numbers are not actual results.
 
-```text
-You: Execute this plan with Subagent-Driven Development.
+1. The parent assistant reads the accepted plan, retains each task and establishes the permitted checkout and write scope.
+2. The first implementer receives the complete hook-install task and asks whether installation is user-level. The parent assistant answers from the accepted user-level requirement.
+3. The implementer returns the diff, exact regression output, original evidence locator and accessed paths. The status label alone does not complete the task.
+4. The specification reviewer inspects the code and maps user-level placement and required flags to source and test evidence.
+5. The quality reviewer inspects the same target after specification compliance. The parent assistant resolves valid blocking findings and marks the task complete only after both reviews are supported.
+6. For the second task, specification review finds missing required progress reporting and an unrequested output flag. The implementer corrects those behaviors; the reviewer checks the changed conditions.
+7. A quality reviewer suggests extracting the reporting interval. The parent assistant evaluates whether this is a real requirement or advisory style preference rather than treating every suggestion as blocking.
+8. After all tasks satisfy their criteria, the parent assistant obtains combined review and invokes finishing-a-development-branch for the authorized integration choice.
 
-[Read the plan file once: .tmp/implementation-plans/feature-plan.md]
-[Extract the full text and context of all 5 tasks]
-[Create a TodoWrite with every task]
-
-Task 1: hook install script
-
-[Bring in the Task 1 text and context (already extracted)]
-[Dispatch an implementation subagent with the full task text + context]
-
-Implementer: "Before I start, do I install the hook at the user level or the system level?"
-
-You: "User level (~/.config/coding-convention/hooks/)"
-
-Implementer: "Understood. Implementing..."
-[Later] Implementer:
-  - Implemented the install-hook command
-  - Added tests, 5/5 passing
-  - Self-review: found the --force flag was missing, added it
-  - Committed
-
-[Dispatch the spec-compliance reviewer]
-Spec reviewer: OK: spec compliant. All requirements met, nothing extra.
-
-[Obtain the git SHA, dispatch the code-quality reviewer]
-Code reviewer: Strengths: good test coverage, clean. Issues: none. Approved.
-
-[Mark Task 1 complete]
-
-Task 2: recovery mode
-
-[Dispatch the implementer]
-Implementer: [proceeds without questions]
-Implementer:
-  - Added verify and repair modes
-  - 8/8 tests passing
-  - Self-review: all good
-  - Committed
-
-[Dispatch the spec-compliance reviewer]
-Spec reviewer: FAIL: issues:
-  - Missing: progress reporting (the spec says "report every 100 items")
-  - Extra: --json flag (not requested)
-
-[Implementer fixes the issues]
-Implementer: removed the --json flag, added progress reporting
-
-[Spec reviewer re-reviews]
-Spec reviewer: OK: now spec compliant
-
-[Dispatch the code-quality reviewer]
-Code reviewer: Strengths: solid. Issues (Important): magic number (100)
-
-[Implementer fixes]
-Implementer: extracted the PROGRESS_INTERVAL constant
-
-[Code reviewer re-reviews]
-Code reviewer: OK: approved
-
-[Mark Task 2 complete]
-
-...
-
-[After all tasks]
-[Dispatch the final code-reviewer]
-Final reviewer: all requirements met, ready to merge
-
-Done!
-```
+Verification-before-completion governs final claims. Neither the implementer's “done” nor the final review's “approved” proves remote CI, merge, installation or delivery.

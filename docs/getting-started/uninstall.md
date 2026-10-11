@@ -67,6 +67,8 @@ Uninstall reads `targets` and `system_env_changes` from these manifests. If a ma
 
 ## Cleanup Order
 
+The uninstall command performs these steps for the selected removal scope:
+
 1. Remove platform hook settings.
 2. Remove Codex bootstrap or global-rule managed blocks.
 3. Restore the source repository `core.hooksPath` only if Ghost-ALICE set it.
@@ -74,7 +76,7 @@ Uninstall reads `targets` and `system_env_changes` from these manifests. If a ma
 5. Remove support state such as install-state manifests, install-state events, Codex hook feature rollback metadata, pending merge queues, installed hook dispatcher assets, and install rollbacks.
 6. Write a report under `~/.ghost-alice/uninstall-reports/`.
 
-The uninstall report directory and privacy-sensitive local files such as `~/.ghost-alice/secrets.env` are preserved unless a future explicit purge mode is added. Runtime audit traces such as `~/.ghost-alice/io-trace.jsonl` are treated as local audit records rather than install targets.
+The uninstall report directory and privacy-sensitive local files such as `~/.ghost-alice/secrets.env` are preserved. Runtime audit traces such as `~/.ghost-alice/io-trace.jsonl` are treated as local audit records rather than install targets.
 
 ## Recovery Principles
 
@@ -87,11 +89,6 @@ The uninstall report directory and privacy-sensitive local files such as `~/.gho
 
 `system_env_changes` is an array of environment changes applied by the installer. Uninstall rolls back an entry only when that entry has `before`/`after` values or rollback metadata.
 
-The current implementation emits `source_repo_hook_path`, `codex_hooks_feature_flag`, and `codex_project_trust`. The other `kind` values are reserved schema slots and are not active rollback coverage until their install-recording and uninstall-rollback tests exist.
-
-- current: `source_repo_hook_path`
-- current: `codex_hooks_feature_flag`
-- current: `codex_project_trust`
-- reserved: `ps_policy_change`, `posix_rc_change`, `macos_quarantine_fix`, `posix_chmod_fix`
+The installer records `source_repo_hook_path`, `codex_hooks_feature_flag`, and `codex_project_trust`. Each has a corresponding uninstall handler and recorded rollback conditions.
 
 When adding a new `kind`, update `installer_update/install_state_schema.md` first and add both install-recording and uninstall-rollback tests.

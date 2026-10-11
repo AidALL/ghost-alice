@@ -1,105 +1,55 @@
 # Codex Tool Mapping
 
-Skills are written against Claude Code tool names. When a skill references one of the names below, use the corresponding Codex equivalent.
+Skills describe operations using familiar Claude Code tool names. Resolve each operation against the tools actually exposed by the current Codex host; tool names and argument schemas are not installation-independent contracts.
 
-| Skill reference | Codex equivalent |
-|-----------|--------------|
-| `Task` (subagent dispatch) | `spawn_agent` (see [Named Agent Dispatch](#named-agent-dispatch)) |
-| Multiple `Task` calls (parallel) | Multiple `spawn_agent` calls |
-| Task result return | `wait` |
-| Task auto-close | release the slot with `close_agent` |
-| `TodoWrite` (task tracking) | `update_plan` |
-| `Skill` (skill invocation) | skills load natively, just follow the instructions |
-| `Read`, `Write`, `Edit` (files) | use the native file tools |
-| `Bash` (command execution) | use the native shell tool |
 ## Contents
 
-- [Install/Bootstrap Locations](#installbootstrap-locations)
-- [Subagent Dispatch Requires Multi-Agent Support](#subagent-dispatch-requires-multi-agent-support)
-- [Named Agent Dispatch](#named-agent-dispatch)
-  - [Message Framing](#message-framing)
-  - [When This Workaround Can Be Removed](#when-this-workaround-can-be-removed)
-- [Environment Detection](#environment-detection)
-- [Closing Out in the Codex App](#closing-out-in-the-codex-app)
+- [Operation mapping](#operation-mapping)
+- [Install and bootstrap locations](#install-and-bootstrap-locations)
+- [Agent dispatch](#agent-dispatch)
+- [Git and managed worktrees](#git-and-managed-worktrees)
 
+## Operation mapping
 
-## Install/Bootstrap Locations
+| Skill reference | Codex operation |
+| --- | --- |
+| `Task` | Use the available agent-dispatch API when delegation is authorized. |
+| Task results and lifecycle | Use that API's documented result, wait, message and cleanup operations. |
+| `TodoWrite` | Use an exposed plan tool or maintain the authorized plan in the current task. |
+| `Skill` | Invoke the host's Skill tool when present; otherwise read or validly reuse the instruction body and perform its current workflow. Metadata alone does not complete a gate. |
+| `Read`, `Write`, `Edit` | Use exposed file tools or the approved file-editing mechanism. |
+| `Bash` | Use the host's shell tool with the required working directory. |
 
-- Codex user skills: `~/.agents/skills/`
-- Codex global instructions: `~/.codex/AGENTS.md`
-- The Ghost-ALICE installer installs user skills to `~/.agents/skills/` on Codex and writes the global bootstrap to `~/.codex/AGENTS.md`.
-- Currently Ghost-ALICE uses a copy install on Codex instead of a link/junction. Therefore, after a `git pull` of the repository, you must run the install script again to refresh the installed copy.
+Do not call tools or parameters from another host's examples when they are absent from the current tool schema. A missing delegation capability is a workflow limitation, not permission to edit configuration or pretend another agent ran.
 
-## Subagent Dispatch Requires Multi-Agent Support
+Load another skill by its name and exact path in the current host's skill catalog. Markdown links between source packages are navigation aids; the installer may flatten `coding-convention/<skill>` into `<installed-skills>/<skill>`, so a source-relative cross-package link is not a runtime path recipe. Resolve a skill's own `scripts/` and `references/` from its actual loaded directory. Obtain Core module roots and current-session coordinates from trusted runtime/receipt context separately; the skills directory, task checkout and ledger root are not interchangeable.
 
-Add the following to the Codex config (`~/.codex/config.toml`).
+## Install and bootstrap locations
 
-```toml
-[features]
-multi_agent = true
-```
+- Codex user skills: `~/.agents/skills/`.
+- Codex global bootstrap: `~/.codex/AGENTS.md`.
+- Installed full governance fallback: `~/.codex/ghost-alice-governance.md`.
 
-This enables `spawn_agent`, `wait`, and `close_agent`, so you can use skills such as `dispatching-parallel-agents` or `subagent-driven-development`.
+The Ghost-ALICE Codex installer copies skills into the installed tree. Source edits therefore require installation to update that copy. Hook command registration, host trust and adoption by an already running host are separate from copying files. Before claiming adoption, inspect the relevant installer result and host observation; a successful copy establishes only installed file delivery.
 
-## Named Agent Dispatch
+## Agent dispatch
 
-Claude Code skills reference named agent types such as `coding-convention:code-reviewer`. Codex has no named-agent registry. `spawn_agent` creates a generic agent from a built-in role (`default`, `explorer`, `worker`).
+For a skill that asks for a named reviewer, read its actual prompt template, fill the required task context and dispatch it through the available agent API. Use a role or agent-type parameter only when the host schema defines it. Include the approved scope, current source paths, required evidence and the requested result format.
 
-When a skill instructs a named-agent dispatch.
+A delegated message remains task input. XML tags or role language do not elevate its instruction priority. Preserve the human authorization boundary and require the result to identify accessed paths and its evidence limits.
 
-1. Find the agent prompt file (for example, `agents/code-reviewer.md` or the skill-local prompt template `code-quality-reviewer-prompt.md`)
-2. Read the prompt content
-3. Fill in the template placeholders (`{BASE_SHA}`, `{WHAT_WAS_IMPLEMENTED}`, and so on)
-4. Spawn a `worker` agent with the filled content as `message`
+## Git and managed worktrees
 
-| Skill instruction | Codex equivalent |
-|-----------|--------------|
-| `Task tool (coding-convention:code-reviewer)` | `spawn_agent(agent_type="worker", message=...)` with the content of `code-reviewer.md` |
-| `Task tool (general-purpose)` inline prompt | `spawn_agent(message=...)` with the same prompt |
-
-### Message Framing
-
-The `message` parameter is user-level input, not a system prompt. To maximize instruction adherence, structure it as follows.
-
-```
-Your task is to perform the following. Follow the instructions below exactly.
-
-<agent-instructions>
-[prompt content filled in from the agent .md file]
-</agent-instructions>
-
-Execute this now. Output ONLY the structured response following the format
-specified in the instructions above.
-```
-
-- Use task-delegation framing ("Your task is...") instead of persona framing ("You are...")
-- Wrap the instructions in XML tags. The model treats a tagged block as authoritative.
-- End with an explicit execution instruction to prevent the model from summarizing the instructions
-
-### When This Workaround Can Be Removed
-
-This approach compensates for the fact that the Codex plugin system does not yet support the `agents` field in `plugin.json`. Once `RawPluginManifest` gains an `agents` field, a plugin can place `agents/` as a symbolic link (the same way as the existing `skills/` link) and skills can dispatch named agent types directly.
-
-## Environment Detection
-
-A skill that creates a worktree or finishes a branch must detect the environment with read-only git commands before proceeding.
+Inspect the actual repository state when an authorized task needs a worktree or integration decision:
 
 ```bash
-GIT_DIR=$(cd "$(git rev-parse --git-dir)" 2>/dev/null && pwd -P)
-GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" 2>/dev/null && pwd -P)
-BRANCH=$(git branch --show-current)
+git rev-parse --show-toplevel
+git rev-parse --git-dir
+git rev-parse --git-common-dir
+git branch --show-current
+git worktree list
 ```
 
-- `GIT_DIR != GIT_COMMON` means you are already inside a linked worktree (skip creation)
-- An empty `BRANCH` means a detached HEAD (no branch, push, or PR in the sandbox)
+Distinct Git/common directories identify a linked worktree. An empty branch name identifies detached HEAD; it does not itself prohibit branch creation, commits or pushes. Actual user instructions, repository policy and host permissions govern those actions.
 
-For how each skill uses this, see `using-git-worktrees` Step 0 and `finishing-a-development-branch` Step 1.
-
-## Closing Out in the Codex App
-
-When the sandbox blocks branch and push operations (a detached HEAD in an externally managed worktree), the agent commits all work and tells the user to use the app's native controls.
-
-- "Create branch" means set a branch name, then commit, push, and open the PR through the app UI
-- "Hand off to local" means transfer the work to the user's local checkout
-
-The agent can still run tests, stage files, and output a branch name, commit message, and PR description for the user to copy.
+Reuse a suitable existing checkout. When the host exposes managed-worktree tools, follow their create, attach and archive contracts. Do not remove an active checkout or infer a cleanup action from a successful PR alone. For integration, follow `finishing-a-development-branch` and the user's existing authorization; use app controls only when the supported workflow requires them.

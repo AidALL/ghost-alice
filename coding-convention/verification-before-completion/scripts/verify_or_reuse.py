@@ -88,18 +88,10 @@ PLATFORM_TOOL_CLASSES: dict[str, dict[str, str]] = {
     },
 }
 # Claude Code exposes connector tools as mcp__<server>__<tool>. Codex connector
-# calls use an explicit neutral "class" until a payload name is pinned.
+# calls supply an explicit neutral "class" for this adapter.
 CONNECTOR_PREFIXES = {"claude": "mcp__"}
-AUDIT_FINDINGS = (
-    "redundant-verification",
-    "duplicate-verification",
-    "wrong-copy-inspection",
-    "non-evidential-inspection",
-)
-
 DELIVERABLE_ORIGINS = ("agent-provided", "user-provided", "third-party")
 REQUEST_MODES = ("deliverable", "diagnosis-only")
-REQUIRED_RESPONSES = ("none", "diagnosis-only", "corrected-full-deliverable", "confirm-before-fix")
 RESPONSE_KINDS = (
     "corrected-full-deliverable",
     "explanation-only",
@@ -107,8 +99,6 @@ RESPONSE_KINDS = (
     "partial-patch",
     "confirmation-question",
 )
-FAILURE_CLASSES = ("confirmed-flaw-not-propagated", "unnecessary-reapproval", "unconfirmed-out-of-scope-change")
-
 _FACT_KEYS = {
     "claim_time",
     "claim_copy",

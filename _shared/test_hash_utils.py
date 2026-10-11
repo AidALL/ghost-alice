@@ -1,7 +1,7 @@
-"""TDD for review finding H1 (follow-up): the copy-mode content hash must ignore
-the Ghost-ALICE managed marker (.ghost-alice-install.json), whose installed_at
-timestamp changes on every install. Otherwise a copy-mode addon's recorded hash
-drifts from its live hash across reinstalls and falsely trips the drift gate.
+"""Copy-mode content hashing excludes the managed install marker.
+
+The marker timestamp varies per installation and must not change the
+recorded content hash of an otherwise unchanged skill.
 
 Run: python3 -m pytest _shared/test_hash_utils.py -q
 """

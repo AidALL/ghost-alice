@@ -26,7 +26,7 @@ ADDON_MANIFEST = "addon.json"
 ADDON_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
 _SEMVER_RE = re.compile(r"^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})$")
 
-# Tier-2 addon hooks (plan Phase 4) may ONLY observe; events that can block or alter control flow / governance gates are rejected fail-closed. PostToolUse and SessionStart observe; PreToolUse can block a tool, Stop can block completion, and UserPromptSubmit can alter intent -- none are permitted for addons.
+# Tier-2 addon hooks may ONLY observe; events that can block or alter control flow / governance gates are rejected fail-closed. PostToolUse and SessionStart observe; PreToolUse can block a tool, Stop can block completion, and UserPromptSubmit can alter intent -- none are permitted for addons.
 ALLOWED_ADDON_HOOK_EVENTS = frozenset({"post_tool_use", "on_session_start"})
 # Reserved core hook ids an addon hook id must not collide with (the runner namespaces used by the core hook suite).
 RESERVED_CORE_HOOK_IDS = frozenset({
@@ -38,7 +38,7 @@ PRIVILEGED_ADAPTER_REQUEST_FIELD = "privileged_adapters"
 CORE_PRIVILEGED_ADAPTER_ALLOWLIST: dict[str, dict[str, Any]] = {}
 PRIVILEGED_ADAPTER_ALLOWLIST_SCHEMA_VERSION = 1
 CORE_PRIVILEGED_ADAPTER_ALLOWLIST_PATH = (
-    Path(__file__).resolve().parents[1] / "skill-catalog" / "privileged-adapters.json"
+    Path(os.environ.get("GHOST_ALICE_CORE_ROOT") or Path(__file__).resolve().parents[1]) / "skill-catalog" / "privileged-adapters.json"
 )
 USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL = Path(".ghost-alice") / "privileged-adapters.json"
 _DEFAULT_USER_PRIVILEGED_ADAPTER_ALLOWLIST = object()
@@ -110,7 +110,7 @@ class AddonTarget:
     # Addon-level extras shared by every skill target in the addon. Commands are Claude-only slash-command files; resources are addon data files.
     commands: tuple[tuple[str, str], ...] = ()
     resources: tuple[tuple[str, str], ...] = ()
-    # observational hooks (plan Phase 4): (hook_id, event_intent, script_abs_path).
+    # observational hooks: (hook_id, event_intent, script_abs_path).
     hooks: tuple[tuple[str, str, str], ...] = ()
     privileged_adapters: tuple[str, ...] = ()
 
@@ -243,6 +243,8 @@ def _merge_allowlist_file(
 
 
 def _default_user_privileged_adapter_allowlist_path() -> Path:
+    if ghost := os.environ.get("GHOST_ALICE_GHOST_ROOT"):
+        return Path(ghost)/"privileged-adapters.json"
     home = os.environ.get("HOME")
     if home:
         return Path(home).expanduser() / USER_PRIVILEGED_ADAPTER_ALLOWLIST_REL
@@ -994,7 +996,7 @@ def detect_collisions(
             # Copy-mode targets can be in a recoverable stale-sidecar state: the installed bytes already match the incoming addon source, but the sidecar still records an older hash. Reinstalling is then a no-op for content and lets write-sidecars repair the registry.
             if _same_addon_copy_matches_source(dest, target.source, recorded_hash, recorded_mode):
                 continue
-            # A skill directory link already pointing at THIS install's source is the installer's own (re)target, not a user edit -- not drift. This unwedges a prior failed reinstall that re-pointed the link before the sidecar hash could be updated. A link pointing ELSEWHERE is still user drift.
+            # A directory link to this install source is an owned retarget; a link to another source is user drift. This permits recovery when link publication succeeded before its sidecar write.
             if _detect_install_mode(dest) in {"symlink", "junction"} and _resolves_to(dest, target.source):
                 continue
             collisions.append({
@@ -1081,7 +1083,7 @@ def _resolves_to(dest: Path, source: Path) -> bool:
 
 
 def _legacy_same_addon_link_is_safe(dest: Path, target: AddonTarget) -> bool:
-    """Allow pre-sidecar same-addon directory links to be updated by the addon installer."""
+    """Allow same-addon directory links without sidecars to be updated by their owning installer."""
     if _detect_install_mode(dest) not in {"symlink", "junction"}:
         return False
     try:
@@ -1214,7 +1216,7 @@ def _existing_extra_targets(addon_id: str, addons_dir: str | Path | None) -> dic
 def _safe_provision(src: str, base: Path, dest: Path, owned: dict[str, tuple[str, str]]) -> None:
     """Copy ``src`` to ``dest`` under ``base`` without following directory links or clobbering.
 
-    Security (addon review): the original code did a bare ``shutil.copyfile`` which (a) silently overwrote any pre-existing file and (b) wrote through a symlink at the destination leaf or parent, letting an addon escape the containment directory and overwrite arbitrary files. This refuses any symlink or junction in the chain from ``base`` to ``dest``, refuses to clobber a path this addon does not already own, and writes atomically with a temporary file plus ``os.replace`` so a write can never traverse a directory link.
+    Refuse symlinks or junctions from ``base`` to ``dest`` and paths the addon does not own. Publish atomically through a temporary file and ``os.replace`` so writes remain contained.
     """
     # Lexical containment FIRST (do not delegate to the caller): collapse ".." and require dest to stay under base, so _safe_provision is self-sufficient even if a future caller forgets its own _within() check.
     base_norm = Path(os.path.normpath(str(base)))

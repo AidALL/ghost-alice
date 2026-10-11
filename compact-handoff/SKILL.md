@@ -5,65 +5,41 @@ compatibility:
   - "Python 3.11+ standard library"
 ---
 
-# compact-handoff
+# Compact Handoff
 
-compact-handoff preserves task continuity before or after context compaction. It does not trigger automatic compaction, add hooks, or create background summaries. It only defines the quality bar for a handoff that a human or future agent can safely resume.
-## Contents
+The current-session assistant uses this skill when long context, an agent transfer or session compaction could lose task state. The handoff preserves the objective, authorized boundary, evidence and next action. This skill does not trigger compaction, install hooks or create background summaries.
 
-- [When To Use](#when-to-use)
-- [Pre-Compaction Record](#pre-compaction-record)
-- [Do Not Compact When](#do-not-compact-when)
-- [Resume Procedure](#resume-procedure)
-- [Validator Rules](#validator-rules)
-- [Warnings](#warnings)
+## Record the handoff
 
-
-## When To Use
-
-- Context is long enough that work state may be lost.
-- Another session or agent must continue the implementation.
-- Test results, changed files, remaining work, forbidden surfaces, or rollback paths need to survive compaction.
-
-## Pre-Compaction Record
-
-Write a short handoff with these fields, then validate it with `scripts/compact_handoff.py <handoff-file> --json`. If validation returns `status=fail`, fix the handoff before compacting.
+The current-session assistant fills the following block from retained task state and original evidence. When an authorized handoff artifact already exists, it writes the block there and invokes `python3 <loaded-skill-directory>/scripts/compact_handoff.py <absolute-handoff-file> --json` through the exposed shell tool. Otherwise it keeps the block in the host's handoff/task context and sends that same text to `python3 <loaded-skill-directory>/scripts/compact_handoff.py - --json` on stdin; do not create a report merely to obtain a filename. The validator returns `status`, `errors` and `warnings`. `status=fail` or exit 1 requires correcting the identified fields before submitting the handoff; a pass confirms only that structural check.
 
 ```text
 [compact-handoff]
 - objective: <current objective>
-- completed: <completed work>
-- in-progress: <current item>
+- completed: <completed work and supported scope>
+- in-progress: <current item and unresolved conditions>
 - next-step: <one next action>
 - files-changed: <absolute paths>
-- tests-run: <commands and results>
+- tests-run: <commands, results and original evidence source/time>
 - forbidden-surface: <paths or actions not to touch>
-- rollback: <nearest rollback path>
+- rollback: <nearest concrete rollback path>
 ```
 
-## Do Not Compact When
+For an unresolved repair, the current-session assistant carries the failure, affected criterion, stage, target, cumulative failed rounds, first-five reassessment status, cause hypothesis and remaining resource allowance in in-progress or next-step. It preserves original evidence and its source/time. Apply systematic-debugging's incident-accounting procedure to those transported values; the handoff is not a new incident or resource allowance.
 
-- A RED test is failing and the root cause is still unknown.
-- A live configuration file is being edited without a rollback path.
-- The next step is a user approval gate.
-- Secret, token, credential, or private key text is exposed in the context.
+## Pause compaction
 
-## Resume Procedure
+Before requesting voluntary compaction or transferring a task, preserve the unresolved RED cause, rollback path, pending human decision and safe context the receiver needs. If a required item is missing, resolve that handoff dependency while independent authorized work continues. The native host controls automatic compaction.
 
-1. Read `objective`, `in-progress`, and `next-step` first.
-2. Inspect the real diff for `files-changed` and compare it with the handoff.
-3. If the most recent test failed, route into systematic-debugging.
-4. Claim completion only after verification-before-completion runs again.
+## Resume
 
-## Validator Rules
+1. The sending assistant passes the validated block through the host's actual context-handoff facility, or retains it in the existing authorized task context when no explicit facility exists. This skill cannot force or defer automatic host compaction. After compaction, the receiving current-session assistant reads objective, in-progress and next-step from that supplied block. A delegated assistant receives only the context needed for its explicitly assigned subtask.
+2. It compares the actual diff for files-changed with the handoff.
+3. If the most recent test failed, it follows systematic-debugging for that failure.
+4. Before a closure claim, it follows verification-before-completion. Unchanged valid evidence keeps its original source/time; only an affected change or evidence gap requires a new check.
 
-- All 8 required fields must exist.
-- Secret-like values fail validation. The validator must not print raw values.
-- Handoffs that touch live config such as `~/.claude/settings.json`, `~/.codex/hooks.json`, `~/.codex/config.toml`, or `~/.agents/skills/` need a concrete rollback path.
-- `tests-run: not run` or `pending` produces a warning. That warning does not block compaction, but it blocks completion claims.
+## Validator and warnings
 
-## Warnings
+All eight fields are required. The validator rejects secret-like values without printing them. A handoff involving live config, such as platform settings/hooks or installed skill directories, requires a concrete rollback path. A tests-run value of not run or pending produces a warning: compaction may proceed, but completion is not established.
 
-- Do not call `/compact` automatically.
-- Do not use compact-handoff as a reason to create extra reports or plans.
-- Do not use compaction to hide uncertainty.
-- A handoff is a continuity artifact, not evidence that the work is complete.
+The current-session assistant must not invoke /compact automatically, create extra reports solely for compaction, hide uncertainty in the handoff or present the handoff as completion evidence. Incident accounting belongs to `../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation`; proof decisions belong to `../coding-convention/verification-before-completion/SKILL.md`.

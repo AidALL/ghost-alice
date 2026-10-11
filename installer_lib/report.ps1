@@ -199,7 +199,6 @@ function Write-AutoAnimateCommonTargetProgress {
         [int]$StepDelayMs = 20
     )
 
-    # PowerShell tween corresponding to shell report.sh's report_auto_animate_target_operation_progress_line. Instead of jumping the milestone count in one shot (0->25->50), it redraws From+1..To one cell at a time to create a smooth roll-up like macOS. Start-Sleep resolution is bound to the Windows timer (~15.6ms), so 20ms effectively becomes ~16-31ms frames, which is enough for animation.
     $from = $FromCount
     $to = $ToCount
     if ($from -lt 0) { $from = 0 }

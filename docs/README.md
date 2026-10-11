@@ -6,17 +6,19 @@ Ghost-ALICE OS documentation is bilingual at the reader-facing documentation lay
 
 Every paired document should expose a language switch near the top. In an English document, the English side is plain text and the Korean side is a link. In a Korean document, the English side is a link and the Korean side is plain text.
 
-The coordinated current release is Ghost-ALICE OS `0.4.1` with Ghost-ALICE Autopilot `0.4.1`. Read the [release notes](./release/2026-10-01-release-notes.md) for current verification scope.
+Core `0.5.0` and Ghost-ALICE Autopilot `0.5.0` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.0` or later. Source checks, native runtime validation and publication establish separate evidence.
+
+The responding model compares claims with original sources, then compares the complete answer with the user objective. Host tools carry the draft, source paths and review judgments to Core Python code, which validates and stores them. Ghost-ALICE Autopilot uses the authenticated result and the model’s already approved task plan; the host delivers any next-task request. Hooks retain strict audit. See the [architecture](../architecture.md) for the responsibility map.
 
 ## Quick Install
 
-From the cloned Core repository, install Core and Autopilot together with automatic agent-platform detection:
+From the cloned Core repository, install Core and Ghost-ALICE Autopilot together with automatic agent-platform detection:
 
 ```bash
 bash install.sh --addon autopilot
 ```
 
-Keep approved work moving across status questions and corrections, retain its boundaries, and connect completion claims to each item's evidence. The [installation guide](./getting-started/installation.md) covers cloning, OS-native commands and explicit platform selection.
+The agent continues approved work across status questions and corrections, retains its authorized boundaries, and connects each completion claim to the relevant item's evidence. The [installation guide](./getting-started/installation.md) covers cloning, OS-native commands and explicit platform selection.
 
 ## Start Here
 
@@ -24,24 +26,24 @@ Keep approved work moving across status questions and corrections, retain its bo
 2. Recover blocked updates from [getting-started/troubleshooting.md](./getting-started/troubleshooting.md).
 3. Understand the repository map from [reference/repository-structure.md](./reference/repository-structure.md).
 4. Understand the installer architecture from [reference/installer-architecture.md](./reference/installer-architecture.md).
-5. Use [SUPPORT.md](../SUPPORT.md) and GitHub Issues for public questions.
-6. Use [SECURITY.md](../SECURITY.md) for private vulnerability reporting.
+5. Use [SUPPORT.md](https://github.com/AidALL/ghost-alice/blob/main/SUPPORT.md) and GitHub Issues for public questions.
+6. Use [SECURITY.md](https://github.com/AidALL/ghost-alice/blob/main/SECURITY.md) for private vulnerability reporting.
 
 ## Documentation Layout
 
 | Area | Role | English | Korean |
 | --- | --- | --- | --- |
-| Getting Started | Install, update, recovery, and uninstall procedures | [getting-started/](./getting-started/) | [ko/getting-started/](./ko/getting-started/) |
-| Concepts | Project model and documentation language policy | [concepts/](./concepts/) | [ko/concepts/](./ko/concepts/) |
-| Reference | Repository map, public skills, hooks, and command surfaces | [reference/](./reference/) | [ko/reference/](./ko/reference/) |
-| Policies | Runtime, platform, and evaluator contracts | [policies/](./policies/) | [ko/policies/](./ko/policies/) |
-| Release | Public release checks and validation guidance | [release/](./release/) | [ko/release/](./ko/release/) |
-| Plans | Public planning boundaries and roadmap notes | [plans/](./plans/) | [ko/plans/](./ko/plans/) |
+| Getting Started | Install, update, recovery, and uninstall procedures | [getting-started/](./getting-started/installation.md) | [ko/getting-started/](./ko/getting-started/installation.md) |
+| Concepts | Project model and documentation language policy | [concepts/](./concepts/language-policy.md) | [ko/concepts/](./ko/concepts/language-policy.md) |
+| Reference | Repository map, public skills, hooks, and command surfaces | [reference/](./reference/repository-structure.md) | [ko/reference/](./ko/reference/repository-structure.md) |
+| Policies | Runtime, platform, and evaluator contracts | [policies/](./policies/session-gate-matrix.md) | [ko/policies/](./ko/policies/session-gate-matrix.md) |
+| Release | Public release checks and validation guidance | [release/](./release/public-release-checklist.md) | [ko/release/](./ko/release/public-release-checklist.md) |
 
 ## Document Map
 
 | Intent | English | Korean |
 | --- | --- | --- |
+| Architecture and responsibilities | [../architecture.md](../architecture.md) | [../architecture_ko.md](../architecture_ko.md) |
 | Documentation index | docs/README.md | [ko/README.md](./ko/README.md) |
 | Installation and update flow | [getting-started/installation.md](./getting-started/installation.md) | [ko/getting-started/installation.md](./ko/getting-started/installation.md) |
 | Git/update troubleshooting | [getting-started/troubleshooting.md](./getting-started/troubleshooting.md) | [ko/getting-started/troubleshooting.md](./ko/getting-started/troubleshooting.md) |
@@ -57,13 +59,11 @@ Keep approved work moving across status questions and corrections, retain its bo
 | Platform adapter compliance | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) | [ko/policies/platform-adapter-compliance.md](./ko/policies/platform-adapter-compliance.md) |
 | Live smoke regression | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) | [ko/policies/live-smoke-regression.md](./ko/policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) | [ko/policies/evaluator-artifact-contract.md](./ko/policies/evaluator-artifact-contract.md) |
-| Current release notes | [release/2026-10-01-release-notes.md](./release/2026-10-01-release-notes.md) | [ko/release/2026-10-01-release-notes.md](./ko/release/2026-10-01-release-notes.md) |
 | Public release checklist | [release/public-release-checklist.md](./release/public-release-checklist.md) | [ko/release/public-release-checklist.md](./ko/release/public-release-checklist.md) |
-| Planning policy | [plans/README.md](./plans/README.md) | [ko/plans/README.md](./ko/plans/README.md) |
 
 ## Canonical Contributor Documents
 
-`CONTRIBUTING.md`, `SUPPORT.md`, `CHANGELOG.md` and `official-docs/` use English as the canonical contributor path. Their control tokens and historical release records remain literal; paired current reader guides are listed above. Historical release notes preserve the versions and evidence limits of their dated release.
+`CONTRIBUTING.md`, `SUPPORT.md` and `official-docs/` use English as the canonical contributor path. Keep control tokens literal; paired reader guides are listed above.
 
 ## Update Rule
 

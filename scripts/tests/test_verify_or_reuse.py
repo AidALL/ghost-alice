@@ -31,13 +31,13 @@ FLOW = (
     "actual-mutation-authority -> observed-mutation-event -> evidence-still-valid -> "
     "decision-impact -> verify-or-reuse"
 )
-VERIFY_OR_REUSE_PRECHECK = "Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists."
-CHANGE_DEFINITION = "A change is an observed mutation event, not a possibility, a storage location, or a new user message."
-TOOL_CHECKPOINT_FIELD_HOOK = "Add verify-or-reuse when a call re-reads an artifact to support a claim, with why naming the observed trigger."
+VERIFY_OR_REUSE_PRECHECK = "The current-session assistant reuses unchanged valid evidence at its original source and verification time."
+CHANGE_DEFINITION = "A route, formatting, or publication error does not prove that the underlying business result failed."
+TOOL_CHECKPOINT_FIELD_HOOK = "follows common governance rule 9"
 
-# The reported incident: the agent wrote a Markdown file in a chat sandbox, the
-# user could change it only by instructing the agent, no edit instruction or
-# other write followed, and the user asked whether content was already included.
+# Current scenario: an agent-authored Markdown file has agent-mediated mutation
+# authority. No mutation instruction or write event follows; a content question
+# can use the retained authored evidence.
 INCIDENT = {
     "claim_time": "authored-at",
     "claim_copy": "chat-sandbox:plan.md",
@@ -603,8 +603,8 @@ class InstalledCopyTests(unittest.TestCase):
         self.assertTrue(agents.is_file())
         loader = agents.read_text(encoding="utf-8")
         companion = agents.with_name("ghost-alice-governance.md")
-        self.assertIn("When the complete Ghost-ALICE project contract is already supplied", loader)
-        self.assertIn("Otherwise, before actionable work", loader)
+        self.assertIn("Common Ghost-ALICE governance comes from", loader)
+        self.assertIn("Project instruction files supply project-specific rules", loader)
         self.assertIn(str(companion), loader)
         self.assertTrue(companion.is_file())
         self.assertIn(VERIFY_OR_REUSE_PRECHECK, " ".join(companion.read_text(encoding="utf-8").split()))

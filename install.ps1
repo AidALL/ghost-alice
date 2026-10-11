@@ -17,7 +17,7 @@
 #   .\install.cmd --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
 #   .\install.cmd --status                         # Show current install status
 #   .\install.cmd --doctor                         # Diagnose install protection state
-#   .\install.cmd --cleanup-pending                # Clean false-positive legacy pending entries
+#   .\install.cmd --cleanup-pending                # Clean installer-created false-positive pending entries
 #   .\install.cmd --update-source                  # Stash source checkout local changes and fast-forward
 # Direct .ps1 form, only when .ps1 script execution is already allowed:
 #   .\install.ps1                                  # Install to detected AI tools
@@ -36,7 +36,7 @@
 #   .\install.ps1 --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
 #   .\install.ps1 --status                         # Show current install status
 #   .\install.ps1 --doctor                         # Diagnose install protection state
-#   .\install.ps1 --cleanup-pending                # Clean false-positive legacy pending entries
+#   .\install.ps1 --cleanup-pending                # Clean installer-created false-positive pending entries
 #   .\install.ps1 --update-source                  # Stash source checkout local changes and fast-forward
 
 param(
@@ -69,10 +69,15 @@ param(
     [switch]$UpdateSource,
     [Alias("skip-source-health")]
     [switch]$SkipSourceHealth,
+    [Alias("destination-file")]
+    [string]$DestinationFile,
     [switch]$Help
 )
 
-# Best-effort UTF-8 console output for Windows PowerShell 5.1 / legacy console hosts.
+if ($PSBoundParameters.ContainsKey('DestinationFile')) {
+    throw "Isolated destinations require the Python hook installer; PowerShell source integration is unsupported"
+}
+# Best-effort UTF-8 console output for Windows PowerShell 5.1 and console hosts.
 $LegacyAsciiConsole = ($PSVersionTable.PSVersion.Major -lt 6 -and $Host.Name -eq "ConsoleHost")
 try {
     if ($LegacyAsciiConsole) {
@@ -101,7 +106,6 @@ if ($args.Count -gt 0) {
 }
 $PlatformWasExplicit = $PSBoundParameters.ContainsKey("Platform")
 $script:InstallLockPath = $null
-$script:ProjectDisplayName = "Ghost-ALICE"
 $script:SourceRepoHookChange = $null
 $script:PwshLtsBaselineVersion = [version]"7.6.0"
 $script:PwshLtsReleaseLine = "7.6"
@@ -117,106 +121,7 @@ if ($script:InstallReportChild) {
 $script:InstallCompactOutput = $false
 # Installer messages are English-only.
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 $script:SessionGateContractSource = Join-Path $script:GhostAliceRoot "skill-catalog\session-gates.json"
-
-
-
-# ── Platform path resolution ───────────────────────────────
-# Environment variables take precedence; otherwise use default paths.
-#   Claude Code: CLAUDE_CONFIG_DIR -> ~/.claude
-#   Codex:       CODEX_HOME -> ~/.codex
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 $script:CodexBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\codex\AGENTS.md"
 $script:CodexBootstrapMarker = "# Ghost-ALICE Codex Bootstrap"
@@ -226,26 +131,6 @@ $script:ClaudeBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\clau
 $script:ClaudeBootstrapMarker = "# Ghost-ALICE Claude Bootstrap"
 $script:ClaudeManagedBlockBegin = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
 $script:ClaudeManagedBlockEnd = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ── Git hooks (post-merge auto-refresh) ───────────────────
-# Point this repo's Git hook path to the tracked hooks/ directory so
-# `git pull --ff-only` automatically triggers hooks/post-merge, which in turn
-# re-runs install.sh --platform codex for copy-mode platforms.
-
 
 $script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 # Dot-source installer_lib modules. Function definitions live in installer_lib/*.ps1 and are sourced here (before any top-level call) so install.ps1 stays a thin entrypoint.
@@ -258,7 +143,6 @@ $AllSkills = @(
     "coding-convention"
     "skill-evolution"
     "agent-security-scan"
-    "jailbreak-detector"
     "merge-companion"
     "necessity-gate"
     "session-intent-analyzer"
@@ -271,115 +155,22 @@ $script:DeprecatedInstalledSkills = @(
     "session-intent-guard"
 )
 
-
-
-
-
-
-
-
-
-
-
-
 # ── Skill target expansion ─────────────────────────────────
 # Normal skill (root SKILL.md exists) -> returns one target for itself.
 # Family skill (no root SKILL.md, subdirectories have SKILL.md) -> returns N subskill targets.
 # Missing skill -> returns an empty array.
 
-
 # ── Skill list ─────────────────────────────────────────────
-
-
-
-
-
-
-
-
 
 # ── Install status ─────────────────────────────────────────
 
-
-
-
-
-
-
-
 # ── Uninstall ──────────────────────────────────────────────
 
-
-
-
-
 # ── Install ────────────────────────────────────────────────
-
 
 # ── UserPromptSubmit hook install/remove ───────────────────
 # Require Python 3.11+. Partial fallback violates the freshness contract.
 # Any failure blocks the whole install.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 # ── Help ───────────────────────────────────────────────────
 

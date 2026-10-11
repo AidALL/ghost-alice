@@ -29,7 +29,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 
 ENTRYPOINT_SKILLS = {
@@ -47,20 +46,43 @@ PLATFORM_PORTS = [
 REQUIRED_SSOT_PHRASES = [
     ("rule 0", r"###\s*0\.\s*Task\s*Routing\s*Gate"),
     ("task-router name reference", r"task-router"),
-    ("first tool call rule", r"first\s+tool\s+call"),
+    ("First-Entry Contract section", r"(?m)^##\s+First-Entry Contract\s*$"),
 ]
 
 REQUIRED_TASK_ROUTER_PHRASES = [
-    ("QUALITY-RATIONALE block", r"<QUALITY-RATIONALE>"),
-    ("ROUTING-CONTRACT block", r"<ROUTING-CONTRACT>"),
+    ("First-Entry Contract owner reference", r"First-Entry Contract"),
+    ("routing-surface record", r"\[routing-surface\]"),
     ("meta:\\* calls", r"meta:\*"),
 ]
 
 REQUIRED_USING_CC_PHRASES = [
-    ("QUALITY-RATIONALE block", r"<QUALITY-RATIONALE>"),
-    ("USE-CONTRACT block", r"<USE-CONTRACT>"),
-    ("1% rule", r"1%"),
+    ("First-Entry Contract owner reference", r"First-Entry Contract"),
+    ("verification owner reference", r"verification-before-completion"),
 ]
+
+# Entrypoints delegate procedures to these source owners. Check their wiring,
+# including target existence, without requiring copied procedure prose.
+REQUIRED_OWNER_REFERENCES = {
+    SSOT_RULES_FILE: (
+        "boundary-contract/SKILL.md",
+        "coding-convention/systematic-debugging/SKILL.md",
+        "coding-convention/verification-before-completion/SKILL.md",
+        "session-intent-analyzer/SKILL.md",
+        "task-router/SKILL.md",
+        "coding-convention/verification-before-completion/references/autopilot-publication.md",
+    ),
+    ENTRYPOINT_SKILLS["task-router"]: (
+        "../boundary-contract/SKILL.md#authority-and-renewal",
+        "../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation",
+        "../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate",
+        "../coding-convention/verification-before-completion/references/verify-or-reuse.md",
+        "../session-intent-analyzer/references/ledger-schema.md",
+    ),
+    ENTRYPOINT_SKILLS["using-coding-convention"]: (
+        "../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse",
+        "../systematic-debugging/SKILL.md#incident-accounting-and-continuation",
+    ),
+}
 
 
 class Finding:
@@ -79,6 +101,34 @@ class Finding:
             "check": self.check,
             "message": self.message,
         }
+
+
+def check_owner_references(repo: Path, rel: str, text: str, area: str, findings: list[Finding]) -> None:
+    """Validate canonical Markdown links and inline source-path references."""
+    references = {
+        link or inline
+        for link, inline in re.findall(r"\]\(([^()\s]+)\)|`([^`\n]+)`", text)
+    }
+    for reference in REQUIRED_OWNER_REFERENCES[rel]:
+        if reference not in references:
+            findings.append(
+                Finding("ERROR", area, "owner-reference", f"{rel} is missing owner reference '{reference}'.")
+            )
+            continue
+        target, _, anchor = reference.partition("#")
+        owner = (repo / rel).parent / target
+        if not owner.is_file():
+            findings.append(
+                Finding("ERROR", area, "owner-missing", f"{rel} owner reference '{reference}' targets a missing file.")
+            )
+            continue
+        if anchor:
+            headings = re.findall(r"(?m)^#{1,6}\s+(.+?)\s*#*\s*$", owner.read_text(encoding="utf-8"))
+            anchors = {re.sub(r"[^\w\s-]", "", heading.lower()).replace(" ", "-") for heading in headings}
+            if anchor not in anchors:
+                findings.append(
+                    Finding("ERROR", area, "owner-anchor", f"{rel} owner reference '{reference}' targets a missing heading.")
+                )
 
 
 def check_entrypoint_skills_exist(repo: Path, findings: list[Finding]) -> None:
@@ -108,6 +158,7 @@ def check_ssot_rules(repo: Path, findings: list[Finding]) -> None:
                     f"{SSOT_RULES_FILE} is missing the '{label}' phrase. pattern: {pattern!r}",
                 )
             )
+    check_owner_references(repo, SSOT_RULES_FILE, text, "ssot", findings)
 
 
 def check_ssot_imports(repo: Path, findings: list[Finding]) -> None:
@@ -240,6 +291,7 @@ def check_task_router_body(repo: Path, findings: list[Finding]) -> None:
                     f"task-router/SKILL.md is missing '{label}'. pattern: {pattern!r}",
                 )
             )
+    check_owner_references(repo, ENTRYPOINT_SKILLS["task-router"], text, "task-router", findings)
 
 
 def check_using_cc_body(repo: Path, findings: list[Finding]) -> None:
@@ -257,6 +309,7 @@ def check_using_cc_body(repo: Path, findings: list[Finding]) -> None:
                     f"using-coding-convention/SKILL.md is missing '{label}'. pattern: {pattern!r}",
                 )
             )
+    check_owner_references(repo, ENTRYPOINT_SKILLS["using-coding-convention"], text, "using-coding-convention", findings)
 
 
 def check_catalog_contains_entrypoints(repo: Path, findings: list[Finding]) -> None:

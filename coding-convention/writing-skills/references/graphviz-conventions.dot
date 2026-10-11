@@ -1,5 +1,7 @@
 digraph STYLE_GUIDE {
-    // The style guide for our process DSL, written in the DSL itself
+    // Diagram notation examples, not task execution instructions.
+    // Name each decision condition and each action's actor/object in real workflows.
+    // Generic and bad-example nodes below illustrate notation only.
 
     // Node type examples with their shapes
     subgraph cluster_node_types {
@@ -29,7 +31,7 @@ digraph STYLE_GUIDE {
         "Write test first" [shape=box];
         "npm test" [shape=plaintext];
         "I am stuck" [shape=ellipse];
-        "NEVER use git add -A" [shape=octagon, style=filled, fillcolor=red, fontcolor=white];
+        "STOP: selected files exceed authorized scope" [shape=octagon, style=filled, fillcolor=red, fontcolor=white];
     }
 
     // Edge naming conventions
@@ -153,7 +155,7 @@ digraph STYLE_GUIDE {
         "Read error message" [shape=box];
         "Can reproduce?" [shape=diamond];
         "git diff HEAD~1" [shape=plaintext];
-        "NEVER ignore errors" [shape=octagon, style=filled, fillcolor=red, fontcolor=white];
+        "STOP: prerequisite result unresolved" [shape=octagon, style=filled, fillcolor=red, fontcolor=white];
 
         "Test failed" -> "Read error message";
         "Read error message" -> "Can reproduce?";

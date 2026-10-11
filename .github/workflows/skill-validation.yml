@@ -32,6 +32,9 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install test dependencies
+        run: python3 -m pip install pytest
+
       - name: Expose PR metadata environment variables
         if: github.event_name == 'pull_request'
         env:

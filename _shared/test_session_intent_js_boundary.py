@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -22,7 +23,7 @@ class JavascriptLedgerBoundaryTests(unittest.TestCase):
         self.sid = "session-a"
         self.directory = self.root / self.platform / self.sid
         self.directory.mkdir(parents=True)
-        self.env = dict(os.environ, HOME=str(self.root / "home"), CODEX_THREAD_ID="", GHOST_ALICE_SESSION_ID="")
+        self.env = dict(os.environ, GHOST_ALICE_GHOST_ROOT=str(self.root / "ghost"), CODEX_THREAD_ID="", GHOST_ALICE_SESSION_ID="")
 
     def save(self, name, value):
         (self.directory / name).write_text(json.dumps(value) + "\n")
@@ -62,16 +63,52 @@ class JavascriptLedgerBoundaryTests(unittest.TestCase):
     def denied(self, **kwargs):
         return self.run_hook(**kwargs).get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
-    def test_authoritative_anchor_carries_current_block_without_audit_file(self):
+    def test_pending_native_origin_has_no_fresh_anchor_until_notification_resolves(self):
+        sys.path.insert(0, str(HOOK.parents[1] / 'session-intent-analyzer/scripts'))
+        import session_intent_ledger as ledger
+        coords = dict(root=self.root, platform='claude', session_id=self.sid)
+        ledger.record_turn(**coords, raw_user_input='Continue the approved work.', source='hook')
+        before = ledger.read_session_state(**coords)['latest_input_event_id']
+        transcript = self.root / 'native.jsonl'
+        transcript.write_text('')
+        ledger.stage_native_input(**coords, raw_input='Delegated work finished.', prompt_id='grain',
+                                  transcript_path=str(transcript))
+        module_url = HOOK.with_name('session_intent_snapshot.mjs').as_uri()
+        program = ('import { readSessionIntentSnapshot } from ' + json.dumps(module_url) + '; '
+            'console.log(JSON.stringify(readSessionIntentSnapshot(' +
+            ','.join(json.dumps(value) for value in (str(self.root / 'claude' / self.sid), 'claude', self.sid)) + ')));')
+        env = dict(self.env, GHOST_ALICE_CORE_ROOT=str(HOOK.parents[1]), GHOST_ALICE_PYTHON=sys.executable)
+        def snapshot():
+            result = subprocess.run(['node', '--input-type=module', '-e', program], env=env,
+                                    text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+        pending = snapshot()
+        self.assertIsNone(pending['latestInput'])
+        self.assertTrue(pending['pending'])
+        self.assertEqual(pending['lineageSource'], 'state')
+        self.assertEqual(pending['state']['latest_input_event_id'], before)
+        with self.assertRaisesRegex(ValueError, 'native.*pending'):
+            ledger.record_turn(**coords, expected_input_event_id=before, intent_delta={'current_goal': 'Premature'})
+        transcript.write_text(json.dumps(dict(type='attachment', sessionId=self.sid, attachment=dict(
+            type='queued_command', commandMode='task-notification',
+            origin=dict(kind='task-notification', producer='session-task'), prompt='Delegated work finished.'))) + '\n')
+        ledger.reconcile_native_inputs(**coords)
+        resolved = snapshot()
+        self.assertEqual(resolved['latestInput']['event_id'], before)
+        self.assertTrue(resolved['latestInput']['authoritative'])
+        self.assertFalse(resolved.get('pending', False))
+
+    def test_authoritative_anchor_routes_without_projecting_legacy_block(self):
         self.state({"decision": "block", "input_event_id": "new-input"})
-        self.assertTrue(self.denied())
-        gate = json.loads((self.directory / "downstream-gates.json").read_text())
-        self.assertEqual(gate["input_event_id"], "new-input")
+        self.assertFalse(self.denied())
+        self.assertFalse((self.directory / "downstream-gates.json").exists())
+        self.assertIn("intake-ready", json.dumps(self.run_hook(reminder=True)))
 
     def test_pending_audit_cannot_hide_current_block(self):
         self.state({"decision": "block", "input_event_id": "new-input"}, pending_audit_event={"event_id": "new-input"})
         self.event("old-input", input_digest="sha256:old")
-        self.assertTrue(self.denied())
+        self.assertFalse(self.denied())
 
     def test_old_audit_cannot_revive_old_decision_or_gate(self):
         self.state({"decision": "block", "input_event_id": "old-input"})
@@ -149,10 +186,10 @@ class JavascriptLedgerBoundaryTests(unittest.TestCase):
         self.event()
         self.assertFalse(self.denied())
 
-    def test_valid_legacy_identity_and_event_still_carry_current_block(self):
+    def test_valid_legacy_identity_and_event_remain_routing_context(self):
         self.state({"decision": "block", "input_event_id": "new-input"}, legacy=True)
         self.event()
-        self.assertTrue(self.denied())
+        self.assertFalse(self.denied())
 
     def test_missing_state_creates_no_block_from_a_gate_and_event(self):
         self.event()

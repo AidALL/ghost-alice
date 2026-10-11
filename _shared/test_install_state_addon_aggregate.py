@@ -1,6 +1,7 @@
-"""TDD for plan tasks T1.4/T1.5: install-state is a derived aggregate that includes
-addons from the cumulative sidecar scan (so separate-run addons persist -- the
-lost-update fix). Run: python3 -m pytest _shared/test_install_state_addon_aggregate.py -q
+"""Install-state aggregate checks: cumulative sidecar scanning preserves
+addons installed in separate operations.
+
+Run: python3 -m pytest _shared/test_install_state_addon_aggregate.py -q
 """
 
 from __future__ import annotations
@@ -40,6 +41,30 @@ def _sidecar(addon_id, dest, *, install_mode="symlink", content_hash="abc123"):
 
 
 class InstallStateAddonAggregateTest(unittest.TestCase):
+    def test_core_writer_uses_content_hash_without_install_metadata_or_import_cache(self):
+        from hash_utils import hash_target
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            dest = root / 'skill'
+            dest.mkdir()
+            (dest / 'SKILL.md').write_text('Original source\n')
+            marker = dest / '.ghost-alice-install.json'
+            marker.write_text('{"installed_at":"first"}')
+            cache = dest / '__pycache__'
+            cache.mkdir()
+            (cache / 'module.pyc').write_bytes(b'first import')
+            def recorded():
+                state = self._run_writer(root, 'skill', str(dest), str(dest), 'copy')
+                return json.loads(state.read_text())['targets'][0]['target_tree_hash']
+            expected = hash_target(dest, 'copy')
+            self.assertEqual(recorded(), expected)
+            marker.write_text('{"installed_at":"next"}')
+            (cache / 'module.pyc').write_bytes(b'next import')
+            self.assertEqual(recorded(), expected)
+            (dest / 'SKILL.md').write_text('Changed source\n')
+            self.assertNotEqual(recorded(), expected)
+            self.assertEqual(recorded(), hash_target(dest, 'copy'))
+
     def _run_writer(self, root: Path, *target_args: str) -> Path:
         state_path = root / ".ghost-alice" / "install-state" / "claude.json"
         result = subprocess.run(

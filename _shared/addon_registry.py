@@ -1,42 +1,17 @@
 #!/usr/bin/env python3
-"""Per-addon sidecar registry for Ghost-ALICE addon install attribution.
+"""Per-addon sidecar registry for Ghost-ALICE install attribution.
 
-Plan reference: the addon "Registry Schema Requirements". This module owns the
-per-addon attribution sidecars under ``~/.ghost-alice/addons/<addon_id>.json``.
+Each addon owns ``~/.ghost-alice/addons/<addon_id>.json``; derive platform
+aggregates by scanning sidecars rather than mutating one shared aggregate.
+Validate addon IDs, containment and in-file identity on every access.
+Writes use a same-directory temporary file, fsync and atomic replacement.
+Reads reject symlinks, nonregular files and oversized payloads.
+Schema versions use strict major.minor semantics: reject unsupported major
+versions and preserve unknown fields for supported versions.
+``provided[].content_hash`` carries adapter/script integrity. The schema
+version is ``1.0``. Public functions require keyword-only ``addons_dir``.
 
-Design invariants (all enforced here):
-
-- Per-addon files only. Each addon writes ONLY its own ``<addon_id>.json``; the
-  platform install-state aggregate is derived by scanning these files
-  (rebuilt, never read-modify-write of a shared file -- the lost-update fix for
-  separate-run/concurrent addon installs).
-- addon_id is a filename, so it is charset-validated (``^[a-z][a-z0-9-]*$``) AND
-  realpath-contained under the addons dir as the FIRST op of every read/write/
-  delete. Charset + containment are each insufficient alone. A read also asserts
-  the in-file ``addon_id`` matches the filename stem (no mis-attribution).
-- Writes are atomic and durable: temp-write in the same dir + fsync(file) +
-  ``os.replace`` + best-effort fsync(parent dir). A failed write never corrupts
-  an existing record and leaves no temp file.
-- Reads never follow symlinks and never touch non-regular files: every read
-  opens with ``O_NOFOLLOW``/``O_NONBLOCK``, asserts ``S_ISREG``, and caps size
-  at ``MAX_SIDECAR_BYTES`` before parsing (blocks symlink-redirect, FIFO/device
-  hangs, and JSON-bomb memory amplification).
-- schema_version uses strict ``major[.minor]`` semantics (no whitespace, signs,
-  underscores, floats, or 3rd component). An UNSUPPORTED MAJOR fails closed on
-  read and leaves the record untouched; a SUPPORTED MAJOR with a higher MINOR is
-  accepted and its unknown fields are PRESERVED (never stripped). Note: a rewrite
-  normalizes formatting (sorted keys, 2-space indent) -- it preserves the JSON
-  *value*, not byte-for-byte layout.
-
-Resolved P0 decisions baked in here:
-- T0.3: adapter/script integrity is carried by the existing
-  ``provided[].content_hash`` field; no separate adapter-hash field.
-- schema_version is the string ``"1.0"`` (SUPPORTED_MAJOR = 1).
-
-The ``addons_dir`` argument is keyword-only on every public function (it is the
-security-sensitive "environment" arg; keyword-only prevents arg-order mistakes).
-
-Pure standard library; importable without the shell installer.
+Dependencies: Python standard library.
 """
 
 from __future__ import annotations

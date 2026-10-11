@@ -18,7 +18,7 @@ This procedure runs the same small request in real agent runtimes to verify that
 
 ## Purpose
 
-- Run the same input in Claude Code, Codex, and Antigravity.
+- Run the same input on the claimed installed Claude Code and Codex targets. Consult `skill-catalog/platform-adapters.json` for the supported adapter set; `terminal-only` is a manual fallback.
 - Keep the request small and reversible, such as reading the first 10 README lines.
 - Verify runtime gate observability, not the quality of the summary itself.
 - Save experiment notes as a smoke record, but do not store raw prompts, secrets, or full transcripts.
@@ -28,7 +28,7 @@ This procedure runs the same small request in real agent runtimes to verify that
 Open the repo root in each runtime and send this request:
 
 ```text
-Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion and include [io-trace].
+Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one paragraph. Apply verification-before-completion before completion.
 ```
 
 ## Target Runtimes
@@ -38,9 +38,7 @@ Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one pa
 | Claude Code | Fresh session after Ghost-ALICE install | Skill permission, SessionStart/UserPromptSubmit hook, completion reminder |
 | Codex | Fresh session after Ghost-ALICE install | `AGENTS.md` bootstrap, `~/.codex/hooks.json`, `~/.codex/config.toml`, `SKILL.md` read records, observed hook payload firing when the runtime supports hooks; otherwise explicit hookless/manual fallback wording |
 | Codex native Windows | Fresh session after Ghost-ALICE install in a Windows native environment | actual hook payload firing, `~/.codex/hooks.json`, `~/.codex/config.toml`, `SKILL.md` read records |
-| Antigravity | Before adapter implementation: inconclusive. After implementation, run the same prompt. | skill activation permission, hook or instruction-backed fallback, smoke record |
 
-Before the Antigravity adapter exists, record this smoke item as inconclusive.
 
 ## Expected Signals
 
@@ -51,12 +49,12 @@ Each smoke record captures whether these signals were observed:
 - `harness validity`: the prompt permits the read-only tool action needed to satisfy the request. A contradictory prompt is `invalid-harness`, not `pass`.
 - `task-router`: routing is visible before the first tool action.
 - `session-intent-analyzer`: intent delta or hook observation is recorded without raw prompt storage.
-- `boundary-contract`: for read-only work, `n/a` or an explicit reason for non-use is visible.
-- `failure-mode-if-wrong`: concise failure surface is visible without routine recovery-cost or recovery-note fields.
+- `boundary-contract`: follows the current routing-surface decision; executed read-only verification may require a boundary contract. Record n/a only when that route does not require one.
+- Conditional `failure-mode-if-wrong`: appears when a side effect, forced signal, mismatch or meaningful user decision requires it; routine read-only checkpoints need intent and why.
 - conditional `recovery-action`: appears only when mismatch, scope reopen, external side effect, or hard-to-recover action needs a concrete next step.
-- `skill activation permission`: Claude Code and Antigravity-family runtimes are not blocked by a shortened allowlist that covers only core gates.
-- `verification-before-completion`: fresh evidence appears immediately before the completion claim.
-- `[io-trace]`: files read, commands run, and skills loaded remain auditable.
+- `skill activation permission`: Claude Code is not blocked by a shortened allowlist that covers only core gates.
+- `verification-before-completion`: the workflow connects each closure claim to applicable evidence, preserving the original source and time for valid unchanged proof.
+- `internal audit`: tool access remains auditable without requiring printed `[io-trace]`.
 - pending merge precheck: branch to hook-verified reuse when hook evidence exists; otherwise inspect the current platform manifest directly.
 
 ## Verification Layers
@@ -72,7 +70,7 @@ Automated blind screening uses only direct-process transport. Its controller and
 
 ## Smoke Record
 
-When storing a record in the repo, use only `tmp/` or local scratch. Do not mutate the remote Wiki or user home settings.
+When storing a record in the repo, use only `.tmp/` or local scratch. Do not mutate the remote Wiki or user home settings.
 
 ```text
 platform:
@@ -86,7 +84,7 @@ observed:
   recovery-action:
   skill activation permission:
   verification-before-completion:
-  io-trace:
+  internal-audit:
 failure triage:
   status: pass | fail | invalid-harness | inconclusive
   reason:
@@ -126,13 +124,12 @@ Subject or evaluator timeout, non-zero exit, empty subject response, malformed e
 | routine tool-checkpoint output requires recovery-cost or recovery-note fields | tool-checkpoint surface failure | Synchronize `docs/policies/session-gate-matrix.md`, platform bootstrap, and hook message wording. |
 | skill activation permission allows only core gates | permission scope failure | Inspect installer hook permission sync and platform policy files. |
 | smoke record stores raw prompt or transcript | audit hygiene failure | Fix the session-intent-analyzer storage contract first. |
-| agent command times out | runtime smoke failure | Keep the loop open. Inspect the log, fix or narrow the failing behavior, reinstall, and rerun in a fresh session. |
+| agent command times out | runtime smoke failure | Inspect the affected failure and follow the bounded repair conditions in the session gate matrix. Reinstall only affected runtime assets; retry with a distinct hypothesis and remaining authority/resources. |
 | log contains `ERROR codex_core::tools::router`, hook failure, traceback, panic, or cache initialization error | runtime smoke failure | Treat the run as failed even if a later, different prompt passes. Reproduce or intentionally retire the failing case with evidence. |
 | output file is missing or empty | runtime smoke failure | Do not infer success from partial log activity. Rerun after fixing the agent command or output path. |
 | Windows resolves `codex` to different shim or binary across PowerShell, CMD, and automation | harness drift | Record `agent_command` and prefer the intended `codex.cmd` shim or an explicit absolute path for Codex smoke. |
 | prompt forbids the only available read-only method needed by the task | invalid harness | Fix the harness and rerun. This is not product pass evidence. |
-| a later bounded pass follows an earlier unresolved failure in the same loop | partial status | Keep the loop open until the failed case is fixed, retired with a source-grounded reason, or explicitly marked out of scope. |
-| Antigravity adapter is not ready | inconclusive | Rerun the same input after compatibility discovery is complete. |
+| a later bounded pass follows an earlier unresolved failure in the same loop | partial status | Retain the unresolved case and report partial status. Continue only eligible authorized repair under the session gate matrix; a bounded later pass does not close the earlier criterion. |
 
 ## Automated Verification Boundary
 

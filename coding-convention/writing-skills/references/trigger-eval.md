@@ -25,9 +25,7 @@ This is the trigger evaluation rule used when refining a description.
 
 ## Query set composition
 
-Base set:
-- should-trigger: 8 to 10 items
-- should-not-trigger: 8 to 10 items
+A typical starting set has 8 to 10 positive and 8 to 10 negative cases. Select the actual set from the named discovery uncertainty and task's evaluation bounds; this example size is not a requirement for unrelated body edits.
 
 What to include in positives:
 - Cases where the user says the skill name directly.
@@ -47,9 +45,9 @@ Negatives to avoid:
 
 ## Judgment rules
 
-- Even if positive recall rises, it is a failure if negative false triggers increase.
+- Evaluate both missed intended triggers and new false triggers against the accepted discovery criteria. Higher recall alone does not establish a successful revision.
 - If it triggers often on near-miss negatives, the description is exaggerated.
-- It is a failure if you forcibly reinforce the trigger by putting a workflow explanation into the description.
+- Keep execution steps in the body; changing the description must clarify selection, not substitute for executing that body.
 
 ## Revision principles
 

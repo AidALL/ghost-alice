@@ -1,9 +1,7 @@
 """End-to-end install/uninstall characterization (golden-master) tests.
 
-These tests PIN CURRENT BEHAVIOR of the Ghost-ALICE installer as a safety net
-for an upcoming behavior-preserving refactor of install.sh / install.ps1. They
-intentionally capture whatever the installer does today (including any existing
-quirks) and must NOT be used to "fix" behavior.
+These tests assert the recorded install.sh/install.ps1 behavior. Changes to
+the fixture require evidence that the intended installer contract changed.
 
 Determinism notes (read before editing the golden fixture):
 - The installer writes <HOME>/.claude/settings.json hooks for every install,
@@ -198,6 +196,11 @@ class InstallCharacterizationTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
 
+            settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
+            prompts = json.dumps(settings["hooks"]["UserPromptSubmit"])
+            self.assertIn("pending-merge", prompts)
+            self.assertIn("session-intent", prompts)
+            self.assertNotIn("web-search-first", prompts)
             snapshot = _snapshot_settings(home)
             expected = json.loads(SETTINGS_SHAPE_FIXTURE.read_text(encoding="utf-8"))
             if os.name == "nt" and snapshot["installed_markers"] and not expected["installed_markers"]:
@@ -209,15 +212,10 @@ class InstallCharacterizationTest(unittest.TestCase):
             self.assertEqual(snapshot, expected)
 
     def test_uninstall_preserves_user_file_and_removes_markers(self) -> None:
-        """Pin CURRENT install->uninstall cleanup behavior.
+        """Assert install/uninstall cleanup behavior.
 
-        A non-managed user file placed directly under ``<home>/.claude/skills``
-        must survive a full uninstall, and no ``.ghost-alice-install.json``
-        ownership markers may remain underneath afterwards.
-
-        This characterizes today's behavior only. Per the refactor plan it must
-        NOT be changed to assert the user-modified-skill backup finding is fixed;
-        it merely records what the installer does now.
+        Non-managed user files survive full uninstall and managed ownership
+        markers are removed from the selected skill root.
         """
 
         with tempfile.TemporaryDirectory() as temp_dir:

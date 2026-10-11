@@ -1,57 +1,58 @@
-"""Protect completion procedure discovery without unconditional expansion."""
+"""Specialized verification instructions have explicit, resolvable owners."""
 from pathlib import Path
-import re
 import unittest
 
-
 ROOT = Path(__file__).resolve().parents[2]
-SKILL = ROOT / "coding-convention" / "verification-before-completion"
-PROCEDURES = {
-    "autopilot-publication.md": ("Autopilot Proof Publication", "receipt_token", "--verified-at"),
-    "external-tool-evidence.md": ("External Tool Web-Search-First Gate", "web-search-first", "source-locator"),
-    "evaluator-artifacts.md": ("Evaluator Artifact Contract", "verifier-result.json", "accepted"),
-}
+SKILL = ROOT / 'coding-convention/verification-before-completion'
 
 
 class VerificationDisclosureTests(unittest.TestCase):
-    def test_specialized_command_payloads_are_not_unconditional_context(self):
-        body = (SKILL / "SKILL.md").read_text()
-        for payload in ("--receipt-token", "--reapprove-current-input", "- web-search-evidence:"):
-            self.assertFalse(payload in body, f"Conditional procedure expanded by default: {payload}")
-
-    def test_each_specialized_procedure_has_a_trigger_and_resolvable_reference(self):
-        body = (SKILL / "SKILL.md").read_text()
-        for filename, (title, *markers) in PROCEDURES.items():
-            with self.subTest(procedure=title):
-                section = re.search(r"^## " + re.escape(title) + r"\n(.*?)(?=^## |\Z)", body, re.M | re.S)
-                self.assertIsNotNone(section)
-                self.assertIn("read", section[1].lower())
-                self.assertTrue("references/" + filename in section[1], f"Missing procedure reference: {filename}")
-                reference = SKILL / "references" / filename
-                self.assertTrue(reference.is_file())
+    def test_specialized_commands_stay_in_triggered_references(self):
+        body = (SKILL / 'SKILL.md').read_text()
+        for payload in ('--receipt-token', '--reapprove-current-input', '- web-search-evidence:'):
+            self.assertNotIn(payload, body)
+        for filename, markers in {
+            'autopilot-publication.md': ('--receipt-token', '--verified-at', 'publication_route'),
+            'external-tool-evidence.md': ('web-search-first', 'source-locator'),
+            'evaluator-artifacts.md': ('verifier-result.json', 'accepted'),
+        }.items():
+            with self.subTest(reference=filename):
+                self.assertIn('references/' + filename, body)
+                reference = (SKILL / 'references' / filename).read_text()
                 for marker in markers:
-                    self.assertIn(marker, reference.read_text())
+                    self.assertIn(marker, reference)
 
-    def test_common_decision_rules_remain_available_without_specialized_files(self):
-        body = (SKILL / "SKILL.md").read_text()
-        for section in ("Acceptance Criteria Iron Law", "Verify-Or-Reuse Gate",
-                        "Hard Finalization Order", "Gate Function",
-                        "Evidence Selection And Stop Gate", "Completion-Check Format"):
-            self.assertIn("## " + section, body)
-        self.assertIn("While actionable authorized work remains", body)
+    def assert_publication_boundary(self, body):
+        for phrase in ('An existing run, cumulative history, missing route, planning reply or explanation does not create a publication obligation',
+                       "Consume Core's `publication_route`", 'registered v2 pretool prepares',
+                       'The assistant submits no separate publication command',
+                       'It then applies the accepted criteria through the guarded Core writer',
+                       '`status: pending-adapter`', '`status: applied`'):
+            self.assertIn(phrase, body)
 
-    def test_activation_prerequisites_cannot_be_removed_or_inverted(self):
-        body = (SKILL / "SKILL.md").read_text()
-        prerequisites = (
-            "When this Codex or Claude installation includes `autopilot-mode/scripts/autopilot_completion.py` and the current session has admitted criteria for authorized execution, read",
-            "Category B runtime behavior and Category C version-dependent behavior require at least three WebSearch queries",
-            "Require an accepted `verifier-result.json` with a rejected candidate; stop promotion when it is absent or rejected.",
-        )
-        for condition in prerequisites:
-            with self.subTest(condition=condition):
-                self.assertIn(condition, body)
-        self.assertIn("sessions without admitted execution criteria do not activate this path", body)
+    def test_native_preparation_publication_and_application_have_distinct_owners(self):
+        body = (SKILL / 'references/autopilot-publication.md').read_text()
+        self.assert_publication_boundary(body)
+        for phrase in ('does not create a publication obligation', 'guarded Core writer',
+                       'The assistant submits no separate publication command'):
+            with self.subTest(phrase=phrase), self.assertRaises(AssertionError):
+                self.assert_publication_boundary(body.replace(phrase, 'removed'))
+
+    def test_review_exposes_claim_sources_and_separate_response_judgment(self):
+        body = (SKILL / 'references/autopilot-publication.md').read_text()
+        for phrase in ('candidate_reference', 'sources[].source_id', 'bindings[]', 'response_binding.text',
+                       'Finish this claim comparison before reviewing the answer as a whole',
+                       'exactly `claims` and `response`', 'It does not compare meaning or decide truth',
+                       'matching bytes do not prove semantic support', 'supported | unsupported | unavailable'):
+            self.assertIn(phrase, body)
+
+    def test_original_proof_and_correction_require_owning_references(self):
+        body = (SKILL / 'references/autopilot-publication.md').read_text()
+        for phrase in ('--evidence-reference', '--reuse-evidence', '--correction-of',
+                       '--correction-json', 'original verification time', 'Unaffected criteria retain their proof'):
+            self.assertIn(phrase, body)
+        self.assertIn('Do not hash a changed artifact later and call that its original snapshot', body)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     unittest.main()

@@ -344,7 +344,6 @@ class BlindBehaviorContractTest(unittest.TestCase):
         self.assertNotEqual(Path(kwargs["cwd"]), controller)
         for key in ("BLIND_CONTROLLER_SECRET", "RUBRIC", "PURPOSE", "EXPECTED_ANSWER"):
             self.assertNotIn(key, kwargs["env"])
-        runtime_env = {"TEMP", "TMP", "TMPDIR", "PYTHONPYCACHEPREFIX"}
         evaluator_command, evaluator_kwargs = calls[1]
         self.assertEqual(evaluator_command, ["evaluator-agent"])
         self.assertEqual(json.loads(evaluator_kwargs["input"]), {

@@ -202,7 +202,7 @@ def classify_skill_root(
 ) -> AssetClassification:
     """Classify a skill root's ownership.
 
-    ``expected_addon_id`` (plan task T2.9) only gates copy-mode targets, which
+    ``expected_addon_id`` only gates copy-mode targets, which
     carry a ``.ghost-alice-install.json`` marker recording ``addon_id``. Symlink
     and junction targets carry NO marker — their addon ownership is proven by the
     recorded sidecar ``content_hash`` of the link, not here — so this function

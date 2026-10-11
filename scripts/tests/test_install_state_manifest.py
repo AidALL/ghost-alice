@@ -1,6 +1,5 @@
 import json
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -12,8 +11,6 @@ from _installer_source import installer_bash_source, installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALL_STATE_SCHEMA = REPO_ROOT / "installer_update" / "install_state_schema.md"
 INSTALL_STATE_WRITER = REPO_ROOT / "_shared" / "install_state_writer.py"
 
@@ -58,31 +55,6 @@ def _extract_powershell_function(source: str, name: str) -> str:
         if depth == 0:
             return "".join(body)
     raise AssertionError(f"Function did not terminate: {name}")
-
-
-def _find_test_bash() -> str | None:
-    candidates = [
-        shutil.which("bash"),
-        shutil.which("bash.exe"),
-        r"C:\Program Files\Git\bin\bash.exe",
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-    ]
-
-    for candidate in candidates:
-        if not candidate:
-            continue
-        path = Path(candidate)
-        if not path.exists():
-            continue
-        normalized = path.as_posix().lower()
-        if sys.platform.startswith("win") and (
-            normalized.endswith("/windows/system32/bash.exe")
-            or normalized.endswith("/appdata/local/microsoft/windowsapps/bash.exe")
-        ):
-            continue
-        return str(path)
-
-    return None
 
 
 class InstallStateManifestTest(unittest.TestCase):
@@ -144,10 +116,6 @@ class InstallStateManifestTest(unittest.TestCase):
         body = INSTALL_STATE_SCHEMA.read_text(encoding="utf-8")
         self.assertIn("system_env_changes", body)
         for kind in [
-            "ps_policy_change",
-            "posix_rc_change",
-            "macos_quarantine_fix",
-            "posix_chmod_fix",
             "source_repo_hook_path",
             "codex_hooks_feature_flag",
             "codex_project_trust",
@@ -164,7 +132,7 @@ class InstallStateManifestTest(unittest.TestCase):
         body = installer_bash_source()
         writer = _extract_bash_function(body, "write_install_state_manifest")
         self.assertIn("GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED", writer)
-        # source_repo_hook_path is computed in the extracted Python module
+        # source_repo_hook_path is computed by the Python installer module
         writer_py = INSTALL_STATE_WRITER.read_text(encoding="utf-8")
         self.assertIn("source_repo_hook_path", writer_py)
 

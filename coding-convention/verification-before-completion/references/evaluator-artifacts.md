@@ -1,9 +1,5 @@
 # Evaluator Artifact Contract
 
-Before claiming verification-complexity-level-3 completion, external agent governance absorption, or RAG/evaluator candidate promotion, read `docs/policies/evaluator-artifact-contract.md`.
+Before a verification-complexity-level-3 completion, external governance absorption or evaluator candidate promotion claim, the current-session assistant reads `docs/policies/evaluator-artifact-contract.md` from the established Core source root. That policy owns the evaluation procedure and required evidence.
 
-The completion evidence must include an accepted `verifier-result.json`.
-
-- A read-only evaluator pass must not modify installed assets.
-- Do not promote a candidate playbook without an accepted verifier result.
-- At least one rejected candidate must exist so the verifier has proven it can say no.
+Use the policy's accepted `verifier-result.json` for the claimed evaluation. A rejected candidate supplies evidence only for the invalid or missing-evidence condition actually exercised; it does not prove generalized rejection ability or require a new negative campaign for every unrelated edit. Missing required evidence leaves the corresponding claim unresolved.

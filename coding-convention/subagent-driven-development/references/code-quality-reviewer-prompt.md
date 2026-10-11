@@ -1,42 +1,9 @@
-# Code Quality Reviewer Prompt Template
+# Code Quality Reviewer Assignment
 
-Use this template when dispatching the code quality reviewer subagent.
+The parent assistant assigns this bounded review to a delegated assistant and receives its findings.
 
-Purpose: verify that the implementation is well built (clean, tested, maintainable).
+The parent assistant dispatches this reviewer only after specification compliance is supported. Use requesting-code-review's [reviewer assignment](../../requesting-code-review/references/code-reviewer.md) with the accepted task, exact base/head or working-tree target, implementation summary and evidence.
 
-Precondition: dispatch only after the spec compliance review has passed.
+Inspect the changed responsibilities and interfaces, testability, accepted file structure and maintainability consequences introduced by this change. Do not flag pre-existing file size alone or require unrelated restructuring.
 
-```
-Task tool (coding-convention:code-reviewer):
-  Use template at requesting-code-review/references/code-reviewer.md
-
-  WHAT_WAS_IMPLEMENTED: [from implementer's report]
-  PLAN_OR_REQUIREMENTS: Task N from [plan-file]
-  BASE_SHA: [commit before task]
-  HEAD_SHA: [current commit]
-  DESCRIPTION: [task summary]
-```
-
-## In addition to standard code quality concerns, the reviewer must check the following
-
-- Does each file have one clear responsibility with a well-defined interface?
-- Are the units decomposed so they can be understood and tested independently?
-- Does the implementation follow the plan's file structure?
-- Did this implementation already create a large new file or grow an existing file substantially? (Do not flag the pre-existing file size. Focus on the part this change contributed.)
-
-Reviewer returns: Strengths, Issues (Critical/Important/Minor), Assessment
-
-## Field guide
-
-□ Slots to fill
-
-- `WHAT_WAS_IMPLEMENTED`: taken from the implementer's report.
-- `PLAN_OR_REQUIREMENTS`: `Task N from <plan-file>` format.
-- `BASE_SHA`: the commit before the task started.
-- `HEAD_SHA`: the current commit.
-- `DESCRIPTION`: a one-line summary of the task.
-
-□ Namespace and path
-
-- When calling the Task tool, standardize the agent namespace to `coding-convention:code-reviewer`
-- The template path is `requesting-code-review/references/code-reviewer.md` (after porting, it moved under references/)
+Return supported strengths, severity-calibrated findings, checked-stage assessment, unresolved limits and accessed absolute paths. The parent assistant evaluates findings against the accepted contract before requesting corrections; the reviewer does not expand implementation authority.

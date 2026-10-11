@@ -49,16 +49,14 @@ class GovernanceClassTaxonomyTest(unittest.TestCase):
         by_name = {skill["name"]: skill for skill in catalog["skills"]}
 
         self.assertEqual(
-            by_name["jailbreak-detector"]["governance_class"],
-            "governance-subskill",
-        )
-        self.assertEqual(
             by_name["skill-evolution"]["governance_class"],
             "governance-subskill",
         )
+        self.assertNotIn("jailbreak-detector", by_name)
+        self.assertNotIn("jailbreak-detector", catalog["install_roots"])
         self.assertNotEqual(
-            by_name["jailbreak-detector"]["family"],
-            by_name["jailbreak-detector"]["governance_class"],
+            by_name["skill-evolution"]["family"],
+            by_name["skill-evolution"]["governance_class"],
         )
 
     def test_addon_skills_are_not_checked_into_core_catalog(self) -> None:

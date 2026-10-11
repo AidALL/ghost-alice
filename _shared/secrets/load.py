@@ -1,34 +1,7 @@
-"""Ghost-ALICE shared secrets loader for Python.
+"""Shared credential lookup: environment, managed file, then optional interactive prompt.
 
-All skills and scripts retrieve login information such as API keys, tokens,
-passwords, and email credentials through the same path. Once a value is
-registered, later calls retrieve it automatically instead of prompting each time.
-
-Location: ~/.ghost-alice/secrets.env (mode 600)
-Format: KEY=value (.env style, optional quotes)
-
-Usage:
-
-    # 1. Import the module
-    import sys, os
-    sys.path.insert(0, os.path.join("<project root>", "_shared", "secrets"))
-    from secrets_loader import get, get_or_prompt, set as set_secret
-
-    # 2. Look up from env/file only (None when missing)
-    key = get("CONTEXT7_API_KEY")
-    if key is None:
-        raise RuntimeError("CONTEXT7_API_KEY is not registered")
-
-    # 3. Look up env/file/prompt in order
-    key = get_or_prompt("CONTEXT7_API_KEY", label="Context7 API key")
-
-    # 4. Store directly
-    set_secret("MY_KEY", "value")
-
-Lookup order for every function:
-    1) Already exported environment variable
-    2) ~/.ghost-alice/secrets.env
-    3) prompt (interactive environments only; get_or_prompt only)
+Only get_or_prompt may prompt. API/CLI examples and storage rules are in the
+README.md beside this module.
 """
 
 # Keep the filename as load.py so the module name does not collide with the stdlib `secrets` module; callers distinguish it by import path.
@@ -37,7 +10,6 @@ from __future__ import annotations
 
 import os
 import re
-import stat
 import sys
 from pathlib import Path
 from typing import Optional

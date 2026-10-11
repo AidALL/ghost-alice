@@ -26,7 +26,15 @@ fi
 
 set -euo pipefail
 
-ORIGINAL_LOCALE="${LANGUAGE:-${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}}"
+# Full source integration is not an isolated action. Reject before logging/locks.
+for _destination_arg in "$@"; do
+  case "$_destination_arg" in
+    --destination-file|--destination-file=*|--isolated)
+      printf '%s\n' "[ERROR] isolated destinations require the Python hook installer; shell source integration is unsupported" >&2
+      exit 2 ;;
+  esac
+done
+unset _destination_arg
 
 # ── Force UTF-8 locale ────────────────────────────────────
 # Ensures output is not garbled on macOS/Linux/WSL.
@@ -38,7 +46,6 @@ for _lib in "${SCRIPT_DIR}"/installer_lib/*.sh; do [ -f "$_lib" ] && source "$_l
 ensure_utf8_locale
 export PYTHONUTF8=1
 export PYTHONIOENCODING=utf-8
-PROJECT_DISPLAY_NAME="Ghost-ALICE"
 PLATFORM="claude"
 PLATFORM_EXPLICIT=0
 PROMPT_PLATFORM=0
@@ -63,31 +70,8 @@ ADDON_SOURCES=()
 ADDON_TAGS=()
 ADDON_SOURCE_PREPARED=0
 INSTALL_ADDON_TARGETS=()
-# ── Platform path resolution ──────────────────────────────
-# Environment variable takes precedence; falls back to default path.
-#   Claude Code: CLAUDE_CONFIG_DIR → ~/.claude
-#   Codex:       CODEX_HOME → ~/.codex
-
-
-
-
-
-
-
-
-
 
 SKILLS_DIR="$(resolve_claude_home)/skills"
-
-
-
-
-
-
-# ── Git hooks (post-merge auto-refresh) ───────────────────
-# Point this repo's Git hook path to the tracked hooks/ directory so
-# `git pull --ff-only` automatically triggers hooks/post-merge, which in turn
-# re-runs install.sh --platform codex only on copy-mode runtimes.
 
 ALL_SKILLS=(
   adversarial-verification
@@ -95,7 +79,6 @@ ALL_SKILLS=(
   coding-convention
   skill-evolution
   agent-security-scan
-  jailbreak-detector
   merge-companion
   necessity-gate
   session-intent-analyzer
@@ -108,21 +91,6 @@ DEPRECATED_INSTALLED_SKILLS=(
   session-intent-guard
 )
 
-# ── Skill target expansion ────────────────────────────────
-# Equivalent to Expand-SkillTargets in install.ps1.
-# Regular skill (root SKILL.md exists) → one "<name>|<source_path>" line
-# Family skill (no root SKILL.md, SKILL.md in direct sub-directories) → N sub-skill lines
-# If not found or no SKILL.md present → no output
-
-
-
-# ── _shared install (symlink preferred, copy fallback) ────
-
-
-
-
-
-
 # ── Colors when the terminal supports them ─────────────────
 if [ -t 1 ]; then
   GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -130,38 +98,6 @@ else
   GREEN=''; RED=''; YELLOW=''; CYAN=''; NC=''
 fi
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ── Message helper ───────────────────────────────
 # Installer messages are English-only.
 
 CODEX_BOOTSTRAP_MARKER="# Ghost-ALICE Codex Bootstrap"
@@ -174,72 +110,8 @@ CLAUDE_MANAGED_BLOCK_END="<!-- Ghost-ALICE managed block end: claude-bootstrap -
 CLAUDE_BOOTSTRAP_SOURCE="${SCRIPT_DIR}/platforms/claude/CLAUDE.md"
 SESSION_GATE_CONTRACT_SOURCE="${SCRIPT_DIR}/skill-catalog/session-gates.json"
 
-# ── Command sync (skills.json SSOT, multi-platform) ────────
-# Validate platform command files from skills.json and generate missing entries.
-#   Claude Code: .claude/commands/*.md  (@path + $ARGUMENTS)
-#   Codex:       Not needed (skills are discovered directly through /skills or $ references)
-# Runs automatically during install; can also run independently with --sync-commands.
-
-
-
 assert_session_gate_contract
 
-
-
-
-
-
-# ── Description extraction (multibyte-safe through perl) ───
-
-# ── Skill list output ──────────────────────────────────────
-
-
-# ── Single-target status line ──────────────────────────────
-
-
-# ── Install status check ───────────────────────────────────
-
-
-# ── Uninstall ──────────────────────────────────────────────
-
-
-
-# ── UserPromptSubmit hook install/remove ──────────────────
-# Require Python 3.11+. Partial fallback violates the freshness contract.
-# Any failure blocks the whole install.
-
-
-
-
-
-# Python bootstrap and guidance when Python is missing (v1.3.0 removed node.js/bash fallbacks).
-# Keep install.sh-level bootstrap messages ASCII English to avoid encoding corruption. User-facing messages are emitted by install_hooks.py under Python UTF-8.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# ── Install helpers ────────────────────────────────────────
-
-# ── Install ────────────────────────────────────────────────
 # ── Argument parsing ───────────────────────────────────────
 ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -264,7 +136,7 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --auto|-a)
-      # Backward-compatible no-op. Plain install is auto-detect by default.
+      # Accepted no-op option; plain install detects platforms automatically.
       shift
       ;;
     --skip-source-health)
@@ -430,8 +302,7 @@ if [ "$UPDATE_SOURCE" -eq 1 ]; then
   update_source_checkout
   exit $?
 fi
-
-# auto/default: detect ~/.claude and ~/.codex, then recurse per platform. Auto child installs are separate install path operations, not a duplicate install. Legacy-readable log shape: [auto] (${platform_index}/${#detected[@]}) <platform>
+# Detect ~/.claude and ~/.codex, then install separately for each selected platform. Log shape: [auto] (${platform_index}/${#detected[@]}) <platform>
 if [ "$AUTO_DETECT" -eq 1 ]; then
   detected=()
   while IFS= read -r plat; do
@@ -491,9 +362,6 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   auto_event_file="${INSTALL_REPORT_LOG_FILE%.log}.events.jsonl"
   : >"$auto_event_file"
   rc=0
-  auto_current=0
-  auto_updated=0
-  auto_new=0
   auto_synced_targets=0
   auto_skills=(${ARGS[@]+"${ARGS[@]}"})
   if [ "${#auto_skills[@]}" -eq 0 ]; then
@@ -505,7 +373,7 @@ if [ "$AUTO_DETECT" -eq 1 ]; then
   auto_platform_label="$(join_by ', ' "${detected[@]}")"
   auto_visibility="$(resolve_effective_visibility)"
   if live_counter_enabled; then
-    report_print_auto_start "$auto_platform_label" "$auto_common_targets" "$auto_visibility" "$auto_platform_count"
+    report_print_auto_start "$auto_platform_label" "$auto_common_targets" "$auto_visibility"
   fi
   platform_index=0
   for plat in "${detected[@]}"; do
@@ -664,7 +532,7 @@ case "${ARGS[0]:-}" in
     echo "$(t 'Advanced/operator commands:' 'Advanced/operator commands:')"
     echo "  SKILL_NAMES            $(t 'Install specified skills only' 'Install specified skills only')"
     echo "  --list, -l             $(t 'List available skills' 'List available skills')"
-    echo "  --cleanup-pending      $(t 'Clean false-positive legacy pending entries' 'Clean false-positive legacy pending entries')"
+    echo "  --cleanup-pending      $(t 'Clean false-positive pending entries' 'Clean false-positive pending entries')"
     echo "  --update-source        $(t 'Stash source checkout local changes and run git pull --ff-only' 'Stash source checkout local changes and run git pull --ff-only')"
     echo "  --addon-source PATH|URL"
     echo "                          $(t 'Add local addon repo or git URL source' 'Add local addon repo or git URL source')"

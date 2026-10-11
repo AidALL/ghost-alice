@@ -21,6 +21,10 @@ This artifact contract applies to verification-complexity-level-3-plus work, int
 
 ## Artifact Set
 
+This contract defines the review inputs and the recorded decision; it does not provide a verifier launcher. The evaluation owner must give the chosen review tool explicit access to the artifacts and the criteria being judged, then retain its returned judgment. A filename alone does not send content to a reviewer. The promotion owner reads that judgment before changing installed assets.
+
+The evaluation workflow supplies the scenario, execution trace, report and candidate procedure to the verifier. The verifier records its accepted or rejected judgment in `verifier-result.json`; the promotion owner reads that result before any installed-asset change.
+
 - `scenario.json`: records the verification scenario, input conditions, non-goals, and forbidden surface.
 - `trace.json`: records evaluator execution trace, read-only status, accessed sources, and command summaries.
 - `report.json`: records metrics, findings, pass/fail state, and uncertainty.
@@ -31,7 +35,7 @@ This artifact contract applies to verification-complexity-level-3-plus work, int
 
 - A read-only evaluator pass must not mutate installed assets.
 - Do not promote `candidate-playbook.md` without an accepted verifier-result (`verifier-result.json`).
-- At least one rejected candidate must exist so the verifier has proven it can say no.
+- Required verification includes at least one candidate rejected for invalid input or missing evidence. That result supports refusal for that candidate and condition only; it does not establish the verifier’s general ability or overall quality. Reuse valid unchanged case evidence; every edit does not require a new rejected candidate.
 - If `verifier-result.json` has `accepted: false`, stop installed asset changes.
 - This artifact contract is for high-risk work. Do not use it to manufacture reports for low-complexity tasks.
 

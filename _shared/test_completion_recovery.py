@@ -1,8 +1,10 @@
-"""Completion regressions from observed native sessions and contrast cases."""
+"""Declared completion routes, owned reviews, and bounded metadata recovery."""
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -33,55 +35,78 @@ class CompletionRecoveryTests(unittest.TestCase):
     def check(self, text):
         return validator.validate_completion_text(text, require_completion_check=True)
 
-    def hook(self, text, *, retry=False):
-        result = subprocess.run(
-            [sys.executable, "-B", str(HOOK), "--platform", "codex"],
-            input=json.dumps({"last_assistant_message": text, "stop_hook_active": retry}),
-            text=True, capture_output=True, check=True,
-        )
+    def hook(self, text, *, retry=False, platform="codex", response_purpose="completion",
+             record_review=True, review_verdict="supported"):
+        from test_completion_skill_evidence import StopHookSkillEvidenceTests
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith('GHOST_ALICE_')
+               and key not in {'CODEX_THREAD_ID', 'CLAUDE_CODE_ENTRYPOINT'}}
+        with tempfile.TemporaryDirectory() as temporary:
+            StopHookSkillEvidenceTests._review_format_fixture(
+                Path(temporary), platform, text, env, review_verdict,
+                response_purpose=response_purpose, record_review=record_review)
+            result = subprocess.run(
+                [sys.executable, "-B", str(HOOK), "--platform", platform],
+                input=json.dumps({"session_id": "fixture-stop", "last_assistant_message": text,
+                                  "stop_hook_active": retry}),
+                text=True, capture_output=True, check=True, env=env,
+            )
         return json.loads(result.stdout)
 
-    def test_korean_nominal_and_conditional_completion_are_not_assertions(self):
-        # The first phrase is the observed short-answer false positive.
-        for text in (
-            "작업 간 완료 의존관계는 그대로입니다.",
-            "작업 완료 시간은 14분입니다.",
-            "작업 완료 여부에 따라 일정을 계산합니다.",
-            "테스트 통과 조건을 설명합니다.",
-            "빌드 성공 가능성을 비교합니다.",
-            "작업이 완료되면 다음 단계가 시작됩니다.",
-            "작업을 완료한 뒤 결과를 확인하세요.",
-        ):
-            with self.subTest(text=text):
-                self.assertIsNone(self.check(text))
+    def test_declared_completion_requires_proof_independent_of_prose(self):
+        for text in ('The task is complete.', '작업을 완료했습니다.',
+                     'The review is not complete.', '작업 완료 여부를 설명합니다.'):
+            for platform in ('codex', 'claude'):
+                with self.subTest(text=text, platform=platform):
+                    payload = self.hook(text, platform=platform)
+                    self.assertEqual(payload.get('decision'), 'block')
+                    self.assertIn('requires a [completion-check]', payload['reason'])
 
-    def test_genuine_korean_closure_still_requires_evidence(self):
-        for text in (
-            "작업 완료", "작업을 완료했습니다.", "작업이 완료되었습니다.",
-            "수정했습니다.", "테스트 통과", "테스트를 통과했습니다.",
-            "빌드 성공입니다.", "작업 완료했고 원인은 확인하지 못했습니다.",
-            "작업 완료; 배포는 보류합니다.", "작업이 완료된 상태입니다.",
-            "작업 완료 시간은 14분입니다. 버그를 고쳤습니다.",
-        ):
-            with self.subTest(text=text):
-                self.assertIsNotNone(self.check(text))
+    def test_reviewed_explanation_does_not_infer_completion_from_prose(self):
+        for text in ('The retained record says the review is complete.',
+                     '기존 검증 기록에 따르면 검토를 완료했습니다.',
+                     'The review is not complete.', '작업 완료 여부를 설명합니다.'):
+            for platform in ('codex', 'claude'):
+                with self.subTest(text=text, platform=platform):
+                    self.assertEqual(self.hook(text, platform=platform,
+                        response_purpose='explanation'), {'continue': True})
+
+    def test_unreviewed_explanation_is_not_accepted_from_nonclosure_wording(self):
+        for text in ('No work has been executed. Here are the tradeoffs.',
+                     '검증은 미완료이며 결과의 한계를 설명합니다.'):
+            payload = self.hook(text, response_purpose='explanation', record_review=False)
+            self.assertEqual(payload.get('decision'), 'block')
+            self.assertIn('repair-target: response_review', payload['reason'])
+
+    def test_readonly_completion_retains_proof_and_review_validation(self):
+        supported = VALID.replace('Business result: 82 hours 40 minutes.',
+                                  'The read-only fixture review is complete.')
+        self.assertEqual(self.hook(supported), {'continue': True})
+        missing = self.hook(supported, record_review=False)
+        self.assertEqual(missing.get('decision'), 'block')
+        self.assertIn('assessment-required:', missing['reason'])
+        unsupported = self.hook(supported, review_verdict='unsupported')
+        self.assertEqual(unsupported.get('decision'), 'block')
+        invalid = self.hook(supported.replace('    evidence: python check.py exited 0\n', ''))
+        self.assertEqual(invalid.get('decision'), 'block')
+        self.assertIn('must include evidence', invalid['reason'])
 
     def test_inline_none_is_equivalent_to_nested_none(self):
         self.assertIsNone(self.check(VALID.replace("- unverified:\n  - none", "- unverified: none")))
 
-    def test_semicolon_skill_list_and_sentence_punctuation_are_equivalent(self):
+    def test_optional_skill_audit_punctuation_does_not_change_evidence_structure(self):
         for value in ("task-router; verification-before-completion.",
                       "task-router; verification-before-completion; boundary-contract",
                       "verification-before-completion."):
             with self.subTest(value=value):
-                self.assertIsNone(self.check(VALID.replace('[verification-before-completion]', value)))
+                self.assertIsNone(self.check(VALID.replace('skill-call: verification-before-completion (this turn)', 'skill-call: '+value)))
 
-    def test_skill_name_prefix_or_mention_does_not_count_as_skill_load(self):
+    def test_optional_skill_audit_does_not_establish_or_block_evidence(self):
         for value in ("task-router; verification-before-completion-v2.",
                       "task-router; skipped verification-before-completion.",
                       "task-router; verification-before-completion.fake"):
             with self.subTest(value=value):
-                self.assertIsNotNone(self.check(VALID.replace('[verification-before-completion]', value)))
+                self.assertIsNone(self.check(VALID.replace('skill-call: verification-before-completion (this turn)', 'skill-call: '+value)))
 
     def test_multiple_declared_criteria_accept_equivalent_delimiters(self):
         text = VALID.replace('- claim-evidence-map:', '  - boundary: Preserve the protected file. [source: user-explicit]\n- claim-evidence-map:')
@@ -179,8 +204,8 @@ class CompletionRecoveryTests(unittest.TestCase):
                     self.assertEqual(payload.get("decision"), "block")
                     self.assertIn("Invalid verdict value", payload["reason"])
                     self.assertIn("without punctuation", payload["reason"])
-                    self.assertIn("Preserve the substantive answer", payload["reason"])
-                    self.assertIn("Do not invent evidence", payload["reason"])
+                    self.assertIn("repair-target: completion_metadata", payload["reason"])
+                    self.assertIn("delivery-route: resolve_host_delivery", payload["reason"])
 
     def test_missing_or_empty_verdict_keeps_distinct_missing_diagnostic(self):
         for text in (
@@ -211,31 +236,90 @@ class CompletionRecoveryTests(unittest.TestCase):
         self.assertTrue(payload.get("continue"))
         self.assertNotIn("systemMessage", payload)
 
-    def test_recovery_preserves_business_payload_and_does_not_invent_evidence(self):
+    def test_recovery_preserves_answer_without_repeating_business_checks(self):
         payload = self.hook(VALID.replace("    evidence: python check.py exited 0\n", ""))
         self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("complete standalone final answer", payload["reason"])
-        self.assertIn("Preserve the substantive answer", payload["reason"])
-        self.assertIn("Do not invent evidence", payload["reason"])
-        self.assertIn("report the unverified or failed state", payload["reason"])
+        self.assertIn("must include evidence", payload["reason"])
+        self.assertIn("repair-target: completion_metadata", payload["reason"])
+        self.assertIn("delivery-route: resolve_host_delivery", payload["reason"])
+        self.assertIn("must not run tools to discover answer visibility", payload["reason"])
+        self.assertIn("without repeating the answer", payload["reason"])
 
-    def test_honest_unverified_retry_can_end_without_false_success(self):
-        payload = self.hook("I have not verified that the tests pass. Verification remains unresolved.", retry=True)
+    def test_reviewed_unresolved_report_can_end_without_false_success(self):
+        text = "I have not verified that the tests pass. Verification remains unresolved."
+        self.assertEqual(self.hook(text, retry=True, response_purpose='explanation'),
+                         {'continue': True})
+
+    def test_skill_self_report_does_not_replace_authenticated_review(self):
+        for platform in ('claude', 'codex'):
+            with self.subTest(platform=platform):
+                payload = self.hook(VALID, platform=platform, record_review=False)
+                self.assertEqual(payload.get('decision'), 'block')
+                self.assertIn('assessment-required:', payload['reason'])
+                self.assertNotIn('Invoke the Claude Code Skill tool', payload['reason'])
+                self.assertEqual(self.hook(VALID, platform=platform), {'continue': True})
+
+    def test_explanation_label_never_bypasses_actual_closure_validation(self):
+        payload = self.hook("[task-router]\n- work-kind: nonexecution\n\nExplanation: the task is complete.")
+        self.assertEqual(payload.get("decision"), "block")
+        self.assertIn("requires a [completion-check]", payload["reason"])
+
+    def test_fenced_completion_example_needs_no_recovery(self):
+        payload = self.hook("Example:\n```text\n[completion-check]\n- claim-evidence-map:\n```\nUse that shape.", response_purpose="explanation")
         self.assertTrue(payload.get("continue"))
         self.assertNotIn("systemMessage", payload)
 
-    def test_missing_skill_retry_fills_evidence_from_existing_results(self):
-        # Blocked subjects re-read files they had just written because this retry text ordered a new check.
-        result = subprocess.run(
-            [sys.executable, "-B", str(HOOK), "--platform", "claude"],
-            input=json.dumps({"last_assistant_message": VALID, "transcript_path": ""}),
-            text=True, capture_output=True, check=True,
-        )
-        reason = json.loads(result.stdout)["reason"]
-        self.assertIn('{"skill": "verification-before-completion"}', reason)
-        self.assertIn("map each claim to evidence that already exists in this turn", reason)
-        self.assertIn("never repeat a successful check just to fill a field", reason)
-        self.assertNotIn("perform the fresh evidence check", reason)
+    def test_actual_markdown_examples_do_not_trigger_stop_recovery(self):
+        for text in ("````text\n```\n[completion-check]\nThe task is complete.\n```\n````\n",
+                     "    [completion-check]\n    The task is complete.\n",
+                     "> Quoted example:\nThe task is complete.\n[completion-check]\n"):
+            with self.subTest(text=text):
+                payload = self.hook(text, response_purpose='explanation')
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
+
+    def test_long_example_preserves_stop_validation_of_outside_closure(self):
+        text = "````text\n```\n[completion-check]\n```\n````\n\nThe task is complete."
+        payload = self.hook(text)
+        self.assertEqual(payload.get("decision"), "block")
+        self.assertIn("requires a [completion-check]", payload["reason"])
+
+    def test_balanced_explicit_multiline_quote_needs_no_stop_recovery(self):
+        for opening, closing in (("“", "”"), ('"', '"')):
+            text = "A sample response is:\n" + opening + "The task is complete.\n[completion-check]\n- claim-evidence-map:\n" + closing
+            with self.subTest(text=text):
+                payload = self.hook(text, response_purpose='explanation')
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
+
+    def test_inline_quote_boundaries_cannot_bypass_stop_validation(self):
+        for literal in ("OK.", "pending.", "(Next section)"):
+            text = f'The command returned "{literal}"\n\nThe task is complete.\n\n"[io-trace]"'
+            with self.subTest(text=text):
+                payload = self.hook(text)
+                self.assertEqual(payload.get("decision"), "block")
+                self.assertIn("requires a [completion-check]", payload["reason"])
+
+    def test_inline_quotes_cannot_hide_a_malformed_unquoted_control_block(self):
+        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[io-trace]"'
+        payload = self.hook(text)
+        self.assertEqual(payload.get("decision"), "block")
+
+    def test_quoted_list_lazy_continuation_needs_no_stop_recovery(self):
+        for prefix in ("> - ", "> 1. ", "> 1. > "):
+            text = prefix + "Example output:\nThe task is complete.\n[completion-check]\n"
+            with self.subTest(text=text):
+                payload = self.hook(text, response_purpose='explanation')
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
+
+    def test_closed_nested_container_fence_needs_no_stop_recovery_for_lazy_quote(self):
+        prefix = "> - > ```\n>   > code\n>   > ```\n>\n> A quoted paragraph.\n"
+        for tail in ("The task is complete.\n[completion-check]\n", "> The task is complete.\n> [completion-check]\n"):
+            with self.subTest(tail=tail):
+                payload = self.hook(prefix + tail, response_purpose='explanation')
+                self.assertTrue(payload.get("continue"))
+                self.assertNotIn("systemMessage", payload)
 
 
 if __name__ == "__main__":

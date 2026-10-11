@@ -1,6 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <script>
+    // Both byte-identical entry files resolve assets and links from the Pages root.
+    if (/\/docs\/(?:index(?:_ko)?\.html)?$/.test(location.pathname)) {
+      const base = document.createElement('base');
+      base.href = new URL('../', location.href).href;
+      document.head.appendChild(base);
+    }
+  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ghost-ALICE OS</title>
@@ -352,27 +360,23 @@
       border-radius: var(--radius);
       background: var(--surface);
     }
-    .gate-flow-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-      margin-top: 16px;
-    }
-    .gate-flow-cell {
-      min-height: 96px;
-      padding: 12px 14px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface-2);
-      overflow-wrap: anywhere;
-    }
-    .gate-flow-cell span {
-      display: block;
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 760;
-      text-transform: uppercase;
-    }
+
+
+    .flow-chart { max-width: 820px; margin: 24px auto; }
+    .flow-node { padding: 16px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--surface-2); }
+    .flow-node span { display: block; color: var(--accent); font-weight: 400; margin-bottom: 6px; }
+    .flow-edge { padding: 10px 14px; color: var(--muted); font-size: 14px; }
+    .flow-return { padding: 12px 16px; margin: 8px 0 8px 24px; border-left: 3px solid var(--accent-2); color: var(--ink); font-size: 14px; }
+
+    .gate-flow-diagram { margin: 0 0 24px; }
+    figcaption { color: var(--muted); font-size: 14px; margin-top: 14px; }
+
+    a:focus-visible, button:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 4px; }
+    .skip-link { position: absolute; top: -80px; left: 12px; padding: 12px; background: var(--surface); z-index: 30; }
+    .skip-link:focus { top: 8px; }
+    .addon-table-scroll { overflow-x: auto; }
+    .addon-table { min-width: 560px; }
+    @media (max-width: 560px) { .flow-node { padding: 12px; font-size: 14px; } .flow-return { margin-left: 8px; } .gate-flow-diagram { padding: 12px; } }
     .support-section { background: var(--support-bg); }
     .support-grid {
       display: grid;
@@ -389,15 +393,15 @@
       .hero-grid { grid-template-columns: 1fr; }
       .hero-visual { justify-content: center; }
       .grid, .support-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .gate-flow-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
     }
     @media (max-width: 680px) {
       .hero {
         --hero-lockup-width: clamp(16rem, 86vw, 26.25rem);
         --quick-panel-width: clamp(16rem, 92vw, 32.5rem);
       }
-      .nav { display: none; }
-      .topbar-inner { gap: 12px; }
+      .nav { display: flex; width: 100%; order: 3; justify-content: flex-start; flex-wrap: wrap; gap: 10px 16px; font-size: 13px; }
+      .topbar-inner { gap: 12px; flex-wrap: wrap; padding-block: 12px; }
       .github-link { display: none; }
       .hero { padding-top: 48px; }
       h2 { font-size: 32px; }
@@ -429,219 +433,90 @@
       .brand span { max-width: 150px; }
       .theme-option { padding: 0 7px; }
       h2 { font-size: 28px; }
-      .gate-flow-grid { grid-template-columns: 1fr; }
-      .gate-flow-cell { min-height: 0; }
+
       .addon-table th,
       .addon-table td { padding: 12px; }
     }
+    h3[id] { scroll-margin-top: 112px; }
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <div class="wrap topbar-inner">
-      <a class="brand" href="./">
-        <img src="icon.png" alt="" aria-hidden="true">
-        <span>Ghost-ALICE OS</span>
-      </a>
-      <nav class="nav" aria-label="Primary">
-        <a href="#get-started">Get started</a>
-        <a href="#latest-release">0.4.1</a>
-        <a href="#official-addons">Addons</a>
-        <a href="#routes">Docs</a>
-        <a href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a>
-      </nav>
-      <div class="topbar-actions">
-        <div class="theme-toggle" role="group" aria-label="Theme">
-          <button class="theme-option" type="button" data-theme-choice="system" aria-pressed="true">System</button>
-          <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="false">Light</button>
-          <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
-        </div>
-        <a class="btn github-link" href="https://github.com/AidALL/ghost-alice">GitHub</a>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar"><div class="wrap topbar-inner">
+    <a class="brand" href="./"><img src="icon.png" alt="" aria-hidden="true"><span>Ghost-ALICE OS</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a href="#get-started">Get started</a><a href="#how-it-works">How it works</a><a href="#routes">Docs</a><a href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a>
+    </nav>
+    <div class="topbar-actions">
+      <a class="btn language-link" href="./index_ko.html" lang="ko" hreflang="ko">한국어</a>
+      <div class="theme-toggle" role="group" aria-label="Theme">
+        <button class="theme-option" type="button" data-theme-choice="system" aria-pressed="true">System</button>
+        <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+        <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
       </div>
     </div>
-  </header>
-
-  <main>
-    <section class="hero" id="get-started">
-      <div class="wrap hero-grid">
-        <div class="hero-copy">
-          <div class="eyebrow">Agent governance layer · 0.4.1</div>
-          <h1 class="sr-only">Ghost-ALICE OS</h1>
-          <div class="hero-logo-lockup">
-            <img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS">
-          </div>
-          <p class="lead">Keep AI agent work inspectable by recording intent, declaring boundaries, requiring evidence, and preserving installer state across supported runtimes.</p>
-          <div class="actions">
-            <a class="btn primary" href="./README.html">Read the docs</a>
-            <a class="btn" href="./docs/getting-started/installation.html">Install</a>
-            <a class="btn" href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a>
-            <a class="btn" href="#official-addons">Addons</a>
-          </div>
-        </div>
-        <div class="hero-visual">
-          <div class="quick-panel">
-            <div class="panel-head">
-              <span>Quick start · Core + Autopilot</span>
-              <button class="copy-btn" type="button" data-copy="bash install.sh --addon autopilot">Copy</button>
-            </div>
-            <pre><code>bash install.sh --addon autopilot</code></pre>
-            <p class="muted">Run from the cloned repository. Agent platforms are detected automatically. See the <a href="./docs/getting-started/installation.html">detailed installation guide</a> for cloning, platform selection and OS-native commands.</p>
-          </div>
-        </div>
+  </div></header>
+  <main id="main" tabindex="-1">
+    <section class="hero" id="get-started"><div class="wrap hero-grid">
+      <div class="hero-copy">
+        <div class="eyebrow">Agent governance layer · 0.5.0</div>
+        <h1 class="sr-only">Ghost-ALICE OS</h1>
+        <div class="hero-logo-lockup"><img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS"></div>
+        <p class="lead">Keep the user's goal, repair affected work, and connect each claim to its original evidence.</p>
+        <div class="actions"><a class="btn primary" href="./README.html">Read the docs</a><a class="btn" href="./docs/getting-started/installation.html">Install</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a></div>
       </div>
-    </section>
-
-    <section id="latest-release">
-      <div class="wrap">
-        <div class="section-head">
-          <h2>Core + Autopilot 0.4.1</h2>
-          <p class="section-note">Preserve useful work through corrections, require scoped completion evidence, and continue within the approved session. Both projects remain open source under Apache-2.0.</p>
+      <div class="hero-visual"><div class="quick-panel">
+        <div class="panel-head"><span>Quick start · Core + Ghost-ALICE Autopilot</span><button class="copy-btn" type="button" data-copy="bash install.sh --addon autopilot">Copy</button></div>
+        <pre><code>bash install.sh --addon autopilot</code></pre>
+        <p class="muted">Run from the cloned repository. The installer detects available agent platforms. <a href="./docs/getting-started/installation.html">See OS-native commands and platform options.</a></p>
+      </div></div>
+    </div></section>
+    <section id="latest-release"><div class="wrap">
+      <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.0</h2><p class="section-note">This documentation describes Core and Ghost-ALICE Autopilot 0.5.0. A local installation is separate from a published release. Ghost-ALICE Autopilot 0.5.0 requires Core 0.5.0 or later.</p></div>
+      <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Ghost-ALICE Autopilot releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">Compatibility</a></div>
+    </div></section>
+    <section id="how-it-works"><div class="wrap">
+      <div class="section-head"><h2>How it works</h2><p class="section-note">The responding model makes the judgments. Core and Ghost-ALICE Autopilot supply instructions and executable code. The native host runs tools and hooks, enforces permission and returns their results to the conversation.</p></div>
+      <figure class="gate-flow-diagram" aria-labelledby="flow-heading">
+        <h3 id="flow-heading">From authorized work to a reviewed answer</h3>
+        <div class="flow-chart">
+          <div class="flow-node"><span>1 · Select and perform the work</span>The model interprets the user’s objective and permission, selects the current work and submits that selection through a host tool to Core. After Core validates the route, the model requests the needed tools. The host returns the actual observations.</div>
+          <div class="flow-edge">↓ Actual results and original source locations</div>
+          <div class="flow-node"><span>2 · Receive exact review inputs</span>The model sends the complete draft, claims under review and original sources to Core through host tools. Core saves those contents and returns the exact inputs and references for the model to review.</div>
+          <div class="flow-edge">↓ Saved answer, original-source contents and references returned as a tool result</div>
+          <div class="flow-node"><span>3 · Judge each claim against original evidence</span>The model reads each claim and its original sources, including contrary evidence. It decides what is supported, contradicted or unavailable and gives the source references and reason for each judgment.</div>
+          <div class="flow-edge">↓ Individual judgments, user objective and constraints, and the complete answer</div>
+          <div class="flow-node"><span>4 · Judge the whole answer against the objective</span>The model separately checks whether the complete answer addresses the requested scope, avoids omissions and conflicts, and accurately states remaining work. Correct individual claims do not settle this whole-answer judgment.</div>
+          <div class="flow-edge">↓ The model’s two judgments, written as review JSON</div>
+          <div class="flow-node"><span>5 · Record both judgments</span>The model submits both judgments through host tools. Core validates their bindings and stores them together. Only supported reviews return an answer for submission. An unsupported judgment or missing prerequisite asks the model to choose affected correction or unresolved reporting.</div>
+          <div class="flow-edge">↓ The model submits the returned reviewed answer</div>
+          <div class="flow-node"><span>6 · Receive independent Stop results</span>The host invokes the Core completion guard and Ghost-ALICE Autopilot adapter independently. Both call Core’s assessment API to authenticate the current answer and review. The guard returns allow or a named prerequisite; Ghost-ALICE Autopilot publishes proof only when Core selects completion evidence, applies or reuses eligible authenticated publications, and may return a ready task from an admitted plan.</div>
         </div>
-        <div class="grid">
-          <div class="card">
-            <h3>Keep corrections in context</h3>
-            <p>Intent snapshots preserve active decisions and recorded scope alongside accumulated constraints. A revised goal does not silently discard the remaining boundaries.</p>
-            <a href="./docs/policies/session-gate-matrix.html">Read the intent contract</a>
-          </div>
-          <div class="card">
-            <h3>Bind work to its session</h3>
-            <p>Current-session checks prevent ledger writes and autonomous continuation from borrowing another session's context. Autopilot checks intent before applying pending receipts or plans.</p>
-            <a href="./docs/release/2026-10-01-release-notes.html">Read verification scope</a>
-          </div>
-          <div class="card">
-            <h3>Load the right contract</h3>
-            <p>Codex keeps its automatic bootstrap short. It uses the complete supplied project contract when available, or loads the managed governance fallback before actionable work.</p>
-            <a href="./docs/getting-started/installation.html">Read the installation contract</a>
-          </div>
-        </div>
-        <p class="section-note">Recommended product pair: core 0.4.1 and Autopilot 0.4.1. The addon's technical minimum remains core 0.4.0. Model interpretation can still be wrong; review the <a href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">documented support and verification limits</a>.</p>
-        <div class="actions">
-          <a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core release</a>
-          <a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Autopilot release</a>
-        </div>
+        <figcaption>A supported answer can honestly report unfinished work. A record, accepted proof or returned task request does not by itself establish that all requested work is complete.</figcaption>
+      </figure>
+      <p>If further work is needed, the model defines tasks, dependencies, allowed surfaces and criterion references within actual user approval, then registers the plan with Ghost-ALICE Autopilot through the host. At Stop, the adapter returns eligible work from the admitted plan. If the host delivers it to the hook session’s identified conversation, the next responding model chooses permitted tools.</p>
+      <p>When evidence contradicts a required result, the model investigates enough to choose a needed authorized correction. It preserves unaffected results and reports unresolved requirements honestly. A recording error alone does not justify repeating the business operation; a new input does not invalidate unchanged proof.</p>
+      <p>The <a href="https://github.com/AidALL/ghost-alice/wiki/design-philosophy-floor-not-ceiling#comparison-and-feedback">comparison diagram</a> explains these model judgments. The <a href="https://github.com/AidALL/ghost-alice/wiki/operating-model-fallback-and-escalation#focus-and-verification-burden">focus diagram</a> explains how the model selects what to investigate and how much evidence it needs.</p>
+      <p><a href="./architecture.html">Read the architecture, interface values and owning procedures</a></p>
+    </div></section>
+    <section id="official-addons"><div class="wrap">
+      <div class="section-head"><h2>Optional Ghost-ALICE Autopilot</h2><p class="section-note">Add Ghost-ALICE Autopilot when you need approved autonomous continuation. Installation does not grant run approval. The current-session assistant follows Core verification instructions, and Core Python code authenticates the submitted bindings.</p></div>
+      <div class="actions"><a class="btn" href="./docs/reference/official-addons.html">Official and custom addon sources</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot">Ghost-ALICE Autopilot</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/addon-authoring">Addon authoring</a></div>
+    </div></section>
+    <section id="routes"><div class="wrap">
+      <div class="section-head"><h2>Documentation</h2><p class="section-note">Practical commands live in repository guides; Wiki provides onboarding and background. English and Korean pages describe the same behavior.</p></div>
+      <div class="grid">
+<div class="card"><h3><a href="./docs/getting-started/installation.html">Installation and updates</a></h3><p>Platform selection, official/custom addons and managed installation.</p></div>
+<div class="card"><h3><a href="./docs/getting-started/troubleshooting.html">Troubleshooting</a></h3><p>Status, doctor, pending merges and hook loading.</p></div>
+<div class="card"><h3><a href="./docs/getting-started/uninstall.html">Uninstall</a></h3><p>Remove owned install surfaces while preserving user files.</p></div>
+<div class="card"><h3><a href="./docs/policies/session-gate-matrix.html">Session contracts</a></h3><p>Intent, work selection, completion evidence and response scope.</p></div>
+<div class="card"><h3><a href="./docs/policies/installer-platform-compatibility-matrix.html">Platform compatibility</a></h3><p>Installer entrypoints and current platform boundaries.</p></div>
+<div class="card"><h3><a href="./docs/reference/skills.html">Skill catalog</a></h3><p>Available workflows and their owning references.</p></div>
       </div>
-    </section>
-
-    <section id="official-addons">
-      <div class="wrap">
-        <div class="section-head">
-          <h2>Addons</h2>
-          <p class="section-note">Autopilot is optional: add it to the core install when you need approved autonomous continuation. Custom, tenant, or local development addons use the same installer entrypoint.</p>
-        </div>
-        <table class="addon-table">
-          <thead>
-            <tr>
-	              <th>Source</th>
-	              <th>Purpose</th>
-	              <th>Install</th>
-	              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-	              <td>official: autopilot</td>
-	              <td>Continue approved work one item at a time, checking current intent and completion evidence before moving on.</td>
-	              <td><a href="./docs/getting-started/installation.html#install-official-addons">Installation guide</a></td>
-	              <td><a href="https://github.com/AidALL/ghost-alice-autopilot">AidALL/ghost-alice-autopilot</a></td>
-	            </tr>
-	            <tr>
-	              <td>custom source</td>
-	              <td>Install an addon you maintain, fork, tenant-package, or develop locally.</td>
-	              <td><a href="./docs/getting-started/installation.html#install-custom-addons">Custom addon guide</a></td>
-	              <td><a href="https://github.com/AidALL/ghost-alice/wiki/addon-authoring">Authoring guide</a></td>
-	            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section id="routes">
-      <div class="wrap">
-        <div class="section-head">
-          <h2>Where to go next</h2>
-          <p class="section-note">The homepage is a navigation hub. Command truth lives in repo docs and installer help; background explanation lives in the Wiki.</p>
-        </div>
-        <div class="grid">
-          <div class="card">
-            <h3>Install</h3>
-            <p>Core install, official addons, custom addon sources, status, doctor, update, and platform selection.</p>
-            <a href="./docs/getting-started/installation.html">Open install guide</a>
-          </div>
-          <div class="card">
-            <h3>Uninstall</h3>
-            <p>Full uninstall, platform uninstall, selected skill removal, and addon-specific removal boundaries.</p>
-            <a href="./docs/getting-started/uninstall.html">Open uninstall guide</a>
-          </div>
-          <div class="card">
-            <h3>Compatibility</h3>
-            <p>Native installer entrypoints and supported hook surfaces for Codex and Claude Code. Addon runtime coverage is documented separately.</p>
-            <a href="./docs/policies/installer-platform-compatibility-matrix.html">Open matrix</a>
-          </div>
-          <div class="card">
-	            <h3>Addon sources</h3>
-	            <p>Official aliases, custom repositories, tenant packages, and local development addons.</p>
-	            <a href="./docs/reference/official-addons.html">Open addon sources</a>
-	          </div>
-	          <div class="card">
-	            <h3>Addon authoring</h3>
-	            <p>Manifest format and packaging guidance for addons you build or bring in.</p>
-            <a href="https://github.com/AidALL/ghost-alice/wiki/addon-authoring">Open authoring guide</a>
-          </div>
-          <div class="card">
-            <h3>Korean docs</h3>
-            <p>Reader-facing Korean mirrors for README and repository documentation.</p>
-            <a href="./README_ko.html">한국어 문서</a>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="how-it-works">
-      <div class="wrap">
-        <div class="section-head">
-          <h2>How it works</h2>
-          <p class="section-note">Core philosophy. Quality floor first. Operating loop steps and Verification layers stay visible without making the homepage a policy manual.</p>
-        </div>
-        <div class="gate-flow-diagram">
-          <h3>Gate interaction map</h3>
-          <p>This is the inventory layer: core governance checkpoints first, then workflow and domain packs that run on top. Quality floor as root rule means agent authority follows verified state, not forward momentum.</p>
-          <div class="gate-flow-grid">
-            <div class="gate-flow-cell"><span>intent delta</span>session-intent-analyzer records goals, constraints, criteria, active decisions, and scope.</div>
-            <div class="gate-flow-cell"><span>derived gate judgments</span>governance consumers reconcile user corrections with the current request and preserved boundaries before execution.</div>
-            <div class="gate-flow-cell"><span>boundary</span>boundary-contract locks allowed and prohibited surfaces.</div>
-            <div class="gate-flow-cell"><span>checkpoint</span>tool-checkpoint guards the execution surface.</div>
-            <div class="gate-flow-cell"><span>focus</span>Dynamic focus can move through micro, meso, macro, and meta scopes at the scope reopen point.</div>
-            <div class="gate-flow-cell"><span>evidence</span>completion-check binds each claim to a claim-evidence-map.</div>
-            <div class="gate-flow-cell"><span>trace</span>io-trace leaves file and tool access auditable.</div>
-            <div class="gate-flow-cell"><span>handoff</span>support handoff keeps recovery paths explicit.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="support-section">
-      <div class="wrap">
-        <div class="section-head">
-          <h2>Lifecycle support</h2>
-          <p class="section-note">The public entrypoint stays short; deeper onboarding, FAQ, and background discussion move to docs and wiki pages.</p>
-        </div>
-        <div class="support-grid">
-          <div class="card"><h3>io-trace audit trail</h3><p>File and external access can be inspected after a turn.</p></div>
-          <div class="card"><h3>skill-evolution candidates</h3><p>Behavioral improvement candidates remain report-only until explicitly accepted.</p></div>
-          <div class="card"><h3>pending-merge review</h3><p>Installed local edits are surfaced before being overwritten.</p></div>
-          <div class="card"><h3>adversarial verification</h3><p>Source-heavy or high-stakes claims can be checked through independent review.</p></div>
-          <div class="card"><h3>jailbreak drift check</h3><p>Current requests are compared against accumulated constraints.</p></div>
-          <div class="card"><h3>runtime recovery</h3><p>Installer state, support files, and cleanup reports preserve recovery context.</p></div>
-        </div>
-      </div>
-    </section>
-    <!-- ── Grows with your team ── -->
+      <p>Strict audit records access metadata. Skill-evolution reports improvement candidates; applying them requires authorized work. Merge-companion handles preserved local edits.</p>
+    </div></section>
   </main>
-
-  <footer>
-    <div class="wrap">Ghost-ALICE OS 0.4.1. Agent governance operating layer. <a href="https://github.com/AidALL/ghost-alice/blob/main/LICENSE">Apache-2.0</a>.</div>
-  </footer>
-
+  <footer><div class="wrap">Ghost-ALICE OS · Agent governance layer · <a href="https://github.com/AidALL/ghost-alice/blob/main/LICENSE">Apache-2.0</a></div></footer>
   <script>
     const themeButtons = Array.from(document.querySelectorAll("[data-theme-choice]"));
     const validThemes = new Set(["system", "light", "dark"]);

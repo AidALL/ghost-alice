@@ -8,9 +8,9 @@ Supported frameworks:
 
 Install behavior:
   1. Read each framework's hook config file, creating it when absent.
-  2. Merge the UserPromptSubmit hook when missing or stale.
-  3. Skip with a message when the same hook already exists (idempotent).
-  4. Preserve existing settings.
+  2. Merge the managed prompt, tool, completion, session-start and audit hooks.
+  3. Replace stale managed entries and retain matching entries.
+  4. Preserve unrelated settings and register approved privileged adapters.
   5. For Codex, install `hooks.json` and ensure `[features] hooks = true` in `config.toml`.
 
 Uninstall behavior:
@@ -31,6 +31,8 @@ Exit codes:
 """
 
 from __future__ import annotations
+
+from reminder_texts import reminder_text
 
 import argparse
 import base64
@@ -74,6 +76,7 @@ if sys.version_info < MIN_PYTHON_VERSION:
 from merge_companion_messages import render_pending_merge_message
 from hook_profile_gate import normalize_hook_id
 import runtime_config
+import install_destination
 import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
 
@@ -97,7 +100,7 @@ class HookStatus:
     details: dict[str, Any]
     missing_reason: str | None = None
     unsupported: bool = False
-    # True when hook files are present but their runtime event semantics are not yet confirmed by a live smoke run. Per docs/policies/platform-adapter-compliance.md, Codex stays instruction-backed (pending smoke evidence) rather than being reported as native runtime-verified. This does not change install behavior; it only keeps the status report honest about unverified event semantics.
+    # Report instruction-backed hook installation separately from verified native event semantics; the structured status requires live smoke evidence.
     pending_smoke_evidence: bool = False
 
 # ── Hook Payload Definitions ──────────────────────────────
@@ -178,7 +181,7 @@ def _default_installed_hook_shared_dir(platform_key: str) -> Path:
     configured = os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR", "").strip()
     if configured:
         return Path(configured).expanduser()
-    return _home() / ".ghost-alice" / "runtime" / "current" / "_shared"
+    return install_destination.ghost_root(_home()) / "runtime" / "current" / "_shared"
 
 
 def _hook_shared_dir_for_platform(platform_key: str, explicit: str | None = None) -> Path | None:
@@ -192,7 +195,9 @@ def _hook_shared_dir_for_platform(platform_key: str, explicit: str | None = None
 
 def _resolve_shared_hook_script(name: str) -> str:
     script = _hook_shared_dir() / name
-    if script.exists():
+    active = install_destination.current()
+    source = Path(active.core_source_root)/"_shared"/name if active else script
+    if script.exists() or (active and source.is_file()):
         return str(script).replace("\\", "/")
     return ""
 
@@ -205,8 +210,93 @@ def _repo_root_from_this_file() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _session_intent_root() -> Path:
-    return _repo_root_from_this_file() / ".tmp" / "session-intent"
+def _session_intent_root(platform: str | None = None) -> Path:
+    configured = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT", "").strip()
+    if configured:
+        if not Path(configured).is_absolute():
+            raise ValueError("session intent root must be absolute")
+        return Path(configured)
+    if "PLATFORMS" not in globals():
+        return _repo_root_from_this_file()/".tmp/session-intent"
+    return Path(_default_destination(platform or "codex").ledger_root)
+
+
+def _default_destination(platform_key: str) -> install_destination.InstallDestination:
+    source = Path(os.environ.get("GHOST_ALICE_CORE_ROOT") or _repo_root_from_this_file())
+    ghost = install_destination.ghost_root(_home())
+    retained = runtime_config.load_config(home=_home()).get("install_locations", {}).get(platform_key, {})
+    ledger = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT") or retained.get("ledger_root") or _retained_installed_ledger(platform_key) or str(source / ".tmp/session-intent")
+    return install_destination.InstallDestination.parse(dict(mode="normal", owned_root=str(_home()),
+        platform_dir=str(_resolve_codex_dir() if platform_key == "codex" else _resolve_claude_dir()),
+        skills_dir=str(_home()/".agents/skills" if platform_key == "codex" else _resolve_claude_dir()/"skills"),
+        ghost_root=str(ghost), ledger_root=str(ledger), project_root=str(source), core_source_root=str(source),
+        runtime_shared_dir=str(os.environ.get(HOOK_SHARED_DIR_ENV) or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR") or ghost/"runtime/current/_shared")))
+
+
+def _retained_installed_ledger(platform_key):
+    """Retain a single explicit authority from the selected installed hook chain.
+
+    Reads only the chosen platform settings, never discovery/latest-checkout state.
+    Multiple managed roots require an explicit choice instead of mixed authority.
+    """
+    import shlex
+    path=(_resolve_codex_dir()/"hooks.json" if platform_key=="codex" else _resolve_claude_dir()/"settings.json")
+    try:
+        settings=json.loads(path.read_text())
+    except (OSError,ValueError):
+        return None
+    roots=set()
+    for groups in settings.get("hooks",{}).values():
+        for group in groups if isinstance(groups,list) else []:
+            for hook in group.get("hooks",[]):
+                command=hook.get("command","")
+                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","prompt","tool-checkpoint","session-start","pending-merge-prompt")):
+                    continue
+                outer=shlex.split(command,comments=True)
+                if "--binding-b64" in outer:
+                    binding=install_destination.decode_binding(outer[outer.index("--binding-b64")+1])
+                    roots.add(binding["destination"]["ledger_root"])
+                else:
+                    args=outer[outer.index("run")+1:]
+                    inner=shlex.split(base64.urlsafe_b64decode(args[-1]).decode(),comments=True)
+                    for flag in ("--root","--session-intent-root"):
+                        if flag in inner:
+                            root=inner[inner.index(flag)+1]
+                            if Path(root).is_absolute(): roots.add(root)
+    if len(roots)>1:
+        raise ValueError("installed managed hooks contain conflicting ledger roots; supply an explicit binding")
+    return next(iter(roots),None)
+
+
+def _destination_action(platform_key, destination, action, *, dry_run=False):
+    resolved = install_destination.InstallDestination.parse(destination)
+    if not (Path(resolved.core_source_root)/"session-intent-analyzer/scripts/session_intent_ledger.py").is_file():
+        raise ValueError("Core source root does not provide the session ledger API")
+    if not (Path(resolved.core_source_root)/"_shared/response_delivery.py").is_file():
+        raise ValueError("Core source root does not provide the response API")
+    if resolved.mode == "isolated":
+        if action not in {"install", "status", "uninstall"}:
+            raise ValueError("isolated destination does not support this action")
+        if install_destination.current() is None and (os.environ.get("GHOST_ALICE_HOOK_SHARED_DIR") or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR")):
+            raise ValueError("isolated destination conflicts with runtime overrides")
+    return resolved
+
+
+def _prepare_destination_runtime(destination, *, dry_run=False):
+    if dry_run:
+        return
+    target = Path(destination.runtime_shared_dir)
+    install_destination.assert_mutation_path(target)
+    if destination.mode == "isolated":
+        Path(destination.platform_dir).mkdir(parents=True, exist_ok=True)
+    for source in (Path(destination.core_source_root)/"_shared").iterdir():
+        if source.is_file() and source.suffix in {".py", ".mjs", ".json"}:
+            output = target/source.name
+            install_destination.assert_mutation_path(output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            if not output.exists() or output.read_bytes() != source.read_bytes():
+                shutil.copy2(source, output)
+
 
 
 def _pending_merge_precheck_command(
@@ -235,7 +325,7 @@ def _pending_merge_precheck_command(
             "--internal-b64",
             instruction_payload,
             "--root",
-            _quote_static_arg(_session_intent_root()),
+            _quote_static_arg(_session_intent_root(platform)),
         ])
 
     if output_format == "json":
@@ -249,9 +339,7 @@ def _pending_merge_precheck_command(
 
 # 1. User input pre-hook: run only the pending-merge precheck first.
 PROMPT_PENDING_MERGE_MARKER = "[merge-companion] prompt-check"
-PROMPT_PENDING_MERGE_INTERNAL = (
-    "merge-companion prompt-check: Check only the current platform pending-merge manifest " "before the user-input governance graph continues. " "If this hook reports undecided entries, surface merge-companion first; " "a user-explicit defer/skip may continue with the entry still undecided. " "If there is no pending warning, treat merge-companion-precheck as clean and do not run an extra shell manifest check."
-)
+PROMPT_PENDING_MERGE_INTERNAL = "merge-companion prompt-check: This hook checks the current platform's pending-merge manifest. If the hook reports undecided entries, the current-session assistant presents merge-companion before other work. A user's explicit defer or skip leaves those entries undecided and permits other authorized work. A clean hook result requires no second manifest inspection."
 
 
 def _prompt_pending_merge_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
@@ -275,21 +363,9 @@ PROMPT_PENDING_MERGE_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": PROMPT_PENDING_MERGE_COMMAND}],
 }
-PROMPT_PENDING_MERGE_ENTRY_CODEX = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": PROMPT_PENDING_MERGE_COMMAND_CODEX}],
-}
-
 # 1-B. Work-start hook: reminder to call task-router.
 HOOK_MARKER = "[hook-reminder] AGENTS.md"
-HOOK_INTERNAL = (
-    "hook-reminder: task-router waits until session-intent preflight exists and no current-lineage block gate is recorded. "
-    "Absent downstream-gates.json means silent allow. "
-    "After release, read the ledger, decompose user input into atomic meaning units, choose focus-layer/scope-reopen, then assign output, verification, lifecycle, and boundary skills. "
-    "task-router consumes session-intent and jailbreak gate context; it performs routing decisions but does not infer raw user intent, own intake, or own tool permission. "
-    "Every user input requires task-router, including a simple question, opinion, clarification, status comment, or follow-up. "
-    "Do not skip task-router for answer-only turns or prior routing; never place task-router before session-intent-analyzer or the jailbreak-detector downstream gate."
-)
+HOOK_INTERNAL = reminder_text('task-router')
 
 
 def _resolve_task_router_reminder_hook_script() -> str:
@@ -308,7 +384,7 @@ def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: b
             "--format",
             output_format,
             "--root",
-            _quote_static_arg(_session_intent_root()),
+            _quote_static_arg(_session_intent_root(platform)),
             "--internal-b64",
             payload,
         ]) + f" # {HOOK_MARKER}"
@@ -316,10 +392,10 @@ def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: b
         return _shell_print_json({"continue": True, "systemMessage": HOOK_INTERNAL}, payload_mode=payload_mode) + f" # {HOOK_MARKER}"
     return _shell_print_message(_localized_bridge(
         HOOK_INTERNAL,
-        "After session-intent preflight, run task-router when there is no current-lineage block gate and the path is silent allow.",
-        "Run task-router after session-intent preflight; absent current-lineage block gate is silent allow.",
-        "task-router reads the ledger, decomposes intent, chooses focus-layer and scope-reopen, then assigns skills.",
-        "task-router reads the ledger, decomposes intent, chooses focus-layer and scope-reopen, then assigns skills.",
+        "After exact session-intent preflight, run task-router.",
+        "Run task-router after exact session-intent preflight; native permission belongs to its host.",
+        "Terminal routing uses supplied context without tools; normal routing reads the exact ledger and assigns skills.",
+        "Terminal routing uses supplied context without tools; normal routing reads the exact ledger and assigns skills.",
     ), payload=payload_mode) + f" # {HOOK_MARKER}"
 
 
@@ -348,18 +424,7 @@ HOOK_ENTRY_CODEX = {
 # 1-A. Session intent hook: update the per-session intent ledger without the raw prompt.
 SESSION_INTENT_MARKER = "[session-intent-analyzer]"
 LEGACY_SESSION_INTENT_MARKERS = ("[" + "session-intent-" + "guard" + "]",)
-SESSION_INTENT_INTERNAL = (
-    "session-intent-analyzer: Observe every user input by recording an input digest, "
-    "current-session pointer, and digest-only intake status. "
-    "Agents add semantic summaries, constraints, and decisions only when intent materially changes. "
-    "Never persist raw prompts, conversation text, tool outputs, system messages, or secrets. "
-    "Use the ledger as context for skill-evolution and jailbreak-detector. "
-    "skill-evolution is a report-only branch that terminates. jailbreak-detector records model_security_decision in the ledger; only current-lineage block decisions are carried to downstream-gates.json, and absent current block means silent allow. "
-    "Capture trigger: when this input corrects the agent's prior behavior or understanding, record a compressed conduct_feedback entry (id, failure_pattern, corrective_rule, pattern_class, source=user-explicit, status=open) with session_intent_ledger.py so skill-evolution and the /evolution backlog surface it. "
-    "Basis for the correction judgment: a mismatch the input asserts between the agent's prior action/claim and the applicable goal, constraints, non_goals, decisions, and acceptance_criteria, not keyword matching. A direct assertion or clear contextual rejection supports user-explicit feedback even without a raw transcript. "
-    "Evidence boundary: read supplied prior context before attributing a mismatch. New constraints, reminders, changed requirements, or refreshing a formerly valid result do not alone establish prior misconduct; record them as intent fields. Use source=inferred only for an actually observed behavior gap, not a hypothetical future violation or buggy task code. If no mismatch is supported, leave feedback absent. Increment occurrence_count only for another supported correction, not a repeated boundary or reread lesson."
-    " Boundary provenance: timestamps on decisions do not date undated restrictions. Active status, admitted criteria, and recorded past edits alone do not prove a conflicting restriction was replaced. Resolve a boundary from the current user instruction or supplied conversation/event evidence; a clear current instruction needs no formal revocation phrase or renewed approval. With only conflicting snapshot fields, do not invent earlier/later ordering or authorize a disputed change; identify the conflict and continue uncontested work. Missing files and missing authorization are distinct."
-)
+SESSION_INTENT_INTERNAL = reminder_text('session-intent')
 
 
 def _resolve_session_intent_analyzer_hook_script() -> str:
@@ -382,7 +447,7 @@ def _session_intent_analyzer_command(*, platform: str, output_format: str, paylo
             "--format",
             output_format,
             "--root",
-            _quote_static_arg(_session_intent_root()),
+            _quote_static_arg(_session_intent_root(platform)),
             "--internal-b64",
             payload,
         ])
@@ -395,31 +460,19 @@ SESSION_INTENT_COMMAND = (
     _session_intent_analyzer_command(platform="claude", output_format="text")
     + f" # {SESSION_INTENT_MARKER}"
 )
-SESSION_INTENT_COMMAND_CODEX = (
-    _session_intent_analyzer_command(platform="codex", output_format="json")
-    + f" # {SESSION_INTENT_MARKER}"
-)
-
 SESSION_INTENT_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": SESSION_INTENT_COMMAND}],
 }
-SESSION_INTENT_ENTRY_CODEX = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": SESSION_INTENT_COMMAND_CODEX}],
-}
-
 # 2. Work-stop hook: verification-before-completion reminder.
 STOP_HOOK_MARKER = "[completion-reminder] AGENTS.md"
-STOP_HOOK_INTERNAL = (
-    "completion-reminder: Before claiming executed work is complete, fixed, successful, or verified, run verification-before-completion. " "Include a [completion-check] block and an [io-trace] block only for those closure claims or for an explicit [completion-check] block. " "Routine explanations, meta-discussion, and options do not require completion-check unless they claim finished work or fresh verification. " "When available, put a top-of-response [observed-timing] block with observable durations only, rounded to two decimals. " "Use unavailable for unobserved phases. Do not infer hidden reasoning time or treat timing as quality evidence. " "On visible Skill surfaces such as Claude Code Skill, actually load " "verification-before-completion before the closure claim; the Stop hook checks that call in the transcript, so the [completion-check] carries no skill-call line there. " "On Codex, write skill-call: verification-before-completion only after using a fresh or valid retained instruction body and executing its workflow this turn. " "Do not infer verification from task-router, metadata, prior context, or routing notes. " "Do not claim skill-call: verification-before-completion unless its workflow was executed this turn with a fresh or valid retained instruction body."
-)
+STOP_HOOK_INTERNAL = 'completion-reminder: Core authenticates the current-session assistant review of claims, original sources and the complete response. The current-session assistant follows verification-before-completion for new completion claims and retains unchanged evidence at its original source and time. Core returns the rejected requirement and the response delivery target. Printed skill or trace fields do not establish evidence; strict audit remains active.'
 STOP_HOOK_MESSAGE = _localized_bridge(
     STOP_HOOK_INTERNAL,
-    "Verification evidence and the work trace are checked after verification-before-completion is actually loaded.",
-    "Verification evidence and the work trace are checked after verification-before-completion is actually loaded.",
-    "Claude Code uses Skill; record skill-call only after the verification skill was actually loaded.",
-    "Claude Code uses Skill; record skill-call only after the verification skill was actually loaded.",
+    "Core checks the authenticated claim, source and complete-response review.",
+    "Core checks the authenticated claim, source and complete-response review.",
+    "Use verification-before-completion to judge claims against original sources.",
+    "Use verification-before-completion to judge claims against original sources.",
 )
 
 
@@ -464,9 +517,7 @@ STOP_HOOK_ENTRY_CODEX = {
 
 # 3. Session-start hook: automatic merge-companion check (pending-merge-session-start layer).
 SESSION_START_MARKER = "[merge-companion] session-check"
-SESSION_START_INTERNAL = (
-    "merge-companion session-check: This Ghost-ALICE hook checks only the current platform pending-merge manifest. " "If this hook reports undecided entries, run merge-companion. Missing, empty, fully decided, or invalid JSON manifests pass silently; " "do not run a second shell check just to prove clean."
-)
+SESSION_START_INTERNAL = "merge-companion session-check: This hook checks the current platform's pending-merge manifest. The current-session assistant presents undecided entries through merge-companion. Missing, empty, fully decided or unparsable manifests pass silently under the current contract; a clean hook result requires no second shell inspection."
 
 
 def _session_start_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
@@ -498,11 +549,9 @@ SESSION_START_ENTRY_CODEX = {
 # 4. User input hook (auxiliary): require web search before external tool claims (rule 10).
 # This is an agent governance hook with the same shape as the task-router hook. It injects text on every user input to require community signal checks before external tool claims.
 WEB_SEARCH_FIRST_MARKER = "[web-search-first]"
-# Only platforms where the reminder reaches the model get the hook. On Claude Code its systemMessage output is shown to the user and never added to the model context, so it adds no model-facing layer of Rule 10 there; the installer leaves it out and removes an entry from an older install.
+# Register this reminder only where its output reaches model context. On Claude Code, systemMessage is user-facing; omit the reminder and remove any matching managed entry.
 WEB_SEARCH_FIRST_PLATFORMS = frozenset({"codex"})
-WEB_SEARCH_FIRST_INTERNAL = (
-    "web-search-first: AGENTS.md Rule 10. Before factual claims about external tools, libraries, CLIs, SDKs, frameworks, versions, or platform behavior, cross-check at least three community sources with WebSearch. Official docs alone are not enough for runtime behavior."
-)
+WEB_SEARCH_FIRST_INTERNAL = "web-search-first: Before endorsing current, version-specific, disputed or high-risk external-tool behavior, the current-session assistant follows AGENTS.md Rule 10: official specifications plus at least three community searches. A specification alone does not prove runtime behavior. Stable general explanations and specification-only questions use Rule 10's stated exceptions."
 
 
 def _web_search_first_command(*, output_format: str, payload_mode: bool = False) -> str:
@@ -534,23 +583,10 @@ WEB_SEARCH_FIRST_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": WEB_SEARCH_FIRST_COMMAND}],
 }
-WEB_SEARCH_FIRST_ENTRY_CODEX = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": WEB_SEARCH_FIRST_COMMAND_CODEX}],
-}
-
 # 5. Pre-tool hook: tool-checkpoint hook-enforced retry point.
 TOOL_CHECKPOINT_MARKER = "[tool-checkpoint] pre-tool-check"
 LEGACY_TOOL_CHECKPOINT_MARKERS = (f"[{'action'}-{'gate'}] pre-tool-check",)
-def _reminder_text(key: str) -> str:
-    import json as _json
-    try:
-        return _json.loads(Path(__file__).with_name("reminder_texts.json").read_text(encoding="utf-8"))[key]
-    except Exception:
-        return ""
-
-
-TOOL_CHECKPOINT_INTERNAL = _reminder_text("tool-checkpoint")
+TOOL_CHECKPOINT_INTERNAL = reminder_text("tool-checkpoint")
 TOOL_CHECKPOINT_COMMAND = (
     _shell_print_message(_localized_bridge(
         TOOL_CHECKPOINT_INTERNAL,
@@ -561,19 +597,11 @@ TOOL_CHECKPOINT_COMMAND = (
     ))
     + f" # {TOOL_CHECKPOINT_MARKER}"
 )
-TOOL_CHECKPOINT_ENTRY = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": TOOL_CHECKPOINT_COMMAND}],
-}
-
 # ── io-trace hook payload ─────────────────────────────────
 # Record file paths from every tool call into the audit log through PostToolUse events.
 # stdout is not visible to the user because this is PostToolUse, but the log file keeps it.
 
 IO_TRACE_MARKER = "[io-trace] audit"
-HOOK_RUNNER_MARKER_PREFIX = "[hook-runner:"
-
-
 def _discover_ghost_alice_skill_names_from_catalog() -> list[str]:
     catalog = _repo_root_from_this_file() / "skill-catalog" / "skills.json"
     if not catalog.exists():
@@ -615,9 +643,10 @@ def _print_addon_target_summary(addon_sources: list[str], platform: str | None =
 
 
 def _ghost_alice_installed_skill_names() -> list[str]:
-    """Return core skill names from the managed catalog only.
+    """Return Core skill names from the managed catalog.
 
-    The legacy function name is retained for internal callers, but arbitrary directories under an installed skills root are not an authority for Claude Skill permissions.
+    Arbitrary directories under an installed skills root do not authorize
+    Claude Skill permissions.
     """
     return _discover_ghost_alice_skill_names_from_catalog()
 
@@ -681,6 +710,18 @@ def _hook_runner_command(
             raise ValueError(f"unsupported hook runner platform: {platform_key}")
         runner_args.append(platform)
     runner_args.append(payload)
+    binding_platform = platform_key or os.environ.get("GHOST_ALICE_PLATFORM") or "codex"
+    destination = install_destination.current() or _default_destination(binding_platform)
+    binding = destination.binding()
+    if normalized.startswith("adapter-autopilot-mode-"):
+        inner_argv = __import__('shlex').split(command,comments=True)
+        if len(inner_argv) != 2:
+            raise ValueError("registered privileged adapter requires no arguments")
+        adapter_script = Path(inner_argv[1])
+        binding["adapter"] = dict(adapter_id="autopilot-mode", runner_id=normalized,
+            script=str(adapter_script), content_hash=hashlib.sha256(adapter_script.read_bytes()).hexdigest(),
+            event="Stop" if normalized.endswith("-continue") else "PreToolUse")
+    runner_args.extend(["--binding-b64", install_destination.encode_binding(binding)])
     visible_hint = " ghost-alice-hook.mjs" if "ghost-alice-hook.mjs" in command else ""
     return (
         f"{_hook_python_invocation(script, *runner_args)} "
@@ -706,16 +747,6 @@ def _hook_runner_command_entry(
 def _resolve_io_trace_script() -> str:
     """Return the io_trace_hook.py path relative to the install directory."""
     return _resolve_shared_hook_script("io_trace_hook.py")
-
-IO_TRACE_ENTRY = {
-    "matcher": "",
-    "hooks": [
-        {
-            "type": "command",
-            "command": "",  # Filled dynamically during install.
-        }
-    ],
-}
 
 # ── Semantic Intent -> Platform Event Name Mapping ────────
 #
@@ -776,6 +807,9 @@ def _home() -> Path:
 
 
 def _resolve_claude_dir() -> Path:
+    active = install_destination.current()
+    if active:
+        return Path(active.platform_dir)
     env = os.environ.get("CLAUDE_CONFIG_DIR")
     if env:
         return Path(env)
@@ -783,6 +817,9 @@ def _resolve_claude_dir() -> Path:
 
 
 def _resolve_codex_dir() -> Path:
+    active = install_destination.current()
+    if active:
+        return Path(active.platform_dir)
     env = os.environ.get("CODEX_HOME")
     if env:
         return Path(env)
@@ -794,11 +831,12 @@ def _resolve_codex_config_toml() -> Path:
 
 
 def _resolve_ghost_alice_hooks_dir() -> Path:
-    return _home() / ".ghost-alice" / "hooks"
+    return install_destination.ghost_root(_home()) / "hooks"
 
 
 def _resolve_source_hook_dispatcher() -> Path:
-    return Path(__file__).with_name("ghost-alice-hook.mjs")
+    active = install_destination.current()
+    return Path(active.core_source_root)/"_shared/ghost-alice-hook.mjs" if active else Path(__file__).with_name("ghost-alice-hook.mjs")
 
 
 def _resolve_installed_hook_dispatcher() -> Path:
@@ -1077,7 +1115,7 @@ def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, An
 
 
 def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[str, str, str, str]]:
-    """Resolve observational addon hooks for one platform (plan Phase 4).
+    """Resolve observational addon hooks for one platform.
 
     Returns [(addon_id, hook_id, event_intent, script_abs_path)]. Re-uses
     addon_installer.load_addon_targets, which fail-closes on a forbidden hook
@@ -1104,7 +1142,7 @@ def _resolve_privileged_adapter_hooks(
     *,
     skills_dir: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    """Resolve core-owned privileged adapter hooks for one platform (plan Phase P5)."""
+    """Resolve core-owned privileged adapter hooks for one platform."""
     if not addon_sources:
         return []
     targets = addon_installer.load_addon_targets(list(addon_sources), platform=platform_key)
@@ -1149,6 +1187,7 @@ def _ensure_hook_dispatcher_installed(dry_run: bool = False) -> bool:
         return True
 
     for src, dst in pending:
+        install_destination.assert_mutation_path(dst)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         _log(_t(f"  Ghost-ALICE hook file installed: {dst}", f"  Ghost-ALICE hook file installed: {dst}"))
@@ -1192,10 +1231,6 @@ PLATFORMS: dict[str, dict[str, Any]] = {
 }
 
 
-def _node_runtime_available(platform_key: str | None = None) -> bool:
-    return bool(_resolve_node_runtime(platform_key))
-
-
 def _ensure_node_runtime_for_hook_install(platform_key: str) -> str | None:
     if platform_key not in {"claude", "codex"}:
         return None
@@ -1221,7 +1256,7 @@ def _log(msg: str) -> None:
 
 
 def _t(ko: str, en: str) -> str:
-    """Return the English message. Retained for call-site compatibility."""
+    """Return the English message; callers may also supply an unused localized value."""
     return en
 
 
@@ -1236,6 +1271,7 @@ def _read_settings(path: Path, *, backup_corrupt: bool = True) -> dict:
         if backup_corrupt:
             _log(_t("  File may be corrupted. Backing up and starting with empty settings.", "  File may be corrupted. Backing up and starting with empty settings."))
             backup = path.with_suffix(".json.corrupt-bak")
+            install_destination.assert_mutation_path(backup)
             shutil.copy2(path, backup)
             _log(_t(f"  Corrupted file backed up: {backup}", f"  Corrupted file backed up: {backup}"))
         else:
@@ -1266,9 +1302,11 @@ def _write_settings(
         _log(_t(f"DRY-RUN: Would write to {path}:", f"DRY-RUN: Would write to {path}:"))
         print(json.dumps(data, indent=2, ensure_ascii=False))
         return
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_suffix(".json.bak")
+        install_destination.assert_mutation_path(backup)
         shutil.copy2(path, backup)
         _log(_t(f"Backup created: {backup}", f"Backup created: {backup}"))
         _rotate_backups(path, keep=3)
@@ -1291,6 +1329,7 @@ def _restore_settings_snapshot(
     if path.is_symlink():
         runtime_config._resolve_symlink_target(path).unlink(missing_ok=True)
         return
+    install_destination.assert_mutation_path(path)
     path.unlink(missing_ok=True)
 
 
@@ -1315,7 +1354,7 @@ def _rotate_backups(
         pending_root: Optional[Path] = _pending_root
     else:
         try:
-            pending_root = (_home() / ".ghost-alice" / "pending-merges").resolve()
+            pending_root = (install_destination.ghost_root(_home()) / "pending-merges").resolve()
         except OSError:
             pending_root = None
 
@@ -1337,6 +1376,7 @@ def _rotate_backups(
     candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     for old in candidates[keep:]:
         try:
+            install_destination.assert_mutation_path(old)
             old.unlink()
         except OSError:
             pass
@@ -1355,9 +1395,11 @@ def _write_text_file(path: Path, content: str, dry_run: bool = False) -> None:
         print(content, end="" if content.endswith("\n") else "\n")
         return
 
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
         backup = path.with_suffix(f"{path.suffix}.bak")
+        install_destination.assert_mutation_path(backup)
         shutil.copy2(path, backup)
         _log(_t(f"Backup created: {backup}", f"Backup created: {backup}"))
     with open(path, "w", encoding="utf-8") as f:
@@ -1490,7 +1532,7 @@ def _ensure_codex_hook_feature_enabled(dry_run: bool = False) -> bool:
 
 
 def _codex_hook_feature_change_path() -> Path:
-    return _home() / ".ghost-alice" / "install-state" / "codex-hook-feature-change.json"
+    return install_destination.ghost_root(_home()) / "install-state" / "codex-hook-feature-change.json"
 
 
 def _write_codex_hook_feature_change(
@@ -1512,6 +1554,7 @@ def _write_codex_hook_feature_change(
     if dry_run:
         _log(_t(f"  DRY-RUN: Would record Codex hooks feature flag change: {path}", f"  DRY-RUN: Would record Codex hooks feature flag change: {path}"))
         return
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(change, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _log(_t("  Recorded Codex hooks feature flag rollback metadata", "  Recorded Codex hooks feature flag rollback metadata"))
@@ -1724,7 +1767,7 @@ def _prune_codex_hook_state_path_variants(lines: list[str], keep_key: str) -> bo
 
 
 def _codex_project_trust_change_path() -> Path:
-    return _home() / ".ghost-alice" / "install-state" / "codex-project-trust-change.json"
+    return install_destination.ghost_root(_home()) / "install-state" / "codex-project-trust-change.json"
 
 
 def _codex_project_trust_header(project_path: str) -> str:
@@ -1809,6 +1852,7 @@ def _write_codex_project_trust_change(
     if dry_run:
         _log(_t(f"  DRY-RUN: Would record Codex project trust change: {path}", f"  DRY-RUN: Would record Codex project trust change: {path}"))
         return
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(change, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _log(_t("  Recorded Codex project trust rollback metadata", "  Recorded Codex project trust rollback metadata"))
@@ -1816,7 +1860,7 @@ def _write_codex_project_trust_change(
 
 def _ensure_codex_project_trusted(dry_run: bool = False) -> bool:
     config_file = _resolve_codex_config_toml()
-    project_path = str(_repo_root_from_this_file().resolve())
+    project_path = str(Path(install_destination.current().project_root).resolve() if install_destination.current() else _repo_root_from_this_file().resolve())
     current_content = _read_text_file(config_file)
     updated_content, changed, before_state = _merge_codex_project_trust(current_content, project_path)
 
@@ -1961,13 +2005,143 @@ def _io_trace_hook_command(*, payload_mode: bool = False) -> str:
 
 
 def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
+    """Recognize the actual managed outer argv, including serialized binding.
+
+    Marker text and a lookalike filename do not establish runner ownership.
+    Commands without an outer binding are removable without granting v2 capability.
+    """
     if not hook_id:
         return False
-    normalized = re.escape(normalize_hook_id(hook_id))
-    return re.search(
-        rf"hook_profile_gate\.py[\"']?\s+[\"']?run[\"']?\s+[\"']?{normalized}[\"']?(?:\s|$)",
-        command,
-    ) is not None
+    import shlex
+    try:
+        argv = shlex.split(command,comments=True)
+        if argv[:2] == ["/bin/sh","-c"]:
+            if len(argv)<7 or argv[3]!="ghost-alice-python":
+                return False
+            prefix,suffix=POSIX_HOOK_PYTHON_LAUNCHER.split("__GHOST_ALICE_INSTALL_PYTHON__")
+            if not argv[2].startswith(prefix) or not argv[2].endswith(suffix):
+                return False
+            middle=shlex.split(argv[2][len(prefix):-len(suffix)])
+            if len(middle)!=1 or not Path(middle[0]).is_absolute():
+                return False
+            script_index=4
+        else:
+            if len(argv)<4 or not re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?(?:\.exe)?",Path(argv[0]).name):
+                return False
+            script_index=1
+        if not Path(argv[script_index]).is_absolute() or Path(argv[script_index]).name!="hook_profile_gate.py":
+            return False
+        args=argv[script_index+1:]
+        if len(args) in {5,6} and args[-2]=="--binding-b64":
+            install_destination.decode_binding(args[-1]);args=args[:-2]
+        if len(args) not in {3,4} or args[:2] != ["run",normalize_hook_id(hook_id)]:
+            return False
+        base64.urlsafe_b64decode(args[-1]).decode('utf-8')
+        return True
+    except (ValueError,UnicodeError,IndexError):
+        return False
+
+
+LEGACY_PROMPT_INSTRUCTION_DIGESTS = {
+    "session-intent": {'99616de4dd8dfee6a9cd62a130a042f03848abb0fedd7c42f9009f37fcdb99d1', '13bedc717127f5ebf23cdf68edd268aba2c4668fe67f87a649ce4b8f267a5df0', 'f0903ce21fe35669afb2b25d9567839529c96f301b84d69f2f084b7c95791162', "4ac1f065346edc273d079dcf0dba602bf3a34871d2f78eed2e05c12b9ecbdecb"},
+    "prompt": {'324cc5f4ca4b3e4d0d91a35a197cd65bad466bf9b975ee15ba6b958507d15c4f', 'a108a60542a39273cdd6b77d29eab749c4b0fb965f2c1a4403df334b2f06baac', '5c6839cdfdf2d42b58299ea8f6ecf353d291bcff8bdf0f2549576d23067d8cde', "5a31b2b40c4a777438fef4dde0bd0026fb77e0c166fcfc5a5531b1e4693643c0"},
+}
+
+
+def _managed_prompt_instruction(command: str, identity: str):
+    """Return payload and instruction coordinates only for an exact bound Core helper."""
+    import shlex
+    if not _hook_runner_id_match(command, identity):
+        return None
+    try:
+        outer = shlex.split(command, comments=True)
+        script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
+        args = outer[script_index + 1:]
+        if len(args) != 6 or args[2] not in {"codex", "claude"} or args[4] != "--binding-b64":
+            return None
+        binding = install_destination.decode_binding(args[5])
+        if set(binding) != {"schema_version", "destination"}:
+            return None
+        destination = install_destination.InstallDestination.parse(binding["destination"])
+        if Path(outer[script_index]) != Path(destination.runtime_shared_dir) / "hook_profile_gate.py":
+            return None
+        script_name = {"prompt": "task_router_reminder_hook.py", "session-intent": "session_intent_analyzer_hook.py"}[identity]
+        inner = base64.urlsafe_b64decode(args[3]).decode("utf-8")
+        argv = shlex.split(inner, comments=True)
+        if (len(argv) < 4 or argv[0] != HOOK_PYTHON_SENTINEL
+                or Path(argv[1]) != Path(destination.runtime_shared_dir) / script_name
+                or len(argv[2:]) % 2):
+            return None
+        options = dict(zip(argv[2::2], argv[3::2]))
+        required = {"--platform", "--format", "--root", "--internal-b64"}
+        if identity == "session-intent":
+            required |= {"--hook", "--context"}
+        if (set(options) != required or len(options) != len(argv[2:]) // 2
+                or options["--platform"] != args[2]
+                or options["--format"] not in {"json", "text"}
+                or options["--root"] != destination.ledger_root
+                or (identity == "session-intent" and (options["--hook"], options["--context"]) != ("session-intent", "prompt_submit"))):
+            return None
+        encoded = options["--internal-b64"]
+        message = base64.urlsafe_b64decode(encoded).decode("utf-8")
+        return args[3], inner, encoded, message
+    except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
+        return None
+
+
+def remove_managed_prompt_reminders(hooks_list: list) -> int:
+    """Retire the built-in reminder without adopting marker-only or custom commands."""
+    def owned(command):
+        decoded = _managed_prompt_instruction(command, "prompt")
+        if decoded is None:
+            return False
+        message = decoded[3]
+        return (message == HOOK_INTERNAL
+                or hashlib.sha256(message.encode("utf-8")).hexdigest() in LEGACY_PROMPT_INSTRUCTION_DIGESTS["prompt"])
+    return _remove_hook_commands_by_command(hooks_list, owned)
+
+
+def refresh_builtin_prompt_instructions(settings: dict[str, Any]) -> tuple[dict[str, Any], int]:
+    """Pure refresh of known built-in prompt text within exact installed bindings.
+
+    No runtime copying, shell execution, config writes, or binding regeneration.
+    Unknown/custom/ambiguous commands remain byte-identical.
+    """
+    import copy
+    refreshed = copy.deepcopy(settings)
+    changed = 0
+    hooks = refreshed.get("hooks", {})
+    rows = hooks.get("UserPromptSubmit", []) if isinstance(hooks, dict) else []
+    if not isinstance(rows, list):
+        return refreshed, changed
+    specifications = {"prompt": HOOK_INTERNAL, "session-intent": SESSION_INTENT_INTERNAL}
+    for row in rows:
+        commands = row.get("hooks", []) if isinstance(row, dict) else []
+        for hook in commands if isinstance(commands, list) else []:
+            command = hook.get("command") if isinstance(hook, dict) else None
+            if not isinstance(command, str) or hook.get("type") != "command":
+                continue
+            for identity, current_message in specifications.items():
+                decoded = _managed_prompt_instruction(command, identity)
+                if decoded is None:
+                    continue
+                try:
+                    payload, inner, encoded, message = decoded
+                    if message == current_message:
+                        continue
+                    if hashlib.sha256(message.encode("utf-8")).hexdigest() not in LEGACY_PROMPT_INSTRUCTION_DIGESTS[identity]:
+                        continue
+                    if inner.count(encoded) != 1 or command.count(payload) != 1:
+                        continue
+                    replacement = base64.urlsafe_b64encode(current_message.encode("utf-8")).decode("ascii")
+                    new_inner = inner.replace(encoded, replacement, 1)
+                    new_payload = base64.urlsafe_b64encode(new_inner.encode("utf-8")).decode("ascii")
+                    hook["command"] = command.replace(payload, new_payload, 1)
+                    changed += 1
+                except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
+                    continue
+                break
+    return refreshed, changed
 
 
 def _remove_stale_hook_entries(
@@ -1985,39 +2159,38 @@ def _remove_stale_hook_entries(
     i = 0
     while i < len(hooks_list):
         entry = hooks_list[i]
-        marker_commands = [
-            hook.get("command", "")
+        stale_commands = [
+            hook
             for hook in entry.get("hooks", [])
-            if any(candidate in hook.get("command", "") for candidate in markers)
-            or _hook_runner_id_match(hook.get("command", ""), hook_id)
+            if (any(candidate in hook.get("command", "") for candidate in markers)
+                or _hook_runner_id_match(hook.get("command", ""), hook_id))
+            and (hook.get("command", "") != expected_command
+                 or (require_dispatcher and not _is_dispatcher_command(hook.get("command", ""))))
         ]
-        if marker_commands and not any(
-            cmd == expected_command and (not require_dispatcher or _is_dispatcher_command(cmd))
-            for cmd in marker_commands
-        ):
-            hooks_list.pop(i)
+        if stale_commands:
+            entry["hooks"] = [hook for hook in entry.get("hooks", []) if hook not in stale_commands]
             removed += 1
-        else:
-            i += 1
+            if not entry["hooks"]:
+                hooks_list.pop(i)
+                continue
+        i += 1
     return removed
 
 
 def _remove_hook_entries(hooks_list: list, marker: str) -> int:
-    """Remove hook-list entries containing the marker and return the removal count."""
+    """Remove marked commands, preserving custom siblings; count affected entries."""
     removed = 0
     i = 0
     while i < len(hooks_list):
         entry = hooks_list[i]
-        has_marker = False
-        for hook in entry.get("hooks", []):
-            if marker in hook.get("command", ""):
-                has_marker = True
-                break
-        if has_marker:
-            hooks_list.pop(i)
+        retained = [hook for hook in entry.get("hooks", []) if marker not in hook.get("command", "")]
+        if len(retained) != len(entry.get("hooks", [])):
+            entry["hooks"] = retained
             removed += 1
-        else:
-            i += 1
+            if not retained:
+                hooks_list.pop(i)
+                continue
+        i += 1
     return removed
 
 
@@ -2029,13 +2202,11 @@ def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
     """Keep managed UserPromptSubmit hook entries in install-surface order.
 
     This is not the full semantic graph. session-intent-analyzer fans out to
-    skill-evolution (report-only) and jailbreak-detector; HOOK_MARKER is only
-    the task-router reminder that waits for downstream-gates.json.
+    task-router and skill-evolution (report-only). Intake owns routing guidance.
     """
     ordered_markers = [
         PROMPT_PENDING_MERGE_MARKER,
         SESSION_INTENT_MARKER,
-        HOOK_MARKER,  # task-router reminder, not task-router execution.
         WEB_SEARCH_FIRST_MARKER,
     ]
     managed: dict[str, dict[str, Any]] = {}
@@ -2049,7 +2220,7 @@ def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
         if first_managed_index is None:
             first_managed_index = index
 
-    # web-search-first is optional (Claude Code does not install it); the other three must all be present to reorder.
+    # web-search-first is optional; pending-merge and intake must be present.
     required_markers = [marker for marker in ordered_markers if marker != WEB_SEARCH_FIRST_MARKER]
     if first_managed_index is None or any(marker not in managed for marker in required_markers):
         return False
@@ -2082,16 +2253,6 @@ GHOST_ALICE_HOOK_MARKERS = (
     SESSION_START_MARKER,
     IO_TRACE_MARKER,
 )
-
-
-def _remove_all_ghost_alice_hooks(hooks_obj: dict[str, Any]) -> int:
-    removed = 0
-    for hook_list in hooks_obj.values():
-        if not isinstance(hook_list, list):
-            continue
-        for marker in GHOST_ALICE_HOOK_MARKERS:
-            removed += _remove_hook_entries(hook_list, marker)
-    return removed
 
 
 def _ensure_claude_ghost_alice_skill_permissions(
@@ -2129,6 +2290,7 @@ def install_hook(
     addon_sources: Any = (),
     skills_dir: str | Path | None = None,
     node_runtime: str | Path | None = None,
+    *, destination: install_destination.InstallDestination | dict | None = None,
 ) -> str:
     """Install hooks into a single framework.
 
@@ -2139,6 +2301,20 @@ def install_hook(
       "unsupported" - skipped because the current runtime does not support it
       "error"     - install failed
     """
+    if destination is not None or install_destination.current() is None:
+        destination = _default_destination(platform_key) if destination is None else destination
+        resolved = _destination_action(platform_key,destination,"install",dry_run=dry_run)
+        if resolved.mode == "isolated" and skills_dir is not None and Path(skills_dir) != Path(resolved.skills_dir):
+            raise ValueError("isolated destination conflicts with skills override")
+        if resolved.mode == "normal" and skills_dir is not None:
+            resolved = __import__("dataclasses").replace(resolved,skills_dir=str(Path(skills_dir).expanduser().resolve()))
+        with install_destination.use(resolved):
+            if PLATFORMS[platform_key]["detect"]() or resolved.mode == "isolated":
+                _prepare_destination_runtime(resolved,dry_run=dry_run)
+            result = install_hook(platform_key,dry_run,addon_sources,resolved.skills_dir,node_runtime)
+            if not dry_run and result in {"installed","already"}:
+                runtime_config.save_config({"install_locations":{platform_key: __import__('dataclasses').asdict(resolved)}},home=_home())
+            return result
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
@@ -2229,30 +2405,9 @@ def install_hook(
         _log(_t("  prompt pending-merge hook added", "  prompt pending-merge hook added"))
         changed = True
 
-    hook_entry = _platform_hook_entry(platform_key, hook_key)
-    hook_command = _entry_command(hook_entry)
-
-    removed = _remove_stale_hook_entries(
-        hook_list,
-        HOOK_MARKER,
-        hook_command,
-        require_dispatcher=require_dispatcher,
-        hook_id="prompt",
-    )
+    removed = remove_managed_prompt_reminders(hook_list)
     if removed:
-        _log(_t(f"  Removed {removed} stale UserPromptSubmit hook entry(ies)", f"  Removed {removed} stale UserPromptSubmit hook entry(ies)"))
-        changed = True
-
-    if _hook_already_exists(
-        hook_list,
-        HOOK_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=hook_command,
-    ):
-        _log(_t("  UserPromptSubmit hook already exists. Skipping", "  UserPromptSubmit hook already exists. Skipping"))
-    else:
-        hook_list.append(hook_entry)
-        _log(_t("  UserPromptSubmit hook added", "  UserPromptSubmit hook added"))
+        _log(f"  Removed {removed} redundant managed task-router reminder(s); intake owns routing guidance")
         changed = True
 
     # Install the session-intent-analyzer hook (updates the session intent ledger for every user input).
@@ -2321,8 +2476,8 @@ def install_hook(
 
     if _reorder_user_prompt_governance_hooks(hook_list):
         _log(_t(
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder (-> web-search-first where installed)",
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent(fan-out: skill-evolution report-only, jailbreak-detector gate) -> task-router-reminder (-> web-search-first where installed)",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch) -> web-search-first where installed",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch) -> web-search-first where installed",
         ))
         changed = True
 
@@ -2458,14 +2613,14 @@ def install_hook(
     # Trust only exact event/command pairs produced by verified addon sources in
     # this install; marker text in pre-existing user hooks is not authority.
     verified_addon_commands: set[tuple[str, str]] = set()
-    # Tier-2 observational addon hooks (plan Phase 4), wired AFTER the core suite. When addon_sources is empty this loop runs zero times, so a core-only install stays byte-identical (no entry added, `changed` untouched).
+    # Wire observational addon hooks after the Core suite. Empty addon_sources leaves the hook configuration unchanged.
     for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
         event_name = _resolve_hook_event(event_intent, platform_key)
         marker = f"[addon:{addon_id}] {hook_id}"
         # The generated command embeds "{marker} [hook-runner:...]", so the marker is always followed by a space. Matching on "marker " makes removal exact and prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
         match_marker = marker + " "
         inner = _hook_python_command(script_path, payload=True)
-        entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker)
+        entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker, platform_key=platform_key)
         command = _entry_command(entry)
         verified_addon_commands.add((event_name, command))
         if event_name not in hooks_obj:
@@ -2484,7 +2639,7 @@ def install_hook(
         else:
             _log(_t(f"  {event_name} addon hook already exists: {marker}", f"  {event_name} addon hook already exists: {marker}"))
 
-    # Privileged adapters (plan Phase P5) are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
+    # Privileged adapters are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
     privileged_adapter_specs = _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir)
     if platform_key == "claude" and any(spec.get("adapter_id") == "autopilot-mode" for spec in privileged_adapter_specs):
         removed = _remove_legacy_autopilot_hook_entries(hooks_obj)
@@ -2574,7 +2729,7 @@ def install_hook(
 
 # ── Uninstall ─────────────────────────────────────────────
 
-# A well-formed addon hook marker -- the ONLY shape remove_addon_hook will act on. This makes the function structurally incapable of stripping a core/peer hook even if handed a forged/tampered marker (addon review: forged-sidecar gate-subversion).
+# A well-formed addon hook marker -- the ONLY shape remove_addon_hook will act on. This makes the function structurally incapable of stripping a core/peer hook even if handed a forged/tampered marker.
 _ADDON_HOOK_MARKER_RE = re.compile(
     r"^\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] (?P<hook_id>[a-z][a-z0-9-]*)$"
 )
@@ -2674,7 +2829,7 @@ def _remove_legacy_autopilot_hook_entries(hooks_obj: dict[str, Any]) -> int:
 
 
 def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
-    """Remove one addon's observational hook entries by exact marker (plan Phase 4).
+    """Remove one addon's observational hook entries by exact marker.
 
     SECURITY: only a well-formed ``[addon:<id>] <hook_id>`` marker is honored; any
     other string (e.g. a forged core marker like ``[completion-reminder] AGENTS.md``)
@@ -2708,7 +2863,7 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
 
 
 def remove_adapter_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
-    """Remove one core-owned privileged adapter hook by exact marker (plan Phase P5)."""
+    """Remove one core-owned privileged adapter hook by exact marker."""
     if not isinstance(marker, str) or not _ADAPTER_HOOK_MARKER_RE.fullmatch(marker):
         return 0
     platform = PLATFORMS.get(platform_key)
@@ -2767,7 +2922,7 @@ def _remove_managed_adapter_entries(hooks_list: list) -> int:
 
 
 def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
-    """Strip EVERY MANAGED addon hook entry (full uninstall, plan Phase 4).
+    """Remove every owned addon hook entry during full uninstall.
 
     Removes only entries that are both ``[addon:`` and ``[hook-runner:`` (managed),
     so a full uninstall cleans addon hooks even when a per-addon uninstall left a
@@ -2793,7 +2948,7 @@ def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
     return total
 
 
-def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
+def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None) -> str:
     """Remove hooks from a single framework.
 
     Return values:
@@ -2803,6 +2958,10 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
       "unsupported" - skipped because the current runtime does not support it
       "error"     - removal failed
     """
+    if destination is not None:
+        resolved = _destination_action(platform_key,destination,"uninstall",dry_run=dry_run)
+        with install_destination.use(resolved):
+            return uninstall_hook(platform_key,dry_run)
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
@@ -2877,7 +3036,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False) -> str:
     if _hook_already_exists(pt_list, IO_TRACE_MARKER):
         total_removed += _remove_hook_entries(pt_list, IO_TRACE_MARKER)
 
-    # Full uninstall also strips every MANAGED addon observational hook (plan Phase 4) and every MANAGED privileged adapter hook (Phase P5), so neither a drifted addon hook nor an adapter hook is ever left firing live after a full uninstall.
+    # Full uninstall also strips every MANAGED addon observational hook and every MANAGED privileged adapter hook, so neither a drifted addon hook nor an adapter hook is ever left firing live after a full uninstall.
     for ev_list in hooks_obj.values():
         if isinstance(ev_list, list):
             total_removed += _remove_managed_addon_entries(ev_list)
@@ -2898,12 +3057,17 @@ def check_status_detail(
     platform_key: str,
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
     addon_sources: Any = (),
+    destination=None,
 ) -> HookStatus:
     """Return structured hook installation status for a single framework."""
+    if destination is not None or install_destination.current() is None:
+        destination = _default_destination(platform_key) if destination is None else destination
+        resolved = _destination_action(platform_key,destination,"status")
+        with install_destination.use(resolved):
+            return check_status_detail(platform_key,node_runtime=node_runtime,addon_sources=addon_sources)
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
-    config_dir = platform["config_dir"]()
     hook_key = _resolve_hook_event(platform["hook_intent"], platform_key)
 
     if platform_key == "codex" and not _codex_hooks_supported():
@@ -2954,14 +3118,6 @@ def check_status_detail(
         PROMPT_PENDING_MERGE_MARKER,
         require_dispatcher=require_dispatcher,
         expected_command=_entry_command(prompt_pending_merge_entry),
-    )
-
-    prompt_entry = _platform_hook_entry(platform_key, hook_key)
-    prompt_present, prompt_ok = _hook_marker_match_status(
-        hook_list,
-        HOOK_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=_entry_command(prompt_entry),
     )
 
     web_search_entry = _platform_web_search_entry(platform_key, hook_key)
@@ -3047,7 +3203,6 @@ def check_status_detail(
 
     required = {
         "pending-merge-prompt": (prompt_pending_merge_present, prompt_pending_merge_ok),
-        "prompt": (prompt_present, prompt_ok),
         "session-intent": (session_intent_present, session_intent_ok),
         "web-search-first": (web_search_present, web_search_ok),
         "tool-checkpoint": (tool_checkpoint_present, tool_checkpoint_ok),
@@ -3075,7 +3230,7 @@ def check_status_detail(
 
     if not incomplete:
         if platform_key == "codex":
-            # Codex hook files are wired, but its hook event semantics are not confirmed by a live runtime smoke. Stay instruction-backed rather than report native runtime-verified. legacy_status stays "installed" so the installer flow and legacy string API are unchanged; only the report surface and the structured flag are made honest.
+            # Report Codex hooks as instruction-backed until live event semantics are verified. The string API reports installed; the structured result carries the native-verification scope.
             _log(_t(
                 f"  {name}: hook files installed (instruction-backed, pending runtime smoke evidence)",
                 f"  {name}: hook files installed (instruction-backed, pending runtime smoke evidence)",
@@ -3131,8 +3286,8 @@ def check_status_detail(
     )
 
 
-def check_status(platform_key: str, addon_sources: Any = ()) -> str:
-    """Return hook installation status through the legacy string API.
+def check_status(platform_key: str, addon_sources: Any = (), *, destination=None) -> str:
+    """Return hook installation status through the string status API.
 
     Return values:
       "installed" - hooks are installed
@@ -3140,7 +3295,7 @@ def check_status(platform_key: str, addon_sources: Any = ()) -> str:
       "skipped"   - framework is not installed
       "unsupported" - current runtime does not support hooks
     """
-    return check_status_detail(platform_key, addon_sources=addon_sources).legacy_status
+    return check_status_detail(platform_key, addon_sources=addon_sources, destination=destination).legacy_status
 
 
 # ── Result Summary Output ─────────────────────────────────
@@ -3270,13 +3425,44 @@ def main() -> int:
         action="version",
         version=f"install_hooks.py {VERSION}",
     )
+    parser.add_argument("--destination-file", help="JSON installation location binding")
+    parser.add_argument("--core-source-root",help="Core source APIs independent of installed runtime")
+    parser.add_argument("--ledger-root",help="Explicit authoritative ledger root independent of source")
     args = parser.parse_args()
+    if args.status and args.uninstall:
+        parser.error("--status and --uninstall select different actions")
+    if args.list_addons and not args.addon_source:
+        parser.error("--list-addons requires at least one --addon-source")
+    destination = None
+    for option,key in ((args.core_source_root,"GHOST_ALICE_CORE_ROOT"),(args.ledger_root,"GHOST_ALICE_SESSION_INTENT_ROOT")):
+        if option:
+            if not Path(option).is_absolute(): parser.error("explicit locations must be absolute")
+            if args.destination_file: parser.error("explicit location flags conflict with --destination-file")
+            os.environ[key]=option
+    if args.destination_file:
+        destination = install_destination.InstallDestination.parse(json.loads(Path(args.destination_file).read_text()))
+        if not args.platform:
+            parser.error("--destination-file requires --platform")
+        _destination_action(args.platform,destination,"status" if args.status else "uninstall" if args.uninstall else "install",dry_run=args.dry_run)
+        if destination.mode == "isolated" and args.agent_visibility and (args.status or args.uninstall):
+            parser.error("isolated visibility changes require install action")
+        if destination.mode == "isolated" and (args.hook_shared_dir or args.skills_dir or args.list_addons):
+            parser.error("isolated destination conflicts with override/list action")
 
+    if destination is not None:
+        with install_destination.use(destination):
+            return _execute_actions(args,destination)
+    if not args.list_addons:
+        for target in ([args.platform] if args.platform else PLATFORMS):
+            _destination_action(target, _default_destination(target),
+                "status" if args.status else "uninstall" if args.uninstall else "install", dry_run=args.dry_run)
+    return _execute_actions(args)
+
+
+def _execute_actions(args, destination=None):
     _log(f"install_hooks.py v{VERSION}")
     _log(_t(f"Home directory: {Path.home()}", f"Home directory: {Path.home()}"))
     if args.list_addons:
-        if not args.addon_source:
-            parser.error("--list-addons requires at least one --addon-source")
         return _print_addon_target_summary(args.addon_source, platform=args.platform)
     if args.addon_source and args.dry_run:
         rc = _print_addon_target_summary(args.addon_source, platform=args.platform)
@@ -3284,7 +3470,7 @@ def main() -> int:
             return rc
     if args.dry_run:
         _log(_t("Mode: DRY-RUN (no actual changes)", "Mode: DRY-RUN (no actual changes)"))
-    if args.agent_visibility:
+    if args.agent_visibility and not args.dry_run:
         runtime_config.save_config(
             {"agent_visibility": {"profile": args.agent_visibility}},
             home=_home(),
@@ -3298,10 +3484,10 @@ def main() -> int:
 
     for key in targets:
         previous_hook_shared_dir = os.environ.get(HOOK_SHARED_DIR_ENV)
-        hook_shared_dir = _hook_shared_dir_for_platform(key, args.hook_shared_dir)
+        hook_shared_dir = None if destination is not None else _hook_shared_dir_for_platform(key, args.hook_shared_dir)
         if hook_shared_dir is not None:
             os.environ[HOOK_SHARED_DIR_ENV] = str(hook_shared_dir)
-        else:
+        elif destination is None:
             os.environ.pop(HOOK_SHARED_DIR_ENV, None)
         try:
             if args.status:
@@ -3311,9 +3497,10 @@ def main() -> int:
                     key,
                     node_runtime=node_runtime,
                     addon_sources=args.addon_source,
+                    destination=destination,
                 )
             elif args.uninstall:
-                results[key] = uninstall_hook(key, dry_run=args.dry_run)
+                results[key] = uninstall_hook(key, dry_run=args.dry_run, destination=destination)
             else:
                 node_runtime = _ensure_node_runtime_for_hook_install(key)
                 if node_runtime is not None:
@@ -3324,6 +3511,7 @@ def main() -> int:
                     addon_sources=args.addon_source,
                     skills_dir=args.skills_dir,
                     node_runtime=node_runtime,
+                    destination=destination,
                 )
         except Exception as e:
             _log(f"ERROR: {PLATFORMS[key]['name']}. {e}")

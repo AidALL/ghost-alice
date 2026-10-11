@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """PostToolUse audit hook for Ghost-ALICE.
 
-This is the cross-platform replacement for io-trace-hook.sh. It intentionally
-returns success for malformed or incomplete hook payloads so tool execution is
-not blocked by audit logging.
+Records tool operations for the strict audit. Malformed or incomplete hook
+payloads return success so audit parsing does not block tool execution.
 """
 
 from __future__ import annotations
@@ -15,6 +14,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+import install_destination
 from typing import Any
 
 from session_intent_analyzer_hook import bound_session_identity, _safe_component
@@ -100,7 +100,7 @@ def _home() -> Path:
 
 
 def _log_file() -> Path:
-    return _home() / ".ghost-alice" / "io-trace.jsonl"
+    return install_destination.ghost_root(_home()) / "io-trace.jsonl"
 
 
 def _utc_now() -> str:
@@ -210,6 +210,7 @@ def _capture_governance_event(raw: str) -> None:
 
 def _append_log(row: dict[str, str]) -> None:
     path = _log_file()
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"ts": _utc_now(), **row}
     with path.open("a", encoding="utf-8") as handle:
@@ -225,11 +226,14 @@ def _rotate(path: Path) -> None:
     if len(lines) <= MAX_LINES:
         return
     keep = MAX_LINES // 2
+    install_destination.assert_mutation_path(path)
     path.write_text("\n".join(lines[-keep:]) + "\n", encoding="utf-8")
 
 
 def _ledger_dir_candidates() -> list[Path]:
-    # Mirrors session_intent_analyzer_hook: repo checkout first, then skill install locations. The runtime tree ships only _shared, so the repo-relative candidate always misses there; without the skill-install candidates this hook would fall back to a hardcoded legacy root and silently diverge from the ledger's repo-aware default root.
+    # Resolve the ledger from the repository checkout or installed skill locations. Runtime-core contains only _shared, so installed skills supply the ledger module and its matching authority root.
+    if explicit := os.environ.get("GHOST_ALICE_CORE_ROOT"):
+        return [Path(explicit)/"session-intent-analyzer/scripts"]
     home = _home()
     candidates = [
         Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts",
@@ -255,7 +259,7 @@ def _session_intent_root() -> Path:
     try:
         from session_intent_ledger import default_root
     except Exception:
-        return _home() / ".ghost-alice" / "session-intent"
+        return install_destination.ghost_root(_home()) / "session-intent"
     return default_root()
 
 

@@ -45,7 +45,7 @@ High-signal feedback includes:
 - Reproducible cases where Ghost-ALICE OS prevented a real agent failure
 - Reproducible cases where a vanilla agent failed but Ghost-ALICE OS helped
 - Workflows where Ghost-ALICE OS blocked useful work, raised the wrong gate, or made recovery harder
-- False positives or false negatives in session intent, jailbreak detection, task routing, boundary contracts, completion checks, or io-trace behavior
+- False positives or false negatives in session intent, authority/provenance handling, current work routing, boundary contracts, completion checks, or io-trace behavior
 - Visibility profile ideas for `strict`, `dynamic`, and `minimal` modes that keep core gate execution intact
 - Cases where governance output was too verbose, too hidden, or poorly timed for the task risk
 - Missing gates for high-risk workflows, especially credentials, external side effects, legal or financial claims, code changes, and release steps
@@ -65,7 +65,7 @@ When reporting a workflow case, include what you were trying to do, the platform
 1. Read [README.md](./README.md) for the project model.
 2. Read [AGENTS.md](./AGENTS.md) for the repository operating contract.
 3. Check [docs/getting-started/installation.md](./docs/getting-started/installation.md) for installer behavior and platform paths.
-4. For public surface changes, run the validation commands listed below before opening a pull request. Update English and paired polite Korean documentation together, preserve literal control/schema tokens, and keep dated historical release facts intact.
+4. For public surface changes, run the validation commands listed below before opening a pull request. Update English and paired polite Korean documentation together and preserve literal control/schema tokens.
 
 ## Development Setup
 
@@ -100,7 +100,7 @@ This project does not currently require a separate CLA or DCO sign-off. If that 
 
 ## Validation Commands
 
-Run the focused checks that match your change. For a public-readiness or release pull request, run the full public validation set.
+Run the focused checks that match your change. For a public-readiness or release pull request, account for every required check using fresh results or valid unchanged evidence at its original source and time. Rerun the checks affected by actual changes, contradictions or an explicit recheck request.
 
 ```bash
 python3 scripts/validate_public_surfaces.py
@@ -133,13 +133,12 @@ python3 scripts/audit_wiki_integrity.py --wiki /tmp/ga-wiki
 
 Each pull request should include:
 
-- What changed
-- Why the change is needed
-- Which user-facing surfaces are affected
-- Which files or directories were intentionally not changed
+- Current behavior and public surfaces within the scope
 - Verification commands and results
 - Any third-party material, generated content, or provenance notes involved
 - Any remaining risk or follow-up work
+
+Record what changed and how only in commit messages. Pull request descriptions state current behavior, verification and limitations without a changelog, before/after comparison or upgrade narrative.
 
 For governance behavior changes, include the relevant gate or hook surface, such as `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, or `SessionStart`.
 

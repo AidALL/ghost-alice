@@ -25,10 +25,6 @@ sync_commands() {
   "$py_cmd" "${SCRIPT_DIR}/_shared/commands_sync.py" "$catalog" "$claude_dir" "$mode" "$target"
 }
 
-_log() {
-  echo "  [install_hooks] $*"
-}
-
 _platform_dir_for_state() {
   case "$PLATFORM" in
     claude|codex) printf '%s\n' "$PLATFORM" ;;
@@ -319,7 +315,7 @@ _run_preflight_before_install() {
     done < <(iter_install_targets "${skills[@]}")
 
     if [ "${#legacy_args[@]}" -gt 0 ] && [ -z "$py" ]; then
-      error "$(t 'Python 3.11+ not found; aborting because legacy target quarantine cannot run' 'Python 3.11+ not found; aborting because legacy target quarantine cannot run')"
+      error "$(t 'Python 3.11+ not found; aborting because unowned target quarantine cannot run' 'Python 3.11+ not found; aborting because unowned target quarantine cannot run')"
       return 1
     fi
 
@@ -333,7 +329,7 @@ _run_preflight_before_install() {
         --pending "$pending_root" \
         --manifest "$manifest" \
         --platform "$platform_dir"; then
-        error "$(t "legacy target quarantine failed; aborting install: ${target_name}" "legacy target quarantine failed; aborting install: ${target_name}")"
+        error "$(t "unowned target quarantine failed; aborting install: ${target_name}" "unowned target quarantine failed; aborting install: ${target_name}")"
         return 1
       fi
     done
@@ -670,7 +666,7 @@ run_repair() {
     copy_only=1
   fi
 
-  # _shared is the most critical target -- every managed skill resolves shared modules through it. A dangling symlink ([ ! -e ] is true, [ -L ] is true) is functionally missing, so it must be re-provisioned too (addon review), while an occupied non-clean _shared (user dir / drift) is classified and left untouched.
+  # _shared is the most critical target -- every managed skill resolves shared modules through it. A dangling symlink ([ ! -e ] is true, [ -L ] is true) is functionally missing, so it must be re-provisioned too, while an occupied non-clean _shared (user dir / drift) is classified and left untouched.
   local shared="${SKILLS_DIR}/_shared"
   if [ ! -e "$shared" ]; then
     install_shared "${SKILLS_DIR}" "$copy_only"  # absent or dangling -> restore
@@ -797,7 +793,7 @@ _run_install_hooks() {
         error "$(t "install_hooks.py not found: ${hook_py}" "install_hooks.py not found: ${hook_py}")"
         return 1
       fi
-      local args=(--platform "$platform" --hook-shared-dir "$(resolve_ghost_alice_runtime_shared_dir)" --skills-dir "$SKILLS_DIR")
+      local args=(--core-source-root "$SCRIPT_DIR" --platform "$platform" --hook-shared-dir "$(resolve_ghost_alice_runtime_shared_dir)" --skills-dir "$SKILLS_DIR")
       local visibility="${AGENT_VISIBILITY:-}"
       if [ "$action" = "install" ] && [ -z "$visibility" ]; then
         visibility="dynamic"
@@ -1051,8 +1047,8 @@ install() {
   fi
 
   case "$PLATFORM" in
-    claude) run_logged_if_compact ensure_claude_bootstrap "${SKILLS_DIR}" ;;
-    codex) run_logged_if_compact ensure_codex_bootstrap "${SKILLS_DIR}" ;;
+    claude) run_logged_if_compact ensure_claude_bootstrap ;;
+    codex) run_logged_if_compact ensure_codex_bootstrap ;;
   esac
   if ! install_compact_output_enabled; then
     info "$(t "[3/5] Runtime config: platform=${PLATFORM}, visibility=${visibility}" "[3/5] Runtime config: platform=${PLATFORM}, visibility=${visibility}")"
@@ -1063,8 +1059,6 @@ install() {
     info "$(t "Install path: ${SKILLS_DIR}" "Install path: ${SKILLS_DIR}")"
     if [ "$PLATFORM" = "codex" ] && [ "$copy_only" = "1" ]; then
       info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source, then re-run bash install.sh" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source, then re-run bash install.sh")"
-    elif [ "$PLATFORM" = "codex" ]; then
-      info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source")"
     else
       info "$(t "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source" "To update skills safely: cd ${SCRIPT_DIR} && bash install.sh --update-source")"
     fi

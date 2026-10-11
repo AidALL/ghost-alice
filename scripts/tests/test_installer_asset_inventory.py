@@ -11,8 +11,6 @@ from _installer_source import installer_bash_source, installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
-INSTALL_PS1 = REPO_ROOT / "install.ps1"
 MARKER_CLI = REPO_ROOT / "_shared" / "installer_assets_cli.py"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 

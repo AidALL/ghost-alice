@@ -26,10 +26,10 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 | # | Item | Spec criterion | Verification method | Automatic |
 | --- | --- | --- | --- | :---: |
 | 1-1 | `name` field exists | required | check whether the name key is present in frontmatter | automatic |
-| 1-2 | `name` format | 1-64 chars, lowercase + digits + hyphens only, cannot start/end with or repeat a hyphen | regex: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, length ≤64 | automatic |
+| 1-2 | `name` format | 1-64 chars, lowercase + digits + hyphens only, cannot start/end with or repeat a hyphen | regex: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, length ≤64; separately check that `--` is absent | automatic + manual |
 | 1-3 | `name` = directory name | must exactly match the parent directory name | `basename $(dirname SKILL.md)` == name value | automatic |
 | 1-4 | `description` field exists | required | check whether the description key is present in frontmatter | automatic |
-| 1-5 | `description` length | maximum 1024 chars, recommended within 250 chars | measured with `wc -c`. WARNING when over 250 chars, ERROR when over 1024 chars | automatic |
+| 1-5 | `description` length | maximum 1024 chars, recommended within 250 chars | measured as Unicode characters (`len(description)`), not bytes. WARNING when over 250 chars, ERROR when over 1024 chars | automatic |
 | 1-6 | `description` content | includes both "what it does" and "when it triggers" | a meaning judgment, so it cannot be automated | manual |
 | 1-7 | `compatibility` field | required when there is an environment dependency (Python, CUDA, etc.) | whether it exceeds 500 chars is automatic, whether it is "needed but missing" is manual | partially automatic |
 
@@ -55,6 +55,9 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 | 3-2 | default tools/libraries stated | a concrete default rather than a "choose A or B" menu | a meaning judgment, so it cannot be automated | manual |
 | 3-3 | output format template | defines the format of the output the agent will generate | a meaning judgment, so it cannot be automated | manual |
 | 3-4 | reference file references | SKILL.md explicitly points to references/*.md | WARNING for suspected orphan when a file exists in the directory but its filename does not appear in the body | automatic |
+| 3-5 | Contents and heading parity | when `## Contents` exists, every unfenced level-2 section is listed and every Contents anchor resolves | ERROR for a missing section entry or dangling anchor; short skills without Contents are exempt | automatic |
+
+Item 3-5 is a Ghost-ALICE project navigation rule implemented by `validate_phase_toc_parity` in `scripts/validate_skills.py`. Phase 3 runs it together with `validate_phase3_structure`; it is not an attributed external-provider requirement.
 
 ---
 
@@ -101,4 +104,4 @@ This phase applies to canonical skill instructions and their accessory guidance.
 |--------|------|------|------|
 | ERROR | violation of a required spec condition | name mismatch, description missing, over 1024 chars | immediate fix required |
 | WARNING | violation of a recommendation | description over 250 chars, body over 500 lines | fix recommended, exception allowed when there is a reason |
-| INFO | improvement possible | TOC incomplete, no output template | supplement in the next iteration |
+| INFO | improvement possible | optional explanatory example could be clearer | supplement in the next iteration |

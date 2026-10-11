@@ -1,90 +1,95 @@
-# Ghost-ALICE OS Project
+# Ghost-ALICE Common Governance
 
-Ghost-ALICE OS is an agent governance operating layer that manages the work boundary, verification, session intent, install state, and platform-specific hook behavior of an AI agent session. It is not a general-purpose operating system or a standalone agent runtime.
+Ghost-ALICE supplies instructions and runtime code for the assistant responding in a native conversation. In this contract, the current-session assistant is that conversation's model, identified by the native session receipt. A delegated assistant is a model assigned a separate subtask by a named parent assistant. The native host is the Codex or Claude Code process that invokes models, tools and hooks. Core and Ghost-ALICE Autopilot name responsibility areas, not separate model instances.
+
+This common governance applies across projects and task domains. The platform installation supplies the common instructions; project instruction files supply project-specific constraints. User instructions and those project-specific constraints take precedence. A procedure does not create permission, evidence, or a completed result.
+
 ## Contents
 
 - [Operating Model](#operating-model)
-- [Work-Impact Projection](#work-impact-projection)
 - [First-Entry Contract](#first-entry-contract)
+- [Work-Impact Projection](#work-impact-projection)
+- [Repair limits, authority and useful checks](#repair-limits-authority-and-useful-checks)
 - [Mandatory Rules](#mandatory-rules)
-  - [0. Task Routing Gate (required on user input)](#0-task-routing-gate-required-on-user-input)
-  - [0-A. merge-companion Self-Check Gate (pending-merge prose-rule layer)](#0-a-merge-companion-self-check-gate-pending-merge-prose-rule-layer)
-  - [0-B. Session Intent Ledger Gate](#0-b-session-intent-ledger-gate)
-  - [1. Mandatory Official Spec Verification After Writing or Modifying a Skill](#1-mandatory-official-spec-verification-after-writing-or-modifying-a-skill)
-  - [2. Language Tone Rule](#2-language-tone-rule)
-  - [3. Progressive Disclosure Principle](#3-progressive-disclosure-principle)
-  - [4. Frontmatter Rule](#4-frontmatter-rule)
-  - [5. Mandatory coding-convention Family Call](#5-mandatory-coding-convention-family-call)
-  - [6. Write/Edit Code File Gate](#6-writeedit-code-file-gate)
-  - [7. Output Emphasis Rule](#7-output-emphasis-rule)
-  - [8. External Credential Lookup Rule](#8-external-credential-lookup-rule)
-  - [9. io-trace Transparency Rule](#9-io-trace-transparency-rule)
-  - [10. Mandatory Web Search Before External Tool Claims](#10-mandatory-web-search-before-external-tool-claims)
-  - [11. No GitHub PR Title Prefix](#11-no-github-pr-title-prefix)
-  - [12. Sufficient Change Principle (no minimal patch bias)](#12-sufficient-change-principle-no-minimal-patch-bias)
-
 
 ## Operating Model
 
-- Do not conclude a complex task without decision-relevant checkpoints. A checkpoint runs only while a live uncertainty exists and its possible outcomes can change the next decision. When a mismatch appears, fix it or hand it to a human.
-- The focus scope is not fixed and does not expand in only one direction. It moves back and forth across micro, meso, macro, and meta according to the mismatch location and the verification burden. When a large premise or logic is wrong, fix the higher scope. When a small work output is wrong, fix that lower unit.
-- Do not judge complexity by tool count alone. Look at the verification burden as a whole, including source selection, source-to-target mapping, format and schema constraints, and recovery cost.
-- Follow the sufficient change principle. Minimal change is not a golden rule. It is one option chosen when the problem cause, structure, and impact surface are local.
-- Handle task-complexity-level-1 work with light confirmation. For task-complexity-level-2 and above, use a bounded checkpoint plan. Level 3 may require several independent checks, but each one must map to a live uncertainty and a decision it can change.
-- After session-intent and downstream gate context are available, task-router emits a reusable routing-surface for work complexity, focus, verification burden, boundary need, and forced visibility. Session intent records semantic facts and decisions; governance surface consumers read the routing-surface instead of creating a competing complexity scale.
-- `calls` expresses only static and sparse relationships. The body procedure and runtime handle decision-relevant checkpoints and mismatch repair. Stop the sequence when a checkpoint produces no relevant state delta or when further checking displaces the primary objective.
-- For structured data (manifest, JSON, config, schema), do not summarize by guessing field names. Check the keys and types first and summarize only with fields that actually exist. If a guessed field turns out null, that is not evidence of absence; it means you read it wrong, so read the actual schema again.
-- For detailed definitions, follow this document's operating model and `architecture.md`.
+The current-session assistant compares the requested result with the user's objective, constraints and original sources. The assistant constructs provisional work, performs authorized actions, and compares the resulting evidence with both the affected criterion and the whole requested outcome. Agreement between the assistant's own records is not independent support; finding no mismatch is not proof that the required criteria are satisfied.
 
-## Work-Impact Projection
+The assistant selects the judgment target through task-router: `micro` for an individual result, `meso` for a subtask or source-to-target mapping, `macro` for the integrated result and dependencies, and `meta` for the task's necessity or premise. Evidence may move the assistant in either direction between these scopes. The place where a mismatch appears starts investigation; it does not establish the cause. Changing focus grants no authority and does not invalidate unaffected evidence.
 
-Work-Impact Projection classifies hook-internal values by whether they change the work boundary, focus layer, verification burden, or recovery path. Stable contract phrase: change the work boundary, focus layer, verification burden, or recovery.
+The assistant selects verification depth separately from focus. Level 1 uses light confirmation; levels 2 and 3 use bounded checks that can change the next decision. A broad judgment may need little checking; a narrow claim may need difficult verification. Tool count does not determine that burden.
 
-- Hook execution and the strict audit log are never reduced.
-- `agent_visibility.profile` selects the user-screen verbosity only; it does not gate hook execution, strict logging, or work-impact classification.
-- Forced/risk/gate values and failed verification always break through as user surface forced and model hint full.
-- Routine/debug values remain full in the strict log, but they do not become a separate reasoning-policy axis. They are omitted from model hints unless they change focus, boundary, verification, or recovery.
-- Unknown, ambiguous, or failed values fail closed to fuller surface and reopen focus through the routing/scope-reopen path.
-- Goal: only values that can change the next work decision affect focus, boundary, verification, or recovery. Token reduction is a consequence, not a metric.
+After comparison, the assistant adopts a supported result, corrects the implicated result or interpretation, investigates a decision-relevant uncertainty, or retains an unresolved condition. The assistant omits unnecessary discretionary work and asks the user only for a missing user-owned decision. An unresolved required condition prevents that completion claim; it does not require endless investigation or block independent authorized work. A diagnostic or record correction does not complete the requested implementation.
+
+The current-session assistant reads actual keys and types before interpreting structured data. A missing guessed key proves neither that a field is absent nor that a feature is unsupported. Static skill `calls` declare relationships; the skill body defines when the current-session assistant follows each relationship.
+
+The system responsibilities and return arrows are documented in [architecture.md](architecture.md).
 
 ## First-Entry Contract
 
-When a user turn begins, apply the execution contract below before any long explanation.
+Before an agent-issued tool call, the current-session assistant classifies the current request from the supplied conversation:
 
-Before constructing the first command of a tool-using turn, establish each path or session coordinate that command needs from the current supplied runtime context; use the current hook receipt when binding session-ledger operations. Treat execution-local variables and `store`/`load` values as a cache, not authority: check presence and, for session-bound values, current-session match before reuse, and initialize missing or stale bindings before interpolation. Do not issue a command containing unresolved `undefined`, `null`, or empty path placeholders. If required authoritative coordinates are unavailable, keep dependent writes closed and report the missing binding; do not guess another root or session. Rebuilding command bindings does not invalidate unchanged task evidence or require repeated business verification.
+- `direct-response`: the supplied content supports the answer without external lookup, file access, changes, or new verification.
+- `clarification-only`: a necessary referent or decision is missing, and the supplied content supports no safe next action.
+- `normal`: the request requires inspection, execution, modification, or verification.
 
-1. Reuse a hook-provided pending-merge result first; without one, finish the manual fallback before actionable work, except for a no-work terminal route (`clarification-only` or `direct-response`).
-2. Connect the `session-intent-analyzer` intake.
-3. Fix the `jailbreak-detector/downstream-gates` state.
-4. Run `task-router`.
-5. Leave `[gate-state]` in the first commentary unless task-router terminates the turn as a no-work terminal route.
-6. Surface a `[tool-checkpoint]` once for the user-input tool batch. The hook still checks every tool call; repeated calls in the same session input lineage do not repeat the user-facing checkpoint text unless state changes. Always carry at least `intent` and `why` on the surfaced block. Add `procedure` when it changes the next work decision or clarifies a non-routine step. Add `contract-ref` and `contract-check` when a boundary-contract is active. Add `localized-human-note`, `rejected-alternatives`, `unverified-premises`, and `failure-mode-if-wrong` only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful. For a read-only call with no active boundary-contract and no forced signal, `intent` and `why` are sufficient. Add `verify-or-reuse` when a call re-reads an artifact to support a claim, with `why` naming the observed trigger.
+For either terminal mode, the current-session assistant returns the answer or the minimum decisive question. The current-session assistant does not read skills, inspect manifests, access the ledger, register a response route, or print governance blocks for that answer. The automatic intake hook and strict audit still execute. The current-session assistant defers semantic ledger updates and does not claim to have persisted them.
 
-`tool-checkpoint` is not user-input intake. It is a tool-stage `PreToolUse`/`BeforeTool` retry checkpoint. Its field tiers follow the observable tool kind and the recorded boundary/forced state, not a self-judgment that the call is safe, and the gate itself is never skipped.
+The current-session assistant first reconciles a follow-up with ongoing authorized work. A status question or correction during that work receives a brief answer followed by the remaining authorized action. An explicit stop, pause, cancellation, or incompatible replacement stops the affected work. Old unmet ledger criteria, an ambient working directory, or available tools do not authorize resumed work.
 
-Clarification-only surface contract: use `response-mode: clarification-only` only when an essential referent or decisive input is missing and neither the current turn nor existing conversation context supports an answer or safe action. Intake and routing still run internally. Ask only for the minimum decisive information, normally one concise question. Do not inspect files, repositories, manifests, tools, credentials, or external state to guess the missing context. Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`; strict hook logging remains active. This exception is unavailable when the content already resolves the question, the user requested a lookup or status check, or a bounded answer can be given with an explicit assumption.
+A general explanation does not become a local diagnosis because it mentions a technical symptom. Local inspection requires an explicit inspection request or a specific referent established in the conversation. A new completion or release-readiness judgment requires evidence for that judgment; previous individual passes do not automatically prove a broader conclusion.
 
-Direct-response surface contract: use `response-mode: direct-response` only when the current input and conversation fully support a bounded answer without file changes, external side effects, current-state lookup, tools, or fresh verification. Route classification precedes evidence planning. A causal premise is not an inspection request, and verification burden cannot create a current-state referent. Only an explicit inspection request or an established conversational referent authorizes local diagnosis. An established referent authorizes inspection but does not require it. Accept an explicit correction or non-goal first, preserve the terminal objective over superseded means, and answer a general explanation or stable low-risk how-to without inspecting the current repository or machine. Ambient working directory, opened project, and available tools are not user-provided referents or inspection authority. Treat a technical state named in a general why or how question as the explanation topic, not as evidence about the active workspace. Do not validate or rebut that premise before explaining. First-person, past-cause, deictic wording, tense, technical-state language, ambient context, and tool availability do not bind the question to the workspace; only an identified workspace, supplied workspace evidence, or an explicit request for exact diagnosis or inspection does. Emit only the resolved content, with at most one decision-relevant caveat; do not emit `[routing-surface]`, `[task-router]`, `[gate-state]`, `[tool-checkpoint]`, `[completion-check]`, or `[io-trace]`. Intake, security review, routing, and strict hook logging remain active. Current or version-specific facts, support or regression claims, high-risk advice, lookup, inspection, modification, and verification requests use a normal route.
+On a normal route, the current-session assistant follows this order:
 
-Active work continuation: before choosing a no-work terminal route, reconcile the current input with unfinished authorized work. A status question, explanation request, or correction normally receives a brief commentary answer followed by the supported work. Respect an explicit stop, pause, cancellation, or incompatible replacement; do not infer authority from ambient context or an unresolved ledger flag alone. A fixed branch-local limit blocks its dependent work only. Recording conduct feedback or verifying a report does not satisfy a requested implementation criterion. When the user authorizes a correction, implement it through the owning workflow and test the original failure.
+1. Reuse the current pending-merge precheck, or perform the manual precheck in rule 0-A.
+2. Consume the exact session-intent observation; add a semantic delta only when meaning changed.
+3. Apply task-router to select current work and skills.
+4. Apply boundary-contract when routing requires it; apply using-coding-convention for development work.
+5. Register the current response-route through Core before dependent evidence submission or Ghost-ALICE Autopilot capture.
+6. Perform the selected workflow and its required verification.
+
+Session-intent intake feeds task-router directly. Skill-evolution consumes the same session as a report-only terminal branch; it does not feed task-router. The current-session assistant uses task-router to select work and skills. The intake hook records input; the native host enforces tool permission.
+
+Before constructing a command, the current-session assistant establishes every required path and session coordinate from current supplied runtime context. Cached variables are not authority. The current-session assistant validates the cache's session identity before reuse and never interpolates an empty, `undefined`, or `null` coordinate. Missing identity blocks dependent writes; the current-session assistant does not substitute another root or session.
+
+A user-specified command allowlist or tool-count limit includes governance calls. The current-session assistant does not add ledger operations, skill reads, route registration, Ghost-ALICE Autopilot preparation, publication, or metadata repair beyond that limit. A permitted command remains normal execution. The current-session assistant reports missing verification or recording without fabricating either result.
+
+## Work-Impact Projection
+
+Hooks classify values by whether they change the work boundary, focus layer, verification burden, or recovery. The `agent_visibility.profile` value (`strict | dynamic | minimal`) controls display verbosity, not hook execution or strict logging.
+
+Hooks retain routine observations in the audit. Hooks expose failed verification, forced signals, unknown state, and information that changes the next work decision. The current-session assistant names the affected decision rather than repeating routine hook output.
+
+## Repair limits, authority and useful checks
+
+These workflows own the detailed procedures; other instructions reference them instead of redefining them:
+
+| Decision | Owner |
+| --- | --- |
+| Authorized targets, exclusions, resources and boundary changes | [boundary-contract](boundary-contract/SKILL.md) |
+| Failed repair rounds, cause reassessment and retry stopping | [systematic-debugging](coding-convention/systematic-debugging/SKILL.md) |
+| Claim-to-criterion evidence, original source/time and useful checks | [verification-before-completion](coding-convention/verification-before-completion/SKILL.md) |
+| Exact session, input and response-route records | [session-intent-analyzer](session-intent-analyzer/SKILL.md) and [task-router](task-router/SKILL.md) |
+| Ghost-ALICE Autopilot publication and application | [Ghost-ALICE Autopilot publication contract](coding-convention/verification-before-completion/references/autopilot-publication.md) |
+
+The current-session assistant asks for a human decision only when the next action crosses an actual authority boundary or depends on an unresolved user choice. The current-session assistant can revise its own implementation plan inside existing authority. A blocked dependent task does not block independent authorized tasks.
+
+The current-session assistant reuses unchanged valid evidence at its original source and verification time. A changed criterion, changed relevant artifact, contradictory observation, or explicit recheck reopens only the affected evidence. A route, formatting, or publication error does not prove that the underlying business result failed.
+
+For source-backed answers, the current-session assistant performs the two reviews below; ordinary tool-free conversation follows First-Entry Contract. Core’s completion_route.py selects completion processing from an actual completion/partial control marker or registered `response_purpose=completion`, not from prose or an execution work selection. The current-session assistant identifies new completion claims and explicitly routes them. It first compares each claim with its original evidence and produces a claim judgment. It then uses those judgments and the complete draft to produce a separate whole-response judgment: whether the answer fulfills the user's objective and constraints without hiding unresolved conditions or expanding partial support into overall success. Core stores both judgments atomically; one judgment cannot substitute for the other. Core’s native_completion.py validates the declared submission, and completion_assessment.py authenticates the recorded review; IDs, hashes, and a printed `pass` do not establish semantic truth. The Ghost-ALICE Autopilot completion adapter consumes that authenticated review and checks receipt/publication records. Ghost-ALICE Autopilot does not repeat the semantic judgment.
+
+The current-session assistant corrects a reported record defect when that correction is required to support the requested claim or perform a dependent authorized action. Otherwise the assistant retains the unresolved record and continues independent work. Core’s response_delivery.py specifies answer delivery only; it neither requires business replay nor makes every diagnostic a repair task.
+
+The current-session assistant preserves original records and correction links, original verification times, and unaffected criteria. The current-session assistant does not rerun unchanged business work to repair a record or generate a later timestamp. Repeated identical recording failure remains parked until a relevant recording or dependency change.
 
 ## Mandatory Rules
 
 ### 0. Task Routing Gate (required on user input)
 
-The session gate SSOT is `skill-catalog/session-gates.json` and `docs/policies/session-gate-matrix.md`. Every conversation follows that matrix.
+The runtime gate definitions are `skill-catalog/session-gates.json`; their explanation is `docs/policies/session-gate-matrix.md`. The current-session assistant applies First-Entry Contract to each input and uses the selected workflow’s owned procedures.
 
-This procedure is a quality-maintenance device that the user confirmed across repeated work. Realigning the goal, constraints, output, and verification criteria on every user input preserves the user intent, the work scope, and the verification quality. If the agent skips it based only on a judgment of "a simple follow-up" or "the procedure is excessive", it can lead to stale routing and insufficient verification.
-
-When there is user input: 1. the `session-intent-analyzer` intake is connected first. 2. Then `jailbreak-detector` gets the chance to make a security judgment on the current input, and on a current-lineage block it carries the decision to `downstream-gates.json`. 3. If there is no block gate, treat it as a silent allow and then call the `task-router` skill. 4. task-router must run after the session-intent-analyzer intake and the jailbreak-detector downstream gate, and before downstream work or a tool call. Check its applicability regardless of domain, including coding, documentation, research, and chores.
-
-The normal order is `pending-merge precheck -> session-intent-analyzer -> jailbreak-detector/downstream-gates -> task-router -> downstream/tool-checkpoint`. Describing it as `task-router -> session-intent-analyzer`, or arranging the execution order so that it skips passing through the detector, is a rule violation. Here `tool-checkpoint` is not a user-input intake step. It is a tool-stage `PreToolUse` checkpoint. When it is surfaced, place `hook-stage: PreToolUse` and `meaning: tool-call retry checkpoint, not user-input intake` together.
-
-task-router scans skill descriptions to match output, verification, and lifecycle skills, records the matching result, and then starts the work. When a skill does not apply, record briefly why it is not a target.
-
-Do not skip this gate based only on the agent's own judgment, such as "already routed on a previous input", "the same domain", "a simple follow-up", or "the user told me to hurry". When there is user input, apply this gate.
-
-Runtime checkpoint: leave the block below in the first commentary for every normal route; no-work terminal routes emit no control block.
+At the first normal commentary, the current-session assistant reports factual gate status:
 
 ```text
 [gate-state]
@@ -93,294 +98,86 @@ Runtime checkpoint: leave the block below in the first commentary for every norm
 - task-router: done
 - using-coding-convention: done | n/a
 - boundary-contract: required | done | n/a
-- skill-call: <each skill actually called this turn, as name (this turn)> | n/a
+- skill-call: <skills actually executed this turn>
 - next-required: <skill-name|none>
 ```
 
-When task-router outputs `boundary-contract: required`, the next required gate is `boundary-contract`. task-router only judges whether boundary-contract is required, and it does not directly write allowed-surface, filenames, or test-purpose.
+The current-session assistant does not mark a skill done after reading only its name or description. On Codex, the current-session assistant loads or validly reuses the instruction body and performs its workflow. On Claude Code, the current-session assistant uses the visible Skill tool. A claimed skill call must match actual execution.
 
-Ghost-ALICE OS uses an English canonical narrative + English control surface. Canonical narrative, including philosophy, explanation, operating intent, failure cases, and human-facing prose, is written in English. Korean is a secondary aid for Korean reviewers and contributors, not the main language. Field names, enum values, literal tokens, gate schemas, and allowed/forbidden values stay English and are not translated.
+A normal response that claims executed work is complete, fixed, successful, or freshly verified follows verification-before-completion. That skill owns the canonical `[completion-check]` and `[partial-check]` schemas. Each claim maps to a declared criterion, original evidence and a bare `pass | fail` verdict. Unresolved criteria remain in `unverified`; a failed verdict proves failure, not successful completion. Core completion acceptance requires authenticated claim, original-source and whole-response review under the current owned route. Skill invocation, body-load records and self-report fields remain workflow/audit facts, not separate acceptance prerequisites.
 
-Leave the block below when the final response claims executed work is complete, fixed, successful, or freshly verified. Routine explanations, meta-discussion, and options do not require `[completion-check]` unless they claim finished work or verified results.
-
-```text
-[completion-check]
-- acceptance-criteria:
-  - <criterion-id>: <user-intent-or-contract-condition> [source: user-explicit | inferred | previous-tool | system-doc]
-- claim-evidence-map:
-  - claim: <completion-or-recommendation-claim>
-    criterion: <criterion-id>
-    evidence: <fresh command, inspected file, source locator, or tool output>
-    verdict: pass | fail
-- unverified:
-  - none
-- evidence: <fresh command or inspected file>
-```
-
-On Codex, where no visible Skill tool exists, start the block with `- verification-before-completion: done` and `- skill-call: verification-before-completion (this turn)`, only after a fresh or valid retained instruction body was used and the workflow followed in the current turn. On Claude Code, omit both lines: the Stop hook verifies the visible Skill call from the transcript.
-
-Serialize `claim`, `criterion`, `evidence`, and `verdict` on their own physical lines. Emit an evidence-supported bare `pass` or `fail` verdict with no trailing punctuation, quotes, markup, or explanatory prose. If evidence does not support a verdict, report honest partial state without a finalized `[completion-check]`. Record the executed `verification-before-completion` workflow in `[io-trace]`: `skills-loaded` for an actual read or `skills-reused` for a valid retained instruction body. A format repair must preserve the substantive business result and supported evidence.
-
-The `acceptance-criteria` are verifiable completion conditions extracted from the user intent and the locked decisions. The `claim-evidence-map` connects each closure claim to the criterion it satisfies and the fresh evidence that satisfies it. If any criterion is `unverified`, do not speak as if complete or successful. State the partial status and the remaining verification instead. A finalized `[completion-check]` allows only `verdict: pass | fail` and `unverified: none`. If there is any unverified item, it is not a finalize, so do not emit a `[completion-check]`. Report the partial status in prose instead. Peripheral evidence such as a link check, lint, or diff check is completion evidence only when it connects directly to that criterion. Installed Stop/AfterAgent completion hooks require `[completion-check]` for executed-work closure claims and allow routine non-closure responses.
-
-Every user input reopens routing; it does not by itself invalidate unchanged evidence or require reverification. Explaining unchanged prior work is not a new closure claim. Reverify when the relevant state, artifact, or criterion changed; a new error, mismatch, contradiction, or instability appeared; or the user explicitly requested a new check. A change is an observed mutation event, not a possibility, a storage location, or a new user message.
-
-Before running a check, name the live uncertainty and the next decision that each possible outcome can change. If no possible outcome can change the criterion or next decision, do not run the check. Verification output does not create a new obligation to verify the verification.
-
-Before re-reading an artifact to support a claim, apply verify-or-reuse: reuse retained evidence unless an observed trigger exists. Answer an objection that a check was redundant from the recorded mutation authority and events, not from hypothetical external changes. Say each fact, status, plan, and apology once; later messages carry only new results or decisions. Contract: `coding-convention/verification-before-completion/references/verify-or-reuse.md`.
-
-User-supplied facts, results, and wording are the user's claims, not the agent's. When the user asks to record them, write them as given; do not refuse, soften, re-verify, or add caveats because the agent cannot confirm them, since that judgment and its consequences belong to the user. Verification duties cover claims about work the agent itself performed.
-
-When you confirm a flaw in a prompt or other deliverable you provided, return the corrected complete deliverable unless the user asked only for diagnosis (`confirmed-flaw-not-propagated`).
-
-Hard sequence for a new current-turn closure claim: skill load/call -> decision-relevant fresh verification -> [completion-check]. A successful result already returned in this turn, such as a write or a test run, is that fresh verification; the order places the skill before the claim and does not require repeating a successful check. Before making that claim, load or call `verification-before-completion` for the current turn, run and read the decision-relevant fresh verification, and only then write `[completion-check]`. If any step is missing or out of order, the completion-check is invalid.
-
-Final message surface contract: when a final user surface includes an executed-work closure claim or explicit `[completion-check]`, close in the order `[completion-check]` -> a short summary -> `[io-trace]`. Otherwise, routine explanations can close with a short summary and `[io-trace]` only. A no-work terminal response emits only its concise clarification or resolved content and no control block. Use `[gate-state]` only on the opening surface early in a normal route, and do not attach it again after `[completion-check]`. Keep the summary short, with only the conclusion and the key evidence. Tool calls (Bash, Read, and so on) appearing folded in the UI are not a defect, so do not do separate work to reduce raw command exposure. The target of surface brevity is the final user commentary, not the folded tool blocks.
-
-The `skill-call:` line is a factual record that the relevant skill workflow was actually performed in the current turn through that platform's skill execution mechanism. On a platform with a visible Skill call surface, such as Claude Code, record it only after the actual call. On a platform without a visible Skill tool, such as Codex, record it only when a fresh or valid retained instruction body was used and the procedure was followed.
-
-Points to follow in an environment without a Codex visible Skill surface:
-- Read or validly reuse the skill's instruction body before marking a required gate as complete.
-- Do not treat a gate as complete based only on metadata, a description, a prior verdict, or an "already know it" reason.
-- If neither a fresh nor a valid retained instruction body is available, the gate is pending; do not list a skill-call.
-- Apply the same standard to simple tasks, already-routed tasks, and tasks where the metadata looks sufficient.
+The final response contains the applicable control block followed by a short supported result. Routine explanations do not require completion blocks. The current-session assistant does not repeat an earlier answer solely to repair metadata.
 
 ### 0-A. merge-companion Self-Check Gate (pending-merge prose-rule layer)
 
-Immediately after every user input, first reuse any hook-provided pending-merge result. A manual fallback check must finish before actionable work begins, but it may be deferred through a no-work terminal response because that route starts no work.
+The current-session assistant first reuses a current-platform hook precheck. If no precheck exists and the route is normal, the current-session assistant reads `~/.ghost-alice/pending-merges/<platform>/manifest.json`. An absent, empty, or unparsable manifest passes silently under the current runtime contract.
 
-1. Identify the current platform:
-   - Claude Code: `claude`
-   - Codex: `codex`
-2. Check whether the current turn or the session-start hook output contains a current platform pending-merge precheck result.
-3. If the hook reported an undecided entry, surface `merge-companion` first and show the status and options to the user. If the user explicitly defers or skips, that pending merge can be left as `decided=false` while returning to rule 0 (task-router).
-4. If the hook issued no pending warning and provided a contract that it performed the current platform precheck, record `merge-companion-precheck: clean (hook-verified)` and do not run an additional shell manifest check.
-5. If there is no hook evidence or the environment is hookless or manual, inspect the `~/.ghost-alice/pending-merges/<current platform>/manifest.json` file directly before a normal route starts downstream work. If task-router classifies the input as `clarification-only` or `direct-response`, defer that manual inspection until the next actionable turn.
-6. On direct inspection, if there is an undecided entry, surface `merge-companion` first. An explicit user defer or skip can pass through, and if the manifest itself is absent, `entries` is empty, or JSON parsing fails, it passes (omit even a one-line notice, a silent clean pass).
-
-Hook-provided pending state is checked before task-router. The manual fallback still precedes actionable downstream work, but it does not justify probing user state when the only valid response is a clarification question.
-
-Runtime checkpoint: record the 0-A check result in the [gate-state] block of the first normal commentary; a no-work terminal response emits no control block.
-
-```text
-[gate-state]
-- merge-companion-precheck: pending=N | clean | unsupported
-- session-intent-analyzer: done | hook-observed | pending
-- task-router: done
-- using-coding-convention: done | n/a
-- boundary-contract: required | done | n/a
-- skill-call: ...
-- next-required: <skill-name|none>
-```
-
-Exemption: when the user explicitly instructs to "skip the merge-companion self-check" for this session only.
-
-This rule is the document layer of the pending-merge layered gate. It operates together with the SessionStart hook (session-start layer) and the UserPromptSubmit hook payload (user-prompt layer). If the hook already performed the current platform precheck, reuse that result, and if the hook failed or the environment is hookless, check directly.
-
-
-First-entry intake invariant:
-- Every user input is connected to the session-intent intake path first.
-- The mandatory main path after pending-merge precheck is not a single line through skill-evolution. session-intent-analyzer fans out to skill-evolution(report-only terminal branch) and jailbreak-detector; task-router runs only after jailbreak-detector opens downstream gate.
-- `skill-evolution` is a report-only terminal branch from `session-intent-analyzer` and does not feed `task-router`.
-- `task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context and an agent-side request decomposition step. It does not own user-input intake, raw intent inference, ledger updates, jailbreak decisions, downstream gate state, or tool permission.
-- The task-router reminder hook withholds task-router until session-intent preflight exists and jailbreak-detector has had the first chance to record a current-lineage block. If no current block gate exists, absent `downstream-gates.json` is silent allow; after release, task-router reads the session intent ledger, performs atomic meaning decomposition, and assigns skills.
-- Missing `current-session.json`, `intent-state.json`, hook payload, preflight evidence, or semantic delta evidence is not a deny reason for first entry.
-- Before the first tool call, the session-intent intake and bootstrap must be connected first, and the absence of evidence itself is not a tool-checkpoint block reason.
-- Missing session-intent evidence means intake/bootstrap must run or continue; it does not mean tool-checkpoint may infer risk from absence.
-- tool-checkpoint must not predict the user's next input or treat unknown intent as a block condition before intake.
+When undecided entries exist, the current-session assistant presents merge-companion before downstream work. A user's explicit defer/skip leaves `decided=false` and permits the other authorized work to continue. A terminal answer defers manual inspection. A user may explicitly skip this precheck for the session.
 
 ### 0-B. Session Intent Ledger Gate
 
-On every user input, `session-intent-analyzer` updates the intake of the per-session intent ledger. On a platform where the hook fires, the UserPromptSubmit/BeforeAgent hook does not store the raw prompt. It leaves `input_digest`, `input_char_count`, `intake_status=observed`, and `intent_delta_status=not-provided`, and it commits the state, ordered event and advisory discovery metadata in `.tmp/session-intent/ghost-state.sqlite3` at the Ghost-ALICE repository root. Runtime reads use `session_intent_ledger.py --read-state` with the receipt root/platform/session ID; compatibility JSON paths may be absent or stale. The agent augments a compressed delta through the ledger API for the same session id only when the user's goals, constraints, decisions, non-goals, open questions, or completion criteria materially change. The exported `intent-state.json` is update-plus-accumulate state; SQLite is the runtime authority. Scalar intent such as `current_goal` and `user_intent_summary` is corrected to the latest delta when there is a semantic delta, and list information such as constraints, non-goals, open questions, criteria, and decisions accumulates by deduplication or merge by id.
+The intake hook supplies the exact native session receipt. For normal work, the current-session assistant follows session-intent-analyzer to read that receipt's authoritative SQLite state and record only material semantic changes. The task-router procedure uses the current input binding to register selected work. Pending Claude transport, compatibility exports and discovery pointers do not establish human authority.
 
-The hook's digest-only observation is evidence of intake completion. A semantic delta is required only when the user's intent, constraints, decisions, or completion criteria change. If no delta is needed, you can leave the `last_semantic_delta_status=not-provided` state as is and mark `session-intent-analyzer: done`. If a delta is needed but was not recorded, it is `hook-observed`.
-
-The consumers of this ledger are `skill-evolution` and `jailbreak-detector`. `skill-evolution` interprets the tool sequence together with the change in user intent, and `jailbreak-detector` compares the current input summary against the accumulated intent and constraints. The deterministic hard-block rule is a narrow regression guard for explicit, high-confidence attack signals, and it is not a proof that every jailbreak is blocked. A gate block derives only from the meaning judgment that the model recorded (`model_security_decision`). Progressive jailbreak resistance across multiple turns depends on the quality of the intent summary, correction, and accumulation in `session-intent-analyzer` and on the quality of the accumulated-constraint comparison in `jailbreak-detector`.
-
-Hook pending-merge precheck is a pre-routing/session-start layer. When hook evidence is absent, the manual fallback still completes before actionable downstream work; only a no-work terminal route may defer it because no work begins. The runtime hook graph fixes the session intent ledger state first. User input -> the `session-intent-analyzer` hook records the digest, the session ledger, ordered event, and database discovery metadata and allows -> `skill-evolution` and `jailbreak-detector` consume the same session through the authoritative storage API -> `skill-evolution` terminates as a report-only branch -> `jailbreak-detector` records `model_security_decision` in the ledger and carries only a current-lineage block to `downstream-gates.json` -> the task-router reminder hook confirms the session-intent preflight and the absence of a current-lineage block and releases with a silent allow -> `task-router` reads the session-intent ledger and performs only atomic meaning decomposition and the routing decision -> the tool-stage `tool-checkpoint` looks at the current-lineage block gate. If `opened=false` or `decision=block`, it denies. An absent gate or any other state is a silent allow. `tool-checkpoint` does not use tool-call identity, payload content, or audit, log, and correlation metadata as decision input. Audit, log, and correlation metadata stay outside the decision body. `tool-checkpoint` is a `PreToolUse` checkpoint and is not user-input intake.
-
-Prohibited:
-- storing the raw prompt
-- storing the full conversation or tool output
-- storing the original system or developer instructions
-- storing raw secret, token, API key, password, or private key values
-- promoting long-term memory without user approval
-
-In a hookless or manual environment, apply this contract manually before the first response and record the `session-intent-analyzer` status in `[gate-state]`.
+The current-session assistant never stores raw prompts, full conversation/tool output, system/developer instruction bodies or secrets in intent-state fields. Separate Core response-review tables hold authorized answer/source snapshots under verification-before-completion. Long-term memory promotion requires user approval. An unavailable ledger leaves dependent operations unresolved; it does not authorize another session or database.
 
 ### 1. Mandatory Official Spec Verification After Writing or Modifying a Skill
 
-After writing a new skill or modifying an existing skill, you must pass the process below. Complete this verification before moving on to the testing or evaluation stage.
-
-Verification process:
-
-1. Read `official-docs/derived/skill-compliance-checklist.md`.
-2. Run Phase 1 through Phase 5 of the checklist in order.
-3. If there is a violating item, fix it and re-verify.
-4. Proceed to the next stage (testing, evaluation, deployment) only after every item passes.
+The author reads `official-docs/derived/skill-compliance-checklist.md`, completes Phase 1 through Phase 5 in order, corrects required violations, and only then evaluates or installs the changed skill. The author applies the checklist to every changed package.
 
 ### 2. Language Tone Rule
 
-The response language follows the user's input language. English and other languages use their formal register. Explicit user instructions about tone take precedence over these defaults.
+The current-session assistant answers in the user's language and requested register. Korean reader-facing documentation uses polite language; Korean skill instructions and formal reports use plain declarative language unless the user asks otherwise. Runtime instruction prose and control fields remain canonical English. Paired English/Korean documentation conveys the same current behavior.
 
-- Reader-facing Korean project documentation, including README files, installation guides, website copy, and release notes, uses a consistent respectful, polite style.
-- Korean proposals, official letters, government project documents, reports, and skill instructions default to plain declarative style unless the user requests a different register.
-- Casual banmal endings are not the default for either category.
-- English canonical skill instructions and control fields remain in English; this tone policy does not translate protocol tokens.
+The author writes each procedure for a reader who has the named inputs but no earlier conversation. Each action names the model, person or executable that performs it and the object it changes or produces. At a handoff, the procedure identifies where the caller obtains the input values, how the caller passes them to the receiver, what the receiver returns, and which returned result determines the next action. One owning reference contains the full calling procedure; hooks and other documents name that reference and add only their local trigger or result. A skill names instructions, not an acting model; Core and Ghost-ALICE Autopilot name responsibility areas, not separate reasoning actors. Conditions and prohibitions name their affected operation. Planned actions, observations and inferences remain distinct. The author replaces words such as “repair”, “complete” or “the path” when the reader would have to guess their object or meaning.
 
 ### 3. Progressive Disclosure Principle
 
-- SKILL.md: within 500 lines, core guidance only
-- references/: detailed reference documents (loaded when needed)
-- scripts/: executable code
-- a reference file over 300 lines must include a TOC
+The author keeps `SKILL.md` within 500 lines, moves detailed guidance to `references/`, and puts executable code in `scripts/`. A reference longer than 300 lines includes a table of contents. The current-session assistant loads a reference only when the current task needs it.
 
 ### 4. Frontmatter Rule
 
-- `name`: lowercase and hyphens, must match the directory name
-- `description`: 250 characters or fewer recommended, 1024 characters or fewer required
-- `compatibility`: state it when there is an environment dependency
+A skill name uses lowercase letters and hyphens and matches its directory. A description is at most 1024 characters, preferably at most 250. The author declares environment dependencies in `compatibility`.
 
 ### 5. Mandatory coding-convention Family Call
 
-In every conversation that begins coding or development work, including writing or modifying a skill, call the `coding-convention/using-coding-convention` entry point first. Call it if there is even a one percent chance it applies. If it does not fit the situation after the call, drop it then.
-
-Family composition (14 sub-skills):
-
-- Process: brainstorming, writing-plans, systematic-debugging, verification-before-completion, dispatching-parallel-agents
-- Implementation: test-driven-development, subagent-driven-development, using-git-worktrees, executing-plans, finishing-a-development-branch
-- Review and meta: requesting-code-review, receiving-code-review, writing-skills, using-coding-convention
+At the start of development work, including skill editing, the current-session assistant applies `using-coding-convention`. If applicability is uncertain, the current-session assistant loads the skill before deciding. A terminal no-work answer exits before development work.
 
 ### 6. Write/Edit Code File Gate
 
-Immediately before calling Write or Edit on a code file (.py, .js, .ts, .jsx, .tsx, .java, .go, .rs, .c, .cpp, .cs, .rb, .sh, .bat, .ps1, and so on), check whether `using-coding-convention` has been called in the current conversation.
-
-Gate rule:
-
-- call history exists -> proceed
-- no call history -> call `using-coding-convention` first, then proceed
-
-Exemptions:
-
-- the user explicitly instructs to "skip the skill"
-- the target is not a code file (.md, .txt, .json config, .xml, and so on)
-- a trivial edit of one line or fewer (a typo, an added import, and so on)
-
-This gate enforces rule 5's "call at the start of coding or development work" policy at the tool-call level. It catches the case where a conversation starts in a non-coding domain and shifts to coding midway.
+Before a code edit, the current-session assistant checks whether using-coding-convention was executed in this conversation. If not, the current-session assistant applies it first. Exemptions: the user explicitly skips the skill, the target is not code, or the edit is a trivial single-line correction.
 
 ### 7. Output Emphasis Rule
 
-
-Do not use markdown bold, the emphasis notation wrapped in two asterisks, in the body of an output. When emphasis is needed, express it with the □, ○, or - markers, a header, or structure.
+The current-session assistant uses Markdown bold only for an explicit requirement that preserves user authorization, evidence validity or the separation of component responsibilities. It writes that requirement as a complete sentence. Ordinary labels, status reports, examples and explanatory prose remain unbolded.
 
 ### 8. External Credential Lookup Rule
 
-Look up all external login information, such as API keys, tokens, passwords, and email credentials, through the `_shared/secrets/` helper.
+The current-session assistant uses `_shared/secrets/` helpers for external credentials: Bash `secrets_get_or_prompt` after loading `load.sh`, or Python `get_or_prompt` from `load.py`. The helper checks the environment, then `~/.ghost-alice/secrets.env`, then an interactive prompt with an optional save.
 
-- bash: after `source _shared/secrets/load.sh`, call `secrets_get_or_prompt KEY "label"`
-- python: after `from load import get_or_prompt` (add `_shared/secrets/` to sys.path), call `get_or_prompt("KEY", label="...")`
-
-Prohibited patterns:
-
-- a pattern where a skill or script receives credentials only by prompt (forcing input every time)
-- a pattern that accesses `os.environ["KEY"]` directly and dies with KeyError (the helper handles a fallback)
-- a pattern that puts credentials in a `.env` file inside the skill directory (the location is `~/.ghost-alice/secrets.env`)
-
-Lookup priority (the helper handles it automatically): env var -> `~/.ghost-alice/secrets.env` -> prompt (interactive) plus a save option. When you introduce a new standard key, update the standard key table in `_shared/secrets/README.md`.
+Code must not force repeated credential entry, fail through direct `os.environ["KEY"]` indexing, or store credentials in a skill-local `.env`. The author updates the standard key table in `_shared/secrets/README.md` when adding a standard credential name.
 
 ### 9. io-trace Transparency Rule
 
-Output an `[io-trace]` block at the end of every normal response. A no-work terminal response (`clarification-only` or `direct-response`) emits no control block and permits no downstream file, tool, credential, or external-state access. Strict hook logging remains active for the exception.
+The PostToolUse hook records strict audit data in `~/.ghost-alice/io-trace.jsonl`. Display verbosity never disables that log. Printed `[io-trace]` is optional; absence or formatting of a printed trace does not invalidate proof.
 
-```
-[io-trace]
-- files-read: [path1, path2, ...]
-- files-written: [path1, ...]
-- files-searched: [pattern -> target path, ...]
-- commands-run: [command summary, ...]
-- web-accessed: [URL or search term, ...]
-- skills-loaded: [skill name, ...]
-- skills-reused: [skill name, ...]
-- subagents: [description -> tool-call count, ...]
-```
+When the user requests a trace, the current-session assistant includes only factual, nonempty categories: files-read, files-written, files-searched, commands-run, web-accessed, skills-loaded, skills-reused, subagents. Paths are absolute; actual reads and valid reuse are separate. Delegated results retain accessed-file paths and call counts.
 
-Rules:
-
-- Omit a category that has no items (do not output an empty array).
-- Write file paths as absolute paths.
-- Truncate Bash commands to the first 200 characters.
-- `skills-loaded` records only the skills that either had a visible Skill call in the current turn, or, in an environment without a visible Skill call surface such as Codex, had their `SKILL.md` body actually read and their workflow performed.
-- A required gate skill is not satisfied by a metadata-only match. In an environment without a visible Skill call surface such as Codex, use a fresh or valid retained instruction body for `task-router` and the gate skills required that turn. Without that body and current workflow execution, it is neither a `skill-call` nor `done`.
-- `skills-reused` records an executed workflow using a valid retained instruction body, with its source path and same-session load-record evidence; it is not a new file read.
-- If you read a `SKILL.md` directly with a tool, also record the absolute path in `files-read`. A metadata-only match is not file I/O and is not a `skills-loaded` entry.
-- A subagent result must include the list of files accessed inside that agent. Add "include the list of accessed file paths in the result" to the subagent dispatch prompt.
-
-Purpose of this rule:
-
-- the user immediately notices when context is taken from the wrong file
-- past activity can be audited by scrolling the conversation
-- whether a request is getting the reasoning depth it needs can be monitored
-
-Code-level reinforcement: `_shared/io_trace_hook.py` records automatically to `~/.ghost-alice/io-trace.jsonl` as a PostToolUse hook. This log can be used for post-hoc audit even when the prompt-level io-trace is missing.
+A tool-checkpoint is a `PreToolUse`/`BeforeTool` checkpoint, not user-input intake. The current-session assistant surfaces it once per input lineage, with `intent`, `why`, `hook-stage: PreToolUse`, and `meaning: tool-call retry checkpoint, not user-input intake`. An active boundary adds `contract-ref` and `contract-check`. An observed change, denial or mismatch can require a new surface. Hooks still inspect and audit every call. Other diagnostic fields appear only when they change the next decision.
 
 ### 10. Mandatory Web Search Before External Tool Claims
 
-Immediately before a material factual claim about an external tool, library, CLI, SDK, framework, version, or platform behavior, cross-check community reports with at least three WebSearch queries when the claim is current or version-specific, concerns support, removal, regression, or live runtime state, is disputed or high-risk, or the user explicitly requests verification. Citing official docs alone is treated as an "unverified echo" for those claims. Stable, low-risk, non-current general guidance on a `direct-response` route is exempt; give the bounded instruction without claiming fresh runtime verification, and mention uncertainty only when it could change the answer.
+Before endorsing a current, version-specific, disputed or high-risk claim about an external tool, the current-session assistant checks official specifications and at least three community searches: `<tool> <year> github issue`, `<tool> reddit`, and `<tool> not working <version>`. The same requirement applies when the user explicitly requests verification. The current-session assistant distinguishes a normative specification from observed behavior. Stable low-risk explanations and questions limited to a specification's definition do not require those searches.
 
-Scope (Category B and C claims):
+The current-session assistant supplies a source locator for quoted sources, numeric claims, original evidence, tables/figures and attached files. A web locator includes an accessible URL. A file locator identifies the file and page/region, or an equivalent section, row, sheet or slide. An inaccessible source is not confirmed evidence.
 
-- "X works / does not work as Y"
-- "Z is supported / removed / a regression in version N"
-- "feature Q of platform P is enabled / disabled"
-
-At least three search queries:
-
-- `<tool> <year> github issue`
-- `<tool> reddit`
-- `<tool> not working <version>`
-
-Evidence location contract:
-
-- Return a `source-locator` together with evidence from an external link, a numeric claim, an original source, a table or figure, or a file the user attached.
-- A web source includes an `accessible_url`. If there is no accessible link, do not confirm it as evidence; mark it inaccessible or exclude it.
-- An attached or local file source includes `file_path` or filename, `page`, and `region`. The `region` enum is `top | middle | bottom | n/a`.
-- For material without pages, write an equivalent locator such as slide, sheet, row, or section in `locator_note` together with `page: n/a`.
-- If a claim includes a number, bind the source location where that number appears with a locator. A summary without a source, such as "I saw it in the search results", is not evidence.
-
-Exemption: a question limited to the spec's own definition (Category A: "X must be Y"). For a runtime-behavior question, official docs alone are insufficient.
-
-Code-level reinforcement (N>=4 layered on Codex, N>=3 on Claude Code):
-
-- web-search-guard-layer-1. Codex only. The UserPromptSubmit agent governance hook in `_shared/install_hooks.py` registers the `[web-search-first]` reminder on platforms where its output reaches the model. Claude Code does not install it: there a UserPromptSubmit hook's `systemMessage` is shown to the user and is not added to the model context (cross-checked against anthropics/claude-code issue 19643, zilliztech/memsearch issue 738, and the Claude Code hooks reference), so it would add no model-facing layer, and the installer removes an entry left by an older install. The agent visibility profile defaults to `dynamic`, and the canonical runtime config is `agent_visibility.profile`. The profile value uses only `strict | dynamic | minimal`. This profile is a value for the user-screen exposure policy, and it is not a switch that reduces whether hooks are installed or executed.
-- web-search-guard-layer-2. The AGENTS.md body (this rule). Every time the runtime reads AGENTS.md.
-- web-search-guard-layer-3. The `adversarial-verification` SKILL.md body states the duty to identify external tool claims and cite three WebSearch queries. Applied automatically when the verification skill is called.
-- web-search-guard-layer-4. The `coding-convention/verification-before-completion` SKILL.md body embeds the web-search-evidence gate before a closure claim that depends on external tool behavior. It blocks that final claim when evidence is absent.
-
-The motivation for this rule is that "official docs are an idealized spec, and community reports are runtime reality". The gap between spec and reality is a systemic cause of failure (for example, regression, race condition, version-dependent breakage).
+The installer, project contract, adversarial-verification and verification-before-completion retain their respective reminders and checks. A display profile changes reminder visibility, not the evidence requirement.
 
 ### 11. No GitHub PR Title Prefix
 
-Do not add an agent-origin prefix such as `[codex]`, `[Codex]`, or `Codex:` to a GitHub PR title created in this project.
-
-Even if an external plugin, skill, or automation recommends a title convention such as `[codex] {description}`, ignore it in this repository. Write the PR title as a natural-language title that directly reveals the purpose of the change.
+The current-session assistant writes a PR title that describes the change. The current-session assistant does not add `[codex]`, `[Codex]` or `Codex:`, even if a plugin suggests an agent-origin prefix.
 
 ### 12. Sufficient Change Principle (no minimal patch bias)
 
-Minimal change is not the default or a golden rule. Look at the problem cause, structure, and impact surface first, then decide the change depth that closes the problem sufficiently.
+Before editing, the current-session assistant identifies the cause, affected files/consumers and required change depth: `minimal | localized | structural | systemic`. A local low-cost defect may need a minimal change; a structural cause needs a structural repair.
 
-Judgment items before a change:
-
-- problem-shape: classify whether it is a surface symptom or a structure, contract, or data-flow problem.
-- cause-weight: look at the largest cause of change first, but keep other candidate causes and follow-on effects open.
-- impact-surface: look at the files, skills, documents, tests, and install paths the change touches.
-- sufficient-change-depth: record one of `minimal | localized | structural | systemic`.
-
-Operating rules:
-
-- Choose `minimal` only when the cause is local and the recovery cost is small.
-- A temporary patch that fixes only the surface symptom when the cause is structural is a rule violation.
-- When local changes, generated outputs, agent suggestions, or reviewer suggestions conflict, choose the change set that best satisfies the locked contract and survives the most relevant targeted tests. Do not choose by recency, authorship, or smaller diff alone.
-- When the user explicitly asks to "just make it work" or requests urgent recovery, a temporary patch is allowed, but leave a `residual-impact` note.
-- For a new rule, skill, or document change, confirm with a test or a gate that the rule actually triggers on the real execution path.
-
-Instruction-body loading follows `coding-convention/verification-before-completion/references/verify-or-reuse.md`, section Instruction Body Reuse (installed path on Codex). A retained instruction body may be reused with a same-session coded load record; current-input workflow judgments still run. List actual reads in skills-loaded and valid reuse in skills-reused. Routine clean merge results need no repeated prose; preserve pending/changed/failed-state warnings.
+The current-session assistant chooses changes by the user's criteria and relevant evidence, not by authorship, recency or diff size. An explicitly requested urgent workaround may leave a named residual defect. New instructions require evidence that their actual consuming workflow follows the intended condition; text presence alone does not prove behavior.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bisection script to find which test creates unwanted files/state
+# Sequential helper to identify the first test run creating the named artifact
 # Usage: ./find-polluter.sh <file_or_dir_to_check> <test_pattern>
 # Example: ./find-polluter.sh '.git' 'src/**/*.test.ts'
 
@@ -59,5 +59,5 @@ for TEST_FILE in $TEST_FILES; do
 done
 
 echo ""
-echo "✅ No polluter found - all tests clean!"
+echo "No new target artifact observed; this helper does not establish that tests passed."
 exit 0

@@ -2,33 +2,37 @@
 
 언어: [🇺🇸 English](../../concepts/language-policy.md) | 🇰🇷 한국어
 
-Ghost-ALICE OS는 저장소의 기본 entry 언어로 English를 쓰고, reader가 보는 문서는 Korean counterpart를 함께 둡니다.
+Ghost-ALICE OS는 영어를 저장소의 기본 안내 언어로 사용하며, 사용자용 문서는 한국어 대응 문서도 제공합니다.
 
-code, schema, control token, issue template, release surface, contributor workflow를 조율하는 주 언어는 English입니다. Korean은 한국어 reviewer와 contributor를 위해 짝으로 두는 reader용 문서입니다.
+기여자는 코드, 스키마, 제어 토큰, 이슈 양식, 배포 안내와 기여 절차를 영어 기준으로 관리합니다. 한국어 문서는 한국어 검토자와 기여자가 같은 내용을 이해하도록 돕는 대응 문서입니다.
 
 ## Rules
 
-- repository의 default entry path는 English로 유지합니다.
-- reader-facing repository documentation은 `docs/ko/` 아래에 Korean counterpart를 유지합니다.
-- 각 paired document는 상단 근처에 language switch를 둡니다.
-- English 문서는 기본적으로 English 문서로 내부 링크합니다.
-- Korean 문서는 counterpart가 있을 때 Korean counterpart로 내부 링크합니다.
-- runtime contracts와 executable behavior는 main repository에 유지합니다.
-- local checkout이 막힌 상황에서도 읽어야 하는 긴 설명 문서는 Wiki에 둡니다.
+- 문서 관리자는 저장소의 기본 안내를 영어로 유지합니다.
+- 사용자용 저장소 문서에는 `docs/ko/` 아래에 한국어 대응 문서를 유지합니다.
+- 쌍을 이루는 각 문서의 상단에 언어 전환 링크를 둡니다.
+- 영어 문서의 내부 링크는 기본적으로 영어 문서를 가리킵니다.
+- 한국어 문서의 내부 링크는 대응 문서가 있으면 한국어 문서를 가리킵니다.
+- 실행 계약과 실행 코드는 주 저장소에서 관리합니다.
+- 로컬 저장소를 업데이트할 수 없는 상황에서도 읽어야 하는 긴 설명은 Wiki에도 제공합니다.
 
 ## Literal Tokens
 
-다음 token은 언어가 달라도 literal로 유지합니다.
+번역자는 다음 토큰의 표기를 바꾸지 않습니다.
 
-- file paths and directory names
-- commands, flags, and environment variables
-- JSON, TOML, YAML, and Markdown field names
-- enum values and schema literals
-- hook names and skill names
-- platform names such as Codex and Claude Code
+- 파일 경로와 디렉터리 이름
+- 명령, 옵션과 환경 변수
+- JSON, TOML, YAML과 Markdown의 필드 이름
+- 열거 값과 스키마 리터럴
+- 훅 이름과 스킬 이름
+- Codex, Claude Code 같은 플랫폼 이름
 
-token은 그대로 두고 주변 설명만 번역합니다.
+토큰 자체는 그대로 두고 주변 설명만 번역합니다.
+
+## Intentionally Unpaired Sources
+
+사용자용 문서, 아키텍처, Wiki 설명과 GitHub Pages는 영어·한국어 대응 문서를 유지합니다. 실행 지침 본문(`AGENTS.md`, 플랫폼 부트스트랩, `SKILL.md`), 스키마, 관리자 절차, 커뮤니티 정책, 법적 고지와 출처 기록은 의도적으로 하나의 영어 원본을 기준으로 관리합니다. `CONTRIBUTING.md`, `SUPPORT.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `.github/` 양식과 `official-docs/`가 여기에 해당합니다. 사용자용 설명에서는 어느 언어에서든 해당 원본으로 연결할 수 있으며, 별도의 번역된 제어·법적 원본을 만든다는 뜻은 아닙니다.
 
 ## Drift Control
 
-English 기본 문서를 먼저 고치고, user-facing 의미가 바뀌면 같은 변경에서 Korean counterpart도 함께 고칩니다. 어중간하게 낡은 page는 남겨 두지 말고 지우거나 갱신합니다. 일부러 Korean counterpart를 두지 않은 문서는 가장 가까운 documentation index에서 그 예외를 설명합니다.
+문서 관리자는 영어 기준 문서를 먼저 수정하고, 사용자에게 전달되는 의미가 바뀌면 같은 변경에서 한국어 대응 문서도 수정합니다. 내용이 낡아 오해를 만드는 문서는 삭제하거나 갱신합니다. 한국어 대응 문서를 의도적으로 제공하지 않는 경우에는 가장 가까운 문서 목록에서 그 예외를 설명합니다.

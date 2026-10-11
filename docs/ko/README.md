@@ -1,4 +1,4 @@
-# Documentation
+# 문서 안내
 
 언어: [🇺🇸 English](../README.md) | 🇰🇷 한국어
 
@@ -6,42 +6,44 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 
 쌍을 이루는 문서는 상단에서 언어를 전환하실 수 있습니다. 영어 문서에서는 한국어 링크를, 한국어 문서에서는 영어 링크를 제공합니다.
 
-현재 버전을 맞춘 공개 릴리스는 Ghost-ALICE OS `0.4.1`과 Ghost-ALICE Autopilot `0.4.1`입니다. 의도·세션·연속 실행 변경과 검증 범위는 [릴리스 노트](./release/2026-10-01-release-notes.md)에서 확인하실 수 있습니다.
+Core `0.5.0`과 Ghost-ALICE Autopilot `0.5.0`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.0` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
+
+응답 모델은 주장과 원본 출처를 먼저 비교하고 답변 전체와 사용자 목적을 비교합니다. 호스트 도구가 원고·출처 경로·검토 판단을 Core Python 코드에 전달하며 Core가 검증·저장합니다. Ghost-ALICE Autopilot은 인증 결과와 모델이 이미 승인받아 등록한 작업 계획을 사용하며 호스트가 후속 요청을 전달합니다. 훅은 엄격한 감사를 유지합니다. 책임 구분은 [아키텍처](../../architecture_ko.md)를 확인해 주세요.
 
 ## 빠른 설치
 
-복제한 Core 저장소에서 다음 명령을 실행하시면 사용 가능한 에이전트 플랫폼을 자동으로 감지하여 Core와 Autopilot을 함께 설치합니다.
+복제한 Core 저장소에서 다음 명령을 실행하시면 설치기가 사용 가능한 에이전트 플랫폼을 자동으로 감지하여 Core와 Ghost-ALICE Autopilot을 함께 설치합니다.
 
 ```bash
 bash install.sh --addon autopilot
 ```
 
-상태 질문과 교정 중에도 승인된 작업의 범위를 유지하며 작업을 이어가고, 완료 보고를 항목별 근거와 연결합니다. 저장소 복제, 운영체제별 명령과 명시적인 플랫폼 선택은 [설치 안내](./getting-started/installation.md)를 확인해 주세요.
+에이전트는 상태 질문과 교정 중에도 승인된 작업의 범위를 유지하며 작업을 이어가고, 완료 보고를 항목별 근거와 연결합니다. 저장소 복제, 운영체제별 명령과 명시적인 플랫폼 선택은 [설치 안내](./getting-started/installation.md)를 확인해 주세요.
 
-## Start Here
+## 시작 안내
 
 1. 설치와 업데이트는 [getting-started/installation.md](./getting-started/installation.md)를 확인해 주세요.
 2. 업데이트가 막히면 [getting-started/troubleshooting.md](./getting-started/troubleshooting.md)를 확인해 주세요.
 3. 저장소 구조는 [reference/repository-structure.md](./reference/repository-structure.md)를 확인해 주세요.
 4. 설치기 구조는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 확인해 주세요.
-5. 공개 질문은 [SUPPORT.md](../../SUPPORT.md)와 GitHub Issues를 이용해 주세요.
-6. 비공개 취약점 보고는 [SECURITY.md](../../SECURITY.md)의 안내를 따라 주세요.
+5. 공개 질문은 [SUPPORT.md](https://github.com/AidALL/ghost-alice/blob/main/SUPPORT.md)와 GitHub Issues를 이용해 주세요.
+6. 비공개 취약점 보고는 [SECURITY.md](https://github.com/AidALL/ghost-alice/blob/main/SECURITY.md)의 안내를 따라 주세요.
 
-## Documentation Layout
+## 문서 안내 Layout
 
-| Area | Role | English | Korean |
+| 구분 | 역할 | 영어 | 한국어 |
 | --- | --- | --- | --- |
-| Getting Started | install, update, recovery, uninstall 절차 | [../getting-started/](../getting-started/) | [getting-started/](./getting-started/) |
-| Concepts | project model과 documentation language policy | [../concepts/](../concepts/) | [concepts/](./concepts/) |
-| Reference | repository map, public skills, hooks, command surfaces | [../reference/](../reference/) | [reference/](./reference/) |
-| Policies | runtime, platform, evaluator contracts | [../policies/](../policies/) | [policies/](./policies/) |
-| Release | public release checks와 validation guidance | [../release/](../release/) | [release/](./release/) |
-| Plans | public planning boundaries와 roadmap notes | [../plans/](../plans/) | [plans/](./plans/) |
+| Getting Started | 설치·업데이트·복구·제거 절차 | [../getting-started/](../getting-started/installation.md) | [getting-started/](./getting-started/installation.md) |
+| Concepts | 프로젝트 모델과 문서 언어 정책 | [../concepts/](../concepts/language-policy.md) | [concepts/](./concepts/language-policy.md) |
+| Reference | 저장소 구조, 공개 스킬, 훅과 명령 안내 | [../reference/](../reference/repository-structure.md) | [reference/](./reference/repository-structure.md) |
+| Policies | 실행 환경·플랫폼·평가 도구의 계약 | [../policies/](../policies/session-gate-matrix.md) | [policies/](./policies/session-gate-matrix.md) |
+| Release | 공개 배포 검사와 검증 안내 | [../release/](../release/public-release-checklist.md) | [release/](./release/public-release-checklist.md) |
 
-## Document Map
+## 문서 목록
 
-| Intent | English | Korean |
+| 목적 | 영어 | 한국어 |
 | --- | --- | --- |
+| 아키텍처와 책임 | [../../architecture.md](../../architecture.md) | [../../architecture_ko.md](../../architecture_ko.md) |
 | Documentation index | [../README.md](../README.md) | README.md |
 | Installation and update flow | [../getting-started/installation.md](../getting-started/installation.md) | [getting-started/installation.md](./getting-started/installation.md) |
 | Git/update troubleshooting | [../getting-started/troubleshooting.md](../getting-started/troubleshooting.md) | [getting-started/troubleshooting.md](./getting-started/troubleshooting.md) |
@@ -57,15 +59,13 @@ bash install.sh --addon autopilot
 | Platform adapter compliance | [../policies/platform-adapter-compliance.md](../policies/platform-adapter-compliance.md) | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) |
 | Live smoke regression | [../policies/live-smoke-regression.md](../policies/live-smoke-regression.md) | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) |
 | Evaluator artifact contract | [../policies/evaluator-artifact-contract.md](../policies/evaluator-artifact-contract.md) | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) |
-| Current release notes | [../release/2026-10-01-release-notes.md](../release/2026-10-01-release-notes.md) | [release/2026-10-01-release-notes.md](./release/2026-10-01-release-notes.md) |
 | Public release checklist | [../release/public-release-checklist.md](../release/public-release-checklist.md) | [release/public-release-checklist.md](./release/public-release-checklist.md) |
-| Planning policy | [../plans/README.md](../plans/README.md) | [plans/README.md](./plans/README.md) |
 
 ## 기준 기여자 문서
 
-`CONTRIBUTING.md`, `SUPPORT.md`, `CHANGELOG.md`와 `official-docs/`는 영어를 기준 기여자 경로로 사용합니다. 제어 토큰과 과거 릴리즈 기록은 그대로 보존하며, 현재 사용자용 한국어 문서는 위 표에서 제공합니다. 과거 릴리즈 안내는 해당 날짜의 버전과 검증 한계를 보존합니다.
+`CONTRIBUTING.md`, `SUPPORT.md`와 `official-docs/`는 영어를 기준 기여자 경로로 사용합니다. 제어 토큰은 그대로 유지하며, 사용자용 한국어 대응 문서는 위 표에서 제공합니다.
 
-## Update Rule
+## 갱신 규칙
 
 1. 기본 영문 페이지를 먼저 수정해 주세요.
 2. 사용자에게 전달되는 의미, 경로, 명령, 정책이 바뀌면 같은 변경에서 한국어 대응 문서도 수정해 주세요.

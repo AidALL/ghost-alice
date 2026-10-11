@@ -95,13 +95,17 @@ class PatternClassNormalizationTests(unittest.TestCase):
         text = SCHEMA_DOC.read_text(encoding="utf-8")
         for pattern_class in LEDGER.CONDUCT_PATTERN_CLASSES:
             with self.subTest(pattern_class=pattern_class):
-                self.assertIn(f"`{pattern_class}`", text)
+                vocabulary = text.split("Optional pattern_class", 1)[1].split("An update omitting", 1)[0]
+                self.assertIn(pattern_class, vocabulary)
 
 
 class CaptureReminderTests(unittest.TestCase):
     def test_capture_reminder_asks_for_pattern_class(self) -> None:
-        self.assertIn("(id, failure_pattern, corrective_rule, pattern_class, source=user-explicit, status=open)",
-                      INSTALL_HOOKS.read_text(encoding="utf-8"))
+        body = (REPO_ROOT / "session-intent-analyzer/SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("Conduct correction evidence", body)
+        self.assertIn("pattern_class", SCHEMA_DOC.read_text())
+        self.assertIn("ledger-schema.md", body)
+        self.assertIn("session-intent-analyzer", INSTALL_HOOKS.read_text(encoding="utf-8"))
 
 
 class CliRejectionTests(unittest.TestCase):

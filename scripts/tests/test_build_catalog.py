@@ -47,7 +47,7 @@ class BuildCatalogFamilyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
             write_skill(repo_root, "task-router", "task-router")
-            write_skill(repo_root, "jailbreak-detector", "jailbreak-detector")
+            write_skill(repo_root, "skill-evolution", "skill-evolution")
             write_skill(repo_root, "sample-domain-skill", "sample-domain-skill")
             write_skill(
                 repo_root,
@@ -58,9 +58,9 @@ class BuildCatalogFamilyTest(unittest.TestCase):
             catalog = build_catalog(repo_root)
             by_name = {skill["name"]: skill for skill in catalog["skills"]}
 
-            self.assertEqual(by_name["jailbreak-detector"]["family"], "domain")
+            self.assertEqual(by_name["skill-evolution"]["family"], "domain")
             self.assertEqual(
-                by_name["jailbreak-detector"]["governance_class"],
+                by_name["skill-evolution"]["governance_class"],
                 "governance-subskill",
             )
             self.assertEqual(

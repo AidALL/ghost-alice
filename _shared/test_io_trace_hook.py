@@ -364,7 +364,7 @@ class TestSessionIntentRootResolution(unittest.TestCase):
                     self.assertIsNone(io_trace_hook._semantic_delta_warning(payload))
 
     def test_runtime_copy_resolves_ledger_root_from_skill_install(self):
-        # N2: the runtime tree ships only _shared, so the repo-relative ledger candidate never exists there. The hook must resolve the real ledger from a skill install location and use its repo-aware default_root, instead of silently falling back to the legacy ~/.ghost-alice root (which diverges from where the ledger actually writes in repo sessions). Runs in a subprocess so no cached module can mask it.
+        # Resolve the ledger from its installed skill location when runtime-core contains only _shared. The subprocess isolates module caching and checks the repository-aware authority root.
         repo_shared = Path(__file__).resolve().parent
         repo_root = repo_shared.parent
         real_ledger = repo_root / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
@@ -376,7 +376,7 @@ class TestSessionIntentRootResolution(unittest.TestCase):
             shutil.copy2(real_ledger, skill_scripts / "session_intent_ledger.py")
             runtime_shared = base / "runtime" / "current" / "_shared"
             runtime_shared.mkdir(parents=True)
-            for name in ("io_trace_hook.py", "session_intent_analyzer_hook.py", "task_router_reminder_hook.py", "session_check_cache.py"):
+            for name in ("io_trace_hook.py", "session_intent_analyzer_hook.py", "task_router_reminder_hook.py", "session_check_cache.py", "install_destination.py", "reminder_texts.py", "reminder_texts.json"):
                 shutil.copy2(repo_shared / name, runtime_shared / name)
             fake_repo = base / "repo"
             (fake_repo / "skill-catalog").mkdir(parents=True)

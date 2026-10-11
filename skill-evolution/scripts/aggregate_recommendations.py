@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""Aggregate conduct_feedback across every session ledger into one ranked
-    update-recommendation backlog.
+"""Aggregate conduct_feedback across session ledgers into a report-only backlog.
 
-The per-session ledger (`.tmp/session-intent/<platform>/<session-id>/intent-state.json`)
-records conduct_feedback entries: user-explicit corrections and inferred
-intent-vs-skill gaps. This script scans all of them, merges by entry id across
-sessions, and surfaces the open recommendations with objective signals: how many
-occurrences and sessions hit the same correction, how recently, and which
-source. It orders them by occurrences, sessions, then recency as a transparent
-default; it does not fabricate a
-priority weight. The consuming model judges priority by reasoning over the
-signals. Report-only: it proposes, it does not edit skills.
+Read authoritative session states through the ledger API when SQLite authority
+is present. A root containing only portable JSON state files can supply offline
+report input. Neither report input nor the resulting recommendations grants
+execution permission. Merge entries by ID across sessions and expose occurrence
+count, session count, recency and source. Order by occurrences, sessions and
+recency without a fabricated priority weight. The consuming model judges priority
+from those signals. This script returns candidates; the consuming model judges
+and reports proposed changes. The script does not edit skills.
 
 Dependencies: Python 3.11+ standard library only.
 """
@@ -20,7 +18,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any

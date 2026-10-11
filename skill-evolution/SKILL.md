@@ -5,116 +5,75 @@ compatibility:
   - "Python 3.11+ standard library"
 ---
 
-# skill-evolution
+# Skill Evolution
 
-skill-evolution reads io-trace JSONL and produces evolution candidate reports for repeated tool, workflow, and sequence patterns. If a session-intent ledger is provided, it uses the intent summary to explain why the tool sequence occurred.
+The current-session assistant uses this report-only workflow to identify repeated tool/workflow patterns and supported conduct corrections. It reads io-trace and, when supplied, the exact session-intent ledger. It returns candidate recommendations; it does not edit skills, install hooks, promote memory or create automation.
 
-This skill is report-only. It does not edit skills, install hooks, promote memory, or create new automation.
+## Inputs and triggers
 
-Intent context preserves `active_decisions` and `latest_scope` from the ledger so a correction's meaning reaches both the report and its candidates. Superseded decisions are excluded. The preserved context does not change candidate triage or authorize execution; accumulated constraints and non-goals remain visible for reconciliation.
+Use the workflow for a user request about skill upgrades, recommendations or an evolution backlog, or an authorized analysis of repeated tool sequences. The default trace source is `~/.ghost-alice/io-trace.jsonl`; isolated fixtures may be selected explicitly.
 
-## Contents
+When SQLite authority exists, the reader uses the public ledger API with the supplied root/platform/session. The `intent-state.json` argument is a compatibility locator. Portable JSON can support offline reporting but cannot establish current routing or permission.
 
-- [When To Use](#when-to-use)
-- [Conduct Feedback](#conduct-feedback)
-- [Blind Installed-Behavior Evaluation](#blind-installed-behavior-evaluation)
-- [Procedure](#procedure)
-- [Output Format](#output-format)
-- [Quality Decisions](#quality-decisions)
-- [Warnings](#warnings)
+The current-session assistant interprets intent through the retained current goal, accumulated constraints/non-goals, active non-superseded decisions and latest scope. These fields explain behavior; they do not authorize execution or resolve conflicting boundaries by themselves.
 
+## Analyze and dispose
 
-## When To Use
+1. The current-session assistant selects the authorized trace path and window, then uses the exposed shell tool to run `python3 <loaded-skill-directory>/scripts/analyze_io_trace.py <authorized-trace-path> --window <selected-window> --json`, adding `--intent-ledger <receipt.state_path>` when exact session context is available. Every path is an established absolute path; the compatibility locator selects the receipt's ledger through the storage API.
+2. For each `instincts` candidate, it assesses the observed behavior or failure and its effect on the applicable contract. Tool frequency alone does not prove a conduct mismatch.
+3. It then considers `quality_summary`, candidate quality and analyzer decision as triage data. Confidence, recency, authorship and artifact preservation do not grant approval.
+4. It assigns every considered candidate a closed disposition: `absorb | project-local | session-only | reject | defer`, with accountable lowercase-hyphenated owner ID, proposed action and rationale. Watch/reject triage candidates still receive this disposition.
+5. If the disposition explicitly proposes follow-up work, that separately authorized task passes necessity-gate before execution. A defer/reject disposition grants no action. Even `decision=route-to-systematic-debugging` remains report context here; the report-only branch does not dispatch implementation.
+6. The current-session assistant performs accepted edits only under the separately authorized editing procedure. They are not an automatic side effect of producing this report.
 
-- Analyze `~/.ghost-alice/io-trace.jsonl` or isolated fixtures.
-- Find repeated tool sequences in a project.
-- Interpret repeated behavior with `.tmp/session-intent/<platform>/<session-id>/intent-state.json`.
-- Answer when the user asks whether there are skill upgrades, update recommendations, or evolution backlog items to review.
-- Gather evidence before proposing a new skill, hook, or doctor check.
+For a full cross-session backlog request, the current-session assistant runs `python3 <loaded-skill-directory>/scripts/aggregate_recommendations.py --root <authorized-ledger-root> --json`; the root comes from the user's selected ledger or trusted receipt/runtime context. Do not let default ancestor/home discovery substitute a different ledger. For one session, use the analyzer with that exact intent locator. Open entries appear as `conduct:<id>` even without tool activity. Read the actual JSON keys and command status before interpretation; the assistant adds dispositions to its report, not to source state, and does not assume the analyzer generated those meaning judgments. A failed or unreadable result leaves the requested coverage unresolved.
 
-## Conduct Feedback
+## Conduct feedback
 
-Tool-frequency, workflow, and sequence mining finds automation candidates, but it does not show whether the agent's behavior matched what the user asked. `conduct_feedback` fills that gap. Read it from the session-intent ledger as a first-class evolution signal.
+Session-intent-analyzer owns capture and provenance of corrections. The report reads `conduct_feedback` as a first-class signal. The aggregator groups entries with `pattern_class` by failure family and includes their member IDs; unclassified entries remain grouped by ID. The stored occurrence count preserves repeated supported corrections within a session. A user-explicit correction or recurring pattern receives high priority, but priority does not authorize implementation.
 
-Open `conduct_feedback` entries form the update-recommendation backlog. The aggregator groups entries by `pattern_class` when present, so differently named corrections of one failure family count as one recurring candidate with their `member_ids`; unclassified entries keep id grouping. `occurrence_count` preserves repeated same-id corrections inside one session, so chronic completion or workflow failures do not collapse into one visible event. A `source=user-explicit` correction or a recurring pattern is high priority. Every candidate first receives a behavior-first assessment of its observed behavior or failure mode and contract impact, then a closed disposition. Only a disposition that proposes follow-up work routes to necessity-gate. Name the likely preventing gate skill as the candidate's owner when it owns the behavior, such as `boundary-contract` for scope failures, `using-coding-convention` for execution discipline, or `verification-before-completion` for false completion.
+The current-session assistant names the contract owner that could prevent the behavior: for example, boundary-contract for scope, using-coding-convention for execution discipline, and verification-before-completion for false completion. It assesses behavior and contract impact before deciding whether a proposed change is justified.
 
-When the user asks whether there are skill upgrades, update recommendations, or evolution backlog items, enumerate the open entries. For the full cross-session backlog, run `scripts/aggregate_recommendations.py`. For one ledger, run `scripts/analyze_io_trace.py --intent-ledger <intent-state.json>`, where open entries surface as `conduct:<id>` candidates even without tool activity. This skill stays report-only; accepted edits happen only under a separate explicit skill-update task.
-
-## Blind Installed-Behavior Evaluation
-
-Skill pressure RED/GREEN tests whether the written methodology changes behavior under disclosed pressure; it is not installed-behavior release evidence. Post-install blind behavior evaluation uses a held-out case in a fresh subject session. The subject sees only the authentic prompt and ordinary runtime context. The evaluation purpose, rubric, expected answer, pass criteria, prior output, and experiment label remain evaluator-private. Only an evaluator-confirmed behavioral failure emits exactly one report-only conduct-feedback candidate; it never auto-edits a skill or writes recommendation state. Harness, transport, provenance, timeout, empty-output, or malformed-evaluator failures emit no conduct-feedback candidate. Detailed blind-evaluation transport, provenance, and persistence rules are owned by the source-tree live-smoke policy and blind-behavior runtime.
-
-## Procedure
-
-1. Choose the JSONL path and window size.
-2. If available, add `--intent-ledger <intent-state.json>`.
-3. Run `scripts/analyze_io_trace.py <path> --json [--intent-ledger <intent-state.json>]`.
-4. Inspect the `instincts` field. For each candidate, assess the observed behavior or failure mode, then its contract impact.
-5. Use `intent_context` only as supporting explanation.
-6. After behavior and impact are established, use `quality_summary` and each candidate's quality as quality triage evidence. Quality is triage evidence, never eligibility or approval authority. `instincts[*].decision` and quality are analyzer triage data only.
-7. Give every considered candidate a closed disposition: `absorb`, `project-local`, `session-only`, `reject`, or `defer`. Record its `owner`, `action`, and `rationale`. `dispositions[*].disposition` is a report-only classification and routing recommendation. necessity-gate remains the execution authority for any proposed skill, file, task, or follow-up work. `owner` is the accountable contract or skill identifier, written as a lowercase hyphenated id; it is not a human role. Items triaged as `watch` or `reject` still receive a closed disposition. A closed disposition does not make a candidate an implementation candidate.
-8. A `defer` or `reject` disposition authorizes no action. Route through necessity-gate before execution only when the recorded disposition and action explicitly propose follow-up work. Analyzer `decision` does not authorize a handoff.
-9. Record `decision=route-to-systematic-debugging` as triage context and assign a closed disposition; do not hand off unless that disposition authorizes it.
-10. Apply any accepted change in a separate plan. Do not change skills, hooks, or memory automatically while this skill runs; it stays report-only.
-
-## Output Format
+## Output
 
 ```json
 {
   "window": 1000,
   "event_count": 3,
-  "quality_summary": {
-    "review": 1,
-    "watch": 0,
-    "reject": 0
-  },
-  "instincts": [
-    {
-      "id": "sequence:read-edit-bash",
-      "trigger": "Read -> Edit -> Bash sequence",
-      "confidence": 0.7,
-      "domain": "sequence",
-      "scope": "project",
-      "evidence": "3 occurrences",
-      "quality": "review",
-      "decision": "necessity-gate",
-      "session_count": 2,
-      "quality_reasons": ["cross-session-evidence"],
-      "intent_context": {
-        "current_goal": "session intent guard implementation",
-        "constraints": ["do not store raw prompts"],
-        "decision_count": 1
-      }
+  "quality_summary": {"review": 1, "watch": 0, "reject": 0},
+  "instincts": [{
+    "id": "sequence:read-edit-bash",
+    "trigger": "Read -> Edit -> Bash sequence",
+    "confidence": 0.7,
+    "domain": "sequence",
+    "scope": "project",
+    "evidence": "3 occurrences",
+    "quality": "review",
+    "decision": "necessity-gate",
+    "session_count": 2,
+    "quality_reasons": ["cross-session-evidence"],
+    "intent_context": {
+      "current_goal": "session intent guard implementation",
+      "constraints": ["do not store raw prompts"],
+      "decision_count": 1
     }
-  ],
-  "dispositions": [
-    {
-      "candidate_id": "sequence:read-edit-bash",
-      "disposition": "defer",
-      "owner": "skill-evolution",
-      "action": "none",
-      "rationale": "observed contract impact is not yet established"
-    }
-  ]
+  }],
+  "dispositions": [{
+    "candidate_id": "sequence:read-edit-bash",
+    "disposition": "defer",
+    "owner": "skill-evolution",
+    "action": "none",
+    "rationale": "observed contract impact is not yet established"
+  }]
 }
 ```
 
-## Quality Decisions
+Quality values have only triage meaning: review indicates possible cross-session generality, watch indicates limited frequency/session evidence, and reject indicates suspected local debugging or noise. The current-session assistant does not convert any value into implementation eligibility.
 
-- Select candidates by observed behavior or failure mode and contract impact before consulting quality triage.
-- Recency, authorship, and artifact preservation are not approval authority.
-- `quality=review` is explicitly non-approving.
-- Every considered candidate must receive a closed disposition of `absorb`, `project-local`, `session-only`, `reject`, or `defer`, with an `owner`, `action`, and `rationale`.
-- `review`: Cross-session evidence suggests the pattern may generalize; this is triage evidence only.
-- `watch`: Single-session or low-frequency evidence; this is triage evidence only.
-- `reject`: The analyzer suspects a local test/debug loop or noise; this is triage evidence only.
+## Blind installed-behavior evaluation
+
+When an authorized evaluation concerns installed behavior, follow the source-tree `docs/policies/live-smoke-regression.md` procedure. It owns subject/evaluator isolation, runtime execution and result classification. Only its evaluator-confirmed behavioral failure supplies a report-only conduct-feedback candidate; a harness or transport failure does not establish agent misconduct.
 
 ## Warnings
 
-- Default mode is report-only.
-- Do not auto-evolve, auto-promote, auto-create skills, or add background hooks.
-- Do not depend on personal absolute paths such as `/Users/aidall`.
-- `intent_context` must come from session-intent-analyzer compressed state, not raw prompts.
-- `confidence` is a prioritization signal, not approval evidence.
-- `quality=review` is a review entry condition, not approval.
-- Do not use external network, MCP, or credential surfaces.
+The current-session assistant must not auto-evolve, auto-promote, auto-create skills or install background hooks. Intent context comes from compressed ledger state, never raw prompts. This workflow does not use network, MCP or credential surfaces, and must not depend on personal absolute paths.

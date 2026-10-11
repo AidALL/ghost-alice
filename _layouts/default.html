@@ -1,5 +1,9 @@
+{%- assign korean = false -%}
+{%- if page.path contains "_ko." or page.path contains "docs/ko/" -%}
+  {%- assign korean = true -%}
+{%- endif -%}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{% if korean %}ko{% else %}en{% endif %}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -249,14 +253,14 @@
 <body>
   <header class="topbar">
     <div class="wrap topbar-inner">
-      <a class="brand" href="{{ '/' | relative_url }}">
+      <a class="brand" href="{% if korean %}{{ '/index_ko.html' | relative_url }}{% else %}{{ '/' | relative_url }}{% endif %}">
         <img src="{{ '/icon.png' | relative_url }}" alt="" aria-hidden="true">
         <span>Ghost-ALICE OS</span>
       </a>
-      <div class="theme-toggle" role="group" aria-label="Theme">
-        <button class="theme-option" type="button" data-theme-choice="system" aria-pressed="true">System</button>
-        <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="false">Light</button>
-        <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      <div class="theme-toggle" role="group" aria-label="{% if korean %}테마{% else %}Theme{% endif %}">
+        <button class="theme-option" type="button" data-theme-choice="system" aria-pressed="true">{% if korean %}자동{% else %}System{% endif %}</button>
+        <button class="theme-option" type="button" data-theme-choice="light" aria-pressed="false">{% if korean %}밝게{% else %}Light{% endif %}</button>
+        <button class="theme-option" type="button" data-theme-choice="dark" aria-pressed="false">{% if korean %}어둡게{% else %}Dark{% endif %}</button>
       </div>
     </div>
   </header>
@@ -266,7 +270,7 @@
   </main>
 
   <footer>
-    <div class="wrap">Ghost-ALICE OS. Agent governance operating layer.</div>
+    <div class="wrap">Ghost-ALICE OS. {% if korean %}에이전트 거버넌스 계층.{% else %}Agent governance operating layer.{% endif %}</div>
   </footer>
 
   <script>

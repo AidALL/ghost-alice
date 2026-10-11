@@ -4,8 +4,7 @@
 Hook execution and strict audit logging are never reduced here. The primary
 question is whether a hook value changes the work boundary, focus layer,
 verification burden, or recovery path. User visibility follows the runtime
-profile. The model-facing field remains as a compatibility hint, but it is
-derived from work impact instead of being a separate profile axis.
+profile. The model-facing hint is derived from work impact.
 
 Materialization levels, low to high:
   model_surface: omitted | marker | digest | focused | full
@@ -17,7 +16,7 @@ projection levels.
 Low-usefulness values are not deleted at hook time. They are classified as
 routine or audit-only unless they change focus, boundary, verification, or
 recovery. Examples include duplicate reminders, clean-pass status, noop audit
-rows, debug counters, correlation ids, and historical wording that does not
+rows, debug counters, correlation ids, and audit wording that does not
 change the next work decision.
 """
 
@@ -27,8 +26,6 @@ from typing import Any
 
 VALUE_KINDS = {"gate", "risk", "routing", "verification", "routine", "debug"}
 EXPOSURE_CLASSES = {"forced", "essential", "focused", "routine", "audit-only"}
-USER_SURFACES = ("hidden", "compact", "focused", "full", "forced")
-MODEL_SURFACES = ("omitted", "marker", "digest", "focused", "full")
 PROFILES = {"strict", "dynamic", "minimal"}
 
 # exposure_class -> {profile -> (user_surface, model_surface_hint)} for the non-forced, non-fail-closed cases. User surface follows the visibility profile. Model surface hints follow work impact, so they do not vary by profile for routine/focused/essential values.

@@ -11,18 +11,16 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from completion_check_validator import (  # noqa: E402
-    looks_like_completion_claim,
-    validate_completion_text,
-)
+from native_completion import assess_native_completion  # noqa: E402
+from native_transcript import read_entries as _iter_transcript, is_actual_user_prompt as _is_actual_user_prompt
+from claim_evidence_runtime import native_claim_source  # noqa: E402
+from response_delivery import observe_recovery_delivery  # noqa: E402
 
-VERIFICATION_SKILL = "verification-before-completion"
 # Every Claude block reason carries this marker so a later Stop in the same turn can count earlier retries.
 COMPLETION_GATE_MARKER = "[completion-gate]"
 RETRIES_PER_TURN = 1
-# Hosts whose screen keeps the earlier assistant messages of the turn. Headless hosts (sdk-*) return only the
-# final message, and an unknown host is treated the same way, so both keep the standalone rewrite.
-TRANSCRIPT_SURFACES = frozenset({"cli", "claude-desktop", "claude-vscode", "remote_desktop", "remote_mobile"})
+# Named surfaces retain the established transcript behavior. Bare cli stays
+# unknown; native interactive evidence is recognized separately below.
 
 
 def _read_hook_input() -> dict[str, Any]:
@@ -45,28 +43,6 @@ def _read_hook_input() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def _iter_transcript(path_value: Any) -> list[dict[str, Any]]:
-    if not path_value:
-        return []
-    path = Path(str(path_value)).expanduser()
-    try:
-        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return []
-
-    entries: list[dict[str, Any]] = []
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(entry, dict):
-            entries.append(entry)
-    return entries
-
-
 def _content_items(entry: dict[str, Any]) -> list[Any]:
     message = entry.get("message")
     if not isinstance(message, dict):
@@ -79,36 +55,6 @@ def _content_items(entry: dict[str, Any]) -> list[Any]:
     return [content]
 
 
-def _is_actual_user_prompt(entry: dict[str, Any]) -> bool:
-    if entry.get("type") != "user" or entry.get("isMeta"):
-        return False
-    message = entry.get("message")
-    if not isinstance(message, dict) or message.get("role") != "user":
-        return False
-    items = _content_items(entry)
-    if not items:
-        return False
-    for item in items:
-        if isinstance(item, dict) and item.get("type") == "tool_result":
-            return False
-    return True
-
-
-def _uses_verification_skill(entry: dict[str, Any]) -> bool:
-    message = entry.get("message")
-    if not isinstance(message, dict) or message.get("role") != "assistant":
-        return False
-    for item in _content_items(entry):
-        if not isinstance(item, dict):
-            continue
-        if item.get("type") != "tool_use" or item.get("name") != "Skill":
-            continue
-        tool_input = item.get("input")
-        if isinstance(tool_input, dict) and tool_input.get("skill") == VERIFICATION_SKILL:
-            return True
-    return False
-
-
 def _turn_start_index(entries: list[dict[str, Any]]) -> int:
     for index in range(len(entries) - 1, -1, -1):
         if _is_actual_user_prompt(entries[index]):
@@ -116,16 +62,9 @@ def _turn_start_index(entries: list[dict[str, Any]]) -> int:
     return -1
 
 
-def _verification_skill_loaded_this_turn(entries: list[dict[str, Any]]) -> bool:
-    start = _turn_start_index(entries)
-    if start < 0:
-        return False
-    return any(_uses_verification_skill(entry) for entry in entries[start + 1 :])
-
-
 def _assistant_text_this_turn(entries: list[dict[str, Any]]) -> str:
     # Validate the FINAL response only: the last assistant message, which is the one that triggered this stop. AskUserQuestion answers and tool results are not real user prompts, so a "since last user prompt" span would concatenate the completion-checks of several earlier responses and re-validate a stale one (causing repeated false blocks).
-    for entry in reversed(entries):
+    for entry in reversed(entries[_turn_start_index(entries) + 1 :]):
         message = entry.get("message")
         if not isinstance(message, dict) or message.get("role") != "assistant":
             continue
@@ -163,33 +102,9 @@ def _block_payload(reason: str) -> dict[str, Any]:
     }
 
 
-def _standalone_retry_guidance() -> str:
-    return (
-        "Retry by writing a complete standalone final answer that includes the requested answer payload again. " "Begin with the user's requested answer, not with the verification process. " "Required control block format overrides any requested line-count limit. " "Write [completion-check] and [io-trace] as canonical multi-line blocks, not inline one-line summaries. " "Do not output a correction-only note. " "Do not refer to a previous answer with phrases such as above, earlier, already provided, or previously."
-        " Preserve the substantive answer when the defect is only control-field formatting; "
-        "change only the invalid control fields, not the business calculations or conclusions. "
-        "Do not invent evidence or turn a failed/unverified result into a pass. "
-        "If the required evidence is unavailable, withdraw unsupported completion claims and "
-        "report the unverified or failed state without a finalized [completion-check]."
-    )
-
-
-def _append_standalone_retry_guidance(reason: str) -> str:
-    guidance = _standalone_retry_guidance()
-    if guidance in reason:
-        return reason
-    return f"{reason} {guidance}"
-
-
-def _partial_retry_guidance() -> str:
-    return (
-        "Your answer above stays visible to the user. Do not repeat or rewrite it. "
-        "Reply with only the missing or corrected control blocks: [completion-check] followed by [io-trace], "
-        "as canonical multi-line blocks. Keep the answer's claims unchanged. "
-        "Do not invent evidence or turn a failed/unverified result into a pass. "
-        "If the required evidence is unavailable, reply instead with one short line that withdraws the unsupported "
-        "completion claim and names what remains unverified, without a finalized [completion-check]."
-    )
+def _recovery_guidance(input_data, entries, platform, final_text, repair_target='completion_metadata'):
+    return observe_recovery_delivery(input_data, platform=platform,
+        entrypoint=_host_entrypoint(entries), final_text=final_text, repair_target=repair_target)["guidance"]
 
 
 def _host_entrypoint(entries: list[dict[str, Any]]) -> str:
@@ -226,10 +141,15 @@ def _gate_blocks_this_turn(entries: list[dict[str, Any]]) -> int:
     return count
 
 
-def _retry_limit_notice(reason: str) -> str:
+def _retry_limit_notice(reason: str, repair_target='completion_metadata') -> str:
+    if repair_target == 'response_route':
+        return f"{COMPLETION_GATE_MARKER} Current work routing remains unresolved: {reason}"
+    if repair_target == 'response_review':
+        return f"{COMPLETION_GATE_MARKER} Internal response review remains unresolved: {reason}"
     return (
-        f"{COMPLETION_GATE_MARKER} The answer ended without a valid [completion-check] after one retry. "
-        f"Remaining defect: {reason}"
+        f"{COMPLETION_GATE_MARKER} Core has not accepted the submitted completion proof after one retry. "
+        f"Remaining defect: {reason} The business result and accepted completion proof are separate states. "
+        "Retain valid proof at its original time; do not rerun unchanged business checks or repeat the requested answer for this notice."
     )
 
 
@@ -245,55 +165,43 @@ def main() -> int:
     entries = _iter_transcript(input_data.get("transcript_path") or input_data.get("transcriptPath"))
 
     input_text = _assistant_text_from_stop_input(input_data)
-    if args.platform == "codex":
-        final_text = input_text or _assistant_text_this_turn(entries)
-    else:
-        final_text = _assistant_text_this_turn(entries) or input_text
+    # Native Stop carries the response that triggered this event. Transcript
+    # writes can lag behind it, especially after a blocked-response repair.
+    # Keep transcript-backed turn/retry context separate from response-body selection.
+    final_text = input_text or _assistant_text_this_turn(entries)
     if not final_text.strip():
         print(json.dumps(_allow_payload(), ensure_ascii=False))
         return 0
 
-    skill_loaded = args.platform == "codex" or _verification_skill_loaded_this_turn(entries)
-    # Completion-body-validation invariant: Stop validates executed-work closure claims and explicit completion-check blocks. Routine explanations are not forced through verification-before-completion.
-    # Claude Code verifies the verification-before-completion Skill call from its own transcript (skill_loaded above), so its completion-check carries no self-report lines. Codex has no visible Skill surface and keeps them.
-    body_issue = validate_completion_text(
-        final_text, require_completion_check=True, require_skill_self_report=args.platform == "codex",
-    )
-    has_completion_marker = looks_like_completion_claim(final_text)
-
-    if body_issue is None and (skill_loaded or not has_completion_marker):
+    # Core authenticates the declared proof and complete response. Procedure
+    # invocation belongs to workflow guidance/audit, not a second eligibility
+    # judgment that can contradict the same review consumed by Ghost-ALICE Autopilot.
+    # Native tool activity requires a current route independently of whether
+    # the assistant submitted a completion claim. Prose does not supply either.
+    try:
+        source = native_claim_source(args.platform, input_data)
+    except ValueError:
+        # Missing native identity cannot adopt the process's ambient session.
+        source = dict(os.environ, GHOST_ALICE_PLATFORM=args.platform, GHOST_ALICE_SESSION_ID='')
+    assessment = assess_native_completion(source, text=final_text, phase='final', native_input=input_data)
+    body_issue = assessment['body_issue']
+    if body_issue is None:
         print(json.dumps(_allow_payload(), ensure_ascii=False))
         return 0
 
-    reminder = (
-        "completion-reminder: verification-before-completion is an always-on completion lifecycle gate. " "Before the final response, call the Claude Code Skill tool with input " '{"skill": "verification-before-completion"} in this turn. ' "Do not ask the user whether to use the skill; invoke it directly. " "Then map each claim to evidence that already exists in this turn, such as a returned write or test result; "
-        "run a check only for a claim that no existing result covers, or withdraw that claim, and never repeat a "
-        "successful check just to fill a field. Only then write [completion-check]. Do not treat task-router, " "metadata, prior context, or evidence-only status inspection as that Skill call."
-    )
-    missing_marker = not has_completion_marker and body_issue is not None
-    if missing_marker:
-        reason = body_issue
-        # Claude gets one retry per turn, so the first block names every missing part at once.
-        if args.platform == "claude" and not skill_loaded:
-            reason = f"{body_issue} {reminder}"
-    elif not skill_loaded:
-        reason = reminder
-    else:
-        reason = body_issue
-
+    # Core's specific defect is authoritative. A missing proof marker does not
+    # mean a retained-claim reference is the repair; mixed claims need review.
+    reason = body_issue or ""
     if args.platform == "codex":
-        print(json.dumps(_block_payload(_append_standalone_retry_guidance(reason)), ensure_ascii=False))
+        print(json.dumps(_block_payload(f"{reason} {_recovery_guidance(input_data, entries, args.platform, final_text, assessment.get('repair_target', 'completion_metadata'))}"), ensure_ascii=False))
         return 0
 
     # One retry per turn: a defect that survives it ends the turn with a visible notice instead of another
-    # rewrite. The notice is not a pass; the answer stays marked as lacking a valid [completion-check].
+    # rewrite. The notice is not a pass; the answer stays marked as lacking valid evidence.
     if _gate_blocks_this_turn(entries) >= RETRIES_PER_TURN:
-        print(json.dumps(_allow_payload(_retry_limit_notice(reason)), ensure_ascii=False))
+        print(json.dumps(_allow_payload(_retry_limit_notice(reason, assessment.get('repair_target', 'completion_metadata'))), ensure_ascii=False))
         return 0
-    if _host_entrypoint(entries) in TRANSCRIPT_SURFACES:
-        reason = f"{COMPLETION_GATE_MARKER} {reason} {_partial_retry_guidance()}"
-    else:
-        reason = f"{COMPLETION_GATE_MARKER} {_append_standalone_retry_guidance(reason)}"
+    reason = f"{COMPLETION_GATE_MARKER} {reason} {_recovery_guidance(input_data, entries, args.platform, final_text, assessment.get('repair_target', 'completion_metadata'))}"
     print(json.dumps(_block_payload(reason), ensure_ascii=False))
     return 0
 

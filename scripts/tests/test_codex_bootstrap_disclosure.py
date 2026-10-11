@@ -1,4 +1,4 @@
-"""Exercise conditional governance delivery through the production merge CLI."""
+"""Exercise common governance delivery through the production merge CLI."""
 
 from pathlib import Path
 import json
@@ -35,6 +35,77 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             capture_output=True, text=True, check=False,
         )
 
+    def doctor(self, dest):
+        import sys
+        return subprocess.run(
+            [sys.executable, str(ROOT / "_shared/install_doctor.py"),
+             "--platform", "codex", "--repo-root", str(ROOT),
+             "--ghost-alice-root", str(dest.parent),
+             "--global-rule", "codex-bootstrap", str(dest),
+             "# Ghost-ALICE Codex Bootstrap",
+             "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->",
+             "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"],
+            capture_output=True, text=True,
+        )
+
+    def test_loader_delivers_common_authority_and_preserves_project_rules(self):
+        with tempfile.TemporaryDirectory(prefix="common governance ") as tmp:
+            dest = Path(tmp) / "AGENTS.md"
+            project_rules = "\n# Project constraints\nUse the project test command.\n"
+            dest.write_text(
+                "# Ghost-ALICE Codex Bootstrap\n"
+                "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->\n"
+                "If trusted project instructions already supply the complete contract, use that body.\n"
+                "<!-- Ghost-ALICE managed block end: codex-bootstrap -->\n"
+                + project_rules
+            )
+            result = self.merge(dest)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            body = dest.read_text()
+            self.assertTrue(body.endswith(project_rules))
+            self.assertIn("Common Ghost-ALICE governance comes from", body)
+            self.assertIn("Project instruction files supply project-specific rules", body)
+            self.assertIn("Explicit user instructions take precedence", body)
+            self.assertIn("without reading the common governance file", body)
+            self.assertNotIn("If trusted project instructions already supply the complete", body)
+
+    def test_doctor_uses_managed_dependency_marker_independently_of_headings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "AGENTS.md"
+            self.assertEqual(self.merge(dest).returncode, 0)
+            lines = dest.read_text().splitlines(keepends=True)
+            dest.write_text("".join("## Instructions\n" if line.startswith("## ") else line
+                                    for line in lines))
+            dest.with_name("ghost-alice-governance.md").unlink()
+            self.assertIn("codex-governance: absent", self.doctor(dest).stdout)
+
+    def test_doctor_does_not_treat_user_appendix_as_managed_dependency(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "AGENTS.md"
+            dest.write_text(
+                "# Ghost-ALICE Codex Bootstrap\n"
+                "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->\n"
+                "Full common governance body.\n"
+                "<!-- Ghost-ALICE managed block end: codex-bootstrap -->\n"
+                "\n# User example\n"
+                "<!-- Ghost-ALICE governance source: installed-common -->\n"
+                "## Select the applicable contract\n"
+                "An example references ghost-alice-governance.md.\n"
+            )
+            self.assertNotIn("codex-governance:", self.doctor(dest).stdout)
+
+    def test_doctor_recognizes_installed_legacy_selector_dependencies(self):
+        for heading in ("## Select the applicable contract", "## Select the instruction body"):
+            with self.subTest(heading=heading), tempfile.TemporaryDirectory() as tmp:
+                dest = Path(tmp) / "AGENTS.md"
+                dest.write_text(
+                    "# Ghost-ALICE Codex Bootstrap\n"
+                    "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->\n"
+                    f"{heading}\nRead `{dest.with_name('ghost-alice-governance.md')}`.\n"
+                    "<!-- Ghost-ALICE managed block end: codex-bootstrap -->\n"
+                )
+                self.assertIn("codex-governance: absent", self.doctor(dest).stdout)
+
     def test_full_contract_is_available_outside_default_instruction_file(self):
         with tempfile.TemporaryDirectory(prefix="bootstrap disclosure ") as tmp:
             dest = Path(tmp) / "AGENTS.md"
@@ -42,7 +113,7 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             fallback = dest.with_name("ghost-alice-governance.md")
             self.assertIn(str(fallback), dest.read_text())
-            # Every original procedure remains available to ordinary projects.
+            # Required governance procedures remain available to ordinary projects.
             self.assertIn(CONTRACT.read_text().split("\n", 1)[1].strip(), fallback.read_text())
             self.assertNotIn("## Codex Hookless Fallback", dest.read_text())
 
@@ -129,21 +200,11 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertEqual((fallback / "user.txt").read_text(), "preserve\n")
 
     def test_doctor_reports_missing_fallback_for_installed_selector(self):
-        import sys
         with tempfile.TemporaryDirectory() as tmp:
             dest = Path(tmp) / "AGENTS.md"
             self.assertEqual(self.merge(dest).returncode, 0)
             dest.with_name("ghost-alice-governance.md").unlink()
-            result = subprocess.run(
-                [sys.executable, str(ROOT / "_shared/install_doctor.py"),
-                 "--platform", "codex", "--repo-root", str(ROOT),
-                 "--ghost-alice-root", tmp,
-                 "--global-rule", "codex-bootstrap", str(dest),
-                 "# Ghost-ALICE Codex Bootstrap",
-                 "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->",
-                 "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"],
-                capture_output=True, text=True,
-            )
+            result = self.doctor(dest)
             self.assertIn("codex-governance: absent", result.stdout,
                           "Doctor accepted a selector without its required fallback")
 

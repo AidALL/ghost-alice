@@ -8,7 +8,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = ROOT / "install.sh"
 INSTALL_PS1 = ROOT / "install.ps1"
 BOOTSTRAP_SOURCE_UPDATE = ROOT / "scripts" / "bootstrap-source-update.sh"
 SCRIPTS_DIR = ROOT / "scripts"

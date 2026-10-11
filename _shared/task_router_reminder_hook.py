@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Prompt hook that releases task-router after intent preflight or explicit gate allow.
+"""Prompt hook that releases task-router after exact intent preflight.
 
 Dependencies: Python 3.11+ standard library and the sibling intake hook.
 """
 
 from __future__ import annotations
 
+from reminder_texts import reminder_text
+
 import argparse
 import base64
+import hashlib
 import importlib
 import json
 import shlex
@@ -15,14 +18,23 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from session_intent_analyzer_hook import bound_session_identity, _safe_component as safe_path_component
+from session_intent_analyzer_hook import (
+    bound_session_identity, _safe_component as safe_path_component, TERMINAL_ROUTING_INSTRUCTION,
+    terminal_routing_instruction,
+)
 from session_check_cache import instruction_delivery
 
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1] / ".tmp" / "session-intent"
-DEFAULT_INTERNAL = (
-    "hook-reminder: task-router waits until session-intent preflight exists and no current-lineage block gate is recorded. " "Absent downstream-gates.json means silent allow unless a current-lineage model block is recorded. " "After release, read the ledger, decompose accepted intent into atomic meaning units, choose focus-layer micro|meso|macro|meta " "plus scope-reopen target on mismatch, then assign output, verification, lifecycle, and boundary skills before downstream work/tool calls."
-)
+DEFAULT_INTERNAL = reminder_text('task-router')
+# Exact prior/current installer messages; custom --internal-b64 remains intact.
+BUILTIN_INTERNAL_DIGESTS = frozenset({
+    'aefa8d90775e96cd1d5d5ecc34d44f9924fc6817c1fadc4d504f71c5880ab8a0',
+    '324cc5f4ca4b3e4d0d91a35a197cd65bad466bf9b975ee15ba6b958507d15c4f',
+    'a108a60542a39273cdd6b77d29eab749c4b0fb965f2c1a4403df334b2f06baac',
+    "5a31b2b40c4a777438fef4dde0bd0026fb77e0c166fcfc5a5531b1e4693643c0",
+    "5c6839cdfdf2d42b58299ea8f6ecf353d291bcff8bdf0f2549576d23067d8cde",
+})
 
 
 def read_payload() -> dict[str, Any]:
@@ -36,14 +48,6 @@ def read_payload() -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def read_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
 def resolve_session_id(root: Path, platform: str, payload: dict[str, Any]) -> str:
     return bound_session_identity(platform, payload) or "unknown"
 
@@ -51,30 +55,6 @@ def resolve_session_id(root: Path, platform: str, payload: dict[str, Any]) -> st
 def session_dir(root: Path, platform: str, session_id: str) -> Path:
     return root / safe_path_component(platform) / safe_path_component(session_id)
 
-
-def gate_state(root: Path, platform: str, session_id: str,
-               material: dict[str, Any] | None = None) -> dict[str, Any]:
-    material = session_material(root, platform, session_id) if material is None else material
-    latest = material['latest_input']
-    record = material['state'].get('model_security_decision')
-    if isinstance(record, dict) and record.get('decision') == 'block':
-        if downstream_gate_matches_latest_event(record, latest).get('ok'):
-            # A routing hint must not call a known current model block absent
-            # merely because its derived gate file has not been published yet.
-            return {'decision': 'block', 'opened': False}
-    gate = read_json(session_dir(root, platform, session_id) / "downstream-gates.json")
-    if gate.get("schema_version") != "downstream-gates.v1":
-        return {}
-    if gate.get("gate") != "jailbreak-detector":
-        return {}
-    if gate.get("platform") != platform or gate.get("session_id") != session_id:
-        return {}
-    match = downstream_gate_matches_latest_event(gate, latest)
-    if not match.get("ok", False):
-        gate["stale"] = True
-        gate["stale_reason"] = match.get("reason", "stale downstream gate")
-        gate["legacy"] = match.get("legacy", False)
-    return gate
 
 
 def session_material(root: Path, platform: str, session_id: str) -> dict[str, Any]:
@@ -130,19 +110,6 @@ def _input_from_state(state: dict[str, Any], directory: Path,
     return {}
 
 
-def downstream_gate_matches_latest_event(gate: dict[str, Any], latest_event: dict[str, Any]) -> dict[str, Any]:
-    if not gate.get("input_event_id") and not gate.get("input_digest"):
-        return {"ok": False, "legacy": True, "reason": "legacy downstream gate missing input lineage"}
-    if not latest_event:
-        return {"ok": False, "legacy": False, "reason": "stale downstream gate: latest input event missing"}
-    if latest_event.get("event_id") and gate.get("input_event_id") != latest_event.get("event_id"):
-        return {"ok": False, "legacy": False, "reason": "stale downstream gate: input_event_id mismatch"}
-    if gate.get("input_event_id") and not latest_event.get("event_id"):
-        return {"ok": False, "legacy": True, "reason": "legacy input cannot verify supplied event ID"}
-    if gate.get("input_digest") and gate["input_digest"] != latest_event.get("input_digest"):
-        return {"ok": False, "legacy": False, "reason": "stale downstream gate: input_digest mismatch"}
-    return {"ok": True, "legacy": False}
-
 
 def ledger_state_path(root: Path, platform: str, session_id: str) -> str:
     return str(session_dir(root, platform, session_id) / "intent-state.json")
@@ -153,28 +120,24 @@ def ledger_read_instruction(root: Path, platform: str, session_id: str) -> str:
     args = [sys.executable, str(Path(ledger.__file__).resolve()),
             "--read-state", "--root", str(root),
             "--platform", platform, "--session-id", session_id]
-    return (f"intent-ledger: use {shlex.join(args)} after session-intent preflight. "
-            f"Compatibility export: {ledger_state_path(root, platform, session_id)} is not authoritative.")
+    return (f"Normal route only, within the explicit user tool budget. intent-ledger: use {shlex.join(args)} after session-intent preflight. "
+            "SQLite is authoritative; compatibility exports are not.")
 
 
-def unresolved_work_instruction(state: dict[str, Any]) -> list[str]:
-    """Expose existing admitted work, without interpreting the new input or granting authority."""
+def intent_history_instruction(state: dict[str, Any]) -> list[str]:
+    """Diagnostic record only; accumulated conditions never select current work."""
     criteria = state.get("acceptance_criteria")
     if not isinstance(criteria, list):
         return []
-    pending = [item["id"] for item in criteria
-               if isinstance(item, dict) and item.get("admitted") is True
-               and item.get("status") == "unmet"
-               and isinstance(item.get("id"), str) and item["id"]]
-    if not pending:
+    count = sum(1 for item in criteria if isinstance(item, dict)
+                and item.get("admitted") is True and item.get("status") == "unmet"
+                and isinstance(item.get("id"), str) and item["id"])
+    if not count:
         return []
     return [
-        "unresolved-work: " + json.dumps(pending, ensure_ascii=False),
-        "Reconcile the current input with these criteria and existing authorization. "
-        "During actionable authorized work, answer status questions in commentary and continue; "
-        "partial verification or a branch-local blocker does not finish the task. "
-        "Respect an explicit stop, pause, cancellation, or replacement. "
-        "This reminder does not authorize work or decide tool permission.",
+        f"intent-history-diagnostic: {count} admitted unmet conditions in the ledger; "
+        "history, not a current work selection or execution authorization. "
+        "Select via current Core response-route and exact owned contract revision; respect stop, pause, cancellation or replacement.",
     ]
 
 
@@ -183,11 +146,20 @@ def reminder_message(base_message: str, root: Path, platform: str, payload: dict
 
 
 def reminder_result(base_message: str, root: Path, platform: str, payload: dict[str, Any]) -> tuple[str, bool]:
-    """(message, routine). Only a release with no current block is routine; every withheld or stale state is not."""
+    """Preserve terminal routing before every normal-route intake diagnostic."""
+    message, routine = _reminder_result(base_message, root, platform, payload)
+    # Unavailable intake always carries the full fallback. Successful intake
+    # coalesces only policy already delivered for this exact native input.
+    return (message if routine else TERMINAL_ROUTING_INSTRUCTION + "\n" + message), routine
+
+
+def _reminder_result(base_message: str, root: Path, platform: str, payload: dict[str, Any]) -> tuple[str, bool]:
+    """(message, routine). Only successful exact intake is routine; every unavailable input state is not."""
     session_id = resolve_session_id(root, platform, payload)
     if session_id == "unknown":
         return (
-            "hook-reminder: task-router withheld until the current host supplies a valid session identity " "and the current-lineage block check can run. Do not run task-router yet."
+            "hook-reminder: Normal-route task-router registration is withheld until the current host supplies a valid session identity. "
+            "Keep dependent normal-route writes closed; tool-free terminal routing remains available from supplied context."
         ), False
 
     # Fail-closed on a degraded ledger: when session-intent-analyzer could not record the latest input (broken import or write failure), the "latest event" anchor is stale, so releasing routing here would ride a previous turn's lineage. The marker is cleared by the analyzer hook on the next successful observation.
@@ -201,54 +173,29 @@ def reminder_result(base_message: str, root: Path, platform: str, payload: dict[
         except (OSError, json.JSONDecodeError):
             reason = "unreadable-marker"
         return (
-            "hook-reminder: task-router withheld: the session-intent ledger is degraded "
+            "hook-reminder: Normal-route task-router registration is withheld: the session-intent ledger is degraded "
             f"({reason}) and the latest input was NOT recorded, so current-lineage checks "
-            "would ride a stale anchor. Fail closed: repair the session-intent ledger " "(fix the broken dependency or reinstall the skill) before routing."
+            "would ride a stale anchor. For an authorized normal route within the explicit user tool budget, repair the session-intent ledger before dependent registration. "
+            "Do not start repair merely to deliver a tool-free terminal answer."
         ), False
 
     material = session_material(root, platform, session_id)
     if material['degraded']:
-        return ("hook-reminder: task-router withheld: the session-intent ledger is degraded. "
-                "Repair the authoritative reader before routing; do not reuse a compatibility export."), False
+        return ("hook-reminder: Normal-route task-router registration is withheld: the session-intent ledger is degraded. "
+                "For an authorized normal route within the explicit user tool budget, repair the authoritative reader before dependent registration; "
+                "do not reuse a compatibility export or start repair for a tool-free terminal answer."), False
     if not material['latest_input']:
         return (
-            "hook-reminder: task-router withheld until session-intent-analyzer records the current input "
-            f"for session {session_id}. Continue intake/bootstrap; do not ask the user for another input."
+            "hook-reminder: Normal-route task-router registration is withheld until session-intent-analyzer records the current input "
+            f"for session {session_id}. Continue intake/bootstrap only for an authorized normal route within the explicit user tool budget; "
+            "do not ask for another input or start bootstrap for a tool-free terminal answer."
         ), False
-    gate = gate_state(root, platform, session_id, material)
-    if not gate:
-        gate_path = str(session_dir(root, platform, session_id) / "downstream-gates.json")
-        return "\n".join([
-            base_message,
-            f"gate-opened: jailbreak-detector silent allow for session {session_id}; no current block decision recorded.",
-            ledger_read_instruction(root, platform, session_id),
-            f"downstream-gate: {gate_path} absent; silent allow invariant applies unless a current-lineage model block is recorded.",
-            "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
-            *unresolved_work_instruction(material['state']),
-        ]), True
-
-    if gate.get("stale"):
-        reason = str(gate.get("stale_reason") or "stale downstream gate")
-        return (
-            "hook-reminder: jailbreak-detector downstream gate is stale for the latest input. "
-            f"{reason}. Continue intake/routing; do not reuse the stale decision as current block/allow."
-        ), False
-
-    decision = str(gate.get("decision") or "unknown")
-    if gate.get("opened") is False or decision == "block":
-        return (
-            "hook-reminder: task-router withheld because jailbreak-detector downstream gate recorded a current-lineage block. "
-            f"decision={decision}. Do not run task-router or downstream work."
-        ), False
-
-    gate_path = str(session_dir(root, platform, session_id) / "downstream-gates.json")
     return "\n".join([
+        terminal_routing_instruction(root, platform, session_id, material['latest_input'].get('event_id')),
         base_message,
-        f"gate-opened: jailbreak-detector silent allow for session {session_id}; no current block decision recorded.",
+        f"intake-ready: current input recorded for session {session_id}.",
         ledger_read_instruction(root, platform, session_id),
-        f"downstream-gate: {gate_path} contains no block; silent allow invariant applies.",
-        "task-router-step: wait-for-jailbreak-decision → read-session-intent-ledger → atomic meaning decomposition → focus-layer/scope-reopen → skill assignment.",
-        *unresolved_work_instruction(material['state']),
+        *intent_history_instruction(material['state']),
     ]), True
 
 
@@ -269,14 +216,14 @@ def render_payload(output_format: str, message: str, *, routine: bool = False) -
         return json.dumps(body, ensure_ascii=False)
     return "\n".join([
         f"Internal instruction: {message}",
-        "User: Run task-router after session-intent preflight; absent current-lineage block gate is silent allow.",
-        "Tech: After release, task-router reads the ledger, chooses focus-layer/scope-reopen, and assigns skills.",
+        "User: Run task-router after exact session-intent preflight; native permission stays with its host.",
+        "Tech: Terminal routing uses supplied context without tools; normal routing reads the exact ledger and assigns skills.",
         "",
     ])
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Release task-router reminder after intent preflight or explicit gate allow.")
+    parser = argparse.ArgumentParser(description="Release task-router reminder after exact intent preflight.")
     parser.add_argument("--platform", default="codex")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--root", default=str(DEFAULT_ROOT))
@@ -293,15 +240,24 @@ def main(argv: list[str] | None = None) -> int:
         except Exception:
             base_message = DEFAULT_INTERNAL
     root = Path(args.root).expanduser()
+    if hashlib.sha256(base_message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS:
+        base_message = DEFAULT_INTERNAL
+
     payload = read_payload()
+    if (payload.get("hook_event_name") or payload.get("hookEventName")) == "UserPromptSubmit":
+        # Cached native registrations can outlive an install. The intake hook
+        # owns this event; a sibling cannot prove it has finished current intake.
+        sys.stdout.write(json.dumps({"continue": True, "ghostAliceSurface": "routine"}) + "\n")
+        return 0
     message, routine = reminder_result(base_message, root, args.platform, payload)
-    # The current input/gate was evaluated above. Only repeated prose is cached.
-    if routine:
+    # The current input binding was evaluated above. Only repeated prose is cached.
+    builtin = (base_message == DEFAULT_INTERNAL
+               or hashlib.sha256(base_message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS)
+    if routine and builtin:
         # Bind to the inspected material's session, never the discovery pointer.
         session_id = resolve_session_id(root, args.platform, payload)
         if not instruction_delivery(root, args.platform, session_id, "hook-router-instructions", Path(__file__), base_message):
-            message = message.replace(base_message, "hook-reminder: execute task-router for this input; reuse retained instructions, reload if lost.", 1)
-            message = "\n".join(line for line in message.splitlines() if not line.startswith("task-router-step:"))
+            message = message.replace(base_message, "hook-reminder: execute task-router for this input; apply the supplied terminal procedure first; on normal routes reuse retained instructions, reload if lost.", 1)
     sys.stdout.write(render_payload(args.format, message, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")

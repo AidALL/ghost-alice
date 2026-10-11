@@ -321,7 +321,7 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
 
 
 class TestLedgerDegradeForcedVisibility(unittest.TestCase):
-    # M9: a degraded intent-audit surface must not depend on the profile default to reach the user.
+    # A degraded intent-audit surface must not depend on the profile default to reach the user.
 
     def _decide(self, message: str) -> dict:
         return agent_visibility_policy.decide(

@@ -2,7 +2,8 @@
 
 Language: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/installer-platform-compatibility-matrix.md)
 
-This document is the Phase 7 compatibility test contract for the Ghost-ALICE installer.
+This document is the compatibility test contract for the Ghost-ALICE installer. The [architecture](../../architecture.md) owns model, Core, Ghost-ALICE Autopilot and host responsibilities and return paths.
+
 ## Contents
 
 - [Runtime Contract](#runtime-contract)
@@ -36,16 +37,16 @@ This document is the Phase 7 compatibility test contract for the Ghost-ALICE ins
 
 The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. Hook payload and platform permission policy must also be synchronized with the current repo contract. Even if an older hook entry exists, the installer must update managed entries when the runtime payload changes. Hook presence and `agent_visibility.profile` are separate concerns. The profile controls the user-facing message surface; it must not relax missing or drift judgments.
 
-The base session-gate contract describes core behavior. Official privileged adapter addons may extend behavior after their declared hook events, but addon-specific queues, task schemas, and continuation policies stay in the addon and require addon-owned smoke evidence.
+Core Python code stores admitted work units and criteria and authenticates the current-session assistant's claim–evidence judgments. Official privileged adapters consume that contract at their declared native events. Addon Python code manages immutable records and receipt schemas; the current-session assistant follows addon instructions to judge additional work and require evidence for the affected addon behavior.
 
-Runtime live smoke follows `docs/policies/live-smoke-regression.md`. That procedure sends the same README first 10 lines request to Claude Code, Codex, and Antigravity to observe `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, and skill activation permission behavior.
+Runtime live smoke follows `docs/policies/live-smoke-regression.md`. That procedure sends the same README first 10 lines request to the claimed installed Claude Code and Codex targets to observe `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, and skill activation permission behavior.
 
 | Platform | Runtime surface | Contract | Regression owner |
 | --- | --- | --- | --- |
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks, and `permissions.allow` | Install the self-contained `platforms/claude/CLAUDE.md` managed block so arbitrary-working-directory sessions receive rules 0 through 12 and the hookless fallback. Preserve markerless user-owned files through a proposal that does not count as installed. Allow `Skill(<name>)` permission for the full set of installed Ghost-ALICE skills; a shortened core-only allowlist is insufficient. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
 | Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | Because there is no visible Skill tool, required gates are recorded through `SKILL.md` read plus workflow execution. Hook event names in `hooks.json` are install-surface configuration, not runtime firing proof; gate-completion claims require observed hook payload evidence, runtime smoke, or the hookless/manual fallback wording. `web-search-first` and `tool-checkpoint` payloads are installation and drift verification targets. The agent visibility profile must not reduce hook execution. Windows native Codex gets separate smoke for actual hook payload firing and `SKILL.md` read records. | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
 
-The installed Codex contract consists of the short managed `~/.codex/AGENTS.md` selector, its full managed `~/.codex/ghost-alice-governance.md` fallback, and the full project instruction budget in `~/.codex/config.toml`. Complete trusted project instructions take precedence over the fallback. Missing or unreadable fallback blocks dependent actionable work; status and doctor track the dependency. User-owned governance files and symlink targets remain protected.
+The Codex managed loader declares the installed `~/.codex/ghost-alice-governance.md` as the common instruction source. A normal route reads that source together with project-specific constraints; a tool-free terminal answer uses the loader's terminal procedure. Status and doctor require the declared companion regardless of prose headings. The installer does not increase unrelated projects' instruction budgets. User-owned governance files remain protected, and a symlink at the Codex common-contract path prevents replacement. See [common governance and project instructions](../getting-started/installation.md#common-governance-and-project-instructions).
 
 ## Hook Message Semantics
 
@@ -55,7 +56,7 @@ Every user input is a `task-router` target. Simple questions, opinions, status c
 
 ### session-intent-analyzer
 
-Every user input is observed by the session intent ledger. Hooks store digest and event data, not raw prompts. When goals, constraints, decisions, or non-goals change, the agent records a compressed delta through the authoritative SQLite ledger API. Compatibility/export `intent-state.json` is update-plus-accumulate state: scalar intent fields are replaced by newer deltas, while list-like constraints, non-goals, questions, criteria, and decisions are deduped or merged by stable id. This context is consumed by `skill-evolution` and `jailbreak-detector`. Deterministic hard-block rules are narrow regression guards for explicit attack signals; gradual multi-turn jailbreak resistance depends on session-intent summary quality and cumulative constraint comparison.
+The installer registers session-intent-analyzer as the single UserPromptSubmit intake owner. Codex commits directly; Claude stages native correlation for trusted PreToolUse/Stop reconciliation. The installed wrapper must return the exact canonical human input or retain pending state; task notifications preserve the last human route. The [intake procedure](../../session-intent-analyzer/SKILL.md) and [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) own identity, compressed deltas, storage and compatibility exports.
 
 ### pending merge precheck
 
@@ -67,9 +68,9 @@ Runtime tool-checkpoint payload does not require routine recovery cost or recove
 
 ### completion-reminder
 
-Before claiming executed work is complete, fixed, successful, or freshly verified, `verification-before-completion` is the lifecycle gate. Routine explanations, meta-discussion, and options do not require it unless they claim finished work or verified results. On Claude Code, where a visible Skill surface exists, the `[completion-check]` has no skill-call line; the Stop hook verifies the actual Skill call from the transcript. On Codex, where no visible Skill surface exists, use `skill-call: verification-before-completion (this turn)` only when that `SKILL.md` was actually read and the workflow followed in the current turn.
+Installed completion hooks consume Core's current-input and exact-answer assessment. Core authenticates the model's distinct claim/source and whole-response judgments; skill loading and printed audit fields are not separate acceptance prerequisites. The independently registered Core guard and Ghost-ALICE Autopilot adapter must use this same assessment without assuming their invocation order.
 
-On Codex, if the final response `[completion-check]` claims `skill-call: verification-before-completion (this turn)`, the same final response `[io-trace]` `skills-loaded` must include the same skill. Claude Code does not cross-check `skills-loaded`.
+Claude retains its one-retry budget and visible unresolved-defect notice; Codex blocks genuine completion-evidence defects. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review/publication reference](../../coding-convention/verification-before-completion/references/autopilot-publication.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#completion-recording-and-delivery) names returned states. Installer tests check those registered payloads and platform mappings, not the truth of model judgments.
 
 ## Shell Matrix
 
@@ -82,7 +83,7 @@ On Codex, if the final response `[completion-check]` claims `skill-call: verific
 | WSL | same as Linux bash, with Windows path boundary smoke | manual or Windows CI |
 | Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, UTF-8 bridge | runtime detection and Codex hook config tests |
 | Windows native Codex hook smoke | Native Windows Codex installer path `.\install.cmd --platform codex` writes Codex bootstrap, `hooks.json`, and `config.toml` with hooks enabled; live smoke observes hook payload firing | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/policies/live-smoke-regression.md` |
-| Windows visibility preference smoke | Native wrapper visibility forwarding reaches `_shared/install_hooks.py --visibility`; legacy visibility aliases remain accepted as compatibility coverage, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
+| Windows visibility preference smoke | Native wrapper visibility forwarding reaches `_shared/install_hooks.py --visibility`; visibility aliases remain accepted as compatibility coverage, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | UTF-8 BOM retained and parser-compatible; PS5-incompatible syntax is caught by `PSUseCompatibleSyntax` static analysis when the analyzer is available | `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | Windows PowerShell 7.4 LTS cleanup | Native Windows installer cleanup removes detected PowerShell 7.4.x MSI products by product-code scoped `msiexec.exe /x ... /quiet /norestart` before resolving the latest 7.6.x MSI; non-MSI entries without a product code are skipped, and 7.5/7.6+, Windows PowerShell 5.1, and unrelated products are not removed | `scripts.tests.test_install_ps1_pwsh_lts`, `scripts.tests.test_powershell_static_analysis`, Windows native live smoke |
 | PowerShell 7 | parser-compatible and install flow accepts Python 3.11+; help output exposes the official addon alias and describes the native wrapper branch/tag option for git URL addon sources | local/CI PowerShell smoke, `scripts.tests.test_install_cmd_wrapper` |
@@ -93,8 +94,11 @@ On Codex, if the final response `[completion-check]` claims `skill-call: verific
 Minimum cross-platform Python gate:
 
 ```bash
+python3 -m pip install pytest
 python3 scripts/run_installer_compat_tests.py
 ```
+
+The `shared-all` group runs shared unittest discovery and the pytest functions in `_shared/test_install_destination.py`, `_shared/test_retired_detector_stage.py`, and `_shared/test_retired_discovery.py`; either execution failing fails the group.
 
 Focused groups:
 

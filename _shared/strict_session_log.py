@@ -8,6 +8,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+import install_destination
 from typing import Any
 
 SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -48,8 +49,7 @@ def safe_component(value: str | None, fallback: str = "unknown") -> str:
 def log_path(home: Path | None, platform: str, session_id: str) -> Path:
     base = Path(home) if home is not None else Path.home()
     return (
-        base
-        / ".ghost-alice"
+        install_destination.ghost_root(base)
         / "session-logs"
         / safe_component(platform)
         / safe_component(session_id)
@@ -123,6 +123,7 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
     safe_platform = safe_component(platform)
     safe_session_id = safe_component(session_id)
     path = log_path(home=home, platform=safe_platform, session_id=safe_session_id)
+    install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     row = {

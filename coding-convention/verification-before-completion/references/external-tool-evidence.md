@@ -52,4 +52,4 @@ When Category B or C appears and `web-search-evidence` has fewer than three entr
 
 This gate exists because official docs describe intended behavior, while community reports often reveal runtime regressions, race conditions, and version-dependent failures.
 
-The only exception is an explicit user instruction for this session to waive web-search evidence.
+An explicit user instruction can waive this search requirement. The project's stable, low-risk direct-response exemption also applies: a bounded general explanation with no current, version-specific, support, regression or high-risk claim needs no fresh search. Apply the main skill's check decision before inventing an external claim or lookup for a local-only task.

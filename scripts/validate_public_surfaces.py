@@ -13,6 +13,8 @@ import json
 import re
 import sys
 from pathlib import Path
+from html.parser import HTMLParser
+from urllib.parse import urljoin, urlsplit
 from typing import Any
 
 
@@ -238,6 +240,82 @@ def extract_stat_number(html: str, label_pattern: str) -> int | None:
     return int(match.group(1))
 
 
+class HomepageNavigation(HTMLParser):
+    """Read executable scripts and URL attributes; comments cannot supply a base."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.scripts: list[str] = []
+        self.references: list[str] = []
+        self.has_static_base = False
+        self.in_script = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "script":
+            self.in_script = not attrs  # The owned normalizer is an inline classic script.
+            if self.in_script:
+                self.scripts.append("")
+        if tag == "base":
+            self.has_static_base = True
+        for key, value in attrs:
+            if key in ("src", "href") and value and not value.startswith("#"):
+                if not urlsplit(value).scheme and not value.startswith("//"):
+                    self.references.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "script":
+            self.in_script = False
+
+    def handle_data(self, data: str) -> None:
+        if self.in_script:
+            self.scripts[-1] += data
+
+
+def check_homepage_base_resolution(text: str, findings: list[Finding]) -> None:
+    """Resolve actual href/src values at both entrypoints and Pages base paths.
+
+    This recognizes the small owned normalizer, not arbitrary JavaScript. A new
+    implementation requires updating this model and its navigation regression;
+    unknown code fails closed instead of claiming browser execution.
+    """
+    html = HomepageNavigation()
+    html.feed(text)
+    normalizer = re.compile(
+        r"if\s*\(\s*/(?P<scope>(?:\\.|[^/])*)/\.test\(location\.pathname\)\s*\)\s*\{\s*"
+        r"const\s+base\s*=\s*document\.createElement\(['\"]base['\"]\);\s*"
+        r"base\.href\s*=\s*new\s+URL\(['\"](?P<relative>[^'\"]+)['\"],\s*location\.href\)\.href;\s*"
+        r"document\.head\.appendChild\(base\);\s*\}\s*"
+    )
+    script = re.sub(r"//[^\n]*", "", html.scripts[0]).strip() if html.scripts else ""
+    match = normalizer.fullmatch(script)
+    problem = None
+    if match is None or html.has_static_base:
+        problem = "Missing or unrecognized executable homepage base normalizer."
+    else:
+        try:
+            scope = re.compile(match["scope"].replace(r"\/", "/"))
+            for prefix in ("/", "/ghost-alice/"):
+                root_url = "https://pages.example" + prefix
+                for entry in ("", "index.html", "index_ko.html", "docs/", "docs/index.html", "docs/index_ko.html"):
+                    page_url = urljoin(root_url, entry)
+                    base_url = (urljoin(page_url, match["relative"])
+                                if scope.search(urlsplit(page_url).path) else page_url)
+                    for reference in html.references:
+                        actual = urljoin(base_url, reference)
+                        expected = urljoin(root_url, reference)
+                        if actual != expected:
+                            problem = f"{page_url} resolves {reference!r} to {actual}; expected {expected}."
+                            break
+                    if problem:
+                        break
+                if problem:
+                    break
+        except re.error:
+            problem = "Homepage base normalizer has an unsupported pathname expression."
+    if problem:
+        findings.append(Finding("ERROR", "docs/index.html", "homepage-base-resolution", problem))
+
+
 def check_docs_index(repo: Path, top_level: list[str], coding: list[str], findings: list[Finding]) -> None:
     path = repo / "docs" / "index.html"
     if not path.is_file():
@@ -266,73 +344,14 @@ def check_docs_index(repo: Path, top_level: list[str], coding: list[str], findin
                 )
         return
 
-    required_floor_markers = [
-        "Core philosophy. Quality floor first",
-        "Operating loop steps",
-        "Verification layers",
-        "Quality floor as root rule",
-        "verified state, not forward momentum",
-    ]
-    missing_markers = [marker for marker in required_floor_markers if marker not in text]
-    if missing_markers:
-        findings.append(
-            Finding(
-                "ERROR",
-                "docs/index.html",
-                "floor-first-contract",
-                "docs/index.html is missing floor-first homepage contract markers: "
-                + ", ".join(missing_markers),
-            )
-        )
-
-    if "Where to go next" in text and "hero-logo-lockup" in text:
-        required_docs_root_markers = [
-            'src="imgs/Ghost-ALICE_logo.png"',
-            'href="./getting-started/installation.html"',
-            'href="./getting-started/uninstall.html"',
-            'href="./policies/installer-platform-compatibility-matrix.html"',
-            'href="./ko/README.html"',
-        ]
-        missing_docs_root_markers = [
-            marker for marker in required_docs_root_markers if marker not in text
-        ]
-        if missing_docs_root_markers:
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "docs/index.html",
-                    "docs-root-links",
-                    "docs/index.html is missing docs-root-relative homepage links: "
-                    + ", ".join(missing_docs_root_markers),
-                )
-            )
-        forbidden_docs_root_markers = [
-            'href="./docs/',
-            'href="./README_ko.md"',
-        ]
-        stale_docs_root_markers = [
-            marker for marker in forbidden_docs_root_markers if marker in text
-        ]
-        if stale_docs_root_markers:
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "docs/index.html",
-                    "docs-root-links",
-                    "docs/index.html contains repo-root-only links that break from docs root: "
-                    + ", ".join(stale_docs_root_markers),
-                )
-            )
-        docs_logo = repo / "docs" / "imgs" / "Ghost-ALICE_logo.png"
-        if not docs_logo.is_file():
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "docs/index.html",
-                    "docs-root-asset",
-                    "docs/imgs/Ghost-ALICE_logo.png is missing for the docs-root homepage.",
-                )
-            )
+    # Review actor responsibilities and diagram edges against their actual
+    # callers and consumers. Exact prose matches cannot perform that review.
+    # This checker owns navigation, asset resolution and site-copy consistency.
+    check_homepage_base_resolution(text, findings)
+    root = repo / "index.html"
+    if root.is_file() and path.read_bytes() != root.read_bytes():
+        findings.append(Finding("ERROR", "docs/index.html", "homepage-copy-parity",
+                                "docs/index.html must byte-match the repository-root Pages entry."))
 
 
 def check_repo_index(repo: Path, findings: list[Finding]) -> None:
@@ -340,7 +359,7 @@ def check_repo_index(repo: Path, findings: list[Finding]) -> None:
     if not path.is_file():
         return
     text = path.read_text(encoding="utf-8")
-    if "Where to go next" not in text or "hero-logo-lockup" not in text:
+    if 'id="routes"' not in text or "hero-logo-lockup" not in text:
         return
 
     required_repo_root_markers = [
@@ -348,7 +367,7 @@ def check_repo_index(repo: Path, findings: list[Finding]) -> None:
         'href="./docs/getting-started/installation.html"',
         'href="./docs/getting-started/uninstall.html"',
         'href="./docs/policies/installer-platform-compatibility-matrix.html"',
-        'href="./README_ko.html"',
+        'href="./index_ko.html"',
     ]
     missing_repo_root_markers = [
         marker for marker in required_repo_root_markers if marker not in text

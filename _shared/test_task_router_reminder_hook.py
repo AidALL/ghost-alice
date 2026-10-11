@@ -5,13 +5,16 @@ from __future__ import annotations
 
 import json
 import base64
+import hashlib
 import os
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -59,9 +62,9 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.assertNotIn("silent allow", message)
 
     def test_without_marker_stale_anchor_still_releases_as_before(self) -> None:
-        # Control: pre-fix behavior preserved when no degrade marker exists.
+        # Control: an intact ledger releases routing when no degraded marker exists.
         message = trh.reminder_message("base", self.root, self.platform, self.payload)
-        self.assertIn("silent allow", message)
+        self.assertIn("intake-ready", message)
 
     def test_unreadable_marker_still_withholds(self) -> None:
         (self.session_dir / "ledger-degraded.json").write_text("{broken", encoding="utf-8")
@@ -82,7 +85,7 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.assertNotIn("silent allow", message)
 
     def test_producer_marker_path_matches_consumer_lookup(self) -> None:
-        # Cross-module seam: the analyzer hook WRITES the marker with its own session-key derivation; this consumer LOOKS IT UP with resolve_session_id. If the two ever diverge, fail-closed silently stops working — the exact drift class that produced the N2 intent-root divergence.
+        # Analyzer and reminder must derive the same session marker path so degraded-ledger recovery remains visible.
         import shutil
         import subprocess
         base = Path(tempfile.mkdtemp())
@@ -96,6 +99,8 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         shared.mkdir()
         analyzer_src = Path(trh.__file__).resolve().with_name("session_intent_analyzer_hook.py")
         shutil.copy2(analyzer_src, shared / "session_intent_analyzer_hook.py")
+        for name in ("install_destination.py", "reminder_texts.py", "reminder_texts.json"):
+            shutil.copy2(analyzer_src.with_name(name), shared / name)
         root = base / "root"
         payload = {"session_id": "s-xchain", "prompt": "hello"}
         env = os.environ.copy()
@@ -103,6 +108,8 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         env["USERPROFILE"] = str(home)
         env.pop("CLAUDE_CONFIG_DIR", None)
         env.pop("GHOST_ALICE_SESSION_ID", None)
+        env.pop("GHOST_ALICE_CORE_ROOT", None)
+        env["PYTHONPATH"] = str(shared)
         proc = subprocess.run(
             [sys.executable, str(shared / "session_intent_analyzer_hook.py"),
              "--platform", "codex", "--format", "json", "--root", str(root)],
@@ -128,6 +135,8 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         shared.mkdir()
         analyzer_src = Path(trh.__file__).resolve().with_name("session_intent_analyzer_hook.py")
         shutil.copy2(analyzer_src, shared / "session_intent_analyzer_hook.py")
+        for name in ("install_destination.py", "reminder_texts.py", "reminder_texts.json"):
+            shutil.copy2(analyzer_src.with_name(name), shared / name)
         root = base / "root"
         payload = {"session_id": "s=eq", "prompt": "hello"}
         env = os.environ.copy()
@@ -135,6 +144,8 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         env["USERPROFILE"] = str(home)
         env.pop("CLAUDE_CONFIG_DIR", None)
         env.pop("GHOST_ALICE_SESSION_ID", None)
+        env.pop("GHOST_ALICE_CORE_ROOT", None)
+        env["PYTHONPATH"] = str(shared)
         proc = subprocess.run(
             [sys.executable, str(shared / "session_intent_analyzer_hook.py"),
              "--platform", "codex", "--format", "json", "--root", str(root)],
@@ -197,7 +208,7 @@ class CurrentSessionReaderTests(unittest.TestCase):
             'event': 'user-input-observed', 'event_id': 'new-input',
             'platform': 'codex', 'session_id': 'bound-session'}) + '\n')
         self.assertIn('withheld', self.message({}))
-        self.assertNotIn('gate-opened', self.message({}))
+        self.assertNotIn('intake-ready', self.message({}))
 
     def test_invalid_identity_is_not_aliased_to_an_existing_session(self):
         (self.directory / 'intent-events.jsonl').write_text(json.dumps({
@@ -205,7 +216,7 @@ class CurrentSessionReaderTests(unittest.TestCase):
         self.assertIn('withheld', self.message({'session_id': 'bound/session'}))
 
     def test_atomic_state_anchor_works_before_audit_projection_is_visible(self):
-        self.assertIn('gate-opened', self.message())
+        self.assertIn('intake-ready', self.message())
 
     def test_old_audit_cannot_make_a_current_block_stale(self):
         (self.directory / 'intent-events.jsonl').write_text(json.dumps({
@@ -216,7 +227,8 @@ class CurrentSessionReaderTests(unittest.TestCase):
             'platform': 'codex', 'session_id': 'bound-session',
             'decision': 'block', 'opened': False, 'input_event_id': 'new-input',
         }))
-        self.assertIn('current-lineage block', self.message())
+        self.assertIn('intake-ready', self.message())
+        self.assertNotIn('withheld', self.message())
 
     def test_foreign_state_or_legacy_event_is_not_current_preflight(self):
         self.state['session_id'] = 'foreign'
@@ -224,12 +236,12 @@ class CurrentSessionReaderTests(unittest.TestCase):
         (self.directory / 'intent-events.jsonl').write_text(json.dumps({
             'event': 'user-input-observed', 'event_id': 'new-input',
             'platform': 'codex', 'session_id': 'bound-session'}) + '\n')
-        self.assertNotIn('gate-opened', self.message())
+        self.assertNotIn('intake-ready', self.message())
         (self.directory / 'intent-state.json').unlink()
         (self.directory / 'intent-events.jsonl').write_text(json.dumps({
             'event': 'user-input-observed', 'event_id': 'new-input',
             'platform': 'claude', 'session_id': 'foreign'}) + '\n')
-        self.assertNotIn('gate-opened', self.message())
+        self.assertNotIn('intake-ready', self.message())
 
     def test_pointer_path_cannot_redirect_bound_context(self):
         (self.root / 'codex/current-session.json').write_text(json.dumps({
@@ -249,7 +261,8 @@ class CurrentSessionReaderTests(unittest.TestCase):
     def test_known_current_model_block_is_not_reported_as_absent(self):
         self.state['model_security_decision'] = {'decision': 'block', 'input_event_id': 'new-input'}
         self.save_state()
-        self.assertIn('current-lineage block', self.message())
+        self.assertIn('intake-ready', self.message())
+        self.assertNotIn('withheld', self.message())
 
     def test_released_context_preserves_admitted_unfinished_work(self):
         self.state['acceptance_criteria'] = [
@@ -259,12 +272,14 @@ class CurrentSessionReaderTests(unittest.TestCase):
         ]
         self.save_state()
         message = self.message()
-        self.assertIn('unresolved-work: ["runtime-fix"]', message)
+        self.assertIn('intent-history-diagnostic:', message)
+        self.assertIn('1 admitted unmet conditions', message)
+        self.assertNotIn('runtime-fix', message)
+        self.assertEqual(trh.session_material(self.root, 'codex', 'bound-session')['state']['acceptance_criteria'],
+                         self.state['acceptance_criteria'])
         self.assertNotIn('already-done', message)
         self.assertNotIn('proposal-only', message)
-        self.assertIn('Reconcile the current input', message)
-        self.assertIn('commentary', message)
-        self.assertIn('does not authorize', message)
+        self.assertIn('history, not a current work selection or execution authorization', message)
 
     def test_completed_or_unadmitted_criteria_do_not_start_work(self):
         self.state['acceptance_criteria'] = [
@@ -281,8 +296,9 @@ class CurrentSessionReaderTests(unittest.TestCase):
         self.state['model_security_decision'] = {'decision': 'block', 'input_event_id': 'new-input'}
         self.save_state()
         message = self.message()
-        self.assertIn('withheld', message)
-        self.assertNotIn('unresolved-work:', message)
+        self.assertIn('intake-ready', message)
+        self.assertIn('intent-history-diagnostic:', message)
+        self.assertNotIn('withheld', message)
 
     def test_identity_helper_matches_writer_identity_selection(self):
         import session_intent_analyzer_hook as analyzer
@@ -300,11 +316,11 @@ class CurrentSessionReaderTests(unittest.TestCase):
 
     @unittest.skipUnless(shutil.which('node'), 'Node is required for cross-language reader parity')
     def test_python_and_javascript_share_input_lineage_rules(self):
-        module = Path(trh.__file__).with_name('derive_downstream_gate.mjs').as_uri()
-        script = f'''import {{readSessionIntentSnapshot, inputLineageMatches}} from {json.dumps(module)};
+        module = Path(trh.__file__).with_name('session_intent_snapshot.mjs').as_uri()
+        script = f'''import {{readSessionIntentSnapshot}} from {json.dumps(module)};
 const [directory, records] = JSON.parse(process.argv[1]);
 const snapshot = readSessionIntentSnapshot(directory, 'codex', 'bound-session');
-console.log(JSON.stringify({{event:snapshot?.latestInput?.event_id || '', matches:records.map(r=>inputLineageMatches(r,snapshot?.latestInput))}}));'''
+console.log(JSON.stringify({{event:snapshot?.latestInput?.event_id || '', digest:snapshot?.latestInput?.input_digest || ''}}));'''
         legacy = {k: self.state[k] for k in ('schema_version', 'platform', 'session_id')}
         own_event = {'event': 'user-input-observed', 'event_id': 'new-input',
                      'input_digest': 'sha256:new', 'platform': 'codex', 'session_id': 'bound-session'}
@@ -336,10 +352,231 @@ console.log(JSON.stringify({{event:snapshot?.latestInput?.event_id || '', matche
                 js = json.loads(observed.stdout)
                 py_input = trh.latest_intent_event(self.root, 'codex', 'bound-session')
                 self.assertEqual(py_input.get('event_id', ''), js['event'])
-                self.assertEqual([trh.downstream_gate_matches_latest_event(r, py_input)['ok'] for r in records], js['matches'])
+                self.assertEqual(py_input.get('input_digest', ''), js['digest'])
 
 
 class RoutingDeliveryTests(unittest.TestCase):
+    def test_custom_internal_guidance_survives_every_input_without_builtin_rewrite(self):
+        import install_hooks
+        import session_intent_analyzer_hook as analyzer
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = dict(os.environ)
+            for name in ('CODEX_THREAD_ID', 'GHOST_ALICE_SESSION_ID', 'GHOST_ALICE_CORE_ROOT'):
+                env.pop(name, None)
+            custom_messages = (install_hooks.SESSION_INTENT_INTERNAL + ' CUSTOM-INTAKE: retain this exact extension.',
+                               install_hooks.HOOK_INTERNAL + ' CUSTOM-ROUTER: retain this exact extension.')
+            for turn in ('first', 'repeat'):
+                for script, message in zip((analyzer.__file__, trh.__file__), custom_messages):
+                    result = subprocess.run([sys.executable, script, '--platform', 'codex', '--format', 'json',
+                        '--root', str(root), '--internal-b64', base64.urlsafe_b64encode(message.encode()).decode()],
+                        input=json.dumps({'session_id': 'custom-guidance', 'prompt': turn}),
+                        text=True, capture_output=True, env=env, check=True)
+                    context = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
+                    self.assertIn(message, context)
+
+    def test_standard_generated_messages_do_not_replay_terminal_procedure(self):
+        import install_hooks
+        import session_intent_analyzer_hook as analyzer
+        self.assertNotIn('Answer-only routing uses', install_hooks.HOOK_INTERNAL)
+        self.assertNotIn('Tool-free terminal routing uses', install_hooks.SESSION_INTENT_INTERNAL)
+        self.assertNotIn('Governance calls have no exemption', install_hooks.HOOK_INTERNAL)
+        self.assertIn('follows session-intent-analyzer', install_hooks.SESSION_INTENT_INTERNAL)
+        self.assertIn('material semantic changes through the exact receipt', install_hooks.SESSION_INTENT_INTERNAL)
+        self.assertEqual(install_hooks.SESSION_INTENT_INTERNAL, analyzer.DEFAULT_INTERNAL)
+        self.assertEqual(install_hooks.HOOK_INTERNAL, trh.DEFAULT_INTERNAL)
+
+    def test_native_hook_pair_delivers_terminal_policy_once_per_exact_input(self):
+        import install_hooks
+        import session_intent_analyzer_hook as analyzer
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = dict(os.environ)
+            for name in ('CODEX_THREAD_ID', 'GHOST_ALICE_SESSION_ID', 'GHOST_ALICE_CORE_ROOT'):
+                env.pop(name, None)
+            for platform in ('codex', 'claude'):
+                receipts = []
+                for turn in ('first authorized input', 'changed authorized input'):
+                    messages = []
+                    for script, instruction in ((analyzer.__file__, install_hooks.SESSION_INTENT_INTERNAL),
+                                                (trh.__file__, install_hooks.HOOK_INTERNAL)):
+                        result = subprocess.run([sys.executable, script, '--platform', platform,
+                            '--format', 'json', '--root', str(root), '--internal-b64',
+                            base64.urlsafe_b64encode(instruction.encode()).decode()],
+                            input=json.dumps({'session_id': 'native-pair', 'prompt': turn,
+                                              'hook_event_name': 'UserPromptSubmit'}),
+                            text=True, capture_output=True, env=env)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        host = json.loads(result.stdout)
+                        self.assertEqual(host['ghostAliceSurface'], 'routine')
+                        messages.append(host.get('hookSpecificOutput', {}).get('additionalContext', ''))
+                    receipts.append(json.loads(messages[0].split('[session-intent-receipt]', 1)[1]
+                                               .split('[/session-intent-receipt]', 1)[0]))
+                    with self.subTest(platform=platform, turn=turn):
+                        combined = '\n'.join(messages)
+                        self.assertEqual(combined.count('The current-session assistant classifies this input before calling tools'), 1)
+                        self.assertIn('Every agent call, including governance and Ghost-ALICE Autopilot recording, counts against explicit user tool limits', combined)
+                        self.assertIn('A new completion judgment requires its own evidence', combined)
+                        self.assertEqual(messages[1], '')
+                if platform == 'claude':
+                    self.assertTrue(all(receipt['intake_status'] == 'pending-native-origin' for receipt in receipts))
+                    self.assertTrue(all('input_event_id' not in receipt for receipt in receipts))
+                    continue
+                self.assertNotEqual(receipts[0]['input_event_id'], receipts[1]['input_event_id'])
+                events = ledger.read_session_events(root=root, platform=platform, session_id='native-pair')
+                self.assertEqual(len(events), 2)
+                self.assertEqual([row['event_id'] for row in events], [row['input_event_id'] for row in receipts])
+                with closing(sqlite3.connect(root / 'session-checks.sqlite3')) as connection:
+                    audit = connection.execute(
+                        'SELECT status FROM check_events WHERE platform=? AND session=? AND key=? ORDER BY rowid',
+                        (platform, 'native-pair', 'hook-terminal-routing')).fetchall()
+                    cached = connection.execute(
+                        'SELECT value FROM checks WHERE platform=? AND session=? AND key=?',
+                        (platform, 'native-pair', 'hook-terminal-routing')).fetchone()
+                self.assertEqual(audit, [('checked',), ('checked',)])
+                self.assertEqual(json.loads(cached[0]), {'input_event_id': receipts[-1]['input_event_id']})
+
+    def test_terminal_delivery_cache_requires_same_input_session_platform_and_source(self):
+        import session_intent_analyzer_hook as analyzer
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            first = analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-1')
+            self.assertIn('The current-session assistant classifies this input before calling tools', first)
+            self.assertEqual(analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-1'), '')
+            for platform, session, event in (('codex', 'same-session', 'input-2'),
+                                             ('codex', 'other-session', 'input-1'),
+                                             ('claude', 'same-session', 'input-1')):
+                self.assertIn('The current-session assistant classifies this input before calling tools',
+                    analyzer.terminal_routing_instruction(root, platform, session, event))
+            # Missing lineage and an unavailable cache must never suppress the policy.
+            for event in ('', None):
+                self.assertIn('The current-session assistant classifies this input before calling tools',
+                    analyzer.terminal_routing_instruction(root, 'codex', 'same-session', event))
+            with patch('session_check_cache.observe_check', side_effect=OSError('cache unavailable')):
+                self.assertIn('The current-session assistant classifies this input before calling tools',
+                    analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-2'))
+            source = root / 'changed-hook.py'
+            source.write_text('changed instructions')
+            with patch.object(analyzer, '__file__', str(source)):
+                self.assertIn('The current-session assistant classifies this input before calling tools',
+                    analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-2'))
+
+    def test_long_history_stays_in_authoritative_state_without_prompt_replay(self):
+        criteria = [{'id': f'criterion-{index}', 'work_unit_id': f'unit-{index}',
+                     'contract_revision': 7, 'status': 'unmet', 'admitted': True} for index in range(200)]
+        criteria.extend([{'id': 'complete', 'admitted': True, 'status': 'met'},
+                         {'id': 'unadmitted', 'admitted': False, 'status': 'unmet'}])
+        message = '\n'.join(trh.intent_history_instruction({'acceptance_criteria': criteria}))
+        self.assertTrue('200 admitted unmet conditions' in message, 'History must be summarized, not replayed')
+        self.assertIn('history, not a current work selection or execution authorization', message)
+        self.assertIn('current Core response-route', message)
+        self.assertIn('exact owned contract revision', message)
+        self.assertNotIn('criterion-0', message)
+        self.assertNotIn('unit-199', message)
+
+    def test_degraded_intake_restores_full_terminal_policy_after_successful_delivery(self):
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            ledger.record_turn(root=root, platform='codex', session_id='degrade-after-ready', raw_user_input='first')
+            payload = {'session_id': 'degrade-after-ready'}
+            first, routine = trh.reminder_result('base', root, 'codex', payload)
+            self.assertTrue(routine)
+            self.assertIn('The current-session assistant classifies this input before calling tools', first)
+            marker = trh.session_dir(root, 'codex', payload['session_id']) / 'ledger-degraded.json'
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text('{"reason":"ledger-write-failed"}')
+            message, routine = trh.reminder_result('base', root, 'codex', payload)
+            self.assertFalse(routine)
+            self.assertTrue(message.startswith('The current-session assistant classifies this input before calling tools'))
+            self.assertIn('latest input was NOT recorded', message)
+            self.assertIn('ledger-write-failed', message)
+            self.assertNotIn('intake-ready:', message)
+
+    def test_installer_full_and_cached_guidance_routes_terminal_before_tool_bootstrap(self):
+        import install_hooks
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = dict(os.environ)
+            env.pop('CODEX_THREAD_ID', None)
+            env.pop('GHOST_ALICE_SESSION_ID', None)
+            for platform in ('codex', 'claude'):
+                for turn in ('Explain without tools.', 'Stop and explain the prior result.'):
+                    with self.subTest(platform=platform, turn=turn):
+                        ledger.record_turn(root=root, platform=platform, session_id='terminal', raw_user_input=turn)
+                        encoded = base64.urlsafe_b64encode(install_hooks.HOOK_INTERNAL.encode()).decode()
+                        result = subprocess.run([sys.executable, trh.__file__, '--platform', platform,
+                            '--format', 'json', '--root', str(root), '--internal-b64', encoded],
+                            input=json.dumps({'session_id': 'terminal'}), text=True, capture_output=True, env=env)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        message = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
+                        self.assertIn('The current-session assistant classifies this input before calling tools', message)
+                        self.assertIn('does not read files, access the ledger or register a response-route', message)
+                        self.assertIn('A new completion judgment requires its own evidence', message)
+                        self.assertLess(message.index('The current-session assistant classifies this input before calling tools'), message.index('intent-ledger:'))
+                        self.assertIn('Normal route only', message)
+                        self.assertNotIn('Read the ledger, decompose', message)
+                        self.assertIn('intake-ready:', message)
+
+    def test_missing_or_degraded_intake_keeps_terminal_procedure_without_bootstrap_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            env = dict(os.environ)
+            env.pop('CODEX_THREAD_ID', None)
+            env.pop('GHOST_ALICE_SESSION_ID', None)
+            for case in ('missing-identity', 'missing-intake', 'degraded-marker'):
+                with self.subTest(case=case):
+                    payload = {} if case == 'missing-identity' else {'session_id': case}
+                    if case == 'degraded-marker':
+                        directory = trh.session_dir(root, 'codex', case)
+                        directory.mkdir(parents=True)
+                        (directory / 'ledger-degraded.json').write_text('{"reason":"write-failed"}')
+                    result = subprocess.run([sys.executable, trh.__file__, '--platform', 'codex',
+                        '--format', 'json', '--root', str(root)], input=json.dumps(payload),
+                        text=True, capture_output=True, env=env)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    host = json.loads(result.stdout)
+                    message = host['hookSpecificOutput']['additionalContext']
+                    self.assertTrue(message.startswith('The current-session assistant classifies this input before calling tools'))
+                    self.assertIn('does not read files, access the ledger or register a response-route', message)
+                    self.assertIn('Normal-route', message)
+                    self.assertIn('withheld', message)
+                    self.assertNotIn('intake-ready:', message)
+                    self.assertNotIn('Continue intake/bootstrap;', message)
+                    self.assertNotIn('Do not run task-router yet.', message)
+                    self.assertNotIn('ghostAliceSurface', host)
+
+    def test_broken_authoritative_reader_keeps_terminal_procedure(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(trh, 'session_material', return_value={'degraded': True}), \
+             patch.dict(os.environ, {'CODEX_THREAD_ID': '', 'GHOST_ALICE_SESSION_ID': ''}):
+            message, routine = trh.reminder_result('base', Path(temporary), 'codex', {'session_id': 'broken-reader'})
+        self.assertFalse(routine)
+        self.assertTrue(message.startswith('The current-session assistant classifies this input before calling tools'))
+        self.assertIn('Normal-route', message)
+        self.assertIn('authoritative reader', message)
+
+    def test_command_budget_is_preserved_before_ready_or_unavailable_route_guidance(self):
+        import install_hooks
+        ledger = trh.importlib.import_module('session_intent_ledger')
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch.dict(os.environ, {'CODEX_THREAD_ID': '', 'GHOST_ALICE_SESSION_ID': ''}):
+                missing = trh.reminder_message(install_hooks.HOOK_INTERNAL, root, 'codex', {'session_id': 'limited'})
+                ledger.record_turn(root=root, platform='codex', session_id='limited', raw_user_input='Run only pwd once.')
+                ready = trh.reminder_message(install_hooks.HOOK_INTERNAL, root, 'codex', {'session_id': 'limited'})
+            for message in (missing, ready):
+                with self.subTest(ready='intake-ready:' in message):
+                    self.assertIn('Every agent call, including governance and Ghost-ALICE Autopilot recording, counts against explicit user tool limits', message)
+                    self.assertIn('For an explanation or clarification answerable from supplied conversation alone', message)
+            self.assertIn('Normal-route task-router registration is withheld', missing)
+            self.assertIn('intake-ready: current input recorded', ready)
+            self.assertIn('follows task-router', ready)
+            self.assertIn('register the Core response-route', ready)
+            self.assertIn('material semantic changes through the exact receipt', install_hooks.SESSION_INTENT_INTERNAL)
+
     def test_cached_guidance_never_reuses_the_previous_input_security_verdict(self):
         ledger = trh.importlib.import_module('session_intent_ledger')
         with tempfile.TemporaryDirectory() as temporary:
@@ -356,8 +593,8 @@ class RoutingDeliveryTests(unittest.TestCase):
             first = run()
             ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='second')
             second = run()
-            self.assertIn('gate-opened', first)
-            self.assertIn('gate-opened', second)
+            self.assertIn('intake-ready', first)
+            self.assertIn('intake-ready', second)
             self.assertIn('reuse retained instructions', second)
             self.assertLess(len(second), len(first))
             ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='blocked')
@@ -366,66 +603,56 @@ class RoutingDeliveryTests(unittest.TestCase):
             ledger.record_turn(root=root, platform='codex', session_id='reuse', expected_input_event_id=event,
                                intent_delta={'model_security_decision': {'decision': 'block', 'input_event_id': event}})
             blocked = run()
-            self.assertIn('current-lineage block', blocked)
-            self.assertNotIn('gate-opened', blocked)
-            self.assertNotIn('reuse retained instructions', blocked)
+            self.assertIn('intake-ready', blocked)
+            self.assertNotIn('withheld', blocked)
+            self.assertIn('reuse retained instructions', blocked)
 
     """Exercise authoritative storage and both platform wire formats, not only a policy string."""
 
     def test_ledger_hint_reads_exact_session_from_unrelated_cwd(self):
         import install_hooks
+        from install_destination import InstallDestination
         ledger = trh.importlib.import_module('session_intent_ledger')
-        shared = Path(trh.__file__).resolve().parent
         with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / 'ledger root with spaces'
-            unrelated = Path(temporary) / 'unrelated cwd'
+            owned = Path(temporary)
+            root = owned / 'ledger root with spaces'
+            unrelated = owned / 'unrelated cwd'
             unrelated.mkdir()
-            env = dict(os.environ)
-            env.pop('CODEX_THREAD_ID', None)
-            env.pop('GHOST_ALICE_SESSION_ID', None)
             for platform in ('codex', 'claude'):
                 session_id = f'{platform}-hint-session'
-                ledger.record_turn(
-                    root=root, platform=platform, session_id=session_id,
-                    raw_user_input='status question',
-                    intent_delta={'current_goal': f'{platform} active work'},
-                )
-                with patch.object(install_hooks, '_session_intent_root', return_value=root), \
-                     patch.object(install_hooks, '_hook_shared_dir', return_value=shared):
-                    native_command = install_hooks._entry_command(
-                        install_hooks._platform_hook_entry(platform, 'UserPromptSubmit'))
-                self.assertIn('hook_profile_gate.py', native_command)
+                ledger.record_turn(root=root, platform=platform, session_id=session_id,
+                    raw_user_input='status question', intent_delta={'current_goal': f'{platform} active work'})
+                destination = InstallDestination(mode='isolated', owned_root=str(owned),
+                    platform_dir=str(owned/platform), skills_dir=str(owned/'skills'),
+                    ghost_root=str(owned/'ghost'), ledger_root=str(root), project_root=str(unrelated),
+                    core_source_root=str(Path(trh.__file__).resolve().parents[1]))
+                self.assertTrue(install_hooks.install_hook(platform, destination=destination))
+                settings_name = 'hooks.json' if platform == 'codex' else 'settings.json'
+                hooks = json.loads((owned/platform/settings_name).read_text())['hooks']
+                native_command = next(h['command'] for row in hooks['UserPromptSubmit'] for h in row['hooks'] if install_hooks.SESSION_INTENT_MARKER in h['command'])
                 for profile in ('strict', 'dynamic', 'minimal'):
                     with self.subTest(platform=platform, profile=profile):
-                        home = Path(temporary) / platform / profile
-                        home.mkdir(parents=True)
-                        profile_env = dict(env, HOME=str(home), USERPROFILE=str(home),
-                                           GHOST_ALICE_AGENT_VISIBILITY=profile)
-                        result = subprocess.run(
-                            native_command, shell=True,
-                            input=json.dumps({'session_id': session_id,
-                                              'hook_event_name': 'UserPromptSubmit'}),
-                            cwd=unrelated, text=True, capture_output=True,
-                            env=profile_env, check=True,
-                        )
+                        env = dict(os.environ, GHOST_ALICE_AGENT_VISIBILITY=profile,
+                            GHOST_ALICE_SESSION_INTENT_ROOT=str(owned/'hostile-ledger'))
+                        env.pop('CODEX_THREAD_ID', None)
+                        env.pop('GHOST_ALICE_SESSION_ID', None)
+                        result = subprocess.run(['/bin/sh', '-c', native_command],
+                            input=json.dumps({'session_id':session_id, 'hook_event_name':'UserPromptSubmit', 'prompt': 'status question'}),
+                            cwd=unrelated, text=True, capture_output=True, env=env)
+                        self.assertEqual(result.returncode, 0, result.stderr)
                         host = json.loads(result.stdout)
                         self.assertTrue(host['continue'])
                         context = host['hookSpecificOutput']['additionalContext']
-                        command = context.split('intent-ledger: use ', 1)[1].split(
-                            ' after session-intent preflight.', 1)[0]
-                        args = shlex.split(command)
-                        self.assertTrue(Path(args[0]).is_absolute(), command)
-                        self.assertTrue(Path(args[0]).is_file(), command)
-                        self.assertTrue(Path(args[1]).is_absolute(), command)
-                        self.assertTrue(Path(args[1]).is_file(), command)
-                        observed = subprocess.run(
-                            args, cwd=unrelated, text=True, capture_output=True,
-                            env=profile_env, check=True,
-                        )
+                        receipt = json.loads(context.split('[session-intent-receipt]', 1)[1].split('[/session-intent-receipt]', 1)[0])
+                        args = [sys.executable, str(Path(ledger.__file__).resolve()), '--read-state',
+                                '--root', receipt['ledger_root'], '--platform', receipt['platform'], '--session-id', receipt['session_id']]
+                        observed = subprocess.run(args, cwd=unrelated, text=True, capture_output=True, env=env)
+                        self.assertEqual(observed.returncode, 0, observed.stderr)
                         state = json.loads(observed.stdout)
                         self.assertEqual(platform, state['platform'])
                         self.assertEqual(session_id, state['session_id'])
                         self.assertEqual(f'{platform} active work', state['current_goal'])
+                        self.assertFalse((owned/'hostile-ledger').exists())
 
     def test_unfinished_criteria_reach_platform_context_from_sqlite(self):
         ledger = trh.importlib.import_module('session_intent_ledger')
@@ -462,10 +689,15 @@ class RoutingDeliveryTests(unittest.TestCase):
                         context = payload['systemMessage']
                     else:
                         context = result.stdout
-                    self.assertIn('unresolved-work: ["order-fix"]', context)
-                    self.assertIn('Respect an explicit stop', context)
+                    self.assertIn('intent-history-diagnostic:', context)
+                    self.assertIn('1 admitted unmet conditions', context)
+                    self.assertNotIn('order-fix', context)
+                    command = context.split('intent-ledger: use ', 1)[1].split(' after session-intent preflight.', 1)[0]
+                    observed = subprocess.run(shlex.split(command), text=True, capture_output=True, env=env, check=True)
+                    self.assertEqual(json.loads(observed.stdout)['acceptance_criteria'][0]['id'], 'order-fix')
+                    self.assertIn('history, not a current work selection or execution authorization', context)
 
-    def test_installer_reminder_keeps_model_context_through_visibility_wrapper(self):
+    def test_cached_native_reminder_does_not_release_prior_input_before_intake(self):
         import install_hooks
         ledger = trh.importlib.import_module('session_intent_ledger')
         shared = Path(trh.__file__).parent
@@ -502,15 +734,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                             text=True, capture_output=True, env=env, check=True,
                         )
                         host = json.loads(result.stdout)
-                        self.assertTrue(host['continue'])
-                        context = host['hookSpecificOutput']['additionalContext']
-                        self.assertIn('unresolved-work: ["order-fix"]', context)
-                        if profile == 'strict':
-                            self.assertIn('task-router consumes session-intent', context)
-                        else:
-                            self.assertIn('execute task-router for this input', context)
-                        if profile != 'strict':
-                            self.assertNotIn('systemMessage', host)
+                        self.assertEqual(host, {'continue': True})
 
 
 if __name__ == "__main__":

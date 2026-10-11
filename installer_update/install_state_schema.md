@@ -7,10 +7,10 @@ This document is the contract for the install-state manifest that the Ghost-ALIC
 - [File location](#file-location)
 - [top-level fields](#top-level-fields)
 - [target fields](#target-fields)
-- [install_mode semantics](#installmode-semantics)
-- [managed_markers](#managedmarkers)
+- [install_mode semantics](#install_mode-semantics)
+- [managed_markers](#managed_markers)
 - [failure policy](#failure-policy)
-- [system_env_changes](#systemenvchanges)
+- [system_env_changes](#system_env_changes)
 
 
 ## Purpose
@@ -21,7 +21,7 @@ The pending merge manifest is the quarantine for user changes and the merge deci
 
 ## File location
 
-The per-platform manifest is placed at the following paths.
+The installer writes one manifest for the selected platform at the corresponding path below.
 
 - `~/.ghost-alice/install-state/claude.json`
 - `~/.ghost-alice/install-state/codex.json`
@@ -30,16 +30,16 @@ The per-platform manifest is placed at the following paths.
 
 | field | type | meaning |
 | --- | --- | --- |
-| `schema_version` | integer | The current schema version. The initial version is `1`. |
+| `schema_version` | integer | The current schema version is `1`. |
 | `platform` | string | One of `claude`, `codex`. |
 | `installed_at` | string | The UTC ISO-8601 timestamp of when the manifest was recorded. |
 | `source_root` | string | The normalized path of the install source repository root. |
 | `source_branch` | string | The source branch at install time. A detached state is recorded as `DETACHED`. |
 | `source_head` | string | The source HEAD commit at install time. When it cannot be determined, it is `unknown`. |
 | `source_dirty_state` | string | One of `clean`, `dirty`, `unknown`. |
-| `remote_freshness_state` | string | The remote freshness decision state. The initial implementation records `unverified`. |
+| `remote_freshness_state` | string | The remote freshness decision state. The installer records `unverified`. |
 | `targets` | array | The array of target records that the installer recorded as managed. |
-| `system_env_changes` | array | The record of user system environment changes that the install self-applied. An empty array means no change or that it was not triggered. Uninstall reads this record to roll back to the pre-change state. |
+| `system_env_changes` | array | The installer records the user system environment changes it applied. An empty array records no such change. Uninstall uses each record and its kind-specific rollback conditions to restore the prior state. |
 
 ## target fields
 
@@ -58,7 +58,7 @@ The per-platform manifest is placed at the following paths.
 | mode | meaning |
 | --- | --- |
 | `copy` | A state where the installer deliberately chose copy mode to create the destination. |
-| `copy-fallback` | A state where the path attempted a link or junction install, but the actual destination remained a plain copy. |
+| `copy-fallback` | The installer attempted a link or junction install, but created or retained a plain copy at the destination. |
 | `symlink` | A state installed as a POSIX-style symlink. |
 | `junction` | A state installed as a Windows directory junction or reparse point. |
 | `wrapper` | A platform wrapper artifact that is not part of the skill tree. |
@@ -73,28 +73,22 @@ The per-platform manifest is placed at the following paths.
 
 ## failure policy
 
-- If the manifest is absent, it is treated as a legacy install and the next preflight behaves conservatively.
-- A manifest parse failure is not a silent success. It must be reported as a diagnostic failure.
+- If the manifest is absent, preflight treats ownership as unproven and behaves conservatively.
+- If a consumer cannot parse the manifest, it reports a diagnostic failure rather than treating the manifest as valid.
 - The manifest is not a recovery source for user changes. Recovery of user changes is handled by the pending merge manifest and the quarantine backup.
 - When the manifest exists, installer doctor uses the `targets` array as the SSOT for that platform's managed targets. It does not fail merely because a catalog-wide skill that is absent from a partial-install manifest is missing.
-- If a target recorded in the manifest has disappeared from its actual destination or fails to pass marker/hash verification, it is reported as an item requiring action.
+- If a recorded target is missing from its destination or fails marker/hash verification, installer doctor reports that target as requiring action.
 
 ## system_env_changes
 
-`system_env_changes` is the array of changes that the install self-applied to the user system environment. Uninstall reads this record to roll back to the pre-change state.
+The installer writes `system_env_changes` entries for changes it applies to the user system environment. Uninstall reads each entry and applies the rollback conditions documented for that kind before restoring the prior state.
 
-Each entry is distinguished by the `kind` field. `source_repo_hook_path`, `codex_hooks_feature_flag`, and `codex_project_trust` are emitted by the current implementation. The other kinds below are reserved schema slots and must not be documented as active until the install-recording and uninstall-rollback code for that kind lands with tests.
+Each entry is distinguished by the `kind` field. The installer records the following implemented changes; uninstall has a corresponding handler for each kind.
 
 | kind | meaning |
 | --- | --- |
-| `source_repo_hook_path` | Current. A record of changing the install source repository's `core.hooksPath` to the Ghost-ALICE post-merge hook path. `repo_root`, `before_present`, `before`, and `after` are recorded. Uninstall restores to `before` only when the current value equals `after`, or unsets it when there was no previous value. |
-| `codex_hooks_feature_flag` | Current. A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[features] hooks` to `true`. Records `path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores `before_state` only from this record. |
-| `codex_project_trust` | Current. A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted`. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
-| `ps_policy_change` | Reserved. A future self-applied change of the Windows PowerShell ExecutionPolicy (CurrentUser scope). The `before`/`after` policy values and the `rollback_command` are recorded together when implemented. |
-| `posix_rc_change` | Reserved. Future addition of a Ghost-ALICE managed block to a POSIX user shell rc file (`~/.bashrc`, `~/.zshrc`, `~/.profile`). `rc_path`, `block_marker`, and `added_lines` are recorded when implemented. |
-| `macos_quarantine_fix` | Reserved. Future automatic removal of the macOS `com.apple.quarantine` xattr. The array of target paths is recorded in `target_paths` when implemented. |
-| `posix_chmod_fix` | Reserved. Future self-restoration of POSIX execute bits (for example, files extracted from a ZIP). `target_paths`, `before_mode`, and `after_mode` are recorded when implemented. |
+| `source_repo_hook_path` | A record of changing the install source repository's `core.hooksPath` to the Ghost-ALICE post-merge hook path. `repo_root`, `before_present`, `before`, and `after` are recorded. Uninstall restores to `before` only when the current value equals `after`, or unsets it when there was no previous value. |
+| `codex_hooks_feature_flag` | A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[features] hooks` to `true`. Records `path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores `before_state` only from this record. |
+| `codex_project_trust` | A trace-backed record that Ghost-ALICE changed `~/.codex/config.toml` `[projects."<repo>"] trust_level` to `trusted`. Records `path`, `project_path`, `before_state`, and `after_state` without storing raw config content. Uninstall restores or removes that trust entry only from this record. |
 
-Each entry has an `applied_at` UTC ISO-8601 timestamp. Additional fields per kind (for example, `before`/`after`/`rollback_command` of `ps_policy_change`) are added to this schema document in the sub-phase that first uses that kind. This document is the SSOT for the system_env_changes definition.
-
-The entry-building logic for reserved kinds and the doctor reader are added in later sub-phases while updating the same SSOT (this document).
+Each entry has an `applied_at` UTC ISO-8601 timestamp and the kind-specific fields above. Adding a kind requires both install-recording and uninstall-rollback implementation and tests.

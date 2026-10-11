@@ -38,54 +38,88 @@ REQUIRED_CONTRACT_KEYS = {
     "terminal_routes",
 }
 
+# Check protocol identifiers and canonical owner links, not repeated narrative wording.
+# These static checks establish document wiring; runtime tests establish behavior.
 REQUIRED_PATTERNS = {
     "docs/policies/session-gate-matrix.md": [
         "skill-catalog/session-gates.json",
-        "task-router",
-        "using-coding-convention",
-        "boundary-contract",
         "session-intent-analyzer",
-        "session-intent-analyzer intake is first",
-        "session-intent-analyzer fans out to `skill-evolution` (report-only terminal branch) and `jailbreak-detector`",
-        "`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context",
-        "task-router is released after session-intent preflight when no current-lineage block gate exists",
-        "absent `downstream-gates.json` is silent allow",
-        "atomic meaning decomposition",
-        "boundary-contract: required",
-        "English canonical narrative + English control surface",
+        "task-router",
+        "skill-evolution",
+        "tool-checkpoint",
+        "boundary-contract",
+        "verification-before-completion",
+        "routing-surface",
+        "clarification-only",
+        "direct-response"
+    ],
+    "AGENTS.md": [
+        "skill-catalog/session-gates.json",
+        "docs/policies/session-gate-matrix.md",
+        "session-intent-analyzer",
+        "task-router",
+        "boundary-contract",
+        "systematic-debugging",
+        "verification-before-completion",
         "[gate-state]",
         "[completion-check]",
-        "acceptance-criteria",
-        "claim-evidence-map",
+        "[partial-check]",
         "unverified",
-        "skill-call:",
-        "Required gate skills are not complete unless a fresh or valid retained instruction body was used",
-        "Read or validly reuse the relevant instruction body before marking a required gate done",
-        "Runtime Hook Graph Contract",
-        "Hook pending-merge precheck is a pre-routing/session-start layer",
-        "manual fallback still completes before actionable downstream work",
-        "intent-state.json is update-plus-accumulate state",
-        "downstream-gates.json",
-        "skill-evolution is report-only and self-terminating",
-        "does not feed task-router",
-        "only current-lineage block decisions are carried to `downstream-gates.json`",
-        "user-explicit defer/skip may continue",
-        "Deterministic hard-block rules are narrow regression guards",
-        "Gradual multi-turn jailbreak resistance depends on session-intent summary quality",
-        "PreToolUse/BeforeTool checkpoint",
-        "hook-stage: PreToolUse",
-        "meaning: tool-call retry checkpoint, not user-input intake",
-        "session-intent-analyzer intake is first",
-        "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage",
-        "keep checking later tool calls silently",
-        "new user input, current-lineage block/deny, mismatch",
-        "first poll in the input lineage",
-        "Dynamic Focus Contract",
-        "mismatch location",
-        "verification burden",
-        "micro, meso, macro, and meta",
-        "scope reopen point",
-        "Routing Surface Contract",
+        "clarification-only",
+        "direct-response"
+    ],
+    "platforms/codex/AGENTS.md": [
+        "session-intent-analyzer",
+        "task-router",
+        "boundary-contract",
+        "systematic-debugging",
+        "verification-before-completion",
+        "[gate-state]",
+        "[completion-check]",
+        "[partial-check]",
+        "clarification-only",
+        "direct-response"
+    ],
+    "platforms/claude/CLAUDE.md": [
+        "session-intent-analyzer",
+        "task-router",
+        "boundary-contract",
+        "verification-before-completion",
+        "[gate-state]",
+        "[completion-check]",
+        "[partial-check]",
+        "clarification-only",
+        "direct-response",
+        "Skill"
+    ],
+    "install.ps1": [
+        "session-gates.json",
+        "platforms\\codex\\AGENTS.md",
+        "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace"
+    ],
+    "install.sh": [
+        "session-gates.json",
+        "platforms/codex/AGENTS.md",
+        "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace"
+    ],
+    "_shared/global_rule_blocks.py": [
+        "CODEX_SPEC",
+        "render_codex_bootstrap",
+        "apply_codex_bootstrap",
+        "codex-merge"
+    ],
+    "README.md": [
+        "skill-catalog/session-gates.json",
+        "python scripts/check_skill_gate_contract.py"
+    ],
+    "scripts/validate_skills.py": [
+        "run_contract_checks",
+        "gate-contract"
+    ],
+    "task-router/SKILL.md": [
+        "session-intent-analyzer",
+        "using-coding-convention",
+        "boundary-contract",
         "routing-surface",
         "primary-request",
         "causal-axis",
@@ -93,190 +127,19 @@ REQUIRED_PATTERNS = {
         "response-order",
         "clarification-only",
         "direct-response",
-        "resolved-intent-first",
-        "Ambient working directory",
-        "Do not validate or rebut that premise",
-        "Route classification precedes evidence planning",
-        "Intake and routing still run internally",
-        "minimum decisive information",
-        "terminal objective outranks",
-        "Do not let a means replace, narrow, or expand",
-        "task-router owns the reusable work judgment",
-        "session-intent-analyzer records semantic facts and accumulated decisions",
-        "governance surface policy consumes routing-surface",
-        "token reduction is a secondary consequence, not a success metric",
-    ],
-    "AGENTS.md": [
-        "skill-catalog/session-gates.json",
-        "docs/policies/session-gate-matrix.md",
-        "boundary-contract",
-        "session-intent-analyzer",
-        "session-intent-analyzer fans out to skill-evolution(report-only terminal branch) and jailbreak-detector",
-        "`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context",
-        "task-router reminder hook withholds task-router until session-intent preflight exists and jailbreak-detector has had the first chance to record a current-lineage block",
-        "absent `downstream-gates.json` is silent allow",
-        "atomic meaning decomposition",
-        "boundary-contract: required",
-        "hook-verified",
-        "English canonical narrative + English control surface",
-        "[gate-state]",
-        "[completion-check]",
-        "acceptance-criteria",
-        "claim-evidence-map",
-        "unverified",
-        "skill-call:",
-        "A required gate skill is not satisfied by a metadata-only match",
-        "use a fresh or valid retained instruction body",
-        "Hook pending-merge precheck is a pre-routing/session-start layer",
-        "manual fallback still completes before actionable downstream work",
-        "explicit user defer or skip",
-        "downstream-gates.json",
-        "current-lineage block gate",
-        "silent allow",
-        "tool-call identity",
-        "payload content",
-        "outside the decision body",
-        "hook-stage: PreToolUse",
-        "meaning: tool-call retry checkpoint, not user-input intake",
-        "The focus scope is not fixed and does not expand in only one direction",
-        "the mismatch location and the verification burden",
-        "micro, meso, macro, and meta",
-        "task-router emits a reusable routing-surface",
-        "clarification-only",
-        "direct-response",
-        "Ambient working directory",
-        "Do not validate or rebut that premise",
-        "Route classification precedes evidence planning",
-        "Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`",
-    ],
-    "platforms/codex/AGENTS.md": [
-        "Session Gate Contract",
-        "boundary-contract",
-        "session-intent-analyzer",
-        "`session-intent-analyzer` branches to the `skill-evolution` report-only branch and to `jailbreak-detector`",
-        "task-router is a consumer of the session-intent and jailbreak gate context",
-        "The task-router reminder hook releases task-router when a session-intent preflight exists and there is no current-lineage block gate",
-        "The absence of `downstream-gates.json` is treated as a silent allow meaning there is no current-lineage block",
-        "atomic meaning decomposition",
-        "boundary-contract: required",
-        "hook-verified",
-        "English canonical narrative + English control surface",
-        "[gate-state]",
-        "[completion-check]",
-        "acceptance-criteria",
-        "claim-evidence-map",
-        "unverified",
-        "skill-call:",
-        "After the session-intent-analyzer intake and the jailbreak-detector downstream gate, read or validly reuse `~/.agents/skills/task-router/SKILL.md`",
-        "A required gate skill is not satisfied by a metadata-only match",
-        "Read or validly reuse the skill's instruction body before marking a required gate as complete",
-        "Hook pending-merge precheck is a pre-routing/session-start layer",
-        "manual fallback still completes before actionable downstream work",
-        "explicit user defer or skip",
-        "downstream-gates.json",
-        "hook-stage: PreToolUse",
-        "meaning: tool-call retry checkpoint, not user-input intake",
-        "the same process, session, or tool-call id",
-        "new user input, current-lineage block/deny, mismatch",
-        "current-lineage block gate",
-        "silent allow",
-        "tool-call identity",
-        "payload content",
-        "outside the decision body",
-        "The focus scope is not fixed and does not expand in only one direction",
-        "the mismatch location and the verification burden",
-        "micro, meso, macro, and meta",
-        "task-router emits a reusable routing-surface",
-        "clarification-only",
-        "direct-response",
-        "minimum decisive information",
-        "Ambient working directory",
-        "Do not validate or rebut that premise",
-        "Route classification precedes evidence planning",
-    ],
-    "platforms/claude/CLAUDE.md": [
-        "clarification-only",
-        "direct-response",
-        "minimum decisive information",
-        "Ambient working directory",
-        "Do not validate or rebut that premise",
-        "Route classification precedes evidence planning",
-        "Intake and routing still run internally",
-        "Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`",
-    ],
-    "install.ps1": [
-        "session-gates.json",
-        "platforms\\codex\\AGENTS.md",
-        "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace",
-    ],
-    "install.sh": [
-        "session-gates.json",
-        "platforms/codex/AGENTS.md",
-        "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace",
-    ],
-    "_shared/global_rule_blocks.py": [
-        "CODEX_SPEC",
-        "render_codex_bootstrap",
-        "apply_codex_bootstrap",
-        "codex-merge",
-    ],
-    "README.md": [
-        "skill-catalog/session-gates.json",
-        "python scripts/check_skill_gate_contract.py",
-    ],
-    "scripts/validate_skills.py": [
-        "run_contract_checks",
-        "gate-contract",
-    ],
-    "task-router/SKILL.md": [
-        "English canonical narrative + English control surface",
-        "[gate-state]",
-        "request-routing gate",
-        "request decomposition, work placement, skill routing",
-        "consumer of session-intent-analyzer and",
-        "routing decision",
-        "raw user intent inference",
-        "after session-intent-analyzer intake and",
-        "silent allow",
-        "current-lineage block gate",
-        "atomic meaning",
-        "not a tool permission owner",
-        "not a tool-checkpoint owner",
-        "hook-stage: PreToolUse",
-        "meaning: tool-call retry checkpoint, not user-input intake",
-        "using-coding-convention",
-        "boundary-contract",
-        "boundary-reason",
-        "next-required",
-        "hook-verified clean",
-        "user-explicit defer/skip may continue",
-        "pending merge remains undecided when deferred",
-        "skill-call:",
-        "routing-surface",
-        "intent-relation",
-        "response-mode",
-        "clarification-only",
-        "direct-response",
-        "resolved-intent-first",
-        "minimum decisive information",
-        "Ambient working directory",
-        "Do not validate or rebut that premise",
-        "Route classification precedes evidence planning",
         "change-depth",
         "focus-layer",
         "verification-complexity",
         "forced-visibility",
-        "accepted-continuation requires recorded acceptance",
-        "unknown routing-surface values fail closed",
-        "user corrects the agent for changing, narrowing, widening, relabeling, or",
-        "substituting the requested objective, scope, selection criterion",
+        "record_response_route",
+        "authority-and-renewal",
+        "incident-accounting-and-continuation",
+        "evidence-selection-and-stop-gate"
     ],
     "boundary-contract/SKILL.md": [
         "name: boundary-contract",
-        "Keep field names",
+        "## Authority and renewal",
         "[boundary-contract]",
-        "- objective: <work-objective>",
-        "phase",
         "objective",
         "explicit-non-goals",
         "allowed-surface",
@@ -287,98 +150,97 @@ REQUIRED_PATTERNS = {
         "test-purpose",
         "stop-conditions",
         "next-allowed-actions",
-        "Scope changes need renegotiation in both directions",
-        "Never shrink or grow the committed scope silently",
+        "human-owned",
+        "agent-declared"
     ],
     "_shared/install_hooks.py": [
         "TOOL_CHECKPOINT_MARKER",
         "TOOL_CHECKPOINT_INTERNAL",
         "pre_tool_use",
         "tool-checkpoint",
-        "do not run an extra shell manifest check",
-        "hook-enforced retry point",
-        "task_router_reminder_hook.py",
-        "task-router waits until session-intent preflight exists",
-        "Absent downstream-gates.json means silent allow",
-        "atomic meaning units",
-        "focus-layer",
-        "scope-reopen",
-        "tool-call retry checkpoint, not user-input intake",
-        "jailbreak-detector downstream gate",
-        "task-router consumes session-intent and jailbreak gate context",
-        "intent",
+        "task_router_reminder_hook.py"
     ],
     "_shared/ghost-alice-hook.mjs": [
         "PreToolUse",
-        "permissionDecision",
-        "downstream-gates.json",
+        "readSessionIntentSnapshot",
+        "taskRouterReleaseMessage"
     ],
     "_shared/reminder_texts.json": [
-        "hook-enforced retry point",
-        "Surface a visible [tool-checkpoint] block once per user-input tool batch",
-        "same session input lineage",
-        "continuing to check every tool call",
-        "hook-stage: PreToolUse",
-        "tool-call retry checkpoint, not user-input intake",
-        "intent",
-        "why",
-        "procedure",
-        "contract-ref",
-        "contract-check",
-        "localized-human-note",
-        "rejected-alternatives",
-        "unverified-premises",
-        "failure-mode-if-wrong",
-        "recovery-action",
-        "focus-layer",
-        "scope-reopen",
-        "never skip the gate",
-        "read-only",
-        "boundary-contract",
+        "tool-checkpoint",
+        "PreToolUse"
     ],
     "coding-convention/using-coding-convention/SKILL.md": [
-        "[gate-state]",
-        "[completion-check]",
+        "verification-before-completion",
+        "boundary-contract",
+        "systematic-debugging",
+        "Instruction Body Reuse",
+        "one physical source line"
+    ],
+    "coding-convention/verification-before-completion/SKILL.md": [
         "acceptance-criteria",
         "claim-evidence-map",
         "unverified",
-        "skill-call:",
-        "quality-maintenance device confirmed through repeated user work",
-        "user intent, work scope, and verification quality",
-        "do not bypass it from the agent's judgment alone",
-        "leave a short reason for the skip",
-        "finished work, verified results, or a decision that materially changes the user's next action",
-        "clarification-only",
-        "direct-response",
-        "no-work terminal route",
-        "exits before a development turn begins",
-        "Prose paragraphs stay on one physical source line unless a semantic, syntax, Markdown-structural, or protocol boundary requires a newline.",
-        "Scope changes already belong to boundary-contract",
-        "Stop and renew or confirm before changing the committed scope",
-    ],
-    "coding-convention/verification-before-completion/SKILL.md": [
-        "No acceptance-criteria means no completed verification-before-completion",
-        "claim-evidence-map",
-        "unverified",
+        "[completion-check]",
+        "[partial-check]",
+        "source and time",
+        "incident-accounting-and-continuation"
     ],
     "session-intent-analyzer/references/ledger-schema.md": [
         "acceptance_criteria",
-        "verifiable completion criterion",
-        "intent-state.json is update-plus-accumulate state",
-    ],
-    "jailbreak-detector/SKILL.md": [
-        "Deterministic hard-block rules are narrow regression guards",
-        "Gradual multi-turn jailbreak resistance depends on session-intent summary quality",
+        "Core Response Projection",
+        "record_response_route"
     ],
     "session-intent-analyzer/scripts/session_intent_ledger.py": [
         "acceptance_criteria",
         "consumer_snapshot",
+        "record_response_route"
     ],
     ".github/workflows/skill-gate-contract.yml": [
         "python scripts/check_skill_gate_contract.py",
-        "python scripts/run_installer_compat_tests.py --group skill-gate-contract",
-    ],
+        "python scripts/run_installer_compat_tests.py --group skill-gate-contract"
+    ]
 }
+
+
+@dataclass(frozen=True)
+class OwnerSection:
+    consumer: str
+    reference: str
+    owner: str
+    heading: str
+    identifiers: tuple[str, ...]
+    message_key: str | None = None
+
+
+# Callers name the owning procedure; only that section owns its detailed fields.
+OWNER_SECTIONS = (
+    OwnerSection(
+        "_shared/reminder_texts.json", "common governance rule 9", "AGENTS.md",
+        "9. io-trace Transparency Rule",
+        ("intent", "why", "hook-stage: PreToolUse", "contract-ref", "contract-check"),
+        message_key="tool-checkpoint",
+    ),
+    OwnerSection(
+        "coding-convention/using-coding-convention/SKILL.md",
+        "../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse",
+        "coding-convention/verification-before-completion/references/verify-or-reuse.md",
+        "Instruction Body Reuse", ("skills-reused", "skills-loaded", "skill-call"),
+    ),
+    OwnerSection(
+        "coding-convention/verification-before-completion/SKILL.md",
+        "../../task-router/SKILL.md#register-the-core-projection",
+        "task-router/SKILL.md", "Register the Core projection",
+        ("response-route.v1", "record_response_route"),
+    ),
+    OwnerSection(
+        "coding-convention/verification-before-completion/SKILL.md",
+        "references/autopilot-publication.md#apply-and-deliver",
+        "coding-convention/verification-before-completion/references/autopilot-publication.md",
+        "Apply and deliver",
+        ("delivery-route", "repair-target", "preserve_answer_and_patch_metadata",
+         "assembled_complete_payload", "corrected_complete_answer", "resolve_host_delivery"),
+    ),
+)
 
 GATE_STATE_ORDER_PATHS = [
     "AGENTS.md",
@@ -537,6 +399,48 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _owner_section(text: str, heading: str) -> str | None:
+    match = re.search(r"(?m)^(#{1,6})[ \t]+" + re.escape(heading) + r"[ \t]*$", text)
+    if match is None:
+        return None
+    body = text[match.end():]
+    end = re.search(r"(?m)^#{1," + str(len(match[1])) + r"}[ \t]+", body)
+    return body[:end.start()] if end else body
+
+
+def _check_owner_sections(root: Path) -> list[ContractIssue]:
+    issues: list[ContractIssue] = []
+    for contract in OWNER_SECTIONS:
+        consumer_path = root / contract.consumer
+        if consumer_path.is_file():
+            consumer = _read_text(consumer_path)
+            reference = f"({contract.reference})"
+            if contract.message_key is not None:
+                try:
+                    messages = json.loads(consumer)
+                    consumer = messages.get(contract.message_key) if isinstance(messages, dict) else None
+                except json.JSONDecodeError:
+                    consumer = None
+                reference = contract.reference
+            if not isinstance(consumer, str) or reference not in consumer:
+                issues.append(ContractIssue("ERROR", contract.consumer,
+                                            f"missing owner reference: {contract.reference}"))
+        owner_path = root / contract.owner
+        if not owner_path.is_file():
+            issues.append(ContractIssue("ERROR", contract.owner, "required owner file missing"))
+            continue
+        body = _owner_section(_read_text(owner_path), contract.heading)
+        if body is None:
+            issues.append(ContractIssue("ERROR", contract.owner,
+                                        f"required owner section missing: {contract.heading}"))
+            continue
+        for identifier in contract.identifiers:
+            if identifier not in body:
+                issues.append(ContractIssue("ERROR", contract.owner,
+                                            f"owner section {contract.heading} missing required identifier: {identifier}"))
+    return issues
+
+
 def _gate_state_blocks(text: str) -> list[list[str]]:
     lines = text.splitlines()
     blocks: list[list[str]] = []
@@ -627,6 +531,32 @@ def _check_legacy_tool_checkpoint_names(root: Path) -> list[ContractIssue]:
     return issues
 
 
+def _check_claude_first_turn_contract(root: Path) -> list[ContractIssue]:
+    path = root / "platforms/claude/CLAUDE.md"
+    if not path.is_file():
+        return []  # The required-file check reports this separately.
+    section = re.search(
+        r"^## (?:Claude First-Turn Contract|First-Entry Contract)\s*\n(.*?)(?=^## |\Z)",
+        _read_text(path), flags=re.MULTILINE | re.DOTALL,
+    )
+    steps = re.findall(r"^(\d+)\. (.+)$", section.group(1), flags=re.MULTILINE) if section else []
+    numbers = [int(number) for number, _ in steps]
+    actions = [action for _, action in steps]
+    intake = [index for index, action in enumerate(actions) if ("session-intent-analyzer" in action or "session-intent observation" in action) and "task-router" not in action]
+    router = [index for index, action in enumerate(actions) if "task-router" in action]
+    direct = (
+        len(intake) == len(router) == 1
+        and router[0] == intake[0] + 1
+        and re.search(r"\b(?:if|unless|block)\b", actions[router[0]], re.IGNORECASE) is None
+    )
+    if not direct or numbers != list(range(1, len(steps) + 1)):
+        return [ContractIssue(
+            "ERROR", "platforms/claude/CLAUDE.md",
+            "Claude first-turn must route directly after exact intake with consecutive steps",
+        )]
+    return []
+
+
 def run_contract_checks(root: Path) -> list[ContractIssue]:
     issues: list[ContractIssue] = []
     contract_path = root / "skill-catalog" / "session-gates.json"
@@ -639,20 +569,28 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
         issues.append(ContractIssue("ERROR", str(contract_path), f"missing contract key: {key}"))
 
     always_first = contract.get("always_first", [])
-    if "session-intent-analyzer" not in always_first:
-        issues.append(ContractIssue("ERROR", str(contract_path), "always_first must include session-intent-analyzer"))
-    if "task-router" in always_first:
-        issues.append(ContractIssue("ERROR", str(contract_path), "always_first must not put task-router before session-intent-analyzer"))
+    if always_first != ["session-intent-analyzer"]:
+        issues.append(ContractIssue("ERROR", str(contract_path),
+                                    "always_first direct intake ownership requires exactly [session-intent-analyzer]"))
 
     agent_first_after_intake = contract.get("agent_first_after_intake", [])
-    if "task-router" not in agent_first_after_intake:
-        issues.append(ContractIssue("ERROR", str(contract_path), "agent_first_after_intake must include task-router"))
+    if agent_first_after_intake != ["task-router"]:
+        issues.append(ContractIssue("ERROR", str(contract_path),
+                                    "agent_first_after_intake direct intake ownership requires exactly [task-router]"))
 
     user_input_graph = contract.get("user_input_graph", [])
+    if not isinstance(user_input_graph, list) or not all(isinstance(item, str) for item in user_input_graph):
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'user_input_graph direct intake ownership requires a list of string nodes'))
+        user_input_graph = []
+    allowed_nodes = {'merge-companion-precheck', 'session-intent-analyzer',
+                     'skill-evolution:report-only-terminal-branch', 'task-router', 'tool-checkpoint'}
+    if len(user_input_graph) != len(allowed_nodes) or set(user_input_graph) != allowed_nodes:
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'direct intake ownership forbids intermediate input policy stages'))
     expected_order = [
         "merge-companion-precheck",
         "session-intent-analyzer",
-        "jailbreak-detector",
         "task-router",
         "tool-checkpoint",
     ]
@@ -687,8 +625,20 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
         )
 
     intent_consumers = contract.get("intent_consumers", {})
+    if not isinstance(intent_consumers, dict) or set(intent_consumers) != {'session-intent-analyzer', 'skill-evolution'}:
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'intent_consumers direct intake ownership permits only intake and report-only evolution owners'))
+        if not isinstance(intent_consumers, dict):
+            intent_consumers = {}
     session_consumers = intent_consumers.get("session-intent-analyzer", [])
-    for required_consumer in ("skill-evolution", "jailbreak-detector"):
+    if not isinstance(session_consumers, list) or not all(isinstance(item, str) for item in session_consumers):
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'intent_consumers.session-intent-analyzer direct intake ownership requires a list of string consumers'))
+        session_consumers = []
+    if len(session_consumers) != 2 or set(session_consumers) != {'task-router', 'skill-evolution'}:
+        issues.append(ContractIssue('ERROR', str(contract_path),
+                                    'direct intake ownership requires only task-router and report-only skill-evolution consumers'))
+    for required_consumer in ("skill-evolution", "task-router"):
         if required_consumer not in session_consumers:
             issues.append(
                 ContractIssue(
@@ -697,7 +647,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
                     f"intent_consumers.session-intent-analyzer must include {required_consumer}",
                 )
             )
-    if "report-only-terminal-branch" not in intent_consumers.get("skill-evolution", []):
+    if intent_consumers.get("skill-evolution") != ["report-only-terminal-branch"]:
         issues.append(
             ContractIssue(
                 "ERROR",
@@ -705,12 +655,13 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
                 "intent_consumers.skill-evolution must be report-only-terminal-branch",
             )
         )
-    if "task-router" not in intent_consumers.get("jailbreak-detector", []):
+    if ("jailbreak-detector" in graph_positions or "jailbreak-detector" in intent_consumers
+            or "jailbreak-detector" in session_consumers):
         issues.append(
             ContractIssue(
                 "ERROR",
                 str(contract_path),
-                "intent_consumers.jailbreak-detector must feed task-router",
+                "retired standalone classifier must not participate in the active graph",
             )
         )
 
@@ -844,7 +795,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
             continue
         text = _read_text(path)
         if rel_path in ("install.sh", "install.ps1"):
-            # install.sh / install.ps1 are modularized: function definitions (and the governance contract strings they carry, e.g. the codex bootstrap block) now live in installer_lib/*.sh and installer_lib/*.ps1. Validate the combined installer source so required patterns are found regardless of which module now holds them.
+            # Validate the combined installer entrypoint and installer_lib modules, including their governance strings.
             ext = ".sh" if rel_path == "install.sh" else ".ps1"
             lib_dir = root / "installer_lib"
             if lib_dir.is_dir():
@@ -863,7 +814,9 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
             if re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL):
                 issues.append(ContractIssue("ERROR", rel_path, message))
 
+    issues.extend(_check_owner_sections(root))
     issues.extend(_check_gate_state_order(root))
+    issues.extend(_check_claude_first_turn_contract(root))
     issues.extend(_check_legacy_tool_checkpoint_names(root))
 
     return issues

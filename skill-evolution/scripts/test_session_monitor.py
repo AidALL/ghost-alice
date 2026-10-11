@@ -75,6 +75,16 @@ class SessionMonitorTests(unittest.TestCase):
 
         self.assertEqual(signals["scope:file-surface"]["severity"], "notice")
         self.assertEqual(signals["test:repeated-failure"]["severity"], "critical")
+        self.assertEqual(signals["scope:file-surface"]["evidence_count"], 21)
+        self.assertEqual(signals["test:repeated-failure"]["evidence_count"], 3)
+        self.assertIn("21 distinct paths observed", signals["scope:file-surface"]["message"])
+        self.assertIn("3 failures of the same command observed", signals["test:repeated-failure"]["message"])
+        for signal_id in ("scope:file-surface", "test:repeated-failure"):
+            self.assertEqual(signals[signal_id]["mode"], "report-only")
+            self.assertIn("model first evaluates whether", signals[signal_id]["message"])
+            self.assertIn("user's objective and current conditions", signals[signal_id]["message"])
+        self.assertNotIn("verify scope before continuing", rendered)
+        self.assertNotIn("switch to root-cause debugging", rendered)
         self.assertNotIn("automatically save files", rendered)
         self.assertNotIn("compact without asking the user", rendered)
 

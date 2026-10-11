@@ -1,17 +1,17 @@
-"""Completion-check validator for the Claude Stop hook.
+"""Core structural validator for completion and partial evidence controls.
 
-Validates the `[completion-check]` block of a final response. The claim-evidence-map
-honesty core (claim + evidence + verdict, unverified=none) is always required; the
-separate acceptance-criteria enumeration is optional.
+Validates final `[completion-check]` and scoped `[partial-check]` evidence.
+Both require claim + evidence + pass/fail verdict. Finalized completion requires
+unverified=none; partial reports require declared unresolved criterion IDs and
+scope=partial. The caller and Core assessment own semantic claim scope.
 
 Public API:
     validate_completion_text(text, require_completion_check=False) -> str | None
-        Returns None when `text` is valid or is not a completion claim,
-        otherwise the deny-reason string.
+        Returns None when structural controls satisfy the supplied requirement,
+        otherwise the diagnostic string.
 
 Helpers are exposed as module-level snake_case functions for unit testing:
     strip_control_blocks, extract_control_block, looks_like_completion_claim,
-    requires_completion_check,
     extract_top_level_field_section, section_is_none,
     extract_acceptance_criteria_ids, extract_claim_evidence_entries,
     validate_completion_evidence_map
@@ -26,20 +26,13 @@ _CONTROL_BLOCKS = frozenset(
     {"tool-checkpoint", "gate-state", "task-router", "boundary-contract", "io-trace"}
 )
 
-# Block header `^\[([a-z0-9-]+)\]`, case-insensitive. The position variant tolerates leading whitespace so an indented header is still located, keeping it consistent with extract_control_block (which matches on the stripped line). A mismatch here previously yielded zero positions for an indented header and crashed the position lookup with IndexError.
+# Match block headers case-insensitively and allow leading whitespace so position lookup agrees with control-block extraction.
 _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
-_BLOCK_HEADER_POSITION_RE = re.compile(r"^[ \t]*\[([a-z0-9-]+)\]", re.I | re.M)
 
 # Split on \r?\n only; splitlines() would also split on other Unicode line boundaries, which we do not want here.
 _NEWLINE_SPLIT_RE = re.compile(r"\r?\n")
 
-# Explicit claim detection is marker-only ([completion-check]). Mandatory final block mode also uses a narrow executed-work closure detector so routine explanations do not become completion-check retry loops.
-
-_VERIFICATION_DONE_RE = re.compile(r"-\s*verification-before-completion:\s*done\b")
-_SKILL_CALL_RE = re.compile(r"-\s*skill-call:\s*([^\n]+)")
-# skills-loaded accepts three equivalent serializations (inline CSV, flow-list `[...]`, or a nested bullet list). The header line is matched here; token extraction and nested-list collection happen in extract_skills_loaded().
-_SKILLS_LOADED_HEADER_RE = re.compile(r"^\s*-?\s*skills-loaded\s*:\s*(.*)$", re.I)
-_ZERO_WIDTH_RE = re.compile("[​‌‍‎‏﻿]")
+# Evidence detection recognizes structural control markers only. The caller supplies any mandatory evidence requirement.
 
 _TOP_LEVEL_FIELD_RE = re.compile(r"^-\s*[A-Za-z0-9_-]+\s*:")
 # Acceptance-criteria id: a leading `- <id>:` on each line.
@@ -50,107 +43,30 @@ _ENTRY_FIELD_RE = re.compile(r"^\s*(criterion|evidence|verdict)\s*:\s*(.*?)\s*$"
 # Exactly `none` or `- none`, case-insensitive; never a prefix of pending work.
 _NONE_LINE_RE = re.compile(r"^(?:-\s*)?none\s*$", re.I)
 
-# A completion noun is not an executed-work assertion (e.g. "작업 완료 시간",
-# "작업 간 완료 의존관계"). Require an assertive predicate, or a bare status at
-# clause end. The Korean boundary prevents a past stem inside a hypothetical
-# modifier ("완료했을 때") from becoming an assertion.
-_KOREAN_ASSERTED_END = (
-    r"(?:했(?:습니다|어요|다|음|고|으며)?|하였(?:습니다|다|음)|"
-    r"됐(?:습니다|어요|다|음|고)?|되었(?:습니다|다|음|고)|되었습니다|"
-    r"함|됨|입니다|임)(?![가-힣])"
-)
-_KOREAN_STATUS_END = (
-    r"(?:" + _KOREAN_ASSERTED_END
-    + r"|\s*(?:된\s*상태|상태)(?:입니다|다|임)(?![가-힣])|(?=\s*(?:$|;)))"
-)
-
 _VALID_VERDICTS = ("pass", "fail", "unverified")
-_EXECUTED_WORK_CLAIM_PATTERNS = (
-    re.compile(
-        r"\b(?:the\s+)?(?:requested\s+)?(?:work|task|change|fix|implementation|"
-        r"request|issue|bug)\s+(?:is\s+)?(?:complete|completed|done|fixed|"
-        r"resolved|implemented)\b",
-        re.I,
-    ),
-    re.compile(
-        r"\b(?:i\s+)?(?:completed|finished|fixed|resolved|implemented)\s+"
-        r"(?:the\s+)?(?:requested\s+)?(?:work|task|change|fix|request|issue|bug)\b",
-        re.I,
-    ),
-    re.compile(r"\b(?:all\s+)?tests?\s+(?:pass|passed|green)\b", re.I),
-    re.compile(r"\b(?:build|lint|typecheck|test\s+suite)\s+(?:succeeded|passed|is\s+clean)\b", re.I),
-    re.compile(r"(?:작업|변경|수정|구현|요청|이슈|버그).{0,12}(?:완료|끝남|해결|반영)" + _KOREAN_STATUS_END),
-    re.compile(r"(?:테스트|빌드|린트|타입체크).{0,12}(?:통과|성공|깨끗)" + _KOREAN_STATUS_END),
-    re.compile(r"(?:완료|수정|구현|해결|반영)" + _KOREAN_ASSERTED_END + r"|(?:끝냈|고쳤)(?:습니다|다)"),
-)
 
-# Spans that are quotation or code, not the model's own assertion. Stripped before executed-work detection so illustrative output, quoted user text, and fenced examples do not trigger a spurious completion-check demand.
-_FENCED_CODE_RE = re.compile(r"```.*?```", re.S)
-_INLINE_CODE_RE = re.compile(r"`[^`]*`")
-# Single-quoted spans only count when the quotes sit on word boundaries, so an ordinary contraction apostrophe (won't, don't, y'all) is not mistaken for a quotation delimiter and does not swallow a real claim between two contractions.
+# Structural Markdown examples do not introduce actual control blocks.
+_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})([^\n]*)$")
+_QUOTE_LINE_RE = re.compile(r"^ {0,3}>[ \t]?(.*)$")
+_LIST_ITEM_RE = re.compile(r"^ *(?:[*+-]|[0-9]{1,9}[.)])[ \t]+")
+_PARAGRAPH_BREAK_RE = re.compile(
+    r"^ {0,3}(?:#{1,6}(?:[ \t]|$)|(?:[*+-]|1[.)])[ \t]+|"
+    r"(?:[-*_][ \t]*){3,}$|(?:=+|-+)[ \t]*$|<[!/A-Za-z])"
+)
+# Reserve balanced inline quotation delimiters at word boundaries before masking multiline examples.
 _QUOTED_SPAN_RE = re.compile(
     "(?<![A-Za-z0-9])'[^'\n]*'(?![A-Za-z0-9])"
     "|\"[^\"\n]*\""
     "|(?<![A-Za-z0-9])‘[^’\n]*’(?![A-Za-z0-9])"
     "|“[^”\n]*”"
 )
-
-# Executed-work detection runs per clause. Two lead families are exempt, with different governance scope:
-#   - GOAL / enumeration leads (goal, acceptance criteria, todo, next steps,
-# plan, ...) introduce a list and govern the WHOLE sentence, so a comma-separated goal list ("Goal: tests pass, lint is clean") is exempt.
-#   - CONDITIONAL leads (if, once, when, ...) govern only their own protasis, so
-#     the asserted main clause after the comma ("If you're curious, I fixed it")
-#     is still checked.
-# Sentences split on . ! ? and newlines; within a sentence, clauses split on
-# commas. ";" and ":" are deliberately NOT split points so a goal lead governs an
-# enumeration across them ("Acceptance criteria: all tests pass; not there yet").
-# A clause that negates the closure verb is also exempt. The ambiguous temporal
-# leads after/before/until are intentionally absent: they usually introduce an
-# asserted main clause ("After much effort the task is complete"), not a
-# hypothetical.
-_SENTENCE_SPLIT_RE = re.compile(r"[\n.!?]+")
-_COMMA_SPLIT_RE = re.compile(r",+")
-_GOAL_LEAD_RE = re.compile(
-    r"^\s*(?:[>*\-]|\d+[.)])?\s*"
-    r"(?:goal|goals|aim|aims|objective|objectives|target|targets|"
-    r"acceptance\s+criteria|criteria|todo|to-?do|next\s+steps?|"
-    r"plan|plans|remaining|pending)\b"
-    r"|^\s*(?:목표|예정)",
-    re.I,
-)
-_CONDITIONAL_LEAD_RE = re.compile(
-    r"^\s*(?:[>*\-]|\d+[.)])?\s*"
-    r"(?:if|once|when|whenever|unless|as\s+soon\s+as)\b"
-    r"|^\s*만약",
-    re.I,
-)
-_NEGATED_CLOSURE_RE = re.compile(
-    r"\b(?:not|never|isn['’]?t|aren['’]?t|wasn['’]?t|weren['’]?t|won['’]?t|"
-    r"cannot|can['’]?t|don['’]?t|doesn['’]?t|didn['’]?t|no\s+longer)\s+"
-    r"(?:yet\s+|fully\s+|completely\s+|quite\s+)*"
-    r"(?:complete|completed|done|fixed|resolved|implemented|passing|pass|"
-    r"passed|green|clean|succeed|succeeded)\b"
-    r"|\bnot\s+there\s+yet\b|\bnot\s+yet\b"
-    r"|아직|않았|않은|않고"
-    # Korean negation is post-verbal ("완료되지 않았다" = is NOT complete), so the closure word survives if only the negation particle is removed. Match the closure word together with its trailing negation so the whole span is stripped and the executed-work pattern no longer sees a bare "작업...완료".
-    r"|(?:완료|끝냈|끝남|고쳤|해결|반영|통과|성공|깨끗)"
-    r"[^\n.!?;,]{0,6}(?:않|안\s|아니|아닙|하지\s*못|되지\s*못|못했|못했다|못했습니다|볼\s*수[^\n.!?;,]{0,8}없)",
-    re.I,
-)
-_HONEST_NEGATIVE_STATUS_RE = re.compile(
-    r"\b(?:have|has|had)\s+not\s+(?:verified?|confirmed?|checked|proven)\b"
-    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
-    r"|\b(?:haven['’]?t|hasn['’]?t|hadn['’]?t)\s+(?:verified?|confirmed?|checked|proven)\b"
-    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
-    r"|\b(?:do|does|did)\s+not\s+(?:think|believe|claim|say)\b"
-    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
-    r"|\b(?:don['’]?t|doesn['’]?t|didn['’]?t)\s+(?:think|believe|claim|say)\b"
-    r"[^\n.!?;,]{0,80}\b(?:tests?\s+)?(?:pass(?:ed|ing)?|complete|completed|done|fixed|resolved|clean|green)\b"
-    r"|(?:완료|통과|성공|해결|반영)[^\n.!?;,]{0,24}(?:여부|라고|했다고|한\s*것|된\s*것)"
-    r"[^\n.!?;,]{0,24}(?:말할\s*수[^\n.!?;,]{0,12}없|확인하지\s*못|검증하지\s*못|보기\s*어렵|볼\s*수[^\n.!?;,]{0,8}없|아니|아닙)"
-    r"|(?:말할\s*수[^\n.!?;,]{0,12}없|확인하지\s*못|검증하지\s*못|보기\s*어렵)[^\n.!?;,]{0,40}"
-    r"(?:완료|통과|성공|해결|반영)",
-    re.I,
+# Multiline examples use balanced matching delimiters. Same-delimiter nesting
+# and apostrophes inside words are ambiguous, so they remain visible to checks.
+_MULTILINE_QUOTED_SPAN_RE = re.compile(
+    r"(?<![A-Za-z0-9\\])'[^']*\n[^']*'(?![A-Za-z0-9])"
+    r'|(?<![A-Za-z0-9\\])"[^"]*\n[^"]*"(?![A-Za-z0-9])'
+    "|‘[^‘’]*\n[^‘’]*’"
+    "|“[^“”]*\n[^“”]*”"
 )
 
 
@@ -158,21 +74,216 @@ def _split_lines(text):
     return _NEWLINE_SPLIT_RE.split("" if text is None else str(text))
 
 
-def _strip_noncommittal_spans(text):
-    """Drop fenced/inline code, blockquotes, and quoted spans.
+def _consume_quote_container_prefixes(body, containers):
+    """Consume the expected frames, leaving literal code payload untouched."""
+    matched = []
+    for kind, width in containers:
+        if kind == "quote":
+            quote = _QUOTE_LINE_RE.match(body)
+            if quote is None:
+                return body, tuple(matched), False
+            body = quote.group(1)
+        else:
+            indentation = len(body) - len(body.lstrip(" "))
+            if indentation < width:
+                return body, tuple(matched), False
+            body = body[width:]
+        matched.append((kind, width))
+    return body, tuple(matched), True
 
-    These carry illustrative or reported content, not the model's own
-    executed-work assertion, so they must not trigger completion detection.
+
+def _quoted_leaf_content(body, paragraph_open=False, containers=()):
+    """Find the paragraph leaf inside demonstrated quote/list containers.
+
+    CommonMark 0.31.2 sections 5.1/5.2 and Example 292 permit lazy paragraph
+    continuation through those containers, but not through code or headings.
     """
-    text = _FENCED_CODE_RE.sub(" ", "" if text is None else str(text))
-    text = _INLINE_CODE_RE.sub(" ", text)
-    kept = [line for line in _split_lines(text) if not line.lstrip().startswith(">")]
-    text = "\n".join(kept)
-    return _QUOTED_SPAN_RE.sub(" ", text)
+    if not body.strip():
+        return "", containers
+    original = body
+    body, matched, complete = _consume_quote_container_prefixes(body, containers)
+    if (not complete and paragraph_open and not _FENCE_OPEN_RE.match(original)
+            and not _PARAGRAPH_BREAK_RE.match(original) and not _QUOTE_LINE_RE.match(original)):
+        # Existing paragraph leaves may omit container prefixes lazily.
+        frames = list(containers)
+    else:
+        frames = list(matched)
+        if not complete:
+            paragraph_open = False
+    while body.strip():
+        indentation = len(body) - len(body.lstrip(" "))
+        if indentation >= 4:
+            # Indented code cannot interrupt an existing paragraph.
+            return (body if paragraph_open else ""), tuple(frames)
+        if re.fullmatch(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", body):
+            return "", tuple(frames)
+        nested = _QUOTE_LINE_RE.match(body)
+        if nested is not None:
+            frames.append(("quote", 0))
+            body = nested.group(1)
+            continue
+        item = _LIST_ITEM_RE.match(body)
+        if item is not None:
+            padding = len(item.group(0)) - len(item.group(0).rstrip(" \t"))
+            end = item.end() if padding <= 4 else item.end() - padding + 1
+            frames.append(("list", end))
+            body = body[end:]
+            paragraph_open = False
+            continue
+        return body, tuple(frames)
+    return "", tuple(frames)
+
+
+def _strip_block_examples(text):
+    """Mask Markdown examples while retaining prose and real control fields.
+
+    Fence delimiters must occupy a line, use the same character, and close with
+    at least the opening length. Indented code starts at a paragraph boundary;
+    indentation within real control records remains data. Blockquote paragraphs
+    may continue lazily without a repeated marker, until a blank or new block.
+    Keep line boundaries so examples cannot join otherwise separate assertions.
+    """
+    kept = []
+    fence = None
+    indented = False
+    paragraph = False
+    quote_paragraph = False
+    quote_containers = ()
+    quoted_fence = None
+    control_fields = False
+    list_indent = 0
+    for line in _split_lines(text):
+        expanded = line.expandtabs(4)
+        blank = not line.strip()
+        indentation = len(expanded) - len(expanded.lstrip(" "))
+        if fence is not None:
+            char, length, container_indent = fence
+            if container_indent and not blank and indentation < container_indent:
+                # A list container ending also ends its unclosed example fence.
+                fence = None
+                list_indent = 0
+                paragraph = False
+            else:
+                content = expanded[container_indent:]
+                if re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(length) + r",}[ \t]*", content):
+                    fence = None
+                kept.append("")
+                continue
+        quote = _QUOTE_LINE_RE.match(expanded)
+        if quote:
+            body = quote.group(1)
+            if quoted_fence is not None:
+                char, length, fence_containers = quoted_fence
+                closing, _, complete = _consume_quote_container_prefixes(body, fence_containers)
+                if not complete:
+                    # The prior code leaf ended with its container, rather than
+                    # being closed by a delimiter in a different container.
+                    quoted_fence = None
+                    quote_containers = fence_containers
+                elif re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(length) + r",}[ \t]*", closing):
+                    quoted_fence = None
+                    quote_containers = fence_containers
+                    quote_paragraph = False
+                    paragraph = False
+                    control_fields = False
+                    list_indent = 0
+                    kept.append("")
+                    continue
+                else:
+                    # Normalize only the known container frames: any further
+                    # quote/list markers are literal fence contents.
+                    quote_paragraph = False
+                    kept.append("")
+                    continue
+                quote_paragraph = False
+            leaf, quote_containers = _quoted_leaf_content(body, quote_paragraph, quote_containers)
+            opener = _FENCE_OPEN_RE.match(leaf)
+            if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+                quoted_fence = opener.group(1)[0], len(opener.group(1)), quote_containers
+            quote_paragraph = bool(leaf.strip()) and not opener and not _PARAGRAPH_BREAK_RE.match(leaf)
+            paragraph = False
+            control_fields = False
+            list_indent = 0
+            kept.append("")
+            continue
+        # Missing quote markers cannot lazily continue a fenced code leaf.
+        quoted_fence = None
+        if quote_paragraph:
+            if not blank and not _FENCE_OPEN_RE.match(expanded) and not _PARAGRAPH_BREAK_RE.match(expanded):
+                kept.append("")
+                continue
+            quote_paragraph = False
+        quote_containers = ()
+        if blank:
+            paragraph = False
+            kept.append("")
+            continue
+        if indentation < list_indent:
+            list_indent = 0
+        code_indentation = indentation - list_indent
+        if indented:
+            if code_indentation >= 4:
+                kept.append("")
+                continue
+            indented = False
+        # A control record's nested fields are evidence data, not code examples.
+        if control_fields and re.match(r"^\s*(?:-\s+|[A-Za-z0-9_-]+\s*:)", line):
+            kept.append(line)
+            paragraph = True
+            continue
+        control_fields = False
+        if code_indentation >= 4 and not paragraph:
+            indented = True
+            kept.append("")
+            continue
+        list_item = _LIST_ITEM_RE.match(expanded)
+        if list_item is not None:
+            list_indent = list_item.end()
+        content = expanded[list_indent:] if list_indent else expanded
+        opener = _FENCE_OPEN_RE.match(content)
+        if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
+            fence = opener.group(1)[0], len(opener.group(1)), list_indent
+            paragraph = False
+            kept.append("")
+            continue
+        header = _BLOCK_HEADER_RE.match(line.strip())
+        control_fields = bool(header and (header.group(1).lower() in _CONTROL_BLOCKS
+                                          or header.group(1).lower() in {"completion-check", "partial-check"}))
+        kept.append(line)
+        paragraph = bool(content.strip()) and not _PARAGRAPH_BREAK_RE.match(content)
+    return _mask_multiline_quoted_examples("\n".join(kept))
+
+
+def _mask_multiline_quoted_examples(text):
+    """Mask balanced quoted examples, retaining outside text and line breaks.
+
+    Reserve complete inline quotation boundaries before considering multiline
+    examples. Neither endpoint of an existing inline span may be repurposed.
+    Keep their original text, including evidence in actual control fields.
+    Multiline exclusion requires an explicit quote opening at a line boundary;
+    ambiguous prose spans remain visible to normal validation.
+    """
+    inline_boundaries = {position for inline in _QUOTED_SPAN_RE.finditer(text)
+                         for position in (inline.start(), inline.end() - 1)}
+    def mask(match):
+        span = match.group(0)
+        if match.start() in inline_boundaries or match.end() - 1 in inline_boundaries:
+            return span
+        opening_prefix = text[:match.start()].rsplit("\n", 1)[-1]
+        if opening_prefix.strip():
+            return span
+        if span[0] in ("'", '"'):
+            closing_prefix = span[:-1].rsplit("\n", 1)[-1]
+            if closing_prefix and closing_prefix[-1].isspace() and closing_prefix.strip():
+                return span
+            if closing_prefix.endswith("\\"):
+                return span
+        return re.sub(r"[^\r\n]", " ", span)
+    return _MULTILINE_QUOTED_SPAN_RE.sub(mask, text)
 
 
 def strip_control_blocks(text):
-    """Remove control blocks so claim detection ignores their contents.
+    """Remove structural control blocks while preserving surrounding text.
 
     A control block starts at a `[name]` header whose name is in
     `_CONTROL_BLOCKS` and ends at the first blank line or a line that is
@@ -195,86 +306,37 @@ def strip_control_blocks(text):
     return "\n".join(kept)
 
 
-def extract_control_block(text, name):
-    """Return the body of the named `[name]` block.
+def _control_headers(text):
+    """Locate real headers once; offsets always refer to the original text."""
+    raw = "" if text is None else str(text)
+    offsets = [0] + [match.end() for match in _NEWLINE_SPLIT_RE.finditer(raw)]
+    for index, line in enumerate(_split_lines(_strip_block_examples(raw))):
+        match = _BLOCK_HEADER_RE.match(line.strip())
+        if match:
+            yield match.group(1).lower(), index, offsets[index]
 
-    Keeps lines after the matching header until the next `[header]` line,
-    then strips surrounding whitespace.
-    """
-    lines = _split_lines(text)
-    wanted = ("" if name is None else str(name)).lower()
-    kept = []
-    in_block = False
-    for line in lines:
-        block = _BLOCK_HEADER_RE.match(line.strip())
-        if block:
-            if in_block:
-                break
-            if block.group(1).lower() == wanted:
-                in_block = True
-            continue
-        if in_block:
-            kept.append(line)
-    return "\n".join(kept).strip()
+
+def extract_control_block(text, name):
+    """Return the first real named block body; Markdown examples are excluded."""
+    blocks = extract_all_control_blocks(text, name)
+    return blocks[0] if blocks else ""
 
 
 def find_control_block_positions(text, name):
-    """Return start offsets for `[name]` headers."""
+    """Return original start offsets for real named headers."""
     wanted = ("" if name is None else str(name)).lower()
-    return [
-        match.start()
-        for match in _BLOCK_HEADER_POSITION_RE.finditer("" if text is None else str(text))
-        if match.group(1).lower() == wanted
-    ]
+    return [offset for marker, _, offset in _control_headers(text) if marker == wanted]
 
 
 def looks_like_completion_claim(text):
-    """True only when a real `[completion-check]` block header is present.
-
-    A header is a line whose stripped form begins with the `[completion-check]`
-    token. A mere inline prose mention of the token (for example, explaining what
-    the block contains) does not count, so meta-discussion is not mistaken for a
-    completion claim. Substring keyword matching of intent is intentionally NOT
-    used: it false-positives and string-matching intent is unreliable.
-    """
-    for line in _split_lines(text):
-        match = _BLOCK_HEADER_RE.match(line.strip())
-        if match and match.group(1).lower() == "completion-check":
-            return True
-    return False
+    """A real completion control declares completion; prose does not."""
+    return bool(find_control_block_positions(text, "completion-check"))
 
 
-def requires_completion_check(text):
-    """True when text makes an executed-work closure claim without the marker.
-
-    This is intentionally narrower than ordinary recommendation or explanation
-    detection. It protects claims that work finished or verification passed, but
-    avoids blocking routine meta-discussion, options, or status explanations.
-
-    Detection runs per clause on text with control blocks and non-committal
-    spans (code, quotes, blockquotes) removed, and skips clauses that are
-    hypothetical / goal-framing or that negate the closure verb, so future,
-    conditional, quoted, and illustrative phrasing does not trigger the gate.
-    """
-    cleaned = _strip_noncommittal_spans(strip_control_blocks(text))
-    for sentence in _SENTENCE_SPLIT_RE.split(cleaned):
-        if not sentence.strip():
-            continue
-        clauses = _COMMA_SPLIT_RE.split(sentence)
-        # A goal / enumeration lead at the sentence start governs the whole list.
-        if clauses and _GOAL_LEAD_RE.search(clauses[0]):
-            continue
-        for clause in clauses:
-            if not clause.strip():
-                continue
-            # A conditional lead governs only its own protasis clause.
-            if _CONDITIONAL_LEAD_RE.search(clause):
-                continue
-            claim_clause = _HONEST_NEGATIVE_STATUS_RE.sub(" ", clause)
-            claim_clause = _NEGATED_CLOSURE_RE.sub(" ", claim_clause)
-            if any(pattern.search(claim_clause) for pattern in _EXECUTED_WORK_CLAIM_PATTERNS):
-                return True
-    return False
+def looks_like_evidence_claim(text):
+    """A real completion or partial control declares an evidence submission."""
+    return any(marker in {"completion-check", "partial-check"}
+               for marker, _, _ in _control_headers(text))
 
 
 def extract_top_level_field_section(block, field_name):
@@ -390,229 +452,213 @@ def extract_claim_evidence_entries(completion_check):
     return entries
 
 
-def validate_completion_evidence_map(completion_check):
-    """Validate the claim-evidence-map honesty core, with optional acceptance-criteria.
+def validate_completion_evidence_map(completion_check, *, partial=False):
+    """Validate declared claim/evidence rows and full or partial control shape.
 
-    The claim-evidence-map (claim + evidence + verdict, unverified=none) is always
-    required. The separate acceptance-criteria enumeration is optional: when it is
-    present (full form) every entry must bind to a known criterion id; when it is
-    absent (compact form) the criterion reference is optional. This lets a turn
-    with no semantic intent delta drop the duplicated acceptance-criteria block
-    while keeping each claim bound to fresh evidence and a verdict.
+    Full completion requires unverified=none. Partial evidence requires unique
+    declared criteria, scope=partial and explicit unresolved criterion reasons.
+    The display parser also accepts compact full controls without declarations;
+    original-proof parsing requires criterion IDs, and native completion uses
+    completion_assessment.py to authenticate the assistant's recorded judgment
+    and exact response binding. The current-session assistant must still judge
+    whether the evidence satisfies the user's criteria.
 
-    Returns a deny-reason string on the first failure, else None.
+    Return all independent defects in one diagnostic, else None. Reporting a
+    later defect never requires the model to submit another malformed block.
     """
-    for name in ("acceptance-criteria", "claim-evidence-map", "unverified"):
+    issues = []
+    marker = "partial-check" if partial else "completion-check"
+    for name in ("acceptance-criteria", "claim-evidence-map", "unverified", "scope"):
         headers = re.findall(r"^-\s*" + re.escape(name) + r"\s*:", completion_check, re.I | re.M)
         if len(headers) > 1:
-            return f"[completion-check] must not contain duplicate {name} sections."
+            issues.append(f"[{marker}] must not contain duplicate {name} sections.")
     entries = extract_claim_evidence_entries(completion_check)
     if len(entries) == 0:
-        return "[completion-check] must include non-empty claim-evidence-map."
+        issues.append(f"[{marker}] must include non-empty claim-evidence-map.")
 
     acceptance_ids = extract_acceptance_criteria_ids(completion_check)
     acceptance_id_set = set(acceptance_ids)
     full_form = len(acceptance_ids) > 0
+    if partial:
+        if not full_form or len(acceptance_ids) != len(acceptance_id_set):
+            issues.append("[partial-check] must declare nonempty, unique acceptance-criteria IDs.")
+        if extract_top_level_field_section(completion_check, "scope").strip() != "partial":
+            issues.append("[partial-check] requires scope: partial.")
     for entry in entries:
         if entry.get("_invalid"):
-            return entry["_invalid"]
+            issues.append(entry["_invalid"])
         if not entry.get("claim"):
-            return "Every claim-evidence-map entry must include a non-empty claim."
+            issues.append("Every claim-evidence-map entry must include a non-empty claim.")
         if full_form:
             criterion = entry.get("criterion") or ""
             # Every explicitly referenced ID must be declared, regardless of the list delimiter.
             criterion_ids = [token for token in re.split(r"[,;\s]+", criterion.strip()) if token]
             if not criterion_ids or any(token not in acceptance_id_set for token in criterion_ids):
-                return "Every claim-evidence-map entry must reference an acceptance-criteria criterion id."
+                issues.append("Every claim-evidence-map entry must reference an acceptance-criteria criterion id.")
         if not entry.get("evidence"):
-            return "Every claim-evidence-map entry must include evidence."
+            issues.append("Every claim-evidence-map entry must include evidence.")
         verdict = entry.get("verdict", "").lower()
         if not verdict:
-            return "Every claim-evidence-map entry must include verdict: pass | fail | unverified."
-        if verdict not in _VALID_VERDICTS:
-            return (
+            issues.append("Every claim-evidence-map entry must include verdict: pass | fail.")
+        elif verdict not in _VALID_VERDICTS:
+            issues.append(
                 "Invalid verdict value in claim-evidence-map. Write verdict: pass or verdict: fail "
                 "on its own line, without punctuation, quotes, or commentary. If the claim is "
-                "unverified, report partial state without a finalized [completion-check]."
+                "unverified, keep it in [partial-check] unverified instead of claiming a verdict."
             )
         if verdict == "unverified":
-            return (
-                "A finalized [completion-check] cannot contain an 'unverified' verdict. " "Verify the claim to pass/fail, or report partial state in prose " "without a [completion-check] block."
+            issues.append(
+                "Evidence entries cannot contain an 'unverified' verdict. Verify the claim to pass/fail, "
+                "or name the unresolved criterion in [partial-check] unverified."
             )
 
     unverified_section = extract_top_level_field_section(completion_check, "unverified")
-    if not unverified_section:
-        return "[completion-check] must include an unverified section."
-    if not section_is_none(unverified_section):
-        return (
-            "A finalized [completion-check] requires the unverified section to be 'none'. " "If items remain unverified, report partial state in prose instead of finalizing."
+    if partial:
+        unresolved = extract_partial_unverified_ids(completion_check)
+        lines = [line.strip() for line in _split_lines(unverified_section) if line.strip()]
+        if (not lines or len(unresolved) != len(lines) or len(set(unresolved)) != len(unresolved)
+                or any(key not in acceptance_id_set for key in unresolved)):
+            issues.append("[partial-check] requires nonempty unverified entries as '- criterion-id: reason' using declared IDs.")
+        covered = {token for entry in entries for token in re.split(r"[,;\s]+", entry.get("criterion", "")) if token}
+        if acceptance_id_set - covered - set(unresolved):
+            issues.append("Every [partial-check] criterion must have a verdict or an explicit unverified reason.")
+    elif not unverified_section:
+        issues.append("[completion-check] must include an unverified section.")
+    elif not section_is_none(unverified_section):
+        issues.append(
+            "A finalized [completion-check] requires the unverified section to be 'none'. " "If items remain unverified, use [partial-check] for supported claims and unresolved criterion IDs instead of finalizing."
         )
-    return None
+    return " ".join(dict.fromkeys(issues)) if issues else None
 
 
-def _split_skill_tokens(raw):
-    """Split a skills-loaded value into normalized skill tokens.
+def extract_partial_unverified_ids(block):
+    """Return explicit unresolved criterion IDs; malformed entries remain invalid."""
+    section = extract_top_level_field_section(block, "unverified")
+    return [match.group(1) for line in _split_lines(section)
+            if (match := re.fullmatch(r"\s*-\s*([A-Za-z0-9_.=-]+)\s*:\s*(\S.*?)\s*", line))]
 
-    Accepts comma-, semicolon- or newline-separated values; strips surrounding brackets,
-    quotes, whitespace, and zero-width characters so that visually-identical
-    values do not produce false negatives.
+
+def extract_original_proof(text):
+    """Return the single real proof with its original bytes and line endings."""
+    raw = "" if text is None else str(text)
+    starts = [(index, offset) for marker, index, offset in _control_headers(raw)
+              if marker in {"completion-check", "partial-check"}]
+    if len(starts) != 1:
+        raise ValueError('Exactly one original completion or partial proof is required')
+    index, start = starts[0]
+    offsets = [0] + [match.end() for match in _NEWLINE_SPLIT_RE.finditer(raw)]
+    lines = _split_lines(raw)
+    end = len(raw)
+    for current in range(index + 1, len(lines)):
+        line = lines[current]
+        if line.strip() and not (line[:1].isspace() or line.startswith('- ')):
+            end = offsets[current]
+            break
+    return raw[start:end].rstrip()
+
+
+def parse_original_completion_evidence(evidence_text, *, allow_partial=False, allow_failed_completion=False):
+    """Interpret an original qualified proof for publication and retained claims.
+
+    This parser checks structure. The current-session assistant judges claims
+    against original sources; completion_assessment.py authenticates that record.
+    Criterion IDs and pass rows alone do not establish semantic support.
+    allow_failed_completion permits a full failure report through this parser.
+    Failed criteria never enter criterion_ids; publication defaults to all-pass.
     """
-    tokens = []
-    for part in re.split(r"[,;\n]+", raw):
-        token = _ZERO_WIDTH_RE.sub("", part).strip().strip("[]").strip().strip("\"'").strip()
-        if token:
-            tokens.append(token)
-    return tokens
-
-
-def _skill_name(token):
-    """Bare skill name: the leading component before any space or annotation.
-
-    ``verification-before-completion (this turn)`` -> ``verification-before-completion``
-    while a different skill such as ``verification-before-completion-v2`` keeps its
-    suffix and therefore does not match the canonical name on exact comparison.
-    """
-    return re.split(r"[\s(]", token, maxsplit=1)[0].strip().rstrip(":.").lower()
+    markers = [name for name, _, _ in _control_headers(evidence_text)
+               if name in {"completion-check", "partial-check"}]
+    if len(markers) != 1:
+        raise ValueError("Original proof requires exactly one completion or partial control")
+    partial = markers[0] == "partial-check"
+    if partial and not allow_partial:
+        raise ValueError("Original partial proof requires an allowed partial-check")
+    problem = validate_completion_evidence_map(evidence_text, partial=partial)
+    if problem:
+        raise ValueError(problem)
+    acceptance_ids = set(extract_acceptance_criteria_ids(evidence_text))
+    if not acceptance_ids:
+        raise ValueError("Original evidence requires qualified acceptance criterion IDs")
+    if partial:
+        declarations = [line for line in extract_top_level_field_section(
+            evidence_text, "acceptance-criteria").splitlines() if line.strip()]
+        if (len(declarations) != len(acceptance_ids)
+                or any(not re.fullmatch(r"\s*-\s*[A-Za-z0-9_.=-]+\s*:\s*\S.*", line)
+                       for line in declarations)):
+            raise ValueError("Partial acceptance criteria require unique exact IDs and descriptions")
+        # The ordinary display parser tolerates commentary. Original partial
+        # evidence has a closed field vocabulary, so unknown rows fail closed.
+        for raw in extract_top_level_field_section(evidence_text, "claim-evidence-map").splitlines():
+            for line in _split_entry_fields(raw):
+                if line.strip() and not (_CLAIM_RE.match(line) or _ENTRY_FIELD_RE.match(line)):
+                    raise ValueError("Partial claim-evidence-map contains an unrecognized field")
+    entries = extract_claim_evidence_entries(evidence_text)
+    criterion_ids, failed_ids = [], set()
+    for entry in entries:
+        bound = [token for token in re.split(r"[,;\s]+", entry['criterion']) if token]
+        verdict = entry['verdict']
+        if partial or allow_failed_completion:
+            if verdict not in {'pass', 'fail'}:
+                raise ValueError("Evidence verdicts must be bare pass or fail")
+            if verdict == 'fail':
+                failed_ids.update(bound)
+        elif verdict.lower() != 'pass':
+            raise ValueError("Original completion evidence verdicts must all be pass")
+        criterion_ids.extend(key for key in bound if key not in criterion_ids)
+    if partial:
+        unresolved = set(extract_partial_unverified_ids(evidence_text))
+        return dict(claims=entries, criterion_ids=[key for key in criterion_ids
+            if key not in failed_ids | unresolved], scope='partial',
+            acceptance_ids=sorted(acceptance_ids), unverified_ids=sorted(unresolved))
+    return dict(claims=entries, criterion_ids=[key for key in criterion_ids if key not in failed_ids])
 
 
 def extract_all_control_blocks(text, name):
-    """Return every `[name]` block body in document order.
-
-    Unlike ``extract_control_block`` (first block only), this collects all
-    occurrences so that a malformed later block cannot hide behind a valid
-    earlier one.
-    """
-    lines = _split_lines(text)
+    """Return all real named block bodies using the same header boundaries."""
+    visible = _split_lines(_strip_block_examples(text))
+    headers = list(_control_headers(text))
     wanted = ("" if name is None else str(name)).lower()
     blocks = []
-    current = None
-    for line in lines:
-        block = _BLOCK_HEADER_RE.match(line.strip())
-        if block:
-            if current is not None:
-                blocks.append("\n".join(current).strip())
-                current = None
-            if block.group(1).lower() == wanted:
-                current = []
-            continue
-        if current is not None:
-            current.append(line)
-    if current is not None:
-        blocks.append("\n".join(current).strip())
+    for position, (marker, line, _) in enumerate(headers):
+        if marker == wanted:
+            end = headers[position + 1][1] if position + 1 < len(headers) else len(visible)
+            blocks.append("\n".join(visible[line + 1:end]).strip())
     return blocks
 
 
-def extract_skills_loaded(io_trace, *, field="skills-loaded"):
-    """Return skill tokens from an io-trace `skills-loaded` field.
+def validate_completion_text(text, *, require_completion_check=False):
+    """Validate finalized or scoped partial evidence.
 
-    Accepts three equivalent serializations so the gate is format-agnostic:
-      - inline list:  ``- skills-loaded: a, b`` or ``a; b``
-      - flow list:    ``- skills-loaded: [a, b]``
-      - nested list:  ``- skills-loaded:`` then indented ``  - a`` / ``  - b`` lines
+    Returns None when all structural checks pass, otherwise a diagnostic.
+    `require_completion_check` is the caller's explicit structured requirement:
+    when true, a real completion or partial block must be present, including
+    for empty text. This validator does not infer requirements from prose.
+
+    Skill invocations and printed self-report/trace fields are workflow audit,
+    not evidence eligibility. Core's assessment authenticates the recorded
+    claim and whole-response judgments independently of those display fields.
     """
-    lines = _split_lines(io_trace)
-    for index, line in enumerate(lines):
-        header = re.match(r"^\s*-?\s*" + re.escape(field) + r"\s*:\s*(.*)$", line, re.I)
-        if not header:
+    if not looks_like_evidence_claim(text):
+        if require_completion_check:
+            return (
+                "The caller requires a [completion-check] block with valid verification evidence, "
+                "or [partial-check] with scope: partial, acceptance-criteria, supported claim-evidence-map verdicts, "
+                "and unresolved criterion IDs in unverified when the overall task remains incomplete."
+            )
+        return None
+
+    issues = []
+    partial_blocks = extract_all_control_blocks(text, "partial-check")
+    if partial_blocks and looks_like_completion_claim(text):
+        issues.append("A response must use either [completion-check] or [partial-check], not both finalized and unresolved status.")
+    for marker in ("completion-check", "partial-check"):
+        positions = find_control_block_positions(text, marker)
+        if not positions:
             continue
-        inline = header.group(1).strip()
-        if inline.startswith("[") and inline.endswith("]"):
-            inline = inline[1:-1]
-        if inline.strip():
-            return _split_skill_tokens(inline)
-        # Nested form: collect indented bullet lines. Blank-line gaps and non-bullet prose lines under the header are tolerated (skipped), so the list is not truncated by a stray blank line or an introductory line. Collection stops at the next top-level `- field:` entry or a non-indented line that is neither blank nor a bullet.
-        tokens = []
-        for nxt in lines[index + 1:]:
-            if not nxt.strip():
-                continue
-            if _TOP_LEVEL_FIELD_RE.search(nxt):
-                break
-            bullet = re.match(r"^\s*-\s*(.+?)\s*$", nxt)
-            if bullet:
-                tokens.extend(_split_skill_tokens(bullet.group(1)))
-                continue
-            if nxt[:1] in (" ", "\t"):
-                # Indented non-bullet prose under the header: ignore and keep scanning.
-                continue
-            break
-        return tokens
-    return []
-
-
-def validate_completion_text(text, *, require_completion_check=False, require_skill_self_report=True):
-    """Validate a completion claim.
-
-    Returns None when `text` is empty, is not a completion claim, or passes
-    every gate; otherwise the deny-reason string. When
-    `require_completion_check` is true, executed-work closure claims must carry
-    the explicit marker, while routine explanations remain allowed.
-
-    `require_skill_self_report` (default True) keeps the self-reported
-    verification-before-completion lines and the io-trace skills-loaded
-    cross-check. A host that can verify the skill call from its own transcript
-    (Claude Code) passes False; the block then needs no constant self-report
-    lines, while the io-trace block and every evidence check still apply.
-    """
-    text = "" if text is None else str(text)
-    if not text:
-        return None
-    if not looks_like_completion_claim(text):
-        if require_completion_check and requires_completion_check(text):
-            return (
-                "Completion or success claims about executed work require a " "[completion-check] block with fresh verification evidence."
-            )
-        return None
-
-    completion_check = extract_control_block(text, "completion-check")
-    if not completion_check:
-        return (
-            "Completion or success claims about executed work require a " "[completion-check] block with fresh evidence."
-        )
-
-    completion_positions = find_control_block_positions(text, "completion-check")
-    if not completion_positions:
-        # Header body was extracted but no position was located (e.g. an unusual header form). Treat as a missing marker rather than crashing.
-        return (
-            "Completion or success claims about executed work require a " "[completion-check] block with fresh evidence."
-        )
-    first_completion = completion_positions[0]
-    gate_state_positions = find_control_block_positions(text, "gate-state")
-    if any(position > first_completion for position in gate_state_positions):
-        return "[gate-state] belongs to the opening surface and must not appear after [completion-check]."
-
-    io_trace_positions = find_control_block_positions(text, "io-trace")
-    if io_trace_positions and io_trace_positions[0] < first_completion:
-        return "[io-trace] must appear after [completion-check] on finalized completion surfaces."
-
-    if require_skill_self_report:
-        if not _VERIFICATION_DONE_RE.search(completion_check):
-            return "[completion-check] must include '- verification-before-completion: done'."
-
-        skill_call = _SKILL_CALL_RE.search(completion_check)
-        if not skill_call or "verification-before-completion" not in skill_call.group(1):
-            return " ".join(
-                [
-                    "verification-reminder: emitted.",
-                    "Run verification-before-completion before claiming completion.",
-                    "Do not claim a verification skill-call unless a fresh or valid retained instruction body was used and its workflow executed this turn.",
-                ]
-            )
-
-        if "[io-trace]" not in text:
-            return "A verification skill-call should be backed by [io-trace] with skills-loaded or skills-reused evidence."
-
-        io_trace = extract_control_block(text, "io-trace")
-        skills_loaded = extract_skills_loaded(io_trace) + extract_skills_loaded(io_trace, field="skills-reused")
-        if not any(_skill_name(skill) == "verification-before-completion" for skill in skills_loaded):
-            return (
-                "The [io-trace] skills-loaded or skills-reused list should include verification-before-completion when completion-check claims that skill-call."
-            )
-    elif "[io-trace]" not in text:
-        return "A finalized completion response must include an [io-trace] block after [completion-check]."
-
-    # Validate every completion-check block, not just the first, so a malformed later block cannot pass by hiding behind a valid earlier one.
-    for block in extract_all_control_blocks(text, "completion-check"):
-        reason = validate_completion_evidence_map(block)
-        if reason:
-            return reason
-    return None
+        if any(position > positions[0] for position in find_control_block_positions(text, "gate-state")):
+            issues.append(f"[gate-state] belongs to the opening surface and must not appear after [{marker}].")
+        for block in extract_all_control_blocks(text, marker):
+            reason = validate_completion_evidence_map(block, partial=marker == "partial-check")
+            if reason:
+                issues.append(reason)
+    return " ".join(dict.fromkeys(issues)) if issues else None

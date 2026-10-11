@@ -1,153 +1,106 @@
 ---
 name: boundary-contract
-description: "Use immediately after task-router routes boundary-contract: required. Before modification, implementation, or verification, declare objective, non-goals, allowed/prohibited surfaces, and stop conditions as a contract; do not execute the work."
+description: "Use when task-router requires a boundary contract. The current-session assistant declares objective, allowed/prohibited surfaces, criteria and stop conditions before dependent work; this declaration step does not perform that work."
 compatibility:
   - "Python 3.11+ standard library"
 ---
 
 # Boundary Contract
 
-boundary-contract declares the work boundary before implementation, modification, or verification. It does not perform the work itself. Its only job is to state which surfaces are allowed, which surfaces are prohibited, what counts as success, and when the agent must stop.
-## Contents
+When the current-session assistant selects `boundary-contract: required` while applying task-router, it uses this skill to declare the work's objective, permitted and prohibited surfaces, criteria, phase and stop conditions. Producing the contract does not execute its work. The task-router instructions define when this skill applies; these instructions define how the assistant declares the concrete boundary.
 
-- [When To Use](#when-to-use)
-- [Language Contract](#language-contract)
-- [Core Rules](#core-rules)
-- [Output Schema](#output-schema)
-- [Phase Rules](#phase-rules)
-  - [discovery](#discovery)
-  - [execution](#execution)
-  - [verification](#verification)
-- [Source Rules](#source-rules)
-- [Tool-Checkpoint Link](#tool-checkpoint-link)
-- [Exact Protected-File Evidence](#exact-protected-file-evidence)
-- [Failure Modes](#failure-modes)
+## Authority and renewal
 
+Current and prior human instructions supply the authorization envelope: objective, prohibitions, allowed actions and targets, side effects and resources. The current-session assistant preserves those instructions' human source and identifies the source of trusted system/project constraints. Intake facts, router decisions, wider focus and an agent's implementation plan do not grant additional authority.
 
-## When To Use
+The current-session assistant distinguishes a human-owned boundary from a narrower agent-declared implementation limit. When a necessary action exceeds only the narrower implementation limit, the current-session assistant renews that contract inside existing authority and continues. When the action exceeds a human-owned boundary or requires a missing decisive input, the current-session assistant asks for that exact decision before the dependent action. A grant changes only its stated scope; denial parks that branch; no answer leaves it waiting. Other eligible authorized work continues.
 
-Use this skill immediately when task-router outputs `boundary-contract: required`. task-router decides only whether a boundary is required, and it does not write `allowed-surface`, filenames, or test-purpose. This skill owns `allowed-surface`, filenames, phase, test purpose, and stop conditions.
+An explicit command/tool allowlist or count includes governance calls. The current-session assistant must not label the cap business-only or exempt bookkeeping. If required verification or Ghost-ALICE Autopilot recording cannot fit, the requirement remains unresolved. An absent explicit resource cap is not a user-approved limit invented by the current-session assistant.
 
-## Language Contract
+The current-session assistant preserves the terminal objective separately from investigative or implementation means. It must not narrow a committed full surface to selected examples, or replace the requested result with a method. When the request covers every member of a set, the coverage criterion enumerates the set or its count. Partial coverage remains partial status.
 
-Use the current user language for human-readable explanations. Keep field names, enum values, literal tokens, gate schemas, and allowed/forbidden control values in English.
+## Declare the contract
 
-Stable contract phrase: Keep field names in English.
+The current-session assistant writes the contract from established user instructions, supplied context and observed source facts. It must not guess filenames or invent allowed surfaces. Unknown targets require discovery. Every criterion describes a requested outcome; incidental methods, examples, artifact counts and verification mechanics become criteria only when required by the user or applicable contract.
 
-## Core Rules
-
-- Do not modify code or documents while producing the contract.
-- Do not guess filenames.
-- Do not invent `allowed-surface` entries without evidence.
-- If the target surface is unclear, use `phase: discovery`.
-- Separate explicit user instructions from inferred decisions.
-- Record the terminal objective separately from implementation and investigation means.
-- Extract verifiable `acceptance-criteria` from the user intent and locked decisions.
-- Acceptance criteria describe the requested outcome, not incidental methods, examples, artifact counts, or verification mechanics unless the user made them requirements.
-- Attach a `source` to every criterion.
-- Do not present `inferred` criteria as user-explicit instructions.
-- Classify tests by the risk they reduce, not by whether they feel convenient.
-- Always include `stop-conditions`.
-- Do not perform execution under a discovery contract.
-- If later work needs a surface outside the contract, stop and renew the contract first.
-- Do not narrow the committed objective or `allowed-surface` by your own judgment. Covering only a subset ("key spots only", "a representative sample", "the important ones") when the user committed the full surface is a scope-narrowing violation, the mirror image of editing outside the contract.
-- Scope changes need renegotiation in both directions. Widening requires stop-and-renew; narrowing requires stop-and-confirm with the user. Never shrink or grow the committed scope silently from the agent's own guess.
-- Partial coverage is partial status, not completion. If the full committed scope is not finished, report what remains and do not speak as though the objective is met.
-- When the objective is a full set (every file, every occurrence, all targets), record a coverage `acceptance-criteria` (an explicit count or enumerated list). Completion requires the whole set, not a sample.
-
-## Output Schema
+Human explanations follow the current user language. Keep field names in English, including enum values and literal protocol tokens.
 
 ```text
 [boundary-contract]
 - id: <stable-id>
 - phase: discovery | execution | verification
-- objective: <work-objective>
+- objective: <terminal work objective>
 - explicit-non-goals:
   - <non-goal>
 - allowed-surface:
-  - <allowed-read-or-write-surface>
+  - <allowed read or write surface>
 - prohibited-surface:
-  - <prohibited-file-layer-or-action>
+  - <prohibited path, layer or action>
 - locked-decisions:
-  - <locked-decision> [source: user-explicit | inferred | previous-tool | system-doc | unknown]
+  - <decision> [source: user-explicit | inferred | previous-tool | system-doc | unknown]
 - acceptance-criteria:
-  - <criterion-id>: <verifiable-condition> [source: user-explicit | inferred | previous-tool | system-doc]
+  - <criterion-id>: <verifiable outcome> [source: user-explicit | inferred | previous-tool | system-doc]
 - open-questions:
-  - <non-blocking-open-question>
+  - <unresolved question>
 - test-purpose: none | smoke | regression | contract | domain-rule | visual | integration
 - stop-conditions:
-  - <condition-that-stops-work>
+  - <condition stopping dependent work>
 - next-allowed-actions:
-  - <allowed-next-action>
+  - <permitted next action>
 ```
 
-## Phase Rules
+The current-session assistant includes stop conditions in every contract and classifies tests by the risk they reduce. Before using an additional surface, it applies Authority and renewal above.
 
-### discovery
+## Phase rules
 
-Use discovery when filenames, modules, or verification methods are not yet known. Only read-only discovery is allowed. Describe action surfaces such as "inspect project structure" or "identify UI directory candidates"; do not name files unless they have already been established.
+| Phase | Entry condition | Permitted work |
+| --- | --- | --- |
+| discovery | Target files, modules or verification methods are unknown | Read-only discovery on named action surfaces; no implementation |
+| execution | Discovery or supplied evidence establishes the targets | Work on concrete allowed files/directories under the declared criteria |
+| verification | Implementation is ready for checking | Declared commands, screenshots or visual checks; no undeclared implementation |
 
-### execution
+A phase change preserves the original acceptance criteria. If verification reveals a needed edit, the current-session assistant renews the affected execution contract before editing.
 
-Use execution after discovery identifies the actual files, modules, or contracts to change. Narrow `allowed-surface` to concrete files or directories. If an edit outside the list becomes necessary, stop and renew the contract.
+## Source rules
 
-### verification
+The current-session assistant assigns a source to each atomic proposition and splits statements with different origins.
 
-Use verification after implementation. Separate verification commands, screenshots, visual smoke checks, and prohibited new edits. Keep the original `acceptance-criteria` so completion can map claims to evidence.
+- `user-explicit`: the human directly supplied the instruction or approval.
+- `inferred`: the current-session assistant selected a conservative assumption for the current phase.
+- `previous-tool`: a tool or runtime supplied the fact/control, including generated text transported with a user role. A generated approval digest is not human approval.
+- `system-doc`: AGENTS.md, a skill or a policy requires the condition.
+- `unknown`: provenance is unresolved; the current-session assistant cannot use this as an execution-phase lock.
 
-## Source Rules
+For example, “preserve protected.txt as requested” may be user-explicit, while “preserve the hook approval-generation value” is previous-tool. Their shared transport does not merge their authority.
 
-- Assign a source to each atomic proposition. Split combined statements with different origins into separate items; a source label must not carry across mixed origins.
-- `user-explicit`: The user directly stated the decision. Actual human approval remains user-explicit.
-- `inferred`: The agent is locking a conservative assumption for this phase.
-- `previous-tool`: A tool result produced the decision, including observed hook/runtime-generated controls even when transported with `role=user`. A generated approval digest and its preservation requirement have this source; transport role does not turn them into human approval.
-- `system-doc`: AGENTS.md, SKILL.md, or policy docs require it.
-- `unknown`: The source is unclear. Do not use it as an execution-phase lock.
+## Tool checkpoint
 
-Keep a user-protected file and a runtime generation separate:
+When the contract is active, the current-session assistant's surfaced tool checkpoint includes:
 
 ```text
-- Preserve protected.txt as the user requested. [source: user-explicit]
-- Preserve the hook-provided approval-generation value. [source: previous-tool]
+- contract-ref: <contract ID>
+- contract-check: <allowed-surface item or next-allowed-action>
 ```
 
-## Tool-Checkpoint Link
+If the proposed call maps to neither field, the current-session assistant keeps that call closed and applies Authority and renewal. The checkpoint does not independently grant native tool permission.
 
-When a boundary contract is active, each tool checkpoint must include:
+## Exact protected-file evidence
 
-```text
-- contract-ref: <boundary-contract-id>
-- contract-check: <allowed-surface-item | next-allowed-action>
-```
-
-If `contract-check` does not map to the contract, do not make the tool call. Renew the contract or ask the user.
-
-## Exact Protected-File Evidence
-
-When an execution contract protects existing files or requires exact modification-time comparisons, use the installed `scripts/file_guard.py` before dependent writes. It captures file content, exact timestamp, identity and mode without writing task files. Resolve the script relative to this loaded skill directory; read its `--help` only if invocation details are needed.
+When the execution contract protects existing files or requires exact modification-time comparison, the current-session assistant invokes `scripts/file_guard.py`, resolved relative to this skill, before dependent writes. Read its help only when invocation details are needed.
 
 ```text
 python3 <loaded-skill-directory>/scripts/file_guard.py capture --path <protected-file> [--path <another-protected-file>]
-python3 <loaded-skill-directory>/scripts/file_guard.py check --token <unchanged-token-from-capture>
+python3 <loaded-skill-directory>/scripts/file_guard.py check --token <token returned by capture>
 ```
 
-`capture` emits JSON containing a string `token` and its `paths`. Keep that token verbatim in current-session tool state and pass it to `check` using the host's structured arguments or proper shell quoting. Do not decode, regenerate or hand-copy its timestamp fields. Do not send nanosecond timestamps or large identity integers through JavaScript `Number`, JSON numeric fields, floating-point seconds or rounded displays. Do not create a replacement numeric baseline when the helper is available.
+The helper captures content, exact timestamp, identity and mode without writing task files. The current-session assistant retains the returned string token verbatim and passes it through structured arguments or proper shell quoting. It must not decode or rebuild timestamp fields, transmit nanoseconds or large identity integers as JavaScript numbers, or reconstruct lost precision from rounded values.
 
-Capture once before the protected operation. Check immediately before a dependent write, and after the operation when preservation is an acceptance condition. A failed check stops the dependent write; investigate the original baseline instead of replacing it with the current state. If the installed helper is unavailable, keep capture and comparison in one exact-integer process or persist integer fields as strings from their original source. Never recover lost precision by converting an already rounded number to a string.
+The current-session assistant captures once before the protected operation, checks immediately before a dependent write, and checks afterward when preservation is an acceptance condition. A failed comparison stops the dependent write; the current-session assistant investigates against the original baseline rather than replacing it. If the helper is unavailable, capture and comparison use one exact-integer process or original integer strings.
 
-The guard observes regular files at a point in time; it is not an atomic write lock, authorization token or business-completion proof. It rejects symlink paths and parent traversal (`..`); use the actual absolute file path. It does not cover directory membership. Preserve any additional contract-specific checks separately. A bookkeeping-only recovery does not itself invalidate a completed guard or business check; do not rerun either without a relevant change or contrary evidence.
+The helper observes regular files at one point in time; it is neither an atomic lock nor authorization or completion proof. It rejects symlinks and parent traversal and does not cover directory membership. The current-session assistant retains other contract-specific checks. A bookkeeping-only failure does not invalidate an unchanged guard result or business check.
 
-## Failure Modes
+## Failure modes and proof
 
-- task-router writes `allowed-surface` directly.
-- A discovery contract guesses filenames.
-- An `inferred` decision is presented as user-explicit.
-- Verification proceeds without `acceptance-criteria`.
-- `[completion-check]` omits `claim-evidence-map`.
-- Peripheral evidence is treated as direct evidence for a user criterion.
-- Work starts without stop conditions.
-- A file outside the contract is changed because the edit seems small.
-- New implementation is added during verification.
-- The agent covers only part of the committed `allowed-surface` ("key spots only", "a representative sample") and speaks as if the objective is complete.
-- The committed scope is shrunk silently instead of stopping to confirm, the mirror image of changing a file outside the contract.
-- A full-set objective ("all files", "every occurrence") is reported complete after only a subset is done, with no coverage criterion to measure against.
+The current-session assistant must not label an inference user-explicit, perform implementation under discovery, omit coverage from a full-set objective, or report a successful subset as the whole outcome. Peripheral checks support only criteria they actually measure.
+
+The current-session assistant following the selected procedure executes the action and judges its returned evidence against the criteria. For incident-based repair limits, discretionary checks, evidence source/time reuse and Ghost-ALICE Autopilot publication/native completion, apply `../coding-convention/verification-before-completion/SKILL.md`. The incident workflow in `../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation` preserves cumulative attempts and user resources across agents and handoffs. Contract renewal does not reset those limits or require replay of completed business work.

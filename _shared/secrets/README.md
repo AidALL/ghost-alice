@@ -29,11 +29,11 @@ OPENAI_API_KEY=sk-example
 
 ## Lookup priority
 
-Every lookup function finds the value in the following order.
+The lookup helpers first check the environment and managed file. Only the prompting helpers ask the user for a missing value:
 
 1. An already-exported environment variable (for example, `export CONTEXT7_API_KEY=...`)
 2. The `~/.ghost-alice/secrets.env` file
-3. prompt is Limited to `get_or_prompt`, interactive environments only, with a save option offered after input.
+3. If neither source supplies a value and standard input is interactive, Python `get_or_prompt` or Bash `secrets_get_or_prompt` asks the user to enter one, then asks whether to save it. Non-prompting lookup functions stop after the file lookup; prompting functions also skip the prompt when standard input is not interactive.
 
 ## bash usage
 
@@ -108,4 +108,4 @@ Add project-specific keys in private deployment documentation, not in the public
 - `secrets.env` is plaintext. Keep it only on a trusted personal or organization-managed machine. Do not put it on a shared server.
 - Never commit it to git. The helper does not block this automatically, so take care yourself.
 - The helper keeps permissions at 600 even after saving, but right after editing manually, run `chmod 600 ~/.ghost-alice/secrets.env` once.
-- OS Keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager) is not supported at present. This is a decision to lower the barrier to entry for non-coding users. It will be implemented separately if it becomes necessary.
+- The helper reads environment variables and the managed plaintext file. It does not integrate with OS credential stores.

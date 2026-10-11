@@ -19,20 +19,18 @@ CONTRACT = {
         "merge-companion-precheck",
         "session-intent-analyzer",
         "skill-evolution:report-only-terminal-branch",
-        "jailbreak-detector",
         "task-router",
         "tool-checkpoint",
     ],
     "intent_consumers": {
-        "session-intent-analyzer": ["skill-evolution", "jailbreak-detector"],
+        "session-intent-analyzer": ["skill-evolution", "task-router"],
         "skill-evolution": ["report-only-terminal-branch"],
-        "jailbreak-detector": ["task-router"],
     },
     "conditional_gates": [
         {
             "id": "session-intent-analyzer",
             "trigger": "every user input",
-            "position": "after-merge-companion-precheck-before-skill-evolution-and-jailbreak-detector",
+            "position": "after-merge-companion-precheck-before-task-router-and-report-only-skill-evolution",
         },
         {
             "id": "boundary-contract",
@@ -81,6 +79,25 @@ CONTRACT = {
 
 
 class SkillGateContractTest(unittest.TestCase):
+    def test_current_boundary_contract_distinguishes_local_plan_from_human_authority(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            body = (REPO_ROOT / "boundary-contract" / "SKILL.md").read_text(encoding="utf-8")
+            self._write_file(root, "boundary-contract/SKILL.md", body)
+            issues = run_contract_checks(root)
+            boundary_issues = [issue for issue in issues if "boundary-contract/SKILL.md" in issue.path]
+            self.assertEqual(boundary_issues, [])
+
+    def test_boundary_contract_rejects_missing_authority_and_objective_protection(self) -> None:
+        for obligation in ("human-owned", "agent-declared", "objective"):
+            with self.subTest(obligation=obligation), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / "boundary-contract/SKILL.md"
+                path.write_text(path.read_text().replace(obligation, "REMOVED"))
+                self.assertTrue(any(obligation in issue.message for issue in run_contract_checks(root)))
+
     def test_missing_clarification_only_machine_route_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -152,30 +169,12 @@ class SkillGateContractTest(unittest.TestCase):
                 self.assertIn(expected_message, messages)
 
     def test_no_work_terminal_routes_are_enforced_by_checker(self) -> None:
-        required_by_surface = {
-            "task-router/SKILL.md": [
-                "response-mode",
-                "clarification-only",
-                "minimum decisive information",
-                "Ambient working directory",
-                "Do not validate or rebut that premise",
-                "Route classification precedes evidence planning",
-            ],
-            "AGENTS.md": ["clarification-only", "Ambient working directory", "Do not validate or rebut that premise", "Route classification precedes evidence planning", "Do not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`"],
-            "platforms/codex/AGENTS.md": ["clarification-only", "minimum decisive information", "Ambient working directory", "Do not validate or rebut that premise", "Route classification precedes evidence planning"],
-            "platforms/claude/CLAUDE.md": ["clarification-only", "minimum decisive information", "Ambient working directory", "Do not validate or rebut that premise", "Route classification precedes evidence planning"],
-            "docs/policies/session-gate-matrix.md": ["clarification-only", "Intake and routing still run internally"],
-            "coding-convention/using-coding-convention/SKILL.md": [
-                "clarification-only",
-                "exits before a development turn begins",
-            ],
-        }
-        for surface in required_by_surface:
-            required_by_surface[surface].append("direct-response")
-        for surface, fragments in required_by_surface.items():
-            for fragment in fragments:
-                with self.subTest(surface=surface, fragment=fragment):
-                    self.assertIn(fragment, REQUIRED_PATTERNS[surface])
+        # Meaning is enforced by terminal_routes machine values, not duplicate prose.
+        for mode in ("clarification-only", "direct-response"):
+            self.assertEqual(CONTRACT["terminal_routes"][mode]["downstream_work"], "none")
+            self.assertEqual(CONTRACT["terminal_routes"][mode]["strict_logging"], "active")
+            for path in ("task-router/SKILL.md", "AGENTS.md", "platforms/codex/AGENTS.md", "platforms/claude/CLAUDE.md"):
+                self.assertIn(mode, REQUIRED_PATTERNS[path])
 
     def _extract_between(self, text: str, start_marker: str, end_marker: str) -> str:
         start = text.find(start_marker)
@@ -200,121 +199,110 @@ class SkillGateContractTest(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
 
     def _write_valid_fixture(self, root: Path) -> None:
-        self._write_file(
-            root,
-            "skill-catalog/session-gates.json",
-            json.dumps(CONTRACT, ensure_ascii=False, indent=2),
+        self._write_file(root, "skill-catalog/session-gates.json", json.dumps(CONTRACT))
+        # Static fixtures provide wiring tokens; real-repository tests check owners.
+        for relative, identifiers in REQUIRED_PATTERNS.items():
+            self._write_file(root, relative, "\n".join(identifiers) + "\n")
+        self._write_file(root, "_shared/reminder_texts.json", json.dumps({
+            "tool-checkpoint": "tool-checkpoint: PreToolUse follows common governance rule 9",
+        }))
+        additions = {
+            "AGENTS.md": "### 9. io-trace Transparency Rule\n`intent` `why` `hook-stage: PreToolUse` `contract-ref` `contract-check`\n",
+            "task-router/SKILL.md": "## Register the Core projection\nresponse-route.v1 record_response_route\n",
+            "coding-convention/using-coding-convention/SKILL.md": "[Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse)\n",
+            "coding-convention/verification-before-completion/SKILL.md": "[Register the Core projection](../../task-router/SKILL.md#register-the-core-projection)\n[Apply and deliver](references/autopilot-publication.md#apply-and-deliver)\n",
+        }
+        for relative, body in additions.items():
+            path = root / relative
+            path.write_text(path.read_text(encoding="utf-8") + "\n" + body, encoding="utf-8")
+        self._write_file(root, "coding-convention/verification-before-completion/references/verify-or-reuse.md",
+                         "## Instruction Body Reuse\nskills-reused skills-loaded skill-call\n")
+        self._write_file(root, "coding-convention/verification-before-completion/references/autopilot-publication.md",
+                         "## Apply and deliver\ndelivery-route repair-target preserve_answer_and_patch_metadata assembled_complete_payload corrected_complete_answer resolve_host_delivery\n")
+        claude = root / "platforms/claude/CLAUDE.md"
+        claude.write_text(
+            "## First-Entry Contract\n\n"
+            "1. Reuse the pending-merge precheck.\n"
+            "2. Consume the exact session-intent observation.\n"
+            "3. Apply task-router to select work.\n"
+            "4. Execute selected workflows.\n\n"
+            "## Owner references\n" + claude.read_text(encoding="utf-8"),
+            encoding="utf-8",
         )
-        self._write_file(
-            root,
-            "docs/policies/session-gate-matrix.md",
-            "skill-catalog/session-gates.json\ntask-router\nusing-coding-convention\nboundary-contract\nsession-intent-analyzer\nsession-intent-analyzer intake is first\nsession-intent-analyzer fans out to `skill-evolution` (report-only terminal branch) and `jailbreak-detector`\n`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context\ntask-router is released after session-intent preflight when no current-lineage block gate exists\nabsent `downstream-gates.json` is silent allow\natomic meaning decomposition\nboundary-contract: required\nEnglish canonical narrative + English control surface\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nskill-call:\nRequired gate skills are not complete unless a fresh or valid retained instruction body was used\nRead or validly reuse the relevant instruction body before marking a required gate done\nRuntime Hook Graph Contract\nHook pending-merge precheck is a pre-routing/session-start layer\nmanual fallback still completes before actionable downstream work\nintent-state.json is update-plus-accumulate state\ndownstream-gates.json\nskill-evolution is report-only and self-terminating\ndoes not feed task-router\nonly current-lineage block decisions are carried to `downstream-gates.json`\nuser-explicit defer/skip may continue\nDeterministic hard-block rules are narrow regression guards\nGradual multi-turn jailbreak resistance depends on session-intent summary quality\nPreToolUse/BeforeTool checkpoint\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nRuntime hooks surface one full `[tool-checkpoint]` per session input lineage\nkeep checking later tool calls silently\nnew user input, current-lineage block/deny, mismatch\nfirst poll in the input lineage\nDynamic Focus Contract\nmismatch location\nverification burden\nmicro, meso, macro, and meta\nscope reopen point\nRouting Surface Contract\nrouting-surface\nprimary-request\ncausal-axis\nresponse-mode\nresponse-order\nclarification-only\ndirect-response\nresolved-intent-first\nIntake and routing still run internally\nminimum decisive information\nThe user's terminal objective outranks investigative means.\nDo not let a means replace, narrow, or expand the terminal objective.\ntask-router owns the reusable work judgment\nsession-intent-analyzer records semantic facts and accumulated decisions\ngovernance surface policy consumes routing-surface\ntoken reduction is a secondary consequence, not a success metric\n",
+
+    def test_current_consumers_use_canonical_owner_contracts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            for relative in ("_shared/reminder_texts.json",
+                             "coding-convention/using-coding-convention/SKILL.md",
+                             "coding-convention/verification-before-completion/SKILL.md"):
+                self._write_file(root, relative, (REPO_ROOT / relative).read_text(encoding="utf-8"))
+            self.assertEqual(run_contract_checks(root), [])
+
+    def test_owner_reference_cannot_be_replaced_with_a_broken_anchor(self) -> None:
+        cases = (
+            ("coding-convention/using-coding-convention/SKILL.md", "#instruction-body-reuse"),
+            ("coding-convention/verification-before-completion/SKILL.md", "#register-the-core-projection"),
+            ("coding-convention/verification-before-completion/SKILL.md", "#apply-and-deliver"),
         )
-        self._write_file(
-            root,
-            "AGENTS.md",
-            "skill-catalog/session-gates.json\ndocs/policies/session-gate-matrix.md\nboundary-contract\nsession-intent-analyzer\nsession-intent-analyzer fans out to skill-evolution(report-only terminal branch) and jailbreak-detector\n`task-router` is a consumer of `session-intent-analyzer` and `jailbreak-detector/downstream-gates.json` context\ntask-router reminder hook withholds task-router until session-intent preflight exists and jailbreak-detector has had the first chance to record a current-lineage block\nabsent `downstream-gates.json` is silent allow\natomic meaning decomposition\nboundary-contract: required\nhook-verified\nEnglish canonical narrative + English control surface\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nskill-call:\nA required gate skill is not satisfied by a metadata-only match\nuse a fresh or valid retained instruction body\nHook pending-merge precheck is a pre-routing/session-start layer\nmanual fallback still completes before actionable downstream work\nexplicit user defer or skip\ndownstream-gates.json\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\ncurrent-lineage block gate\nsilent allow\ntool-call identity\npayload content\noutside the decision body\nThe focus scope is not fixed and does not expand in only one direction\nthe mismatch location and the verification burden\nmicro, meso, macro, and meta\ntask-router emits a reusable routing-surface\nclarification-only\ndirect-response\nDo not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`\n",
+        for relative, anchor in cases:
+            with self.subTest(anchor=anchor), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / relative
+                path.write_text(path.read_text().replace(anchor, "#missing-owner-section"))
+                self.assertTrue(any(issue.path == relative and "owner reference" in issue.message
+                                    for issue in run_contract_checks(root)))
+
+    def test_checkpoint_owner_reference_is_required_in_checkpoint_message(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            self._write_file(root, "_shared/reminder_texts.json", json.dumps({
+                "tool-checkpoint": "tool-checkpoint PreToolUse intent why contract-ref contract-check",
+                "unrelated-message": "common governance rule 9",
+            }))
+            self.assertTrue(any(issue.path == "_shared/reminder_texts.json" and "owner reference" in issue.message
+                                for issue in run_contract_checks(root)))
+
+    def test_missing_canonical_owner_file_or_section_fails(self) -> None:
+        cases = (
+            ("AGENTS.md", "### 9. io-trace Transparency Rule"),
+            ("task-router/SKILL.md", "## Register the Core projection"),
+            ("coding-convention/verification-before-completion/references/verify-or-reuse.md", "## Instruction Body Reuse"),
+            ("coding-convention/verification-before-completion/references/autopilot-publication.md", "## Apply and deliver"),
         )
-        self._write_file(
-            root,
-            "platforms/codex/AGENTS.md",
-            "Session Gate Contract\nboundary-contract\nsession-intent-analyzer\n`session-intent-analyzer` branches to the `skill-evolution` report-only branch and to `jailbreak-detector`\ntask-router is a consumer of the session-intent and jailbreak gate context\nThe task-router reminder hook releases task-router when a session-intent preflight exists and there is no current-lineage block gate\nThe absence of `downstream-gates.json` is treated as a silent allow meaning there is no current-lineage block\natomic meaning decomposition\nboundary-contract: required\nhook-verified\nEnglish canonical narrative + English control surface\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nskill-call:\nAfter the session-intent-analyzer intake and the jailbreak-detector downstream gate, read or validly reuse `~/.agents/skills/task-router/SKILL.md`\nA required gate skill is not satisfied by a metadata-only match\nRead or validly reuse the skill's instruction body before marking a required gate as complete\nHook pending-merge precheck is a pre-routing/session-start layer\nmanual fallback still completes before actionable downstream work\nexplicit user defer or skip\ndownstream-gates.json\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nthe same process, session, or tool-call id\nnew user input, current-lineage block/deny, mismatch\ncurrent-lineage block gate\nsilent allow\ntool-call identity\npayload content\noutside the decision body\nThe focus scope is not fixed and does not expand in only one direction\nthe mismatch location and the verification burden\nmicro, meso, macro, and meta\ntask-router emits a reusable routing-surface\nclarification-only\ndirect-response\nminimum decisive information\n",
+        for relative, heading in cases:
+            for mutation in ("file", "section"):
+                with self.subTest(owner=relative, mutation=mutation), tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self._write_valid_fixture(root)
+                    path = root / relative
+                    if mutation == "file":
+                        path.unlink()
+                    else:
+                        path.write_text(path.read_text().replace(heading, "## Unrelated section"))
+                    self.assertTrue(any(issue.path == relative and "owner" in issue.message
+                                        for issue in run_contract_checks(root)))
+
+    def test_owner_contract_fields_must_remain_in_the_owned_section(self) -> None:
+        cases = (
+            ("AGENTS.md", ("why", "contract-ref", "contract-check")),
+            ("task-router/SKILL.md", ("record_response_route", "response-route.v1")),
+            ("coding-convention/verification-before-completion/references/verify-or-reuse.md", ("skills-reused", "skills-loaded", "skill-call")),
+            ("coding-convention/verification-before-completion/references/autopilot-publication.md", ("delivery-route", "repair-target", "preserve_answer_and_patch_metadata", "assembled_complete_payload", "corrected_complete_answer", "resolve_host_delivery")),
         )
-        self._write_file(
-            root,
-            "platforms/claude/CLAUDE.md",
-            "clarification-only\ndirect-response\nminimum decisive information\nIntake and routing still run internally\nDo not emit `[gate-state]`, `[tool-checkpoint]`, or `[io-trace]`\n",
-        )
-        self._write_file(
-            root,
-            "install.ps1",
-            "session-gates.json\nplatforms\\codex\\AGENTS.md\npending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace\n",
-        )
-        self._write_file(
-            root,
-            "install.sh",
-            "session-gates.json\nplatforms/codex/AGENTS.md\npending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace\n",
-        )
-        self._write_file(
-            root,
-            "_shared/global_rule_blocks.py",
-            "CODEX_SPEC\nrender_codex_bootstrap\napply_codex_bootstrap\ncodex-merge\n",
-        )
-        self._write_file(
-            root,
-            "README.md",
-            "skill-catalog/session-gates.json\npython scripts/check_skill_gate_contract.py\n",
-        )
-        self._write_file(
-            root,
-            "scripts/validate_skills.py",
-            "run_contract_checks\ngate-contract\n",
-        )
-        self._write_file(
-            root,
-            "task-router/SKILL.md",
-            "English canonical narrative + English control surface\n[gate-state]\nrequest-routing gate\nrequest decomposition, work placement, skill routing\nconsumer of session-intent-analyzer and\nrouting decision\nraw user intent inference\nafter session-intent-analyzer intake and\nsilent allow\ncurrent-lineage block gate\natomic meaning\nnot a tool permission owner\nnot a tool-checkpoint owner\nhook-stage: PreToolUse\nmeaning: tool-call retry checkpoint, not user-input intake\nusing-coding-convention\nboundary-contract\nboundary-reason\nnext-required\nhook-verified clean\nuser-explicit defer/skip may continue\npending merge remains undecided when deferred\nskill-call:\nrouting-surface\nintent-relation\nresponse-mode\nclarification-only\ndirect-response\nresolved-intent-first\nminimum decisive information\nchange-depth\nfocus-layer\nverification-complexity\nforced-visibility\naccepted-continuation requires recorded acceptance\nunknown routing-surface values fail closed\nuser corrects the agent for changing, narrowing, widening, relabeling, or\nsubstituting the requested objective, scope, selection criterion\n",
-        )
-        self._write_file(
-            root,
-            "boundary-contract/SKILL.md",
-            "---\nname: boundary-contract\ndescription: Use after task-router routes boundary-contract: required.\n---\n\nKeep field names, enum values, literal tokens, gate schemas, and allowed/forbidden control values in English.\n[boundary-contract]\n- objective: <work-objective>\nphase\nobjective\nexplicit-non-goals\nallowed-surface\nprohibited-surface\nlocked-decisions\nacceptance-criteria\nopen-questions\ntest-purpose\nstop-conditions\nnext-allowed-actions\nScope changes need renegotiation in both directions\nNever shrink or grow the committed scope silently\n",
-        )
-        self._write_file(
-            root,
-            "_shared/install_hooks.py",
-            "TOOL_CHECKPOINT_MARKER\nTOOL_CHECKPOINT_INTERNAL\npre_tool_use\ntool-checkpoint\ndo not run an extra shell manifest check\nhook-enforced retry point\ntask_router_reminder_hook.py\ntask-router waits until session-intent preflight exists\nAbsent downstream-gates.json means silent allow\natomic meaning units\nfocus-layer\nscope-reopen\nhook-stage: PreToolUse\ntool-call retry checkpoint, not user-input intake\njailbreak-detector downstream gate\ntask-router consumes session-intent and jailbreak gate context\nSurface a visible [tool-checkpoint] block once per user-input tool batch, carrying intent and why\nsuppress duplicate user-facing checkpoint text for the same session input lineage while continuing to check every tool call\nAdd procedure when it changes the next work decision\nAdd contract-ref and contract-check when a boundary-contract is active\nAdd localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\n",
-        )
-        self._write_file(
-            root,
-            "_shared/ghost-alice-hook.mjs",
-            'case "tool-checkpoint":\ndo not run an extra shell manifest check\nPreToolUse\npermissionDecision\nhook-enforced retry point\ntask-router waits until session-intent preflight exists\nAbsent downstream-gates.json means silent allow\natomic meaning decomposition\nfocus-layer\nscope-reopen\nhook-stage: PreToolUse/BeforeTool\ntool-call retry checkpoint, not user-input intake\njailbreak-detector downstream gate\ntask-router consumes session-intent and jailbreak gate context\nSurface a visible [tool-checkpoint] block once per user-input tool batch, carrying intent and why\nsuppress duplicate user-facing checkpoint text for the same session input lineage while continuing to check every tool call\nAdd procedure when it changes the next work decision\nAdd contract-ref and contract-check when a boundary-contract is active\nAdd localized-human-note, rejected-alternatives, unverified-premises, and failure-mode-if-wrong only when a side effect, forced signal, mismatch, or meaningful user decision point makes those fields useful\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\nacceptance-criteria\nclaim-evidence-map\nunverified\ndownstream-gates.json\n',
-        )
-        self._write_file(
-            root,
-            "_shared/reminder_texts.json",
-            "hook-enforced retry point\nSurface a visible [tool-checkpoint] block once per user-input tool batch\nsame session input lineage\ncontinuing to check every tool call\nhook-stage: PreToolUse\ntool-call retry checkpoint, not user-input intake\nintent\nwhy\nprocedure\ncontract-ref\ncontract-check\nlocalized-human-note\nrejected-alternatives\nunverified-premises\nfailure-mode-if-wrong\nrecovery-action\nfocus-layer\nscope-reopen\nnever skip the gate\nread-only\nboundary-contract\n",
-        )
-        self._write_file(
-            root,
-            "coding-convention/using-coding-convention/SKILL.md",
-            "quality-maintenance device confirmed through repeated user work\nuser intent, work scope, and verification quality\ndo not bypass it from the agent's judgment alone\nleave a short reason for the skip\n[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nfinished work, verified results, or a decision that materially changes the user's next action\nclarification-only\ndirect-response\nno-work terminal route\nexits before a development turn begins\nProse paragraphs stay on one physical source line unless a semantic, syntax, Markdown-structural, or protocol boundary requires a newline.\nskill-call:\nScope changes already belong to boundary-contract\nStop and renew or confirm before changing the committed scope\n",
-        )
-        self._write_file(
-            root,
-            "coding-convention/verification-before-completion/SKILL.md",
-            "No acceptance-criteria means no completed verification-before-completion\nclaim-evidence-map\nunverified\n",
-        )
-        self._write_file(
-            root,
-            "session-intent-analyzer/references/ledger-schema.md",
-            "acceptance_criteria\nverifiable completion criterion\nintent-state.json is update-plus-accumulate state\n",
-        )
-        self._write_file(
-            root,
-            "jailbreak-detector/SKILL.md",
-            "Deterministic hard-block rules are narrow regression guards\nGradual multi-turn jailbreak resistance depends on session-intent summary quality\n",
-        )
-        self._write_file(
-            root,
-            "session-intent-analyzer/scripts/session_intent_ledger.py",
-            "acceptance_criteria\nconsumer_snapshot\n",
-        )
-        self._write_file(
-            root,
-            ".github/workflows/skill-gate-contract.yml",
-            "python scripts/check_skill_gate_contract.py\npython scripts/run_installer_compat_tests.py --group skill-gate-contract\n",
-        )
-        ambient_rule = "\nAmbient working directory, opened project, and available tools are not user-provided referents or inspection authority. Route classification precedes evidence planning. Do not validate or rebut that premise before explaining.\n"
-        for relative_path in (
-            "docs/policies/session-gate-matrix.md",
-            "AGENTS.md",
-            "platforms/codex/AGENTS.md",
-            "platforms/claude/CLAUDE.md",
-            "task-router/SKILL.md",
-        ):
-            fixture_path = root / relative_path
-            fixture_path.write_text(fixture_path.read_text(encoding="utf-8") + ambient_rule, encoding="utf-8")
+        for relative, fields in cases:
+            for field in fields:
+                with self.subTest(owner=relative, field=field), tempfile.TemporaryDirectory() as tmpdir:
+                    root = Path(tmpdir)
+                    self._write_valid_fixture(root)
+                    path = root / relative
+                    # A stray mention outside the owning section cannot satisfy its contract.
+                    path.write_text(field + "\n" + path.read_text().replace(field, "REMOVED"))
+                    self.assertTrue(any(issue.path == relative and "owner" in issue.message and field in issue.message
+                                        for issue in run_contract_checks(root)))
 
     def test_missing_task_router_reference_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -384,18 +372,9 @@ class SkillGateContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            matrix_path = root / "docs" / "policies" / "session-gate-matrix.md"
-            matrix_path.write_text(
-                matrix_path.read_text(encoding="utf-8").replace(
-                    "task-router owns the reusable work judgment\n",
-                    "",
-                ),
-                encoding="utf-8",
-            )
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("task-router owns the reusable work judgment", messages)
+            path = root / "task-router/SKILL.md"
+            path.write_text(path.read_text().replace("evidence-selection-and-stop-gate", "REMOVED"))
+            self.assertTrue(any("evidence-selection-and-stop-gate" in issue.message for issue in run_contract_checks(root)))
 
     def test_legacy_tool_checkpoint_name_fails(self) -> None:
         legacy_name = "action" + "-gate"
@@ -416,27 +395,17 @@ class SkillGateContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            self._write_file(
-                root,
-                "coding-convention/using-coding-convention/SKILL.md",
-                "[gate-state]\n[completion-check]\nacceptance-criteria\nclaim-evidence-map\nunverified\nfinished work, verified results, or a decision that materially changes the user's next action\nskill-call:\n",
-            )
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("quality-maintenance device confirmed through repeated user work", messages)
+            path = root / "coding-convention/using-coding-convention/SKILL.md"
+            path.write_text(path.read_text().replace("Instruction Body Reuse", "REMOVED"))
+            self.assertTrue(any("Instruction Body Reuse" in issue.message for issue in run_contract_checks(root)))
 
     def test_missing_prose_no_hard_wrap_contract_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            using_path = root / "coding-convention" / "using-coding-convention" / "SKILL.md"
-            phrase = "Prose paragraphs stay on one physical source line unless a semantic, syntax, Markdown-structural, or protocol boundary requires a newline."
-            using_path.write_text(using_path.read_text(encoding="utf-8").replace(phrase, ""), encoding="utf-8")
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn(phrase, messages)
+            path = root / "coding-convention/using-coding-convention/SKILL.md"
+            path.write_text(path.read_text().replace("one physical source line", "REMOVED"))
+            self.assertTrue(any("one physical source line" in issue.message for issue in run_contract_checks(root)))
 
     def test_coercive_skip_wording_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -539,81 +508,19 @@ class SkillGateContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            self._write_file(
-                root,
-                "docs/policies/session-gate-matrix.md",
-                (
-                    "skill-catalog/session-gates.json\n"
-                    "task-router\n"
-                    "using-coding-convention\n"
-                    "boundary-contract\n"
-                    "session-intent-analyzer\n"
-                    "boundary-contract: required\n"
-                    "English canonical narrative + English control surface\n"
-                    "[gate-state]\n"
-                    "[completion-check]\n"
-                    "acceptance-criteria\n"
-                    "claim-evidence-map\n"
-                    "unverified\n"
-                    "skill-call:\n"
-                    "Required gate skills are not complete unless a fresh or valid retained instruction body was used\n"
-                    "Read or validly reuse the relevant instruction body before marking a required gate done\n"
-                    "Runtime Hook Graph Contract\n"
-                    "downstream-gates.json\n"
-                    "session-intent-analyzer intake is first\n"
-                    "session-intent-analyzer → task-router\n"
-                    "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage\n"
-                    "keep checking later tool calls silently\n"
-                    "new user input, current-lineage block/deny, mismatch\n"
-                    "first poll in the input lineage\n"
-                ),
-            )
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("skill-evolution is report-only and self-terminating", messages)
-            self.assertIn("only current-lineage block decisions are carried to `downstream-gates.json`", messages)
+            path = root / "docs/policies/session-gate-matrix.md"
+            path.write_text(path.read_text().replace("skill-evolution", "REMOVED"))
+            self.assertTrue(any("skill-evolution" in issue.message for issue in run_contract_checks(root)))
 
     def test_runtime_hook_graph_requires_hook_and_manual_pending_merge_boundaries(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            self._write_file(
-                root,
-                "docs/policies/session-gate-matrix.md",
-                (
-                    "skill-catalog/session-gates.json\n"
-                    "task-router\n"
-                    "using-coding-convention\n"
-                    "boundary-contract\n"
-                    "session-intent-analyzer\n"
-                    "boundary-contract: required\n"
-                    "English canonical narrative + English control surface\n"
-                    "[gate-state]\n"
-                    "[completion-check]\n"
-                    "acceptance-criteria\n"
-                    "claim-evidence-map\n"
-                    "unverified\n"
-                    "skill-call:\n"
-                    "Required gate skills are not complete unless a fresh or valid retained instruction body was used\n"
-                    "Read or validly reuse the relevant instruction body before marking a required gate done\n"
-                    "Runtime Hook Graph Contract\n"
-                    "downstream-gates.json\n"
-                    "skill-evolution is report-only and self-terminating\n"
-                    "only current-lineage block decisions are carried to `downstream-gates.json`\n"
-                    "session-intent-analyzer intake is first\n"
-                    "session-intent-analyzer → task-router\n"
-                    "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage\n"
-                    "keep checking later tool calls silently\n"
-                    "new user input, current-lineage block/deny, mismatch\n"
-                    "first poll in the input lineage\n"
-                ),
-            )
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("Hook pending-merge precheck is a pre-routing/session-start layer", messages)
-            self.assertIn("manual fallback still completes before actionable downstream work", messages)
+            path = root / "skill-catalog/session-gates.json"
+            contract = json.loads(path.read_text())
+            contract["user_input_graph"].remove("merge-companion-precheck")
+            path.write_text(json.dumps(contract))
+            self.assertTrue(any("merge-companion-precheck" in issue.message for issue in run_contract_checks(root)))
 
     def test_gate_state_order_contract_rejects_task_router_before_session_intent(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -647,7 +554,6 @@ class SkillGateContractTest(unittest.TestCase):
                     "use a fresh or valid retained instruction body\n"
                     "The pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins\n"
                     "explicit user defer or skip\n"
-                    "downstream-gates.json\n"
                 ),
             )
 
@@ -689,55 +595,94 @@ class SkillGateContractTest(unittest.TestCase):
             messages = "\n".join(issue.message for issue in issues)
             self.assertIn("gate-state with task-router must include session-intent-analyzer", messages)
 
-    def test_detector_scope_contract_requires_long_horizon_limits(self) -> None:
+    def test_retired_classifier_and_nonterminal_evolution_are_rejected(self):
+        for mutation in ('detector', 'evolution'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / "skill-catalog/session-gates.json"
+                contract = json.loads(path.read_text())
+                if mutation == 'detector':
+                    contract['intent_consumers']['session-intent-analyzer'].append('jailbreak-detector')
+                else:
+                    contract['intent_consumers']['skill-evolution'].append('task-router')
+                path.write_text(json.dumps(contract))
+                messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+                self.assertIn('retired standalone classifier' if mutation == 'detector' else 'report-only-terminal-branch', messages)
+
+    def test_direct_intake_contract_rejects_a_renamed_intermediate_stage(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            self._write_file(
-                root,
-                "docs/policies/session-gate-matrix.md",
-                (
-                    "skill-catalog/session-gates.json\n"
-                    "task-router\n"
-                    "using-coding-convention\n"
-                    "boundary-contract\n"
-                    "session-intent-analyzer\n"
-                    "boundary-contract: required\n"
-                    "English canonical narrative + English control surface\n"
-                    "[gate-state]\n"
-                    "[completion-check]\n"
-                    "acceptance-criteria\n"
-                    "claim-evidence-map\n"
-                    "unverified\n"
-                    "skill-call:\n"
-                    "Required gate skills are not complete unless a fresh or valid retained instruction body was used\n"
-                    "Read or validly reuse the relevant instruction body before marking a required gate done\n"
-                    "Runtime Hook Graph Contract\n"
-                    "Pending-merge precheck runs before the user-input governance graph begins\n"
-                    "downstream-gates.json\n"
-                    "skill-evolution is report-only and self-terminating\n"
-                    "only current-lineage block decisions are carried to `downstream-gates.json`\n"
-                    "session-intent-analyzer intake is first\n"
-                    "session-intent-analyzer → task-router\n"
-                    "Runtime hooks surface one full `[tool-checkpoint]` per session input lineage\n"
-                    "keep checking later tool calls silently\n"
-                    "new user input, current-lineage block/deny, mismatch\n"
-                    "first poll in the input lineage\n"
-                ),
-            )
-            self._write_file(
-                root,
-                "session-intent-analyzer/references/ledger-schema.md",
-                "acceptance_criteria\nverifiable completion criterion\n",
-            )
-            self._write_file(root, "jailbreak-detector/SKILL.md", "")
+            path = root / "skill-catalog/session-gates.json"
+            contract = json.loads(path.read_text())
+            contract['user_input_graph'].insert(2, 'input-policy-review')
+            contract['intent_consumers']['session-intent-analyzer'].append('input-policy-review')
+            path.write_text(json.dumps(contract))
+            messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+            self.assertIn('direct intake ownership', messages)
 
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
+    def test_direct_intake_entrypoint_fields_reject_intermediates_duplicates_and_types(self):
+        cases = (
+            ('always_first', ['policy-review', 'session-intent-analyzer']),
+            ('always_first', ['session-intent-analyzer', 'policy-review']),
+            ('always_first', ['session-intent-analyzer', 'session-intent-analyzer']),
+            ('always_first', 'session-intent-analyzer'),
+            ('always_first', None),
+            ('agent_first_after_intake', ['review-input', 'task-router']),
+            ('agent_first_after_intake', ['task-router', 'review-input']),
+            ('agent_first_after_intake', ['task-router', 'task-router']),
+            ('agent_first_after_intake', 'task-router'),
+            ('agent_first_after_intake', {'task-router': True}),
+            ('agent_first_after_intake', None),
+        )
+        for field, value in cases:
+            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / 'skill-catalog/session-gates.json'
+                contract = json.loads(path.read_text())
+                contract[field] = value
+                path.write_text(json.dumps(contract))
+                messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+                self.assertIn(f'{field} direct intake ownership', messages)
 
-            self.assertIn("Deterministic hard-block rules are narrow regression guards", messages)
-            self.assertIn("Gradual multi-turn jailbreak resistance depends on session-intent summary quality", messages)
-            self.assertIn("intent-state.json is update-plus-accumulate state", messages)
+    def test_direct_intake_graph_fields_reject_wrong_shapes_and_order(self):
+        graph = CONTRACT['user_input_graph']
+        cases = (
+            ('user_input_graph', graph[:3] + ['task-router', 'task-router', 'tool-checkpoint']),
+            ('user_input_graph', [graph[0], 'task-router', graph[2], 'session-intent-analyzer', graph[4]]),
+            ('user_input_graph', None),
+            ('user_input_graph', 'task-router'),
+            ('user_input_graph', graph[:3] + [['task-router'], graph[4]]),
+            ('intent_consumers', None),
+            ('intent_consumers', {**CONTRACT['intent_consumers'], 'review-input': ['task-router']}),
+            ('intent_consumers', {'session-intent-analyzer': ['task-router', 'task-router'], 'skill-evolution': ['report-only-terminal-branch']}),
+            ('intent_consumers', {'session-intent-analyzer': {'task-router': True, 'skill-evolution': True}, 'skill-evolution': ['report-only-terminal-branch']}),
+            ('intent_consumers', {'session-intent-analyzer': None, 'skill-evolution': ['report-only-terminal-branch']}),
+        )
+        for field, value in cases:
+            with self.subTest(field=field, value=value), tempfile.TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self._write_valid_fixture(root)
+                path = root / 'skill-catalog/session-gates.json'
+                contract = json.loads(path.read_text())
+                contract[field] = value
+                path.write_text(json.dumps(contract))
+                errors = [issue for issue in run_contract_checks(root) if issue.severity == 'ERROR']
+                self.assertTrue(errors, (field, value))
+
+    def test_claude_first_turn_rejects_block_condition_even_with_correct_later_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            path = root / "platforms/claude/CLAUDE.md"
+            path.write_text(path.read_text().replace("3. Apply task-router to select work.", "3. If no block exists, apply task-router."))
+            self.assertTrue(any("Claude first-turn must route directly after exact intake" in issue.message for issue in run_contract_checks(root)))
+
+    def test_real_claude_first_turn_routes_directly_after_exact_intake(self) -> None:
+        from check_skill_gate_contract import _check_claude_first_turn_contract
+        self.assertEqual(_check_claude_first_turn_contract(REPO_ROOT), [])
 
     def test_valid_contract_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -764,192 +709,61 @@ class SkillGateContractTest(unittest.TestCase):
         )
 
     def test_skill_evolution_requires_behavior_first_selection_and_closed_disposition(self) -> None:
-        skill_text = (REPO_ROOT / "skill-evolution" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        sections = {
-            "skill": skill_text,
-            "conduct": self._extract_between(skill_text, "## Conduct Feedback", "## Procedure"),
-            "procedure": self._extract_between(skill_text, "## Procedure", "## Output Format"),
-            "output": self._extract_between(skill_text, "## Output Format", "## Quality Decisions"),
-            "quality": self._extract_between(skill_text, "## Quality Decisions", "## Warnings"),
-        }
-        normalized = {name: " ".join(text.split()) for name, text in sections.items()}
-        required_by_section = {
-            "conduct": [
-                "Every candidate first receives a behavior-first assessment of its observed behavior or failure mode and contract impact, then a closed disposition.",
-                "Only a disposition that proposes follow-up work routes to necessity-gate.",
-                "likely preventing gate skill",
-            ],
-            "procedure": [
-                "Quality is triage evidence, never eligibility or approval authority.",
-                "`instincts[*].decision` and quality are analyzer triage data only.",
-                "`absorb`, `project-local`, `session-only`, `reject`, or `defer`",
-                "Items triaged as `watch` or `reject` still receive a closed disposition.",
-                "A closed disposition does not make a candidate an implementation candidate.",
-                "`dispositions[*].disposition` is a report-only classification and routing recommendation.",
-                "necessity-gate remains the execution authority",
-                "`owner` is the accountable contract or skill identifier",
-                "A `defer` or `reject` disposition authorizes no action.",
-                "Analyzer `decision` does not authorize a handoff.",
-            ],
-        }
-        forbidden_fragments = [
-            ("skill", "Route each candidate through necessity-gate"),
-            ("procedure", "Read `quality_summary` first"),
-            ("procedure", "Treat only `quality=review` candidates as possible follow-up work"),
-            ("quality", "route through necessity-gate"),
-            ("procedure", "as a debugging handoff rather than"),
-            ("procedure", "sole action authority"),
-        ]
-        self._assert_fragment_tables(normalized, required_by_section, forbidden_fragments)
-
-        behavior_position = normalized["procedure"].find("observed behavior or failure mode")
-        impact_position = normalized["procedure"].find("contract impact")
-        quality_position = normalized["procedure"].find("quality triage")
-        self.assertGreaterEqual(behavior_position, 0)
-        self.assertGreater(impact_position, behavior_position)
-        self.assertGreater(quality_position, impact_position)
-
-        output_payload = json.loads(self._extract_between(sections["output"], "```json", "```"))
-        disposition = output_payload["dispositions"][0]
-        self.assertEqual(
-            set(disposition),
-            {"candidate_id", "disposition", "owner", "action", "rationale"},
-        )
-        self.assertEqual(disposition["disposition"], "defer")
-        self.assertEqual(disposition["action"], "none")
-        self.assertRegex(disposition["owner"], r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-        self.assertEqual(disposition["owner"], "skill-evolution")
+        text = (REPO_ROOT / "skill-evolution/SKILL.md").read_text()
+        procedure = self._extract_between(text, "## Analyze and dispose", "## Conduct feedback")
+        self.assertLess(procedure.index("observed behavior"), procedure.index("quality_summary"))
+        self.assertIn("report-only branch does not dispatch implementation", procedure)
+        self.assertIn("defer/reject disposition grants no action", procedure)
+        self.assertIn("Watch/reject triage candidates still receive this disposition", procedure)
+        payload = json.loads(self._extract_between(text, "```json", "```"))
+        disposition = payload["dispositions"][0]
+        self.assertEqual(set(disposition), {"candidate_id", "disposition", "owner", "action", "rationale"})
+        self.assertEqual((disposition["disposition"], disposition["action"], disposition["owner"]), ("defer", "none", "skill-evolution"))
 
     def test_skill_evolution_distinguishes_pressure_testing_from_blind_installed_behavior_evaluation(self) -> None:
-        skill_text = (REPO_ROOT / "skill-evolution" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        normalized = " ".join(skill_text.split())
-
-        required = [
-            "Skill pressure RED/GREEN tests whether the written methodology changes behavior under disclosed pressure; it is not installed-behavior release evidence.",
-            "Post-install blind behavior evaluation uses a held-out case in a fresh subject session.",
-            "The subject sees only the authentic prompt and ordinary runtime context.",
-            "purpose, rubric, expected answer, pass criteria, prior output, and experiment label remain evaluator-private",
-            "Only an evaluator-confirmed behavioral failure emits exactly one report-only conduct-feedback candidate; it never auto-edits a skill or writes recommendation state.",
-            "Harness, transport, provenance, timeout, empty-output, or malformed-evaluator failures emit no conduct-feedback candidate.",
-            "Detailed blind-evaluation transport, provenance, and persistence rules are owned by the source-tree live-smoke policy and blind-behavior runtime.",
-        ]
-        for fragment in required:
-            with self.subTest(required=fragment):
-                self.assertIn(fragment, normalized)
-
-        for duplicated_detail in (
-            "Held-out and fresh-session provenance must be validated from the case bundle and canonical install manifest",
-            "Persist only the case id/hash",
-            "../docs/policies/live-smoke-regression.md",
-            "../_shared/blind_behavior.py",
-        ):
-            self.assertNotIn(duplicated_detail, normalized)
-
-        pressure_position = normalized.find("Skill pressure RED/GREEN")
-        blind_position = normalized.find("Post-install blind behavior evaluation")
-        self.assertGreaterEqual(pressure_position, 0)
-        self.assertGreater(blind_position, pressure_position)
+        text = (REPO_ROOT / "skill-evolution/SKILL.md").read_text()
+        section = self._extract_between(text, "## Blind installed-behavior evaluation", "## Warnings")
+        owner_path = "docs/policies/live-smoke-regression.md"
+        for fragment in (owner_path, "evaluator-confirmed behavioral failure",
+                         "report-only conduct-feedback candidate", "harness or transport failure"):
+            self.assertIn(fragment, section)
+        self.assertIn("must not auto-evolve, auto-promote, auto-create skills", text)
+        owner = (REPO_ROOT / owner_path).read_text()
+        layers = self._extract_between(owner, "| Layer | Purpose |", "## Smoke Record")
+        for fragment in ("Skill pressure RED/GREEN", "never installed-behavior release evidence",
+                         "fresh session", "evaluator purpose, rubric, expected answer, pass criteria, prior output, and experiment label stay private"):
+            self.assertIn(fragment, layers)
+        record = self._extract_between(owner, "## Blind Behavior Record", "## Failure Triage")
+        for fragment in ("malformed evaluator output", "fail closed and emit no conduct-feedback candidate",
+                         "Only an evaluator-confirmed behavioral failure emits exactly one canonical report-only candidate",
+                         "_shared/blind_behavior.py", "_shared/fresh_agent_session.py"):
+            self.assertIn(fragment, record)
 
     def test_task_router_preserves_primary_request_axis(self) -> None:
-        skill_text = (REPO_ROOT / "task-router" / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        sections = {
-            "skill": " ".join(skill_text.split()),
-            "surface": " ".join(self._extract_between(
-                skill_text, "```text\n[routing-surface]", "```"
-            ).split()),
-            "rules": " ".join(self._extract_between(
-                skill_text, "Rules:", "### Sufficient Change Principle"
-            ).split()),
-        }
-        required_by_section = {
-            "surface": [
-                "- primary-request:", "- causal-axis:", "- response-mode:", "- response-order:",
-                "<cause or relationship | n/a>",
-                "causal-answer-first-after-necessary-evidence",
-                "imperative-result-first-after-necessary-work",
-                "clarification-question-only",
-            ],
-            "rules": [
-                "`primary-request` preserves the user's primary question or imperative instruction.",
-                "For a causal question, preserve its causal axis",
-                "For a non-causal imperative request, set `causal-axis: n/a` and use `response-order: imperative-result-first-after-necessary-work`.",
-                "Do not invent causality.",
-                "The user's terminal objective outranks investigative means.",
-                "Treat investigation, provenance reconstruction, artifact preservation, and worktree inspection as means unless the user explicitly requests one as a deliverable.",
-                "Do not let a means replace, narrow, or expand the terminal objective.",
-            ],
-            "skill": ["At pre-tool routing, do not fabricate or require an unsupported answer."],
-        }
-        forbidden_fragments = [
-            ("surface", "- primary-question:"),
-            ("skill", "Answer the primary causal axis before elaborating, narrowing, or broadening scope."),
-            ("skill", "must answer immediately"),
-            ("skill", "must answer before evidence"),
-            ("skill", "requires an answer before evidence"),
-            ("skill", "must answer before tool"),
-        ]
-        self._assert_fragment_tables(sections, required_by_section, forbidden_fragments)
+        text = (REPO_ROOT / "task-router/SKILL.md").read_text()
+        for fragment in ("- primary-request:", "- causal-axis:", "- response-order:", "Preserve a causal axis only", "Route classification precedes evidence planning", "imperative requests", "result after necessary work"):
+            self.assertIn(fragment, text)
+        self.assertIn("authority-and-renewal", text)
 
     def test_purpose_and_evidence_selection_contract_has_owner_and_consumers(self) -> None:
-        paths = {
-            "boundary": REPO_ROOT / "boundary-contract" / "SKILL.md",
-            "verification": (
-                REPO_ROOT
-                / "coding-convention"
-                / "verification-before-completion"
-                / "SKILL.md"
-            ),
-            "merge": REPO_ROOT / "merge-companion" / "SKILL.md",
-        }
-        sections = {
-            name: " ".join(path.read_text(encoding="utf-8").split())
-            for name, path in paths.items()
-        }
-        required_by_section = {
-            "boundary": [
-                "Record the terminal objective separately from implementation and investigation means.",
-                "Acceptance criteria describe the requested outcome, not incidental methods, examples, artifact counts, or verification mechanics unless the user made them requirements.",
-            ],
-            "verification": [
-                "Current accessible behavior or content is the default direct evidence for semantic claims.",
-                "Hash or provenance evidence is appropriate when the criterion is artifact identity, integrity, drift, merge safety, or reproducibility.",
-                "Do not use hash equality, byte identity, cache history, or repository lineage as a proxy for current semantic behavior.",
-            ],
-            "merge": [
-                "Use hashes and provenance only to establish artifact identity, drift, and merge safety.",
-                "Choose semantic behavior by current contract and behavior evidence, not by recency, authorship, or hash equality.",
-            ],
-        }
-        forbidden_fragments = [
-            ("verification", "Always hash the original"),
-            ("verification", "Always reconstruct provenance"),
-            ("merge", "newest file wins"),
-            ("merge", "matching hash proves semantic correctness"),
-        ]
-        self._assert_fragment_tables(sections, required_by_section, forbidden_fragments)
+        boundary = (REPO_ROOT / "boundary-contract/SKILL.md").read_text()
+        proof = (REPO_ROOT / "coding-convention/verification-before-completion/SKILL.md").read_text()
+        merge = (REPO_ROOT / "merge-companion/SKILL.md").read_text()
+        self.assertIn("terminal objective separately", boundary)
+        self.assertIn("Every criterion describes a requested outcome", boundary)
+        self.assertIn("## Evidence selection and stop gate", proof)
+        self.assertIn("semantic", proof)
+        self.assertIn("identity", proof)
+        self.assertIn("Hash/provenance evidence establishes identity, drift and merge safety", merge)
+        self.assertIn("current contract and behavior evidence determine which semantics to retain", merge)
 
     def test_korean_routing_docs_preserve_primary_request_and_terminal_objective(self) -> None:
-        required = [
-            "## Routing Surface Contract",
-            "primary-request",
-            "causal-axis",
-            "response-order",
-            "The user's terminal objective outranks investigative means.",
-            "Do not let a means replace, narrow, or expand the terminal objective.",
-        ]
-        for rel_path in ("docs/ko/policies/session-gate-matrix.md",):
-            text = " ".join(
-                (REPO_ROOT / rel_path).read_text(encoding="utf-8").split()
-            )
-            for fragment in required:
-                with self.subTest(path=rel_path, fragment=fragment):
-                    self.assertIn(fragment, text)
+        for relative in ("docs/ko/policies/session-gate-matrix.md",):
+            text = (REPO_ROOT / relative).read_text()
+            # Korean aid points to the English canonical owner instead of duplicating rules.
+            self.assertIn("task-router/SKILL.md", text)
+            self.assertIn("boundary-contract/SKILL.md", text)
+            self.assertIn("verification-before-completion", text)
 
     def test_real_repo_contract_surfaces_do_not_reintroduce_tool_shape_policy(self) -> None:
         old_phrase = "deterministic " + "inspection"

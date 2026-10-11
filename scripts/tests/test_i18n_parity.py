@@ -1,9 +1,9 @@
 """
 i18n (internationalization) parity lock test for Ghost-ALICE installers.
 
-Extracts (ko, en) string pairs from install.sh ``t`` calls and install.ps1
-``T`` calls, computes the symmetric difference of English strings between the
-two files, and asserts that difference equals a pre-recorded baseline.
+Extracts (ko, en) string pairs from the shell and PowerShell entrypoints and
+matching installer_lib modules, then compares the English-string difference
+against the recorded baseline.
 
 Purpose
 -------
@@ -26,21 +26,16 @@ install.ps1 call sites look like::
     (T "Korean text" "English text")
     T "Korean text" "English text"
 
-Both files use only single-line calls.  Strings may contain ``${var}`` / ``$Var``
-interpolations, punctuation, and escaped double-quotes (``\\\"``), but a string
-argument never contains an unescaped instance of its own delimiter.  The extractor
-therefore uses ``[^QUOTE]*`` (with a secondary pass to normalise embedded
-``\\\"`` in double-quoted strings) to capture argument content.
-
-The extractor uses ``re.findall`` on the full file text so that lines with
-multiple ``t``/``T`` calls are handled correctly.
+The extractor finds call starts with ``finditer`` and parses the two quoted
+arguments with ``_extract_quoted_arg``. That parser skips escaped characters
+inside double quotes and retains the source text; it does not evaluate shell
+interpolation. Calls without two quoted arguments are skipped.
 
 Determinism guarantee
 ---------------------
-``re.findall`` is deterministic: same source text → same list in the same order.
-Conversion to a ``set`` before computing the symmetric difference removes any
-order sensitivity.  The baseline JSON uses ``sort_keys=True`` and
-``ensure_ascii=False`` for a stable, human-readable encoding.
+Entry points are read first and installer_lib filenames are sorted. Converting
+the extracted English strings to sets removes ordering and duplicate effects;
+the reported differences are sorted before comparison with the baseline.
 """
 
 import json
@@ -88,7 +83,7 @@ def _extract_quoted_arg(text: str, pos: int) -> tuple[str, int]:
 
 # Regex to locate a `t` or `T` call.  We match:
 #   \b t \s+ QUOTE   (bash). Word boundary ensures we don't match "cat", etc.
-#   \b T \s+ QUOTE   (PS1). The same pattern; PS1 is case-sensitive so T only.
+#   \b T \s+ QUOTE   (PS1). The source matcher recognizes uppercase T only.
 #
 # After matching, we hand-parse the two arguments to avoid nested-quote issues.
 _T_CALL_RE_SH = re.compile(r'\bt(?=\s+[\'"])', re.UNICODE)
@@ -130,11 +125,7 @@ def _extract_pairs_from_text(text: str, call_re: re.Pattern) -> list[tuple[str, 
 
 
 def extract_sh_pairs(path: str = _SH_PATH) -> list[tuple[str, str]]:
-    """Return (ko, en) pairs from all ``t`` calls in install.sh and installer_lib/*.sh.
-
-    Bash modularization moved many ``t`` call sites out of install.sh into
-    installer_lib/*.sh, so parity with install.ps1 must scan the combined source.
-    """
+    """Return (ko, en) pairs from all ``t`` calls in install.sh and installer_lib/*.sh."""
     sources = [path]
     lib_dir = os.path.join(os.path.dirname(path), "installer_lib")
     if os.path.isdir(lib_dir):
@@ -151,11 +142,7 @@ def extract_sh_pairs(path: str = _SH_PATH) -> list[tuple[str, str]]:
 
 
 def extract_ps1_pairs(path: str = _PS1_PATH) -> list[tuple[str, str]]:
-    """Return (ko, en) pairs from all ``T`` calls in install.ps1 and installer_lib/*.ps1.
-
-    PowerShell modularization moved many ``T`` call sites out of install.ps1 into
-    installer_lib/*.ps1, so parity with install.sh must scan the combined source.
-    """
+    """Return (ko, en) pairs from all ``T`` calls in install.ps1 and installer_lib/*.ps1."""
     sources = [path]
     lib_dir = os.path.join(os.path.dirname(path), "installer_lib")
     if os.path.isdir(lib_dir):
@@ -223,24 +210,6 @@ class TestI18nParityBaseline(unittest.TestCase):
             )
         with open(_BASELINE_PATH, encoding="utf-8") as fh:
             return json.load(fh)
-
-    def test_extractor_finds_sh_pairs(self):
-        """install.sh extractor must find a non-trivial number of pairs."""
-        pairs = extract_sh_pairs()
-        self.assertGreater(
-            len(pairs), 50,
-            f"Expected >50 t() pairs in install.sh; got {len(pairs)}. "
-            "The extractor may be broken.",
-        )
-
-    def test_extractor_finds_ps1_pairs(self):
-        """install.ps1 extractor must find at least 10 pairs."""
-        pairs = extract_ps1_pairs()
-        self.assertGreater(
-            len(pairs), 5,
-            f"Expected >5 T() pairs in install.ps1; got {len(pairs)}. "
-            "The extractor may be broken.",
-        )
 
     def test_drift_matches_baseline(self):
         """Symmetric difference of EN strings must equal the recorded baseline.

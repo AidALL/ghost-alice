@@ -1,4 +1,4 @@
-"""TDD for Phase P5: core-owned privileged adapter provisioning.
+"""Tests for core-owned privileged adapter provisioning.
 
 Run: python3 -m pytest _shared/test_addon_privileged_adapters.py -q
 """

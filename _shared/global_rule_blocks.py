@@ -13,6 +13,7 @@ from typing import Sequence
 CODEX_BOOTSTRAP_MARKER = "# Ghost-ALICE Codex Bootstrap"
 CODEX_MANAGED_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->"
 CODEX_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
+CODEX_GOVERNANCE_DEPENDENCY_MARKER = "<!-- Ghost-ALICE governance source: installed-common -->"
 CLAUDE_BOOTSTRAP_MARKER = "# Ghost-ALICE Claude Bootstrap"
 CLAUDE_MANAGED_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
 CLAUDE_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
@@ -218,6 +219,22 @@ def merge_codex_bootstrap_text(existing_text: str | None, source_text: str) -> t
     return _merge_bootstrap_text(existing_text, source_text, CODEX_SPEC)
 
 
+def codex_requires_governance_companion(text: str) -> bool:
+    """Read only the managed loader's dependency, preserving user text authority."""
+    managed_block = _find_managed_block(text, CODEX_SPEC)
+    if managed_block is None:
+        return False
+    begin, end = managed_block
+    body = text[begin:end]
+    if CODEX_GOVERNANCE_DEPENDENCY_MARKER in body:
+        return True
+    # Compatibility with installed selectors predating the dependency marker.
+    return "ghost-alice-governance.md" in body and any(
+        heading in body
+        for heading in ("## Select the applicable contract", "## Select the instruction body")
+    )
+
+
 def apply_codex_bootstrap(
     source_path: Path | str,
     dest_path: Path | str,
@@ -231,8 +248,8 @@ def apply_codex_bootstrap(
         placeholder = "{{GOVERNANCE_PATH}}"
         if loader_text.count(placeholder) != 1:
             raise GlobalRuleBlockError("Codex loader requires exactly one governance path placeholder")
-        # Keep the fallback outside automatically loaded AGENTS.md files. It
-        # follows the same ownership and managed-block rules as the old port.
+        # Keep common governance outside automatically loaded AGENTS.md files. It
+        # follows the same ownership and managed-block rules for each platform.
         contract = Path(dest_path).with_name("ghost-alice-governance.md")
         if contract.is_symlink():
             raise GlobalRuleBlockError(f"refusing symlink governance contract: {contract}")

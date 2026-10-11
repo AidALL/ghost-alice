@@ -1,4 +1,5 @@
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -93,37 +94,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         data = self.load_json_output(result)
         self.assertEqual(data["error_count"], 0, msg=result.stdout)
 
-    def test_validator_accepts_floor_first_homepage_contract(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = self.make_fixture(Path(td))
-            write_text(
-                repo / "docs" / "index.html",
-                """
-                <section id="whats-inside">
-                  <div class="stat-cell">
-                    <div class="stat-num">1</div>
-                    <div class="stat-label">Core philosophy. Quality floor first</div>
-                  </div>
-                  <div class="stat-cell">
-                    <div class="stat-num">8</div>
-                    <div class="stat-label">Operating loop steps</div>
-                  </div>
-                  <div class="stat-cell">
-                    <div class="stat-num">4</div>
-                    <div class="stat-label">Verification layers</div>
-                  </div>
-                  <div class="inside-card-title">Quality floor as root rule</div>
-                  <div class="inside-card-desc">Agent authority is a consequence of verified state, not forward momentum.</div>
-                </section>
-                """,
-            )
-
-            result = self.run_validator(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stdout)
-        data = self.load_json_output(result)
-        self.assertEqual(data["error_count"], 0, msg=result.stdout)
-
     def test_validator_accepts_english_readme_contract(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             repo = self.make_fixture(Path(td))
@@ -192,7 +162,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         data = self.load_json_output(result)
         self.assertEqual(data["error_count"], 0, msg=result.stdout)
 
-    def test_homepage_foregrounds_intent_analyzer_not_internal_router(self) -> None:
+    def test_homepage_has_public_metadata_without_internal_badges(self) -> None:
         text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
 
         self.assertIn(
@@ -200,7 +170,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
             'scope, evidence, and runtime state across agent runtimes."',
             text,
         )
-        self.assertIn("session-intent-analyzer", text)
         self.assertNotIn("session-intent-" + "guard", text)
         for forbidden in (
             'class="gate-key">task-router',
@@ -249,94 +218,83 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
 
         self.assertEqual(offenders, [])
 
-    def test_homepage_gate_flow_diagram_has_compact_layout_contract(self) -> None:
-        text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+    def assert_accessible_homepage(self, text: str) -> None:
+        # Actor, judgment and return-path meaning requires source-backed review;
+        # these checks cover addressable navigation and accessible references.
+        self.assertIn('class="skip-link"', text)
+        ids = re.findall(r'\bid="([^"]+)"', text)
+        self.assertEqual(len(ids), len(set(ids)), "HTML IDs must be unique")
+        labels = re.findall(r'aria-labelledby="([^"]+)"', text)
+        self.assertTrue(labels, "The workflow figure needs an accessible name")
+        for label in labels:
+            self.assertTrue(set(label.split()) <= set(ids), label)
+        self.assertIn('href="#main"', text)
+        self.assertIn("main", ids)
 
-        self.assertIn('class="gate-flow-diagram"', text)
-        for marker in (
-            "session-intent-analyzer",
-            "governance consumers",
-            "boundary-contract",
-            "tool-checkpoint",
-            "execution surface",
-            "completion-check",
-            "io-trace",
-        ):
-            self.assertIn(marker, text)
-        for css_marker in (
-            ".gate-flow-grid",
-            ".gate-flow-cell",
-            "grid-template-columns: repeat(4, minmax(0, 1fr))",
-            "padding: 12px 14px",
-            "overflow-wrap: anywhere",
-            "@media (max-width: 900px)",
-            "@media (max-width: 560px)",
-        ):
-            self.assertIn(css_marker, text)
+    def test_homepage_has_accessible_navigation_and_figure_references(self) -> None:
+        self.assert_accessible_homepage((REPO_ROOT / "index.html").read_text(encoding="utf-8"))
 
-    def test_homepage_separates_gate_map_from_lifecycle_support(self) -> None:
-        text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
-        self.assertIn("Gate interaction map", text)
-        self.assertIn('class="support-grid"', text)
-        self.assertNotIn(":hover", text)
-        self.assertNotIn(".support-card:hover", text)
-        self.assertIn(
-            "This is the inventory layer: core governance checkpoints first, then workflow " "and domain packs that run on top.",
-            text,
+    def test_homepage_accessibility_rejects_dangling_or_duplicate_references(self) -> None:
+        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+        candidates = (
+            text.replace('href="#main"', 'href="#missing"'),
+            text.replace('id="main"', 'id="missing"'),
+            text.replace('id="flow-heading"', 'id="unrelated-description"'),
+            text + '<div id="main"></div>',
         )
-        self.assertNotIn('class="mechanism-grid"', text)
-        self.assertNotIn('class="support-note"', text)
-        self.assertNotIn("The map is the live gate path.", text)
+        for number, candidate in enumerate(candidates):
+            with self.subTest(case=number), self.assertRaises(AssertionError):
+                self.assert_accessible_homepage(candidate)
 
-        for marker in (
-            "intent delta",
-            "derived gate judgments",
-            "scope reopen point",
-            "Dynamic focus",
-            "micro",
-            "meso",
-            "macro",
-            "meta",
-            "claim-evidence-map",
-            "support handoff",
-        ):
-            self.assertIn(marker, text)
+    def test_homepage_languages_share_navigation_and_accessible_structure(self) -> None:
+        english = (REPO_ROOT / "index.html").read_text()
+        korean = (REPO_ROOT / "index_ko.html").read_text()
+        self.assert_accessible_homepage(english)
+        self.assert_accessible_homepage(korean)
+        self.assertIn('<html lang="ko">', korean)
+        self.assertIn('href="./index.html"', korean)
+        self.assertIn('href="./index_ko.html"', english)
+        self.assertEqual(re.findall(r'\bid="([^"]+)"', english), re.findall(r'\bid="([^"]+)"', korean))
+        self.assertEqual((REPO_ROOT / "docs/index_ko.html").read_bytes(), (REPO_ROOT / "index_ko.html").read_bytes())
+        self.assertIn('docs/index_ko.html', (REPO_ROOT / "_config.yml").read_text())
 
-        support_section = text.split('class="support-section"', 1)[1].split(
-            "<!-- ── Grows with your team ── -->", 1
-        )[0]
-        for marker in (
-            "Lifecycle support",
-            "io-trace audit trail",
-            "skill-evolution candidates",
-            "pending-merge review",
-            "adversarial verification",
-            "jailbreak drift check",
-        ):
-            self.assertIn(marker, support_section)
-        for duplicated_gate_card in (
-            'class="support-name">session-intent-analyzer',
-            'class="support-name">governance consumers',
-            'class="support-name">boundary-contract',
-            'class="support-name">tool-checkpoint',
-            'class="support-name">verification-before-completion',
-        ):
-            self.assertNotIn(duplicated_gate_card, support_section)
+    def test_docs_homepage_matches_root_pages_entry(self) -> None:
+        self.assertEqual((REPO_ROOT / "docs" / "index.html").read_bytes(),
+                         (REPO_ROOT / "index.html").read_bytes())
 
-    def test_docs_homepage_uses_docs_root_relative_links(self) -> None:
-        text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+    def test_validator_detects_homepage_copy_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            repo = self.make_fixture(Path(td))
+            text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+            write_text(repo / "index.html", text)
+            write_text(repo / "docs" / "index.html", text + "<!-- drift -->")
+            result = self.run_validator(repo)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("homepage-copy-parity", result.stdout)
 
-        self.assertTrue((REPO_ROOT / "docs" / "imgs" / "Ghost-ALICE_logo.png").is_file())
-        self.assertIn('src="imgs/Ghost-ALICE_logo.png"', text)
-        for marker in (
-            'href="./getting-started/installation.html"',
-            'href="./getting-started/uninstall.html"',
-            'href="./policies/installer-platform-compatibility-matrix.html"',
-            'href="./ko/README.html"',
-        ):
-            self.assertIn(marker, text)
-        for stale_marker in ('href="./docs/', 'href="./README_ko.md"'):
-            self.assertNotIn(stale_marker, text)
+    def test_validator_rejects_broken_navigation_in_identical_homepage_copies(self) -> None:
+        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
+        normalizer = re.search(r"<script>.*?</script>", text, re.DOTALL).group(0)
+        candidates = {
+            "missing": text.replace(normalizer, ""),
+            "wrong_base": text.replace("new URL('../', location.href)", "new URL('./', location.href)"),
+            "wrong_scope": text.replace(r"/\/docs\/(?:index(?:_ko)?\.html)?$/", r"/./"),
+            "comment_only": text.replace(normalizer, "<!--" + normalizer + "-->"),
+        }
+        for case, candidate in candidates.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
+                repo = self.make_fixture(Path(td))
+                write_text(repo / "index.html", candidate)
+                write_text(repo / "docs" / "index.html", candidate)
+                (repo / "imgs").mkdir()
+                (repo / "imgs" / "Ghost-ALICE_logo.png").touch()
+                result = self.run_validator(repo)
+                self.assertEqual(result.returncode, 2, msg=result.stdout)
+                data = self.load_json_output(result)
+                self.assertTrue(any(f["check"] == "homepage-base-resolution"
+                                    for f in data["findings"]), msg=result.stdout)
+                self.assertFalse(any(f["check"] == "homepage-copy-parity"
+                                     for f in data["findings"]), msg=result.stdout)
 
     def test_validator_detects_repo_root_homepage_link_drift(self) -> None:
         with tempfile.TemporaryDirectory() as td:

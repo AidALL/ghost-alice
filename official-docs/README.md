@@ -17,10 +17,6 @@ Place here only project-owned procedure documents that public contributors must 
 - Files currently included:
   - `skill-compliance-checklist.md`: the skill official-spec compliance verification checklist
 
-## Planning document entry point
-
-Upcoming work starts from `../docs/plans/README.md`. `official-docs/derived/` holds only public contributor procedure documents.
-
 ## New document classification criteria
 
 When adding a new document, use the questions below to decide which layer it goes into.
