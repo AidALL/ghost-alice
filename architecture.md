@@ -19,9 +19,39 @@ A delegated model handles an explicitly assigned subtask and returns its result 
 
 ## Work, review and return paths
 
-![Model, host and code handoffs](docs/assets/architecture.svg)
+~~~mermaid
+flowchart TD
+  U["The user supplies the objective, constraints and permission"] -->|Objective and authority| S["1 · The responding model selects authorized work<br/>and asks the host to run the required tools"]
+  S -->|Requested tool calls| T["The native host enforces tool permission, executes calls<br/>and returns their actual observations to the model"]
+  T -->|Actual observations| S
+  S -->|Original observations for the answer| D["2 · The model identifies the draft and source inputs<br/>New source-backed explanation: explicit claims<br/>Completion-candidate reuse: original bindings"]
+  D -->|Draft and new claims/sources or original candidate| HP["The host execution tool runs<br/>completion_assessment.py prepare-response"]
+  HP -->|CLI reads arguments and files| E["Core saves or retains exact review inputs<br/>and returns their contents and binding IDs"]
+  E -->|Host returns saved contents and candidate_reference| V["3a · The model compares each claim with original source contents<br/>and gives a verdict, sources and reason"]
+  V -->|Individual judgments| V2["3b · The model uses the individual judgments<br/>to compare the whole answer with the user objective,<br/>constraints and remaining work"]
+  V2 -->|Claim judgments and whole-answer judgment| J["The model writes both judgments as review JSON<br/>and requests recording"]
+  J -->|candidate_reference and review JSON file| HR["The host execution tool runs<br/>completion_assessment.py record-response"]
+  HR -->|CLI calls record_response_review| C["Core validates bindings and source integrity,<br/>then stores both judgments in one transaction"]
+  C -->|Supported: host returns review and response_text| R["4 · The model submits the exact reviewed answer<br/>returned by Core through the host tool result"]
+  C -->|Unsupported review or named prerequisite error| N["The model corrects affected content or drafts an honest unresolved result<br/>It preserves unchanged business work<br/>and reopens only affected review inputs"]
+  N -->|Only affected review inputs| D
+  S -->|Current authority and approved task scope| P["5 · The model identifies needed approved tasks<br/>for separate plan admission before Stop<br/>Current answer review may follow admission"]
+  P -->|Host Python execution request for the approved plan| HT["The host Python execution calls register_continuation_plan()<br/>with tasks, criterion references and actual approval references"]
+  HT -->|Plan inputs passed to register_continuation_plan| Q["Ghost-ALICE Autopilot code validates tasks, dependencies,<br/>boundaries and approval references<br/>It returns an admitted plan reference or error"]
+  Q -->|Host returns plan admission or a named error| P
+  R -->|Submitted answer and native session| K["The native host invokes each registered Stop hook independently"]
+  K -->|Independent completion-guard invocation| G["The Core completion guard calls assess_native_completion()<br/>and returns allow or a named rejection"]
+  K -->|Independent Ghost-ALICE Autopilot Stop invocation| B["The Ghost-ALICE Autopilot Stop adapter calls the same assess_native_completion() API<br/>It publishes new proof only when Core selects it,<br/>applies or reuses eligible authenticated publications,<br/>and selects ready tasks from the admitted plan"]
+  Q -->|Admitted plan retained for Stop| B
+  G -->|Allow or named rejection| H["The host receives each hook result<br/>It may deliver feedback to the conversation identified by the hook"]
+  B -->|Recording status and optional task request| H
+  H -->|If the host delivers a named diagnostic to that conversation| X["If a correction is needed for the requested answer or an approved dependent task,<br/>that conversation’s next response model fixes the identified record error<br/>or revises or withdraws a claim unsupported by original evidence<br/>Receiving a diagnostic does not direct a business rerun"]
+  H -->|If the host delivers an approved task request to that conversation| X2["That conversation’s next response model chooses permitted tools<br/>within the stored boundary and criteria<br/>Dispatch grants no new permission and proves<br/>neither execution nor whole-work completion"]
+~~~
 
-The diagram is a runtime overview. Its numbered handoffs are expanded below. The two green review steps are judgments made by the responding model. Saving or validating their records does not perform those judgments.
+The diagram is a runtime overview. Its numbered handoffs are expanded below with exact values and APIs. The responding model makes the claim judgment in step 3a and the whole-answer judgment in step 3b. Saving both judgments atomically or validating their records performs neither judgment.
+
+A supported answer can honestly report unfinished work; only supported required criteria can become met. Explanations create no new completion proof, while eligible prior proof and approved plans may still be used. A record creates no user permission.
 
 ### 1. Select work and execute it
 

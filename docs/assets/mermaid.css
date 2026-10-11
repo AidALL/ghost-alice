@@ -1,0 +1,15 @@
+.mermaid-scroll { overflow-x: auto; margin: 24px 0; }
+.mermaid-scroll .mermaid {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: 14px/1.5 ui-monospace, monospace;
+  white-space: pre;
+  overflow: visible;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.mermaid-scroll .mermaid svg { display: block; max-width: none; margin: 0 auto; }
+.mermaid-scroll:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 4px; }

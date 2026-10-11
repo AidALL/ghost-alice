@@ -362,11 +362,6 @@
     }
 
 
-    .flow-chart { max-width: 820px; margin: 24px auto; }
-    .flow-node { padding: 16px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--surface-2); }
-    .flow-node span { display: block; color: var(--accent); font-weight: 400; margin-bottom: 6px; }
-    .flow-edge { padding: 10px 14px; color: var(--muted); font-size: 14px; }
-    .flow-return { padding: 12px 16px; margin: 8px 0 8px 24px; border-left: 3px solid var(--accent-2); color: var(--ink); font-size: 14px; }
 
     .gate-flow-diagram { margin: 0 0 24px; }
     figcaption { color: var(--muted); font-size: 14px; margin-top: 14px; }
@@ -376,7 +371,7 @@
     .skip-link:focus { top: 8px; }
     .addon-table-scroll { overflow-x: auto; }
     .addon-table { min-width: 560px; }
-    @media (max-width: 560px) { .flow-node { padding: 12px; font-size: 14px; } .flow-return { margin-left: 8px; } .gate-flow-diagram { padding: 12px; } }
+    @media (max-width: 560px) { .gate-flow-diagram { padding: 12px; } }
     .support-section { background: var(--support-bg); }
     .support-grid {
       display: grid;
@@ -439,6 +434,7 @@
     }
     h3[id] { scroll-margin-top: 112px; }
   </style>
+  <link rel="stylesheet" href="./docs/assets/mermaid.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -479,18 +475,33 @@
       <div class="section-head"><h2>How it works</h2><p class="section-note">The responding model makes the judgments. Core and Ghost-ALICE Autopilot supply instructions and executable code. The native host runs tools and hooks, enforces permission and returns their results to the conversation.</p></div>
       <figure class="gate-flow-diagram" aria-labelledby="flow-heading">
         <h3 id="flow-heading">From authorized work to a reviewed answer</h3>
-        <div class="flow-chart">
-          <div class="flow-node"><span>1 · Select and perform the work</span>The model interprets the user’s objective and permission, selects the current work and submits that selection through a host tool to Core. After Core validates the route, the model requests the needed tools. The host returns the actual observations.</div>
-          <div class="flow-edge">↓ Actual results and original source locations</div>
-          <div class="flow-node"><span>2 · Receive exact review inputs</span>The model sends the complete draft, claims under review and original sources to Core through host tools. Core saves those contents and returns the exact inputs and references for the model to review.</div>
-          <div class="flow-edge">↓ Saved answer, original-source contents and references returned as a tool result</div>
-          <div class="flow-node"><span>3 · Judge each claim against original evidence</span>The model reads each claim and its original sources, including contrary evidence. It decides what is supported, contradicted or unavailable and gives the source references and reason for each judgment.</div>
-          <div class="flow-edge">↓ Individual judgments, user objective and constraints, and the complete answer</div>
-          <div class="flow-node"><span>4 · Judge the whole answer against the objective</span>The model separately checks whether the complete answer addresses the requested scope, avoids omissions and conflicts, and accurately states remaining work. Correct individual claims do not settle this whole-answer judgment.</div>
-          <div class="flow-edge">↓ The model’s two judgments, written as review JSON</div>
-          <div class="flow-node"><span>5 · Record both judgments</span>The model submits both judgments through host tools. Core validates their bindings and stores them together. Only supported reviews return an answer for submission. An unsupported judgment or missing prerequisite asks the model to choose affected correction or unresolved reporting.</div>
-          <div class="flow-edge">↓ The model submits the returned reviewed answer</div>
-          <div class="flow-node"><span>6 · Receive independent Stop results</span>The host invokes the Core completion guard and Ghost-ALICE Autopilot adapter independently. Both call Core’s assessment API to authenticate the current answer and review. The guard returns allow or a named prerequisite; Ghost-ALICE Autopilot publishes proof only when Core selects completion evidence, applies or reuses eligible authenticated publications, and may return a ready task from an admitted plan.</div>
+        <div class="mermaid-scroll" role="region" aria-label="Work and review flow; scroll horizontally to inspect the diagram" tabindex="0">
+          <pre class="mermaid">flowchart TD
+  accTitle: From authorized work to a reviewed answer
+  accDescr: The responding model selects authorized work and makes two distinct judgments. Core stores the exact review. The host invokes its completion guard and the Ghost-ALICE Autopilot adapter independently. Follow-up work returns to the next responding model only if the host delivers it to the identified conversation.
+  U["User supplies the objective,&lt;br/&gt;constraints and actual approval"] --&gt;|Objective and permission| M["1 · Model selects current work"]
+  M --&gt;|Work selection through a host tool| C["Core validates the work route"]
+  C --&gt;|Validated route| T["Model requests tools;&lt;br/&gt;native host runs permitted tools"]
+  T --&gt;|Actual results and original source locations| D["Model prepares the complete draft,&lt;br/&gt;claims and original sources"]
+  D --&gt;|Complete inputs through host tools| E["2 · Core saves exact review inputs&lt;br/&gt;and returns their contents and references"]
+  E --&gt;|Saved answer, original sources and references| V["3 · Model judges each claim against original sources,&lt;br/&gt;including contrary evidence:&lt;br/&gt;supported, contradicted or unavailable;&lt;br/&gt;records source references and reasons"]
+  V --&gt;|Individual judgments and the complete answer| W["4 · Model separately judges the whole answer:&lt;br/&gt;requested scope, omissions, conflicts&lt;br/&gt;and honest remaining-work reporting"]
+  U --&gt;|Objective and constraints| W
+  W --&gt;|Both model judgments as review JSON through host tools| R["5 · Core validates bindings&lt;br/&gt;and stores both judgments together"]
+  R --&gt;|Unsupported judgment or missing prerequisite| F["Model chooses an affected authorized correction&lt;br/&gt;or reports unresolved requirements"]
+  F --&gt;|Only if correction is needed and authorized| M
+  R --&gt;|Supported review returns the exact answer| S["Model submits the returned reviewed answer"]
+  S --&gt;|Submitted answer and current hook receipt| K["6 · Native host independently invokes&lt;br/&gt;the completion guard and Ghost-ALICE Autopilot Stop adapter"]
+  K --&gt;|Independent guard invocation| G["Core completion guard uses Core assessment API&lt;br/&gt;to authenticate the current answer and review"]
+  K --&gt;|Independent adapter invocation| A["Ghost-ALICE Autopilot uses Core assessment API&lt;br/&gt;to authenticate the current answer and review;&lt;br/&gt;publishes only Core-selected completion proof&lt;br/&gt;and applies or reuses eligible authenticated publications"]
+  G --&gt;|Allow or a named prerequisite| H["Native host receives the independent Stop results"]
+  M --&gt;|If further approved work is needed| P["Model defines tasks, dependencies,&lt;br/&gt;allowed surfaces and criterion references"]
+  U --&gt;|Actual approval boundary| P
+  P --&gt;|Plan registration through the host before Stop| Q["Ghost-ALICE Autopilot admits and stores the plan"]
+  Q --&gt;|Admitted tasks, approval boundaries and dependencies| A
+  A --&gt;|Recording status and optional ready task from the admitted plan| H
+  H --&gt;|Only if the host delivers the task to the identified conversation| X["That conversation's next responding model&lt;br/&gt;receives the task request"]
+  X --&gt;|Existing authority and permitted tools| M</pre>
         </div>
         <figcaption>A supported answer can honestly report unfinished work. A record, accepted proof or returned task request does not by itself establish that all requested work is complete.</figcaption>
       </figure>
@@ -561,5 +572,6 @@
       });
     });
   </script>
+  <script type="module" src="./docs/assets/mermaid.js"></script>
 </body>
 </html>

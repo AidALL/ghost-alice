@@ -249,6 +249,7 @@
       h2 { font-size: 22px; }
     }
   </style>
+  <link rel="stylesheet" href="{{ '/docs/assets/mermaid.css' | relative_url }}">
 </head>
 <body>
   <header class="topbar">
@@ -304,5 +305,6 @@
       button.addEventListener("click", () => applyThemeChoice(button.dataset.themeChoice));
     });
   </script>
+  <script type="module" src="{{ '/docs/assets/mermaid.js' | relative_url }}"></script>
 </body>
 </html>

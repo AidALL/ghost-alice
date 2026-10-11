@@ -57,7 +57,7 @@ Verification-before-completion owns useful-check selection, evidence reuse, orig
 | Official skill design principles | [anthropic-best-practices.md](references/anthropic-best-practices.md) |
 | Rule rationalization exposed by a case | [bulletproofing-skills.md](references/bulletproofing-skills.md) |
 | Trigger, workflow and output separation | [condition-skill-output-detailed.md](references/condition-skill-output-detailed.md) |
-| Flowchart notation | [graphviz-conventions.dot](references/graphviz-conventions.dot) |
+| Flowchart notation | [mermaid-conventions.md](references/mermaid-conventions.md) |
 | Pressure dimensions for a case | [persuasion-principles.md](references/persuasion-principles.md) |
 | A post-evaluation contradiction | [review-loop.md](references/review-loop.md) |
 | Test method by skill type | [skill-testing-guide.md](references/skill-testing-guide.md) |

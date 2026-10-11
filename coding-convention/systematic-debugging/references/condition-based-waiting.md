@@ -8,18 +8,12 @@ Flaky tests often guess at timing with arbitrary delays. This creates race condi
 
 ## When to Use
 
-```dot
-digraph when_to_use {
-    "Test uses setTimeout/sleep?" [shape=diamond];
-    "Testing timing behavior?" [shape=diamond];
-    "Document why the timeout is needed" [shape=box];
-    "Use condition-based waiting" [shape=box];
-
-    "Test uses setTimeout/sleep?" -> "Testing timing behavior?" [label="yes"];
-    "Testing timing behavior?" -> "Document why the timeout is needed" [label="yes"];
-    "Testing timing behavior?" -> "Use condition-based waiting" [label="no"];
-}
-```
+~~~mermaid
+flowchart TD
+  A{"Does the test use setTimeout or sleep?"} -->|yes| B{"Does the test verify timing behavior?"}
+  B -->|yes| C["The test author documents why the timeout is needed"]
+  B -->|no| D["The test author uses condition-based waiting"]
+~~~
 
 When to use it.
 

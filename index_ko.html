@@ -362,11 +362,6 @@
     }
 
 
-    .flow-chart { max-width: 820px; margin: 24px auto; }
-    .flow-node { padding: 16px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--surface-2); }
-    .flow-node span { display: block; color: var(--accent); font-weight: 400; margin-bottom: 6px; }
-    .flow-edge { padding: 10px 14px; color: var(--muted); font-size: 14px; }
-    .flow-return { padding: 12px 16px; margin: 8px 0 8px 24px; border-left: 3px solid var(--accent-2); color: var(--ink); font-size: 14px; }
 
     .gate-flow-diagram { margin: 0 0 24px; }
     figcaption { color: var(--muted); font-size: 14px; margin-top: 14px; }
@@ -376,7 +371,7 @@
     .skip-link:focus { top: 8px; }
     .addon-table-scroll { overflow-x: auto; }
     .addon-table { min-width: 560px; }
-    @media (max-width: 560px) { .flow-node { padding: 12px; font-size: 14px; } .flow-return { margin-left: 8px; } .gate-flow-diagram { padding: 12px; } }
+    @media (max-width: 560px) { .gate-flow-diagram { padding: 12px; } }
     .support-section { background: var(--support-bg); }
     .support-grid {
       display: grid;
@@ -439,6 +434,7 @@
     }
     h3[id] { scroll-margin-top: 112px; }
   </style>
+  <link rel="stylesheet" href="./docs/assets/mermaid.css">
 </head>
 <body>
   <a class="skip-link" href="#main">본문으로 이동</a>
@@ -479,18 +475,33 @@
       <div class="section-head"><h2>작동 방식</h2><p class="section-note">판단은 응답 모델이 수행합니다. Core와 Ghost-ALICE Autopilot은 지침과 실행 코드를 제공합니다. 네이티브 호스트는 도구·훅을 실행하고 권한을 집행하며 결과를 대화에 반환합니다.</p></div>
       <figure class="gate-flow-diagram" aria-labelledby="flow-heading">
         <h3 id="flow-heading">승인된 작업에서 검토한 답변까지</h3>
-        <div class="flow-chart">
-          <div class="flow-node"><span>1 · 작업 선택과 실행</span>모델은 사용자 목적·권한을 해석하여 현재 작업을 선택하고 호스트 도구로 Core에 제출합니다. Core가 경로를 검증하면 모델은 필요한 도구를 요청합니다. 호스트가 실제 관찰을 반환합니다.</div>
-          <div class="flow-edge">↓ 실제 결과와 원본 출처 위치</div>
-          <div class="flow-node"><span>2 · 정확한 검토 입력 받기</span>모델이 원고 전체·검토 대상 주장·원본 출처를 호스트 도구로 Core에 전달합니다. Core는 그 내용을 저장하고 모델이 검토할 정확한 내용과 참조를 반환합니다.</div>
-          <div class="flow-edge">↓ 저장한 답변·원본 출처 내용·참조가 도구 결과로 반환됨</div>
-          <div class="flow-node"><span>3 · 각 주장과 원본 근거의 비교</span>모델은 각 주장과 반대 근거를 포함한 원본 출처를 읽습니다. 무엇이 뒷받침되고 모순되며 확인할 수 없는지 판단하고 출처 참조와 판단 이유를 남깁니다.</div>
-          <div class="flow-edge">↓ 주장별 판단, 사용자 목적·제약, 완전한 답변</div>
-          <div class="flow-node"><span>4 · 답변 전체와 목적의 비교</span>모델은 답변 전체가 요청 범위에 응답하는지, 누락·충돌이 없는지, 남은 작업을 정확히 설명하는지 따로 판단합니다. 개별 주장이 맞다는 사실만으로 전체 답변의 판단이 끝나지는 않습니다.</div>
-          <div class="flow-edge">↓ 모델이 검토 JSON으로 작성한 서로 다른 두 판단</div>
-          <div class="flow-node"><span>5 · 두 판단 기록</span>모델이 두 판단을 호스트 도구로 제출하면 Core가 연결을 검증하고 함께 저장합니다. 지원되는 검토만 제출용 답변을 반환합니다. 미지원 판단이나 선행 조건 오류가 있으면 모델은 영향받은 수정 또는 미해결 보고를 선택합니다.</div>
-          <div class="flow-edge">↓ 모델이 반환된 검토 답변을 제출함</div>
-          <div class="flow-node"><span>6 · 독립적인 Stop 결과 수신</span>호스트는 Core 완료 가드와 Ghost-ALICE Autopilot 어댑터를 독립 호출합니다. 각각 Core 평가 API로 현재 답변과 검토 기록을 인증합니다. 가드는 허용 또는 누락된 선행 조건을 반환하며, Ghost-ALICE Autopilot은 Core가 선택한 완료 근거만 새로 접수하고, 적격한 기존 인증 근거를 적용·재사용하며, 수락된 계획의 준비된 작업을 반환할 수 있습니다.</div>
+        <div class="mermaid-scroll" role="region" aria-label="작업과 검토 흐름; 가로로 스크롤하여 그림을 확인합니다" tabindex="0">
+          <pre class="mermaid">flowchart TD
+  accTitle: 승인된 작업에서 검토한 답변까지
+  accDescr: 응답 모델은 승인된 작업을 선택하고 서로 다른 두 판단을 수행합니다. Core는 정확한 검토를 저장합니다. 호스트는 완료 가드와 Ghost-ALICE Autopilot 어댑터를 독립 호출합니다. 호스트가 식별된 대화에 후속 작업을 전달한 경우에만 다음 응답 모델이 작업을 받습니다.
+  U["사용자가 목적·제약과&lt;br/&gt;실제 승인 범위를 제시합니다"] --&gt;|목적과 권한| M["1 · 모델이 현재 작업을 선택합니다"]
+  M --&gt;|호스트 도구를 통한 작업 선택 제출| C["Core가 작업 경로를 검증합니다"]
+  C --&gt;|검증된 경로| T["모델이 도구를 요청하고&lt;br/&gt;네이티브 호스트가 허용된 도구를 실행합니다"]
+  T --&gt;|실제 결과와 원본 출처 위치| D["모델이 원고 전체·주장·원본 출처를 준비합니다"]
+  D --&gt;|호스트 도구를 통한 완전한 입력 전달| E["2 · Core가 정확한 검토 입력을 저장하고&lt;br/&gt;그 내용과 참조를 반환합니다"]
+  E --&gt;|저장한 답변·원본 출처·참조| V["3 · 모델이 반대 근거를 포함한 원본 출처와&lt;br/&gt;각 주장을 비교하여 지원·모순·확인 불가를 판단하고&lt;br/&gt;출처 참조와 판단 이유를 기록합니다"]
+  V --&gt;|주장별 판단과 완전한 답변| W["4 · 모델이 답변 전체를 별도로 판단합니다:&lt;br/&gt;요청 범위·누락·충돌과&lt;br/&gt;남은 작업의 정직한 설명"]
+  U --&gt;|목적과 제약| W
+  W --&gt;|호스트 도구를 통한 두 모델 판단의 검토 JSON 제출| R["5 · Core가 연결을 검증하고&lt;br/&gt;두 판단을 함께 저장합니다"]
+  R --&gt;|미지원 판단 또는 누락된 선행 조건| F["모델이 영향받은 승인된 수정을 선택하거나&lt;br/&gt;미해결 요구를 보고합니다"]
+  F --&gt;|수정이 필요하고 승인된 경우에만| M
+  R --&gt;|지원되는 검토가 정확한 답변을 반환함| S["모델이 반환된 검토 답변을 제출합니다"]
+  S --&gt;|제출 답변과 현재 훅 receipt| K["6 · 네이티브 호스트가 완료 가드와&lt;br/&gt;Ghost-ALICE Autopilot Stop 어댑터를 독립 호출합니다"]
+  K --&gt;|독립적인 완료 가드 호출| G["Core 완료 가드가 Core 평가 API로&lt;br/&gt;현재 답변과 검토를 인증합니다"]
+  K --&gt;|독립적인 어댑터 호출| A["Ghost-ALICE Autopilot이 Core 평가 API로&lt;br/&gt;현재 답변과 검토를 인증하고,&lt;br/&gt;Core가 선택한 완료 근거만 접수하며&lt;br/&gt;적격한 인증 근거를 적용하거나 재사용합니다"]
+  G --&gt;|허용 또는 명시된 선행 조건| H["네이티브 호스트가 독립적인 Stop 결과를 받습니다"]
+  M --&gt;|승인된 후속 작업이 필요한 경우| P["모델이 작업·의존 관계·허용 대상과&lt;br/&gt;기준 참조를 정합니다"]
+  U --&gt;|실제 승인 범위| P
+  P --&gt;|Stop 전에 호스트를 통한 계획 등록| Q["Ghost-ALICE Autopilot이 계획을 수락하고 저장합니다"]
+  Q --&gt;|수락된 작업·승인 범위·의존 관계| A
+  A --&gt;|기록 상태와 수락된 계획의 선택적 준비 작업| H
+  H --&gt;|호스트가 식별된 대화에 작업을 전달한 경우에만| X["해당 대화의 다음 응답 모델이&lt;br/&gt;작업 요청을 받습니다"]
+  X --&gt;|기존 권한과 허용된 도구| M</pre>
         </div>
         <figcaption>지원되는 답변도 미완료 작업을 정직하게 보고할 수 있습니다. 기록·수락된 근거·작업 요청의 반환만으로 요청된 모든 작업이 완료됐다고 판단하지 않습니다.</figcaption>
       </figure>
@@ -561,5 +572,6 @@
       });
     });
   </script>
+  <script type="module" src="./docs/assets/mermaid.js"></script>
 </body>
 </html>
