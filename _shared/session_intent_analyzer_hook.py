@@ -34,19 +34,8 @@ def _home() -> Path:
 
 
 def _ledger_dir_candidates() -> list[Path]:
-    explicit = os.environ.get("GHOST_ALICE_CORE_ROOT")
-    if explicit:
-        return [Path(explicit)/"session-intent-analyzer/scripts"]
-    home = _home()
-    candidates = [
-        REPO_ROOT / "session-intent-analyzer" / "scripts",
-        home / ".agents" / "skills" / "session-intent-analyzer" / "scripts",
-        home / ".claude" / "skills" / "session-intent-analyzer" / "scripts",
-    ]
-    claude_home = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-    if claude_home:
-        candidates.append(Path(claude_home) / "skills" / "session-intent-analyzer" / "scripts")
-    return candidates
+    """The source and installed runtime both ship their own sibling ledger API."""
+    return [REPO_ROOT / "session-intent-analyzer" / "scripts"]
 
 
 for LEDGER_DIR in _ledger_dir_candidates():

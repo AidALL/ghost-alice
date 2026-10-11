@@ -373,6 +373,53 @@ class CompletionAssessmentTests(unittest.TestCase):
         with self.assertRaises(self.api().CompletionAssessmentError):
             self.api().lookup_current_proof(self.source, candidate['proof'].replace('criterion: AC1', 'criterion: AC2'))
 
+    def test_control_marker_spacing_preserves_original_review_through_stop(self):
+        import json, os, subprocess, sys
+        api = self.api()
+        body = 'The recorded observation supports this result.\n\n' + self.proof()
+        candidate = api.prepare_response_review(self.source, response_text=body,
+            source_paths=[str(self.observation)], verified_at=self.time)
+        api.record_response_review(self.source, candidate['candidate_reference'], dict(
+            claims=self.claim_judgments(candidate), response=dict(
+                binding_id=candidate['response_binding']['binding_id'], verdict='supported',
+                source_ids=[candidate['sources'][0]['source_id']],
+                rationale='The complete answer is limited to the original observation.')))
+        delivered = body.replace('[completion-check]\n', '[completion-check]\n\n', 1)
+        for text in (body, delivered):
+            with self.subTest(text=text):
+                actual = api.lookup_current_response(self.source, text)
+                self.assertEqual(actual.candidate['proof'], candidate['proof'])
+                self.assertEqual(actual.candidate['proof_digest'], candidate['proof_digest'])
+                self.assertEqual(actual.candidate['sources'], candidate['sources'])
+                self.assertEqual(actual.candidate['verified_at'], self.time)
+        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
+            input=json.dumps(dict(session_id='current', last_assistant_message=delivered)),
+            text=True, capture_output=True, check=True,
+            env=dict(os.environ, **self.source, PYTHONDONTWRITEBYTECODE='1'))
+        self.assertNotEqual(json.loads(stopped.stdout).get('decision'), 'block', stopped.stdout)
+        for changed in (delivered.replace('criterion: AC1', 'criterion: AC2'),
+                        delivered.replace('verdict: pass', 'verdict: fail'),
+                        delivered.replace('original observation', 'different observation'),
+                        delivered.replace('supports this result', 'supports every task'),
+                        delivered.replace('  - claim:', '\n  - claim:', 1)):
+            with self.subTest(changed=changed), self.assertRaises(api.CompletionAssessmentError):
+                api.lookup_current_response(self.source, changed)
+        spaced = api.prepare_response_review(self.source, response_text=delivered,
+            source_paths=[str(self.observation)], verified_at=self.time)
+        api.record_response_review(self.source, spaced['candidate_reference'], dict(
+            claims=self.claim_judgments(spaced), response=dict(
+                binding_id=spaced['response_binding']['binding_id'], verdict='supported',
+                source_ids=[spaced['sources'][0]['source_id']],
+                rationale='The same observation supports this independently recorded draft.')))
+        for text, original in ((body, candidate), (delivered, spaced)):
+            with self.subTest(exact=text):
+                self.assertEqual(api.lookup_current_response(self.source, text).candidate['proof_digest'],
+                    original['proof_digest'])
+        self.observation.write_text('The original observation has changed.')
+        with self.assertRaises(api.CompletionAssessmentError):
+            api.lookup_current_response(self.source, delivered)
+
     def test_final_block_extraction_does_not_digest_summary_as_original_proof(self):
         import completion_check_validator as parser
         self.assertTrue(callable(getattr(parser, 'extract_original_proof', None)), 'Original proof extraction is missing')

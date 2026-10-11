@@ -26,7 +26,7 @@ bash install.sh --addon autopilot
 | --- | --- | --- | --- |
 | autopilot | Return eligible tasks from the model’s explicitly approved plan through the registered Stop adapter. | `bash install.sh --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-Core `0.5.0` and Ghost-ALICE Autopilot `0.5.0` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.0` or later. Source checks, native runtime validation and publication establish separate evidence.
+Core `0.5.1` and Ghost-ALICE Autopilot `0.5.1` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.1` or later. Source checks, native runtime validation and publication establish separate evidence.
 
 The responding model judges work and meaning; Core authenticates the review records. Ghost-ALICE Autopilot consumes that result and selects eligible work from the model’s admitted plan. See the [architecture](../../architecture.md) for inputs, returns and host delivery.
 

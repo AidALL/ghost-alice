@@ -55,8 +55,8 @@ def is_actual_user_prompt(entry):
                                      for item in items)
 
 
-def native_tool_activity(platform, session_id, native_input):
-    """Observe typed current-turn calls; unavailable evidence is not absence.
+def native_tool_activity(platform, session_id, native_input, *, input_observation=None):
+    """Observe calls after the current human input; unavailable evidence is not absence.
 
     This establishes native activity only. It neither judges the response's
     meaning nor substitutes for the current Core route or authenticated review.
@@ -87,8 +87,34 @@ def native_tool_activity(platform, session_id, native_input):
                     if row.get('type') == 'turn_context' and isinstance(row.get('payload'), dict)]
         if not isinstance(turn_id, str) or not turn_id or not contexts or contexts[-1] != turn_id:
             return result('unavailable', 'native-turn-unavailable')
-        active_turn = None
-        for row in rows:
+        # A host turn can contain several human inputs. Native actor metadata
+        # locates the latest human message; the ledger observation binds its
+        # content to this input independently of tool or hook message wording.
+        human = None
+        for index, row in enumerate(rows):
+            payload = row.get('payload')
+            if (row.get('type') != 'response_item' or not isinstance(payload, dict)
+                    or payload.get('type') != 'message' or payload.get('role') != 'user'):
+                continue
+            metadata = payload.get('internal_chat_message_metadata_passthrough')
+            if (isinstance(metadata, dict) and metadata.get('turn_id') == turn_id
+                    and isinstance(metadata.get('content_item_kinds'), list)
+                    and 'user.text' in metadata['content_item_kinds']):
+                human = (index, payload)
+        if human is None:
+            return result('unavailable', 'native-user-boundary-unavailable')
+        content = human[1].get('content')
+        texts = [part.get('text') for part in content
+                 if isinstance(part, dict) and part.get('type') == 'input_text'] if isinstance(content, list) else []
+        if not texts or any(not isinstance(text, str) for text in texts):
+            return result('unavailable', 'native-user-text-unavailable')
+        text = ''.join(texts)
+        if (not isinstance(input_observation, dict)
+                or input_observation.get('input_char_count') != len(text)
+                or input_observation.get('input_digest') != 'sha256:' + hashlib.sha256(text.encode('utf-8')).hexdigest()):
+            return result('unavailable', 'native-input-observation-mismatch')
+        active_turn = turn_id
+        for row in rows[human[0] + 1:]:
             payload = row.get('payload')
             if not isinstance(payload, dict):
                 continue
@@ -100,10 +126,10 @@ def native_tool_activity(platform, session_id, native_input):
             metadata = payload.get('internal_chat_message_metadata_passthrough')
             event_turn = metadata.get('turn_id') if isinstance(metadata, dict) else None
             if event_turn == turn_id:
-                return result('observed', 'current-turn-tool-call')
+                return result('observed', 'current-input-tool-call')
             if active_turn == turn_id and event_turn is None:
                 return result('unavailable', 'native-tool-turn-unavailable')
-        return result('absent', 'current-turn-has-no-tool-call')
+        return result('absent', 'current-input-has-no-tool-call')
     owned = [row for row in rows if row.get('sessionId') == session_id and not row.get('isSidechain')]
     for index in range(len(owned) - 1, -1, -1):
         if is_actual_user_prompt(owned[index]):

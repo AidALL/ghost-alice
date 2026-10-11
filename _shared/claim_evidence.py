@@ -98,10 +98,11 @@ def evaluate_claim_report(text, resolver):
 
 
 def evaluate_claim_reuse(text, resolver, candidate_provider):
-    """Hook-owned default: bind original paragraphs without model bookkeeping.
+    """Authenticate a response consisting entirely of retained claim paragraphs.
 
     claim_evidence_runtime supplies candidates from original_claim_evidence's read-only API.
-    They still pass the full resolver before any assertion is covered. New
+    An incidental match in ordinary prose does not submit an evidence report.
+    Eligible responses pass the full resolver before any assertion is covered. New
     completion/partial submissions own their proof and do not inherit old state.
     """
     explicit = evaluate_claim_report(text, resolver)
@@ -114,7 +115,8 @@ def evaluate_claim_reuse(text, resolver, candidate_provider):
         paragraphs = re.split(r"\n[ \t]*\n", text)
         matched = [row for row in candidates.get("claims", []) if isinstance(row, dict)
                    and row.get("statement") in paragraphs and _FIELDS <= set(row)]
-        if not matched:
+        statements = {row['statement'] for row in matched}
+        if not matched or any(p.strip() and p not in statements for p in paragraphs):
             return explicit
         refs = [{key: row[key] for key in _FIELDS} for row in matched]
         envelope = dict(schema_version=SCHEMA_VERSION, claims=refs)

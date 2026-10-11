@@ -557,6 +557,32 @@ def extract_original_proof(text):
     return raw[start:end].rstrip()
 
 
+def review_comparison_text(text):
+    """Compare review delivery while retaining the original evidence bytes.
+
+    A real control marker is separate from its field list. Blank lines between
+    those two elements are presentation spacing, not a change to either input.
+    All fields, their order and indentation, and surrounding prose stay exact.
+    This comparison value must never replace a stored proof or source digest.
+    """
+    raw = "" if text is None else str(text)
+    lines = _split_lines(raw)
+    offsets = [0] + [match.end() for match in _NEWLINE_SPLIT_RE.finditer(raw)]
+    spans = []
+    for marker, index, _ in _control_headers(raw):
+        if marker not in {"completion-check", "partial-check"}:
+            continue
+        first = index + 1
+        current = first
+        while current < len(lines) and not lines[current].strip():
+            current += 1
+        if current > first and current < len(lines) and _TOP_LEVEL_FIELD_RE.match(lines[current]):
+            spans.append((offsets[first], offsets[current]))
+    for start, end in reversed(spans):
+        raw = raw[:start] + raw[end:]
+    return raw.strip()
+
+
 def parse_original_completion_evidence(evidence_text, *, allow_partial=False, allow_failed_completion=False):
     """Interpret an original qualified proof for publication and retained claims.
 

@@ -289,13 +289,16 @@ def _prepare_destination_runtime(destination, *, dry_run=False):
     install_destination.assert_mutation_path(target)
     if destination.mode == "isolated":
         Path(destination.platform_dir).mkdir(parents=True, exist_ok=True)
-    for source in (Path(destination.core_source_root)/"_shared").iterdir():
-        if source.is_file() and source.suffix in {".py", ".mjs", ".json"}:
-            output = target/source.name
-            install_destination.assert_mutation_path(output)
-            output.parent.mkdir(parents=True, exist_ok=True)
-            if not output.exists() or output.read_bytes() != source.read_bytes():
-                shutil.copy2(source, output)
+    source_root = Path(destination.core_source_root)
+    ledger = Path('session-intent-analyzer/scripts/session_intent_ledger.py')
+    sources = [(source_root / ledger, target.parent / ledger)]
+    sources.extend((source, target / source.name) for source in (source_root / '_shared').iterdir()
+                   if source.is_file() and source.suffix in {'.py', '.mjs', '.json'})
+    for source, output in sources:
+        install_destination.assert_mutation_path(output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        if not output.exists() or output.read_bytes() != source.read_bytes():
+            shutil.copy2(source, output)
 
 
 

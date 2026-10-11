@@ -583,7 +583,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(self.base, ignore_errors=True))
         shared = self.base / "_shared"
         shared.mkdir(parents=True)
-        # Copy the hook so its REPO_ROOT has no sibling ledger; resolution must fall to the home/CLAUDE_CONFIG_DIR candidates we control.
+        # Copy the hook into a deployment whose sibling ledger this fixture controls.
         self.hook = shared / "session_intent_analyzer_hook.py"
         shutil.copy2(SCRIPT, self.hook)
         shutil.copy2(SCRIPT.with_name("install_destination.py"),shared/"install_destination.py")
@@ -599,8 +599,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         env["USERPROFILE"] = str(self.home)
         env.pop("CLAUDE_CONFIG_DIR", None)
         env.pop("GHOST_ALICE_SESSION_ID", None)
-        # Exercise provider discovery without an explicit source; an explicit Core source
-        # is a different authoritative capability and must not be ignored.
+        # Keep ambient source coordinates outside the isolated deployment.
         env.pop("GHOST_ALICE_CORE_ROOT", None)
         env.pop("GHOST_ALICE_SESSION_INTENT_SCRIPT", None)
         env["PYTHONPATH"] = str(self.hook.parent)
@@ -617,7 +616,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         )
 
     def _put_ledger(self, body: str) -> None:
-        d = self.home / ".claude" / "skills" / "session-intent-analyzer" / "scripts"
+        d = self.base / "session-intent-analyzer" / "scripts"
         d.mkdir(parents=True, exist_ok=True)
         (d / "session_intent_ledger.py").write_text(body, encoding="utf-8")
 

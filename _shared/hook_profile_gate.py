@@ -9,7 +9,6 @@ wrapped command, and then runs it.
 from __future__ import annotations
 
 import base64
-import importlib.util
 import json
 import os
 import re
@@ -917,12 +916,8 @@ def _reconcile_native_intake(env, hook_payload):
     session = bound_session_identity('claude', hook_payload, env)
     if session is None:
         return
-    path = Path(env['GHOST_ALICE_CORE_ROOT']) / 'session-intent-analyzer/scripts/session_intent_ledger.py'
-    spec = importlib.util.spec_from_file_location('_native_intake_ledger', path)
-    if spec is None or spec.loader is None:
-        raise HookCommandRejected('Core native intake ledger is unavailable', hook_payload=hook_payload)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    from native_completion import _ledger
+    module = _ledger(env)
     module.reconcile_native_inputs(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
                                    platform='claude', session_id=session)
 

@@ -160,6 +160,26 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.review_report()
         self.assertIsNone(self.assess()['body_issue'])
 
+    def test_registered_review_owns_the_response_instead_of_automatic_claim_discovery(self):
+        body = 'Existing tests cover recording, not complete business continuation.'
+        candidate = self.api.prepare_response_review(self.source, response_text=body, source_paths=[],
+            reuse_candidate=self.original['candidate_reference'])
+        self.api.record_response_review(self.source, candidate['candidate_reference'], dict(
+            claims=self.judgments(candidate), response=dict(
+                binding_id=candidate['response_binding']['binding_id'], verdict='supported',
+                source_ids=[candidate['sources'][0]['source_id']],
+                rationale='The complete response preserves the original observation and its limits.')))
+        claim = dict(statement=body, work_unit_id='first', contract_revision=1,
+            criterion_id='AC1', proof_digest='sha256:' + 'a' * 64)
+        with patch('original_claim_evidence.list_retained_claim_candidates',
+                return_value=dict(status='candidates', claims=[claim])), patch(
+                'original_claim_evidence.resolve_retained_claims',
+                return_value=dict(status='unavailable', claims=[])):
+            result = self.assess(body)
+        self.assertIsNone(result['body_issue'])
+        self.assertEqual(result['completion_route']['publication_route'], 'none')
+        self.assertEqual(result['completion_route']['publication_criteria'], [])
+
     def test_explanation_source_failure_requests_source_status_before_affected_review(self):
         self.review_report()
         original = self.observation.read_bytes()
@@ -254,7 +274,8 @@ class NativeActivityTests(unittest.TestCase):
             transcript_path=str(self.transcript), last_assistant_message='memo.txt: requested line')
         self.rows = [dict(type='session_meta', payload=dict(id='current')),
             dict(type='turn_context', payload=dict(turn_id='followup')),
-            self.item('message', 'followup', role='user', content=[dict(type='input_text', text='Append the line.')])]
+            self.item('message', 'followup', role='user', content=[dict(type='input_text', text='Append the requested line.')])]
+        self.rows[-1]['payload']['internal_chat_message_metadata_passthrough']['content_item_kinds'] = ['user.text']
 
     def item(self, kind, turn, **fields):
         return dict(type='response_item', payload=dict(type=kind,
@@ -267,6 +288,38 @@ class NativeActivityTests(unittest.TestCase):
         return importlib.import_module('native_completion').assess_native_completion(
             self.source, phase='final', text=self.payload['last_assistant_message'],
             native_input=self.payload if payload is None else payload)
+
+    def test_conversation_explanation_does_not_submit_an_incidental_retained_claim(self):
+        body = '''네. 검토한 최종본은 모두 문서 본문에 들어가 있습니다.
+
+- Core 한·영 아키텍처·웹페이지·스킬 참고자료: Mermaid로 반영했습니다.
+- Ghost-ALICE Autopilot README·위키·설치 문서: 이미 본문에 있던 최종 Mermaid 다이어그램을 유지했습니다.
+
+19개 다이어그램을 Mermaid로 통일하고 SVG 자산과 생성 스크립트를 제거했습니다.
+
+[한국어 아키텍처 최종본 보기](https://aidall.github.io/ghost-alice/architecture_ko.html)'''
+        claim = dict(statement=body.split('\n\n')[2], work_unit_id='diagrams',
+            contract_revision=1, criterion_id='format', proof_digest='sha256:' + 'a' * 64)
+        accepted = dict(status='valid', claims=[dict(claim, validity='valid',
+            original_claims=[claim['statement']], original_verified_at='2026-10-11T20:11:49Z',
+            evidence_reference='original-evidence', application_reference='accepted-application')])
+        self.write_rows()
+        with patch('original_claim_evidence.list_retained_claim_candidates',
+                return_value=dict(status='candidates', claims=[claim])), patch(
+                'original_claim_evidence.resolve_retained_claims', return_value=accepted):
+            self.payload['last_assistant_message'] = body
+            ordinary = self.assess()
+            self.assertIsNone(ordinary['body_issue'])
+            self.assertEqual(ordinary['validation_text'], body)
+            self.assertFalse(ordinary['completion_route']['report_only'])
+            self.assertEqual(ordinary['completion_route']['publication_route'], 'none')
+            self.assertEqual(ordinary['native_activity']['status'], 'absent')
+            self.payload['last_assistant_message'] = body + '\n\n[evidence-report]\n' + json.dumps(
+                dict(schema_version='claim-evidence.v1', claims=[claim])) + '\n[/evidence-report]'
+            explicit = self.assess()
+            self.assertIn('claim-evidence-unbound', explicit['body_issue'])
+            self.assertFalse(explicit['completion_route']['report_only'])
+            self.assertEqual(explicit['completion_route']['publication_route'], 'none')
 
     def test_codex_native_stop_requires_route_for_typed_current_tool_calls(self):
         hook = Path(__file__).with_name('claude_stop_verification_hook.py')
@@ -293,6 +346,44 @@ class NativeActivityTests(unittest.TestCase):
         assessed = self.assess()
         self.assertEqual(assessed.get('native_activity', {}).get('status'), 'absent')
         self.assertIsNone(assessed['body_issue'])
+
+    def test_codex_steered_question_uses_current_input_not_entire_turn(self):
+        # A native turn can contain work followed by a new, tool-free question.
+        question = 'What is in that retained data folder?'
+        self.fixture.event = self.fixture.intake(question)
+        human = self.item('message', 'followup', role='user',
+            content=[dict(type='input_text', text=question)])
+        human['payload']['internal_chat_message_metadata_passthrough']['content_item_kinds'] = ['user.text']
+        rows = self.rows + [self.item('custom_tool_call', 'followup', name='exec', call_id='earlier-work'),
+            human, self.item('message', 'followup', role='assistant',
+                content=[dict(type='output_text', text=self.payload['last_assistant_message'])])]
+        self.write_rows(rows)
+        assessed = self.assess()
+        self.assertEqual(assessed['native_activity']['status'], 'absent')
+        self.assertIsNone(assessed['body_issue'])
+        self.assertEqual(assessed['completion_route']['publication_route'], 'none')
+
+        hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
+        stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
+            input=json.dumps(self.payload), text=True, capture_output=True, check=True,
+            env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
+        self.assertNotEqual(json.loads(stopped.stdout).get('decision'), 'block', stopped.stdout)
+
+        # Tool use after the new question still requires the current route.
+        rows.append(self.item('function_call', 'followup', name='exec', call_id='current-work'))
+        self.write_rows(rows)
+        self.assertTrue(self.assess()['body_issue'].startswith('route-unavailable:'))
+
+        # Native hook feedback is not a new human input boundary.
+        feedback = self.item('message', 'followup', role='user',
+            content=[dict(type='input_text', text=question)])
+        feedback['payload']['internal_chat_message_metadata_passthrough']['content_item_kinds'] = ['unknown']
+        self.write_rows(rows + [feedback])
+        self.assertTrue(self.assess()['body_issue'].startswith('route-unavailable:'))
+
+        # A different observed input cannot borrow the earlier human boundary.
+        self.fixture.event = self.fixture.intake('A different current input.')
+        self.assertEqual(self.assess()['native_activity']['status'], 'unavailable')
 
     def test_unavailable_native_identity_or_transcript_is_not_tool_absence(self):
         self.write_rows()
@@ -759,6 +850,83 @@ class NativeProofBindingTests(unittest.TestCase):
         self.assertNotEqual(result['completion_route']['publication_route'], 'none')
         self.assertEqual(result['completion_route']['publication_criteria'], [
             dict(work_unit_id='first', contract_revision=1, criterion_id='AC1')])
+
+
+class RuntimeInstallationIsolationTests(unittest.TestCase):
+    def test_installed_stop_modules_do_not_import_later_source_edits(self):
+        import shutil
+        import tempfile
+        import install_destination
+        import install_hooks
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'source'
+            source_shared = source / '_shared'
+            source_shared.mkdir(parents=True)
+            for path in Path(__file__).parent.iterdir():
+                if path.is_file() and path.suffix in {'.py', '.mjs', '.json'}:
+                    shutil.copy2(path, source_shared / path.name)
+            ledger_relative = Path('session-intent-analyzer/scripts/session_intent_ledger.py')
+            source_ledger = source / ledger_relative
+            source_ledger.parent.mkdir(parents=True)
+            shutil.copy2(fixtures.ROOT / ledger_relative, source_ledger)
+            destination = install_destination.InstallDestination(
+                mode='isolated', owned_root=str(root), platform_dir=str(root / 'platform'),
+                skills_dir=str(root / 'skills'), ghost_root=str(root / 'ghost'),
+                ledger_root=str(root / 'ledger'), project_root=str(root / 'project'),
+                core_source_root=str(source))
+            with install_destination.use(destination):
+                install_hooks._prepare_destination_runtime(destination)
+
+            # A source edit can introduce an API absent from the installed snapshot.
+            with (source_shared / 'completion_check_validator.py').open('a') as stream:
+                stream.write('\nuninstalled_source_api = True\n')
+            (source_shared / 'completion_assessment.py').write_text(
+                'from completion_check_validator import uninstalled_source_api\n')
+            with source_ledger.open('a') as stream:
+                stream.write('\ndef reconcile_native_inputs(**kwargs):\n'
+                             '    raise AssertionError("Uninstalled source ledger executed")\n')
+
+            environment = {key: value for key, value in os.environ.items()
+                if not key.startswith('GHOST_ALICE_') and key not in {'CODEX_THREAD_ID', 'PYTHONPATH'}}
+            environment = install_destination.binding_environment(destination, environment)
+            environment.update(GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='runtime-isolation')
+            program = '''import json, os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import hook_profile_gate
+import native_completion
+import completion_check_validator
+core = native_completion._ledger(os.environ)
+core.read_response_route(root=Path(os.environ['GHOST_ALICE_SESSION_INTENT_ROOT']),
+    platform='claude', session_id='runtime-isolation')
+import completion_assessment, response_route, session_intent_analyzer_hook
+hook_profile_gate._reconcile_native_intake(os.environ,
+    {'hook_event_name': 'Stop', 'session_id': 'runtime-isolation'})
+print(json.dumps({
+    'ledger': core.__file__,
+    'intake_ledger': session_intent_analyzer_hook.record_turn.__code__.co_filename,
+    'route': response_route.__file__,
+    'assessment': completion_assessment.__file__,
+    'validator': completion_check_validator.__file__,
+    'ledger_root': os.environ['GHOST_ALICE_SESSION_INTENT_ROOT'],
+    'source_root': os.environ['GHOST_ALICE_CORE_ROOT'],
+}))
+'''
+            result = subprocess.run([sys.executable, '-B', '-c', program, destination.runtime_shared_dir],
+                env=environment, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            loaded = json.loads(result.stdout)
+            runtime = Path(destination.runtime_shared_dir).resolve().parent
+            self.assertEqual(Path(loaded['ledger']).resolve(), runtime / ledger_relative)
+            self.assertEqual(Path(loaded['intake_ledger']).resolve(), runtime / ledger_relative)
+            for key, filename in (('route', 'response_route.py'),
+                                  ('assessment', 'completion_assessment.py'),
+                                  ('validator', 'completion_check_validator.py')):
+                self.assertEqual(Path(loaded[key]).resolve(), runtime / '_shared' / filename)
+            self.assertEqual(loaded['ledger_root'], destination.ledger_root)
+            self.assertEqual(loaded['source_root'], destination.core_source_root)
 
 
 if __name__ == '__main__':

@@ -21,7 +21,10 @@ A delegated model handles an explicitly assigned subtask and returns its result 
 
 ~~~mermaid
 flowchart TD
-  U["The user supplies the objective, constraints and permission"] -->|Objective and authority| S["1 · The responding model selects authorized work<br/>and asks the host to run the required tools"]
+  U["The user supplies the objective, constraints and permission"] -->|Current request and supplied conversation| I{"Does the responding model need to perform work,<br/>look up sources or make a new verification judgment?"}
+  I -->|Yes: authorized work| S["1 · The responding model selects authorized work<br/>and asks the host to run the required tools"]
+  I -->|No: supplied conversation supports the answer| A0["The model answers from the supplied conversation<br/>without tools or a new review record"]
+  A0 -->|Submitted answer and native session| K
   S -->|Requested tool calls| T["The native host enforces tool permission, executes calls<br/>and returns their actual observations to the model"]
   T -->|Actual observations| S
   S -->|Original observations for the answer| D["2 · The model identifies the draft and source inputs<br/>New source-backed explanation: explicit claims<br/>Completion-candidate reuse: original bindings"]
@@ -40,7 +43,7 @@ flowchart TD
   HT -->|Plan inputs passed to register_continuation_plan| Q["Ghost-ALICE Autopilot code validates tasks, dependencies,<br/>boundaries and approval references<br/>It returns an admitted plan reference or error"]
   Q -->|Host returns plan admission or a named error| P
   R -->|Submitted answer and native session| K["The native host invokes each registered Stop hook independently"]
-  K -->|Independent completion-guard invocation| G["The Core completion guard calls assess_native_completion()<br/>and returns allow or a named rejection"]
+  K -->|Independent completion-guard invocation| G["The Core completion guard calls assess_native_completion()<br/>Core binds tool activity to the current human input<br/>and authenticates required review records and original sources"]
   K -->|Independent Ghost-ALICE Autopilot Stop invocation| B["The Ghost-ALICE Autopilot Stop adapter calls the same assess_native_completion() API<br/>It publishes new proof only when Core selects it,<br/>applies or reuses eligible authenticated publications,<br/>and selects ready tasks from the admitted plan"]
   Q -->|Admitted plan retained for Stop| B
   G -->|Allow or named rejection| H["The host receives each hook result<br/>It may deliver feedback to the conversation identified by the hook"]
@@ -51,7 +54,7 @@ flowchart TD
 
 The diagram is a runtime overview. Its numbered handoffs are expanded below with exact values and APIs. The responding model makes the claim judgment in step 3a and the whole-answer judgment in step 3b. Saving both judgments atomically or validating their records performs neither judgment.
 
-A supported answer can honestly report unfinished work; only supported required criteria can become met. Explanations create no new completion proof, while eligible prior proof and approved plans may still be used. A record creates no user permission.
+A supported answer can honestly report unfinished work; only supported required criteria can become met. Explanations create no new completion proof, while eligible prior proof and approved plans may still be used. A record creates no user permission. Core automatically authenticates retained claims only when they constitute the entire reply; an incidental matching paragraph does not submit the surrounding conversation as evidence. An explicitly submitted evidence report retains its validation requirements. A registered source-backed explanation uses its exact current response review, independently of automatic historical matching.
 
 ### 1. Select work and execute it
 
@@ -74,6 +77,8 @@ Here, a *review-input record* means the saved answer, source copies and their cu
 
 The [owning review procedure](coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review) supplies executable binding and command details, including original-proof and completion-candidate reuse. The interface above explains the transport without duplicating that procedure.
 
+Core first matches the submitted proof and answer to an exact recorded review. If no exact match exists, it compares them with only the blank separator between a real completion/partial marker and its first field omitted. Field contents, order, indentation and surrounding prose must remain identical. Core returns the uniquely matched original review; stored proof bytes, source hashes and verification times remain unchanged. Different content or ambiguous matches require their own review.
+
 ### 3. Make two distinct judgments
 
 After receiving Core's saved review inputs through the tool result, the model performs these comparisons in order:
@@ -91,7 +96,7 @@ An accurate answer can describe incomplete work; its supported response judgment
 
 For the initial answer, the model submits the exact reviewed answer returned by Core. For a correction, the model selects and reviews the response to submit by following [Apply and deliver](coding-convention/verification-before-completion/references/autopilot-publication.md#apply-and-deliver). The host then invokes its independently registered Stop hooks. The Core completion guard and the Ghost-ALICE Autopilot adapter each obtain an input-and-answer-bound result from `native_completion.assess_native_completion()`. Neither must run before the other.
 
-Core's assessment checks the current route, complete answer, original sources and recorded judgments. It returns authenticated supported coverage or a named missing prerequisite. The completion guard turns that result into the host's allow or rejection output. It does not compose missing prose or decide whether the evidence means what the model claimed.
+Core's assessment locates the current human input in the native transcript before attributing tool calls to that input. For Codex, native message metadata identifies the human message; its text digest and character count must match the authoritative intake observation. Only subsequent calls belong to that input, even when several human messages share one host turn. Hook feedback does not establish a new human boundary. Unknown ownership or a mismatched observation remains unavailable. Core then checks the required route, complete answer, original sources and recorded judgments. It returns authenticated supported coverage or a named missing prerequisite. The completion guard turns that result into the host's allow or rejection output. It does not compose missing prose or decide whether the evidence means what the model claimed.
 
 The Ghost-ALICE Autopilot Stop path runs `autopilot_mode.main()` → `adapter_payload_from_env()` → `apply_completion_v2()` → `advance_continuation()`, then `_format_payload_for_hook()` serializes the result for the host. Completion recording and selection of later work are separate operations. The adapter publishes new completion proof only when Core selects publication. An explanation with `response-no-publication` creates no new proof; it may apply or reuse an existing authenticated publication with its original sources and time. Continuation can still select ready work from an admitted plan when current authority, dependencies and criterion states permit it. Supported criteria can be applied while other criteria remain unresolved; an entire work unit is complete only when all its required criteria are met.
 
@@ -107,7 +112,7 @@ The model first asks whether a mismatch affects the objective or a required depe
 
 A missing current route is corrected through the route API; a malformed review field is corrected through the review workflow. Contrary evidence requires revising or withdrawing the unsupported claim. A recording-only failure preserves the business result and parks only dependent application. It does not request another business run or another copy of an already visible unchanged answer. Repeated unchanged recording failure remains parked until a relevant condition changes.
 
-A new input requires its own route binding but does not refresh an original verification time or invalidate unchanged proof. An actual relevant artifact, dependency or criterion change reopens only affected evidence. Review and publication retain original sources, times and prior records. Core's capture binding establishes that provenance was captured before the review snapshot; it does not attest when an earlier business operation ran.
+A new input that requires normal work needs its own route binding; a tool-free answer supported by the supplied conversation does not. Neither input refreshes an original verification time or invalidates unchanged proof. An actual relevant artifact, dependency or criterion change reopens only affected evidence. Review and publication retain original sources, times and prior records. Core's capture binding establishes that provenance was captured before the review snapshot; it does not attest when an earlier business operation ran.
 
 Core's delivery helper selects the shape of a corrected response from supplied host context. The model uses that context to preserve an unchanged visible answer, assemble one complete answer for final-only delivery, or submit corrected prose when claims change. It does not call tools merely to discover whether the host displayed the previous answer.
 

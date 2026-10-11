@@ -17,7 +17,7 @@ from pathlib import Path
 import re
 
 from completion_check_validator import (extract_original_proof, parse_original_completion_evidence,
-                                        looks_like_evidence_claim)
+                                        looks_like_evidence_claim, review_comparison_text)
 from native_completion import _ledger
 
 _SEAL = object()
@@ -637,7 +637,7 @@ verified_assessment = lookup_assessment
 
 
 def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
-    """Resolve a final block to one reviewed original without changing its bytes/time."""
+    """Resolve delivered controls to one reviewed original; retain its bytes/time."""
     core, root, owner = _coordinates(source)
     with core._read_connection(root, transaction) as connection:
         _require(connection is not None, 'assessment-required', 'Owning Core review is unavailable')
@@ -647,25 +647,30 @@ def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
         contracts = [_current_contract(core, root, owner, connection, unit)[0] for unit in units]
         _require(connection.execute("SELECT 1 FROM sqlite_master WHERE name='core_completion_assessments'").fetchone(),
                  'assessment-required', 'The current-session assistant must review the original proof and record its judgments through completion_assessment.py')
-        matches = []
+        exact, equivalent = [], []
+        comparison = review_comparison_text(proof)
         for contract in contracts:
             rows = connection.execute('''SELECT reference FROM core_completion_assessments WHERE
                 json_extract(payload_json, '$.candidate.contract.owner.platform')=? AND
                 json_extract(payload_json, '$.candidate.contract.owner.session_id')=? AND
-                json_extract(payload_json, '$.candidate.contract.work_unit_id')=? AND
-                trim(json_extract(payload_json, '$.candidate.proof'), ?)=?''',
-                (owner['platform'], owner['session_id'], contract['work_unit_id'], ' \t\r\n', proof.strip()))
+                json_extract(payload_json, '$.candidate.contract.work_unit_id')=?''',
+                (owner['platform'], owner['session_id'], contract['work_unit_id']))
             for reference, in rows:
                 candidate = _stored(connection, 'core_completion_assessments', reference)['candidate']
-                if candidate['contract'] == contract and candidate['proof'].strip() == proof.strip():
-                    matches.append(candidate)
+                if candidate['contract'] != contract:
+                    continue
+                if candidate['proof'].strip() == proof.strip():
+                    exact.append(candidate)
+                elif review_comparison_text(candidate['proof']) == comparison:
+                    equivalent.append(candidate)
+        matches = exact or equivalent
         _require(len(matches) == 1, 'assessment-required', 'Final block must match exactly one recorded assistant review of its original proof')
         candidate = matches[0]
         return lookup_assessment(source, candidate['contract'], candidate['proof'], candidate['verified_at'], transaction=connection)
 
 
 def lookup_current_response(source, text, *, transaction=None):
-    """Authenticate complete reviewed bytes; meaning stays with the current-session assistant."""
+    """Authenticate reviewed content and original sources, allowing control-marker spacing."""
     core, root, owner = _coordinates(source)
     report_only = not looks_like_evidence_claim(text)
     if not report_only:
@@ -697,6 +702,13 @@ def lookup_current_response(source, text, *, transaction=None):
         else:
             key = _reference(dict(assessment_reference=assessment.reference, body=text.strip()))
             rows = connection.execute('SELECT reference FROM core_completion_responses WHERE lookup_key=?', (key,)).fetchall()
+            if not rows:
+                candidates = connection.execute('''SELECT reference FROM core_completion_responses
+                    WHERE json_extract(payload_json, '$.assessment_reference')=?''', (assessment.reference,))
+                comparison = review_comparison_text(text)
+                rows = [(reference,) for reference, in candidates
+                    if review_comparison_text(_stored(connection, 'core_completion_responses', reference)
+                        ['response_binding']['text']) == comparison]
         _require(len(rows) == 1, 'response-assessment-required', 'Complete response text must match exactly one recorded assistant review')
         reviewed = _stored(connection, 'core_completion_responses', rows[0][0])
         candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
@@ -706,7 +718,8 @@ def lookup_current_response(source, text, *, transaction=None):
             assessment = lookup_assessment(source, contract, candidate['proof'], candidate['verified_at'],
                 transaction=connection)
         response = candidate.get('response_binding')
-        _require(response == reviewed['response_binding'] and response['text'].strip() == text.strip()
+        _require(response == reviewed['response_binding']
+            and review_comparison_text(response['text']) == review_comparison_text(text)
             and reviewed['assessment_reference'] == assessment.reference
             and candidate['contract'] == assessment.candidate['contract']
             and candidate['proof'] == assessment.candidate['proof']

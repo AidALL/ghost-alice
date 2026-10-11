@@ -8,11 +8,11 @@ Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층�
 
 기존 에이전트 실행 환경 위에서 동작하며, 에이전트가 완료를 선언하기 전에 작업 과정과 근거를 검토할 수 있도록 돕습니다. 프롬프트 모음이나 챗봇 연결 도구, 독립 실행형 에이전트 런타임을 제공하는 저장소는 아닙니다.
 
-## 버전 0.5.0
+## 버전 0.5.1
 
 [웹사이트](https://aidall.github.io/ghost-alice/index_ko.html) · [아키텍처](./architecture_ko.md)
 
-Core 0.5.0과 Ghost-ALICE Autopilot 0.5.0은 현재 response-route와 완료 계약을 사용합니다. Ghost-ALICE Autopilot에는 Core 0.5.0 이상이 필요합니다. 두 프로젝트 모두 Apache-2.0으로 제공됩니다.
+Core 0.5.1과 Ghost-ALICE Autopilot 0.5.1은 현재 response-route와 완료 계약을 사용합니다. Ghost-ALICE Autopilot에는 Core 0.5.1 이상이 필요합니다. 두 프로젝트 모두 Apache-2.0으로 제공됩니다.
 
 ## 승인된 작업의 진행과 복구
 

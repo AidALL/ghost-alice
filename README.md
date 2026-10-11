@@ -8,11 +8,11 @@ Ghost-ALICE OS is an agent governance layer for AI work. It keeps intent, bounda
 
 It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It is the operating layer that makes agent work auditable before the agent claims completion.
 
-## Version 0.5.0
+## Version 0.5.1
 
 [Website](https://aidall.github.io/ghost-alice/) · [Architecture](./architecture.md)
 
-Core 0.5.0 and Ghost-ALICE Autopilot 0.5.0 use the current response-route and completion contract. Ghost-ALICE Autopilot requires Core 0.5.0 or later. Both projects use Apache-2.0.
+Core 0.5.1 and Ghost-ALICE Autopilot 0.5.1 use the current response-route and completion contract. Ghost-ALICE Autopilot requires Core 0.5.1 or later. Both projects use Apache-2.0.
 
 ## How governed work proceeds
 

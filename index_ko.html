@@ -455,7 +455,7 @@
   <main id="main" tabindex="-1">
     <section class="hero" id="get-started"><div class="wrap hero-grid">
       <div class="hero-copy">
-        <div class="eyebrow">에이전트 거버넌스 계층 · 0.5.0</div>
+        <div class="eyebrow">에이전트 거버넌스 계층 · 0.5.1</div>
         <h1 class="sr-only">Ghost-ALICE OS</h1>
         <div class="hero-logo-lockup"><img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS"></div>
         <p class="lead">사용자의 목표를 유지하고, 영향을 받은 작업을 수정하며, 각 주장을 원본 증거와 연결합니다.</p>
@@ -468,7 +468,7 @@
       </div></div>
     </div></section>
     <section id="latest-release"><div class="wrap">
-      <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.0</h2><p class="section-note">이 문서는 Core와 Ghost-ALICE Autopilot 0.5.0을 설명합니다. 로컬 설치와 공개 릴리즈는 별개입니다. Ghost-ALICE Autopilot 0.5.0에는 Core 0.5.0 이상이 필요합니다.</p></div>
+      <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.1</h2><p class="section-note">이 문서는 Core와 Ghost-ALICE Autopilot 0.5.1을 설명합니다. 로컬 설치와 공개 릴리즈는 별개입니다. Ghost-ALICE Autopilot 0.5.1에는 Core 0.5.1 이상이 필요합니다.</p></div>
       <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core 릴리즈</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Ghost-ALICE Autopilot 릴리즈</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">호환성</a></div>
     </div></section>
     <section id="how-it-works"><div class="wrap">
@@ -492,7 +492,7 @@
   F --&gt;|수정이 필요하고 승인된 경우에만| M
   R --&gt;|지원되는 검토가 정확한 답변을 반환함| S["모델이 반환된 검토 답변을 제출합니다"]
   S --&gt;|제출 답변과 현재 훅 receipt| K["6 · 네이티브 호스트가 완료 가드와&lt;br/&gt;Ghost-ALICE Autopilot Stop 어댑터를 독립 호출합니다"]
-  K --&gt;|독립적인 완료 가드 호출| G["Core 완료 가드가 Core 평가 API로&lt;br/&gt;현재 답변과 검토를 인증합니다"]
+  K --&gt;|독립적인 완료 가드 호출| G["Core 완료 가드가 Core 평가 API로&lt;br/&gt;도구 호출을 현재 사용자 입력에 연결하고&lt;br/&gt;필요한 답변 검토를 인증합니다"]
   K --&gt;|독립적인 어댑터 호출| A["Ghost-ALICE Autopilot이 Core 평가 API로&lt;br/&gt;현재 답변과 검토를 인증하고,&lt;br/&gt;Core가 선택한 완료 근거만 접수하며&lt;br/&gt;적격한 인증 근거를 적용하거나 재사용합니다"]
   G --&gt;|허용 또는 명시된 선행 조건| H["네이티브 호스트가 독립적인 Stop 결과를 받습니다"]
   M --&gt;|승인된 후속 작업이 필요한 경우| P["모델이 작업·의존 관계·허용 대상과&lt;br/&gt;기준 참조를 정합니다"]

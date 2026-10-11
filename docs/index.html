@@ -455,7 +455,7 @@
   <main id="main" tabindex="-1">
     <section class="hero" id="get-started"><div class="wrap hero-grid">
       <div class="hero-copy">
-        <div class="eyebrow">Agent governance layer · 0.5.0</div>
+        <div class="eyebrow">Agent governance layer · 0.5.1</div>
         <h1 class="sr-only">Ghost-ALICE OS</h1>
         <div class="hero-logo-lockup"><img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS"></div>
         <p class="lead">Keep the user's goal, repair affected work, and connect each claim to its original evidence.</p>
@@ -468,7 +468,7 @@
       </div></div>
     </div></section>
     <section id="latest-release"><div class="wrap">
-      <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.0</h2><p class="section-note">This documentation describes Core and Ghost-ALICE Autopilot 0.5.0. A local installation is separate from a published release. Ghost-ALICE Autopilot 0.5.0 requires Core 0.5.0 or later.</p></div>
+      <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.1</h2><p class="section-note">This documentation describes Core and Ghost-ALICE Autopilot 0.5.1. A local installation is separate from a published release. Ghost-ALICE Autopilot 0.5.1 requires Core 0.5.1 or later.</p></div>
       <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Ghost-ALICE Autopilot releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">Compatibility</a></div>
     </div></section>
     <section id="how-it-works"><div class="wrap">
@@ -492,7 +492,7 @@
   F --&gt;|Only if correction is needed and authorized| M
   R --&gt;|Supported review returns the exact answer| S["Model submits the returned reviewed answer"]
   S --&gt;|Submitted answer and current hook receipt| K["6 · Native host independently invokes&lt;br/&gt;the completion guard and Ghost-ALICE Autopilot Stop adapter"]
-  K --&gt;|Independent guard invocation| G["Core completion guard uses Core assessment API&lt;br/&gt;to authenticate the current answer and review"]
+  K --&gt;|Independent guard invocation| G["Core completion guard uses Core assessment API&lt;br/&gt;to bind tools to the current human input&lt;br/&gt;and authenticate the required answer review"]
   K --&gt;|Independent adapter invocation| A["Ghost-ALICE Autopilot uses Core assessment API&lt;br/&gt;to authenticate the current answer and review;&lt;br/&gt;publishes only Core-selected completion proof&lt;br/&gt;and applies or reuses eligible authenticated publications"]
   G --&gt;|Allow or a named prerequisite| H["Native host receives the independent Stop results"]
   M --&gt;|If further approved work is needed| P["Model defines tasks, dependencies,&lt;br/&gt;allowed surfaces and criterion references"]

@@ -1075,8 +1075,10 @@ class RuntimeCoreAuditTest(unittest.TestCase):
     def test_session_intent_golden_flags_missing_ledger_dependency_as_warning(self):
         # First-layer install: no intent-audit capability at all must not read as fully healthy — the ledger is the governance input anchor. WARNING (documented degrade), not OK, not ERROR.
         source_shared = Path(__file__).resolve().parent
-        with mock.patch.dict(os.environ, {"GHOST_ALICE_CORE_ROOT": str(self.root / "absent-provider")}):
-            status, detail = install_doctor._runtime_session_intent_golden_status(source_shared, "claude")
+        import shutil
+        shutil.copytree(source_shared, self.runtime, dirs_exist_ok=True,
+                        ignore=shutil.ignore_patterns("test_*", "tests", "__pycache__"))
+        status, detail = install_doctor._runtime_session_intent_golden_status(self.runtime, "claude")
 
         self.assertEqual(status, install_doctor.STATUS_WARNING)
         self.assertEqual(detail, "ledger-unavailable-degraded")
@@ -1101,6 +1103,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             ledger_root=str(self.root / "installed-ledger"), project_root=str(source_shared.parent),
             core_source_root=str(source_shared.parent), runtime_shared_dir=str(self.runtime))
         with install_destination.use(destination):
+            install_hooks._prepare_destination_runtime(destination)
             entry = install_hooks._platform_session_intent_entry("claude", "UserPromptSubmit")
         self.config.write_text(json.dumps({"hooks": {"UserPromptSubmit": [entry]}}))
         with mock.patch.dict(os.environ, {"HOME": str(self.root),

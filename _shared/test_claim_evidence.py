@@ -115,6 +115,12 @@ class ClaimEvidenceTests(unittest.TestCase):
             with self.subTest(prefix=prefix):
                 text = prefix + "\n\n" + CLAIM["statement"]
                 value = evaluate_claim_reuse(text, accepted, candidates)
+                self.assertFalse(value["present"])
+                self.assertEqual(value["residual_text"], text)
+                self.assertEqual(value["claims"], [])
+                # Explicit references still authenticate only the original claim;
+                # surrounding scope needs the separate whole-response review.
+                value = evaluate_claim_report(report(body=text), accepted)
                 self.assertTrue(value["valid"], value)
                 self.assertEqual(value["residual_text"].strip(), prefix)
                 self.assertEqual(value["claims"][0]["original_verified_at"], "2026-10-10T10:42:22Z")

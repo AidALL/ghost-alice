@@ -82,7 +82,7 @@ Addon-specific behavior, state files, pause/resume controls, and removal details
 | --- | --- | --- | --- | --- |
 | autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-Core `0.5.0` and Ghost-ALICE Autopilot `0.5.0` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.0` or later. Source checks, native runtime validation and publication establish separate evidence.
+Core `0.5.1` and Ghost-ALICE Autopilot `0.5.1` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.1` or later. Source checks, native runtime validation and publication establish separate evidence.
 
 ## Install One Official Addon To One Platform
 

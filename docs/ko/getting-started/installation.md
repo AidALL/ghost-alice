@@ -82,7 +82,7 @@ Windows Command Prompt와 PowerShell에서도 `.\install.cmd --addon autopilot`�
 | --- | --- | --- | --- | --- |
 | autopilot | 명시적으로 승인된 자율 실행을 작업 항목 단위로 이어갑니다 | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
 
-Core `0.5.0`과 Ghost-ALICE Autopilot `0.5.0`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.0` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
+Core `0.5.1`과 Ghost-ALICE Autopilot `0.5.1`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.1` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
 
 ## Install One Official Addon To One Platform
 

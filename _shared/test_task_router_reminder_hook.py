@@ -92,7 +92,7 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
         home = base / "home"
         home.mkdir()
-        broken = home / ".claude" / "skills" / "session-intent-analyzer" / "scripts"
+        broken = base / "session-intent-analyzer" / "scripts"
         broken.mkdir(parents=True)
         (broken / "session_intent_ledger.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
         shared = base / "_shared"
@@ -128,7 +128,7 @@ class DegradedLedgerFailClosedTests(unittest.TestCase):
         self.addCleanup(lambda: shutil.rmtree(base, ignore_errors=True))
         home = base / "home"
         home.mkdir()
-        broken = home / ".claude" / "skills" / "session-intent-analyzer" / "scripts"
+        broken = base / "session-intent-analyzer" / "scripts"
         broken.mkdir(parents=True)
         (broken / "session_intent_ledger.py").write_text("raise RuntimeError('boom')\n", encoding="utf-8")
         shared = base / "_shared"

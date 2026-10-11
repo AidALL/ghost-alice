@@ -6,7 +6,7 @@ Ghost-ALICE OS documentation is bilingual at the reader-facing documentation lay
 
 Every paired document should expose a language switch near the top. In an English document, the English side is plain text and the Korean side is a link. In a Korean document, the English side is a link and the Korean side is plain text.
 
-Core `0.5.0` and Ghost-ALICE Autopilot `0.5.0` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.0` or later. Source checks, native runtime validation and publication establish separate evidence.
+Core `0.5.1` and Ghost-ALICE Autopilot `0.5.1` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.1` or later. Source checks, native runtime validation and publication establish separate evidence.
 
 The responding model compares claims with original sources, then compares the complete answer with the user objective. Host tools carry the draft, source paths and review judgments to Core Python code, which validates and stores them. Ghost-ALICE Autopilot uses the authenticated result and the model’s already approved task plan; the host delivers any next-task request. Hooks retain strict audit. See the [architecture](../architecture.md) for the responsibility map.
 

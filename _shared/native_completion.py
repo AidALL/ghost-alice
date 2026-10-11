@@ -41,10 +41,8 @@ def _source_status_issue(reasons, *, explanation=False):
 
 
 def _ledger(source):
-    root = source.get('GHOST_ALICE_CORE_ROOT') or source.get('GHOST_ALICE_SKILLS_DIR')
-    if not isinstance(root, str) or not Path(root).is_absolute():
-        raise ValueError('Core module authority is missing')
-    path = Path(root) / 'session-intent-analyzer/scripts/session_intent_ledger.py'
+    """Load this Core module's sibling ledger; callers supply database and session coordinates."""
+    path = Path(__file__).resolve().parents[1] / 'session-intent-analyzer/scripts/session_intent_ledger.py'
     name = '_native_completion_ledger_' + hashlib.sha256(str(path).encode()).hexdigest()[:16]
     if name not in sys.modules:
         spec = importlib.util.spec_from_file_location(name, path)
@@ -72,6 +70,7 @@ Publication and application retain immutable provenance/integrity checks.
     source = dict(source)
     platform, session = source.get('GHOST_ALICE_PLATFORM'), source.get('GHOST_ALICE_SESSION_ID')
     route, context, context_status, context_issue = None, {}, 'unavailable', None
+    input_observation = None
     try:
         root = source.get('GHOST_ALICE_SESSION_INTENT_ROOT')
         if not isinstance(root, str) or not Path(root).is_absolute():
@@ -88,6 +87,9 @@ Publication and application retain immutable provenance/integrity checks.
             state = ledger._stored_state(connection, platform, session)
             event = (state.get('latest_input_event_id') if state is not None
                 and ledger._canonical_input_bound(connection, Path(root), state) else None)
+            if event is not None:
+                input_observation = dict(input_digest=state.get('latest_input_digest'),
+                    input_char_count=state.get('latest_input_char_count'))
             try:
                 route = ledger.read_response_route(root=Path(root), platform=platform,
                     session_id=session, transaction=connection) if connection is not None else None
@@ -105,10 +107,14 @@ Publication and application retain immutable provenance/integrity checks.
     report_review_issue = None
     report_review_target = 'response_review'
     if phase == 'final' and text.strip():
-        report = evaluate_runtime_claim_report(text, platform, {'session_id': session}, source)
+        explanation = (isinstance(route, dict) and route.get('status') == 'ready'
+            and route.get('response_purpose') == 'explanation')
+        # A registered explanation belongs to its exact current review. Automatic
+        # historical discovery cannot replace or preempt that review.
+        report = evaluate_runtime_claim_report(text, platform, {'session_id': session}, source,
+            automatic=not explanation)
         if ((not report['present'] or report['valid']) and not looks_like_evidence_claim(text)
-                and isinstance(route, dict) and route.get('status') == 'ready'
-                and route.get('response_purpose') == 'explanation'):
+                and explanation):
             # The internal review channel is independent of printed proof.
             # Exact current-input/body review is still mandatory: neither a
             # historical phrase nor an explanation label authenticates a claim.
@@ -134,7 +140,7 @@ Publication and application retain immutable provenance/integrity checks.
     issue = None
     publication_criteria = [] if reviewed_report else None
     repair_target = 'completion_metadata'
-    native_activity = (native_tool_activity(platform, session, native_input)
+    native_activity = (native_tool_activity(platform, session, native_input, input_observation=input_observation)
         if phase == 'final' and native_input is not None else None)
     if phase == 'final':
         issue = selected['claim_report_issue']

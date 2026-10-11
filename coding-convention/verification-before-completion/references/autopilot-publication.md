@@ -36,7 +36,8 @@ Establish the following values before constructing the call. Use the current tru
 
 | Value | Authoritative origin and meaning |
 | --- | --- |
-| `CORE_ROOT` | Absolute Core module root supplied by the registered runtime context (`GHOST_ALICE_CORE_ROOT`, or its supplied `GHOST_ALICE_SKILLS_DIR` fallback); it contains `_shared/completion_assessment.py` and `session-intent-analyzer/scripts/session_intent_ledger.py`. It is distinct from the task checkout and ledger root. |
+| `CORE_ROOT` | Preserve the registered `GHOST_ALICE_CORE_ROOT` source coordinate, or its supplied `GHOST_ALICE_SKILLS_DIR` fallback. This coordinate identifies the installation source; it does not select libraries for an installed hook. |
+| `CORE_API` | With a registered `GHOST_ALICE_RUNTIME_SHARED_DIR`, use its absolute `completion_assessment.py` path. Without that runtime binding, an explicitly selected source execution uses `CORE_ROOT/_shared/completion_assessment.py`. The API loads the ledger and helpers from its own deployment. A missing selected API is an installation error, not permission to switch to another copy. |
 | `LEDGER_ROOT`, `PLATFORM`, `SESSION_ID` | Current receipt's `ledger_root`, `platform` and `session_id`; after pending Claude reconciliation, use the authoritative state described in the ledger schema. Preserve the native `CODEX_THREAD_ID` binding; a mismatch is an error. |
 | Current route | The ready owned route registered through task-router for that receipt/input. Use purpose `completion` for closure and `explanation` for source-backed explanation. A completion review selects exactly one owned work unit; when the route selects several, pass its exact `--work-unit-id`. |
 | `ANSWER` | Absolute path in permitted runtime scratch to the complete proposed answer, including its actual completion/partial block. The assistant writes the draft through its exposed file tool. It includes every paragraph it intends to submit; a proof extract does not cover omitted prose. |
@@ -53,7 +54,7 @@ GHOST_ALICE_CORE_ROOT="$CORE_ROOT" \
 GHOST_ALICE_SESSION_INTENT_ROOT="$LEDGER_ROOT" \
 GHOST_ALICE_PLATFORM="$PLATFORM" \
 GHOST_ALICE_SESSION_ID="$SESSION_ID" \
-python3 "$CORE_ROOT/_shared/completion_assessment.py" prepare-response \
+python3 "$CORE_API" prepare-response \
   --response-file "$ANSWER" --source "$ORIGINAL_SOURCE" --verified-at "$ORIGINAL_TIME"
 ```
 
@@ -94,11 +95,11 @@ GHOST_ALICE_CORE_ROOT="$CORE_ROOT" \
 GHOST_ALICE_SESSION_INTENT_ROOT="$LEDGER_ROOT" \
 GHOST_ALICE_PLATFORM="$PLATFORM" \
 GHOST_ALICE_SESSION_ID="$SESSION_ID" \
-python3 "$CORE_ROOT/_shared/completion_assessment.py" record-response \
+python3 "$CORE_API" record-response \
   --candidate "$REFERENCE" --judgment-file "$REVIEW"
 ```
 
-When files for `ANSWER` or `REVIEW` are prohibited but Python execution is allowed, import `completion_assessment` from `<CORE_ROOT>/_shared` through that tool. Call `prepare_response_review(source, response_text=<complete draft>, source_paths=<absolute original paths>, verified_at=<original time or None>, reuse_candidate=None, reuse_evidence=None, work_unit_id=None, claim_statements=None)`, supplying the selected exact draft statements as `claim_statements` only for an explanation prepared from new source paths. Leave that argument unset whenever a completion/partial block or proof-reuse argument selects original proof bindings. For a retained completion explanation, use `reuse_candidate` as described above. Then call `record_response_review(source, candidate_reference, review)`. Construct `source` from the current host environment and bind the four `GHOST_ALICE_*` keys above to their established values; retain native `CODEX_THREAD_ID` and any supplied managed capture/adapter context. Do not fabricate omitted runtime keys. The other arguments have exactly the same origins and shapes as the CLI. This avoids draft/review scratch files, not source requirements or either model stage.
+When files for `ANSWER` or `REVIEW` are prohibited but Python execution is allowed, import `completion_assessment` from the directory containing the selected `CORE_API` through that tool. Call `prepare_response_review(source, response_text=<complete draft>, source_paths=<absolute original paths>, verified_at=<original time or None>, reuse_candidate=None, reuse_evidence=None, work_unit_id=None, claim_statements=None)`, supplying the selected exact draft statements as `claim_statements` only for an explanation prepared from new source paths. Leave that argument unset whenever a completion/partial block or proof-reuse argument selects original proof bindings. For a retained completion explanation, use `reuse_candidate` as described above. Then call `record_response_review(source, candidate_reference, review)`. Construct `source` from the current host environment and bind the four `GHOST_ALICE_*` keys above to their established values; retain native `CODEX_THREAD_ID` and any supplied managed capture/adapter context. Do not fabricate omitted runtime keys. The other arguments have exactly the same origins and shapes as the CLI. This avoids draft/review scratch files, not source requirements or either model stage.
 
 Core code validates schema, source integrity, owner/input/contract bindings and the submitted judgments, then atomically stores the claim assessment and whole-answer review in the ledger. It does not compare meaning or decide truth. Successful recording returns `status: reviewed` and the exact supported `response_text`, with assessment/response reference fields as applicable. For the initial answer, the assistant submits that returned text to the host; native Stop authenticates its reviewed content. When correcting a prior delivered answer, select the payload described in Apply and deliver before preparing its review; returned text is not a command to replay an already visible answer. Atomic storage does not combine the two semantic stages, and matching bytes do not prove semantic support.
 

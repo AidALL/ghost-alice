@@ -6,7 +6,7 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 
 쌍을 이루는 문서는 상단에서 언어를 전환하실 수 있습니다. 영어 문서에서는 한국어 링크를, 한국어 문서에서는 영어 링크를 제공합니다.
 
-Core `0.5.0`과 Ghost-ALICE Autopilot `0.5.0`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.0` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
+Core `0.5.1`과 Ghost-ALICE Autopilot `0.5.1`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.1` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
 
 응답 모델은 주장과 원본 출처를 먼저 비교하고 답변 전체와 사용자 목적을 비교합니다. 호스트 도구가 원고·출처 경로·검토 판단을 Core Python 코드에 전달하며 Core가 검증·저장합니다. Ghost-ALICE Autopilot은 인증 결과와 모델이 이미 승인받아 등록한 작업 계획을 사용하며 호스트가 후속 요청을 전달합니다. 훅은 엄격한 감사를 유지합니다. 책임 구분은 [아키텍처](../../architecture_ko.md)를 확인해 주세요.
 
