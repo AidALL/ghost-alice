@@ -1,8 +1,9 @@
 """Report-only Wiki integrity checks.
 
 Validate internal page links, page-name uniqueness, the language switch line,
-its pairing, folder placement and sidebar language. External links, images,
-same-page anchors and special pages are excluded from page-target checks.
+its pairing, folder placement, sidebar presence, coverage and language, and the
+absence of a footer. External links, images, same-page anchors and special pages
+are excluded from page-target checks.
 Main-repository contracts remain normative.
 
 Run: python3 -m pytest scripts/tests/test_audit_wiki_integrity.py -q
@@ -142,6 +143,16 @@ class TestLanguageSwitch(unittest.TestCase):
         pages["ko/Design-Principles"] = pages.pop("Design-Principles")
         self.assertIn("ko/Design-Principles", _pages_with(awi.audit(pages), "switch-folder"))
 
+    def test_english_page_in_another_subfolder_is_flagged(self):
+        pages = dict(CLEAN)
+        pages["draft/Design-Principles"] = pages.pop("Design-Principles")
+        self.assertIn("draft/Design-Principles", _pages_with(awi.audit(pages), "switch-folder"))
+
+    def test_korean_page_in_a_nested_folder_is_flagged(self):
+        pages = dict(CLEAN)
+        pages["ko/draft/설계-원칙"] = pages.pop("ko/설계-원칙")
+        self.assertIn("ko/draft/설계-원칙", _pages_with(awi.audit(pages), "switch-folder"))
+
     def test_switch_that_does_not_come_back_is_flagged(self):
         pages = dict(CLEAN)
         pages["Architecture"] = "언어: 🇺🇸 English | [🇰🇷 한국어](설계-원칙)\n\nBody."
@@ -152,13 +163,28 @@ class TestLanguageSwitch(unittest.TestCase):
         pages["Design-Principles"] = "언어: 🇺🇸 English | [🇰🇷 한국어](Home)\n\nBody."
         self.assertIn("Design-Principles", _pages_with(awi.audit(pages), "switch-pair"))
 
-    def test_special_pages_carry_no_switch_line(self):
+    def test_sidebars_carry_no_switch_line(self):
+        flagged = _pages_with(awi.audit(CLEAN), "switch-format")
+        self.assertNotIn("_Sidebar", flagged)
+        self.assertNotIn("ko/_Sidebar", flagged)
+
+
+class TestSidebars(unittest.TestCase):
+    def test_missing_english_sidebar_is_flagged(self):
         pages = dict(CLEAN)
-        pages["_Footer"] = "footer"
-        self.assertEqual(awi.audit(pages), [])
+        del pages["_Sidebar"]
+        self.assertIn("_Sidebar", _pages_with(awi.audit(pages), "missing-sidebar"))
 
+    def test_missing_korean_sidebar_is_flagged(self):
+        pages = dict(CLEAN)
+        del pages["ko/_Sidebar"]
+        self.assertIn("ko/_Sidebar", _pages_with(awi.audit(pages), "missing-sidebar"))
 
-class TestSidebarLanguage(unittest.TestCase):
+    def test_page_missing_from_its_sidebar_is_flagged(self):
+        pages = dict(CLEAN)
+        pages["_Sidebar"] = "[Home](Home)"
+        self.assertIn("Design-Principles", _pages_with(awi.audit(pages), "sidebar-coverage"))
+
     def test_korean_sidebar_linking_an_english_page_is_flagged(self):
         pages = dict(CLEAN)
         pages["ko/_Sidebar"] = CLEAN["ko/_Sidebar"] + "\n2. [Design Principles](Design-Principles)"
@@ -168,6 +194,13 @@ class TestSidebarLanguage(unittest.TestCase):
         pages = dict(CLEAN)
         pages["_Sidebar"] = CLEAN["_Sidebar"] + " · [설계 원칙](설계-원칙)"
         self.assertIn("_Sidebar", _pages_with(awi.audit(pages), "sidebar-language"))
+
+
+class TestFooter(unittest.TestCase):
+    def test_footer_is_flagged(self):
+        pages = dict(CLEAN)
+        pages["_Footer"] = "footer"
+        self.assertIn("_Footer", _pages_with(awi.audit(pages), "footer"))
 
 
 class TestLoadWiki(unittest.TestCase):

@@ -4,20 +4,23 @@
 The Wiki is a separate checkout containing design pages and links to the
 canonical repository contracts. The language policy
 (docs/concepts/language-policy.md) defines its layout: English pages at the
-Wiki root, Korean pages under ``ko/``, a sidebar per folder in that folder's
-language, and a language switch line at the top of every content page. This
-command checks page links and that layout. It does not validate architecture
-prose, runtime behavior or remote publication state. Findings produce a
-nonzero exit status; the audit neither edits pages nor controls runtime
-permission.
+Wiki root, Korean pages directly under ``ko/``, a sidebar per folder that lists
+the pages of that folder's language, no footer, and a language switch line at
+the top of every content page. This command checks page links and that layout.
+It does not validate architecture prose, runtime behavior or remote
+publication state. Findings produce a nonzero exit status; the audit neither
+edits pages nor controls runtime permission.
 
 Checks:
 - broken-link      : a [text](Target) link pointing at a non-existent wiki page.
 - duplicate-page   : two files share one page name; GitHub serves pages by name.
 - switch-format    : a content page whose first line is not a language switch line.
-- switch-folder    : a Korean page outside ``ko/`` or an English page inside it.
+- switch-folder    : an English page outside the root or a Korean page outside ``ko/``.
 - switch-pair      : a switch link whose target does not switch back to the page.
+- missing-sidebar  : English or Korean pages exist without their folder's ``_Sidebar``.
+- sidebar-coverage : a content page that its language's sidebar does not list.
 - sidebar-language : a sidebar link to a page in the other language.
+- footer           : a ``_Footer`` page; the Wiki has no footer.
 
 GitHub wiki special pages (any ``_``-prefixed page such as ``_Sidebar``) carry
 no switch line; their links are still checked.
@@ -48,6 +51,8 @@ _EN_SWITCH_RE = re.compile(r"^언어: 🇺🇸 English \| \[🇰🇷 한국어\]
 _KO_SWITCH_RE = re.compile(r"^Language: \[🇺🇸 English\]\(([^)]+)\) \| 🇰🇷 한국어$")
 
 _KO_FOLDER = "ko"
+# The folder holding each language's pages and sidebar ("" is the Wiki root).
+_LANGUAGE_FOLDER = {"en": "", "ko": _KO_FOLDER}
 
 
 @dataclass(frozen=True)
@@ -66,8 +71,8 @@ def page_name(key: str) -> str:
     return key.rsplit("/", 1)[-1]
 
 
-def _in_ko_folder(key: str) -> bool:
-    return key.startswith(_KO_FOLDER + "/")
+def _folder(key: str) -> str:
+    return key.rsplit("/", 1)[0] if "/" in key else ""
 
 
 def _is_special(key: str) -> bool:
@@ -160,8 +165,8 @@ def check_language_switches(pages: dict[str, str]) -> list[Finding]:
             )
             continue
         language, target = switch
-        if (language == "ko") != _in_ko_folder(key):
-            expected = "under ko/" if language == "ko" else "outside ko/"
+        if _folder(key) != _LANGUAGE_FOLDER[language]:
+            expected = "directly under ko/" if language == "ko" else "at the wiki root"
             findings.append(
                 Finding("switch-folder", key, f"{language} page must live {expected}")
             )
@@ -176,23 +181,44 @@ def check_language_switches(pages: dict[str, str]) -> list[Finding]:
     return findings
 
 
-def check_sidebar_language(pages: dict[str, str]) -> list[Finding]:
+def check_sidebars(pages: dict[str, str]) -> list[Finding]:
     findings: list[Finding] = []
     names = _by_name(pages)
+    languages: dict[str, str] = {}
     for key in sorted(pages):
-        if page_name(key) != "_Sidebar":
-            continue
-        language = "ko" if _in_ko_folder(key) else "en"
-        for target in _internal_targets(pages[key]):
-            target_key = names.get(target)
-            if target_key is None:
-                continue  # reported as broken-link
-            switch = parse_switch(pages[target_key])
-            if switch is not None and switch[0] != language:
+        switch = None if _is_special(key) else parse_switch(pages[key])
+        if switch is not None:
+            languages[key] = switch[0]
+    for language, folder in _LANGUAGE_FOLDER.items():
+        sidebar = f"{folder}/_Sidebar" if folder else "_Sidebar"
+        content = [key for key, page_language in languages.items() if page_language == language]
+        if sidebar not in pages:
+            if content:
                 findings.append(
-                    Finding("sidebar-language", key, f"{language} sidebar links {switch[0]} page '{target}'")
+                    Finding("missing-sidebar", sidebar, f"{language} pages have no {sidebar}.md")
+                )
+            continue
+        listed = _internal_targets(pages[sidebar])
+        for key in content:
+            if page_name(key) not in listed:
+                findings.append(
+                    Finding("sidebar-coverage", key, f"page is not listed in {sidebar}")
+                )
+        for target in listed:
+            target_language = languages.get(names.get(target, ""))
+            if target_language is not None and target_language != language:
+                findings.append(
+                    Finding("sidebar-language", sidebar, f"{language} sidebar links {target_language} page '{target}'")
                 )
     return findings
+
+
+def check_footer(pages: dict[str, str]) -> list[Finding]:
+    return [
+        Finding("footer", key, "the wiki has no footer")
+        for key in sorted(pages)
+        if page_name(key) == "_Footer"
+    ]
 
 
 def audit(pages: dict[str, str]) -> list[Finding]:
@@ -201,7 +227,8 @@ def audit(pages: dict[str, str]) -> list[Finding]:
         check_duplicate_pages(pages)
         + check_broken_links(pages)
         + check_language_switches(pages)
-        + check_sidebar_language(pages)
+        + check_sidebars(pages)
+        + check_footer(pages)
     )
 
 
