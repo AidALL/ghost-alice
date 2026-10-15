@@ -1,0 +1,449 @@
+"""Loopback native-request gateway with Core-authenticated input selection.
+
+Native credentials and server answer bytes pass through unchanged. Logs contain
+structure, hashes and server usage, never conversation or credential bodies.
+Dependencies: Python 3.11+; zstd requests require Python 3.14 compression.zstd.
+"""
+import argparse
+import copy
+from datetime import datetime, timezone
+import gzip
+import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import json
+from pathlib import Path
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+import zlib
+
+HOP = {'host', 'connection', 'transfer-encoding', 'content-length', 'proxy-connection', 'keep-alive'}
+INTERNAL_HEADERS = {'x-ghost-context-scope', 'x-ghost-context-session'}
+ORIGINS = {'codex': 'https://chatgpt.com/backend-api/codex', 'anthropic': 'https://api.anthropic.com'}
+PLATFORMS = {'codex': 'codex', 'anthropic': 'claude'}
+SELECTION_ENDPOINTS = {'codex': {'responses'}, 'anthropic': {'v1/messages', 'v1/messages/count_tokens'}}
+
+
+def _url_origin(url):
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme not in ('http', 'https') or not parsed.hostname:
+            return None
+        port = parsed.port if parsed.port is not None else (443 if parsed.scheme == 'https' else 80)
+        return parsed.scheme, parsed.hostname, port
+    except ValueError:
+        return None
+
+
+def _redirect_allowed(origin, source_url, location):
+    expected = _url_origin(origin)
+    try:
+        # Native clients may use WHATWG parsing, where backslashes and extra
+        # authority slashes differ from urllib's relative-path interpretation.
+        if any(ord(char) < 32 or ord(char) == 127 for char in location):
+            return False
+        location = location.strip()
+        if '\\' in location or location.startswith('///'):
+            return False
+        target = urllib.parse.urlsplit(location)
+        if target.scheme and not target.netloc:
+            return False
+        return expected is not None and _url_origin(urllib.parse.urljoin(source_url, location)) == expected
+    except ValueError:
+        return False
+
+
+class _OriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Keep native headers inside the configured provider's origin."""
+
+    def __init__(self, origin):
+        self.origin = origin
+
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        if not _redirect_allowed(self.origin, request.full_url, new_url):
+            fp.close()
+            raise urllib.error.URLError('redirect-outside-configured-origin')
+        return super().redirect_request(request, fp, code, message, headers, new_url)
+
+
+def digest(value):
+    return hashlib.sha256(value).hexdigest()
+
+
+def item_shape(item):
+    raw = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
+    shape = {'sha256': digest(raw), 'bytes': len(raw)}
+    if isinstance(item, dict):
+        for key in ('type', 'role', 'call_id', 'name'):
+            if isinstance(item.get(key), str):
+                shape[key] = item[key]
+    return shape
+
+
+def decode_body(raw, encoding):
+    if encoding == 'gzip':
+        return gzip.decompress(raw)
+    if encoding == 'zstd':
+        from compression import zstd
+        return zstd.decompress(raw)
+    if encoding and encoding != 'identity':
+        raise ValueError('unsupported-content-encoding')
+    return raw
+
+
+def encode_body(raw, encoding):
+    if encoding == 'gzip':
+        return gzip.compress(raw)
+    if encoding == 'zstd':
+        from compression import zstd
+        return zstd.compress(raw)
+    return raw
+
+
+def _merge_usage(previous, incoming):
+    """Retain only observed native fields; cumulative counts replace, not add."""
+    result = copy.deepcopy(previous)
+    for key, value in incoming.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _merge_usage(result[key], value)
+        else:
+            result[key] = copy.deepcopy(value)
+    return result
+
+
+class UsageSnapshots:
+    """Request-local native server identity and observed usage snapshots."""
+
+    def __init__(self, provider):
+        if provider not in ('codex', 'anthropic'):
+            raise ValueError('A supported native usage provider is required')
+        self.provider = provider
+        self.server_id = self.model = None
+        self.usage = {}
+
+    def observe(self, event):
+        if not isinstance(event, dict):
+            return None
+        container = event.get('response' if self.provider == 'codex' else 'message')
+        container = container if isinstance(container, dict) else {}
+        identifier = container.get('id')
+        if isinstance(identifier, str) and identifier and identifier != self.server_id:
+            self.server_id, self.model, self.usage = identifier, None, {}
+        model = container.get('model')
+        if isinstance(model, str):
+            self.model = model
+        usage = container.get('usage')
+        if not isinstance(usage, dict):
+            usage = event.get('usage')
+        if not isinstance(usage, dict):
+            return None
+        self.usage = _merge_usage(self.usage, usage)
+        observed = dict(server_id=self.server_id, server_event=event.get('type'), model=self.model,
+                        raw_usage=copy.deepcopy(usage), usage=copy.deepcopy(self.usage))
+        context = event.get('context_management', container.get('context_management'))
+        if self.provider == 'anthropic' and isinstance(context, dict):
+            observed['context_management'] = copy.deepcopy(context)
+        return observed
+
+
+def forward_stream(upstream, sink, provider, on_usage):
+    """Copy original response bytes while observing native usage separately."""
+    parser = UsageSnapshots(provider)
+    pending = b''
+    response_hash = hashlib.sha256()
+    events = 0
+    encoding = upstream.headers.get('Content-Encoding', '').lower()
+    observable = encoding in ('', 'identity', 'gzip', 'zstd')
+    decoder = None
+    decoder_factory = None
+    if encoding == 'gzip':
+        decoder_factory = lambda: zlib.decompressobj(16 + zlib.MAX_WBITS)
+    elif encoding == 'zstd':
+        try:
+            from compression import zstd
+            decoder_factory = zstd.ZstdDecompressor
+        except ImportError:
+            observable = False
+    if decoder_factory is not None:
+        decoder = decoder_factory()
+    while True:
+        chunk = upstream.read1(65536)
+        if not chunk:
+            break
+        response_hash.update(chunk)
+        sink.write(chunk)
+        sink.flush()
+        if not observable:
+            continue
+        try:
+            if decoder is None:
+                pending += chunk
+            else:
+                compressed = chunk
+                while compressed:
+                    if decoder.eof:
+                        decoder = decoder_factory()
+                    pending += decoder.decompress(compressed)
+                    compressed = decoder.unused_data if decoder.eof else b''
+        except Exception:
+            # Observation is passive: invalid compression never interrupts or
+            # filters the native response. Earlier observed events stay factual.
+            observable = False
+            pending = b''
+            continue
+        while b'\n' in pending:
+            line, pending = pending.split(b'\n', 1)
+            if not line.startswith(b'data: '):
+                continue
+            try:
+                event = json.loads(line[6:])
+            except ValueError:
+                continue
+            events += 1
+            observed = parser.observe(event)
+            if observed is not None:
+                on_usage(observed)
+    if decoder is not None and not decoder.eof:
+        observable = False
+    return dict(wire_sha256=response_hash.hexdigest(), sse_events_observed=events,
+                usage_stream_observable=observable, response_content_encoding=encoding)
+
+
+def request_shape(raw, encoding):
+    try:
+        body = json.loads(decode_body(raw, encoding))
+        if not isinstance(body, dict):
+            return {'shape_unavailable': 'not-an-object'}
+        result = {'fields': list(body), 'model': body.get('model'), 'units': {}}
+        for field in ('input', 'messages', 'system', 'tools'):
+            if field in body:
+                value = body[field]
+                result['units'][field] = [item_shape(i) for i in value] if isinstance(value, list) else [item_shape(value)]
+        return result
+    except (ValueError, ImportError, OSError):
+        return {'shape_unavailable': 'content-not-decoded'}
+
+
+def make_server(scope, output, origins=None, selection=None, port=0, selectors=None, server_selectors=None):
+    """Dispatch explicit platform callbacks with (request, declared_session).
+
+    The legacy single-argument selection callback remains Codex-only. Explicit
+    selectors use the native platform keys codex and claude; no signature is
+    inferred and duplicate Codex declarations are rejected.
+    """
+    lock = threading.Lock()
+    origins = dict(origins or ORIGINS)
+    openers = {provider: urllib.request.build_opener(_OriginRedirectHandler(origin))
+               for provider, origin in origins.items()}
+    if (server_selectors is not None and (not isinstance(server_selectors, dict)
+        or any(key != 'claude' or not callable(callback) for key, callback in server_selectors.items()))):
+        raise ValueError('Only an explicit Claude native-capability selector is supported')
+    server_dispatch = server_selectors or {}
+    if selectors is not None and (not isinstance(selectors, dict) or any(
+        key not in ('codex', 'claude') or not callable(callback) for key, callback in selectors.items())):
+        raise ValueError('Explicit supported platform selection callbacks are required')
+    dispatch = dict(selectors or {})
+    if selection is not None:
+        if not callable(selection) or 'codex' in dispatch:
+            raise ValueError('One explicit Codex selection callback is required')
+        dispatch['codex'] = lambda request, _session: selection(request)
+
+    def record(value):
+        value['observed_at'] = datetime.now(timezone.utc).isoformat()
+        with lock, Path(output).open('a') as stream:
+            stream.write(json.dumps(value, ensure_ascii=False) + '\n')
+
+    class Observer(BaseHTTPRequestHandler):
+        protocol_version = 'HTTP/1.1'
+
+        def log_message(self, *_args):
+            pass
+
+        def reject(self, status):
+            self.send_response(status)
+            self.send_header('Content-Length', '0')
+            self.send_header('Connection', 'close')
+            self.end_headers()
+            self.close_connection = True
+
+        def read_body(self):
+            if self.headers.get('Transfer-Encoding', '').lower() == 'chunked':
+                parts = []
+                while True:
+                    size = int(self.rfile.readline().split(b';', 1)[0], 16)
+                    if not size:
+                        while self.rfile.readline() not in (b'\r\n', b'\n', b''):
+                            pass
+                        return b''.join(parts)
+                    parts.append(self.rfile.read(size))
+                    if self.rfile.read(2) != b'\r\n':
+                        raise ValueError('invalid-chunk-boundary')
+            return self.rfile.read(int(self.headers.get('Content-Length', '0')))
+
+        def handle_request(self):
+            if self.headers.get_all('X-Ghost-Context-Scope') != [scope]:
+                record({'event': 'request-not-forwarded', 'reason': 'scope-mismatch', 'status': 403})
+                self.reject(403)
+                return
+            if self.path == '/health' and self.command == 'GET':
+                body = b'{"status":"ready"}'
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            parsed = urllib.parse.urlsplit(self.path)
+            provider, _, suffix = parsed.path.lstrip('/').partition('/')
+            allowed = {'codex': {'models', 'responses', 'responses/compact'},
+                       'anthropic': {'v1/messages', 'v1/messages/count_tokens'}}
+            if provider not in origins or suffix not in allowed.get(provider, set()):
+                self.reject(404)
+                return
+            platform = PLATFORMS[provider]
+            selector = dispatch.get(platform) if suffix in SELECTION_ENDPOINTS[provider] else None
+            server_selector = server_dispatch.get(platform) if suffix in SELECTION_ENDPOINTS[provider] else None
+            session_headers = self.headers.get_all('X-Ghost-Context-Session') or []
+            session_id = session_headers[0] if len(session_headers) == 1 else None
+            if platform == 'claude' and (selector is not None or server_selector is not None):
+                try:
+                    valid_session = (isinstance(session_id, str)
+                                     and str(uuid.UUID(session_id)) == session_id.lower())
+                except ValueError:
+                    valid_session = False
+                if not valid_session:
+                    record({'event': 'request-not-forwarded', 'provider': provider, 'platform': platform,
+                            'reason': 'native-session-unavailable', 'status': 400})
+                    self.reject(400)
+                    return
+            request_id = str(uuid.uuid4())
+            body = self.read_body()
+            encoding = self.headers.get('Content-Encoding', '').lower()
+            record({'event': 'request', 'request_id': request_id, 'provider': provider, 'platform': platform,
+                    'native_session_id': session_id,
+                    'endpoint': '/' + suffix, 'method': self.command,
+                    'wire_sha256': digest(body), 'wire_bytes': len(body),
+                    'native_authorization_present': bool(self.headers.get('Authorization') or self.headers.get('X-Api-Key')),
+                    'shape': request_shape(body, encoding)})
+            if selector is not None or server_selector is not None:
+                try:
+                    decoded = json.loads(decode_body(body, encoding))
+                    betas = tuple(value.strip() for header in self.headers.get_all('anthropic-beta', [])
+                                  for value in header.split(',') if value.strip())
+                    result = (server_selector(decoded, session_id, betas) if server_selector is not None
+                              else selector(decoded, session_id))
+                    if result.state == 'unavailable':
+                        record({'event': 'request-not-forwarded', 'request_id': request_id,
+                                'reason': result.reason, 'status': 503})
+                        self.reject(503)
+                        return
+                    if result.state not in {'selected', 'preserved'}:
+                        raise ValueError('Invalid request selection state')
+                    original_hash = digest(body)
+                    if result.state == 'selected':
+                        body = encode_body(json.dumps(result.request, ensure_ascii=False, separators=(',', ':')).encode(), encoding)
+                    record({'event': 'request-selection', 'request_id': request_id, 'provider': provider,
+                            'platform': platform, 'native_session_id': session_id,
+                            'native_betas': list(betas) if platform == 'claude' else [],
+                            'state': result.state, 'reason': result.reason,
+                            'original_wire_sha256': original_hash, 'forwarded_wire_sha256': digest(body),
+                            'selected_blocks': result.observations, 'forwarded_shape': request_shape(body, encoding)})
+                except Exception as error:
+                    record({'event': 'request-not-forwarded', 'request_id': request_id,
+                            'reason': 'selection-error', 'error_type': type(error).__name__, 'status': 500})
+                    self.reject(500)
+                    return
+            url = origins[provider].rstrip('/') + '/' + suffix
+            if parsed.query:
+                url += '?' + parsed.query
+            headers = {k: v for k, v in self.headers.items()
+                       if k.lower() not in HOP and k.lower() not in INTERNAL_HEADERS
+                       and k.lower() != 'anthropic-beta'}
+            native_beta_headers = self.headers.get_all('anthropic-beta', [])
+            if native_beta_headers:
+                headers['Anthropic-Beta'] = ','.join(native_beta_headers)
+            request = urllib.request.Request(url, data=body if self.command == 'POST' else None,
+                                             headers=headers, method=self.command)
+            try:
+                upstream = openers[provider].open(request, timeout=300)
+            except urllib.error.HTTPError as error:
+                upstream = error
+            except (OSError, urllib.error.URLError) as error:
+                record({'event': 'transport-unavailable', 'request_id': request_id,
+                        'provider': provider, 'error_type': type(error).__name__})
+                self.reject(502)
+                return
+            with upstream:
+                # Some methods/statuses (notably POST 307/308) become
+                # HTTPError before redirect_request. Never pass an unsafe
+                # redirect to the native client for it to follow instead.
+                redirect_response = 300 <= upstream.status < 400
+                if redirect_response and any(
+                    not _redirect_allowed(origins[provider], upstream.geturl(), location)
+                    for key in ('Location', 'URI') for location in upstream.headers.get_all(key, [])):
+                    record({'event': 'redirect-not-forwarded', 'request_id': request_id,
+                            'provider': provider, 'status': 502})
+                    self.reject(502)
+                    return
+                self.send_response(upstream.status)
+                for key, value in upstream.headers.items():
+                    if key.lower() not in HOP:
+                        if redirect_response and key.lower() in ('location', 'uri'):
+                            # The native client sees an HTTP loopback base.
+                            # Relay the absolute URL already validated against
+                            # the upstream base, preserving its HTTPS origin.
+                            value = urllib.parse.urljoin(upstream.geturl(), value.strip())
+                        self.send_header(key, value)
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.close_connection = True
+                details = forward_stream(upstream, self.wfile, provider, lambda usage: record(
+                    dict(event='server-usage', request_id=request_id, provider=provider, **usage)))
+                record({'event': 'response-end', 'request_id': request_id, 'provider': provider,
+                        'status': upstream.status, **details})
+
+        do_GET = handle_request
+        do_POST = handle_request
+
+    return ThreadingHTTPServer(('127.0.0.1', port), Observer)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--config', required=True, type=Path)
+    args = parser.parse_args(argv)
+    config = json.loads(args.config.read_text())
+    if (config.get('schema_version') != 'context-gateway.v1'
+        or type(config.get('port')) is not int or not 0 < config['port'] < 65536
+        or not isinstance(config.get('scope'), str) or not config['scope']):
+        raise ValueError('An explicit installed gateway configuration is required')
+    for key in ('ledger_root', 'codex_dir', 'usage_log'):
+        if not isinstance(config.get(key), str) or not Path(config[key]).is_absolute():
+            raise ValueError('Absolute installed coordinates are required')
+    if 'strict_log_root' in config and (not isinstance(config['strict_log_root'], str)
+                                      or not Path(config['strict_log_root']).is_absolute()):
+        raise ValueError('An explicit absolute strict log root is required')
+    if 'claude_dir' in config and (not isinstance(config['claude_dir'], str)
+                                  or not Path(config['claude_dir']).is_absolute()):
+        raise ValueError('An explicit absolute Claude native home is required')
+    from context_lifecycle import select_request, prepare_native_request
+    selectors = {'codex': lambda request, _session: select_request(
+        request, config['ledger_root'], config['codex_dir'], strict_log_root=config.get('strict_log_root'))}
+    origins = {'codex': ORIGINS['codex']}
+    server_selectors = {}
+    if 'claude_dir' in config:
+        origins['anthropic'] = ORIGINS['anthropic']
+        selectors['claude'] = lambda request, session: prepare_native_request(
+            request, config['ledger_root'], config['claude_dir'], platform='claude', session_id=session)
+        server_selectors['claude'] = lambda request, session, betas: prepare_native_request(
+            request, config['ledger_root'], config['claude_dir'], platform='claude', session_id=session,
+            native_betas=betas)
+    server = make_server(config['scope'], config['usage_log'], port=config['port'],
+                         origins=origins, selectors=selectors, server_selectors=server_selectors)
+    server.serve_forever()
+
+
+if __name__ == '__main__':
+    main()

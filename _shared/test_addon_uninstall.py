@@ -26,21 +26,31 @@ import install_hooks  # noqa: E402
 import install_transaction  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import hash_utils  # noqa: E402
+import install_destination  # noqa: E402
 from snapshot import capture_snapshot, load_snapshot  # noqa: E402
 
 
 class UninstallTestBase(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
         self.root = Path(self._tmp.name)
         # platform-scoped layout (review M5): sidecars live under addons/<platform>/
         self.addons = self.root / ".ghost-alice" / "addons" / "claude"
         self.skills = self.root / ".claude" / "skills"
         self.src = self.root / "src"
         self._install_modes = {}
+        self._destination = install_destination.use(dict(
+            mode="isolated", owned_root=str(self.root), platform_dir=str(self.root / ".claude"),
+            skills_dir=str(self.skills), ghost_root=str(self.root / ".ghost-alice"),
+            ledger_root=str(self.root / "ledger"), project_root=str(self.root / "project"),
+            core_source_root=str(REPO_ROOT), runtime_shared_dir=str(self.root / ".ghost-alice/runtime/current/_shared"),
+        ))
+        self._destination.__enter__()
+        self.addCleanup(self._destination.__exit__, None, None, None)
 
     def tearDown(self):
-        self._tmp.cleanup()
+        pass  # LIFO cleanups restore subclass environment patches before destination.
 
     def _provision_target(self, src, dest):
         try:
@@ -284,6 +294,121 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertTrue(os.path.lexists(self.skills / "one"))
         self.assertTrue((self.addons / "alpha.json").exists())
         self.assertFalse(self._marker("alpha").exists())  # dry-run persists no marker
+
+
+class ExecutableDetachmentOrderTest(UninstallTestBase):
+    """Detach real temporary hook registrations before changing addon files."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings = self.root / ".claude" / "settings.json"
+        self.settings.parent.mkdir(parents=True)
+        self.env = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": str(self.settings.parent)})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self._install("autopilot-mode", ["pilot-skill"])
+        record = reg.read_record("autopilot-mode", addons_dir=self.addons)
+        record["hooks"] = [{"hook_id": "obs", "event": "post_tool_use"}]
+        record["provided"].append({
+            "kind": "adapter", "name": "autopilot-mode",
+            "target": str(self.skills / "pilot-skill" / "adapters" / "stop.py"),
+            "ownership": "addon", "install_mode": "copy", "content_hash": "recorded",
+            "marker": "[adapter:autopilot-mode] stop", "metadata": {"hook_id": "stop"},
+        })
+        reg.write_record(record, addons_dir=self.addons)
+        observer = install_hooks._hook_runner_command_entry(
+            "obs", "echo observer", "[addon:autopilot-mode] obs", platform_key="claude",
+        )
+        adapter_script = self.src / "autopilot-mode" / "pilot-skill" / "adapters" / "stop.py"
+        adapter_script.parent.mkdir(parents=True)
+        adapter_script.write_text("# fixture adapter\n", encoding="utf-8")
+        adapter = install_hooks._hook_runner_command_entry(
+            install_hooks.addon_installer.privileged_adapter_runner_id("autopilot-mode", "stop"),
+            f'{sys.executable} "{adapter_script}"', "[adapter:autopilot-mode] stop", platform_key="claude",
+        )
+        self.retained_commands = ["echo core-completion # [completion]", "echo user-hook"]
+        self.settings.write_text(json.dumps({"hooks": {
+            "PostToolUse": [observer],
+            "Stop": [adapter, {"hooks": [{"type": "command", "command": c}
+                                         for c in self.retained_commands]}],
+        }}), encoding="utf-8")
+
+    def _assert_detached(self):
+        settings = json.loads(self.settings.read_text(encoding="utf-8"))
+        commands = [hook["command"] for groups in settings["hooks"].values()
+                    for group in groups for hook in group.get("hooks", [])]
+        self.assertFalse(any("[addon:autopilot-mode]" in c or "[adapter:autopilot-mode]" in c
+                             for c in commands))
+        for command in self.retained_commands:
+            self.assertIn(command, commands)
+
+    def test_hooks_are_detached_before_first_target_deletion(self):
+        remove = un._symlink_safe_remove
+        observed = []
+
+        def observe_deletion(path):
+            self._assert_detached()
+            self.assertTrue(self._marker("autopilot-mode").exists())
+            self.assertTrue((self.addons / "autopilot-mode.json").exists())
+            observed.append(path)
+            return remove(path)
+
+        with mock.patch.object(un, "_symlink_safe_remove", side_effect=observe_deletion):
+            result = self._uninstall("autopilot-mode")
+        self.assertEqual(result["status"], "removed")
+        self.assertEqual(len(observed), 1)
+
+    def test_failed_hook_detachment_preserves_files_for_resume(self):
+        with mock.patch.object(install_hooks, "remove_adapter_hook", side_effect=OSError("config write failed")):
+            with self.assertRaisesRegex(OSError, "config write failed"):
+                self._uninstall("autopilot-mode")
+        self.assertTrue(os.path.lexists(self.skills / "pilot-skill"))
+        self.assertTrue(self._marker("autopilot-mode").exists())
+        self.assertTrue((self.addons / "autopilot-mode.json").exists())
+        resumed = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills], platform="claude")
+        self.assertEqual([r["status"] for r in resumed], ["removed"])
+        self._assert_detached()
+
+    def test_missing_hook_object_finishes_confirmed_removal_and_clears_marker(self):
+        self.settings.write_text('{"theme":"dark","permissions":{"allow":["Read"]}}', encoding='utf-8')
+        original = self.settings.read_bytes()
+        remove = un._symlink_safe_remove
+        observed = []
+
+        def observe_deletion(path):
+            self.assertTrue(self._marker('autopilot-mode').is_file())
+            self.assertEqual(self.settings.read_bytes(), original)
+            observed.append(path)
+            return remove(path)
+
+        with mock.patch.object(un, '_symlink_safe_remove', side_effect=observe_deletion):
+            result = self._uninstall('autopilot-mode')
+        self.assertEqual(result['status'], 'removed')
+        self.assertEqual(len(observed), 1)
+        self.assertFalse(os.path.lexists(self.skills / 'pilot-skill'))
+        self.assertFalse(self._marker('autopilot-mode').exists())
+        self.assertFalse((self.addons / 'autopilot-mode.json').exists())
+        self.assertEqual(un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills], platform='claude'), [])
+        self.assertEqual(self.settings.read_bytes(), original)
+
+    def test_file_removal_failure_leaves_hooks_detached_and_can_resume(self):
+        with mock.patch.object(un, "_symlink_safe_remove", side_effect=OSError("file removal interrupted")):
+            with self.assertRaisesRegex(OSError, "file removal interrupted"):
+                self._uninstall("autopilot-mode")
+        self._assert_detached()
+        self.assertTrue(os.path.lexists(self.skills / "pilot-skill"))
+        self.assertTrue(self._marker("autopilot-mode").exists())
+        resumed = un.resume_pending(addons_dir=self.addons, allowed_roots=[self.skills], platform="claude")
+        self.assertEqual([r["status"] for r in resumed], ["removed"])
+
+    def test_dry_run_keeps_registrations_files_and_sidecar(self):
+        original = self.settings.read_bytes()
+        result = self._uninstall("autopilot-mode", confirm=False)
+        self.assertEqual(result["status"], "dry-run")
+        self.assertEqual(self.settings.read_bytes(), original)
+        self.assertTrue(os.path.lexists(self.skills / "pilot-skill"))
+        self.assertTrue((self.addons / "autopilot-mode.json").exists())
+        self.assertFalse(self._marker("autopilot-mode").exists())
 
 
 class ResumeTest(UninstallTestBase):

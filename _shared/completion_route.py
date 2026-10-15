@@ -36,6 +36,7 @@ from completion_check_validator import (
     validate_completion_text,
 )
 from response_purpose import NONCLOSING_PURPOSES, response_purpose
+from response_route import RouteSchemaError, validate_routing_surface
 
 SCHEMA_VERSION = "completion-route.v1"
 _EVIDENCE_PRIORITY = ("no_external_check", "reuse", "recording_repair_only", "owner_verification",
@@ -101,12 +102,11 @@ def _bound_selection(context, claim_scope):
             return "stale", [], []
     if route.get("current_input_event_id") != context["input_event_id"]:
         return "stale", [], []
-    surface = route.get("routing_surface")
-    if (not isinstance(surface, dict) or surface.get("response_mode") not in
-            ("normal", "direct-response", "clarification-only")
-            or surface.get("verification_complexity") not in ("level-1", "level-2", "level-3")
-            or surface.get("boundary_contract") not in ("required", "n/a")
-            or (surface.get("boundary_contract") == "required" and not route.get("boundary_ref"))):
+    try:
+        surface = validate_routing_surface(route.get("routing_surface"))
+    except RouteSchemaError:
+        return "invalid", [], []
+    if surface["boundary_contract"] == "required" and not route.get("boundary_ref"):
         return "invalid", [], []
     units, selected, criteria = (route.get(field) for field in
                                  ("work_units", "selected_work_unit_ids", "selected_criteria"))

@@ -1,3 +1,2 @@
-# Preserve the repository SSOT and leave room for nested instructions.
-# The default 32 KiB limit truncates this repository's AGENTS.md.
+# Preserve complete project and nested instructions.
 project_doc_max_bytes = 131072

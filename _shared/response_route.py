@@ -37,6 +37,7 @@ ROUTING_ENUMS = {
     "boundary_contract": {"required", "n/a"}, "forced_visibility": {"yes", "no"},
 }
 ROUTING_TEXT = {"primary_request", "causal_axis", "reason"}
+ROUTING_CONTROLS = {"response_mode", "boundary_contract"}
 CANDIDATE_KEYS = {"schema_version", "routing_surface", "work_units", "selected_work_unit_ids", "selected_criteria"}
 UNIT_KEYS = {"work_unit_id", "contract_revision", "kind", "admitted", "owner"}
 REFERENCE_KEYS = {"work_unit_id", "contract_revision", "criterion_id"}
@@ -109,16 +110,20 @@ def _unique(values, label):
     return values
 
 
-def _surface(value):
-    surface = _object(value, set(ROUTING_ENUMS) | ROUTING_TEXT, "routing_surface")
-    for key, choices in ROUTING_ENUMS.items():
+def validate_routing_surface(value):
+    """Validate route controls and supplied judgments without filling omissions."""
+    surface = _object(value, ROUTING_CONTROLS, "routing_surface",
+                      optional=set(ROUTING_ENUMS) | ROUTING_TEXT)
+    for key in set(surface) & set(ROUTING_ENUMS):
+        choices = ROUTING_ENUMS[key]
         if not isinstance(surface[key], str) or surface[key] not in choices:
             raise RouteSchemaError(f"unknown routing_surface.{key}")
-    for key in ROUTING_TEXT:
+    for key in set(surface) & ROUTING_TEXT:
         if not isinstance(surface[key], str) or not surface[key].strip() or len(surface[key]) > 500:
             raise RouteSchemaError(f"routing_surface.{key} must be a compressed nonempty summary")
     required_order = {"clarification-only": "clarification-question-only", "direct-response": "resolved-intent-first"}
-    if surface["response_mode"] in required_order and surface["response_order"] != required_order[surface["response_mode"]]:
+    if ("response_order" in surface and surface["response_mode"] in required_order
+            and surface["response_order"] != required_order[surface["response_mode"]]):
         raise RouteSchemaError("terminal response mode and response order disagree")
     return surface
 
@@ -174,17 +179,129 @@ def _require_execution_criteria(units, selected, owned):
             raise RouteSchemaError('selected execution work needs an admitted owned criterion; record the actual task condition before routing')
 
 
+
+def _validate_continuation_feedback(value, selected, *, resolved=False):
+    _object(value, {'schema_version', 'control', 'required_unprocessed'}, 'continuation feedback')
+    if (value['schema_version'] != 'continuation-feedback.v1'
+        or not isinstance(value['control'], str) or value['control'] not in {'active', 'human-stop'}):
+        raise RouteSchemaError('Unknown current continuation feedback control')
+    if not isinstance(value['required_unprocessed'], list):
+        raise RouteSchemaError('Current required-unprocessed work must be an explicit list')
+    admitted = {(row['work_unit_id'], row['contract_revision'], row['criterion_id']) for row in selected}
+    seen = set()
+    for row in value['required_unprocessed']:
+        _object(row, {'criterion_refs', 'reason', 'next_information', 'source_refs', 'prerequisite'},
+                'required-unprocessed condition')
+        if not isinstance(row['prerequisite'], str) or row['prerequisite'] not in {'ready', 'missing'}:
+            raise RouteSchemaError('A current prerequisite disposition is required')
+        if any(not isinstance(row[key], str) or not row[key].strip() for key in ('reason', 'next_information')):
+            raise RouteSchemaError('The model supplies current necessity and next needed information')
+        if not isinstance(row['criterion_refs'], list) or not row['criterion_refs']:
+            raise RouteSchemaError('Needed work must refer to selected owned criteria')
+        for ref in row['criterion_refs']:
+            _object(ref, REFERENCE_KEYS, 'required criterion reference')
+            key = (*_unit_key(ref), _identifier(ref['criterion_id'], 'criterion_id'))
+            if key not in admitted or key in seen:
+                raise RouteSchemaError('Required work must be selected, admitted and nonoverlapping')
+            seen.add(key)
+        if not isinstance(row['source_refs'], list):
+            raise RouteSchemaError('Needed original selectors must be an explicit list')
+        sources = set()
+        for selector in row['source_refs']:
+            _object(selector, {'candidate_reference', 'source_id'} | ({'source'} if resolved else set()),
+                    'required original selector')
+            if any(not isinstance(selector[key], str) or not selector[key] for key in ('candidate_reference', 'source_id')):
+                raise RouteSchemaError('Existing Core candidate and source identities are required')
+            key = selector['candidate_reference'], selector['source_id']
+            if key in sources:
+                raise RouteSchemaError('Original selectors cannot be duplicated in one work condition')
+            sources.add(key)
+            if resolved:
+                source = selector['source']
+                if (not isinstance(source, dict) or source.get('source_id') != selector['source_id']
+                    or source.get('storage') not in {'source-reference.v1', 'core-source-reference.v1'}
+                    or 'text' in source or 'bytes_base64' in source):
+                    raise RouteSchemaError('Feedback retains authenticated source coordinates, never another body')
+    return value
+
+
+def _continuation_original(selector, root, owner, connection):
+    import base64
+    import hashlib
+    from completion_assessment import _stored, CompletionAssessmentError
+    from source_reference import core_source_reference, verify_source, SourceReferenceError
+    root = Path(root).resolve()
+    try:
+        candidate = _stored(connection, 'core_completion_candidates', selector['candidate_reference'])
+    except CompletionAssessmentError as error:
+        raise RouteBindingError('source-unverified') from error
+    original_owner = candidate.get('owner') or candidate.get('contract', {}).get('owner') or candidate.get('input_binding', {})
+    if (candidate.get('intent_root') != str(root)
+        or any(original_owner.get(key) != owner[key] for key in ('platform', 'session_id'))):
+        raise RouteBindingError('source-owner-unbound')
+    matches = [source for source in candidate.get('sources', []) if source.get('source_id') == selector['source_id']]
+    if len(matches) != 1:
+        raise RouteBindingError('source-unverified')
+    original = matches[0]
+    try:
+        if 'text' in original or 'bytes_base64' in original:
+            raw = (base64.b64decode(original['bytes_base64'], validate=True) if 'bytes_base64' in original
+                   else original['text'].encode())
+            if 'sha256:' + hashlib.sha256(raw).hexdigest() != original['digest']:
+                raise RouteBindingError('source-changed')
+        else:
+            verify_source(original)
+    except SourceReferenceError as error:
+        raise RouteBindingError('source-changed') from error
+    except OSError as error:
+        raise RouteBindingError('source-unavailable') from error
+    return deepcopy(core_source_reference(original, root, owner, selector['candidate_reference']))
+
+
+def authenticate_continuation_feedback(projection, root, connection):
+    """Authenticate the declared originals in the existing route transaction."""
+    if 'continuation_feedback' not in projection:
+        return projection
+    result = deepcopy(projection)
+    owner = {key:result[key] for key in ('platform', 'session_id')}
+    for row in result['continuation_feedback']['required_unprocessed']:
+        for selector in row['source_refs']:
+            selector['source'] = _continuation_original(selector, root, owner, connection)
+    return result
+
+
+def refresh_continuation_feedback(projection, root, connection):
+    """Unavailable originals suppress only dependent feedback, retaining proof."""
+    if projection.get('status') != 'ready' or 'continuation_feedback' not in projection:
+        return projection
+    owner = {key:projection[key] for key in ('platform', 'session_id')}
+    issues = []
+    for index, row in enumerate(projection['continuation_feedback']['required_unprocessed']):
+        try:
+            for selector in row['source_refs']:
+                if _continuation_original(selector, root, owner, connection) != selector['source']:
+                    raise RouteBindingError('source-unverified')
+        except RouteBindingError as error:
+            issues.append(dict(pointer='/continuation_feedback/required_unprocessed/'+str(index),
+                               issue=str(error)))
+    if issues:
+        result = deepcopy(projection)
+        result['continuation_feedback_issues'] = issues
+        return result
+    return projection
+
+
 def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
                             boundary_ref: str | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Validate current selection against owned criteria and immutable contracts."""
-    _object(candidate, CANDIDATE_KEYS, "candidate", optional={"response_purpose"})
+    _object(candidate, CANDIDATE_KEYS, "candidate", optional={"response_purpose", "continuation_feedback"})
     try:
         purpose = response_purpose(candidate)
     except ValueError as exc:
         raise RouteSchemaError(str(exc)) from exc
     if candidate["schema_version"] != SCHEMA_VERSION:
         raise RouteSchemaError("unsupported response route schema")
-    surface = _surface(candidate["routing_surface"])
+    surface = validate_routing_surface(candidate["routing_surface"])
     if boundary_ref is not None:
         _identifier(boundary_ref, "boundary_ref")
     if surface["boundary_contract"] == "required" and boundary_ref is None:
@@ -261,6 +378,9 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         "work_units": list(units.values()), "selected_work_unit_ids": deepcopy(selected_ids),
         "selected_criteria": resolved,
     }
+    if 'continuation_feedback' in candidate:
+        projection['continuation_feedback'] = deepcopy(_validate_continuation_feedback(
+            candidate['continuation_feedback'], resolved))
     return projection, registry
 
 
@@ -276,12 +396,12 @@ def project_stored_response_route(state, expected_input_event_id=None):
             or stored.get("platform") != state.get("platform") or stored.get("session_id") != state.get("session_id")):
         raise RouteSchemaError("stored response route schema or owner is invalid")
     _object(stored, CANDIDATE_KEYS | {"status", "platform", "session_id", "input_event_id", "boundary_ref"},
-            "stored response route", optional={"response_purpose"})
+            "stored response route", optional={"response_purpose", "continuation_feedback"})
     try:
         purpose = response_purpose(stored)
     except ValueError as exc:
         raise RouteSchemaError(str(exc)) from exc
-    _surface(stored["routing_surface"])
+    validate_routing_surface(stored["routing_surface"])
     if not isinstance(stored["input_event_id"], str) or not stored["input_event_id"]:
         raise RouteSchemaError("stored route input event is invalid")
     if stored["boundary_ref"] is not None:
@@ -317,9 +437,12 @@ def project_stored_response_route(state, expected_input_event_id=None):
                 or criterion.get("status") not in ("met", "unmet")):
             raise RouteSchemaError("stored selected criterion binding is invalid")
         seen.add(key)
+    if 'continuation_feedback' in stored:
+        _validate_continuation_feedback(stored['continuation_feedback'], stored['selected_criteria'], resolved=True)
     route = deepcopy(stored)
     route["response_purpose"] = purpose
-    if route.get("input_event_id") != current or state.get("canonical_input_event_id") != current:
+    if (route.get("input_event_id") != current or state.get("canonical_input_event_id") != current
+        or state.get('current_context_input_event_id')):
         route["status"] = "stale"
     for selected_criterion in route["selected_criteria"]:
         criterion = owned.get(_criterion(selected_criterion, resolved=True))
@@ -330,7 +453,40 @@ def project_stored_response_route(state, expected_input_event_id=None):
 
 
 def record_response_route(root, platform, session_id, expected_input_event_id, candidate, boundary_ref, *, transaction=None,
-                          legacy_criteria_binding=None, expected_revision=None):
+                          legacy_criteria_binding=None, expected_revision=None,
+                          context_selection=None, context_source=None, context_use_judgments=None,
+                          context_selection_mode='replace'):
+    if not isinstance(context_selection_mode, str) or context_selection_mode not in {'replace', 'update'}:
+        raise RouteSchemaError('Context selection mode must be replace or update')
+    if context_selection_mode == 'update':
+        if context_selection is None:
+            raise RouteBindingError('Context selection update requires an explicit selection array')
+        if platform != 'codex':
+            raise RouteBindingError('Source-local context selection updates currently require Codex')
+    if context_selection is not None or context_use_judgments is not None:
+        source = context_source if context_source is not None else dict(os.environ,
+            GHOST_ALICE_SESSION_INTENT_ROOT=str(root), GHOST_ALICE_PLATFORM=platform,
+            GHOST_ALICE_SESSION_ID=session_id)
+        if any(source.get(key) != value for key, value in (
+            ('GHOST_ALICE_SESSION_INTENT_ROOT', str(root)), ('GHOST_ALICE_PLATFORM', platform),
+            ('GHOST_ALICE_SESSION_ID', session_id))):
+            raise RouteBindingError('Context selection and work selection must use the same native owner')
+        with ledger._transaction(Path(root), transaction) as connection:
+            result = record_response_route(root, platform, session_id, expected_input_event_id,
+                candidate, boundary_ref, transaction=connection,
+                legacy_criteria_binding=legacy_criteria_binding, expected_revision=expected_revision)
+            if context_selection is not None:
+                from context_lifecycle import record_disposition
+                result = dict(result, context_disposition=record_disposition(source,
+                    expected_input_event_id, context_selection, transaction=connection,
+                    selection_mode=context_selection_mode))
+            if context_use_judgments is not None:
+                from response_context_use import record_use_judgments
+                result = dict(result, context_use_judgments=record_use_judgments(source,
+                    expected_input_event_id, context_use_judgments, transaction=connection))
+            return result
+    if context_source is not None:
+        raise RouteBindingError('Context source belongs to an explicit context selection')
     if legacy_criteria_binding is not None:
         _object(legacy_criteria_binding, {"work_unit_id", "contract_revision", "expected_criteria"}, "ownership binding")
         with ledger._transaction(Path(root), transaction) as connection:
@@ -361,6 +517,12 @@ def main(argv=None):
     parser.add_argument("--expected-revision", type=int, help="Current ledger revision required for ownership binding")
     parser.add_argument("--bind-legacy-criteria-json",
         help="Core binds existing admitted criterion snapshots to frozen ownership, records the candidate atomically, and returns the ready route")
+    parser.add_argument('--context-selection-json',
+        help='Current use conclusions and remaining needs; resolved and committed with this work selection')
+    parser.add_argument('--context-selection-mode', choices=('replace', 'update'), default='replace',
+        help='Replace the complete selection, or explicitly update only named Codex source scopes')
+    parser.add_argument('--context-use-judgments-json',
+        help='Post-use keep or replace judgments, committed with this work selection')
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--read", action="store_true")
     group.add_argument("--candidate-json", help="compressed route candidate, never answer text")
@@ -369,7 +531,9 @@ def main(argv=None):
         if ledger is None:
             ledger = _load_installed_ledger(args.platform)
         if args.read:
-            if args.bind_legacy_criteria_json is not None or args.expected_revision is not None:
+            if (args.bind_legacy_criteria_json is not None or args.expected_revision is not None
+                or args.context_selection_json is not None or args.context_use_judgments_json is not None
+                or args.context_selection_mode != 'replace'):
                 raise RouteBindingError("read cannot bind criterion ownership")
             result = read_response_route(args.root, args.platform, args.session_id,
                                          expected_input_event_id=args.expected_input_event_id)
@@ -385,7 +549,10 @@ def main(argv=None):
             result = record_response_route(args.root, args.platform, args.session_id,
                 args.expected_input_event_id, candidate, args.boundary_ref,
                 legacy_criteria_binding=json.loads(args.bind_legacy_criteria_json) if args.bind_legacy_criteria_json is not None else None,
-                expected_revision=args.expected_revision)
+                expected_revision=args.expected_revision,
+                context_selection=json.loads(args.context_selection_json) if args.context_selection_json is not None else None,
+                context_selection_mode=args.context_selection_mode,
+                context_use_judgments=json.loads(args.context_use_judgments_json) if args.context_use_judgments_json is not None else None)
     except (ResponseRouteError, ValueError, OSError, sqlite3.Error) as exc:
         print(json.dumps({"error": getattr(exc, "code", "route-storage"), "message": str(exc)}), file=sys.stderr)
         return 1

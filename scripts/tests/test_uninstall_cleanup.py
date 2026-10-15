@@ -163,6 +163,193 @@ def _write_manifest(
     return manifest
 
 
+class SupportArtifactLifecycleTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.ghost = self.root / ".ghost-alice"
+        home = mock.patch.object(cleanup, "_user_home", return_value=self.root)
+        home.start()
+        self.addCleanup(home.stop)
+        self.manifest = self.ghost / "install-state" / "codex.json"
+        self._create_support()
+
+    def _create_support(self, value="original"):
+        self.manifest.parent.mkdir(parents=True, exist_ok=True)
+        self.manifest.write_text('{"platform":"codex","targets":[]}', encoding="utf-8")
+        self.pending = self.ghost / "pending-merges" / "codex"
+        self.pending.mkdir(parents=True, exist_ok=True)
+        (self.pending / "user-original.txt").write_text(value, encoding="utf-8")
+        self.rollbacks = self.ghost / "install-rollbacks"
+        self.rollbacks.mkdir(parents=True, exist_ok=True)
+        (self.rollbacks / "previous-copy.txt").write_text(value, encoding="utf-8")
+        self.dispatcher = self.ghost / "hooks"
+        self.dispatcher.mkdir(parents=True, exist_ok=True)
+        (self.dispatcher / "dispatcher.mjs").write_text("shared", encoding="utf-8")
+
+    def _support(self, confirm=True):
+        args = cleanup.build_parser().parse_args([
+            "--platform", "codex", "--install-state-manifest", str(self.manifest),
+            *(["--confirm"] if confirm else []),
+        ])
+        return {item["target_name"]: item for item in cleanup._support_artifact_items(args)}
+
+    def test_other_platform_retains_shared_dispatcher_and_rollbacks(self):
+        other = self.manifest.with_name("claude.json")
+        other.write_text('{"platform":"claude","targets":[]}', encoding="utf-8")
+        original_other = other.read_bytes()
+        report = self._support()
+        self.assertEqual((self.dispatcher / "dispatcher.mjs").read_text(), "shared")
+        self.assertEqual((self.rollbacks / "previous-copy.txt").read_text(), "original")
+        self.assertEqual(other.read_bytes(), original_other)
+        for name in ["hook-dispatcher-assets", "install-rollbacks"]:
+            self.assertEqual(report[name]["action"], "manual-review")
+            self.assertEqual(report[name]["shared_platforms"], ["claude"])
+
+    def test_last_platform_archives_recovery_material_before_removal(self):
+        original_times = [(self.pending / "user-original.txt").stat().st_mtime_ns,
+                          (self.rollbacks / "previous-copy.txt").stat().st_mtime_ns]
+        report = self._support()
+        self.assertFalse(self.pending.exists())
+        self.assertFalse(self.rollbacks.exists())
+        self.assertFalse(self.dispatcher.exists())
+        self.assertEqual(cleanup._summary(list(report.values()))["removed"], 4)
+        for index, (name, filename) in enumerate([
+            ("pending-merges", "user-original.txt"),
+            ("install-rollbacks", "previous-copy.txt"),
+        ]):
+            self.assertEqual(report[name]["action"], "quarantined-removed")
+            copy = Path(report[name]["backup_path"]) / filename
+            self.assertEqual(copy.read_text(), "original")
+            self.assertEqual(copy.stat().st_mtime_ns, original_times[index])
+
+    def test_successive_removals_do_not_replace_prior_recovery_copies(self):
+        first = self._support()
+        first_copy = Path(first["pending-merges"]["backup_path"]) / "user-original.txt"
+        self._create_support("next original")
+        second = self._support()
+        second_copy = Path(second["pending-merges"]["backup_path"]) / "user-original.txt"
+        self.assertNotEqual(first_copy, second_copy)
+        self.assertEqual(first_copy.read_text(), "original")
+        self.assertEqual(second_copy.read_text(), "next original")
+
+    def test_dry_run_keeps_recovery_material_and_creates_no_archive(self):
+        before = {p: p.read_bytes() for p in self.ghost.rglob("*") if p.is_file()}
+        report = self._support(confirm=False)
+        self.assertEqual({p: p.read_bytes() for p in self.ghost.rglob("*") if p.is_file()}, before)
+        self.assertFalse((self.ghost / "uninstall-backup").exists())
+        self.assertEqual(report["pending-merges"]["action"], "would-quarantine-remove")
+        self.assertEqual(report["install-rollbacks"]["action"], "would-quarantine-remove")
+
+    def test_failed_recovery_copy_keeps_original_material(self):
+        with mock.patch.object(cleanup.shutil, "copytree", side_effect=OSError("copy interrupted")):
+            with self.assertRaisesRegex(OSError, "copy interrupted"):
+                self._support()
+        self.assertEqual((self.pending / "user-original.txt").read_text(), "original")
+        self.assertEqual((self.rollbacks / "previous-copy.txt").read_text(), "original")
+        self.assertTrue(self.manifest.exists())
+
+    def test_recovery_archive_preserves_links_without_copying_external_targets(self):
+        outside = self.root / "user-owned.txt"
+        outside.write_text("external original", encoding="utf-8")
+        link = self.pending / "source-link"
+        try:
+            link.symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"symlink capability unavailable: {exc}")
+        report = self._support()
+        archived_link = Path(report["pending-merges"]["backup_path"]) / link.name
+        self.assertTrue(archived_link.is_symlink())
+        self.assertEqual(os.readlink(archived_link), str(outside))
+        self.assertEqual(outside.read_text(), "external original")
+
+    def test_recovery_root_symlink_preserves_original_link_mtime(self):
+        outside = self.root / "original-recovery"
+        outside.mkdir()
+        (outside / "original.txt").write_text("outside original", encoding="utf-8")
+        shutil.rmtree(self.pending)
+        try:
+            self.pending.symlink_to(outside, target_is_directory=True)
+            os.utime(self.pending, ns=(1234567800000000000, 1234567890000000000), follow_symlinks=False)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink timestamp capability unavailable: {exc}")
+        original_time = self.pending.lstat().st_mtime_ns
+        report = self._support()
+        archived = Path(report["pending-merges"]["backup_path"])
+        self.assertTrue(archived.is_symlink())
+        self.assertEqual(os.readlink(archived), str(outside))
+        self.assertEqual(archived.lstat().st_mtime_ns, original_time)
+        self.assertEqual((outside / "original.txt").read_text(), "outside original")
+
+    def test_recovery_junction_roots_and_children_remain_for_review(self):
+        # Emulate only the Windows junction detector; all archive/removal paths
+        # are real temporary files. This is not native Windows evidence.
+        for nested in [False, True]:
+            with self.subTest(nested=nested):
+                target = self.pending / "junction-child" if nested else self.pending
+                if nested:
+                    target.mkdir()
+                with mock.patch.object(cleanup, "_is_junction", side_effect=lambda p: p == target):
+                    report = self._support()
+                self.assertEqual(report["pending-merges"]["action"], "manual-review")
+                self.assertEqual(report["pending-merges"]["reason"], "recovery-junction-needs-review")
+                self.assertEqual(report["pending-merges"]["junction_path"], str(target))
+                self.assertEqual((self.pending / "user-original.txt").read_text(), "original")
+                self.assertTrue(self.manifest.exists())
+                self.assertEqual(report["install-state-manifest"]["action"], "manual-review")
+
+    def test_unsupported_link_timestamp_copy_keeps_original_and_manifest(self):
+        outside = self.root / "original-recovery"
+        outside.mkdir()
+        shutil.rmtree(self.pending)
+        try:
+            self.pending.symlink_to(outside, target_is_directory=True)
+            os.utime(self.pending, ns=(1234567800000000000, 1234567890000000000), follow_symlinks=False)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink timestamp fixture unavailable: {exc}")
+        original_time = self.pending.lstat().st_mtime_ns
+        copystat = cleanup.shutil.copystat
+
+        def unsupported_no_follow(src, dest, *, follow_symlinks=True):
+            if follow_symlinks:
+                return copystat(src, dest, follow_symlinks=follow_symlinks)
+
+        with mock.patch.object(cleanup.shutil, "copystat", side_effect=unsupported_no_follow):
+            report = self._support()
+        self.assertEqual(report["pending-merges"]["action"], "manual-review")
+        self.assertEqual(report["pending-merges"]["reason"], "recovery-link-time-not-preserved")
+        self.assertTrue(self.pending.is_symlink())
+        self.assertEqual(self.pending.lstat().st_mtime_ns, original_time)
+        self.assertTrue(self.manifest.exists())
+        self.assertEqual(report["install-state-manifest"]["action"], "manual-review")
+
+    def test_unsupported_nested_link_timestamp_copy_keeps_original_tree(self):
+        outside = self.root / "user-original.txt"
+        outside.write_text("outside original", encoding="utf-8")
+        link = self.pending / "nested-link"
+        try:
+            link.symlink_to(outside)
+            os.utime(link, ns=(1234567800000000000, 1234567890000000000), follow_symlinks=False)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest(f"symlink timestamp fixture unavailable: {exc}")
+        original_time = link.lstat().st_mtime_ns
+        copystat = cleanup.shutil.copystat
+
+        def unsupported_no_follow(src, dest, *, follow_symlinks=True):
+            if follow_symlinks:
+                return copystat(src, dest, follow_symlinks=follow_symlinks)
+
+        with mock.patch.object(cleanup.shutil, "copystat", side_effect=unsupported_no_follow):
+            report = self._support()
+        self.assertEqual(report["pending-merges"]["action"], "manual-review")
+        self.assertEqual(report["pending-merges"]["reason"], "recovery-link-time-not-preserved")
+        self.assertEqual(link.lstat().st_mtime_ns, original_time)
+        self.assertEqual((self.pending / "user-original.txt").read_text(), "original")
+        self.assertEqual(outside.read_text(), "outside original")
+        self.assertTrue(self.manifest.exists())
+
+
 class UninstallCleanupTest(unittest.TestCase):
     def test_claude_global_rule_cleanup_has_one_reported_owner(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -473,9 +660,13 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(support["install-state-manifest"]["action"], "removed")
             self.assertEqual(support["install-state-events"]["action"], "removed")
             self.assertEqual(support["codex-hook-feature-change"]["action"], "removed")
-            self.assertEqual(support["pending-merges"]["action"], "removed")
+            self.assertEqual(support["pending-merges"]["action"], "quarantined-removed")
             self.assertEqual(support["hook-dispatcher-assets"]["action"], "removed")
-            self.assertEqual(support["install-rollbacks"]["action"], "removed")
+            self.assertEqual(support["install-rollbacks"]["action"], "quarantined-removed")
+            pending_copy = Path(support["pending-merges"]["backup_path"])
+            rollback_copy = Path(support["install-rollbacks"]["backup_path"])
+            self.assertEqual((pending_copy / "manifest.json").read_text(), '{"entries": []}\n')
+            self.assertEqual((rollback_copy / "rollback-task-router").read_text(), "previous copy\n")
 
     def test_confirm_removes_addon_sidecars(self) -> None:
         # Full uninstall must clean the per-addon sidecar registry; otherwise orphan ~/.ghost-alice/addons/*.json survive a full uninstall.

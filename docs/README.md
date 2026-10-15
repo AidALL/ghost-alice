@@ -8,7 +8,7 @@ Every paired document should expose a language switch near the top. In an Englis
 
 Core `0.5.1` and Ghost-ALICE Autopilot `0.5.1` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.1` or later. Source checks, native runtime validation and publication establish separate evidence.
 
-The responding model compares claims with original sources, then compares the complete answer with the user objective. Host tools carry the draft, source paths and review judgments to Core Python code, which validates and stores them. Ghost-ALICE Autopilot uses the authenticated result and the model’s already approved task plan; the host delivers any next-task request. Hooks retain strict audit. See the [architecture](../architecture.md) for the responsibility map.
+The responding model judges claims against original sources and the complete answer against the user objective. Core authenticates the records; the native host displays the answer. See the [Core architecture](../architecture.md) for the standalone flow and the [Autopilot architecture](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README.md#how-autopilot-extends-core) for the addon’s proof application and approved-plan continuation.
 
 ## Quick Install
 

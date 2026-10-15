@@ -30,13 +30,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / '_shared'))
+from global_rule_blocks import platform_contract_text, GlobalRuleBlockError
+
 
 ENTRYPOINT_SKILLS = {
     "task-router": "task-router/SKILL.md",
     "using-coding-convention": "coding-convention/using-coding-convention/SKILL.md",
 }
 
-SSOT_RULES_FILE = "AGENTS.md"
+SSOT_RULES_FILE = "platforms/common-governance.md"
 SSOT_IMPORT_FILES = ["CLAUDE.md"]
 PLATFORM_PORTS = [
     "platforms/claude/CLAUDE.md",
@@ -44,14 +47,14 @@ PLATFORM_PORTS = [
 ]
 
 REQUIRED_SSOT_PHRASES = [
-    ("rule 0", r"###\s*0\.\s*Task\s*Routing\s*Gate"),
+    ("Operating Model section", r"(?m)^##\s+Operating Model\s*$"),
     ("task-router name reference", r"task-router"),
     ("First-Entry Contract section", r"(?m)^##\s+First-Entry Contract\s*$"),
 ]
 
 REQUIRED_TASK_ROUTER_PHRASES = [
     ("First-Entry Contract owner reference", r"First-Entry Contract"),
-    ("routing-surface record", r"\[routing-surface\]"),
+    ("response-route record", r"response-route"),
     ("meta:\\* calls", r"meta:\*"),
 ]
 
@@ -63,25 +66,22 @@ REQUIRED_USING_CC_PHRASES = [
 # Entrypoints delegate procedures to these source owners. Check their wiring,
 # including target existence, without requiring copied procedure prose.
 REQUIRED_OWNER_REFERENCES = {
-    SSOT_RULES_FILE: (
-        "boundary-contract/SKILL.md",
-        "coding-convention/systematic-debugging/SKILL.md",
-        "coding-convention/verification-before-completion/SKILL.md",
-        "session-intent-analyzer/SKILL.md",
-        "task-router/SKILL.md",
-        "coding-convention/verification-before-completion/references/autopilot-publication.md",
-    ),
     ENTRYPOINT_SKILLS["task-router"]: (
-        "../boundary-contract/SKILL.md#authority-and-renewal",
-        "../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation",
-        "../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate",
-        "../coding-convention/verification-before-completion/references/verify-or-reuse.md",
-        "../session-intent-analyzer/references/ledger-schema.md",
+        "references/routing-details.md",
+        "../session-intent-analyzer/references/ledger-schema.md#core-response-projection",
     ),
     ENTRYPOINT_SKILLS["using-coding-convention"]: (
         "../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse",
         "../systematic-debugging/SKILL.md#incident-accounting-and-continuation",
     ),
+}
+
+NAMED_PROCEDURE_OWNERS = {
+    'session-intent-analyzer': 'session-intent-analyzer/SKILL.md',
+    'task-router': 'task-router/SKILL.md',
+    'boundary-contract': 'boundary-contract/SKILL.md',
+    'systematic-debugging': 'coding-convention/systematic-debugging/SKILL.md',
+    'verification-before-completion': 'coding-convention/verification-before-completion/SKILL.md',
 }
 
 
@@ -109,7 +109,7 @@ def check_owner_references(repo: Path, rel: str, text: str, area: str, findings:
         link or inline
         for link, inline in re.findall(r"\]\(([^()\s]+)\)|`([^`\n]+)`", text)
     }
-    for reference in REQUIRED_OWNER_REFERENCES[rel]:
+    for reference in REQUIRED_OWNER_REFERENCES.get(rel, ()):
         if reference not in references:
             findings.append(
                 Finding("ERROR", area, "owner-reference", f"{rel} is missing owner reference '{reference}'.")
@@ -148,6 +148,11 @@ def check_ssot_rules(repo: Path, findings: list[Finding]) -> None:
         )
         return
     text = ssot.read_text(encoding="utf-8")
+    for name, owner in NAMED_PROCEDURE_OWNERS.items():
+        if name not in text:
+            findings.append(Finding('ERROR', 'ssot', 'owner-reference', f'{SSOT_RULES_FILE} is missing owner reference {name}.'))
+        elif not (repo / owner).is_file():
+            findings.append(Finding('ERROR', 'ssot', 'owner-missing', f'{SSOT_RULES_FILE} owner {name} targets a missing file.'))
     for label, pattern in REQUIRED_SSOT_PHRASES:
         if not re.search(pattern, text):
             findings.append(
@@ -216,10 +221,14 @@ def check_platform_ports(repo: Path, findings: list[Finding]) -> None:
                 )
             )
             continue
-        text = path.read_text(encoding="utf-8")
+        try:
+            text = platform_contract_text(path)
+        except GlobalRuleBlockError as error:
+            findings.append(Finding("ERROR", "platform-port", "common-source", str(error)))
+            continue
 
         # The rule 0 Task Routing Gate keeps a keyword match as a strong signal.
-        if not re.search(r"###\s*0\.\s*Task\s*Routing\s*Gate", text):
+        if not re.search(r"(?m)^##\s+First-Entry Contract\s*$", text) and not re.search(r"###\s*0\.\s*Task\s*Routing\s*Gate", text):
             findings.append(
                 Finding(
                     "ERROR",

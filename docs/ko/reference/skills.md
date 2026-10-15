@@ -10,7 +10,7 @@
 
 - 공개 스킬 제공 상태: [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json)
 - 세션 검사 절차의 라우팅: [skill-catalog/session-gates.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/session-gates.json)
-- 스킬 작성 규칙: [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)
+- 스킬 작성 규칙: [공통 거버넌스](../../../platforms/common-governance.md)
 - 준수 점검표: [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md)
 
 ## 업데이트 규칙

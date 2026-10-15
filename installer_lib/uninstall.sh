@@ -360,6 +360,7 @@ uninstall() {
   validate_requested_skills "${skills[@]}"
   info "$(t 'Removing selected skills...' 'Removing selected skills...')"
 
+  local removal_targets=() removal_labels=()
   for skill in "${skills[@]}"; do
     if [ -n "$py" ] && [ "$force" -eq 0 ]; then
       local dep_rc=0
@@ -375,22 +376,32 @@ uninstall() {
     targets=$(expand_skill_targets "$skill")
     if [ -z "$targets" ]; then
       target="${SKILLS_DIR}/${skill}"
-      if remove_installed_target "$skill" "$target"; then
-        removed=$((removed + 1))
-      fi
+      removal_targets+=("$target")
+      removal_labels+=("$skill")
       continue
     fi
     while IFS='|' read -r sub_name sub_path; do
       [ -n "$sub_name" ] || continue
       target="${SKILLS_DIR}/${sub_name}"
-      if remove_installed_target "$sub_name" "$target"; then
-        removed=$((removed + 1))
-      fi
+      removal_targets+=("$target")
+      removal_labels+=("$sub_name")
     done <<< "$targets"
+  done
+
+  guard_gateway_removal ${removal_targets[@]+"${removal_targets[@]}"} || return $?
+  local removal_index=0
+  while [ "$removal_index" -lt "${#removal_targets[@]}" ]; do
+    if remove_installed_target "${removal_labels[$removal_index]}" "${removal_targets[$removal_index]}"; then
+      removed=$((removed + 1))
+    fi
+    removal_index=$((removal_index + 1))
   done
 
   if cleanup_shared_if_unused "${SKILLS_DIR}"; then
     removed=$((removed + 1))
+  else
+    local shared_rc=$?
+    [ "$shared_rc" -eq 1 ] || return "$shared_rc"
   fi
 
   case "$PLATFORM" in

@@ -12,9 +12,9 @@ The current-session assistant uses this lifecycle workflow to protect user chang
 
 ## Entry and activation
 
-The current-session assistant applies this skill when the current-platform pending-merge check finds an undecided entry, including after an explicit user request for pending-merge review. It performs that check before task-router under AGENTS.md rule 0-A, or reuses the result supplied by the SessionStart or UserPromptSubmit hook. Other skills must not invoke it speculatively. At least one current-platform entry must have `decided=false`. A missing manifest, empty entries or JSON parse failure passes silently.
+The current-session assistant applies this skill when the current-platform pending-merge check finds an undecided entry and the user requests its review or selected work can modify, replace or install an affected skill. Reuse the result supplied by the native hook; perform a missing manual precheck before affected changes. A bounded read-only lookup unrelated to those changes does not load this procedure, inspect backups or request a merge decision. Other skills must not invoke it speculatively. At least one current-platform entry must have `decided=false`. A missing manifest, empty entries or JSON parse failure passes silently.
 
-The SessionStart and UserPromptSubmit hooks, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and SessionStart failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge; the current-session assistant follows AGENTS.md rule 0-A before normal routing.
+The SessionStart and UserPromptSubmit hooks, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and SessionStart failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. The common First-Entry Contract owns precheck timing.
 
 ## Review and apply
 

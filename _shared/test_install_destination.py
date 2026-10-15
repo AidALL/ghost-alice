@@ -22,12 +22,15 @@ def test_installer_exposes_one_destination_across_actions():
         assert 'destination' in inspect.signature(function).parameters
 
 
-def test_recovery_trace_is_optional():
-    from response_delivery import recovery_delivery_guidance
-    for route in ('preserve_answer_and_patch_metadata','assembled_complete_payload','corrected_complete_answer'):
-        guidance = recovery_delivery_guidance(route)
-        assert 'delivery-route: ' + route in guidance
-        assert '[io-trace]' not in guidance
+def test_native_assessment_needs_no_display_trace_or_delivery_instruction():
+    from test_completion_skill_evidence import (
+        StopHookSkillEvidenceTests, WITHOUT_SELF_REPORT, assert_stop_observation,
+    )
+    case = StopHookSkillEvidenceTests()
+    payload = case.run_hook(platform='codex', message=WITHOUT_SELF_REPORT)
+    assert_stop_observation(case, payload)
+    assert '[io-trace]' not in json.dumps(payload)
+    assert 'delivery-route:' not in json.dumps(payload)
 
 
 def test_bound_runner_transports_locations_without_adapter_args():
@@ -243,7 +246,7 @@ def test_generated_chain_and_public_actions_under_os_write_deny(tmp_path):
     assert (root/'ledger/ghost-state.sqlite3').is_file()
     assert (root/'ghost/io-trace.jsonl').is_file()
     assert (root/'ghost/governance-events.jsonl').is_file()
-    assert (root/'ghost/hooks/tool-checkpoint-surface-state.json').is_file()
+    assert not (root/'ghost/hooks/tool-checkpoint-surface-state.json').exists()
     config=(root/'platform/config.toml').read_text()
     assert str(root/'project') in config
     assert set(__import__('tomllib').loads(config)['projects']) == {str(root/'project')}

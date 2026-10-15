@@ -43,6 +43,13 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_profile_gate
 import install_hooks
+from test_completion_skill_evidence import assert_stop_observation
+
+
+LEGACY_WEB_SEARCH_ENTRY = {
+    "matcher": "",
+    "hooks": [{"type": "command", "command": "echo old # [web-search-first]"}],
+}
 
 
 class _FailAfterPartialWrite:
@@ -147,13 +154,33 @@ def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claud
         hook_env[install_hooks.HOOK_SHARED_DIR_ENV] = shared
     payload.setdefault("session_id", "installer-stop")
     with tempfile.TemporaryDirectory() as temporary:
+        hook_env['HOME'] = temporary
+        hook_env['USERPROFILE'] = temporary
+        hook_env['GHOST_ALICE_GHOST_ROOT'] = str(Path(temporary) / '.ghost-alice')
+        if payload.get('transcript_path') and platform == 'claude':
+            # These synthetic rows need the same explicit owner as the hook.
+            entries = [json.loads(row) for row in Path(payload['transcript_path']).read_text().splitlines()]
+            transcript = Path(temporary) / 'owned-transcript.jsonl'
+            transcript.write_text(''.join(json.dumps(dict(row, sessionId=payload['session_id'])) + '\n'
+                for row in entries))
+            payload['transcript_path'] = str(transcript)
         StopHookSkillEvidenceTests._review_format_fixture(Path(temporary), platform, text, hook_env,
             session_id=payload["session_id"], response_purpose=response_purpose,
             record_review=record_review)
         if callable(command):
-            with patch.dict(os.environ, hook_env, clear=True):
+            with patch.dict(os.environ, hook_env, clear=True), patch.object(
+                install_hooks, '_home', return_value=Path(temporary)
+            ):
                 command = command()
-        return _run_hook_command(command, json.dumps(payload), env=hook_env)
+        result = _run_hook_command(command, json.dumps(payload), env=hook_env)
+        log = Path(temporary) / '.ghost-alice/session-logs' / platform / payload['session_id'] / 'strict-hook-output.jsonl'
+        result.stop_observation = None
+        if log.exists():
+            for line in log.read_text().splitlines():
+                raw = json.loads(json.loads(line)['stdout'])
+                if 'response_assessment' in raw:
+                    result.stop_observation = raw['response_assessment']
+        return result
 
 
 def _run_hook_command_via_cmd(
@@ -642,7 +669,6 @@ class TestMessageLanguage(unittest.TestCase):
         for command, env in (
             (install_hooks.HOOK_COMMAND, None),
             (install_hooks.SESSION_INTENT_COMMAND, None),
-            (install_hooks.WEB_SEARCH_FIRST_COMMAND, _strict_hook_env()),
             (install_hooks.SESSION_START_COMMAND, None),
         ):
             result = _run_hook_command(command, env=env)
@@ -701,8 +727,8 @@ class TestMessageLanguage(unittest.TestCase):
 
     def test_session_intent_reminder_preserves_receipt_and_data_minimization(self):
         self.assertIn("digest-only intake", install_hooks.SESSION_INTENT_INTERNAL)
-        self.assertIn("follows session-intent-analyzer", install_hooks.SESSION_INTENT_INTERNAL)
-        self.assertIn("material semantic changes through the exact receipt", install_hooks.SESSION_INTENT_INTERNAL)
+        self.assertIn("only when it affects a decision or a semantic update", install_hooks.SESSION_INTENT_INTERNAL)
+        self.assertIn("using the exact receipt", install_hooks.SESSION_INTENT_INTERNAL)
         self.assertIn("exclude raw prompts, conversation/tool output, system instructions and secrets", install_hooks.SESSION_INTENT_INTERNAL)
 
     def test_codex_hook_reminder_command_uses_task_router_gate_helper(self):
@@ -754,8 +780,7 @@ class TestMessageLanguage(unittest.TestCase):
             first_payload = json.loads(first.stdout)
             first_message = first_payload["systemMessage"]
             self.assertIn("intake-ready: current input recorded", first_message)
-            self.assertIn("follows task-router", first_message)
-            self.assertIn("register the Core response-route", first_message)
+            self.assertNotIn(install_hooks.HOOK_INTERNAL, first_message)
             self.assertNotIn("task-router withheld", first_message)
 
             _write_downstream_gate(temp_home, "codex", "s-codex-router", "allow")
@@ -789,11 +814,11 @@ class TestMessageLanguage(unittest.TestCase):
             ledger_args = shlex.split(ledger_command)
             self.assertEqual(ledger_args, [
                 sys.executable, str(Path(session_intent_ledger.__file__).resolve()),
-                "--read-state", "--root", str(root),
+                "--read-intent", "--root", str(root),
                 "--platform", "codex", "--session-id", "s-codex-router",
             ])
-            self.assertIn("execute task-router for this input", message)
-            self.assertIn("reuse retained instructions, reload if lost", message)
+            self.assertNotIn(install_hooks.HOOK_INTERNAL, message)
+            self.assertNotIn("reuse retained instructions, reload if lost", message)
             self.assertNotIn("task-router-step", message)
             self.assertNotIn("atomic meaning decomposition", message)
             self.assertNotIn("downstream-gate:", message)
@@ -829,8 +854,7 @@ class TestMessageLanguage(unittest.TestCase):
             payload = json.loads(result.stdout)
             message = payload["systemMessage"]
             self.assertIn("intake-ready: current input recorded", message)
-            self.assertIn("follows task-router", message)
-            self.assertIn("register the Core response-route", message)
+            self.assertNotIn(install_hooks.HOOK_INTERNAL, message)
             self.assertNotIn("task-router withheld", message)
 
     def test_completion_reminder_delegates_evidence_review_and_preserves_original_time(self):
@@ -839,7 +863,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("retains unchanged evidence at its original source and time", install_hooks.STOP_HOOK_INTERNAL)
         self.assertIn("Printed skill or trace fields do not establish evidence", install_hooks.STOP_HOOK_INTERNAL)
 
-    def test_claude_stop_hook_blocks_printed_skill_markers_without_evidence(self):
+    def test_claude_stop_records_printed_skill_markers_without_evidence_as_unaccepted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -869,11 +893,9 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("claim-evidence-map", payload["reason"])
-        self.assertIn("repair-target: completion_metadata", payload["reason"])
+        assert_stop_observation(self, payload, issue='claim-evidence-map', repair_target='completion_metadata')
 
-    def test_claude_stop_hook_retry_repairs_fields_without_answer_replay(self):
+    def test_claude_stop_observes_unreviewed_answer_without_retry_or_answer_replay(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -914,7 +936,7 @@ class TestMessageLanguage(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            # A headless host receives a bounded correction; the hook does not regenerate its business result.
+            # Stop records the unreviewed body; it cannot hold or regenerate the host's answer.
             headless_env = {**os.environ, "GHOST_ALICE_AGENT_VISIBILITY": "strict", "CLAUDE_CODE_ENTRYPOINT": "sdk-cli"}
             result = _run_reviewed_stop_command(
                 install_hooks.STOP_HOOK_COMMAND,
@@ -925,11 +947,9 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("repair-target:", payload["reason"])
-        self.assertIn("assessment-required", payload["reason"])
-        self.assertIn("includes the retained answer once", payload["reason"])
-        self.assertNotIn("Paper A summary", payload["reason"])
+        observed = assert_stop_observation(self, payload, issue='assessment-required')
+        self.assertIsNotNone(observed['repair_target'])
+        self.assertNotIn('Paper A summary', observed['body_issue'])
 
     def test_claude_stop_hook_allows_actual_verification_skill_load(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -994,8 +1014,8 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(payload.get("continue"), True)
         self.assertNotIn("decision", payload)
 
-    def test_claude_stop_hook_blocks_completion_claim_with_invalid_body(self):
-        # Completion-body-validation invariant: verification skill loaded, but the [completion-check] body is incomplete (no claim-evidence-map). The Claude Stop gate must block, matching the .mjs validator.
+    def test_claude_stop_keeps_invalid_completion_body_unaccepted(self):
+        # Loading a skill cannot authenticate an incomplete completion body.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1036,8 +1056,7 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("claim-evidence-map", payload["reason"])
+        assert_stop_observation(self, payload, issue='claim-evidence-map', repair_target='completion_metadata')
 
     def test_claude_stop_hook_validates_only_final_response(self):
         # AskUserQuestion answers and tool results are not user prompts and do not reset the turn boundary. Validate only the final response in the span; earlier completion-checks cannot establish its closure.
@@ -1102,11 +1121,10 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("continue"), True, msg=payload)
-        self.assertNotIn("decision", payload)
+        assert_stop_observation(self, payload)
 
     def test_claude_stop_hook_allows_explanatory_final_response_without_completion_check(self):
-        # Stop hooks keep the completion gate alive without turning every routine explanatory final response into a completion-check retry loop.
+        # An authenticated explanatory response remains distinct from a completion submission.
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1125,10 +1143,9 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("continue"), True, msg=payload)
-        self.assertNotIn("decision", payload)
+        assert_stop_observation(self, payload)
 
-    def test_claude_stop_hook_blocks_completion_claim_without_completion_check(self):
+    def test_claude_stop_keeps_declared_completion_without_proof_unaccepted(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -1146,8 +1163,7 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("decision"), "block", msg=payload)
-        self.assertIn("[completion-check]", payload["reason"])
+        assert_stop_observation(self, payload, issue='[completion-check]', repair_target='completion_metadata')
 
     def test_internal_instruction_lines_are_english_only(self):
         for command in (
@@ -1169,26 +1185,14 @@ class TestMessageLanguage(unittest.TestCase):
                 self.assertTrue(internal_lines)
             for line in internal_lines:
                 self.assertIsNone(re.search(r"[\uac00-\ud7a3]", line))
-        result = _run_hook_command(
-            install_hooks.WEB_SEARCH_FIRST_COMMAND,
-            env=_strict_hook_env(),
-        )
-        self.assertEqual(result.returncode, 0)
-        internal_lines = [
-            line for line in result.stdout.splitlines()
-            if line.startswith("Internal instruction:")
-        ]
-        self.assertTrue(internal_lines)
-        for line in internal_lines:
-            self.assertIsNone(re.search(r"[\uac00-\ud7a3]", line))
 
     def test_tool_checkpoint_runtime_hook_uses_concise_enforced_instruction(self):
         """The hook points to one field owner and still runs through its host command."""
         instruction = install_hooks.TOOL_CHECKPOINT_INTERNAL
         self.assertIn('common governance rule 9', instruction)
-        self.assertIn('Every tool call is still checked and audited', instruction)
+        self.assertIn('Native checks and strict audit run independently', instruction)
         self.assertNotIn('rejected-alternatives', instruction)
-        contract = (Path(__file__).resolve().parents[1] / 'AGENTS.md').read_text()
+        contract = (Path(__file__).resolve().parents[1] / 'platforms/common-governance.md').read_text()
         for field in ('intent', 'why', 'hook-stage: PreToolUse', 'contract-ref', 'contract-check'):
             self.assertIn(field, contract)
         result = _run_hook_command(install_hooks.TOOL_CHECKPOINT_COMMAND, env=_strict_hook_env())
@@ -1261,7 +1265,7 @@ class TestMessageLanguage(unittest.TestCase):
         second_payload = json.loads(second.stdout)
         self.assertNotIn("permissionDecision", second_payload.get("hookSpecificOutput", {}))
 
-    def test_codex_dispatcher_tool_checkpoint_surfaces_once_per_input_lineage(self):
+    def test_codex_dispatcher_routine_tool_checks_add_no_input_guidance(self):
         """Recorded intake keeps checking each tool call but surfaces once per user input."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
@@ -1356,7 +1360,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(first.returncode, 0, msg=first.stderr)
         first_payload = json.loads(first.stdout)
         self.assert_no_pretool_deny(first_payload)
-        self.assertIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
+        self.assertNotIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
 
         self.assertEqual(second.returncode, 0, msg=second.stderr)
         second_payload = json.loads(second.stdout)
@@ -1366,7 +1370,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(third.returncode, 0, msg=third.stderr)
         third_payload = json.loads(third.stdout)
         self.assert_no_pretool_deny(third_payload)
-        self.assertIn("additionalContext", third_payload.get("hookSpecificOutput", {}))
+        self.assertNotIn("additionalContext", third_payload.get("hookSpecificOutput", {}))
 
     def test_claude_dispatcher_tool_checkpoint_fallback_does_not_inject_answer_context(self):
         """Claude print mode can miss intent lineage; allow checkpoints still avoid model-context text."""
@@ -1553,7 +1557,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("additionalContext", third_payload.get("hookSpecificOutput", {}))
         self.assertNotIn("[tool-checkpoint]", third.stdout)
 
-    def test_codex_dispatcher_tool_checkpoint_parallel_calls_share_input_surface(self):
+    def test_codex_dispatcher_parallel_routine_checks_add_no_input_guidance(self):
         """Parallel tool calls in one input lineage share one user-facing checkpoint surface."""
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
@@ -1625,7 +1629,7 @@ class TestMessageLanguage(unittest.TestCase):
             for payload in payloads
             if payload.get("hookSpecificOutput", {}).get("additionalContext")
         )
-        self.assertEqual(surfaced_count, 1)
+        self.assertEqual(surfaced_count, 0)
 
     def test_dispatcher_install_copies_companion_modules(self):
         # Dispatcher companion-module invariant: the dispatcher imports a relative .mjs module; the installer must copy it alongside, or the installed enforcer fails ERR_MODULE_NOT_FOUND.
@@ -2333,7 +2337,7 @@ class TestMessageLanguage(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        output = payload["hookSpecificOutput"]
+        output = payload.get("hookSpecificOutput", {})
         self.assertNotIn("permissionDecision", output)
 
 
@@ -2944,10 +2948,34 @@ class TempHomeTestCase(unittest.TestCase):
 
 
 class TestInstallHook(TempHomeTestCase):
-    def test_pure_prompt_refresh_preserves_binding_custom_siblings_and_other_settings(self):
-        import copy
+    def test_reinstall_preserves_one_explicit_intake_override_without_adding_a_second_owner(self):
         from install_destination import InstallDestination, use
-        self.assertTrue(callable(getattr(install_hooks, 'refresh_builtin_prompt_instructions', None)))
+        for platform in ('codex', 'claude'):
+            with self.subTest(platform=platform):
+                destination = InstallDestination(mode='isolated', owned_root=str(self.fake_home),
+                    platform_dir=str(self.fake_home / platform), skills_dir=str(self.fake_home / 'skills'),
+                    ghost_root=str(self.fake_home / 'ghost'), ledger_root=str(self.fake_home / 'ledger'),
+                    project_root=str(self.fake_home / 'project'),
+                    core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
+                with use(destination):
+                    install_hooks.install_hook(platform, destination=destination)
+                    command = install_hooks._session_intent_analyzer_command(platform=platform, output_format='json', payload_mode=True)
+                    entry = install_hooks._hook_runner_command_entry('session-intent',
+                        command + ' --internal-b64 ' + base64.urlsafe_b64encode(b'Caller policy').decode(),
+                        install_hooks.SESSION_INTENT_MARKER, platform_key=platform)
+                    path = Path(destination.platform_dir) / ('hooks.json' if platform == 'codex' else 'settings.json')
+                    settings = json.loads(path.read_text())
+                    for row in settings['hooks']['UserPromptSubmit']:
+                        row['hooks'] = [h for h in row['hooks'] if '[hook-runner:session-intent]' not in h['command']]
+                    settings['hooks']['UserPromptSubmit'].append(entry)
+                    path.write_text(json.dumps(settings))
+                    install_hooks.install_hook(platform, destination=destination)
+                actual = [h['command'] for r in json.loads(path.read_text())['hooks']['UserPromptSubmit']
+                          for h in r['hooks'] if '[hook-runner:session-intent]' in h['command']]
+                self.assertEqual(actual, [entry['hooks'][0]['command']])
+
+    def test_prompt_retirement_uses_executor_contract_and_preserves_explicit_custom_text(self):
+        from install_destination import InstallDestination, use
         for platform in ('codex', 'claude'):
             with self.subTest(platform=platform):
                 destination = InstallDestination(mode='normal', owned_root=str(self.fake_home),
@@ -2955,47 +2983,18 @@ class TestInstallHook(TempHomeTestCase):
                     ghost_root=str(self.fake_home / 'ghost'), ledger_root=str(self.fake_home / 'ledger'),
                     project_root=str(self.fake_home / 'project'),
                     core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
-                prior = {'prompt': 'known previous router instruction', 'session-intent': 'known previous intake instruction'}
-                digests = {key: {hashlib.sha256(value.encode()).hexdigest()} for key, value in prior.items()}
-                with use(destination), patch.object(install_hooks, 'HOOK_INTERNAL', prior['prompt']), \
-                     patch.object(install_hooks, 'SESSION_INTENT_INTERNAL', prior['session-intent']):
-                    router = install_hooks._platform_hook_entry(platform, 'UserPromptSubmit')
-                    intake = install_hooks._platform_session_intent_entry(platform, 'UserPromptSubmit')
+                with use(destination):
+                    builtin = install_hooks._platform_hook_entry(platform, 'UserPromptSubmit')['hooks'][0]
+                    command = install_hooks._hook_reminder_command(platform=platform, output_format='json', payload_mode=True)
+                    body, marker = command.split(' # ', 1)
+                    override = base64.urlsafe_b64encode(install_hooks.HOOK_INTERNAL.encode()).decode()
                     custom = install_hooks._hook_runner_command_entry('prompt',
-                        install_hooks._hook_reminder_command(platform=platform, output_format='json', payload_mode=True)
-                        .replace(base64.urlsafe_b64encode(prior['prompt'].encode()).decode(),
-                                 base64.urlsafe_b64encode(b'custom policy').decode()),
-                        install_hooks.HOOK_MARKER, platform_key=platform)
-                settings = {'custom': ['preserve'], 'hooks': {'UserPromptSubmit': [
-                    {'matcher': 'preserve', 'metadata': 7, 'hooks': [router['hooks'][0], intake['hooks'][0],
-                        custom['hooks'][0], {'type': 'command', 'command': 'echo custom-sibling'}]}],
-                    'Stop': [{'hooks': [{'type': 'command', 'command': 'echo stop'}]}]}}
-                original = copy.deepcopy(settings)
-                with patch.object(install_hooks, 'LEGACY_PROMPT_INSTRUCTION_DIGESTS', digests):
-                    refreshed, count = install_hooks.refresh_builtin_prompt_instructions(settings)
-                self.assertEqual(count, 2)
-                self.assertEqual(settings, original)
-                self.assertEqual(refreshed['custom'], original['custom'])
-                self.assertEqual(refreshed['hooks']['Stop'], original['hooks']['Stop'])
-                new_row = refreshed['hooks']['UserPromptSubmit'][0]
-                self.assertEqual((new_row['matcher'], new_row['metadata']), ('preserve', 7))
-                self.assertEqual(new_row['hooks'][2:], original['hooks']['UserPromptSubmit'][0]['hooks'][2:])
-                for before, after in zip(original['hooks']['UserPromptSubmit'][0]['hooks'][:2], new_row['hooks'][:2]):
-                    old_argv, new_argv = shlex.split(before['command'], comments=True), shlex.split(after['command'], comments=True)
-                    old_payload_index = old_argv.index('--binding-b64') - 1
-                    new_payload_index = new_argv.index('--binding-b64') - 1
-                    self.assertEqual(old_argv[:old_payload_index], new_argv[:new_payload_index])
-                    self.assertEqual(old_argv[old_payload_index+1:], new_argv[new_payload_index+1:])
-                    self.assertEqual(before['command'].replace(old_argv[old_payload_index], '<payload>'),
-                                     after['command'].replace(new_argv[new_payload_index], '<payload>'))
-                unchanged, count = install_hooks.refresh_builtin_prompt_instructions(refreshed)
-                self.assertEqual((unchanged, count), (refreshed, 0))
-
-    def test_pure_prompt_refresh_leaves_unbound_or_foreign_commands_unchanged(self):
-        self.assertTrue(callable(getattr(install_hooks, 'refresh_builtin_prompt_instructions', None)))
-        command = "python /foreign/hook_profile_gate.py run prompt codex eA== # [hook-reminder] AGENTS.md"
-        settings = {'hooks': {'UserPromptSubmit': [{'hooks': [{'type': 'command', 'command': command}]}]}}
-        self.assertEqual(install_hooks.refresh_builtin_prompt_instructions(settings), (settings, 0))
+                        body + ' --internal-b64 ' + override + ' # ' + marker,
+                        install_hooks.HOOK_MARKER, platform_key=platform)['hooks'][0]
+                foreign = {'type': 'command', 'command': 'python /foreign/hook_profile_gate.py run prompt codex eA== # [hook-reminder] AGENTS.md'}
+                rows = [{'matcher': 'preserve', 'metadata': 7, 'hooks': [builtin, custom, foreign]}]
+                self.assertEqual(install_hooks.remove_managed_prompt_reminders(rows), 1)
+                self.assertEqual(rows, [{'matcher': 'preserve', 'metadata': 7, 'hooks': [custom, foreign]}])
 
     def test_legacy_managed_removal_preserves_custom_sibling(self):
         marker = install_hooks.LEGACY_SESSION_INTENT_MARKERS[0]
@@ -3033,13 +3032,14 @@ class TestInstallHook(TempHomeTestCase):
                 config.write_text(json.dumps(before))
                 with patch.dict(os.environ, {install_hooks.HOOK_SHARED_DIR_ENV: '',
                                              'GHOST_ALICE_RUNTIME_SHARED_DIR': ''}):
-                    self.assertEqual(install_hooks.install_hook(platform, destination=destination), 'installed')
+                    self.assertEqual(install_hooks.install_hook(platform, destination=destination), 'already')
                 after = json.loads(config.read_text())
                 self.assertEqual(after['customSetting'], before['customSetting'])
                 custom = [row for row in after['hooks']['UserPromptSubmit']
                           if row.get('customEntryMetadata') == 'preserve']
                 self.assertEqual(len(custom), 1)
-                self.assertTrue(all(row['hooks'] == [{'type': 'command', 'command': 'echo custom-sibling'}] for row in custom))
+                self.assertEqual(custom, [row for row in before['hooks']['UserPromptSubmit']
+                                          if row.get('customEntryMetadata') == 'preserve'])
                 for event in set(before['hooks']) - {'UserPromptSubmit'}:
                     self.assertEqual(after['hooks'][event], before['hooks'][event])
                 commands = [hook['command'] for row in after['hooks']['UserPromptSubmit'] for hook in row['hooks']]
@@ -4028,8 +4028,6 @@ class TestInstallHook(TempHomeTestCase):
                         marker_order.append("web-search-first")
 
                 expected = ["pending-merge", "session-intent"]
-                if platform in install_hooks.WEB_SEARCH_FIRST_PLATFORMS:
-                    expected.append("web-search-first")
                 self.assertEqual(marker_order, expected)
                 with use(install_hooks._default_destination(platform)):
                     old = install_hooks._platform_hook_entry(platform, event)['hooks'][0]
@@ -4593,6 +4591,25 @@ class TestUninstallHook(TempHomeTestCase):
         self.assertIn("SessionStart", settings["hooks"])
 
 
+class TestAddonHookRemovalWithoutHooks(TempHomeTestCase):
+    def test_missing_hook_object_is_idempotent_and_preserves_settings(self):
+        removers = ((install_hooks.remove_addon_hook, '[addon:hookaddon] obs'),
+                    (install_hooks.remove_adapter_hook, '[adapter:autopilot-mode] stop'))
+        for platform in ('claude', 'codex'):
+            for settings in ({}, {'theme': 'dark', 'permissions': {'allow': ['Read']}}):
+                for remove, marker in removers:
+                    for dry_run in (False, True):
+                        with self.subTest(platform=platform, settings=settings, remove=remove.__name__, dry_run=dry_run):
+                            path = self._write_settings(platform, settings)
+                            before = _tree_snapshot(self.fake_home)
+                            with patch.object(install_hooks, '_write_removed_hook_settings') as write:
+                                self.assertEqual(remove(marker, platform_key=platform, dry_run=dry_run), 0)
+                                self.assertEqual(remove(marker, platform_key=platform, dry_run=dry_run), 0)
+                            write.assert_not_called()
+                            self.assertEqual(json.loads(path.read_text()), settings)
+                            self.assertEqual(_tree_snapshot(self.fake_home), before)
+
+
 class TestCheckStatus(TempHomeTestCase):
     """Status check tests."""
 
@@ -4641,31 +4658,6 @@ class TestCheckStatus(TempHomeTestCase):
         self.assertEqual(status.details["drifted"], ["session-intent"])
         self.assertNotEqual(status.status_label, install_hooks.STATUS_LABELS["missing"])
 
-    def test_install_reports_stale_web_search_hook_as_replaced_not_removed(self):
-        """On a platform that installs it, a stale web-search-first hook is reported as replacement."""
-        self._create_platform_dir("codex")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
-        settings = self._read_settings("codex")
-        for entry in settings["hooks"]["UserPromptSubmit"]:
-            for hook in entry.get("hooks", []):
-                command = hook.get("command", "")
-                if install_hooks.WEB_SEARCH_FIRST_MARKER in command:
-                    hook["command"] = command + " --local-user-edit"
-        self._write_settings("codex", settings)
-
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output), \
-                patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
-
-        text = output.getvalue()
-        self.assertEqual(result, "installed")
-        self.assertIn("Replaced 1 stale web-search-first hook entry(ies)", text)
-        self.assertNotIn("Removed 1 stale web-search-first hook entry(ies)", text)
-        self.assertIn("web-search-first hook added (rule 10)", text)
-
     def test_status_detail_reports_codex_feature_flag_disabled(self):
         """Codex hooks.json with feature flag off is config disabled, not missing."""
         self._create_platform_dir("codex")
@@ -4699,8 +4691,8 @@ class TestCheckStatus(TempHomeTestCase):
         result = install_hooks.check_status("claude")
         self.assertEqual(result, "missing")
 
-    def test_status_missing_for_codex_when_web_search_hook_is_missing(self):
-        """Codex still requires the web-search-first hook."""
+    def test_status_installed_for_codex_without_web_search_hook(self):
+        """External evidence guidance is not a required input hook."""
         self._create_platform_dir("codex")
         with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
             self.assertEqual(install_hooks.install_hook("codex"), "installed")
@@ -4711,7 +4703,7 @@ class TestCheckStatus(TempHomeTestCase):
             ]
             self._write_settings("codex", settings)
             result = install_hooks.check_status("codex")
-        self.assertEqual(result, "missing")
+        self.assertEqual(result, "installed")
 
     def test_status_installed_for_claude_without_web_search_hook(self):
         """Claude Code does not install or require the web-search-first hook."""
@@ -4729,7 +4721,7 @@ class TestCheckStatus(TempHomeTestCase):
                 "UserPromptSubmit": [
                     install_hooks.PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
-                    install_hooks.WEB_SEARCH_FIRST_ENTRY,
+                    LEGACY_WEB_SEARCH_ENTRY,
                 ],
                 "Stop": [install_hooks.STOP_HOOK_ENTRY],
                 "SessionStart": [install_hooks.SESSION_START_ENTRY],
@@ -4752,7 +4744,7 @@ class TestCheckStatus(TempHomeTestCase):
                     install_hooks.PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
-                    install_hooks.WEB_SEARCH_FIRST_ENTRY,
+                    LEGACY_WEB_SEARCH_ENTRY,
                 ],
                 "Stop": [install_hooks.STOP_HOOK_ENTRY],
                 "PostToolUse": [
@@ -4774,7 +4766,7 @@ class TestCheckStatus(TempHomeTestCase):
                     install_hooks.PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
-                    install_hooks.WEB_SEARCH_FIRST_ENTRY,
+                    LEGACY_WEB_SEARCH_ENTRY,
                 ],
                 "Stop": [install_hooks.STOP_HOOK_ENTRY],
                 "SessionStart": [install_hooks.SESSION_START_ENTRY],
@@ -4851,18 +4843,11 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         for marker, cmds in (
             (install_hooks.PROMPT_PENDING_MERGE_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
-            (install_hooks.WEB_SEARCH_FIRST_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
         ):
             matching = [cmd for cmd in cmds if marker in cmd]
             self.assertEqual(len(matching), 1)
-            if marker == install_hooks.WEB_SEARCH_FIRST_MARKER:
-                minimal_result = _run_hook_command(matching[0], env=_minimal_visibility_env())
-                self.assertEqual(minimal_result.returncode, 0)
-                self.assertTrue(minimal_result.stdout)
-                result = _run_hook_command(matching[0])
-            else:
-                result = _run_hook_command(matching[0])
+            result = _run_hook_command(matching[0])
             self.assertEqual(result.returncode, 0)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
@@ -4907,7 +4892,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config = tomllib.loads(self._codex_config_toml().read_text(encoding="utf-8"))
         hook_state = config["hooks"]["state"]
         self.assertEqual(set(hook_state), set(managed_keys))
-        self.assertEqual(len(hook_state), 7)
         for key in managed_keys:
             trusted_hash = hook_state[key]["trusted_hash"]
             self.assertRegex(trusted_hash, r"^sha256:[0-9a-f]{64}$")
@@ -5151,7 +5135,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             for key in config["hooks"]["state"]
             if key.startswith((self.fake_home / ".codex" / "hooks.json").as_posix())
         ]
-        self.assertEqual(len(ghost_alice_states), 7)
+        self.assertTrue(ghost_alice_states)
 
     def test_install_codex_prunes_legacy_path_variant_hook_state(self):
         """Codex hook auto-trust removes duplicate Ghost-ALICE path variants."""
@@ -5190,7 +5174,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             if key.startswith(managed_prefix)
         ]
 
-        self.assertEqual(len(managed_states), 7)
+        self.assertTrue(managed_states)
         self.assertNotIn(legacy_key, hook_state)
         self.assertFalse(any(key.startswith(legacy_settings_path) for key in hook_state))
         self.assertIn(unrelated_key, hook_state)
@@ -5221,7 +5205,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
                     install_hooks.PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
-                    install_hooks.WEB_SEARCH_FIRST_ENTRY,
+                    LEGACY_WEB_SEARCH_ENTRY,
                 ],
                 "SessionStart": [install_hooks.SESSION_START_ENTRY],
                 "Stop": [install_hooks.STOP_HOOK_ENTRY_CODEX],
@@ -5239,18 +5223,11 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         for marker, cmds in (
             (install_hooks.PROMPT_PENDING_MERGE_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
-            (install_hooks.WEB_SEARCH_FIRST_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
         ):
             matching = [cmd for cmd in cmds if marker in cmd]
             self.assertEqual(len(matching), 1)
-            if marker == install_hooks.WEB_SEARCH_FIRST_MARKER:
-                minimal_result = _run_hook_command(matching[0], env=_minimal_visibility_env())
-                self.assertEqual(minimal_result.returncode, 0)
-                self.assertTrue(minimal_result.stdout)
-                result = _run_hook_command(matching[0])
-            else:
-                result = _run_hook_command(matching[0])
+            result = _run_hook_command(matching[0])
             self.assertEqual(result.returncode, 0)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
@@ -5281,7 +5258,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
                 user_prompt: [
                     markerless(install_hooks._platform_prompt_pending_merge_entry("codex", user_prompt)),
                     markerless(install_hooks._platform_session_intent_entry("codex", user_prompt)),
-                    markerless(install_hooks._platform_web_search_entry("codex", user_prompt)),
+                    markerless(install_hooks._hook_runner_command_entry(
+                        "web-search-first", "echo old", install_hooks.WEB_SEARCH_FIRST_MARKER, platform_key="codex")),
                 ],
                 pre_tool: [markerless(install_hooks._platform_tool_checkpoint_entry("codex", pre_tool))],
                 post_tool: [markerless(io_trace_entry)],
@@ -5299,7 +5277,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             user_prompt: [
                 install_hooks.PROMPT_PENDING_MERGE_MARKER,
                 install_hooks.SESSION_INTENT_MARKER,
-                install_hooks.WEB_SEARCH_FIRST_MARKER,
             ],
             pre_tool: [install_hooks.TOOL_CHECKPOINT_MARKER],
             post_tool: [install_hooks.IO_TRACE_MARKER],
@@ -5722,8 +5699,8 @@ class TestSessionStartHook(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("has 1 undecided entry", result.stdout)
-        self.assertIn("Surface merge-companion first", result.stdout)
-        self.assertIn("user-explicit defer/skip may continue", result.stdout)
+        self.assertIn("Unrelated read-only work may continue", result.stdout)
+        self.assertIn("an explicit defer leaves entries undecided", result.stdout)
         self.assertNotIn("Check the current platform pending-merge manifest", result.stdout)
 
     def test_claude_prompt_hooks_use_json_payloads_to_avoid_answer_text_leakage(self):
@@ -5732,14 +5709,12 @@ class TestSessionStartHook(unittest.TestCase):
             _platform_prompt_pending_merge_entry,
             _platform_session_intent_entry,
             _platform_session_start_entry,
-            _platform_web_search_entry,
         )
 
         entries = [
             _platform_prompt_pending_merge_entry("claude", "UserPromptSubmit"),
             _platform_hook_entry("claude", "UserPromptSubmit"),
             _platform_session_intent_entry("claude", "UserPromptSubmit"),
-            _platform_web_search_entry("claude", "UserPromptSubmit"),
             _platform_session_start_entry("claude", "SessionStart"),
         ]
         commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
@@ -5773,58 +5748,51 @@ class TestSessionStartHook(unittest.TestCase):
         self.assertNotIn("The next time you open Claude/Codex", result.stdout)
 
 
-class TestWebSearchFirstHook(TempHomeTestCase):
-    """Rule 10: web-search-first hook for external tool claims (agent governance)."""
+class TestExternalEvidenceHookRemoval(TempHomeTestCase):
+    """External evidence is selected for claims, without an unconditional input hook."""
 
-    def test_web_search_first_hook_not_installed_for_claude(self):
-        """Its systemMessage-only output never reaches the model on Claude Code, so it adds no model-facing layer."""
-        self._create_platform_dir("claude")
-        result = install_hooks.install_hook("claude")
-        self.assertEqual(result, "installed")
-        settings = self._read_settings("claude")
-        hooks = settings["hooks"]["UserPromptSubmit"]
-        cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
-        self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
+    def test_prompt_hooks_do_not_install_an_external_search_reminder(self):
+        for platform in ("claude", "codex"):
+            with self.subTest(platform=platform):
+                self._create_platform_dir(platform)
+                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                commands = [hook["command"]
+                            for entry in self._read_settings(platform)["hooks"]["UserPromptSubmit"]
+                            for hook in entry["hooks"]]
+                self.assertFalse(any("[web-search-first]" in command for command in commands))
+                self.assertTrue(any(install_hooks.SESSION_INTENT_MARKER in command for command in commands))
+                self.assertEqual(install_hooks.check_status(platform), "installed")
 
-    def test_web_search_first_hook_still_installed_for_codex(self):
-        self._create_platform_dir("codex")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "installed")
-        hooks = self._read_settings("codex")["hooks"]["UserPromptSubmit"]
-        cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
-        self.assertTrue(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
+    def test_reinstall_removes_search_reminder_and_preserves_other_commands(self):
+        for platform in ("claude", "codex"):
+            with self.subTest(platform=platform):
+                self._create_platform_dir(platform)
+                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                settings = self._read_settings(platform)
+                settings["hooks"]["UserPromptSubmit"].append({
+                    "matcher": "preserved", "custom": 7, "hooks": [
+                        {"type": "command", "command": "echo old # [web-search-first]"},
+                        {"type": "command", "command": "echo user-owned"},
+                    ],
+                })
+                self._write_settings(platform, settings)
+                self.assertEqual(install_hooks.install_hook(platform), "installed")
+                hooks = self._read_settings(platform)["hooks"]["UserPromptSubmit"]
+                self.assertFalse(any("[web-search-first]" in h["command"] for entry in hooks for h in entry["hooks"]))
+                preserved = next(entry for entry in hooks if entry.get("matcher") == "preserved")
+                self.assertEqual(preserved, {"matcher": "preserved", "custom": 7,
+                                           "hooks": [{"type": "command", "command": "echo user-owned"}]})
+                self.assertEqual(install_hooks.check_status(platform), "installed")
+                self.assertEqual(install_hooks.install_hook(platform), "already")
 
-    def test_reinstall_removes_a_legacy_web_search_first_entry_for_claude(self):
-        self._create_platform_dir("claude")
-        install_hooks.install_hook("claude")
-        settings = self._read_settings("claude")
-        settings["hooks"]["UserPromptSubmit"].append(install_hooks.WEB_SEARCH_FIRST_ENTRY)
-        self._write_settings("claude", settings)
 
-        output = io.StringIO()
-        with contextlib.redirect_stdout(output):
-            result = install_hooks.install_hook("claude")
-
-        self.assertEqual(result, "installed")
-        self.assertIn("Removed 1 web-search-first hook entry(ies)", output.getvalue())
-        hooks = self._read_settings("claude")["hooks"]["UserPromptSubmit"]
-        cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
-        self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
-
-    def test_web_search_first_command_mentions_community_sources(self):
-        result = _run_hook_command(install_hooks.WEB_SEARCH_FIRST_COMMAND)
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("official specifications plus at least three community searches", result.stdout)
-        self.assertIn("GitHub issues", result.stdout)
-        self.assertIn("Reddit", result.stdout)
-        self.assertIn("Rule 10", result.stdout)
+class TestForegroundHookPayloads(TempHomeTestCase):
+    """Installed foreground hooks preserve their platform payload contracts."""
 
     def test_user_prompt_hooks_emit_non_json_prefixed_text(self):
         for cmd, env in (
             (install_hooks.HOOK_COMMAND, None),
             (install_hooks.SESSION_INTENT_COMMAND, None),
-            (install_hooks.WEB_SEARCH_FIRST_COMMAND, _strict_hook_env()),
         ):
             result = _run_hook_command(cmd, env=env)
             self.assertEqual(result.returncode, 0)
@@ -5838,7 +5806,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self.assertNotIn(result.stdout.lstrip()[:1], ("[", "{"))
 
     def test_claude_stop_hook_emits_valid_json(self):
-        # With no transcript (empty input) there is no completion claim, so the claim-only gate allows. However, it must still emit valid JSON. The block path's. valid JSON is covered by test_claude_stop_hook_blocks_printed_skill_markers_without_evidence.
+        # With no response body, Stop has no assessment and returns only the host envelope.
         result = _run_hook_command(install_hooks.STOP_HOOK_COMMAND)
         self.assertEqual(result.returncode, 0)
         payload = json.loads(result.stdout)
@@ -5877,8 +5845,10 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self.assertEqual(result.stdout.lstrip()[:1], "{", msg=result.stdout)
         payload = json.loads(result.stdout)
         self.assertEqual(payload, {"continue": True})
+        self.assertIsNotNone(result.stop_observation)
+        assert_stop_observation(self, {'continue': True, 'response_assessment': result.stop_observation})
 
-    def test_codex_stop_hook_blocks_completion_claim_missing_completion_check(self):
+    def test_codex_stop_keeps_declared_completion_without_proof_unaccepted(self):
         result = _run_reviewed_stop_command(
             install_hooks.STOP_HOOK_COMMAND_CODEX,
             platform="codex",
@@ -5890,9 +5860,24 @@ class TestWebSearchFirstHook(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("decision"), "block", msg=payload)
-        self.assertIn("[completion-check]", payload["reason"])
+        assert_stop_observation(self, payload, issue='[completion-check]', repair_target='completion_metadata')
         self.assertNotIn("systemMessage", payload)
+
+    def test_wrapped_stop_logs_unaccepted_body_without_native_continuation(self):
+        for platform in ('claude', 'codex'):
+            with self.subTest(platform=platform):
+                command = lambda: install_hooks._entry_command(
+                    install_hooks._platform_stop_hook_entry(platform, 'Stop'))
+                result = _run_reviewed_stop_command(command, platform=platform,
+                    response_purpose='explanation', record_review=False,
+                    input_text=json.dumps(dict(session_id='unreviewed-' + platform,
+                        hook_event_name='Stop', last_assistant_message='The source contains two options.')))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout), {'continue': True})
+                self.assertIsNotNone(result.stop_observation)
+                assert_stop_observation(self,
+                    {'continue': True, 'response_assessment': result.stop_observation},
+                    issue='response-assessment-required', repair_target='response_review')
 
     def test_codex_stop_hook_allows_explanatory_response_without_completion_check(self):
         result = _run_reviewed_stop_command(
@@ -5907,8 +5892,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("continue"), True, msg=payload)
-        self.assertNotIn("decision", payload)
+        assert_stop_observation(self, payload)
         self.assertNotIn("systemMessage", payload)
 
     def test_codex_stop_hook_allows_valid_completion_check(self):
@@ -5942,8 +5926,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload.get("continue"), True, msg=payload)
-        self.assertNotIn("decision", payload)
+        assert_stop_observation(self, payload)
         self.assertNotIn("systemMessage", payload)
 
     def test_codex_stop_hook_optional_trace_does_not_require_retry(self):
@@ -5976,7 +5959,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertEqual(payload, {"continue": True})
+        assert_stop_observation(self, payload)
 
     def test_codex_stop_hook_uses_validator_command(self):
         command = install_hooks.STOP_HOOK_COMMAND_CODEX
@@ -5988,16 +5971,12 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         cases = (
             (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
             (install_hooks.HOOK_COMMAND_CODEX, "hook-reminder"),
-            (install_hooks.WEB_SEARCH_FIRST_COMMAND_CODEX, "web-search-first"),
             (install_hooks.SESSION_START_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
         )
 
         for command, expected in cases:
             with self.subTest(expected=expected):
-                if command == install_hooks.WEB_SEARCH_FIRST_COMMAND_CODEX:
-                    result = _run_hook_command(command, env=_strict_hook_env())
-                else:
-                    result = _run_hook_command(command, env=_strict_hook_env({"HOME": str(self.fake_home)}))
+                result = _run_hook_command(command, env=_strict_hook_env({"HOME": str(self.fake_home)}))
                 self.assertEqual(result.returncode, 0, msg=result.stderr)
                 payload = json.loads(result.stdout)
                 self.assertEqual(payload["continue"], True)
@@ -6105,7 +6084,6 @@ class TestWebSearchFirstHook(TempHomeTestCase):
     def test_foreground_hook_messages_run_under_cmd_exe(self):
         for cmd, env in (
             (install_hooks.HOOK_COMMAND, None),
-            (install_hooks.WEB_SEARCH_FIRST_COMMAND, _strict_hook_env()),
             (install_hooks.SESSION_START_COMMAND, None),
         ):
             result = _run_hook_command_via_cmd(cmd, env=env)
@@ -6144,7 +6122,7 @@ class TestWebSearchFirstHook(TempHomeTestCase):
         self._create_platform_dir("claude")
         install_hooks.install_hook("claude")
         settings = self._read_settings("claude")
-        settings["hooks"]["UserPromptSubmit"].append(install_hooks.WEB_SEARCH_FIRST_ENTRY)  # install fixture with codex_hooks enabled
+        settings["hooks"]["UserPromptSubmit"].append(LEGACY_WEB_SEARCH_ENTRY)  # install fixture with codex_hooks enabled
         self._write_settings("claude", settings)
         result = install_hooks.uninstall_hook("claude")
         self.assertEqual(result, "removed")

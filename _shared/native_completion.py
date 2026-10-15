@@ -18,7 +18,7 @@ import sys
 from claim_evidence_runtime import evaluate_runtime_claim_report
 from completion_check_validator import looks_like_evidence_claim, validate_completion_text
 from completion_route import select_completion_route
-from native_transcript import native_tool_activity
+from native_transcript import native_tool_activity, stop_response_text
 
 
 def _source_status_issue(reasons, *, explanation=False):
@@ -67,6 +67,8 @@ Publication and application retain immutable provenance/integrity checks.
 """
     if phase not in {'before_tool', 'publication', 'final'} or not isinstance(text, str):
         raise ValueError('Invalid native assessment request')
+    if phase == 'final' and native_input is not None and not text.strip():
+        text = stop_response_text(native_input)
     source = dict(source)
     platform, session = source.get('GHOST_ALICE_PLATFORM'), source.get('GHOST_ALICE_SESSION_ID')
     route, context, context_status, context_issue = None, {}, 'unavailable', None

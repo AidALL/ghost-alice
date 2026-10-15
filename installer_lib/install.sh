@@ -628,14 +628,27 @@ write_addon_sidecars_after_install() {
   fi
 }
 
+_install_link_or_copy() {
+  local src="$1" dest="$2" py result_code
+  py="$(_find_python_runtime || true)"
+  [ -n "$py" ] || return 1
+  if "$py" "${SCRIPT_DIR}/_shared/install_transaction.py" symlink-replace --source "$src" --dest "$dest" --event-log "${HOME}/.ghost-alice/install-state/${PLATFORM}-events.jsonl"; then
+    return 0
+  else
+    result_code=$?
+    # Only an ordinary filesystem/link failure can choose copy fallback.
+    # Ownership, native-state and recovery errors must keep their stop result.
+    [ "$result_code" -eq 1 ] || return "$result_code"
+    _install_copy_target "$src" "$dest"
+  fi
+}
+
 _repair_reprovision_target() {
   local name="$1" src="$2" dest="$3" copy_only="$4"
   if [ "$copy_only" = "1" ]; then
-    _install_copy_target "$src" "$dest"
-  elif ln -s "$src" "$dest" 2>/dev/null; then
-    :
+    _install_copy_target "$src" "$dest" || return $?
   else
-    _install_copy_target "$src" "$dest"
+    _install_link_or_copy "$src" "$dest" || return $?
   fi
   ok "$(t "repair: re-provisioned ${name}" "repair: re-provisioned ${name}")"
 }
@@ -984,14 +997,11 @@ install() {
       target_status="new"
     fi
 
-    if [ -n "$py" ] && "$py" "${SCRIPT_DIR}/_shared/install_transaction.py" symlink-replace --source "$src" --dest "$dest" --event-log "${HOME}/.ghost-alice/install-state/${PLATFORM}-events.jsonl" >/dev/null 2>&1; then
-      detail_ok "$(t "${sub_name} → symlinked" "${sub_name} → symlinked")"
-    elif ln -s "$src" "$dest" 2>/dev/null; then
-      detail_ok "$(t "${sub_name} → symlinked" "${sub_name} → symlinked")"
-    else
-      _install_copy_target "$src" "$dest"
-      detail_ok "$(t "${sub_name} → copied (symlink not supported)" "${sub_name} → copied (symlink not supported)")"
+    if ! _install_link_or_copy "$src" "$dest"; then
+      error "$(t "Managed target replacement failed: ${dest}" "Managed target replacement failed: ${dest}")"
+      return 1
     fi
+    detail_ok "$(t "${sub_name} -> installed" "${sub_name} -> installed")"
     report_write_target_event "$PLATFORM" "$sub_name" "skill" "$target_status"
     installed=$((installed + 1))
   done

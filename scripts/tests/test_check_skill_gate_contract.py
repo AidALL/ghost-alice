@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -9,6 +10,23 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from check_skill_gate_contract import REQUIRED_PATTERNS, run_contract_checks  # noqa: E402
+
+
+class GateCheckerImportIsolationTests(unittest.TestCase):
+    def test_checker_import_preserves_script_test_discovery(self):
+        probe = """import sys, unittest
+from pathlib import Path
+root = Path.cwd()
+sys.path.insert(0, str(root / 'scripts/tests'))
+sys.path.insert(0, str(root / 'scripts'))
+import check_skill_gate_contract
+suite = unittest.TestLoader().discover('scripts/tests', 'test_completion_check_validator.py')
+assert suite.countTestCases() > 0
+assert Path(sys.modules['test_completion_check_validator'].__file__).parent == root / 'scripts/tests'
+"""
+        result = subprocess.run([sys.executable, '-c', probe], cwd=REPO_ROOT,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 CONTRACT = {
@@ -173,7 +191,7 @@ class SkillGateContractTest(unittest.TestCase):
         for mode in ("clarification-only", "direct-response"):
             self.assertEqual(CONTRACT["terminal_routes"][mode]["downstream_work"], "none")
             self.assertEqual(CONTRACT["terminal_routes"][mode]["strict_logging"], "active")
-            for path in ("task-router/SKILL.md", "AGENTS.md", "platforms/codex/AGENTS.md", "platforms/claude/CLAUDE.md"):
+            for path in ("task-router/SKILL.md", "platforms/common-governance.md"):
                 self.assertIn(mode, REQUIRED_PATTERNS[path])
 
     def _extract_between(self, text: str, start_marker: str, end_marker: str) -> str:
@@ -207,25 +225,22 @@ class SkillGateContractTest(unittest.TestCase):
             "tool-checkpoint": "tool-checkpoint: PreToolUse follows common governance rule 9",
         }))
         additions = {
-            "AGENTS.md": "### 9. io-trace Transparency Rule\n`intent` `why` `hook-stage: PreToolUse` `contract-ref` `contract-check`\n",
-            "task-router/SKILL.md": "## Register the Core projection\nresponse-route.v1 record_response_route\n",
+            "platforms/common-governance.md": "## First-Entry Contract\nUse the exact intake receipt to select work through task-router.\n### 9. io-trace Transparency Rule\n`intent` `why` `hook-stage: PreToolUse` `contract-ref` `contract-check`\n",
+            "session-intent-analyzer/references/ledger-schema.md": "## Core Response Projection\nresponse-route.v1 record_response_route\n",
             "coding-convention/using-coding-convention/SKILL.md": "[Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse)\n",
-            "coding-convention/verification-before-completion/SKILL.md": "[Register the Core projection](../../task-router/SKILL.md#register-the-core-projection)\n[Apply and deliver](references/autopilot-publication.md#apply-and-deliver)\n",
+            "coding-convention/verification-before-completion/SKILL.md": "session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection\n[Apply and deliver](references/autopilot-publication.md#apply-and-deliver)\n",
         }
         for relative, body in additions.items():
             path = root / relative
-            path.write_text(path.read_text(encoding="utf-8") + "\n" + body, encoding="utf-8")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text((path.read_text(encoding="utf-8") if path.exists() else "") + "\n" + body, encoding="utf-8")
         self._write_file(root, "coding-convention/verification-before-completion/references/verify-or-reuse.md",
                          "## Instruction Body Reuse\nskills-reused skills-loaded skill-call\n")
         self._write_file(root, "coding-convention/verification-before-completion/references/autopilot-publication.md",
-                         "## Apply and deliver\ndelivery-route repair-target preserve_answer_and_patch_metadata assembled_complete_payload corrected_complete_answer resolve_host_delivery\n")
+                         "## Apply and deliver\ncontinue: true response_assessment.body_issue strict audit does not hold or replace desktop output\n")
         claude = root / "platforms/claude/CLAUDE.md"
         claude.write_text(
-            "## First-Entry Contract\n\n"
-            "1. Reuse the pending-merge precheck.\n"
-            "2. Consume the exact session-intent observation.\n"
-            "3. Apply task-router to select work.\n"
-            "4. Execute selected workflows.\n\n"
+            "{{COMMON_GOVERNANCE}}\n\n"
             "## Owner references\n" + claude.read_text(encoding="utf-8"),
             encoding="utf-8",
         )
@@ -243,7 +258,7 @@ class SkillGateContractTest(unittest.TestCase):
     def test_owner_reference_cannot_be_replaced_with_a_broken_anchor(self) -> None:
         cases = (
             ("coding-convention/using-coding-convention/SKILL.md", "#instruction-body-reuse"),
-            ("coding-convention/verification-before-completion/SKILL.md", "#register-the-core-projection"),
+            ("coding-convention/verification-before-completion/SKILL.md", "Core Response Projection"),
             ("coding-convention/verification-before-completion/SKILL.md", "#apply-and-deliver"),
         )
         for relative, anchor in cases:
@@ -268,8 +283,8 @@ class SkillGateContractTest(unittest.TestCase):
 
     def test_missing_canonical_owner_file_or_section_fails(self) -> None:
         cases = (
-            ("AGENTS.md", "### 9. io-trace Transparency Rule"),
-            ("task-router/SKILL.md", "## Register the Core projection"),
+            ("platforms/common-governance.md", "### 9. io-trace Transparency Rule"),
+            ("session-intent-analyzer/references/ledger-schema.md", "## Core Response Projection"),
             ("coding-convention/verification-before-completion/references/verify-or-reuse.md", "## Instruction Body Reuse"),
             ("coding-convention/verification-before-completion/references/autopilot-publication.md", "## Apply and deliver"),
         )
@@ -288,10 +303,10 @@ class SkillGateContractTest(unittest.TestCase):
 
     def test_owner_contract_fields_must_remain_in_the_owned_section(self) -> None:
         cases = (
-            ("AGENTS.md", ("why", "contract-ref", "contract-check")),
-            ("task-router/SKILL.md", ("record_response_route", "response-route.v1")),
+            ("platforms/common-governance.md", ("why", "contract-ref", "contract-check")),
+            ("session-intent-analyzer/references/ledger-schema.md", ("record_response_route", "response-route.v1")),
             ("coding-convention/verification-before-completion/references/verify-or-reuse.md", ("skills-reused", "skills-loaded", "skill-call")),
-            ("coding-convention/verification-before-completion/references/autopilot-publication.md", ("delivery-route", "repair-target", "preserve_answer_and_patch_metadata", "assembled_complete_payload", "corrected_complete_answer", "resolve_host_delivery")),
+            ("coding-convention/verification-before-completion/references/autopilot-publication.md", ("continue: true", "response_assessment.body_issue", "strict audit", "does not hold or replace desktop output")),
         )
         for relative, fields in cases:
             for field in fields:
@@ -360,21 +375,21 @@ class SkillGateContractTest(unittest.TestCase):
             self._write_valid_fixture(root)
             task_router_path = root / "task-router" / "SKILL.md"
             task_router_path.write_text(
-                task_router_path.read_text(encoding="utf-8").replace("routing-surface", "route-surface"),
+                task_router_path.read_text(encoding="utf-8").replace("response-route", "route-surface"),
                 encoding="utf-8",
             )
 
             issues = run_contract_checks(root)
             messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("routing-surface", messages)
+            self.assertIn("response-route", messages)
 
     def test_missing_routing_surface_owner_policy_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
             path = root / "task-router/SKILL.md"
-            path.write_text(path.read_text().replace("evidence-selection-and-stop-gate", "REMOVED"))
-            self.assertTrue(any("evidence-selection-and-stop-gate" in issue.message for issue in run_contract_checks(root)))
+            path.write_text(path.read_text().replace("references/routing-details.md", "REMOVED"))
+            self.assertTrue(any("references/routing-details.md" in issue.message for issue in run_contract_checks(root)))
 
     def test_legacy_tool_checkpoint_name_fails(self) -> None:
         legacy_name = "action" + "-gate"
@@ -672,13 +687,21 @@ class SkillGateContractTest(unittest.TestCase):
                 errors = [issue for issue in run_contract_checks(root) if issue.severity == 'ERROR']
                 self.assertTrue(errors, (field, value))
 
-    def test_claude_first_turn_rejects_block_condition_even_with_correct_later_context(self) -> None:
+    def test_claude_bootstrap_rejects_missing_common_owner(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
             path = root / "platforms/claude/CLAUDE.md"
-            path.write_text(path.read_text().replace("3. Apply task-router to select work.", "3. If no block exists, apply task-router."))
-            self.assertTrue(any("Claude first-turn must route directly after exact intake" in issue.message for issue in run_contract_checks(root)))
+            path.write_text(path.read_text().replace("{{COMMON_GOVERNANCE}}", "Apply task-router after intake."))
+            self.assertTrue(any("must reference one common governance" in issue.message for issue in run_contract_checks(root)))
+
+    def test_claude_bootstrap_rejects_missing_first_entry_contract(self) -> None:
+        from check_skill_gate_contract import _check_claude_first_turn_contract
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            (root / "platforms/common-governance.md").write_text("## Operating Model\nSelect relevant work.\n")
+            self.assertTrue(_check_claude_first_turn_contract(root))
 
     def test_real_claude_first_turn_routes_directly_after_exact_intake(self) -> None:
         from check_skill_gate_contract import _check_claude_first_turn_contract
@@ -740,10 +763,14 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertIn(fragment, record)
 
     def test_task_router_preserves_primary_request_axis(self) -> None:
-        text = (REPO_ROOT / "task-router/SKILL.md").read_text()
-        for fragment in ("- primary-request:", "- causal-axis:", "- response-order:", "Preserve a causal axis only", "Route classification precedes evidence planning", "imperative requests", "result after necessary work"):
-            self.assertIn(fragment, text)
-        self.assertIn("authority-and-renewal", text)
+        router = (REPO_ROOT / "task-router/SKILL.md").read_text()
+        schema = (REPO_ROOT / "session-intent-analyzer/references/ledger-schema.md").read_text()
+        self.assertIn('user objective', router)
+        self.assertIn('Do not replace a requested repair with a report', router)
+        self.assertIn('ledger-schema.md#core-response-projection', router)
+        for field in ('primary_request', 'causal_axis', 'response_order'):
+            self.assertIn(field, schema)
+        self.assertIn('optional', schema)
 
     def test_purpose_and_evidence_selection_contract_has_owner_and_consumers(self) -> None:
         boundary = (REPO_ROOT / "boundary-contract/SKILL.md").read_text()

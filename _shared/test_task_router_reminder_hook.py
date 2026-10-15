@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import base64
 import hashlib
+import io
 import os
 import shlex
 import shutil
@@ -381,12 +382,12 @@ class RoutingDeliveryTests(unittest.TestCase):
         self.assertNotIn('Answer-only routing uses', install_hooks.HOOK_INTERNAL)
         self.assertNotIn('Tool-free terminal routing uses', install_hooks.SESSION_INTENT_INTERNAL)
         self.assertNotIn('Governance calls have no exemption', install_hooks.HOOK_INTERNAL)
-        self.assertIn('follows session-intent-analyzer', install_hooks.SESSION_INTENT_INTERNAL)
-        self.assertIn('material semantic changes through the exact receipt', install_hooks.SESSION_INTENT_INTERNAL)
+        self.assertTrue(install_hooks.SESSION_INTENT_INTERNAL.startswith('session-intent-analyzer:'))
+        self.assertNotIn('--read-state', install_hooks.SESSION_INTENT_INTERNAL)
         self.assertEqual(install_hooks.SESSION_INTENT_INTERNAL, analyzer.DEFAULT_INTERNAL)
         self.assertEqual(install_hooks.HOOK_INTERNAL, trh.DEFAULT_INTERNAL)
 
-    def test_native_hook_pair_delivers_terminal_policy_once_per_exact_input(self):
+    def test_native_hook_pair_returns_current_receipt_without_procedure_replay(self):
         import install_hooks
         import session_intent_analyzer_hook as analyzer
         ledger = trh.importlib.import_module('session_intent_ledger')
@@ -415,9 +416,8 @@ class RoutingDeliveryTests(unittest.TestCase):
                                                .split('[/session-intent-receipt]', 1)[0]))
                     with self.subTest(platform=platform, turn=turn):
                         combined = '\n'.join(messages)
-                        self.assertEqual(combined.count('The current-session assistant classifies this input before calling tools'), 1)
-                        self.assertIn('Every agent call, including governance and Ghost-ALICE Autopilot recording, counts against explicit user tool limits', combined)
-                        self.assertIn('A new completion judgment requires its own evidence', combined)
+                        self.assertNotIn('The current-session assistant classifies this input before calling tools', combined)
+                        self.assertNotIn('Every agent call', combined)
                         self.assertEqual(messages[1], '')
                 if platform == 'claude':
                     self.assertTrue(all(receipt['intake_status'] == 'pending-native-origin' for receipt in receipts))
@@ -427,15 +427,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                 events = ledger.read_session_events(root=root, platform=platform, session_id='native-pair')
                 self.assertEqual(len(events), 2)
                 self.assertEqual([row['event_id'] for row in events], [row['input_event_id'] for row in receipts])
-                with closing(sqlite3.connect(root / 'session-checks.sqlite3')) as connection:
-                    audit = connection.execute(
-                        'SELECT status FROM check_events WHERE platform=? AND session=? AND key=? ORDER BY rowid',
-                        (platform, 'native-pair', 'hook-terminal-routing')).fetchall()
-                    cached = connection.execute(
-                        'SELECT value FROM checks WHERE platform=? AND session=? AND key=?',
-                        (platform, 'native-pair', 'hook-terminal-routing')).fetchone()
-                self.assertEqual(audit, [('checked',), ('checked',)])
-                self.assertEqual(json.loads(cached[0]), {'input_event_id': receipts[-1]['input_event_id']})
+                self.assertFalse((root / 'session-checks.sqlite3').exists())
 
     def test_terminal_delivery_cache_requires_same_input_session_platform_and_source(self):
         import session_intent_analyzer_hook as analyzer
@@ -513,7 +505,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                         self.assertEqual(result.returncode, 0, result.stderr)
                         message = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
                         self.assertIn('The current-session assistant classifies this input before calling tools', message)
-                        self.assertIn('does not read files, access the ledger or register a response-route', message)
+                        self.assertIn('without file, ledger or route access', message)
                         self.assertIn('A new completion judgment requires its own evidence', message)
                         self.assertLess(message.index('The current-session assistant classifies this input before calling tools'), message.index('intent-ledger:'))
                         self.assertIn('Normal route only', message)
@@ -540,7 +532,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                     host = json.loads(result.stdout)
                     message = host['hookSpecificOutput']['additionalContext']
                     self.assertTrue(message.startswith('The current-session assistant classifies this input before calling tools'))
-                    self.assertIn('does not read files, access the ledger or register a response-route', message)
+                    self.assertIn('without file, ledger or route access', message)
                     self.assertIn('Normal-route', message)
                     self.assertIn('withheld', message)
                     self.assertNotIn('intake-ready:', message)
@@ -570,33 +562,43 @@ class RoutingDeliveryTests(unittest.TestCase):
             for message in (missing, ready):
                 with self.subTest(ready='intake-ready:' in message):
                     self.assertIn('Every agent call, including governance and Ghost-ALICE Autopilot recording, counts against explicit user tool limits', message)
-                    self.assertIn('For an explanation or clarification answerable from supplied conversation alone', message)
+                    self.assertIn('For a self-contained explanation or clarification', message)
             self.assertIn('Normal-route task-router registration is withheld', missing)
             self.assertIn('intake-ready: current input recorded', ready)
             self.assertIn('follows task-router', ready)
             self.assertIn('register the Core response-route', ready)
-            self.assertIn('material semantic changes through the exact receipt', install_hooks.SESSION_INTENT_INTERNAL)
+            self.assertTrue(install_hooks.SESSION_INTENT_INTERNAL.startswith('session-intent-analyzer:'))
 
-    def test_cached_guidance_never_reuses_the_previous_input_security_verdict(self):
+    def test_each_route_observation_uses_current_input_without_instruction_cache(self):
         ledger = trh.importlib.import_module('session_intent_ledger')
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             env = dict(os.environ)
             env.pop('CODEX_THREAD_ID', None)
             env.pop('GHOST_ALICE_SESSION_ID', None)
+            observed = []
+            reader = trh.session_material
+            def observe(*args):
+                material = reader(*args)
+                observed.append(material['latest_input']['event_id'])
+                return material
             def run():
-                return json.loads(subprocess.run(
-                    [sys.executable, trh.__file__, '--platform', 'codex', '--format', 'json', '--root', str(root)],
-                    input=json.dumps({'session_id': 'reuse'}), text=True, capture_output=True, env=env, check=True,
-                ).stdout)['systemMessage']
+                output = io.StringIO()
+                with patch.dict(os.environ, env, clear=True), patch.object(trh, 'session_material', observe), \
+                     patch.object(trh.sys, 'stdin', io.StringIO(json.dumps({'session_id': 'reuse'}))), \
+                     patch.object(trh.sys, 'stdout', output):
+                    self.assertEqual(trh.main(['--platform', 'codex', '--format', 'json', '--root', str(root)]), 0)
+                return json.loads(output.getvalue())['systemMessage']
             ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='first')
             first = run()
             ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='second')
             second = run()
             self.assertIn('intake-ready', first)
             self.assertIn('intake-ready', second)
-            self.assertIn('reuse retained instructions', second)
-            self.assertLess(len(second), len(first))
+            second_event = ledger.read_session_state(root=root, platform='codex', session_id='reuse')['latest_input_event_id']
+            self.assertEqual(observed[-1], second_event)
+            self.assertNotEqual(observed[0], observed[-1])
+            self.assertNotIn('hook-reminder: execute task-router for this input', second)
             ledger.record_turn(root=root, platform='codex', session_id='reuse', raw_user_input='blocked')
             state = ledger.read_session_state(root=root, platform='codex', session_id='reuse')
             event = state['latest_input_event_id']
@@ -605,7 +607,7 @@ class RoutingDeliveryTests(unittest.TestCase):
             blocked = run()
             self.assertIn('intake-ready', blocked)
             self.assertNotIn('withheld', blocked)
-            self.assertIn('reuse retained instructions', blocked)
+            self.assertEqual(observed[-1], event)
 
     """Exercise authoritative storage and both platform wire formats, not only a policy string."""
 
@@ -644,7 +646,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                         self.assertTrue(host['continue'])
                         context = host['hookSpecificOutput']['additionalContext']
                         receipt = json.loads(context.split('[session-intent-receipt]', 1)[1].split('[/session-intent-receipt]', 1)[0])
-                        args = [sys.executable, str(Path(ledger.__file__).resolve()), '--read-state',
+                        args = [sys.executable, str(Path(ledger.__file__).resolve()), '--snapshot',
                                 '--root', receipt['ledger_root'], '--platform', receipt['platform'], '--session-id', receipt['session_id']]
                         observed = subprocess.run(args, cwd=unrelated, text=True, capture_output=True, env=env)
                         self.assertEqual(observed.returncode, 0, observed.stderr)
@@ -694,7 +696,9 @@ class RoutingDeliveryTests(unittest.TestCase):
                     self.assertNotIn('order-fix', context)
                     command = context.split('intent-ledger: use ', 1)[1].split(' after session-intent preflight.', 1)[0]
                     observed = subprocess.run(shlex.split(command), text=True, capture_output=True, env=env, check=True)
-                    self.assertEqual(json.loads(observed.stdout)['acceptance_criteria'][0]['id'], 'order-fix')
+                    reference=json.loads(observed.stdout)
+                    self.assertNotIn('acceptance_criteria', reference)
+                    self.assertEqual(reference['references']['route'], '/response_route')
                     self.assertIn('history, not a current work selection or execution authorization', context)
 
     def test_cached_native_reminder_does_not_release_prior_input_before_intake(self):

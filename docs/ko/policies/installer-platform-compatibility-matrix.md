@@ -2,7 +2,7 @@
 
 언어: [🇺🇸 English](../../policies/installer-platform-compatibility-matrix.md) | 🇰🇷 한국어
 
-개발자는 이 계약을 기준으로 Ghost-ALICE 설치기의 플랫폼별 호환성을 구현하고, 각 행에 지정된 담당 테스트로 해당 동작을 검증합니다. 모델·Core·Ghost-ALICE Autopilot·호스트의 실행 책임과 반환 경로는 [아키텍처](../../../architecture_ko.md)를 따릅니다.
+개발자는 이 계약을 기준으로 Ghost-ALICE 설치기의 플랫폼별 호환성을 구현하고, 각 행에 지정된 담당 테스트로 해당 동작을 검증합니다. 단독 실행의 책임과 반환 경로는 [Core 아키텍처](../../../architecture_ko.md), 애드온 확장은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)를 따릅니다.
 
 ## Contents
 
@@ -44,7 +44,7 @@ Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니�
 | Platform | Runtime surface | Contract | Regression owner |
 | --- | --- | --- | --- |
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks와 `permissions.allow` | `platforms/claude/CLAUDE.md`의 독립적인 관리 블록을 설치하여 임의 작업 디렉터리에서도 규칙 0부터 12와 hookless fallback을 제공합니다. 표시가 없는 사용자 파일은 설치 상태로 계산하지 않는 제안 파일로 보존합니다. 모든 설치된 Ghost-ALICE skill에 `Skill(<name>)` 권한을 허용하며 core-only allowlist로 축소하지 않습니다. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
-| Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | visible Skill tool이 없으므로 required gates는 `SKILL.md` read와 workflow execution으로 기록합니다. `hooks.json`의 hook event names는 install-surface configuration이며 runtime firing proof가 아닙니다. gate-completion claim에는 observed hook payload evidence, runtime smoke, 또는 hookless/manual fallback wording이 필요합니다. `web-search-first`와 `tool-checkpoint` payloads는 installation and drift verification targets입니다. agent visibility profile은 hook execution을 줄이면 안 됩니다. Windows native Codex는 actual hook payload firing과 `SKILL.md` read records에 별도 smoke를 둡니다 | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
+| Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | visible Skill tool이 없으므로 required gates는 `SKILL.md` read와 workflow execution으로 기록합니다. `hooks.json`의 hook event names는 install-surface configuration이며 runtime firing proof가 아닙니다. gate-completion claim에는 observed hook payload evidence, runtime smoke, 또는 hookless/manual fallback wording이 필요합니다. `tool-checkpoint` payloads는 installation and drift verification targets입니다. 외부 도구 근거 선택은 해당 주장을 검증할 때 verification reference를 따릅니다. agent visibility profile은 hook execution을 줄이면 안 됩니다. Windows native Codex는 actual hook payload firing과 `SKILL.md` read records에 별도 smoke를 둡니다 | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
 
 Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공통 지침 소스로 지정합니다. 정상 작업 경로는 그 소스와 프로젝트 고유 제약을 함께 적용하며, 도구 없는 종결 답변은 로더의 종결 절차를 사용합니다. Status와 doctor는 문단 제목과 관계없이 로더가 지정한 공통 파일을 요구합니다. 설치기는 다른 프로젝트의 지침 예산을 늘리지 않습니다. 사용자 거버넌스 파일을 보호하며, Codex 공통 계약 경로가 심볼릭 링크이면 교체를 거부합니다. 자세한 내용은 [공통 거버넌스와 프로젝트 지침](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)을 확인해 주세요.
 
@@ -70,7 +70,7 @@ SessionStart 또는 UserPromptSubmit 훅이 현재 플랫폼의 병합 대기 �
 
 설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core는 모델의 서로 다른 주장·출처 판단과 응답 전체 판단을 인증하며, 스킬 로드나 화면 감사 필드는 별도의 수락 조건이 아닙니다. 독립 등록된 Core 가드와 Ghost-ALICE Autopilot 어댑터는 호출 순서를 가정하지 않고 같은 평가를 사용해야 합니다.
 
-Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토·접수 참조](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#completion-recording-and-delivery)는 반환 상태를 정의합니다. 설치기 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
+Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토·접수 참조](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 설치기 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
 
 ## Shell Matrix
 

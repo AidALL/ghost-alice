@@ -125,10 +125,6 @@ join_by() {
 
 hook_suite_label() {
   local platform_label="${1:-}" hooks="prompt, session-intent"
-  # The web-search-first reminder is installed only where it reaches the model (Codex); Claude Code does not get it.
-  case "$platform_label" in
-    *[Cc]odex*) hooks="$hooks, web-search-first" ;;
-  esac
   printf '%s\n' "$hooks, tool-checkpoint, completion, session-start, io-trace"
 }
 

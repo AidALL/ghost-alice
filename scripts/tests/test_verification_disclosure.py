@@ -13,7 +13,7 @@ class VerificationDisclosureTests(unittest.TestCase):
             self.assertNotIn(payload, body)
         for filename, markers in {
             'autopilot-publication.md': ('--receipt-token', '--verified-at', 'publication_route'),
-            'external-tool-evidence.md': ('web-search-first', 'source-locator'),
+            'external-tool-evidence.md': ('Select evidence for the claim', 'source-locator'),
             'evaluator-artifacts.md': ('verifier-result.json', 'accepted'),
         }.items():
             with self.subTest(reference=filename):
@@ -40,7 +40,8 @@ class VerificationDisclosureTests(unittest.TestCase):
 
     def test_review_exposes_claim_sources_and_separate_response_judgment(self):
         body = (SKILL / 'references/autopilot-publication.md').read_text()
-        for phrase in ('candidate_reference', 'sources[].source_id', 'bindings[]', 'response_binding.text',
+        for phrase in ('candidate_reference', 'sources[].source_id', 'bindings[]', 'claim_index',
+                       'read-claims', 'caller retains the draft',
                        'Finish this claim comparison before reviewing the answer as a whole',
                        'exactly `claims` and `response`', 'It does not compare meaning or decide truth',
                        'matching bytes do not prove semantic support', 'supported | unsupported | unavailable'):

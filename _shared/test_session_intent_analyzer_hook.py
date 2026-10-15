@@ -31,6 +31,95 @@ def receipt_from(message: str) -> dict:
 
 
 class SessionIntentAnalyzerHookTests(unittest.TestCase):
+    def test_managed_commands_register_executor_without_procedure_snapshot(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import install_hooks
+        with patch.object(install_hooks, '_resolve_session_intent_analyzer_hook_script', return_value=SCRIPT), \
+                patch.object(install_hooks, '_resolve_task_router_reminder_hook_script', return_value=SCRIPT):
+            for platform in ['codex', 'claude']:
+                for builder in [install_hooks._session_intent_analyzer_command, install_hooks._hook_reminder_command]:
+                    command = builder(platform=platform, output_format='json')
+                    self.assertNotIn('--internal-b64', command)
+
+    def test_explicit_custom_instruction_is_not_classified_by_content(self):
+        import base64
+        sys.path.insert(0, str(SCRIPT.parent))
+        import session_intent_analyzer_hook as analyzer
+        encoded = base64.urlsafe_b64encode(analyzer.DEFAULT_INTERNAL.encode()).decode()
+        result = self.run_hook({'session_id':'explicit-custom','prompt':'read a source'}, '--internal-b64', encoded)
+        self.assertEqual(result.returncode, 0)
+        self.assertIn(analyzer.DEFAULT_INTERNAL, json.loads(result.stdout)['systemMessage'])
+
+    def test_invalid_custom_configuration_cannot_become_builtin_guidance(self):
+        result = self.run_hook({'session_id':'invalid-custom','prompt':'read a source'}, '--internal-b64', '%%%')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn('[session-intent-receipt]', result.stdout)
+
+    def test_receipt_exposes_native_context_provider_without_procedure_body(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import session_intent_analyzer_hook as analyzer
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp) / 'native'
+            log = home / 'sessions/rollout-capability-native.jsonl'
+            log.parent.mkdir(parents=True)
+            paths = {'state': pathlib.Path(temp) / 'ledger/codex/capability-native/intent-state.json',
+                     'events': pathlib.Path(temp) / 'ledger/codex/capability-native/intent-events.jsonl'}
+            with patch.dict(os.environ, {'GHOST_ALICE_CODEX_DIR': str(home)}):
+                for provider in ['ghost_alice_context', 'openai']:
+                    log.write_text(json.dumps({'type':'session_meta', 'payload':{
+                        'id':'capability-native', 'model_provider':provider}}) + '\n')
+                    receipt = receipt_from(analyzer.observation_receipt(paths, {'input_event_id':'event'}))
+                    if provider == 'ghost_alice_context':
+                        self.assertEqual(receipt['context_selection']['native_provider'], provider)
+                        self.assertEqual(set(receipt['context_selection']), {'native_provider', 'procedure', 'native_dir'})
+                        self.assertEqual(receipt['context_selection']['native_dir'], str(home))
+                        self.assertTrue(pathlib.Path(receipt['context_selection']['procedure']).is_file())
+                    else:
+                        self.assertNotIn('context_selection', receipt)
+
+    def test_scoped_claude_transport_exposes_lookup_coordinates_even_before_reconciliation(self):
+        sys.path.insert(0, str(SCRIPT.parent))
+        import session_intent_analyzer_hook as analyzer
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)/'claude'; home.mkdir()
+            config = pathlib.Path(temp)/'gateway.json'
+            config.write_text(json.dumps(dict(port=12345, scope='owned-scope', claude_dir=str(home))))
+            paths = {'state':pathlib.Path(temp)/'ledger/claude/exact/intent-state.json',
+                     'events':pathlib.Path(temp)/'ledger/claude/exact/intent-events.jsonl'}
+            with patch.dict(os.environ, {'GHOST_ALICE_CONTEXT_CONFIG':str(config),
+                'ANTHROPIC_BASE_URL':'http://127.0.0.1:12345/anthropic',
+                'ANTHROPIC_CUSTOM_HEADERS':'X-Ghost-Context-Scope: owned-scope\nX-Ghost-Context-Session: exact'}):
+                receipt = receipt_from(analyzer.observation_receipt(paths, None))
+                self.assertEqual(receipt['intake_status'], 'pending-native-origin')
+                self.assertEqual(receipt['context_selection']['native_dir'], str(home))
+                self.assertEqual(receipt['context_selection']['native_provider'], 'anthropic-subscription-gateway')
+                with patch.dict(os.environ, {'ANTHROPIC_BASE_URL':'https://api.anthropic.com'}):
+                    receipt = receipt_from(analyzer.observation_receipt(paths, None))
+                    self.assertNotIn('context_selection', receipt)
+
+    def test_healthy_intake_returns_current_identity_without_reinjecting_policy(self):
+        for platform in ('codex', 'claude'):
+            receipts = []
+            for prompt in ('first task ' + 'original text ' * 1000, 'changed task'):
+                result = self.run_hook({'session_id': 'policy-owner', 'prompt': prompt},
+                                       '--platform', platform)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                message = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
+                receipt = receipt_from(message)
+                self.assertEqual(receipt['session_id'], 'policy-owner')
+                self.assertEqual(receipt['platform'], platform)
+                self.assertEqual(message.strip(), RECEIPT_START + '\n' +
+                                 json.dumps(receipt, ensure_ascii=True, separators=(',', ':')) +
+                                 '\n' + RECEIPT_END)
+                self.assertNotIn(prompt, message)
+                receipts.append(receipt)
+            if platform == 'codex':
+                self.assertNotEqual(receipts[0]['input_event_id'], receipts[1]['input_event_id'])
+                self.assertEqual(len(self.events('policy-owner')), 2)
+            else:
+                self.assertTrue(all(r['intake_status'] == 'pending-native-origin' for r in receipts))
+                self.assertTrue(all('input_event_id' not in r for r in receipts))
+
     def native_fixture(self, session="native-intake"):
         coords = dict(root=self.ledger_root, platform='claude', session_id=session)
         ledger_api.record_turn(**coords, raw_user_input='Do the authorized work.', source='hook')
@@ -66,6 +155,95 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
 
     def reconcile_native(self, coords):
         return ledger_api.reconcile_native_inputs(**coords)
+
+    def test_desktop_guidance_sibling_preserves_exact_submitted_prompt_binding(self):
+        coords, transcript, before = self.native_fixture()
+        prompt = 'latest correction'
+        self.stage_native(coords, transcript, prompt)
+        row = self.human_native(coords['session_id'], prompt)
+        row['message']['content'] = [{'type':'text','text':'host guidance retained'}, {'type':'text','text':prompt}]
+        self.append_native(transcript, row)
+        original = transcript.read_bytes()
+        state = self.reconcile_native(coords)
+        self.assertEqual(state['intake_status'], 'observed')
+        self.assertEqual(state['latest_input_digest'], 'sha256:' + hashlib.sha256(prompt.encode()).hexdigest())
+        self.assertNotEqual(state['latest_input_event_id'], before['latest_input_event_id'])
+        self.assertEqual(transcript.read_bytes(), original)
+
+    def test_later_human_supersedes_correlated_unknown_without_promoting_it(self):
+        coords, transcript, before = self.native_fixture()
+        self.stage_native(coords, transcript, 'unknown sdk input')
+        first_id = ledger_api.read_session_state(**coords)['pending_native_inputs'][0]['transport_observation_id']
+        self.append_native(transcript, dict(type='user', sessionId=coords['session_id'],
+            promptId='native-prompt-grain', promptSource='sdk', turnOrigin='sdk',
+            message=dict(role='user', content='unknown sdk input')))
+        self.stage_native(coords, transcript, 'latest actual input')
+        self.append_native(transcript, self.human_native(coords['session_id'], 'latest actual input'))
+        state = self.reconcile_native(coords)
+        self.assertEqual(state['intake_status'], 'observed')
+        self.assertEqual(state['latest_input_digest'], 'sha256:' + hashlib.sha256(b'latest actual input').hexdigest())
+        events = ledger_api.read_session_events(**coords)
+        superseded = [e for e in events if e['event']=='native-input-superseded']
+        self.assertEqual(len(superseded), 1)
+        self.assertEqual(superseded[0]['transport_observation_id'], first_id)
+        self.assertEqual(superseded[0]['actor'], 'unknown')
+        self.assertEqual(len([e for e in events if e['event']=='native-input-resolved' and e['actor']=='human']), 1)
+
+    def test_joined_desktop_guidance_receipt_does_not_block_later_input(self):
+        coords, transcript, before = self.native_fixture()
+        self.stage_native(coords, transcript, 'unknown sdk input')
+        self.append_native(transcript, dict(type='user', sessionId=coords['session_id'],
+            promptId='native-prompt-grain', promptSource='sdk', turnOrigin='sdk',
+            message=dict(role='user', content='unknown sdk input')))
+        self.stage_native(coords, transcript, 'host guidance retained\nfirst desktop correction')
+        row = self.human_native(coords['session_id'])
+        row['message']['content'] = [{'type':'text','text':'host guidance retained'},
+                                    {'type':'text','text':'first desktop correction'}]
+        self.append_native(transcript, row)
+        self.stage_native(coords, transcript, 'latest correction')
+        self.append_native(transcript, self.human_native(coords['session_id'], 'latest correction'))
+        original = transcript.read_bytes()
+        state = self.reconcile_native(coords)
+        self.assertEqual(state['intake_status'], 'observed')
+        self.assertEqual(state['latest_input_digest'], 'sha256:' + hashlib.sha256(b'latest correction').hexdigest())
+        events = ledger_api.read_session_events(**coords)
+        self.assertEqual([e['actor'] for e in events if e['event']=='native-input-superseded'], ['unknown'])
+        self.assertEqual(len([e for e in events if e['event']=='native-input-resolved' and e['actor']=='human']), 2)
+        self.assertEqual(transcript.read_bytes(), original)
+
+    def test_missing_earlier_native_row_still_blocks_later_human(self):
+        coords, transcript, before = self.native_fixture()
+        self.stage_native(coords, transcript, 'unmatched earlier input')
+        self.stage_native(coords, transcript, 'later human')
+        self.append_native(transcript, self.human_native(coords['session_id'], 'later human'))
+        state = self.reconcile_native(coords)
+        self.assertEqual(state['intake_status'], 'pending-native-origin')
+        self.assertEqual(state['latest_input_event_id'], before['latest_input_event_id'])
+
+    def test_duplicate_prompt_blocks_do_not_resolve_native_input(self):
+        coords, transcript, before = self.native_fixture()
+        self.stage_native(coords, transcript, 'ambiguous prompt')
+        row = self.human_native(coords['session_id'], 'ambiguous prompt')
+        row['message']['content'] = [{'type':'text','text':'ambiguous prompt'}] * 2
+        self.append_native(transcript, row)
+        state = self.reconcile_native(coords)
+        self.assertEqual(state['intake_status'], 'pending-native-origin')
+        self.assertEqual(state['latest_input_event_id'], before['latest_input_event_id'])
+
+    def test_notification_cannot_supersede_unknown_native_actor(self):
+        coords, transcript, before = self.native_fixture()
+        self.stage_native(coords, transcript, 'unknown sdk input')
+        self.append_native(transcript, dict(type='user', sessionId=coords['session_id'],
+            promptId='native-prompt-grain', promptSource='sdk', turnOrigin='sdk',
+            message=dict(role='user', content='unknown sdk input')))
+        self.stage_native(coords, transcript, 'background result')
+        self.append_native(transcript, dict(type='user', sessionId=coords['session_id'],
+            promptId='native-prompt-grain', promptSource='system', turnOrigin='task_notification',
+            origin=dict(kind='task-notification',producer='session-task'),
+            message=dict(role='user', content='background result')))
+        state = self.reconcile_native(coords)
+        self.assertEqual(state['intake_status'], 'pending-native-origin')
+        self.assertEqual(state['latest_input_event_id'], before['latest_input_event_id'])
 
     def test_claude_unflushed_transport_has_no_user_authority(self):
         coords, transcript, before = self.native_fixture()
@@ -105,7 +283,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                                   intent_delta={'current_goal': 'Old decision'})
 
     def test_claude_native_notification_preserves_route_and_identical_human_is_new_input(self):
-        for kind in ('user', 'attachment'):
+        for kind in ('user', 'attachment', 'peer'):
             with self.subTest(kind=kind):
                 coords, transcript, before = self.native_fixture('notification-' + kind)
                 self.stage_native(coords, transcript)
@@ -113,6 +291,10 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                 if kind == 'user':
                     row = dict(self.human_native(coords['session_id']), promptSource='system',
                                turnOrigin='task_notification', origin=origin)
+                elif kind == 'peer':
+                    row = dict(self.human_native(coords['session_id']), isMeta=True,
+                        promptSource='system', turnOrigin='peer', origin=dict(kind='peer',
+                            handback=True, senderTaskId='worker', **{'from':'worker'}))
                 else:
                     row = dict(type='attachment', sessionId=coords['session_id'], attachment=dict(
                         type='queued_command', commandMode='task-notification', origin=origin,
@@ -168,54 +350,50 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(len(state['pending_native_inputs']), 1)
         self.assertEqual(sum(e['event'] == 'user-input-observed' for e in ledger_api.read_session_events(**coords)), 2)
 
-    def test_normal_receipt_uses_one_bounded_binding_instruction_without_failure_replay(self):
+    def test_normal_receipt_has_no_instruction_footer(self):
         first = json.loads(self.run_hook({'session_id': 'receipt-diet', 'prompt': 'first'}).stdout)['systemMessage']
         second = json.loads(self.run_hook({'session_id': 'receipt-diet', 'prompt': 'second'}).stdout)['systemMessage']
         for message in (first, second):
-            instruction = message.split(RECEIPT_END, 1)[1]
-            self.assertIn('--expected-input-event-id input_event_id', instruction)
-            self.assertIn('--read-state', instruction)
-            self.assertIn('receipt confirms input observation only', instruction)
-            self.assertNotIn('If writing to this ledger is not permitted or fails', instruction)
-            self.assertNotIn('Do not select another ledger from a later current-session pointer', instruction)
+            self.assertEqual(message.split(RECEIPT_END, 1)[1].strip(), '')
         self.assertEqual(first.split(RECEIPT_END, 1)[1], second.split(RECEIPT_END, 1)[1])
 
-    def test_repeated_guidance_compacts_but_each_input_gets_new_receipt_and_event(self):
+    def test_each_input_gets_new_receipt_without_instruction_cache(self):
         first = json.loads(self.run_hook({"session_id": "reuse", "prompt": "first objective"}).stdout)["systemMessage"]
         second = json.loads(self.run_hook({"session_id": "reuse", "prompt": "changed objective"}).stdout)["systemMessage"]
-        self.assertLess(len(second), len(first))
-        self.assertIn("apply the retained skill to current meaning", second)
         self.assertNotEqual(receipt_from(first)["input_event_id"], receipt_from(second)["input_event_id"])
         self.assertEqual(len(self.events("reuse")), 2)
-        self.assertNotIn(b"first objective", (self.ledger_root / "session-checks.sqlite3").read_bytes())
-        self.assertNotIn(b"changed objective", (self.ledger_root / "session-checks.sqlite3").read_bytes())
+        self.assertFalse((self.ledger_root / "session-checks.sqlite3").exists())
 
-    def test_full_and_compact_receipts_preserve_tool_free_terminal_intake(self):
+    def test_tool_free_terminal_input_still_records_intake(self):
         for turn in ("Explain the general mechanism without tools.", "Stop; explain the retained answer only."):
             with self.subTest(turn=turn):
                 result = self.run_hook({"session_id": "terminal-intake", "prompt": turn})
                 self.assertEqual(result.returncode, 0, result.stderr)
                 host = json.loads(result.stdout)
                 message = host["hookSpecificOutput"]["additionalContext"]
-                self.assertIn("The current-session assistant classifies this input before calling tools", message)
-                self.assertIn("does not read files, access the ledger or register a response-route", message)
-                self.assertIn("The intake hook and strict audit still run", message)
-                self.assertIn("A new completion judgment requires its own evidence", message)
                 self.assertEqual(receipt_from(message)["intake_status"], "observed")
         self.assertEqual(len(self.events("terminal-intake")), 2)
 
-    def test_explicit_command_budget_covers_full_and_cached_intake_guidance(self):
-        for turn in ('Run only pwd once.', 'Run only pwd once again for this new request.'):
-            with self.subTest(turn=turn):
-                result = self.run_hook({'session_id': 'command-budget', 'prompt': turn})
-                self.assertEqual(result.returncode, 0, result.stderr)
-                message = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
-                self.assertIn('Every agent call, including governance and Ghost-ALICE Autopilot recording, counts against explicit user tool limits', message)
-                self.assertIn('using this receipt', message)
-                self.assertIn('the current-session assistant registers the current Core response-route', message)
-                self.assertIn('must not use an export, default root or another session', message)
-                self.assertIn('A new completion judgment requires its own evidence', message)
-        self.assertEqual(len(self.events('command-budget')), 2)
+    def test_common_contract_owns_intake_authority_and_tool_limits(self):
+        from global_rule_blocks import platform_contract_text
+        for platform, filename in (('codex', 'AGENTS.md'), ('claude', 'CLAUDE.md')):
+            contract = platform_contract_text(SCRIPT.parents[1] / 'platforms' / platform / filename)
+            self.assertIn("intake receipt's exact root, platform, session and input identity", contract)
+            self.assertIn('Missing or pending identity', contract)
+            self.assertIn('Core still reads and validates canonical state', contract)
+            self.assertIn('Every agent call', contract)
+            self.assertIn("user's tool limit", contract)
+
+    def test_custom_instruction_survives_healthy_intake_on_both_platforms(self):
+        import base64
+        custom = 'User-owned additional instruction: preserve this exact text.'
+        encoded = base64.urlsafe_b64encode(custom.encode()).decode()
+        for platform in ('codex', 'claude'):
+            result = self.run_hook({'session_id': 'custom-instruction', 'prompt': 'new task'},
+                                   '--platform', platform, '--internal-b64', encoded)
+            message = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
+            self.assertTrue(message.startswith(custom))
+            self.assertEqual(receipt_from(message)['platform'], platform)
 
     def setUp(self) -> None:
         self.tmp_home = pathlib.Path(tempfile.mkdtemp(prefix="session-intent-hook-test-"))
@@ -299,11 +477,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         })
         self.assertNotIn(prompt, result.stdout)
         self.assertNotIn("not-a-real-secret", result.stdout)
-        self.assertIn("--root", payload["systemMessage"])
-        self.assertIn("--session-id", payload["systemMessage"])
-        self.assertIn("--read-state", payload["systemMessage"])
         self.assertNotIn("Use state_path for downstream intent context", payload["systemMessage"])
-        self.assertIn("The current-session assistant must not use an export, default root or another session as the authoritative ledger", payload["systemMessage"])
 
     def test_receipt_native_session_wins_pointer_and_env_and_uses_exact_paths(self) -> None:
         self.run_hook({"session_id": "old-pointer", "prompt": "prior"})
@@ -386,7 +560,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
         self.assertEqual(payload["continue"], True)
-        self.assertIn("session-intent-analyzer", payload["systemMessage"])
+        self.assertEqual(receipt_from(payload["systemMessage"])["session_id"], "s-hook")
 
         rows = self.events("s-hook")
         self.assertTrue(rows)

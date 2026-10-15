@@ -51,6 +51,22 @@ def reply(text):
     return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
+def assert_stop_observation(case, payload, *, issue=None, repair_target=None):
+    """Stop transport must not substitute for acceptance of the observed body."""
+    case.assertIs(payload.get('continue'), True)
+    for key in ('decision', 'reason', 'systemMessage'):
+        case.assertNotIn(key, payload)
+    observation = payload['response_assessment']
+    case.assertEqual(observation['status'], 'unaccepted' if issue else 'no-issue')
+    if issue:
+        case.assertIn(issue, observation['body_issue'])
+    else:
+        case.assertIsNone(observation['body_issue'])
+    if repair_target is not None:
+        case.assertEqual(observation['repair_target'], repair_target)
+    return observation
+
+
 class ValidatorOptionTests(unittest.TestCase):
     def check(self, text, **kwargs):
         return validator.validate_completion_text(text, require_completion_check=True, **kwargs)
@@ -89,7 +105,8 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
                 payload["last_assistant_message"] = message
             if entries is not None:
                 transcript = Path(temp_dir) / "transcript.jsonl"
-                transcript.write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+                transcript.write_text("".join(json.dumps(dict(e, sessionId=payload['session_id'])) + "\n"
+                    for e in entries), encoding="utf-8")
                 payload["transcript_path"] = str(transcript)
             text = message or next((part['text'] for entry in reversed(entries or [])
                 for part in entry.get('message', {}).get('content', [])
@@ -166,54 +183,49 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
 
     def test_claude_allows_a_block_without_self_report_when_the_skill_was_called(self):
         payload = self.run_hook([user("Compute it."), skill_call(), reply(WITHOUT_SELF_REPORT)])
-        self.assertTrue(payload.get("continue"))
-        self.assertNotIn("decision", payload)
+        assert_stop_observation(self, payload)
 
     def test_claude_still_allows_the_old_self_report_lines(self):
         payload = self.run_hook([user("Compute it."), skill_call(), reply(WITH_SELF_REPORT)])
-        self.assertTrue(payload.get("continue"))
+        assert_stop_observation(self, payload)
 
     def test_claude_accepts_authenticated_response_without_skill_call(self):
         payload = self.run_hook([user("Compute it."), reply(WITH_SELF_REPORT)])
-        self.assertEqual(payload, {"continue": True})
+        assert_stop_observation(self, payload)
 
     def test_first_claude_stop_accepts_review_without_procedural_markers(self):
         payload = self.run_hook([user("Compute it."), reply(WITHOUT_SELF_REPORT)])
-        self.assertEqual(payload, {"continue": True}, payload.get("reason"))
+        assert_stop_observation(self, payload)
 
-    def test_claude_still_blocks_a_missing_evidence_field(self):
+    def test_claude_records_missing_evidence_as_unaccepted_without_continuation(self):
         broken = WITHOUT_SELF_REPORT.replace("    evidence: python check.py exited 0\n", "")
         payload = self.run_hook([user("Compute it."), skill_call(), reply(broken)])
-        self.assertEqual(payload.get("decision"), "block")
-        self.assertIn("evidence", payload["reason"])
+        assert_stop_observation(self, payload, issue='evidence', repair_target='completion_metadata')
 
     def test_first_codex_stop_accepts_review_without_procedural_markers(self):
         payload = self.run_hook(platform="codex", message=WITHOUT_SELF_REPORT)
-        self.assertEqual(payload, {"continue": True}, payload.get("reason"))
+        assert_stop_observation(self, payload)
 
     def test_authenticated_whole_answer_still_needs_supported_judgment(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 payload = self.run_hook(platform=platform, message=WITHOUT_SELF_REPORT,
                     review_verdict="unsupported")
-                self.assertEqual(payload.get("decision"), "block")
-                self.assertIn("response-unsupported", payload["reason"])
+                assert_stop_observation(self, payload, issue='response-unsupported')
 
     def test_changed_complete_answer_cannot_borrow_review(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 payload = self.run_hook(platform=platform, message=WITHOUT_SELF_REPORT,
                     append_text="\n\nAll unrelated work is also complete.")
-                self.assertEqual(payload.get("decision"), "block")
-                self.assertIn("response-assessment-required", payload["reason"])
+                assert_stop_observation(self, payload, issue='response-assessment-required')
 
-    def test_changed_source_still_blocks_authenticated_response(self):
+    def test_changed_source_keeps_authenticated_response_unaccepted(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 payload = self.run_hook(platform=platform, message=WITHOUT_SELF_REPORT,
                     mutate_source=True)
-                self.assertEqual(payload.get("decision"), "block")
-                self.assertIn("source-changed", payload["reason"])
+                assert_stop_observation(self, payload, issue='source-changed', repair_target='source_status')
 
 
 if __name__ == "__main__":

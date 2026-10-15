@@ -246,37 +246,18 @@ iter_install_targets() {
 }
 
 install_shared() {
-  local skills_dir="$1"
-  local copy_only="${2:-0}"
-  local shared_src="${SCRIPT_DIR}/_shared"
-  local shared_dest="${skills_dir}/_shared"
-
+  local skills_dir="$1" copy_only="${2:-0}"
+  local shared_src="${SCRIPT_DIR}/_shared" shared_dest="${skills_dir}/_shared"
   [ -d "$shared_src" ] || return 0
-
-  if [ "$copy_only" != "1" ] && [ -L "$shared_dest" ]; then
-    local existing
-    existing=$(readlink "$shared_dest" 2>/dev/null || echo "")
-    if [ "$existing" = "$shared_src" ]; then
-      warn "$(t '_shared. Already installed (skipped)' '_shared. Already installed (skipped)')"
-      return 0
-    fi
-    rm -f "$shared_dest"
-  elif [ -e "$shared_dest" ]; then
-    warn "$(t '_shared. Overwriting existing copy' '_shared. Overwriting existing copy')"
-    if [ "$copy_only" != "1" ]; then
-      rm -rf "$shared_dest"
-    fi
-  fi
-
   if [ "$copy_only" = "1" ]; then
     _install_copy_target "$shared_src" "$shared_dest"
-    ok "$(t '_shared → copied' '_shared → copied')"
-  elif ln -s "$shared_src" "$shared_dest" 2>/dev/null; then
-    ok "$(t '_shared → symlinked' '_shared → symlinked')"
-  else
-    _install_copy_target "$shared_src" "$shared_dest"
-    ok "$(t '_shared → copied (symlink not supported)' '_shared → copied (symlink not supported)')"
+    return $?
   fi
+  if [ -L "$shared_dest" ] && [ "$(readlink "$shared_dest" 2>/dev/null || true)" = "$shared_src" ]; then
+    warn "$(t '_shared. Already installed (skipped)' '_shared. Already installed (skipped)')"
+    return 0
+  fi
+  _install_link_or_copy "$shared_src" "$shared_dest"
 }
 
 validate_requested_skills() {
@@ -289,6 +270,15 @@ validate_requested_skills() {
       exit 1
     fi
   done
+}
+
+guard_gateway_removal() {
+  [ "$#" -gt 0 ] || return 0
+  local py target roots=()
+  py="$(_find_python_runtime || true)"
+  [ -n "$py" ] || return 2
+  for target in "$@"; do roots+=(--root "$target"); done
+  "$py" "${SCRIPT_DIR}/_shared/context_gateway_install.py" detach "${roots[@]}" --confirm
 }
 
 remove_installed_target() {
@@ -338,6 +328,7 @@ cleanup_shared_if_unused() {
   fi
 
   if [ -L "$shared_target" ] || [ -d "$shared_target" ]; then
+    guard_gateway_removal "$shared_target" || return $?
     rm -rf "$shared_target"
     ok "$(t '_shared removed' '_shared removed')"
     return 0

@@ -3,7 +3,7 @@
 This document defines the verification process that must be passed after writing or modifying a skill. There are no exceptions. When you create a new skill or modify an existing skill, you must pass this entire checklist before moving on to the testing stage.
 
 Basis documents
-- AGENTS.md is the project skill writing and modification contract.
+- The installed common contract governs skill writing and modification; `platforms/common-governance.md` owns its source.
 - Each skill's SKILL.md is the actual applied surface for progressive disclosure, frontmatter, and reference structure.
 - external specs are referenced only with an upstream link and a short citation, never by copying the original text
 

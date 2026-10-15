@@ -25,8 +25,8 @@
   "conditional_gates": [
     {
       "id": "session-intent-analyzer",
-      "trigger": "every user input; hook records digest-only intake status and agent updates semantic intent delta only when intent materially changes",
-      "position": "after-merge-companion-precheck-before-task-router-and-report-only-skill-evolution",
+      "trigger": "hook records every input; agent retrieves stored intent only for a state-dependent decision or material semantic update",
+      "position": "native-intake-before-task-selection; semantic-lookup-before-dependent-decision",
       "state_path": ".tmp/session-intent/<platform>/<session-id>/intent-state.json",
       "raw_prompt_policy": "do-not-persist"
     },
@@ -39,17 +39,17 @@
   "pre_routing_gates": [
     {
       "id": "merge-companion-precheck",
-      "rule": "AGENTS.md rule 0-A (pending-merge prose-rule layer)",
+      "rule": "Common First-Entry Contract (pending-merge observation and affected-change handling)",
       "skill": "merge-companion",
-      "trigger": "pending-merges manifest entries where decided=false",
+      "trigger": "pending entries plus selected affected-skill changes or explicit user review request",
       "manifest_path": "~/.ghost-alice/pending-merges/<platform>/manifest.json",
       "platforms": [
         "claude",
         "codex"
       ],
       "on_missing_or_empty": "silent-pass",
-      "priority": "before-task-router-when-known",
-      "manual_fallback_priority": "before-actionable-work-except-no-work-terminal-routes"
+      "priority": "reuse-native-observation-before-selection",
+      "manual_fallback_priority": "before-affected-skill-changes"
     }
   ],
   "domain_routes": {

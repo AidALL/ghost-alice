@@ -47,7 +47,7 @@ For a new current-turn closure:
 
 1. Load this skill through the host's real mechanism, or validly reuse its body under [Instruction Body Reuse](references/verify-or-reuse.md#instruction-body-reuse), and apply the workflow to this input.
 2. Map each claim to its criterion and actual evidence. A successful result already returned in this turn can supply fresh evidence; run a further check only for a criterion it does not cover. Read the result, source locator, exit status and failures before judging it.
-3. Follow task-router's [Register the Core projection](../../task-router/SKILL.md#register-the-core-projection) for the exact current binding. A missing route blocks dependent recording, not the original business evidence.
+3. Follow session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection, for the exact current binding. Resolve that reference from the selected installed session-intent-analyzer directory. A missing route blocks dependent recording, not the original business evidence.
 4. Compare each claim with its original sources and criterion, then separately judge the complete draft against the user's objective and constraints. Follow [Prepare and record the response review](references/autopilot-publication.md#prepare-and-record-the-response-review) to submit both judgments to Core. Core authenticates and stores them; code does not decide their meaning.
 5. Deliver the supported reviewed answer with its applicable completion or partial control under the owner reference's delivery procedure.
 
@@ -55,7 +55,7 @@ Explaining an unchanged prior result is not a new completion submission and does
 
 ## Retained original results and delivery
 
-Routine explanation from supplied conversation remains tool-free. For a source-backed explanation on a normal route, follow [Prepare and record the response review](references/autopilot-publication.md#prepare-and-record-the-response-review). The assistant obtains claim bindings through the reference's new-source or retained-proof procedure, reviews each against the original sources, then separately judges the whole answer. Explanation review uses no completion block, new verification timestamp or Ghost-ALICE Autopilot publication.
+Routine explanation from supplied conversation remains tool-free. For a source-backed explanation, the assistant compares each claim with the relevant originals, then separately judges the whole answer against the user's objective and constraints. Reuse available source passages and their original locators; this judgment requires neither a new route write nor a separate preparation or recording call. When the user explicitly requests an authenticated explanation review, follow [Prepare and record the response review](references/autopilot-publication.md#prepare-and-record-the-response-review). An explanation does not refresh prior evidence time or publish completion. New completion and partial-completion claims follow the finalization sequence above.
 
 For a correction to an already submitted answer, follow the reference's [Apply and deliver](references/autopilot-publication.md#apply-and-deliver) procedure using the host's supplied visibility context. That procedure owns replacement payloads and required recording; the assistant does not infer visibility from an unrelated tool result.
 
@@ -72,6 +72,8 @@ Copying proof preserves its source and original time. For recording, follow the 
 When Core's current route selects publication and the compatible managed adapter is available, follow [autopilot-publication.md](references/autopilot-publication.md). That reference owns preparation reuse, receipt inputs, recording recovery and returned publication/application stages. Preserve the actual business result if recording is unavailable; publication alone does not demonstrate criterion application or next-task execution.
 
 ## Completion-Check Format
+
+The control's `scope` describes completion evidence coverage. In `[partial-check]`, `scope: partial` means that declared required criteria remain unresolved. It is independent of the response-route's `focus_layer`, which selects the judgment target (`micro`, `meso`, `macro` or `meta`). A macro judgment can therefore have partial evidence coverage. The assistant preserves both meanings when preparing the answer; it does not substitute a focus value for the required partial control.
 
 For a new full closure, place `[completion-check]` before the supported summary. Declare every acceptance criterion and map each claim to its criterion, evidence and bare `pass` or `fail` verdict. Put `claim`, `criterion`, `evidence` and `verdict` on separate physical lines. A full block requires `unverified: none`; a failed verdict proves failure, not overall success.
 
@@ -115,13 +117,13 @@ Partial result:
 - evidence: Original regression output with source locator
 ```
 
-Retain actual body-load/reuse facts in the internal audit. The project response contract controls whether `[io-trace]` is displayed; printing it does not prove verification. Core selects delivery of a corrected control block as described above. Replace a defective block in full, preserving original proof and unresolved criteria; a Ghost-ALICE Autopilot record failure does not require repeating a valid block.
+Retain actual body-load/reuse facts in the internal audit. The project response contract controls whether `[io-trace]` is displayed; printing it does not prove verification.
 
-The publication reference's [Apply and deliver](references/autopilot-publication.md#apply-and-deliver) procedure defines how recorded full or partial proof applies to qualified criteria. The control block alone establishes neither application nor continuation.
+The publication reference's [Apply and deliver](references/autopilot-publication.md#apply-and-deliver) procedure owns criterion application and the explicit managed output contract. The control block alone establishes neither application nor continuation.
 
 ## Confirmed flaw propagation
 
-For a confirmed flaw in the requested deliverable, apply [Confirmed Flaw Propagation](references/verify-or-reuse.md#confirmed-flaw-propagation). For control-only corrections to unchanged supported answer content, use the publication reference's delivery procedure instead of replaying the answer.
+For a confirmed flaw in the requested deliverable, apply [Confirmed Flaw Propagation](references/verify-or-reuse.md#confirmed-flaw-propagation).
 
 ## External evidence and evaluator requirements
 

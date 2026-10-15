@@ -10,6 +10,23 @@ permissions:
   contents: read
 
 jobs:
+  context-gateway:
+    name: Context gateway (Python 3.14 / zstd)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Test native gateway and compressed streams
+        env:
+          PYTHONPATH: _shared
+        run: python3 -m unittest -v test_context_gateway test_context_gateway_install test_context_gateway_uninstall test_gateway_payload_update test_gateway_installer_faults
+
   validation:
     name: Public validation
     runs-on: ubuntu-latest

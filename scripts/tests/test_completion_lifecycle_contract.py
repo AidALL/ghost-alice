@@ -1,10 +1,13 @@
 """Completion procedure discovery and the owning evidence/response contract."""
 from pathlib import Path
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / 'coding-convention/verification-before-completion/SKILL.md'
 OWNER = SKILL.parent / 'references/autopilot-publication.md'
+sys.path.insert(0, str(ROOT / '_shared'))
+from global_rule_blocks import platform_contract_text
 
 
 def section(text, title):
@@ -55,13 +58,25 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         self.assertNotIn('--receipt-token', architecture)
 
     def test_common_contracts_keep_routing_independent_of_proof(self):
-        for name in ('AGENTS.md', 'platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
+        common = (ROOT / 'platforms/common-governance.md').read_text()
+        for phrase in ('Reuse unchanged evidence at its original time and source',
+                       'A recording error does not refute the business result or authorize replay',
+                       'These are separate judgments',
+                       'Core validates record ownership, input binding and source integrity',
+                       '`verification-before-completion` owns evidence selection'):
+            self.assertIn(phrase, common)
+        for name in ('platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
             with self.subTest(path=name):
-                body = (ROOT / name).read_text()
-                self.assertIn('reuses unchanged valid evidence at its original source and verification time', body)
-                self.assertIn('A route, formatting, or publication error does not prove', body)
-                self.assertIn('Core stores both judgments atomically', body)
-                self.assertIn('verification-before-completion/references/autopilot-publication.md', body)
+                template = (ROOT / name).read_text()
+                self.assertEqual(1, template.count('{{COMMON_GOVERNANCE}}'))
+                self.assertNotIn(common.strip(), template)
+                installed = platform_contract_text(ROOT / name)
+                self.assertEqual(1, installed.count(common.strip()))
+                self.assertNotIn('{{COMMON_GOVERNANCE}}', installed)
+        project = (ROOT / 'AGENTS.md').read_text()
+        self.assertIn('platforms/common-governance.md', project)
+        self.assertIn("current host's installed common contract", project)
+        self.assertNotIn(common.strip(), project)
 
     def test_proof_format_keeps_partial_and_failed_results_distinct(self):
         body = section(SKILL.read_text(), 'Completion-Check Format')
@@ -70,6 +85,9 @@ class CompletionLifecycleContractTests(unittest.TestCase):
                        'Preserve all required criteria', 'claim', 'criterion', 'evidence', 'verdict'):
             self.assertIn(phrase, body)
         self.assertIn('neither application nor continuation', body)
+        self.assertIn('completion evidence coverage', body)
+        self.assertIn('independent of the response-route\'s `focus_layer`', body)
+        self.assertIn('A macro judgment can therefore have partial evidence coverage', body)
 
 
 if __name__ == '__main__':

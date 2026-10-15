@@ -20,8 +20,9 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | --- | --- |
 | [README.md](../../../README.md) | 프로젝트 소개·빠른 시작과 문서 목록 |
 | [README_ko.md](../../../README_ko.md) | 한국어 프로젝트 소개와 문서 목록 |
-| [architecture.md](../../../architecture.md), [architecture_ko.md](../../../architecture_ko.md) | 양 언어 책임·데이터 흐름 안내 |
-| [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md) | 플랫폼 배포본의 기준이 되는 공통 거버넌스 원본 |
+| [architecture.md](../../../architecture.md), [architecture_ko.md](../../../architecture_ko.md) | 양 언어 Core 책임·데이터 흐름 안내 |
+| [AGENTS.md](../../../AGENTS.md) | 현재 호스트 계약의 프로젝트 로더 |
+| [공통 거버넌스](../../../platforms/common-governance.md) | 호스트별 규칙과 결합하는 공통 계약 원본 |
 | [CLAUDE.md](https://github.com/AidALL/ghost-alice/blob/main/CLAUDE.md) | Claude Code 프로젝트 규칙의 진입점 |
 | [docs/index.html](../../index.html) | GitHub Pages 홈페이지 |
 

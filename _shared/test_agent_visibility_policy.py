@@ -125,6 +125,23 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
         self.assertEqual(decision["visible_decision"], "show")
         self.assertEqual(decision["reason"], "routing-surface-focused")
 
+    def test_omitted_routing_judgments_do_not_force_diagnostic_visibility(self):
+        for surface in ({"response_mode": "normal", "boundary_contract": "n/a"},
+                        {"primary_request": "explain the supplied result", "reason": "current question"}):
+            with self.subTest(surface=surface):
+                decision = agent_visibility_policy.decide(profile="dynamic", hook_id="hook-reminder",
+                    event="UserPromptSubmit", stdout="routine clean pass", stderr="", exit_code=0,
+                    context={"signal": "routine-clean-pass", "routing_surface": surface})
+                self.assertEqual(decision["visible_decision"], "hide")
+
+    def test_supplied_malformed_routing_judgment_still_fails_closed(self):
+        for surface in ({"focus_layer": None}, {"verification_complexity": []}, {"forced_visibility": None}):
+            with self.subTest(surface=surface):
+                decision = agent_visibility_policy.decide(profile="dynamic", hook_id="hook-reminder",
+                    event="UserPromptSubmit", stdout="routine clean pass", stderr="", exit_code=0,
+                    context={"signal": "routine-clean-pass", "routing_surface": surface})
+                self.assertEqual(decision["reason"], "routing-surface-fail-closed")
+
     def test_dynamic_routing_surface_ambiguous_fails_closed(self):
         decision = agent_visibility_policy.decide(
             profile="dynamic",

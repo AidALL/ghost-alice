@@ -578,7 +578,7 @@ bash() {{ printf 'CHILD|%s\\n' "$*"; [ "$3" != claude ] || return 37; }}
                 result.stdout,
             )
             self.assertIn(
-                "  [3/5] Hooks               prompt, session-intent, web-search-first, tool-checkpoint, completion, session-start, io-trace enabled",
+                "  [3/5] Hooks               prompt, session-intent, tool-checkpoint, completion, session-start, io-trace enabled",
                 result.stdout,
             )
             self.assertIn("  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]", result.stdout)

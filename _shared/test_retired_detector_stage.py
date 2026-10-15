@@ -85,7 +85,8 @@ def test_router_uses_intake_without_legacy_classifier_or_backlog_authority(tmp_p
     assert 'withheld' not in context
     assert 'jailbreak' not in context
     assert 'unresolved-work:' not in context
-    assert '--read-state' in context
+    assert '--read-intent' in context
+    assert '--read-state' not in context
     assert str(destination.ledger_root) in context
     assert 'history, not a current work selection or execution authorization' in context
     assert ledger.read_session_state(**coordinates)['model_security_decision']['decision'] == 'block'

@@ -760,11 +760,11 @@ def _runtime_session_intent_golden_status(
     destination = None
     if hook_commands is not None:
         import install_destination
-        from install_hooks import _managed_prompt_instruction
+        from install_hooks import _managed_instruction_contract
 
         destinations = {}
         for command in hook_commands:
-            if _managed_prompt_instruction(command, "session-intent") is None:
+            if _managed_instruction_contract(command, "session-intent") is None:
                 continue
             outer = shlex.split(command, comments=True)
             script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1

@@ -7,18 +7,15 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class OperatingRuleContractTest(unittest.TestCase):
     def test_terminal_routes_preserve_authority_and_avoid_governance_work(self):
-        common = (ROOT / 'AGENTS.md').read_text()
+        common = (ROOT / 'platforms/common-governance.md').read_text()
         first = common.split('## First-Entry Contract\n', 1)[1].split('\n## ', 1)[0]
-        for term in ('direct-response', 'clarification-only', 'does not read skills',
-                     'does not cancel', 'ambient working directory'):
-            if term == 'does not cancel':
-                self.assertIn('ongoing authorized work', first)
-            else:
-                self.assertIn(term, first)
-        self.assertIn('do not authorize resumed work', first)
+        for term in ('direct-response', 'clarification-only', 'answer without reading skills',
+                     'does not cancel authorized work', 'never substitute another session'):
+            self.assertIn(term, first)
+        self.assertIn('stored result or available tool grants no authority', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('First-Entry Contract', router)
-        self.assertIn('Register the Core projection', router)
+        self.assertIn('register the Core response-route using the current receipt', router)
 
     def test_reuse_instruction_contract_stays_at_its_owner(self):
         reference = (ROOT / 'coding-convention/verification-before-completion/references/verify-or-reuse.md').read_text()
@@ -28,18 +25,17 @@ class OperatingRuleContractTest(unittest.TestCase):
             self.assertIn(phrase, reference)
 
     def test_scope_depth_and_sufficient_change_are_distinct_decisions(self):
-        common = (ROOT / 'AGENTS.md').read_text()
-        for term in ('micro', 'meso', 'macro', 'meta', 'level 1', 'minimal | localized | structural | systemic'):
-            self.assertIn(term.lower(), common.lower())
-        self.assertIn('selects verification depth separately from focus', common)
-        self.assertIn('structural cause needs a structural repair', common)
-        self.assertIn('not by authorship, recency or diff size', common)
+        common = (ROOT / 'platforms/common-governance.md').read_text()
+        for term in ('micro', 'meso', 'macro', 'meta', 'Verification depth is a separate choice'):
+            self.assertIn(term, common)
+        self.assertIn('sufficient correction depth', common)
+        self.assertIn('systematic-debugging', common)
 
     def test_visibility_does_not_disable_audit_or_execution(self):
-        common = (ROOT / 'AGENTS.md').read_text()
-        self.assertIn('controls display verbosity, not hook execution or strict logging', common)
-        self.assertIn('The PostToolUse hook records strict audit data', common)
-        self.assertIn('Display verbosity never disables that log', common)
+        common = (ROOT / 'platforms/common-governance.md').read_text()
+        self.assertIn('strict audit independently of displayed guidance', common)
+        self.assertIn('Do not print full audit records', common)
+        self.assertIn('Printed `[io-trace]` is optional and never establishes proof', common)
 
     def test_external_and_evaluator_details_are_reachable_from_verification(self):
         skill = ROOT / 'coding-convention/verification-before-completion/SKILL.md'

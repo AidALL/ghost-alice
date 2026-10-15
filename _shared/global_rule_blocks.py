@@ -72,6 +72,24 @@ def _write_text(path: Path, body: str) -> None:
     path.write_text(body, encoding="utf-8")
 
 
+def platform_contract_text(source_path: Path | str) -> str:
+    """Compose the installed contract from its one common owner and host rules."""
+    source = Path(source_path)
+    text = _read_text(source)
+    placeholder = '{{COMMON_GOVERNANCE}}'
+    if placeholder not in text:
+        return text
+    if text.count(placeholder) != 1:
+        raise GlobalRuleBlockError('Platform contract requires exactly one common source placeholder')
+    common = source.parent.parent / 'common-governance.md'
+    if not common.is_file():
+        raise GlobalRuleBlockError(f'Missing common governance source: {common}')
+    body = _read_text(common)
+    if placeholder in body or not body.strip():
+        raise GlobalRuleBlockError('Common governance source must be complete and nonrecursive')
+    return text.replace(placeholder, body.strip())
+
+
 def _known_markers(spec: RuleBlockSpec) -> tuple[str, ...]:
     return (spec.marker, *spec.legacy_markers)
 
@@ -155,7 +173,7 @@ def _apply_bootstrap(
     dest = Path(dest_path)
     proposed = Path(proposed_path) if proposed_path is not None else dest.with_name(dest.name + ".ghost-alice-proposed")
     if source_text is None:
-        source_text = _read_text(source)
+        source_text = platform_contract_text(source)
 
     existing_text = None
     if dest.exists():
@@ -256,7 +274,7 @@ def apply_codex_bootstrap(
         if contract.exists() and not contract.is_file():
             raise GlobalRuleBlockError(f"governance contract is not a regular file: {contract}")
         if contract.exists():
-            status, _ = _merge_bootstrap_text(_read_text(contract), _read_text(Path(source_path)), CODEX_SPEC)
+            status, _ = _merge_bootstrap_text(_read_text(contract), platform_contract_text(source_path), CODEX_SPEC)
             if status == "proposed":
                 raise GlobalRuleBlockError(f"user-owned governance contract: {contract}")
         _apply_bootstrap(source_path, contract, CODEX_SPEC)

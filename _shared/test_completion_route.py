@@ -66,6 +66,26 @@ class PartialEvidenceRouteTests(unittest.TestCase):
 
 
 class CompletionRouteTests(unittest.TestCase):
+    def test_minimal_surface_preserves_owned_verification_and_original_proof(self):
+        ctx = context()
+        ctx["response_route"]["routing_surface"] = dict(response_mode="normal", boundary_contract="n/a")
+        result = self.select(ctx, proof={})
+        self.assertEqual(result["route_binding"], "current")
+        self.assertEqual(result["evidence_route"], "fresh_affected")
+        self.assertEqual(result["unit_decisions"][0]["criteria"][0]["check_ids"], ["original-failure"])
+        retained = self.select(ctx, ap=dict(enabled=True, publication_status="prepared"))
+        self.assertEqual(retained["publication_route"], "publish")
+        proof = retained["unit_decisions"][0]["criteria"][0]
+        self.assertEqual((proof["proof_ref"], proof["verified_at"]), ("tool-result-old", "2026-10-01T12:00:00Z"))
+
+    def test_supplied_invalid_judgment_cannot_authorize_completion(self):
+        for field, value in (("verification_complexity", []), ("focus_layer", "wide"), ("causal_axis", None)):
+            with self.subTest(field=field):
+                ctx = context(); ctx["response_route"]["routing_surface"][field] = value
+                result = self.select(ctx, ap=dict(enabled=True, publication_status="prepared"))
+                self.assertEqual(result["route_binding"], "invalid")
+                self.assertEqual(result["publication_route"], "blocked")
+
     def test_prior_result_explanation_preserves_proof_without_publication(self):
         ctx = context(); ctx["response_route"]["response_purpose"] = "explanation"
         before = deepcopy(ctx)

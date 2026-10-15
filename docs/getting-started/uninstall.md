@@ -20,9 +20,9 @@ Ghost-ALICE uninstall is driven by the `install-state` manifest written by the i
 | Remove all managed Ghost-ALICE surfaces | `bash install.sh --uninstall` | Full uninstall across recorded targets |
 | Remove one platform | `bash install.sh --platform codex --uninstall` | Keeps other platform installs |
 | Remove selected skills | `bash install.sh --platform codex --uninstall task-router` | Keeps hooks and shared assets when other skills remain |
-| Remove one official addon | Follow that addon's repository documentation | Keeps addon hook and sidecar cleanup aligned |
+| Remove Autopilot, retain Core | `bash install.sh --platform codex --uninstall --addon autopilot-mode` | Detaches owned executable hooks before removing verified addon files |
 
-Addon-specific removal is different from selected skill removal. A full uninstall removes the managed Ghost-ALICE footprint, including installed addon sidecar cleanup. If you want to remove only one official addon, follow that addon's repository documentation so hook and sidecar cleanup stay aligned with the addon package.
+Addon-specific removal is different from selected skill removal. Core updates preserve existing addons; an explicit addon uninstall selects the removal. A full uninstall removes the active managed Ghost-ALICE footprint, including installed addon sidecars, while retaining original recovery material and local evidence. Per-addon removal keeps Core and other addons installed. Core skills required by an installed addon are protected by the existing dependency check during selected skill removal.
 
 ## Basic Commands
 
@@ -69,16 +69,21 @@ Uninstall reads `targets` and `system_env_changes` from these manifests. If a ma
 
 The uninstall command performs these steps for the selected removal scope:
 
-1. Remove platform hook settings.
-2. Remove Codex bootstrap or global-rule managed blocks.
-3. Restore the source repository `core.hooksPath` only if Ghost-ALICE set it.
-4. Remove only manifest targets that are inside allowed roots and verified by Ghost-ALICE ownership markers or hashes.
-5. Remove support state such as install-state manifests, install-state events, Codex hook feature rollback metadata, pending merge queues, installed hook dispatcher assets, and install rollbacks.
-6. Write a report under `~/.ghost-alice/uninstall-reports/`.
+1. For full/platform removal, remove its installed addons first: write a removal-intent marker, detach exact owned addon and privileged adapter hook registrations, then remove only verified addon targets. A failed hook write leaves files and sidecar intact. Modified targets and their sidecar/removal marker remain for review or retry; detached hooks are not restored by that retry.
+2. If the removal affects the optional native context gateway's runtime, ledger, or Codex provider, detach that gateway before changing Core hooks or files. The component's owned `~/.ghost-alice/context-gateway-binding.json` identifies custom installation paths. Confirm service absence, remove the owned launch agent and provider blocks, and preserve adjacent current settings, component logs, and existing recovery material. A symlinked Codex configuration or gateway service/state/ownership file, missing ownership, an uncertain teardown, or gateway state/recovery data nested inside a selected removal root stops dependent Core cleanup with a failure. Unrelated Claude removal preserves a gateway whose actual dependencies survive.
+3. Remove Core platform hook settings and Codex bootstrap or global-rule managed blocks, preserving user-owned entries.
+4. Restore the source repository `core.hooksPath` only if Ghost-ALICE set it, and apply the recorded feature/trust rollback conditions.
+5. Remove only manifest targets inside allowed roots and verified by Ghost-ALICE ownership markers or hashes. Retain shared runtime and dispatcher assets when another platform still has an install-state manifest.
+6. Archive the selected platform's pending merge originals before removing its active queue. Retain shared installation rollback copies while another platform is installed; otherwise archive them first. Each archive uses a new directory under `~/.ghost-alice/uninstall-backup/<platform>/support-state/`; its report item records `backup_path`. Copies preserve original modification times and symlink representations, and earlier archives remain intact. Before removing a recovery root, compare every archived root/nested symlink's modification time with its captured original. If link times cannot be preserved, retain the original root and its install-state manifest for review. Recovery material containing a Windows junction is likewise retained instead of being copied or deleted automatically.
+7. Remove remaining installer support records, keeping the install-state manifest until support cleanup and recovery copying succeed. Write a report under `~/.ghost-alice/uninstall-reports/`.
 
-The uninstall report directory and privacy-sensitive local files such as `~/.ghost-alice/secrets.env` are preserved. Runtime audit traces such as `~/.ghost-alice/io-trace.jsonl` are treated as local audit records rather than install targets.
+The uninstall report and backup directories, source checkouts, conversation/session evidence, intent ledgers, and privacy-sensitive local files such as `~/.ghost-alice/secrets.env` are preserved. Runtime audit traces such as `~/.ghost-alice/io-trace.jsonl` are local audit records rather than install targets. No data purge is implied by removing executable integration. These file/configuration results do not establish ongoing-host adoption or cancellation of already delivered work. A preview without confirmation leaves install/configuration/recovery assets unchanged but writes its report, as the existing CLI does.
 
 ## Recovery Principles
+
+Per-addon removal detaches Claude installer-added skill permissions and Codex owned hook trust before removing files. Claude permission ownership is bound to the settings file and manifest-selected skill names; preexisting grants, duplicate user grants and unknown legacy ownership remain protected. Codex surviving trust tables follow their actual group/handler positions, including repeated identical commands, with user fields and comments preserved. An unresolved destination collision stops removal. Config writes preserve symlinks and use atomic replacement; if the subsequent hook settings write fails, removal restores the original trust bytes and modification time. The original config backup remains available if restoration itself fails.
+
+The addon removal CLI returns exit `2` for errors or partial removal, including resume errors. Exit `1` means the addon was not found. A retained modified target, unknown permission ownership or configuration failure does not count as complete removal.
 
 - Do not guess how to restore user settings that were not recorded.
 - Do not automatically delete personal skills or user-owned files without markers.

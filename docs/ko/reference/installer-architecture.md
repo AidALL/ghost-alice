@@ -10,6 +10,7 @@
 - [읽는 순서](#읽는-순서)
 - [Architecture Summary](#architecture-summary)
 - [Install Flow](#install-flow)
+- [Gateway Lifecycle](#gateway-lifecycle)
 - [Platform Surfaces](#platform-surfaces)
 - [State And Safety Model](#state-and-safety-model)
 - [Contributor Entry Points](#contributor-entry-points)
@@ -49,6 +50,14 @@
 | 설치기 → 설치 상태 기록기 → 상태 출력 | 실제 변경 대상·해시·복원 정보. | Status·doctor·제거에서 읽을 플랫폼 매니페스트와 설치 보고서. |
 
 Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달하고 실제 설치는 `install.ps1`이 담당합니다. Unix 계열 환경에서는 `install.sh`가 셸 진입점을 담당하며 필요할 때 Bash로 다시 실행합니다.
+
+## Gateway Lifecycle
+
+게이트웨이 설치·갱신·해제는 `_shared/context_gateway_*`의 여섯 모듈이 담당합니다. `model`은 요청·관측값·계획·결과와 실행 인터페이스의 자료형을 정의하며 AI 모델을 호출하지 않습니다. `inventory`는 전달받은 플랫폼 어댑터로 사실을 읽습니다. `plan`은 소유권을 확인하고 변경 대상과 실제 게이트웨이 의존성을 비교하여 I/O 없이 순서가 정해진 계획을 만듭니다. `transaction`은 계획 실행과 역순 복구를 담당합니다. `platform`은 개별 파일·네이티브 서비스 작업을 수행합니다. `install`은 기존 Python·CLI 진입점에서 이 모듈들을 연결합니다.
+
+일반 파일 교체는 `install_transaction.py`의 되돌릴 수 있는 `ReplacementBatch` 작업을, 관리형 Git 업데이트는 `installer_source_update.py`의 되돌릴 수 있는 `SourceUpdate` 작업을 제공합니다. 선택한 경로가 소유권이 확인된 게이트웨이에 영향을 주면 같은 게이트웨이 트랜잭션이 교체 전에 서비스를 중지하고 후보 서비스의 준비 상태를 확인한 뒤 설치 명세와 등록 바인딩을 갱신합니다. 무관함이 확인된 변경은 게이트웨이를 그대로 둡니다. Core 정리는 영향을 받는 게이트웨이를 먼저 해제한 뒤 의존 파일을 삭제합니다. 소유권이나 의존성을 확인할 수 없으면 해제와 그에 의존하는 삭제를 허용하지 않습니다.
+
+게이트웨이 설치 CLI의 `--dry-run` 옵션은 확인한 변경 계획을 출력하고 실제 반영이나 승인 대기 없이 종료합니다. 게이트웨이·컴포넌트 오류는 발생 단계와 고정 오류 식별자를 유지합니다. 종료 코드 2는 선행 조건 불충족, 3은 활성 파일 교체 전 서비스 상태 확인 불가, 4는 작업 실패 후 이전 설치 복원, 5는 변경 시작 후 복구 확인 불가를 뜻합니다. 일반 셸·PowerShell 호출자는 기존 전체 실패 보고와 구조화된 컴포넌트 원인을 유지합니다. 설치에는 zstd 코덱이 동작하는 Python 3.14가 필요하며 해제는 Python 3.11을 지원합니다. [설치 생명주기 명세](../../coding-convention/specs/2026-10-15-gateway-installer-design.md)에서 작업별 조건, 자료 전달과 실패 분기를 확인하실 수 있습니다.
 
 ## Platform Surfaces
 

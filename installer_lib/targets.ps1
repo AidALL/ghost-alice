@@ -94,6 +94,17 @@ function Assert-SkillNames {
     }
 }
 
+function Invoke-GatewayRemovalGuard {
+    param([string[]]$Targets)
+    if (-not $Targets -or $Targets.Count -eq 0) { return }
+    $py = Find-PythonExe
+    if (-not $py) { throw "Python 3.11+ is required before gateway dependency removal." }
+    $roots = @()
+    foreach ($target in $Targets) { $roots += @("--root", $target) }
+    & $py (Join-Path $script:GhostAliceRoot "_shared/context_gateway_install.py") detach @roots --confirm | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Gateway detachment did not permit selected dependency removal." }
+}
+
 function Remove-InstalledTarget {
     param(
         [string]$DisplayName,
@@ -141,6 +152,7 @@ function Remove-SharedIfUnused {
         return $false
     }
 
+    Invoke-GatewayRemovalGuard -Targets @($sharedTarget)
     Remove-Item $sharedTarget -Recurse -Force
     Write-Ok "_shared removed" "_shared removed"
     return $true

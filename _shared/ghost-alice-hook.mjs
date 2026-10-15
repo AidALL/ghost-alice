@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
-import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -44,18 +43,6 @@ function ghostRoot() {
   return process.env.GHOST_ALICE_GHOST_ROOT || path.join(userHome(), ".ghost-alice");
 }
 
-function assertOwnedMutation(target) {
-  const owned = process.env.GHOST_ALICE_OWNED_ROOT;
-  if (!owned) return;
-  function resolved(candidate) {
-    if (fs.existsSync(candidate)) return fs.realpathSync(candidate);
-    return path.join(resolved(path.dirname(candidate)), path.basename(candidate));
-  }
-  const relative = path.relative(resolved(owned), resolved(target));
-  if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
-    throw new Error("Isolated mutation escapes owned destination");
-  }
-}
 
 function sessionIntentRoot(configuredRoot = "") {
   const configured = firstNonEmpty(configuredRoot, process.env.GHOST_ALICE_SESSION_INTENT_ROOT);
@@ -95,58 +82,8 @@ function readJsonFile(filePath, fallback) {
   }
 }
 
-function writeJsonFile(filePath, value) {
-  assertOwnedMutation(filePath);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
 
-function sleepMs(ms) {
-  const buffer = new SharedArrayBuffer(4);
-  Atomics.wait(new Int32Array(buffer), 0, 0, ms);
-}
 
-function withJsonFileLock(filePath, callback) {
-  const lockPath = `${filePath}.lock`;
-  assertOwnedMutation(filePath);
-  assertOwnedMutation(lockPath);
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    let fd = null;
-    try {
-      fd = fs.openSync(lockPath, "wx");
-      return callback();
-    } catch (error) {
-      if (!error || error.code !== "EEXIST") {
-        return callback();
-      }
-      try {
-        const stat = fs.statSync(lockPath);
-        if (Date.now() - stat.mtimeMs > 2000) {
-          fs.unlinkSync(lockPath);
-          continue;
-        }
-      } catch {
-        // Retry after transient lock-file races.
-      }
-      sleepMs(10);
-    } finally {
-      if (fd !== null) {
-        try {
-          fs.closeSync(fd);
-        } catch {
-          // Ignore close failures; the lock file cleanup below is decisive.
-        }
-        try {
-          fs.unlinkSync(lockPath);
-        } catch {
-          // A stale lock is handled by the next caller.
-        }
-      }
-    }
-  }
-  return callback();
-}
 
 function firstNonEmpty(...values) {
   for (const value of values) {
@@ -179,6 +116,8 @@ function inputSessionId(platform, input) {
   return "";
 }
 
+
+
 function reminderText(hook) {
   try {
     const data = JSON.parse(fs.readFileSync(new URL("./reminder_texts.json", import.meta.url), "utf8"));
@@ -186,13 +125,6 @@ function reminderText(hook) {
   } catch {
     return "";
   }
-}
-
-function messageFor(hook) {
-  if (hook !== "tool-checkpoint") {
-    return "";
-  }
-  return reminderText("tool-checkpoint") || "tool-checkpoint: emit a [tool-checkpoint] block (intent, why).";
 }
 
 function emit(payload) {
@@ -220,55 +152,14 @@ function payloadFor(platform, event, message) {
     : { continue: true };
 }
 
-function readJsonLine(line) {
-  try {
-    const row = JSON.parse(line);
-    return row && typeof row === "object" ? row : null;
-  } catch {
-    return null;
-  }
-}
 
-function sha256Text(value) {
-  return `sha256:${crypto.createHash("sha256").update(String(value), "utf8").digest("hex")}`;
-}
 
-function latestTranscriptUserDigest(transcriptPath) {
-  const filePath = String(transcriptPath || "").trim();
-  if (!filePath) {
-    return "";
-  }
-  let lines = [];
-  try {
-    lines = fs.readFileSync(filePath, "utf8").trim().split(/\r?\n/u).filter(Boolean);
-  } catch {
-    return "";
-  }
-  for (let index = lines.length - 1; index >= 0; index -= 1) {
-    const row = readJsonLine(lines[index]);
-    if (!row) {
-      continue;
-    }
-    const message = row.message && typeof row.message === "object" ? row.message : {};
-    const role = firstNonEmpty(row.role, message.role);
-    const type = firstNonEmpty(row.type);
-    if (role !== "user" && type !== "user") {
-      continue;
-    }
-    const content = message.content ?? row.content;
-    if (Array.isArray(content) && content.some((item) => item && typeof item === "object" && item.type === "tool_result")) {
-      continue;
-    }
-    return sha256Text(lines[index]);
-  }
-  return "";
-}
 
 function taskRouterReleaseMessage(sessionId, statePath) {
   return [
     reminderText("task-router"),
     `intake-ready: current input recorded for session ${sessionId}.`,
-    `Normal route only: use session_intent_ledger.py --read-state --root ${JSON.stringify(path.dirname(path.dirname(path.dirname(statePath))))} --platform ${JSON.stringify(path.basename(path.dirname(path.dirname(statePath))))} --session-id ${JSON.stringify(sessionId)}. Read SQLite; ${statePath} is a compatibility export.`,
+    `Normal route only: use session_intent_ledger.py --read-intent --root ${JSON.stringify(path.dirname(path.dirname(path.dirname(statePath))))} --platform ${JSON.stringify(path.basename(path.dirname(path.dirname(statePath))))} --session-id ${JSON.stringify(sessionId)}. Read SQLite; ${statePath} is a compatibility export.`,
   ].join("\n");
 }
 
@@ -289,63 +180,8 @@ function taskRouterReminderMessage(platform, input, root = "") {
   return taskRouterReleaseMessage(sessionId, path.join(sessionDirPath, "intent-state.json"));
 }
 
-function toolCheckpointSurfaceStatePath() {
-  return path.join(ghostRoot(), "hooks", "tool-checkpoint-surface-state.json");
-}
 
-function toolCheckpointSurfaceLineage(platform, input, root = "") {
-  const sessionId = inputSessionId(platform, input);
-  if (!sessionId || sessionId === "unknown") {
-    return null;
-  }
-  const safePlatform = platform;
-  const snapshot = readSessionIntentSnapshot(sessionIntentDir(platform, sessionId, root), platform, sessionId);
-  const latestEvent = snapshot?.latestInput;
-  const eventId = firstNonEmpty(latestEvent?.event_id);
-  const inputDigest = firstNonEmpty(latestEvent?.input_digest);
-  if (eventId || inputDigest) {
-    return {
-      scope: `${safePlatform}:${sessionId}`,
-      key: `${safePlatform}:${sessionId}:intent:${eventId}:${inputDigest}`,
-    };
-  }
-  if (snapshot?.degraded || snapshot?.lineageSource === "state") return null;
-  if (safePlatform === "claude") {
-    const transcriptDigest = latestTranscriptUserDigest(firstNonEmpty(input.transcript_path, input.transcriptPath));
-    return {
-      scope: `${safePlatform}:${sessionId}`,
-      key: `${safePlatform}:${sessionId}:fallback:${transcriptDigest || "session"}`,
-    };
-  }
-  return null;
-}
 
-function shouldSurfaceToolCheckpoint(platform, input, root = "") {
-  const lineage = toolCheckpointSurfaceLineage(platform, input, root);
-  if (!lineage) {
-    return true;
-  }
-  const statePath = toolCheckpointSurfaceStatePath();
-  return withJsonFileLock(statePath, () => {
-    const state = readJsonFile(statePath, {});
-    const surfaces = state && typeof state.surfaces === "object" && state.surfaces
-      ? state.surfaces
-      : {};
-    const current = surfaces[lineage.scope];
-    if (current && current.lineage_key === lineage.key) {
-      return false;
-    }
-    surfaces[lineage.scope] = {
-      lineage_key: lineage.key,
-      updated_at: new Date().toISOString(),
-    };
-    writeJsonFile(statePath, {
-      schema_version: "tool-checkpoint-surface.v1",
-      surfaces,
-    });
-    return true;
-  });
-}
 
 try {
   const args = parseArgs(process.argv.slice(2));
@@ -356,14 +192,13 @@ try {
   const marker = args.marker ? `${args.marker}: ` : "";
   const body = hook === "hook-reminder"
     ? taskRouterReminderMessage(platform, input, args["session-intent-root"])
-    : messageFor(hook);
+    : "";
   const message = body ? `${marker}${body}` : "";
 
   if (hook === "tool-checkpoint" && (event === "BeforeTool" || event === "PreToolUse")) {
-    const surfaceMessage = shouldSurfaceToolCheckpoint(platform, input, args["session-intent-root"])
-      ? message
-      : "";
-    emit(payloadFor(platform, event, surfaceMessage));
+    // The registered wrapper checks and audits every call. A healthy checkpoint
+    // contributes no instruction context; decision-relevant failures come from it.
+    emit(payloadFor(platform, event, ""));
     process.exit(0);
   }
 

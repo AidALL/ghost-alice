@@ -79,57 +79,13 @@ EOF
 }
 
 update_source_checkout() {
-  if ! command -v git >/dev/null 2>&1; then
-    error "$(t 'git not found; cannot update source checkout' 'git not found; cannot update source checkout')"
+  local py
+  py="$(_find_python_runtime || true)"
+  if [ -z "$py" ]; then
+    error "$(t 'Python 3.11+ is required for coordinated source update.' 'Python 3.11+ is required for coordinated source update.')"
     return 1
   fi
-
-  if ! git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    error "$(t 'source is not a git worktree; cannot update source checkout' 'source is not a git worktree; cannot update source checkout')"
-    return 1
-  fi
-
-  local branch upstream status_output stash_created stash_message stash_ref
-  branch="$(git -C "$SCRIPT_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || printf '%s' 'DETACHED')"
-  upstream="$(git -C "$SCRIPT_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
-  if [ -z "$upstream" ]; then
-    error "$(t "source branch has no upstream; cannot update automatically: ${branch}" "source branch has no upstream; cannot update automatically: ${branch}")"
-    error "$(t 'Inspect git remote -v and git branch --set-upstream-to first.' 'Inspect git remote -v and git branch --set-upstream-to first.')"
-    return 1
-  fi
-
-  info "$(t "Source update: branch=${branch}, upstream=${upstream}" "Source update: branch=${branch}, upstream=${upstream}")"
-
-  status_output="$(git -C "$SCRIPT_DIR" status --porcelain=v1 --untracked-files=all)"
-  stash_created=0
-  stash_ref=""
-  if [ -n "$status_output" ]; then
-    stash_message="ghost-alice source update backup $(date +%Y%m%d-%H%M%S)"
-    info "$(t 'Saving source local changes in git stash.' 'Saving source local changes in git stash.')"
-    if ! git -C "$SCRIPT_DIR" stash push -u -m "$stash_message" -- . >/dev/null; then
-      error "$(t 'Could not stash source local changes; aborting update.' 'Could not stash source local changes; aborting update.')"
-      return 1
-    fi
-    stash_created=1
-    stash_ref="$(git -C "$SCRIPT_DIR" stash list --format='%gd' | sed -n '1p')"
-    [ -z "$stash_ref" ] && stash_ref="stash@{0}"
-    warn "$(t "Source local changes saved in git stash: ${stash_ref}" "Source local changes saved in git stash: ${stash_ref}")"
-    warn "$(t "Review: git -C \"${SCRIPT_DIR}\" stash show -p ${stash_ref}" "Review: git -C \"${SCRIPT_DIR}\" stash show -p ${stash_ref}")"
-    warn "$(t "Reapply only if intentional: git -C \"${SCRIPT_DIR}\" stash pop ${stash_ref}" "Reapply only if intentional: git -C \"${SCRIPT_DIR}\" stash pop ${stash_ref}")"
-  fi
-
-  if ! git -C "$SCRIPT_DIR" pull --ff-only; then
-    error "$(t 'Source checkout fast-forward update failed.' 'Source checkout fast-forward update failed.')"
-    if [ "$stash_created" = "1" ]; then
-      warn "$(t "Local changes remain saved in ${stash_ref}." "Local changes remain saved in ${stash_ref}.")"
-    fi
-    return 1
-  fi
-
-  ok "$(t 'Source checkout updated. Now rerun the installer: bash install.sh' 'Source checkout updated. Now rerun the installer: bash install.sh')"
-  if [ "$stash_created" = "1" ]; then
-    warn "$(t "Review saved source changes: git -C \"${SCRIPT_DIR}\" stash show -p ${stash_ref}" "Review saved source changes: git -C \"${SCRIPT_DIR}\" stash show -p ${stash_ref}")"
-  fi
+  "$py" "${SCRIPT_DIR}/_shared/installer_source_update.py" --source-dir "$SCRIPT_DIR"
 }
 
 setup_git_hooks() {

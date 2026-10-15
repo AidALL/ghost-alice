@@ -136,10 +136,37 @@ class HooksDeclareOnlyRoutineStateTests(unittest.TestCase):
         self.assertEqual(recorded["hookSpecificOutput"]["additionalContext"], recorded["systemMessage"])
         self.assertNotIn(KEY, not_recorded)
 
-    def test_web_search_first_declares_routine(self):
-        command = install_hooks._web_search_first_command(output_format="json")
-        out = subprocess.run(["bash", "-c", command], capture_output=True, text=True, check=True).stdout
-        self.assertEqual(json.loads(out).get(KEY), "routine")
+    def test_installed_intake_keeps_context_without_retired_search_notice(self):
+        import install_destination
+
+        source_shared = Path(__file__).resolve().parent
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            destination = install_destination.InstallDestination(
+                mode="normal", owned_root=str(root), platform_dir=str(root / "platform"),
+                skills_dir=str(root / "skills"), ghost_root=str(root / "ghost"),
+                ledger_root=str(root / "ledger"), project_root=str(source_shared.parent),
+                core_source_root=str(source_shared.parent), runtime_shared_dir=str(source_shared))
+            with install_destination.use(destination):
+                command = install_hooks._entry_command(
+                    install_hooks._platform_session_intent_entry("codex", "UserPromptSubmit"))
+            env = install_destination.binding_environment(destination, {
+                **os.environ, "HOME": temp, "GHOST_ALICE_AGENT_VISIBILITY": "dynamic"})
+            out = subprocess.run(
+                shlex.split(command, comments=True),
+                input=json.dumps({"session_id": "s-installed-surface", "prompt": "current"}),
+                env=env, capture_output=True, text=True, check=True).stdout
+            self.assertTrue((Path(destination.ledger_root) / "ghost-state.sqlite3").is_file())
+        payload = json.loads(out)
+        self.assertNotIn("systemMessage", payload)
+        self.assertNotIn(KEY, payload)
+        context = payload["hookSpecificOutput"]["additionalContext"]
+        receipt = json.loads(context.split("[session-intent-receipt]\n", 1)[1]
+                             .split("\n[/session-intent-receipt]", 1)[0])
+        self.assertEqual(receipt["intake_status"], "observed")
+        self.assertEqual(receipt["session_id"], "s-installed-surface")
+        self.assertEqual(Path(receipt["ledger_root"]), Path(destination.ledger_root).resolve())
+        self.assertNotIn("web-search-first", out)
 
 
 if __name__ == "__main__":

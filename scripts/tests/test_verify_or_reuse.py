@@ -17,6 +17,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from _shared.global_rule_blocks import platform_contract_text
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -31,9 +32,8 @@ FLOW = (
     "actual-mutation-authority -> observed-mutation-event -> evidence-still-valid -> "
     "decision-impact -> verify-or-reuse"
 )
-VERIFY_OR_REUSE_PRECHECK = "The current-session assistant reuses unchanged valid evidence at its original source and verification time."
-CHANGE_DEFINITION = "A route, formatting, or publication error does not prove that the underlying business result failed."
-TOOL_CHECKPOINT_FIELD_HOOK = "follows common governance rule 9"
+VERIFY_OR_REUSE_PRECHECK = "Reuse unchanged evidence at its original time and source."
+CHANGE_DEFINITION = "A recording error does not refute the business result or authorize replay."
 
 # Current scenario: an agent-authored Markdown file has agent-mediated mutation
 # authority. No mutation instruction or write event follows; a content question
@@ -520,15 +520,17 @@ class RuntimeSurfaceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
-    def test_codex_pretool_checkpoint_reminder_carries_verify_or_reuse_field(self) -> None:
+    def test_healthy_codex_checkpoint_keeps_shared_contract_out_of_tool_context(self) -> None:
         payload = self._run_pretool("codex")
         context = payload.get("hookSpecificOutput", {}).get("additionalContext", "")
-        self.assertIn(TOOL_CHECKPOINT_FIELD_HOOK, context)
+        self.assertEqual(context, '')
         self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
+        port = platform_contract_text(REPO_ROOT / 'platforms/codex/AGENTS.md')
+        self.assertIn(VERIFY_OR_REUSE_PRECHECK, port)
 
     def test_claude_pretool_allow_carries_no_context_so_rule_blocks_carry_the_contract(self) -> None:
         self.assertEqual(self._run_pretool("claude"), {})
-        port = " ".join((REPO_ROOT / "platforms" / "claude" / "CLAUDE.md").read_text(encoding="utf-8").split())
+        port = " ".join(platform_contract_text(REPO_ROOT / "platforms/claude/CLAUDE.md").split())
         self.assertIn(VERIFY_OR_REUSE_PRECHECK, port)
 
     def _merge(self, command: str, source: Path, dest: Path) -> str:

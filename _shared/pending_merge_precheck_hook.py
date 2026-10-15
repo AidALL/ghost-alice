@@ -68,7 +68,7 @@ def _pending_line(platform: str, count: int) -> str:
     return (
         f"merge-companion precheck: ~/.ghost-alice/pending-merges/{platform}/manifest.json "
         f"has {count} undecided entr{'y' if count == 1 else 'ies'}. "
-        "Surface merge-companion first; a user-explicit defer/skip may continue with the entry still undecided."
+        "Apply merge-companion before changing affected skills or when the user requests backup review. Unrelated read-only work may continue; an explicit defer leaves entries undecided."
     )
 
 
@@ -194,18 +194,29 @@ def _text_payload(platform: str, hook: HookKind, context: str, internal: str, re
     return _clean_contract_line(platform)
 
 
-def _json_payload(platform: str, internal: str, result: dict | None = None) -> str:
+def _json_payload(platform: str, internal: str, result: dict | None = None, *,
+                  context: str | None = None, session_id: str | None = None) -> str:
     count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
     receipt = {"platform": platform, "manifest_path": str(_pending_manifest_path(platform)), "undecided_count": count}
     if result is not None:
         receipt.update({"status": result["status"], "checked_at": result["checked_at"]})
+    body: dict[str, Any] = {"continue": True, "ghostAlicePendingMergeCheck": receipt}
+    if context == 'prompt_submit' and result is not None and session_id and session_id != 'unknown':
+        # The model cannot reuse a precheck delivered only as a host UI notice.
+        # Return its current native binding and metadata, never manifest entries
+        # or the common procedure. SessionStart keeps its separate UI notice.
+        public = dict(receipt, session_id=session_id)
+        body['hookSpecificOutput'] = {'hookEventName': 'UserPromptSubmit',
+            'additionalContext': 'merge-companion-precheck: ' + json.dumps(public, ensure_ascii=False, separators=(',', ':'))}
     if count:
         message = (f"merge-companion precheck: pending={count} (unchanged; session check reused)."
                    if result is not None and result["status"] == "reused" else _pending_line(platform, count))
-        return json.dumps({"continue": True, "systemMessage": message, "ghostAlicePendingMergeCheck": receipt}, ensure_ascii=False)
+        body['systemMessage'] = message
+        return json.dumps(body, ensure_ascii=False)
     message = _clean_contract_line(platform)
     # A clean pass is routine: the hook runner keeps it off the user screen and in the strict log.
-    return json.dumps({"continue": True, "systemMessage": message, "ghostAliceSurface": "routine", "ghostAlicePendingMergeCheck": receipt}, ensure_ascii=False)
+    body.update(systemMessage=message, ghostAliceSurface='routine')
+    return json.dumps(body, ensure_ascii=False)
 
 
 def main() -> int:
@@ -226,6 +237,7 @@ def main() -> int:
             print(visibility_payload)
             return 0
     result = None
+    session_id = bound_session_identity(args.platform, input_payload)
     if args.root is not None:
         session_id = bound_session_identity(args.platform, input_payload) or "unknown"
         # Cache only normalized check metadata, not backup contents or raw manifest entries.
@@ -241,7 +253,7 @@ def main() -> int:
             print(reason, file=sys.stderr)
             return 2
     if args.format == "json":
-        print(_json_payload(args.platform, internal, result))
+        print(_json_payload(args.platform, internal, result, context=args.context, session_id=session_id))
     else:
         print(_text_payload(args.platform, args.hook, args.context, internal, result))
     return 0

@@ -87,7 +87,7 @@ task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 �
 
 ## Runtime Checkpoints
 
-정상 경로의 첫 gate-state와 경로 출력 형식은 [task-router](../../../task-router/SKILL.md#routing-records)가 담당합니다. 현재 세션 어시스턴트는 새로 읽거나 유효하게 보관한 스킬 본문을 사용하고 실제 절차를 수행한 뒤에만 호출을 기록합니다. 메타데이터 일치는 실행이 아닙니다.
+정상 경로의 첫 gate-state와 경로 출력 형식은 [task-router](../../../task-router/SKILL.md#referenced-contracts)가 담당합니다. 현재 세션 어시스턴트는 새로 읽거나 유효하게 보관한 스킬 본문을 사용하고 실제 절차를 수행한 뒤에만 호출을 기록합니다. 메타데이터 일치는 실행이 아닙니다.
 
 [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md#completion-check-format)은 공통 completion-check·partial-check 형식과 기준·주장·근거 대응을 담당합니다. Core는 현재 소유 경로에 연결된 주장·원본 자료·응답 전체의 검토를 인증하여 완료 제출을 수락합니다. 스킬 로드는 절차 안내와 감사 활동이며 별도의 완료 선행 조건이 아닙니다. 최종 완료에는 미검증 기준 없이 근거가 지원하는 판정이 필요합니다. 부분 성공은 전체 계약과 미해결 기준을 유지하며 성공한 일부를 전체 완료로 제시하지 않습니다.
 
@@ -117,7 +117,7 @@ Continuation은 같은 process/session/tool-call ID의 출력을 기다리는 �
 
 새 완료 또는 부분 완료 제출에서 Core Python 코드는 증거 형식과 인증된 의미 검토보다 현재 소유 경로를 먼저 확인합니다. 따라서 경로가 없으면 증거 필드 수정을 요구하기 전에 경로 오류를 반환합니다.
 
-이 조건에서는 응답 모델이 [담당 검토 절차](../../../coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review)에 따라 두 판단을 기록합니다. [아키텍처 전달 표](../../../architecture_ko.md#2-답변과-원본-출처를-core에-전달)는 호출 주체·입력·반환을 설명하고, [출력 의미](tool-output-semantics.md#completion-recording-and-delivery)는 지원·미지원 결과를 구분합니다.
+이 조건에서는 응답 모델이 [담당 검토 절차](../../../coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review)에 따라 두 판단을 기록합니다. [Core 응답 흐름](../../../architecture_ko.md#근거와-네이티브-표시)은 인증과 네이티브 답변 전달을 설명하며, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 지원·미지원 결과를 구분합니다.
 
 등록된 관리 훅은 v2의 작업 단위별 승인 기준을 사용하고 직접 공개 API는 v1 기본값을 유지합니다. 소스 API·실행 모듈·원장·프로젝트·설치 스킬·플랫폼 상태는 별도의 위치 연결을 유지합니다. 일반 업데이트는 원장 권위를 보존하며 전송 방식이 origin·세션·접수·승인을 부여하지 않습니다.
 
@@ -129,7 +129,7 @@ Core는 task-router를 따르는 모델이 제출한 현재 응답 경로를 검
 
 구체적인 경로·증거·기록 오류는 아래의 담당 절차로 돌아갑니다. 모델은 목적이나 필수 의존 관계에 필요하고 권한 안에 있을 때만 수정을 선택합니다. 지원되지 않는 주장은 수정·철회하며 필수 미해결 기준은 미충족 상태로 남습니다. 동일한 기록 실패가 반복되면 의존 적용을 보류하되 업무를 재실행하거나 독립적인 승인 작업을 막지 않습니다.
 
-[검토·전달 절차](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)가 호출 순서와 정정 답변의 형태를 담당합니다. [출력 의미](tool-output-semantics.md#completion-recording-and-delivery)는 반환 선택 값을 정의합니다. Core의 과거 결과 보고 경로는 원본 적용 근거가 정확한 문장 전체를 뒷받침할 때만 적용하며, 추가 문구나 더 넓은 주장에는 별도 검토가 필요합니다.
+[검토·전달 절차](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)가 호출 순서와 정정 답변의 형태를 담당합니다. [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 선택 값을 정의합니다. Core의 과거 결과 보고 경로는 원본 적용 근거가 정확한 문장 전체를 뒷받침할 때만 적용하며, 추가 문구나 더 넓은 주장에는 별도 검토가 필요합니다.
 
 ## Repair and authority conditions
 

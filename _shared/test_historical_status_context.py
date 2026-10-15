@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from test_completion_skill_evidence import assert_stop_observation
 
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
@@ -22,9 +23,11 @@ class ExplicitControlRouteBindingTests(unittest.TestCase):
             transcript.write_text("".join(json.dumps(entry, ensure_ascii=False) + "\n" for entry in entries), encoding="utf-8")
             result = subprocess.run(
                 [sys.executable, "-B", str(HOOK), "--platform", platform],
-                input=json.dumps({"transcript_path": str(transcript)}), text=True,
+                input=json.dumps({"session_id": "fixture-stop", "last_assistant_message": text,
+                                  "transcript_path": str(transcript)}), text=True,
                 capture_output=True, check=True,
-                env={key: value for key, value in os.environ.items() if key != "CLAUDE_CODE_ENTRYPOINT"},
+                env={key: value for key, value in os.environ.items()
+                     if not key.startswith(('GHOST_ALICE_', 'CODEX_', 'CLAUDE_'))},
             )
         return json.loads(result.stdout)
 
@@ -33,7 +36,8 @@ class ExplicitControlRouteBindingTests(unittest.TestCase):
         text = "[partial-check]\n- scope: partial\n- unverified:\n  - pending: evidence missing"
         for platform in ("codex", "claude"):
             with self.subTest(platform=platform):
-                self.assertEqual(self.run_hook(text, platform).get("decision"), "block")
+                assert_stop_observation(self, self.run_hook(text, platform),
+                                        issue='response-route', repair_target='response_route')
 
 
 if __name__ == "__main__":

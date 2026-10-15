@@ -212,6 +212,8 @@ Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code works
 
 The installer requires Python 3.11 or newer. If Python 3.11+ is missing, it attempts automatic preparation where possible.
 
+The optional macOS native context gateway requires Python 3.14 or newer with `compression.zstd`. Its installer checks that capability before changing component files, the launch agent, or the Codex provider. This component requirement does not change the Core installer and hook minimum of Python 3.11. If Codex `config.toml` is a symlink, gateway installation and affected removal stop before changing the service and preserve the link and its target. Gateway installation also refuses symlinked launch-agent, component, companion, state, and ownership-file entries before service changes, preserving both links and targets. Refresh preserves edited provider blocks and launch agents by checking the prior installation binding before changes. Component replacement uses only the file digests in the authenticated installation receipt; the obsolete separate `installed-files.json` is neither read nor generated and is removed after a successful installation or refresh. Existing gateway state also requires authenticated registration and unchanged state proof, even when provider markers or the launch agent are absent. Without that ownership, installation preserves the state directory and stops; use an empty destination for a new installation or review the retained installation binding. If a first installation fails and the candidate service is confirmed stopped, rollback removes that attempt's new state artifacts so a new attempt can proceed. An uncertain stop or concurrent artifact change preserves recovery material for review.
+
 - macOS: if Homebrew is available, `brew install python3`
 - Linux / WSL: available package managers such as `apt-get`, `dnf`, `yum`, or `pacman`
 - Windows: `winget`, `choco`, then `scoop`
@@ -237,6 +239,23 @@ Claude Code and Codex hook-enabled installs require a resolvable Node.js runtime
 Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are installer-managed runtime surfaces, so rerun the installer when they change.
 
 Installation on disk and adoption by a running host are separate. After a hook command changes, confirm its native trust entry and observe a subsequent native callback; use the host's reload or full restart controls if it retains the previous registration. See [native hook trust and reload](./troubleshooting.md#native-hook-trust-and-reload). Do not repeat unchanged business verification to check host adoption.
+
+### Core and optional Autopilot transitions
+
+Core installation and addon removal are separate operations. A fresh Core installation supplies the instructions, input/source bindings, work and review records, and Core hooks. It does not register Autopilot continuation. Updating Core without an addon option preserves an already installed addon; `--addon-skip` skips addon installation and does not request its removal.
+
+| Operation | Example for Codex | Managed scope |
+| --- | --- | --- |
+| Fresh Core install or Core update | `bash install.sh --platform codex` | Core; preserve existing addon files and registrations on update |
+| Add or update Autopilot | `bash install.sh --platform codex --addon autopilot` | Core plus manifest-selected addon skill and privileged adapters |
+| Remove Autopilot while retaining Core | `bash install.sh --platform codex --uninstall --addon autopilot-mode` | Detach recorded addon/adapter hooks before removing verified addon targets |
+| Remove one platform | `bash install.sh --platform codex --uninstall` | That platform's addons and Core; retain shared assets needed by other installed platforms |
+
+Core authenticates the model's recommended follow-up work independently of Autopilot. Only the optional approved continuation path requests another host invocation. Removing Autopilot retains Core records and does not turn unmet criteria into completed criteria. Per-addon removal keeps modified files and its sidecar/removal marker for review or retry, while detaching its managed executable registrations. This is a configuration/file operation; ongoing-host adoption and cancellation of already delivered work are separate observations.
+
+Full/platform removal archives pending merge originals and last-platform installation recovery copies under unique `~/.ghost-alice/uninstall-backup/<platform>/support-state/` directories. It keeps previous archives, source checkouts, conversation/session evidence, intent ledgers, audit traces and secrets. See [uninstall cleanup](./uninstall.md) for ownership and shared-file rules.
+
+For Claude, the installer records which manifest-selected addon `Skill(...)` grants it actually added in `~/.ghost-alice/addon-permissions/claude.json`. Addon removal clears one owned occurrence and preserves preexisting grants and extra user occurrences. A legacy grant without ownership evidence requires manual review. For Codex, addon removal clears unchanged owned hook trust hashes and moves surviving Core/user trust tables with their hook positions, preserving their metadata. A trust collision or configuration write failure prevents successful file removal; see [uninstall cleanup](./uninstall.md).
 
 ### Installed Surfaces
 

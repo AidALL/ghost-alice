@@ -240,268 +240,173 @@ def _write_target_progress_event(
         return
 
 
-def staged_copy_replace(
-    source: Path | str,
-    dest: Path | str,
-    *,
-    rollback_root: Path | str | None = None,
-    event_log: Path | str | None = None,
-    rollback_keep: int = DEFAULT_ROLLBACK_KEEP,
-) -> None:
-    """Copy source to a complete stage, then swap it into dest.
+class ReplacementBatch:
+    """Reversible filesystem participant; its caller owns service recovery."""
+    def __init__(self, targets, *, rollback_root=None, rollback_keep=DEFAULT_ROLLBACK_KEEP,
+                 progress_callback=None, progress_event_file=None, progress_events=None):
+        self.targets = [(Path(src), Path(dst), mode) for src, dst, mode in targets]
+        self.root = Path(rollback_root) if rollback_root is not None else self.targets[0][1].parent / '.ghost-alice-install-rollbacks'
+        self.keep = rollback_keep
+        self.callback, self.event_file, self.events = progress_callback, progress_event_file, progress_events
+        if self.events is not None and len(self.events) != len(self.targets):
+            raise InstallTransactionError('progress event count must match target count')
+        self.prepared, self.phase = [], 'prepare'
+        self.source, self.dest = self.targets[0][:2]
 
-    Existing dest is untouched until source has been fully copied to stage.
-    If the install move fails after dest was moved aside, this best-effort
-    restores the previous dest before raising.
-    """
-
-    src = Path(source)
-    dst = Path(dest)
-    root = Path(rollback_root) if rollback_root is not None else dst.parent / ".ghost-alice-install-rollbacks"
-    event_log_path = Path(event_log) if event_log is not None else None
-    stage_root = dst.parent / ".ghost-alice-install-staging"
-    stage = _unique_path(stage_root, "stage", dst.name)
-    rollback = _unique_path(root, "rollback", dst.name)
-    phase = "prepare"
-
-    try:
-        stage_root.mkdir(parents=True, exist_ok=True)
-        root.mkdir(parents=True, exist_ok=True)
-        phase = "stage-copy"
-        _copy_to_stage(src, stage)
-        phase = "stage-verify"
-        _verify_staged_copy(src, stage)
-
-        moved_existing = False
+    @staticmethod
+    def identity(path):
         try:
-            phase = "publish"
-            if dst.exists() or dst.is_symlink():
-                rollback.parent.mkdir(parents=True, exist_ok=True)
-                _rename_path(dst, rollback)
-                moved_existing = True
-            _rename_path(stage, dst)
-            _prune_rollback_root(root, rollback_keep)
-        except OSError as exc:
-            if moved_existing and not (dst.exists() or dst.is_symlink()) and (rollback.exists() or rollback.is_symlink()):
-                try:
-                    _rename_path(rollback, dst)
-                except OSError as rollback_exc:
-                    phase = "rollback"
-                    raise InstallTransactionError(
-                        f"install move failed and rollback restore failed for {dst}"
-                    ) from rollback_exc
-            raise InstallTransactionError(f"install move failed for {dst}") from exc
-    except InstallTransactionError as exc:
-        _write_failure_event(event_log_path, source=src, dest=dst, phase=phase, error=str(exc))
-        raise
-    except OSError as exc:
-        wrapped = InstallTransactionError(f"staged copy replace failed for {dst}")
-        _write_failure_event(event_log_path, source=src, dest=dst, phase=phase, error=str(wrapped))
-        raise wrapped from exc
-    finally:
-        if stage.exists() or stage.is_symlink():
-            try:
-                _remove_path(stage)
-            except OSError:
-                pass
+            info = path.lstat()
+            return info.st_dev, info.st_ino, info.st_mode, _tree_fingerprint(path)
+        except FileNotFoundError:
+            return None
 
+    @property
+    def mappings(self):
+        return tuple((item['stage'], item['dest']) for item in self.prepared)
 
-def staged_symlink_replace(
-    source: Path | str,
-    dest: Path | str,
-    *,
-    rollback_root: Path | str | None = None,
-    event_log: Path | str | None = None,
-    rollback_keep: int = DEFAULT_ROLLBACK_KEEP,
-) -> None:
-    """Create a symlink dest -> source atomically.
+    @property
+    def destinations(self):
+        return tuple(dst for _, dst, _ in self.targets)
 
-    The existing dest is renamed aside into the rollback root before the staged
-    symlink is moved into place, and restored if the publish fails. The previous
-    dest is never removed without a rollback copy.
-    """
-    src = Path(source)
-    dst = Path(dest)
-    root = Path(rollback_root) if rollback_root is not None else dst.parent / ".ghost-alice-install-rollbacks"
-    event_log_path = Path(event_log) if event_log is not None else None
-    stage_root = dst.parent / ".ghost-alice-install-staging"
-    stage = _unique_path(stage_root, "stage", dst.name)
-    rollback = _unique_path(root, "rollback", dst.name)
-    phase = "prepare"
+    @property
+    def recovery_reference(self):
+        return str(self.root)
 
-    try:
-        stage_root.mkdir(parents=True, exist_ok=True)
-        root.mkdir(parents=True, exist_ok=True)
-        phase = "stage-symlink"
-        _create_directory_link(src, stage)
-
-        moved_existing = False
-        try:
-            phase = "publish"
-            if dst.exists() or dst.is_symlink():
-                rollback.parent.mkdir(parents=True, exist_ok=True)
-                _rename_path(dst, rollback)
-                moved_existing = True
-            _rename_path(stage, dst)
-            _prune_rollback_root(root, rollback_keep)
-        except OSError as exc:
-            if moved_existing and not (dst.exists() or dst.is_symlink()) and (rollback.exists() or rollback.is_symlink()):
-                try:
-                    _rename_path(rollback, dst)
-                except OSError as rollback_exc:
-                    phase = "rollback"
-                    raise InstallTransactionError(
-                        f"symlink install failed and rollback restore failed for {dst}"
-                    ) from rollback_exc
-            raise InstallTransactionError(f"symlink install move failed for {dst}") from exc
-    except InstallTransactionError as exc:
-        _write_failure_event(event_log_path, source=src, dest=dst, phase=phase, error=str(exc))
-        raise
-    except OSError as exc:
-        wrapped = InstallTransactionError(f"staged symlink replace failed for {dst}")
-        _write_failure_event(event_log_path, source=src, dest=dst, phase=phase, error=str(wrapped))
-        raise wrapped from exc
-    finally:
-        if stage.is_symlink() or stage.exists():
-            try:
-                _remove_path(stage)
-            except OSError:
-                pass
-
-
-def staged_copy_replace_many(
-    targets: Sequence[tuple[Path | str, Path | str]],
-    *,
-    rollback_root: Path | str | None = None,
-    event_log: Path | str | None = None,
-    progress_callback: Callable[[int, int], None] | None = None,
-    progress_event_file: Path | str | None = None,
-    progress_events: Sequence[dict[str, str]] | None = None,
-    rollback_keep: int = DEFAULT_ROLLBACK_KEEP,
-) -> None:
-    """Stage every target first, then publish them as one install batch."""
-
-    normalized = [(Path(source), Path(dest)) for source, dest in targets]
-    if not normalized:
-        return
-    if progress_events is not None and len(progress_events) != len(normalized):
-        raise InstallTransactionError("progress event count must match target count")
-
-    root = Path(rollback_root) if rollback_root is not None else normalized[0][1].parent / ".ghost-alice-install-rollbacks"
-    event_log_path = Path(event_log) if event_log is not None else None
-    progress_event_path = Path(progress_event_file) if progress_event_file is not None else None
-    prepared: list[dict[str, Path | bool]] = []
-    phase = "prepare"
-    event_source, event_dest = normalized[0]
-
-    def rollback_prepared() -> None:
-        rollback_error: OSError | None = None
-        for item in reversed(prepared):
-            dst = item["dest"]
-            stage = item["stage"]
-            rollback = item["rollback"]
-            if not isinstance(dst, Path) or not isinstance(stage, Path) or not isinstance(rollback, Path):
-                continue
-            try:
-                if item["published_new"] and (dst.exists() or dst.is_symlink()):
-                    _remove_path(dst)
-                if item["moved_existing"] and (rollback.exists() or rollback.is_symlink()):
-                    if dst.exists() or dst.is_symlink():
-                        raise OSError(f"destination still exists during rollback: {dst}")
-                    _rename_path(rollback, dst)
-            except OSError as exc:
-                if rollback_error is None:
-                    rollback_error = exc
-        if rollback_error is not None:
-            raise InstallTransactionError("multi-target rollback restore failed") from rollback_error
-
-    try:
-        root.mkdir(parents=True, exist_ok=True)
-        for src, dst in normalized:
-            event_source, event_dest = src, dst
-            phase = "prepare"
-            stage_root = dst.parent / ".ghost-alice-install-staging"
-            stage = _unique_path(stage_root, "stage", dst.name)
-            rollback = _unique_path(root, "rollback", dst.name)
+    def stage(self):
+        for src, dst, mode in self.targets:
+            self.source, self.dest = src, dst
+            stage_root = dst.parent / '.ghost-alice-install-staging'
+            stage = _unique_path(stage_root, 'stage', dst.name)
+            item = dict(source=src, dest=dst, stage=stage, mode=mode,
+                rollback=_unique_path(self.root, 'rollback', dst.name),
+                before=self.identity(dst), moved=False, attempted=False, after=None)
+            self.prepared.append(item)
             stage_root.mkdir(parents=True, exist_ok=True)
-            prepared.append(
-                {
-                    "source": src,
-                    "dest": dst,
-                    "stage": stage,
-                    "rollback": rollback,
-                    "moved_existing": False,
-                    "published_new": False,
-                }
-            )
-            phase = "stage-copy"
-            _copy_to_stage(src, stage)
-            phase = "stage-verify"
-            _verify_staged_copy(src, stage)
+            try:
+                if mode == 'symlink':
+                    self.phase = 'stage-symlink'
+                    _create_directory_link(src, stage)
+                else:
+                    self.phase = 'stage-copy'
+                    _copy_to_stage(src, stage)
+                    self.phase = 'stage-verify'
+                    _verify_staged_copy(src, stage)
+            finally:
+                item['candidate'] = self.identity(stage)
 
-        phase = "publish"
-        published_count = 0
-        total_count = len(prepared)
-        for item in prepared:
-            src = item["source"]
-            dst = item["dest"]
-            stage = item["stage"]
-            rollback = item["rollback"]
-            if not isinstance(src, Path) or not isinstance(dst, Path) or not isinstance(stage, Path) or not isinstance(rollback, Path):
-                raise InstallTransactionError("invalid staged copy target")
-            event_source, event_dest = src, dst
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            if dst.exists() or dst.is_symlink():
-                rollback.parent.mkdir(parents=True, exist_ok=True)
-                _rename_path(dst, rollback)
-                item["moved_existing"] = True
-            _rename_path(stage, dst)
-            item["published_new"] = True
-            published_count += 1
-            if progress_events is not None:
-                progress_event = progress_events[published_count - 1]
-                _write_target_progress_event(
-                    progress_event_path,
-                    platform=progress_event["platform"],
-                    target_id=progress_event["target_id"],
-                    target_kind=progress_event["target_kind"],
-                    status=progress_event["status"],
-                )
-            if progress_callback is not None:
-                progress_callback(published_count, total_count)
-        _prune_rollback_root(root, rollback_keep)
-    except InstallTransactionError as exc:
-        if phase == "publish":
+    def publish(self):
+        self.phase = 'publish'
+        for item in self.prepared:
+            if self.identity(item['dest']) != item['before'] or self.identity(item['stage']) != item['candidate']:
+                raise InstallTransactionError('Concurrent target/stage change prevents install publish')
+        for index, item in enumerate(self.prepared, 1):
+            self.source, self.dest = item['source'], item['dest']
+            self.dest.parent.mkdir(parents=True, exist_ok=True)
+            item['attempted'] = True
             try:
-                rollback_prepared()
-            except InstallTransactionError as rollback_exc:
-                phase = "rollback"
-                exc = InstallTransactionError(f"install move failed and rollback restore failed for {event_dest}")
-                _write_failure_event(event_log_path, source=event_source, dest=event_dest, phase=phase, error=str(exc))
-                raise exc from rollback_exc
-        _write_failure_event(event_log_path, source=event_source, dest=event_dest, phase=phase, error=str(exc))
-        raise
-    except OSError as exc:
-        if phase == "publish":
-            try:
-                rollback_prepared()
-            except InstallTransactionError as rollback_exc:
-                wrapped = InstallTransactionError(f"install move failed and rollback restore failed for {event_dest}")
-                _write_failure_event(event_log_path, source=event_source, dest=event_dest, phase="rollback", error=str(wrapped))
-                raise wrapped from rollback_exc
-            wrapped = InstallTransactionError(f"install move failed for {event_dest}")
-        else:
-            wrapped = InstallTransactionError(f"staged copy replace failed for {event_dest}")
-        _write_failure_event(event_log_path, source=event_source, dest=event_dest, phase=phase, error=str(wrapped))
-        raise wrapped from exc
-    finally:
-        for item in prepared:
-            stage = item["stage"]
-            if isinstance(stage, Path) and (stage.exists() or stage.is_symlink()):
+                if item['before'] is not None:
+                    item['rollback'].parent.mkdir(parents=True, exist_ok=True)
+                    _rename_path(self.dest, item['rollback'])
+                    item['moved'] = True
+                _rename_path(item['stage'], self.dest)
+            finally:
+                current = self.identity(self.dest)
+                item['moved'] = self.identity(item['rollback']) == item['before'] if item['before'] is not None else False
+                # Only a moved stage or a missing partially published target
+                # is our output. Never adopt a concurrent replacement.
+                item['after'] = item['candidate'] if current is not None else None
+            if self.events is not None:
+                event = self.events[index - 1]
+                _write_target_progress_event(Path(self.event_file) if self.event_file else None,
+                    platform=event['platform'], target_id=event['target_id'], target_kind=event['target_kind'], status=event['status'])
+            if self.callback:
+                self.callback(index, len(self.prepared))
+
+    def restore(self):
+        self.phase = 'rollback'
+        # Validate the complete set before deleting any published candidate.
+        for item in self.prepared:
+            current = self.identity(item['dest'])
+            if current == item['before']:
+                continue
+            if current != item['after'] or (item['moved'] and self.identity(item['rollback']) != item['before']):
+                raise InstallTransactionError('Concurrent target/recovery change prevents install rollback')
+        for item in reversed(self.prepared):
+            dst = item['dest']
+            if self.identity(dst) == item['before']:
+                continue
+            if self.identity(dst) is not None:
+                _remove_path(dst)
+            if item['moved']:
+                _rename_path(item['rollback'], dst)
+            if self.identity(dst) != item['before']:
+                raise InstallTransactionError('Restored target does not match its original')
+
+    def finalize(self):
+        # Retention cleanup is performed only after the whole service/file
+        # transaction commits; never discard rollback material during recovery.
+        try:
+            _prune_rollback_root(self.root, self.keep)
+        except OSError:
+            pass
+
+    def cleanup(self):
+        for item in self.prepared:
+            stage = item['stage']
+            if stage.exists() or stage.is_symlink():
                 try:
-                    _remove_path(stage)
+                    if self.identity(stage) == item.get('candidate'):
+                        _remove_path(stage)
                 except OSError:
                     pass
+
+    def run_unmanaged(self):
+        try:
+            self.publish()
+        except Exception:
+            self.restore()
+            raise
+
+
+def _replace(targets, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP,
+             progress_callback=None, progress_event_file=None, progress_events=None):
+    if not targets:
+        return
+    batch = ReplacementBatch(targets, rollback_root=rollback_root, rollback_keep=rollback_keep,
+        progress_callback=progress_callback, progress_event_file=progress_event_file, progress_events=progress_events)
+    try:
+        batch.stage()
+        from context_gateway_install import coordinate_payload_replacement
+        coordinate_payload_replacement(batch)
+        batch.finalize()
+    except Exception as exc:
+        wrapped = exc if isinstance(exc, InstallTransactionError) else InstallTransactionError(
+            'staged replacement failed for ' + str(batch.dest) + ': ' + str(exc))
+        for name in ('code', 'exit_code', 'outcome'):
+            if hasattr(exc, name):
+                setattr(wrapped, name, getattr(exc, name))
+        wrapped.phase = getattr(exc, 'phase', batch.phase)
+        _write_failure_event(Path(event_log) if event_log is not None else None,
+            source=batch.source, dest=batch.dest, phase=wrapped.phase, error=str(wrapped))
+        raise wrapped from exc
+    finally:
+        batch.cleanup()
+
+
+def staged_copy_replace(source, dest, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP):
+    _replace([(source, dest, 'copy')], rollback_root=rollback_root, event_log=event_log, rollback_keep=rollback_keep)
+
+
+def staged_symlink_replace(source, dest, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP):
+    _replace([(source, dest, 'symlink')], rollback_root=rollback_root, event_log=event_log, rollback_keep=rollback_keep)
+
+
+def staged_copy_replace_many(targets, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP,
+        progress_callback=None, progress_event_file=None, progress_events=None):
+    _replace([(src, dst, 'copy') for src, dst in targets], rollback_root=rollback_root, event_log=event_log,
+        rollback_keep=rollback_keep, progress_callback=progress_callback,
+        progress_event_file=progress_event_file, progress_events=progress_events)
 
 
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -654,8 +559,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     except InstallTransactionError as exc:
         if getattr(args, "progress_label", None):
             sys.stdout.write("\n")
-        print(str(exc), file=sys.stderr)
-        return 1
+        if hasattr(exc, 'code'):
+            print(json.dumps(dict(status=exc.outcome, error_code=exc.code, phase=exc.phase, detail=str(exc))), file=sys.stderr)
+        else:
+            print(str(exc), file=sys.stderr)
+        return getattr(exc, 'exit_code', 1)
     return 0
 
 

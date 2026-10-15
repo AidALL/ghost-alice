@@ -30,6 +30,38 @@ def load_routes():
 
 
 class ResponseRouteTests(unittest.TestCase):
+    def test_minimal_surface_round_trips_without_invented_judgments(self):
+        self.event = self.setup_owned()
+        for mode, units, boundary in (("direct-response", (), "n/a"), ("normal", ("first",), "required")):
+            with self.subTest(mode=mode):
+                candidate = self.candidate(units=units)
+                candidate["routing_surface"] = dict(response_mode=mode, boundary_contract=boundary)
+                candidate["response_purpose"] = "explanation" if not units else "execution"
+                self.record(candidate)
+                route = self.api.read_response_route(**self.coords)
+                self.assertEqual(route["routing_surface"], candidate["routing_surface"])
+                self.assertEqual(route["selected_work_unit_ids"], list(units))
+                self.assertEqual([c["work_unit_id"] for c in route["selected_criteria"]], list(units))
+
+    def test_minimal_surface_keeps_controls_and_validates_supplied_judgments(self):
+        self.event = self.setup_owned()
+        minimal = dict(response_mode="normal", boundary_contract="required")
+        invalid = [dict(minimal, focus_layer="wide"), dict(minimal, causal_axis=None),
+                   dict(minimal, verification_complexity=[]), dict(minimal, reason=" "),
+                   dict(minimal, unexpected="value"), {"response_mode": "normal"},
+                   {"boundary_contract": "required"}, dict(minimal, response_mode="direct-response",
+                    response_order="imperative-result-first-after-necessary-work")]
+        before = ledger.read_session_state(**self.coords)
+        for surface in invalid:
+            with self.subTest(surface=surface):
+                candidate = self.candidate(); candidate["routing_surface"] = surface
+                with self.assertRaises(self.api.RouteSchemaError):
+                    self.record(candidate)
+                self.assertEqual(ledger.read_session_state(**self.coords), before)
+        candidate = self.candidate(); candidate["routing_surface"] = minimal
+        with self.assertRaisesRegex(self.api.RouteSchemaError, "boundary_ref"):
+            self.api.validate_response_route(before, candidate, None)
+
     def test_runtime_cli_uses_the_explicit_platform_installation(self):
         self.event = self.setup_owned()
         runtime = Path(self.tmp.name) / "runtime" / "_shared"
@@ -719,6 +751,102 @@ class ResponseRouteTests(unittest.TestCase):
                        (json.dumps(state), "codex", "current"))
         with self.assertRaises(self.api.RouteSchemaError):
             self.api.read_response_route(**self.coords)
+
+
+class RouteContextUpdateTests(unittest.TestCase):
+    def setUp(self):
+        import test_codex_context_updates as fixtures
+        self.updates = fixtures.CodexContextUpdateTests()
+        self.updates.setUp()
+        self.addCleanup(self.updates.doCleanups)
+        self.route = self.updates.fixture.fixture
+
+    def publish(self, choices, **extra):
+        return self.route.record(context_selection=choices, context_source=self.updates.fixture.source, **extra)
+
+    def test_required_route_can_update_second_source_without_restoring_first(self):
+        result = self.publish([self.updates.second], context_selection_mode='update')
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual(result['context_disposition']['selection_mode'], 'update')
+        self.updates.assert_both_omitted(self.updates.select())
+
+    def test_route_targeted_keep_restores_only_named_original(self):
+        self.publish([self.updates.second], context_selection_mode='update')
+        self.publish([dict(self.updates.first, disposition='keep')], context_selection_mode='update')
+        result = self.updates.select()
+        self.assertEqual(result.request['input'][2], self.updates.fixture.output)
+        self.assertEqual(result.request['input'][-1]['output'], '')
+
+    def test_route_empty_update_retains_choices_and_default_empty_refresh_clears(self):
+        self.publish([self.updates.second], context_selection_mode='update')
+        self.publish([], context_selection_mode='update')
+        self.updates.assert_both_omitted(self.updates.select())
+        self.publish([])
+        self.assertEqual(self.updates.select().request, self.updates.fixture.request)
+
+    def test_default_route_selection_still_refreshes_the_complete_selection(self):
+        self.publish([self.updates.second])
+        result = self.updates.select()
+        self.assertEqual(result.request['input'][2], self.updates.fixture.output)
+        self.assertEqual(result.request['input'][-1]['output'], '')
+
+    def test_invalid_retained_origin_rolls_back_required_route_and_content_update(self):
+        import context_lifecycle as lifecycle
+        self.updates.corrupt_retained_file_reference(lambda original: original.update(storage='unclassified-inline',
+            text=self.updates.fixture.log.read_text()), select_second=True)
+        before = ledger.read_session_state(**self.route.coords)
+        disposition_before = self.updates.current_payload()
+        candidate = self.route.candidate()
+        candidate['routing_surface']['reason'] = 'new route must roll back with rejected content update'
+        with self.assertRaises(lifecycle.ContextSelectionRejected):
+            self.publish([self.updates.second], candidate=candidate, context_selection_mode='update')
+        self.assertEqual(ledger.read_session_state(**self.route.coords), before)
+        self.assertEqual(self.updates.current_payload(), disposition_before)
+
+    def test_unknown_mode_or_update_without_selection_rejects_before_route_write(self):
+        before = ledger.read_session_state(**self.route.coords)
+        for mode in ('unsupported', None, False, []):
+            with self.subTest(mode=mode), self.assertRaises(self.route.api.RouteSchemaError):
+                self.route.record(context_selection_mode=mode)
+            self.assertEqual(ledger.read_session_state(**self.route.coords), before)
+        with self.assertRaises(self.route.api.RouteBindingError):
+            self.route.record(context_selection_mode='update')
+        self.assertEqual(ledger.read_session_state(**self.route.coords), before)
+
+    def test_claude_source_local_mode_rejects_before_any_route_write(self):
+        before = ledger.read_session_state(**self.route.coords)
+        with self.assertRaises(self.route.api.RouteBindingError):
+            self.route.api.record_response_route(root=self.route.root, platform='claude', session_id='current',
+                expected_input_event_id=self.route.event, candidate=self.route.candidate(), boundary_ref='boundary-1',
+                context_selection=[], context_selection_mode='update')
+        self.assertEqual(ledger.read_session_state(**self.route.coords), before)
+
+    def test_existing_route_cli_combines_current_work_and_source_local_update(self):
+        from contextlib import redirect_stdout
+        import io
+        from unittest.mock import patch
+        output = io.StringIO()
+        with patch.dict(os.environ, {'CODEX_THREAD_ID': 'current',
+            'GHOST_ALICE_CODEX_DIR': str(self.updates.fixture.home)}), redirect_stdout(output):
+            status = self.route.api.main(['--root', str(self.route.root), '--platform', 'codex',
+                '--session-id', 'current', '--expected-input-event-id', self.route.event,
+                '--boundary-ref', 'boundary-1', '--candidate-json', json.dumps(self.route.candidate()),
+                '--context-selection-mode', 'update', '--context-selection-json', json.dumps([self.updates.second])])
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(output.getvalue())['context_disposition']['selection_mode'], 'update')
+        self.updates.assert_both_omitted(self.updates.select())
+
+    def test_read_cli_cannot_apply_source_local_selection_mode(self):
+        from contextlib import redirect_stderr
+        import io
+        errors = io.StringIO()
+        before = ledger.read_session_state(**self.route.coords)
+        with redirect_stderr(errors):
+            status = self.route.api.main(['--root', str(self.route.root), '--platform', 'codex',
+                '--session-id', 'current', '--read', '--context-selection-mode', 'update'])
+        self.assertEqual(status, 1)
+        self.assertEqual(json.loads(errors.getvalue())['error'], 'route-binding')
+        self.assertEqual(ledger.read_session_state(**self.route.coords), before)
 
 
 if __name__ == "__main__":

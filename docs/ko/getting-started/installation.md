@@ -212,6 +212,8 @@ Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynami
 
 설치기는 Python 3.11 이상을 요구합니다. 해당 버전이 없으면 가능한 환경에서 자동 준비를 시도합니다.
 
+선택적인 macOS 네이티브 컨텍스트 gateway에는 `compression.zstd`를 제공하는 Python 3.14 이상이 필요합니다. 해당 설치기는 구성 파일, launch agent, Codex provider를 변경하기 전에 이 기능을 확인합니다. Core 설치기와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`이 심볼릭 링크이면 gateway 설치와 해당 구성 요소 제거는 서비스를 변경하기 전에 중단하고 링크와 원본을 보존합니다. Gateway 설치는 launch agent, 구성 요소, 공유 의존 파일, 상태와 소유권 파일 자체가 심볼릭 링크이면 서비스를 변경하기 전에 거부하여 링크와 원본을 보존합니다. 갱신은 변경 전에 이전 설치 바인딩을 확인하여 사용자가 편집한 provider 블록과 launch agent를 보존합니다. 구성 요소 교체에는 인증된 설치 영수증의 파일 해시만 사용합니다. 폐기한 별도 `installed-files.json`은 읽거나 생성하지 않으며 설치나 갱신이 성공하면 삭제합니다. Provider 표시나 launch agent가 없어도 기존 gateway 상태에는 인증된 등록과 변경되지 않은 상태 증거가 필요합니다. 소유권이 없으면 설치는 상태 디렉터리를 보존하고 중단합니다. 새 설치에는 빈 대상 디렉터리를 사용하거나 보존된 설치 바인딩을 검토하세요. 첫 설치가 실패하고 후보 서비스의 중지가 확인되면 해당 시도가 새로 만든 상태 자료를 되돌려 다음 설치를 진행할 수 있습니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 복구 자료를 보존하고 검토를 요청합니다.
+
 - macOS: Homebrew가 있으면 `brew install python3`
 - Linux / WSL: `apt-get`, `dnf`, `yum`, `pacman` 같은 패키지 관리자
 - Windows: `winget`, `choco`, 그 다음 `scoop`
@@ -237,6 +239,23 @@ Claude Code와 Codex의 훅 설치에는 사용 가능한 Node.js 실행 환경�
 소스 변경의 자동 반영은 `SKILL.md`, `references/`, `scripts/` 같은 스킬 본문에 적용됩니다. 훅, 부트스트랩 파일, 권한 정책과 `_shared/`는 설치기가 관리하는 실행 파일이므로 변경 시 다시 설치해 주세요.
 
 디스크의 설치 상태와 실행 중인 호스트의 반영은 별개입니다. 훅 명령을 바꾼 뒤에는 해당 네이티브 신뢰 항목을 확인하고 다음 실제 콜백을 관측해 주세요. 호스트가 이전 등록을 유지하면 재로드 또는 완전한 종료·재시작 절차를 사용합니다. 자세한 내용은 [네이티브 훅 신뢰와 재로드](./troubleshooting.md#native-hook-trust-and-reload)를 확인해 주세요. 호스트 반영을 확인하려고 변경 없는 업무 검증을 반복하지 않습니다.
+
+### Core와 선택적 Autopilot 전환
+
+Core 설치와 애드온 제거는 별도 작업입니다. 새 Core 설치는 지침, 입력·출처 연결, 작업·검토 기록과 Core 훅을 제공합니다. Autopilot의 자동 재개는 등록하지 않습니다. 애드온 옵션 없이 Core를 갱신하면 이미 설치된 애드온은 유지합니다. `--addon-skip`은 애드온 설치를 건너뛰며 기존 애드온의 제거를 요청하지 않습니다.
+
+| 동작 | Codex 예시 | 관리 범위 |
+| --- | --- | --- |
+| 새 Core 설치 또는 Core 갱신 | `bash install.sh --platform codex` | Core를 설치·갱신하며 기존 애드온 파일과 등록은 유지합니다 |
+| Autopilot 추가 또는 갱신 | `bash install.sh --platform codex --addon autopilot` | Core와 매니페스트가 선택한 애드온 스킬·전용 어댑터를 설치합니다 |
+| Core를 유지하며 Autopilot 제거 | `bash install.sh --platform codex --uninstall --addon autopilot-mode` | 기록된 애드온·어댑터 훅을 먼저 해제하고 검증된 전용 파일을 제거합니다 |
+| 한 플랫폼 제거 | `bash install.sh --platform codex --uninstall` | 해당 플랫폼의 애드온·Core를 제거하고 다른 설치 플랫폼이 사용하는 공용 파일은 유지합니다 |
+
+Core는 모델이 추천하는 후속 작업을 Autopilot과 독립적으로 인증합니다. 선택적이고 승인된 계속 경로가 호스트에 다음 호출을 요청합니다. Autopilot을 제거해도 Core 기록은 유지되며 미충족 기준이 완료로 바뀌지 않습니다. 개별 애드온 제거는 수정된 파일과 부속 기록·제거 표시를 검토 또는 재시도를 위해 남기면서 해당 애드온의 관리되는 실행 훅 등록을 해제합니다. 이는 설정·파일 작업이며, 실행 중인 호스트의 반영과 이미 전달된 작업의 중지는 별도 관찰입니다.
+
+전체 또는 플랫폼 제거는 미결 병합 원본과 마지막 플랫폼의 설치 복구 사본을 `~/.ghost-alice/uninstall-backup/<platform>/support-state/` 아래의 새 디렉터리에 보존합니다. 기존 보존 사본, 소스 작업 트리, 대화·세션 근거, 의도 원장, 감사 기록과 비밀 파일은 유지합니다. 소유권과 공용 파일의 처리 기준은 [제거 안내](./uninstall.md)를 확인해 주세요.
+
+Claude 설치기는 매니페스트가 선택한 애드온의 `Skill(...)` 권한 중 실제로 추가한 항목을 `~/.ghost-alice/addon-permissions/claude.json`에 기록합니다. 애드온 제거는 소유한 권한 한 항목을 해제하며 기존 권한과 사용자가 추가한 중복 항목을 보존합니다. 소유권 근거가 없는 이전 권한은 수동 검토가 필요합니다. Codex의 애드온 제거는 변경되지 않은 소유 훅의 신뢰 해시를 정리하고, 남은 Core·사용자 신뢰 테이블을 훅 위치에 맞춰 옮기면서 메타데이터를 보존합니다. 신뢰 설정 충돌이나 설정 저장 오류가 있으면 파일 제거를 성공으로 처리하지 않습니다. 자세한 내용은 [제거 안내](./uninstall.md)를 확인해 주세요.
 
 ### Installed Surfaces
 

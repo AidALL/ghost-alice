@@ -993,6 +993,30 @@ class RuntimeCoreAuditTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
+    def _bound_session_intent_command(self, platform="claude", *, inner=None, **locations):
+        import install_destination
+        import install_hooks
+
+        source_root = Path(__file__).resolve().parents[1]
+        destination = install_destination.InstallDestination(**{
+            "mode": "normal", "owned_root": str(self.root),
+            "platform_dir": str(self.root / "platform"), "skills_dir": str(self.root / "skills"),
+            "ghost_root": str(self.root / "ghost"), "ledger_root": str(self.root / "ledger"),
+            "project_root": str(source_root), "core_source_root": str(source_root),
+            "runtime_shared_dir": str(self.runtime), **locations,
+        })
+        for shared in (self.runtime, Path(destination.runtime_shared_dir)):
+            shared.mkdir(parents=True, exist_ok=True)
+            for name in ("session_intent_analyzer_hook.py", "hook_profile_gate.py"):
+                (shared / name).write_text("# bound hook fixture\n", encoding="utf-8")
+        with install_destination.use(destination):
+            if inner is not None:
+                return install_hooks._hook_runner_command(
+                    "session-intent", inner, install_hooks.SESSION_INTENT_MARKER,
+                    platform_key=platform)
+            return install_hooks._entry_command(
+                install_hooks._platform_session_intent_entry(platform, "UserPromptSubmit"))
+
     def _write_runtime_files(self):
         files = {
             "hook_profile_gate.py": "# runner\n",
@@ -1112,6 +1136,34 @@ class RuntimeCoreAuditTest(unittest.TestCase):
                 source_shared, self.runtime, self.config, "claude")
         self.assertEqual(status, install_doctor.STATUS_OK, findings)
         self.assertFalse(Path(destination.ledger_root).exists(), "golden wrote the installed ledger")
+
+    def test_session_intent_golden_rejects_binding_mismatch(self):
+        for overrides in (
+            {"platform": "codex"},
+            {"runtime_shared_dir": str(self.root / "foreign-runtime")},
+            {"core_source_root": str(self.root / "foreign-provider")},
+        ):
+            with self.subTest(overrides=overrides):
+                command = self._bound_session_intent_command(**overrides)
+                self.assertEqual(
+                    install_doctor._runtime_session_intent_golden_status(
+                        self.runtime, "claude", hook_commands=[command]),
+                    (install_doctor.STATUS_ERROR, "session-intent-binding-mismatch"))
+
+    def test_session_intent_golden_rejects_ambiguous_installed_bindings(self):
+        commands = [self._bound_session_intent_command(ledger_root=str(self.root / name))
+                    for name in ("ledger-a", "ledger-b")]
+        self.assertEqual(
+            install_doctor._runtime_session_intent_golden_status(
+                self.runtime, "claude", hook_commands=commands),
+            (install_doctor.STATUS_ERROR, "session-intent-binding-missing-or-ambiguous"))
+
+    def test_session_intent_golden_rejects_runner_without_valid_intake_executor(self):
+        command = self._bound_session_intent_command(inner="echo intake-lookalike")
+        self.assertEqual(
+            install_doctor._runtime_session_intent_golden_status(
+                self.runtime, "claude", hook_commands=[command]),
+            (install_doctor.STATUS_ERROR, "session-intent-binding-missing-or-ambiguous"))
 
     def test_session_intent_golden_uses_repo_local_child_temp(self):
         source_shared = Path(__file__).resolve().parent

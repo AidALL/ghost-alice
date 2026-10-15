@@ -98,6 +98,33 @@ branch="$(git -C "$repo_root" rev-parse --abbrev-ref HEAD 2>/dev/null || printf 
 info "Updating Ghost-ALICE source checkout: ${repo_root}"
 info "Branch: ${branch}; upstream: ${upstream}"
 
+helper="${repo_root}/_shared/installer_source_update.py"
+if [ -f "$helper" ]; then
+  py="$(command -v python3 || command -v python || true)"
+  [ -n "$py" ] || { error "Python 3.11+ is required for coordinated source update."; exit 2; }
+  "$py" "$helper" --source-dir "$repo_root"
+else
+  # Old-checkout recovery cannot coordinate an installed gateway without its
+  # helper. Confirm there is no gateway before the legacy Git-only operation.
+  codex_home="${GHOST_ALICE_CODEX_DIR:-${CODEX_HOME:-${HOME}/.codex}}"
+  if [ -e "${HOME}/.ghost-alice/context-gateway-binding.json" ] ||
+     { [ -f "${codex_home}/config.toml" ] && LC_ALL=C grep -q 'ghost_alice_context' "${codex_home}/config.toml"; }; then
+    error "Gateway coordination helper is missing; source files were not changed."
+    exit 2
+  fi
+  case "${OSTYPE:-}" in
+    darwin*)
+      if launchctl print "gui/$(id -u)/org.ghost-alice.context-gateway" >/dev/null 2>&1; then
+        native_status=0
+      else
+        native_status=$?
+      fi
+      if [ "$native_status" -ne 113 ]; then
+        error "Gateway absence is unconfirmed and its coordination helper is missing."
+        exit 3
+      fi
+      ;;
+  esac
 status_output="$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)"
 stash_created=0
 stash_ref=""
@@ -130,6 +157,8 @@ fi
 
 if [ "$stash_created" = "1" ]; then
   warn "Review saved source changes before reapplying: git -C \"${repo_root}\" stash show -p ${stash_ref}"
+fi
+
 fi
 
 if [ "$run_install" = "0" ]; then

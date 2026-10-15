@@ -471,49 +471,34 @@
       <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.1</h2><p class="section-note">This documentation describes Core and Ghost-ALICE Autopilot 0.5.1. A local installation is separate from a published release. Ghost-ALICE Autopilot 0.5.1 requires Core 0.5.1 or later.</p></div>
       <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Ghost-ALICE Autopilot releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">Compatibility</a></div>
     </div></section>
-    <section id="how-it-works"><div class="wrap">
-      <div class="section-head"><h2>How it works</h2><p class="section-note">The responding model makes the judgments. Core and Ghost-ALICE Autopilot supply instructions and executable code. The native host runs tools and hooks, enforces permission and returns their results to the conversation.</p></div>
-      <figure class="gate-flow-diagram" aria-labelledby="flow-heading">
-        <h3 id="flow-heading">From authorized work to a reviewed answer</h3>
-        <div class="mermaid-scroll" role="region" aria-label="Work and review flow; scroll horizontally to inspect the diagram" tabindex="0">
-          <pre class="mermaid">flowchart TD
-  accTitle: From authorized work to a reviewed answer
-  accDescr: The responding model selects authorized work and makes two distinct judgments. Core stores the exact review. The host invokes its completion guard and the Ghost-ALICE Autopilot adapter independently. Follow-up work returns to the next responding model only if the host delivers it to the identified conversation.
-  U["User supplies the objective,&lt;br/&gt;constraints and actual approval"] --&gt;|Objective and permission| M["1 · Model selects current work"]
-  M --&gt;|Work selection through a host tool| C["Core validates the work route"]
-  C --&gt;|Validated route| T["Model requests tools;&lt;br/&gt;native host runs permitted tools"]
-  T --&gt;|Actual results and original source locations| D["Model prepares the complete draft,&lt;br/&gt;claims and original sources"]
-  D --&gt;|Complete inputs through host tools| E["2 · Core saves exact review inputs&lt;br/&gt;and returns their contents and references"]
-  E --&gt;|Saved answer, original sources and references| V["3 · Model judges each claim against original sources,&lt;br/&gt;including contrary evidence:&lt;br/&gt;supported, contradicted or unavailable;&lt;br/&gt;records source references and reasons"]
-  V --&gt;|Individual judgments and the complete answer| W["4 · Model separately judges the whole answer:&lt;br/&gt;requested scope, omissions, conflicts&lt;br/&gt;and honest remaining-work reporting"]
-  U --&gt;|Objective and constraints| W
-  W --&gt;|Both model judgments as review JSON through host tools| R["5 · Core validates bindings&lt;br/&gt;and stores both judgments together"]
-  R --&gt;|Unsupported judgment or missing prerequisite| F["Model chooses an affected authorized correction&lt;br/&gt;or reports unresolved requirements"]
-  F --&gt;|Only if correction is needed and authorized| M
-  R --&gt;|Supported review returns the exact answer| S["Model submits the returned reviewed answer"]
-  S --&gt;|Submitted answer and current hook receipt| K["6 · Native host independently invokes&lt;br/&gt;the completion guard and Ghost-ALICE Autopilot Stop adapter"]
-  K --&gt;|Independent guard invocation| G["Core completion guard uses Core assessment API&lt;br/&gt;to bind tools to the current human input&lt;br/&gt;and authenticate the required answer review"]
-  K --&gt;|Independent adapter invocation| A["Ghost-ALICE Autopilot uses Core assessment API&lt;br/&gt;to authenticate the current answer and review;&lt;br/&gt;publishes only Core-selected completion proof&lt;br/&gt;and applies or reuses eligible authenticated publications"]
-  G --&gt;|Allow or a named prerequisite| H["Native host receives the independent Stop results"]
-  M --&gt;|If further approved work is needed| P["Model defines tasks, dependencies,&lt;br/&gt;allowed surfaces and criterion references"]
-  U --&gt;|Actual approval boundary| P
-  P --&gt;|Plan registration through the host before Stop| Q["Ghost-ALICE Autopilot admits and stores the plan"]
-  Q --&gt;|Admitted tasks, approval boundaries and dependencies| A
-  A --&gt;|Recording status and optional ready task from the admitted plan| H
-  H --&gt;|Only if the host delivers the task to the identified conversation| X["That conversation's next responding model&lt;br/&gt;receives the task request"]
-  X --&gt;|Existing authority and permitted tools| M</pre>
-        </div>
-        <figcaption>A supported answer can honestly report unfinished work. A record, accepted proof or returned task request does not by itself establish that all requested work is complete.</figcaption>
-      </figure>
-      <p>If further work is needed, the model defines tasks, dependencies, allowed surfaces and criterion references within actual user approval, then registers the plan with Ghost-ALICE Autopilot through the host. At Stop, the adapter returns eligible work from the admitted plan. If the host delivers it to the hook session’s identified conversation, the next responding model chooses permitted tools.</p>
-      <p>When evidence contradicts a required result, the model investigates enough to choose a needed authorized correction. It preserves unaffected results and reports unresolved requirements honestly. A recording error alone does not justify repeating the business operation; a new input does not invalidate unchanged proof.</p>
-      <p>The <a href="https://github.com/AidALL/ghost-alice/wiki/design-philosophy-floor-not-ceiling#comparison-and-feedback">comparison diagram</a> explains these model judgments. The <a href="https://github.com/AidALL/ghost-alice/wiki/operating-model-fallback-and-escalation#focus-and-verification-burden">focus diagram</a> explains how the model selects what to investigate and how much evidence it needs.</p>
-      <p><a href="./architecture.html">Read the architecture, interface values and owning procedures</a></p>
-    </div></section>
-    <section id="official-addons"><div class="wrap">
-      <div class="section-head"><h2>Optional Ghost-ALICE Autopilot</h2><p class="section-note">Add Ghost-ALICE Autopilot when you need approved autonomous continuation. Installation does not grant run approval. The current-session assistant follows Core verification instructions, and Core Python code authenticates the submitted bindings.</p></div>
-      <div class="actions"><a class="btn" href="./docs/reference/official-addons.html">Official and custom addon sources</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot">Ghost-ALICE Autopilot</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/addon-authoring">Addon authoring</a></div>
-    </div></section>
+    <section id="how-it-works"><div class="wrap"><div class="section-head"><h2 id="flow-heading">Core operation</h2><p class="section-note">The response model compares the objective with original sources and selects needed work and verification depth. Judgment focus can be micro, meso, macro or meta; verification depth is a separate choice.</p></div>
+<figure class="diagram-block" aria-labelledby="flow-heading"><pre class="mermaid">flowchart TD
+ U[&quot;User objective and authorization&quot;] --&gt; M[&quot;Response model&quot;]
+ O[&quot;Original sources and tool observations&quot;] --&gt; M
+ M --&gt; V[&quot;Compare each claim with originals&quot;]
+ V --&gt; W[&quot;Compare the whole answer with the objective&quot;]
+ W --&gt; R{&quot;Completion claim or requested authenticated review&quot;}
+ R --&gt;|Required| C[&quot;Core authenticates records and source bindings&quot;]
+ C --&gt; M
+ R --&gt;|Routine explanation| M
+ M --&gt; H[&quot;Native host displays the answer&quot;]
+ H --&gt; U
+</pre><figcaption>The response model separately judges individual claims and the complete answer. Core authenticates records and source bindings; the native host displays the answer.</figcaption></figure>
+<p>Necessary long originals and answers remain available. Ghost-ALICE handoffs carry the current conclusion, unresolved conditions and original location needed for the next decision. The model retrieves the original when required. Earlier native messages can still enter subsequent requests; an installed adapter applies supported content selections. Original retention, handoff selection and actual request changes are separate.</p>
+<p>When evidence conflicts with a required result, the response model selects a needed correction or investigation. It exposes unresolved conditions and reuses unchanged evidence at its original verification time.</p>
+<p><a href="./architecture.html">Read the Core architecture</a></p>
+</div></section>
+    <section id="official-addons"><div class="wrap"><div class="section-head"><h2 id="autopilot-flow-heading">How installing Autopilot extends Core</h2><p class="section-note">Autopilot applies Core-authenticated proof separately from selecting current necessary continuation. It checks the approved task, boundary, dependencies and prerequisites, then sends only needed next information and original references. An unmet criterion alone creates no request. A request to the native host and actual execution are separate observations. Installation grants no run authority.</p></div>
+<figure class="diagram-block" aria-labelledby="autopilot-flow-heading"><pre class="mermaid">flowchart TD
+ C[&quot;Core-authenticated proof&quot;] --&gt; A[&quot;Autopilot applies proof and selects eligible continuation&quot;]
+ F[&quot;Core-authenticated current necessity and next information&quot;] --&gt; A
+ U[&quot;Approved task, boundary, dependencies and prerequisites&quot;] --&gt; A
+ A --&gt;|Necessary ready authorized work| H[&quot;Request continuation from the native host&quot;]
+ H --&gt; M[&quot;Response model performs authorized work&quot;]
+ A --&gt;|No eligible current work| E[&quot;No continuation request&quot;]
+</pre></figure>
+<div class="actions"><a class="btn" href="./docs/reference/official-addons.html">Official and custom addon sources</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot">Ghost-ALICE Autopilot</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/addon-authoring">Addon authoring</a></div>
+</div></section>
     <section id="routes"><div class="wrap">
       <div class="section-head"><h2>Documentation</h2><p class="section-note">Practical commands live in repository guides; Wiki provides onboarding and background. English and Korean pages describe the same behavior.</p></div>
       <div class="grid">

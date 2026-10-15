@@ -27,19 +27,51 @@ def _load_global_rule_blocks():
 
 
 class GlobalRuleBlockTest(unittest.TestCase):
+    def test_project_loader_does_not_reinject_common_contract(self):
+        body = (REPO_ROOT / 'AGENTS.md').read_text()
+        self.assertFalse('## First-Entry Contract' in body, 'project loader duplicates the common procedure')
+        self.assertIn('installed common contract', body)
+
+    def test_platform_install_composes_one_common_source_and_preserves_user_rules(self):
+        blocks = _load_global_rule_blocks()
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            common = root / 'platforms/common-governance.md'
+            common.parent.mkdir()
+            common.write_text('# Ghost-ALICE Common Governance\n\nOne current procedure.\n')
+            for platform, name, apply, marker, render in (
+                    ('codex', 'AGENTS.md', blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER, blocks.render_codex_bootstrap),
+                    ('claude', 'CLAUDE.md', blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER, blocks.render_claude_bootstrap)):
+                source = common.parent / platform / name
+                source.parent.mkdir()
+                source.write_text(marker + '\n\n{{COMMON_GOVERNANCE}}\n\nHost-specific tools.\n')
+                dest = root / platform / name
+                dest.parent.mkdir()
+                dest.write_text(render(marker + '\n\nOld contract.\n') + '\nUser-owned rule.\n')
+                result = apply(source, dest, proposed_path=root / (platform + '.proposed'))
+                rendered = result.path.read_text()
+                self.assertEqual(rendered.count('One current procedure.'), 1)
+                self.assertFalse('{{COMMON_GOVERNANCE}}' in rendered, 'installer left an unresolved common source')
+                self.assertIn('User-owned rule.', rendered)
+                common.unlink()
+                with self.assertRaises(blocks.GlobalRuleBlockError):
+                    apply(source, dest)
+                common.write_text('# Ghost-ALICE Common Governance\n\nOne current procedure.\n')
+
     def assert_intake_routing_authority(self, body: str) -> None:
-        self.assertIn("Session-intent intake feeds task-router directly", body)
-        self.assertIn("Skill-evolution consumes the same session as a report-only terminal branch; it does not feed task-router", body)
-        self.assertIn("the native host enforces tool permission", body)
+        self.assertIn("through `task-router`", body)
+        self.assertIn("Apply `session-intent-analyzer` when stored intent can change that selection or a semantic update is needed", body)
+        self.assertIn("skill-evolution is a report-only branch", body)
+        self.assertIn("The native host executes tools and enforces permission", body)
         self.assertNotIn("jailbreak-detector", body)
 
     def test_rendered_fallback_rejects_classifier_or_audit_authority(self) -> None:
         blocks = _load_global_rule_blocks()
         for rel, render in (("platforms/codex/AGENTS.md", blocks.render_codex_bootstrap),
                             ("platforms/claude/CLAUDE.md", blocks.render_claude_bootstrap)):
-            body = render((REPO_ROOT / rel).read_text(encoding="utf-8"))
-            for old, new in (("Session-intent intake feeds task-router directly", "Session intake requires jailbreak-detector permission before task-router"),
-                             ("the native host enforces tool permission", "Audit records grant execution permission")):
+            body = render(blocks.platform_contract_text(REPO_ROOT / rel))
+            for old, new in (("Apply `session-intent-analyzer` when stored intent can change that selection or a semantic update is needed", "Session intake requires jailbreak-detector permission before task-router"),
+                             ("The native host executes tools and enforces permission", "Audit records grant execution permission")):
                 with self.subTest(path=rel, change=old), self.assertRaises(AssertionError):
                     self.assert_intake_routing_authority(body.replace(old, new))
 
@@ -218,9 +250,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
     def test_codex_source_owns_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
-        source = (REPO_ROOT / "platforms" / "codex" / "AGENTS.md").read_text(
-            encoding="utf-8"
-        )
+        source = blocks.platform_contract_text(REPO_ROOT / "platforms/codex/AGENTS.md")
         self.assertFalse(hasattr(blocks, "CODEX_HOOKLESS_FALLBACK_BLOCK"))
         for renderer in (
             blocks.render_codex_managed_block,
@@ -237,15 +267,14 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertIn("manual", body)
         self.assertIn("within the user's tool budget", body)
         self.assertIn("does not claim native hook execution or invent a session receipt", body)
-        self.assertIn("once per input lineage", body)
+        self.assertIn("Repeated healthy tool calls and new input receipts alone do not require another checkpoint message", body)
+        self.assertIn("when its result changes an authority boundary, the next work decision or a required verification", body)
         self.assertIn("strict audit", body)
 
     def test_claude_source_owns_rules_zero_through_twelve_and_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
-        ssot = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
-        source = (REPO_ROOT / "platforms" / "claude" / "CLAUDE.md").read_text(
-            encoding="utf-8"
-        )
+        ssot = (REPO_ROOT / "platforms/common-governance.md").read_text(encoding="utf-8")
+        source = blocks.platform_contract_text(REPO_ROOT / "platforms/claude/CLAUDE.md")
 
         heading_pattern = re.compile(r"(?m)^###\s*(\d+)\.\s*(.+)$")
         self.assertEqual(
@@ -269,7 +298,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertIn("does not claim native intake, routing, Stop or audit observations", body)
         self.assert_intake_routing_authority(body)
         self.assertIn("task-router", body)
-        self.assertIn("[completion-check]", body)
+        self.assertIn("verification-before-completion", body)
         self.assertIn("[io-trace]", body)
 
     def test_installers_route_global_rule_files_through_block_helper(self) -> None:

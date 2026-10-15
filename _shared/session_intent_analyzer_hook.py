@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-from reminder_texts import reminder_text
+from reminder_texts import instruction_override, reminder_text
 
 import argparse
-import base64
-import hashlib
 import json
 import os
 import re
@@ -51,6 +49,7 @@ try:
         stage_native_input,
         resolve_session_id,
     )
+    _LEDGER_SCRIPT = Path(sys.modules['session_intent_ledger'].__file__).resolve()
     _LEDGER_IMPORT_BROKEN = False
 except ImportError as _ledger_exc:
     # ImportError naming the ledger module itself means it is genuinely absent (skill uninstalled, mid-reinstall, or relocated) -> degrade as "unavailable". An ImportError naming a DIFFERENT module means the ledger is present but a transitive dependency is broken -> flag as broken, not absent. Either way degrade gracefully instead of crashing at import time.
@@ -91,15 +90,6 @@ def terminal_routing_instruction(root: Path, platform: str, session_id: str,
 
 
 DEFAULT_INTERNAL = reminder_text('session-intent')
-# Exact managed-message hashes authorize canonical instruction replacement.
-# Custom text remains verbatim; substrings do not establish ownership.
-BUILTIN_INTERNAL_DIGESTS = frozenset({
-    '516411ca63efee6770666220f1f95fe3f8e883246b7bd0730996639bf2ca2fca',
-    '99616de4dd8dfee6a9cd62a130a042f03848abb0fedd7c42f9009f37fcdb99d1',
-    '13bedc717127f5ebf23cdf68edd268aba2c4668fe67f87a649ce4b8f267a5df0',
-    "4ac1f065346edc273d079dcf0dba602bf3a34871d2f78eed2e05c12b9ecbdecb",
-    "f0903ce21fe35669afb2b25d9567839529c96f301b84d69f2f084b7c95791162",
-})
 LEDGER_UNAVAILABLE_DEGRADE = 'The intake hook cannot load the ledger dependency. The current-session assistant must not claim intake was recorded or substitute another ledger. Authorized ledger repair and a tool-free explanation remain possible.'
 LEDGER_WRITE_FAILED_DEGRADE = 'The intake hook could not write this input to the ledger. The current-session assistant must not claim persistence or use an old input binding. Authorized ledger repair and a tool-free explanation remain possible.'
 LEDGER_BROKEN_DEGRADE = 'The ledger module exists but the intake hook could not load it. The current-session assistant must not claim intake was recorded or substitute another ledger. Authorized module repair and a tool-free explanation remain possible.'
@@ -224,7 +214,50 @@ def extract_prompt(payload: dict[str, Any]) -> str:
     )
 
 
-def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | None, *, compact: bool = False) -> str:
+def native_context_capability(session_id: str, platform: str = 'codex') -> dict[str, str] | None:
+    """Expose provider metadata, never permission or an adoption claim."""
+    try:
+        procedure = Path(__file__).resolve().with_name('context_lifecycle.md')
+        if not procedure.is_file():
+            return None
+        if platform == 'claude':
+            config = os.environ.get('GHOST_ALICE_CONTEXT_CONFIG')
+            if not config or not Path(config).is_absolute():
+                return None
+            state = json.loads(Path(config).read_text())
+            port, scope, home = state.get('port'), state.get('scope'), state.get('claude_dir')
+            if (type(port) is not int or not 0 < port < 65536 or not isinstance(scope, str)
+                    or not scope or not isinstance(home, str) or not Path(home).is_absolute()):
+                return None
+            headers = [line.partition(':') for line in os.environ.get('ANTHROPIC_CUSTOM_HEADERS', '').splitlines()]
+            def values(name):
+                return [value.strip() for key, separator, value in headers
+                        if separator and key.strip().casefold() == name.casefold()]
+            if (os.environ.get('ANTHROPIC_BASE_URL') != f'http://127.0.0.1:{port}/anthropic'
+                    or values('X-Ghost-Context-Scope') != [scope]
+                    or values('X-Ghost-Context-Session') != [session_id]):
+                return None
+            return dict(native_provider='anthropic-subscription-gateway', procedure=str(procedure), native_dir=home)
+        if platform != 'codex':
+            return None
+        from native_transcript import codex_transcript_path
+        from context_gateway_install import PROVIDER
+        home = os.environ.get('GHOST_ALICE_CODEX_DIR') or os.environ.get('CODEX_HOME') or str(_home() / '.codex')
+        path = codex_transcript_path(home, session_id)
+        if path is None:
+            return None
+        with Path(path).open() as stream:
+            metadata = json.loads(stream.readline())
+        payload = metadata.get('payload', {})
+        if (metadata.get('type') == 'session_meta' and payload.get('id') == session_id
+                and payload.get('model_provider') == PROVIDER and procedure.is_file()):
+            return {'native_provider': PROVIDER, 'procedure': str(procedure), 'native_dir': str(home)}
+    except (ImportError, OSError, ValueError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | None) -> str:
     """Expose canonical intake identity only after native actor reconciliation."""
     state_path = Path(paths["state"]).resolve()
     events_path = Path(paths["events"]).resolve()
@@ -241,28 +274,13 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | No
     }
     if observation is not None:
         receipt["input_event_id"] = observation["input_event_id"]
-    binding = (
+    capability = native_context_capability(receipt['session_id'], receipt['platform'])
+    if capability is not None:
+        receipt['context_selection'] = capability
+    return (
         "\n[session-intent-receipt]\n"
         + json.dumps(receipt, ensure_ascii=True, separators=(",", ":"))
         + "\n[/session-intent-receipt]\n"
-    )
-    if observation is None:
-        return binding + (
-            "This receipt records native transport only; user authority awaits committed native actor evidence. "
-            "The first native PreToolUse or Stop reconciles that evidence. For normal work, the current-session "
-            "assistant reads session_intent_ledger.py --read-state using this receipt's --root ledger_root "
-            "--platform platform --session-id session_id. After reconciliation, a material semantic update binds "
-            "--expected-input-event-id to latest_input_event_id returned by that read. Pending transport has no "
-            "input event token and cannot authorize a route or semantic update. A confirmed native notification "
-            "retains the preceding human input and route."
-        )
-    return binding + (
-        "For a normal route, the current-session assistant reads SQLite with session_intent_ledger.py --read-state "
-        "using this receipt's --root ledger_root --platform platform --session-id session_id. "
-        "A material intent update also binds --expected-input-event-id input_event_id. "
-        "This receipt confirms input observation only. The current-session assistant must not use an export, default root or another session as the authoritative ledger. "
-        "After applying task-router and any required boundary-contract, the current-session assistant registers the current Core response-route. "
-        "If a ledger operation fails, the current-session assistant reports that failure and leaves dependent registration incomplete. "
     )
 
 
@@ -295,22 +313,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hook", default="session-intent")
     parser.add_argument("--context", default="prompt_submit")
     parser.add_argument("--format", choices=["text", "json"], default="text")
-    parser.add_argument("--internal-b64", default="")
+    parser.add_argument("--internal-b64", default=None)
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="session intent ledger root")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    message = DEFAULT_INTERNAL
-    if args.internal_b64:
-        try:
-            message = base64.urlsafe_b64decode(args.internal_b64.encode("ascii")).decode("utf-8")
-        except Exception:
-            message = DEFAULT_INTERNAL
-
-    if hashlib.sha256(message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS:
-        message = DEFAULT_INTERNAL
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        override = instruction_override(args.internal_b64)
+    except (ValueError, UnicodeError):
+        parser.error('Invalid custom instruction encoding')
+    message = override or ""
+    custom_instruction = (override + "\n") if override is not None else ""
 
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
@@ -342,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
                     raw_input=prompt, prompt_id=payload.get('prompt_id'),
                     transcript_path=payload.get('transcript_path') or payload.get('transcriptPath'))
                 _clear_degrade_marker(ledger_root, args.platform, payload)
-                message = terminal + "\n" + observation_receipt(paths, None)
+                message = custom_instruction + observation_receipt(paths, None)
                 sys.stdout.write(render_payload(args.format, message, ledger_root, routine=True)
                                  + ('\n' if args.format == 'json' else ''))
                 return 0
@@ -362,33 +378,14 @@ def main(argv: list[str] | None = None) -> int:
                     observation=observation,
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
-                try:
-                    from session_check_cache import instruction_delivery
-                    builtin = (message == DEFAULT_INTERNAL
-                               or hashlib.sha256(message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS)
-                    full = not builtin or instruction_delivery(ledger_root, args.platform, session_id,
-                                                               "hook-intake-instructions", Path(__file__), message)
-                except (ImportError, OSError):
-                    # Cache delivery is optional; a successful intake stays valid.
-                    full = True
-                if not full:
-                    message = "session-intent-analyzer: input observed; apply the retained skill to current meaning; add only material semantic deltas."
-                message += observation_receipt(paths, observation, compact=not full)
-                try:
-                    from claim_evidence_runtime import retained_results_hint
-                    message += retained_results_hint(args.platform, dict(payload, session_id=session_id),
-                        dict(os.environ, GHOST_ALICE_SESSION_INTENT_ROOT=str(ledger_root.resolve())))
-                except (ImportError, OSError, ValueError, TypeError):
-                    # Advisory discovery cannot change intake or invent proof.
-                    pass
+                message = custom_instruction + observation_receipt(paths, observation)
                 routine = True
-                terminal = terminal_routing_instruction(ledger_root, args.platform, session_id,
-                                                        observation["input_event_id"])
+                terminal = ""
     except Exception:
         _write_degrade_marker(ledger_root, args.platform, payload, "ledger-write-failed")
         message = message + " " + LEDGER_WRITE_FAILED_DEGRADE
 
-    message = terminal + "\n" + message
+    message = terminal + "\n" + message if terminal else message
     sys.stdout.write(render_payload(args.format, message, ledger_root, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")

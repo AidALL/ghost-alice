@@ -13,6 +13,7 @@ import unittest
 from unittest.mock import patch
 
 import test_response_route as fixtures
+from test_completion_skill_evidence import assert_stop_observation
 
 
 # The actual status response rejected by the native Stop hook. This is a
@@ -29,7 +30,7 @@ REJECTED_STATUS_REPORT = """제가 한 일은 근거 검증·접수·정정 코�
 | 과거 차단 응답 3개 | 설치본 Stop에 재입력했습니다. 세 응답 모두 `route-unavailable`로 차단됐습니다. 필요한 경로 등록을 먼저 요구하는지 확인했을 뿐, 정상 보고가 끝까지 통과한 검사가 아닙니다. |
 | 문구·문서 검사 | 행동 주체를 명시했는지, 안내 문구와 문서·다이어그램이 맞는지 검사했습니다. 마지막 수정은 주로 문구·주석 변경이며 실행 로직은 그대로였습니다. |
 
-앞의 검사들은 [실행 기록](/Users/raymond/.ghost-alice/session-logs/codex/01a126f6-bda1-7463-9272-2893590fd30f/instruction-overhaul-final-verification.json), 차단 응답 결과는 [재생 기록](/Users/raymond/.ghost-alice/session-logs/codex/01a126f6-bda1-7463-9272-2893590fd30f/instruction-overhaul-replay.json)에 남아 있습니다.
+앞의 검사들은 [실행 기록](/tmp/ghost-alice-test-evidence/final-verification.json), 차단 응답 결과는 [재생 기록](/tmp/ghost-alice-test-evidence/replay.json)에 남아 있습니다.
 
 핵심 코드도 수정했습니다. AP가 Core 평가를 받아 조건을 적용하도록 연결했고, 부분 완료와 실패 보고를 구분했으며, 정정 시 원본과 영향 없는 항목을 보존하도록 했습니다. 정밀한 타임스탬프 대신 인증된 기록 순서로 구분하는 수정도 설치했습니다.
 
@@ -109,9 +110,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
     def test_actual_report_reuses_review_through_stop_without_new_completion(self):
         self.assertIsNotNone(self.assess()['body_issue'])
         diagnostic = self.run_stop(REJECTED_STATUS_REPORT)
-        self.assertEqual(diagnostic.get('decision'), 'block')
-        self.assertIn('repair-target: response_review', diagnostic['reason'])
-        self.assertNotIn('returns only the corrected fields', diagnostic['reason'])
+        assert_stop_observation(self, diagnostic, issue='response-assessment-required', repair_target='response_review')
         before = fixtures.ledger.read_session_state(**self.fixture.coords)['acceptance_criteria']
         reviewed = self.review_report()
         result = self.assess()
@@ -119,7 +118,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.assertTrue(result['completion_route']['report_only'])
         self.assertEqual(result['completion_route']['publication_route'], 'none')
         self.assertEqual(result['completion_route']['publication_criteria'], [])
-        self.assertNotEqual(self.run_stop(REJECTED_STATUS_REPORT).get('decision'), 'block')
+        assert_stop_observation(self, self.run_stop(REJECTED_STATUS_REPORT))
         self.assertEqual(fixtures.ledger.read_session_state(**self.fixture.coords)['acceptance_criteria'], before)
         self.assertEqual(reviewed['verified_at'], self.time)
         self.assertEqual(reviewed['sources'], self.original['sources'])
@@ -149,7 +148,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.review_report()
         changed = REJECTED_STATUS_REPORT + '\n\n방금 새 작업까지 모두 완료했습니다.'
         self.assertIsNotNone(self.assess(changed)['body_issue'])
-        self.assertEqual(self.run_stop(changed).get('decision'), 'block')
+        assert_stop_observation(self, self.run_stop(changed), issue='response-assessment-required')
         original = self.observation.read_text()
         self.observation.write_text('The original observation changed.')
         self.assertIsNotNone(self.assess()['body_issue'])
@@ -200,9 +199,8 @@ class HistoricalResponseReviewTests(unittest.TestCase):
                     self.assertNotIn('if needed', result['body_issue'])
                     self.assertEqual(result['repair_target'], 'source_status')
                     stopped = self.run_stop(REJECTED_STATUS_REPORT)
-                    self.assertEqual(stopped.get('decision'), 'block')
-                    self.assertIn('repair-target: source_status', stopped['reason'])
-                    self.assertNotIn('returns only the corrected fields', stopped['reason'])
+                    observed = assert_stop_observation(self, stopped, issue=status + ':', repair_target='source_status')
+                    self.assertEqual(observed['body_issue'], result['body_issue'])
                 finally:
                     self.observation.write_bytes(original)
         self.assertIsNone(self.assess()['body_issue'])
@@ -238,11 +236,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
                 env=dict(os.environ, **source, CLAUDE_CODE_ENTRYPOINT='claude-desktop', PYTHONDONTWRITEBYTECODE='1'))
             return json.loads(result.stdout)
         rejected = stop()
-        self.assertEqual(rejected.get('decision'), 'block')
-        self.assertIn('route-unavailable', rejected['reason'])
-        self.assertIn('repair-target: response_route', rejected['reason'])
-        self.assertNotIn('completion-reminder', rejected['reason'])
-        self.assertNotIn('corrected control fields', rejected['reason'])
+        assert_stop_observation(self, rejected, issue='route-unavailable', repair_target='response_route')
         candidate = fixture.candidate()
         candidate['work_units'][0]['owner']['platform'] = 'claude'
         candidate['selected_criteria'] = []
@@ -253,11 +247,11 @@ class UnroutedNativeWorkTests(unittest.TestCase):
             intent_delta={'acceptance_criteria': [fixture.criterion(summary='Create the memo from the supplied notes.')]})
         candidate['selected_criteria'] = [dict(work_unit_id='first', contract_revision=1, criterion_id='AC1')]
         fixture.record(candidate)
-        self.assertNotEqual(stop().get('decision'), 'block')
+        assert_stop_observation(self, stop())
         # A later tool-free input must not inherit the preceding Write call.
         entries.append(dict(type='user', sessionId='current', message=dict(role='user', content='Thanks.')))
         transcript.write_text('\n'.join(json.dumps(row) for row in entries))
-        self.assertNotEqual(stop().get('decision'), 'block')
+        assert_stop_observation(self, stop())
 
 
 class NativeActivityTests(unittest.TestCase):
@@ -330,9 +324,7 @@ class NativeActivityTests(unittest.TestCase):
                     input=json.dumps(self.payload), text=True, capture_output=True, check=True,
                     env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
                 rejected = json.loads(result.stdout)
-                self.assertEqual(rejected.get('decision'), 'block')
-                self.assertIn('route-unavailable', rejected['reason'])
-                self.assertIn('repair-target: response_route', rejected['reason'])
+                assert_stop_observation(self, rejected, issue='route-unavailable', repair_target='response_route')
                 assessed = self.assess()
                 self.assertEqual(assessed.get('native_activity', {}).get('status'), 'observed')
                 self.assertFalse(assessed['has_evidence_marker'])
@@ -367,7 +359,7 @@ class NativeActivityTests(unittest.TestCase):
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(self.payload), text=True, capture_output=True, check=True,
             env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
-        self.assertNotEqual(json.loads(stopped.stdout).get('decision'), 'block', stopped.stdout)
+        assert_stop_observation(self, json.loads(stopped.stdout))
 
         # Tool use after the new question still requires the current route.
         rows.append(self.item('function_call', 'followup', name='exec', call_id='current-work'))
@@ -459,7 +451,7 @@ class NativeCompletionTests(unittest.TestCase):
             input=json.dumps(dict(session_id='current', last_assistant_message=body)),
             text=True, capture_output=True, check=True,
             env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
-        self.assertNotEqual(json.loads(executed.stdout).get('decision'), 'block')
+        assert_stop_observation(self, json.loads(executed.stdout))
 
     def test_canonical_completion_purpose_requires_proof_without_lexical_hint(self):
         candidate = self.fixture.candidate()
@@ -556,9 +548,7 @@ class NativeCompletionTests(unittest.TestCase):
 
 
 class NativeProofBindingTests(unittest.TestCase):
-    def test_cli_reviews_and_returns_one_complete_partial_response(self):
-        # The observed failure: only the partial proof was recorded, then the
-        # assistant appended a human explanation before submitting the answer.
+    def test_cli_records_complete_partial_response_without_echoing_original(self):
         proof = self.proof.replace('[completion-check]', '[partial-check]\n- scope: partial').replace(
             '  - none', '  - AC1: Native application remains unverified')
         body = proof + '\n\nThe footer observation is retained. Native application remains unverified.'
@@ -573,8 +563,9 @@ class NativeProofBindingTests(unittest.TestCase):
             '--verified-at', self.owner.time, '--source', str(self.owner.observation))
         self.assertEqual(prepared.returncode, 0, prepared.stdout + prepared.stderr)
         candidate = json.loads(prepared.stdout)
-        self.assertEqual(candidate['response_binding']['text'], body)
-        self.assertEqual(candidate['proof'].strip(), proof.strip())
+        self.assertNotIn('text', candidate['response_binding'])
+        self.assertNotIn('proof', candidate)
+        self.assertNotIn(body, prepared.stdout)
         sources = [s['source_id'] for s in candidate['sources']]
         claims = [dict(binding_id=b['binding_id'], verdict='supported', source_ids=sources,
             rationale='The observed footer result supports only the retained partial claim.')
@@ -592,14 +583,17 @@ class NativeProofBindingTests(unittest.TestCase):
         recorded = cli('record-response', '--candidate', candidate['candidate_reference'],
             '--judgment-file', str(judgment_file))
         self.assertEqual(recorded.returncode, 0, recorded.stdout + recorded.stderr)
-        delivered = json.loads(recorded.stdout)['response_text']
-        self.assertEqual(delivered, body)
+        receipt = json.loads(recorded.stdout)
+        self.assertEqual(receipt['status'], 'reviewed')
+        self.assertNotIn('response_text', receipt)
+        self.api.lookup_current_response(self.owner.source, body)
+        delivered = body
         self.assertIsNone(self.assess(delivered)['body_issue'])
         self.assertEqual(self.assess(delivered)['completion_route']['publication_route'], 'none')
         stopped = subprocess.run([sys.executable, '-B', str(shared / 'claude_stop_verification_hook.py'),
             '--platform', 'codex'], input=json.dumps(dict(session_id='current', last_assistant_message=delivered)),
             env=env, text=True, capture_output=True, check=True)
-        self.assertNotEqual(json.loads(stopped.stdout).get('decision'), 'block')
+        assert_stop_observation(self, json.loads(stopped.stdout))
         self.assertIsNotNone(self.assess(delivered + '\nEverything is now complete.')['body_issue'])
 
     def setUp(self):
@@ -789,7 +783,7 @@ class NativeProofBindingTests(unittest.TestCase):
                     self.owner.observation.write_bytes(original)
         self.assertIsNone(self.assess(self.proof)['body_issue'])
 
-    def test_stop_source_failure_keeps_source_resolution_ahead_of_delivery_repair(self):
+    def test_stop_preserves_source_failure_without_starting_delivery_repair(self):
         body = self.proof + '\n\nThe footer correction is verified.'
         self.review_response(body)
         original = self.owner.observation.read_bytes()
@@ -807,14 +801,8 @@ class NativeProofBindingTests(unittest.TestCase):
                         last_assistant_message=body)),
                         env=env, text=True, capture_output=True, check=True)
                     result = json.loads(stopped.stdout)
-                    self.assertEqual(result.get('decision'), 'block')
-                    self.assertIn(status + ':', result['reason'])
-                    self.assertIn('repair-target: source_status', result['reason'])
-                    self.assertIn('Delivery selection does not establish source validity or claim meaning.', result['reason'])
-                    self.assertLess(result['reason'].index(status + ':'),
-                                    result['reason'].index('delivery-route:'))
-                    self.assertNotIn('returns only the corrected fields', result['reason'])
-                    self.assertNotIn('For an invalid proof field or claim', result['reason'])
+                    observed = assert_stop_observation(self, result, issue=status + ':', repair_target='source_status')
+                    self.assertEqual(observed['body_issue'], self.assess(body)['body_issue'])
                 finally:
                     self.owner.observation.write_bytes(original)
 

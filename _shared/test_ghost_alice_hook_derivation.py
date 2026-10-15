@@ -19,6 +19,15 @@ HOOK = REPO / "_shared" / "ghost-alice-hook.mjs"
 
 
 class DerivationTests(unittest.TestCase):
+    def test_healthy_codex_checkpoint_does_not_append_instruction_context(self) -> None:
+        for session in ('checkpoint-first', 'checkpoint-followup'):
+            out = subprocess.run(
+                ['node', str(HOOK), '--platform', 'codex', '--event', 'PreToolUse',
+                 '--hook', 'tool-checkpoint'],
+                input=json.dumps({'session_id': session, 'tool_name': 'Bash'}),
+                capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(out.stdout), {})
+
     def setUp(self) -> None:
         self.tmp = pathlib.Path(tempfile.mkdtemp(prefix="mjs-derive-"))
         self.addCleanup(lambda: shutil.rmtree(self.tmp, ignore_errors=True))

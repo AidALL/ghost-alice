@@ -36,6 +36,7 @@ from reminder_texts import reminder_text
 
 import argparse
 import base64
+import copy
 import hashlib
 import io
 import json
@@ -272,7 +273,7 @@ def _destination_action(platform_key, destination, action, *, dry_run=False):
     resolved = install_destination.InstallDestination.parse(destination)
     if not (Path(resolved.core_source_root)/"session-intent-analyzer/scripts/session_intent_ledger.py").is_file():
         raise ValueError("Core source root does not provide the session ledger API")
-    if not (Path(resolved.core_source_root)/"_shared/response_delivery.py").is_file():
+    if not (Path(resolved.core_source_root)/"_shared/completion_assessment.py").is_file():
         raise ValueError("Core source root does not provide the response API")
     if resolved.mode == "isolated":
         if action not in {"install", "status", "uninstall"}:
@@ -378,7 +379,6 @@ def _resolve_task_router_reminder_hook_script() -> str:
 def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
     script = _resolve_task_router_reminder_hook_script()
     if script:
-        payload = base64.urlsafe_b64encode(HOOK_INTERNAL.encode("utf-8")).decode("ascii")
         return " ".join([
             _hook_python_command(payload=payload_mode),
             _quote_static_arg(script),
@@ -388,8 +388,6 @@ def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: b
             output_format,
             "--root",
             _quote_static_arg(_session_intent_root(platform)),
-            "--internal-b64",
-            payload,
         ]) + f" # {HOOK_MARKER}"
     if output_format == "json":
         return _shell_print_json({"continue": True, "systemMessage": HOOK_INTERNAL}, payload_mode=payload_mode) + f" # {HOOK_MARKER}"
@@ -437,7 +435,6 @@ def _resolve_session_intent_analyzer_hook_script() -> str:
 def _session_intent_analyzer_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
     script = _resolve_session_intent_analyzer_hook_script()
     if script:
-        payload = base64.urlsafe_b64encode(SESSION_INTENT_INTERNAL.encode("utf-8")).decode("ascii")
         return " ".join([
             _hook_python_command(payload=payload_mode),
             _quote_static_arg(script),
@@ -451,8 +448,6 @@ def _session_intent_analyzer_command(*, platform: str, output_format: str, paylo
             output_format,
             "--root",
             _quote_static_arg(_session_intent_root(platform)),
-            "--internal-b64",
-            payload,
         ])
     if output_format == "json":
         return _shell_print_json({"continue": True, "systemMessage": SESSION_INTENT_INTERNAL}, payload_mode=payload_mode)
@@ -549,43 +544,9 @@ SESSION_START_ENTRY_CODEX = {
     "hooks": [{"type": "command", "command": SESSION_START_COMMAND_CODEX}],
 }
 
-# 4. User input hook (auxiliary): require web search before external tool claims (rule 10).
-# This is an agent governance hook with the same shape as the task-router hook. It injects text on every user input to require community signal checks before external tool claims.
+# Managed marker retained only to remove the obsolete unconditional input reminder.
 WEB_SEARCH_FIRST_MARKER = "[web-search-first]"
-# Register this reminder only where its output reaches model context. On Claude Code, systemMessage is user-facing; omit the reminder and remove any matching managed entry.
-WEB_SEARCH_FIRST_PLATFORMS = frozenset({"codex"})
-WEB_SEARCH_FIRST_INTERNAL = "web-search-first: Before endorsing current, version-specific, disputed or high-risk external-tool behavior, the current-session assistant follows AGENTS.md Rule 10: official specifications plus at least three community searches. A specification alone does not prove runtime behavior. Stable general explanations and specification-only questions use Rule 10's stated exceptions."
 
-
-def _web_search_first_command(*, output_format: str, payload_mode: bool = False) -> str:
-    if output_format == "json":
-        return (
-            _shell_print_json({
-                "continue": True,
-                "systemMessage": WEB_SEARCH_FIRST_INTERNAL,
-                "ghostAliceSurface": "routine",
-            }, payload_mode=payload_mode)
-            + f" # {WEB_SEARCH_FIRST_MARKER}"
-        )
-    return (
-        _shell_print_message(_localized_bridge(
-            WEB_SEARCH_FIRST_INTERNAL,
-            "Current field reports are checked before describing external tool or version behavior.",
-            "Current field reports are checked before describing external tool or version behavior.",
-            "Rule 10: check at least three community signals such as GitHub issues, Reddit, HN, or Stack Overflow.",
-            "Rule 10: check at least three community signals such as GitHub issues, Reddit, HN, or Stack Overflow.",
-        ), payload=payload_mode)
-        + f" # {WEB_SEARCH_FIRST_MARKER}"
-    )
-
-
-WEB_SEARCH_FIRST_COMMAND = _web_search_first_command(output_format="text")
-WEB_SEARCH_FIRST_COMMAND_CODEX = _web_search_first_command(output_format="json")
-
-WEB_SEARCH_FIRST_ENTRY = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": WEB_SEARCH_FIRST_COMMAND}],
-}
 # 5. Pre-tool hook: tool-checkpoint hook-enforced retry point.
 TOOL_CHECKPOINT_MARKER = "[tool-checkpoint] pre-tool-check"
 LEGACY_TOOL_CHECKPOINT_MARKERS = (f"[{'action'}-{'gate'}] pre-tool-check",)
@@ -1066,14 +1027,6 @@ def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, A
     else:
         command = _session_intent_analyzer_command(platform="claude", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
     return _hook_runner_command_entry("session-intent", command, SESSION_INTENT_MARKER, platform_key=platform_key)
-
-
-def _platform_web_search_entry(platform_key: str, event: str) -> dict[str, Any]:
-    if platform_key == "codex":
-        command = _web_search_first_command(output_format="json", payload_mode=True)
-    else:
-        command = _web_search_first_command(output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("web-search-first", command, WEB_SEARCH_FIRST_MARKER, platform_key=platform_key)
 
 
 def _platform_tool_checkpoint_entry(
@@ -2045,14 +1998,8 @@ def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
         return False
 
 
-LEGACY_PROMPT_INSTRUCTION_DIGESTS = {
-    "session-intent": {'99616de4dd8dfee6a9cd62a130a042f03848abb0fedd7c42f9009f37fcdb99d1', '13bedc717127f5ebf23cdf68edd268aba2c4668fe67f87a649ce4b8f267a5df0', 'f0903ce21fe35669afb2b25d9567839529c96f301b84d69f2f084b7c95791162', "4ac1f065346edc273d079dcf0dba602bf3a34871d2f78eed2e05c12b9ecbdecb"},
-    "prompt": {'324cc5f4ca4b3e4d0d91a35a197cd65bad466bf9b975ee15ba6b958507d15c4f', 'a108a60542a39273cdd6b77d29eab749c4b0fb965f2c1a4403df334b2f06baac', '5c6839cdfdf2d42b58299ea8f6ecf353d291bcff8bdf0f2549576d23067d8cde', "5a31b2b40c4a777438fef4dde0bd0026fb77e0c166fcfc5a5531b1e4693643c0"},
-}
-
-
-def _managed_prompt_instruction(command: str, identity: str):
-    """Return payload and instruction coordinates only for an exact bound Core helper."""
+def _managed_instruction_contract(command: str, identity: str):
+    """Resolve the executor and explicit instruction ownership from its bound arguments."""
     import shlex
     if not _hook_runner_id_match(command, identity):
         return None
@@ -2060,7 +2007,7 @@ def _managed_prompt_instruction(command: str, identity: str):
         outer = shlex.split(command, comments=True)
         script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
         args = outer[script_index + 1:]
-        if len(args) != 6 or args[2] not in {"codex", "claude"} or args[4] != "--binding-b64":
+        if len(args) != 6 or args[:2] != ["run", identity] or args[2] not in {"codex", "claude"} or args[4] != "--binding-b64":
             return None
         binding = install_destination.decode_binding(args[5])
         if set(binding) != {"schema_version", "destination"}:
@@ -2076,75 +2023,43 @@ def _managed_prompt_instruction(command: str, identity: str):
                 or len(argv[2:]) % 2):
             return None
         options = dict(zip(argv[2::2], argv[3::2]))
-        required = {"--platform", "--format", "--root", "--internal-b64"}
+        required = {"--platform", "--format", "--root"}
         if identity == "session-intent":
             required |= {"--hook", "--context"}
-        if (set(options) != required or len(options) != len(argv[2:]) // 2
+        if (set(options) - {"--internal-b64"} != required or len(options) != len(argv[2:]) // 2
                 or options["--platform"] != args[2]
                 or options["--format"] not in {"json", "text"}
                 or options["--root"] != destination.ledger_root
                 or (identity == "session-intent" and (options["--hook"], options["--context"]) != ("session-intent", "prompt_submit"))):
             return None
-        encoded = options["--internal-b64"]
-        message = base64.urlsafe_b64decode(encoded).decode("utf-8")
-        return args[3], inner, encoded, message
+        return options
     except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
         return None
 
 
-def remove_managed_prompt_reminders(hooks_list: list) -> int:
-    """Retire the built-in reminder without adopting marker-only or custom commands."""
-    def owned(command):
-        decoded = _managed_prompt_instruction(command, "prompt")
-        if decoded is None:
-            return False
-        message = decoded[3]
-        return (message == HOOK_INTERNAL
-                or hashlib.sha256(message.encode("utf-8")).hexdigest() in LEGACY_PROMPT_INSTRUCTION_DIGESTS["prompt"])
-    return _remove_hook_commands_by_command(hooks_list, owned)
+def _managed_prompt_executor(command: str, identity: str):
+    contract = _managed_instruction_contract(command, identity)
+    return contract is not None and "--internal-b64" not in contract
 
 
-def refresh_builtin_prompt_instructions(settings: dict[str, Any]) -> tuple[dict[str, Any], int]:
-    """Pure refresh of known built-in prompt text within exact installed bindings.
-
-    No runtime copying, shell execution, config writes, or binding regeneration.
-    Unknown/custom/ambiguous commands remain byte-identical.
-    """
-    import copy
-    refreshed = copy.deepcopy(settings)
-    changed = 0
-    hooks = refreshed.get("hooks", {})
-    rows = hooks.get("UserPromptSubmit", []) if isinstance(hooks, dict) else []
-    if not isinstance(rows, list):
-        return refreshed, changed
-    specifications = {"prompt": HOOK_INTERNAL, "session-intent": SESSION_INTENT_INTERNAL}
+def resolve_instruction_command(rows, identity, default_command):
+    """An explicit caller policy selects one executor; ambiguity prevents replacement."""
+    overrides = []
     for row in rows:
-        commands = row.get("hooks", []) if isinstance(row, dict) else []
-        for hook in commands if isinstance(commands, list) else []:
-            command = hook.get("command") if isinstance(hook, dict) else None
-            if not isinstance(command, str) or hook.get("type") != "command":
-                continue
-            for identity, current_message in specifications.items():
-                decoded = _managed_prompt_instruction(command, identity)
-                if decoded is None:
-                    continue
-                try:
-                    payload, inner, encoded, message = decoded
-                    if message == current_message:
-                        continue
-                    if hashlib.sha256(message.encode("utf-8")).hexdigest() not in LEGACY_PROMPT_INSTRUCTION_DIGESTS[identity]:
-                        continue
-                    if inner.count(encoded) != 1 or command.count(payload) != 1:
-                        continue
-                    replacement = base64.urlsafe_b64encode(current_message.encode("utf-8")).decode("ascii")
-                    new_inner = inner.replace(encoded, replacement, 1)
-                    new_payload = base64.urlsafe_b64encode(new_inner.encode("utf-8")).decode("ascii")
-                    hook["command"] = command.replace(payload, new_payload, 1)
-                    changed += 1
-                except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
-                    continue
-                break
-    return refreshed, changed
+        for hook in row.get("hooks", []):
+            command = hook.get("command", "")
+            contract = _managed_instruction_contract(command, identity)
+            if hook.get("type") == "command" and contract is not None and "--internal-b64" in contract:
+                overrides.append(command)
+    if len(overrides) > 1:
+        raise ValueError("Instruction ownership is ambiguous")
+    return overrides[0] if overrides else default_command
+
+
+def remove_managed_prompt_reminders(hooks_list: list) -> int:
+    """Retire the redundant default executor; explicit custom commands remain intact."""
+    return _remove_hook_commands_by_command(hooks_list,
+        lambda command: _managed_prompt_executor(command, "prompt") is True)
 
 
 def _remove_stale_hook_entries(
@@ -2180,13 +2095,15 @@ def _remove_stale_hook_entries(
     return removed
 
 
-def _remove_hook_entries(hooks_list: list, marker: str) -> int:
-    """Remove marked commands, preserving custom siblings; count affected entries."""
+def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None = None) -> int:
+    """Remove managed commands, preserving custom siblings; count affected entries."""
     removed = 0
     i = 0
     while i < len(hooks_list):
         entry = hooks_list[i]
-        retained = [hook for hook in entry.get("hooks", []) if marker not in hook.get("command", "")]
+        retained = [hook for hook in entry.get("hooks", [])
+                    if marker not in hook.get("command", "")
+                    and not _hook_runner_id_match(hook.get("command", ""), hook_id)]
         if len(retained) != len(entry.get("hooks", [])):
             entry["hooks"] = retained
             removed += 1
@@ -2210,7 +2127,6 @@ def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
     ordered_markers = [
         PROMPT_PENDING_MERGE_MARKER,
         SESSION_INTENT_MARKER,
-        WEB_SEARCH_FIRST_MARKER,
     ]
     managed: dict[str, dict[str, Any]] = {}
     first_managed_index: int | None = None
@@ -2223,9 +2139,7 @@ def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
         if first_managed_index is None:
             first_managed_index = index
 
-    # web-search-first is optional; pending-merge and intake must be present.
-    required_markers = [marker for marker in ordered_markers if marker != WEB_SEARCH_FIRST_MARKER]
-    if first_managed_index is None or any(marker not in managed for marker in required_markers):
+    if first_managed_index is None or any(marker not in managed for marker in ordered_markers):
         return False
     present_markers = [marker for marker in ordered_markers if marker in managed]
 
@@ -2358,6 +2272,8 @@ def install_hook(
     _log(_t(f"  Hook config file: {settings_file}", f"  Hook config file: {settings_file}"))
     settings = _read_settings(settings_file, backup_corrupt=not dry_run)
 
+    permission_before = list(settings.get("permissions", {}).get("allow", [])) if isinstance(settings.get("permissions"), dict) and isinstance(settings.get("permissions", {}).get("allow", []), list) else []
+
     changed = False
 
     if platform_key == "claude":
@@ -2415,7 +2331,7 @@ def install_hook(
 
     # Install the session-intent-analyzer hook (updates the session intent ledger for every user input).
     session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
-    session_intent_command = _entry_command(session_intent_entry)
+    session_intent_command = resolve_instruction_command(hook_list, "session-intent", _entry_command(session_intent_entry))
     removed = _remove_stale_hook_entries(
         hook_list,
         SESSION_INTENT_MARKER,
@@ -2442,45 +2358,19 @@ def install_hook(
         _log(_t("  session-intent-analyzer hook added", "  session-intent-analyzer hook added"))
         changed = True
 
-    # Install the web-search-first hook (rule 10: web search before external tool claims) where its output reaches the model. Separate entry on the same UserPromptSubmit event; injects text alongside the task-router reminder.
-    if platform_key in WEB_SEARCH_FIRST_PLATFORMS:
-        web_search_entry = _platform_web_search_entry(platform_key, hook_key)
-        web_search_command = _entry_command(web_search_entry)
-        removed = _remove_stale_hook_entries(
-            hook_list,
-            WEB_SEARCH_FIRST_MARKER,
-            web_search_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="web-search-first",
-        )
-        if removed:
-            _log(_t(f"  Replaced {removed} stale web-search-first hook entry(ies)", f"  Replaced {removed} stale web-search-first hook entry(ies)"))
-            changed = True
-
-        if _hook_already_exists(
-            hook_list,
-            WEB_SEARCH_FIRST_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=web_search_command,
-        ):
-            _log(_t("  web-search-first hook already exists. Skipping", "  web-search-first hook already exists. Skipping"))
-        else:
-            hook_list.append(web_search_entry)
-            _log(_t("  web-search-first hook added (rule 10)", "  web-search-first hook added (rule 10)"))
-            changed = True
-    else:
-        removed = _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER)
-        if removed:
-            _log(_t(
-                f"  Removed {removed} web-search-first hook entry(ies) (its output does not reach the model on this platform)",
-                f"  Removed {removed} web-search-first hook entry(ies) (its output does not reach the model on this platform)",
-            ))
-            changed = True
+    # External evidence selection belongs to the verification reference, not input intake.
+    removed = _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER, hook_id="web-search-first")
+    if removed:
+        _log(_t(
+            f"  Removed {removed} web-search-first hook entry(ies)",
+            f"  Removed {removed} web-search-first hook entry(ies)",
+        ))
+        changed = True
 
     if _reorder_user_prompt_governance_hooks(hook_list):
         _log(_t(
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch) -> web-search-first where installed",
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch) -> web-search-first where installed",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch)",
+            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch)",
         ))
         changed = True
 
@@ -2689,6 +2579,13 @@ def install_hook(
     if not changed:
         if not dry_run and selected_node_runtime is not None:
             _persist_node_runtime(platform_key, selected_node_runtime)
+            if platform_key == "claude" and addon_sources:
+                import addon_skill_permissions
+                addon_skill_permissions.record_install(
+                    settings_file,
+                    load_addon_targets(list(addon_sources), core_skill_names=_ghost_alice_installed_skill_names(), platform="claude"),
+                    permission_before, settings.get("permissions", {}).get("allow", []),
+                )
         return "already"
 
     _write_settings(
@@ -2700,6 +2597,13 @@ def install_hook(
     if not dry_run and selected_node_runtime is not None:
         try:
             _persist_node_runtime(platform_key, selected_node_runtime)
+            if platform_key == "claude" and addon_sources:
+                import addon_skill_permissions
+                addon_skill_permissions.record_install(
+                    settings_file,
+                    load_addon_targets(list(addon_sources), core_skill_names=_ghost_alice_installed_skill_names(), platform="claude"),
+                    permission_before, settings.get("permissions", {}).get("allow", []),
+                )
         except Exception as persistence_error:
             rollback_errors: list[Exception] = []
             try:
@@ -2794,22 +2698,138 @@ def _is_legacy_autopilot_hook_command(command: str) -> bool:
     return any(marker in normalized and script in normalized for marker, script in _LEGACY_AUTOPILOT_HOOKS)
 
 
-def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str], bool]) -> int:
+def _reconcile_codex_hook_trust(content, changes):
+    """Remove owned hashes and relocate surviving occurrences without granting trust.
+
+    Each change binds an original position to its new position (or removal) and
+    original command hash. The removal pass supplies this mapping directly;
+    hashes never identify duplicate occurrences. User-edited or colliding
+    tables that cannot be relocated intact reject the whole removal.
+    """
+    parsed = tomllib.loads(content)
+    hooks = parsed.get("hooks", {})
+    if not isinstance(hooks, dict) or not isinstance(hooks.get("state", {}), dict):
+        raise ValueError("Codex hook trust state must be a TOML table")
+    tables = hooks.get("state", {})
+    expected = copy.deepcopy(parsed)
+    expected_tables = expected.get("hooks", {}).get("state", {})
+    lines = content.splitlines(keepends=True)
+    edits = []
+    vacated = set()
+    moves = {}
+    for key, (new_key, expected_hash) in changes.items():
+        table = tables.get(key)
+        header = f"[hooks.state.{_toml_basic_string(key)}]"
+        start, end = _find_toml_header_bounds(lines, header)
+        if new_key is not None:
+            if table is not None:
+                if not isinstance(table, dict) or table.get("trusted_hash") != expected_hash or start is None:
+                    raise ValueError(f"Cannot relocate user-edited Codex hook trust: {key}")
+                replacement = lines[start:end].copy()
+                replacement[0] = replacement[0].replace(header, f"[hooks.state.{_toml_basic_string(new_key)}]", 1)
+                edits.append((start, end, replacement))
+                vacated.add(key)
+                moves[key] = (new_key, table)
+            continue
+        if not isinstance(table, dict) or table.get("trusted_hash") != expected_hash or start is None:
+            continue
+        trusted_index = next((i for i in range(start + 1, end)
+            if lines[i].split("=", 1)[0].strip() == "trusted_hash" and "=" in lines[i]), None)
+        if trusted_index is None:
+            continue
+        if lines[trusted_index].strip() != f'trusted_hash = "{expected_hash}"':
+            continue  # User-edited representations/comments are not our unchanged line.
+        if set(table) == {"trusted_hash"} and not any(line.strip().startswith("#") for line in lines[start + 1:end]):
+            edits.append((start, end, []))
+            expected_tables.pop(key)
+            vacated.add(key)
+        else:
+            edits.append((trusted_index, trusted_index + 1, []))
+            expected_tables[key].pop("trusted_hash")
+    for key, (new_key, _) in changes.items():
+        if new_key is not None and new_key in tables and new_key not in vacated:
+            raise ValueError(f"Codex hook trust destination retains user data: {new_key}")
+    for key in moves:
+        expected_tables.pop(key)
+    for new_key, table in moves.values():
+        expected_tables[new_key] = table
+    for start, end, replacement in sorted(edits, reverse=True):
+        lines[start:end] = replacement
+    result = ''.join(lines)
+    actual = tomllib.loads(result)
+    # Removing the last generated nested header also removes its implicit
+    # empty ancestors. Other user tables, including empty ones, stay exact.
+    for value in (expected, actual):
+        hook_tables = value.get("hooks")
+        if isinstance(hook_tables, dict):
+            if hook_tables.get("state") == {}:
+                hook_tables.pop("state")
+            if not hook_tables:
+                value.pop("hooks")
+    if actual != expected:
+        raise ValueError("Codex hook trust representation cannot be reconciled without changing user data")
+    return result
+
+
+def _write_removed_hook_settings(settings_file, settings, platform_key, changes):
+    """Commit trust/settings atomically per file; restore trust on settings failure."""
+    if platform_key != "codex" or not changes:
+        _write_settings(settings_file, settings, dry_run=False)
+        return
+    config_file = _resolve_codex_config_toml()
+    if not config_file.exists():
+        _write_settings(settings_file, settings, dry_run=False)
+        return
+    original = config_file.read_bytes()
+    stat_before = config_file.stat()
+    content = _reconcile_codex_hook_trust(original.decode('utf-8'), changes).encode('utf-8')
+    if content == original:
+        _write_settings(settings_file, settings, dry_run=False)
+        return
+    install_destination.assert_mutation_path(config_file)
+    backup = config_file.with_suffix('.toml.bak')
+    install_destination.assert_mutation_path(backup)
+    shutil.copy2(config_file, backup)
+    runtime_config._atomic_write_bytes(config_file, content)
+    try:
+        _write_settings(settings_file, settings, dry_run=False)
+    except BaseException as error:
+        try:
+            runtime_config._atomic_write_bytes(config_file, original)
+            target = runtime_config._atomic_write_destination(config_file)
+            os.utime(target, ns=(stat_before.st_atime_ns, stat_before.st_mtime_ns))
+        except BaseException as rollback_error:
+            error.add_note(f"Codex trust rollback failed; original backup is {backup}: {rollback_error}")
+        raise
+
+
+def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str], bool], *, position_callback=None) -> int:
     removed = 0
     kept = []
-    for entry in hooks_list:
+    for old_group, entry in enumerate(hooks_list):
+        if not isinstance(entry, dict):
+            kept.append(entry)
+            continue
         hooks = entry.get("hooks", [])
         if not isinstance(hooks, list):
             kept.append(entry)
             continue
         kept_hooks = []
+        positions = []
         removed_from_entry = 0
-        for hook in hooks:
+        for old_handler, hook in enumerate(hooks):
             if isinstance(hook, dict) and predicate(hook.get("command", "")):
                 removed += 1
                 removed_from_entry += 1
+                positions.append((old_handler, None, hook))
             else:
+                positions.append((old_handler, len(kept_hooks), hook))
                 kept_hooks.append(hook)
+        if position_callback is not None:
+            for old_handler, new_handler, hook in positions:
+                if isinstance(hook, dict) and hook.get("type") == "command":
+                    new_position = None if new_handler is None else (len(kept), new_handler)
+                    position_callback((old_group, old_handler), new_position, entry, hook)
         if kept_hooks:
             if removed_from_entry:
                 entry["hooks"] = kept_hooks
@@ -2821,6 +2841,22 @@ def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str]
             pass
     hooks_list[:] = kept
     return removed
+
+
+def _remove_hook_settings_commands(settings_file, hooks_obj, predicate, *, collect_trust=False):
+    changes = {}
+    total = 0
+    for event, groups in hooks_obj.items():
+        if not isinstance(groups, list):
+            continue
+        def position(old, new, group, hook):
+            if old == new:
+                return
+            key = _codex_hook_state_key(settings_file, event, *old)
+            new_key = None if new is None else _codex_hook_state_key(settings_file, event, *new)
+            changes[key] = (new_key, _codex_command_hook_hash(event, group, hook))
+        total += _remove_hook_commands_by_command(groups, predicate, position_callback=position if collect_trust else None)
+    return total, changes
 
 
 def _remove_legacy_autopilot_hook_entries(hooks_obj: dict[str, Any]) -> int:
@@ -2853,15 +2889,10 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     if not isinstance(hooks_obj, dict):
         return 0
     # Ownership proof: remove only the command generated by _hook_runner_command(). A user hook can contain the marker text, or even a fake [hook-runner:] token; it is not ours unless the comment carries the exact generated marker/runner signature and argv invokes the same normalized hook id.
-    total = 0
-    for event_list in hooks_obj.values():
-        if isinstance(event_list, list):
-            total += _remove_hook_commands_by_command(
-                event_list,
-                lambda command, marker=marker: _is_exact_addon_hook_command(command, marker),
-            )
+    total, changes = _remove_hook_settings_commands(settings_file, hooks_obj,
+        lambda command: _is_exact_addon_hook_command(command, marker), collect_trust=platform_key == "codex")
     if total and not dry_run:
-        _write_settings(settings_file, settings, dry_run=False)
+        _write_removed_hook_settings(settings_file, settings, platform_key, changes)
     return total
 
 
@@ -2879,15 +2910,10 @@ def remove_adapter_hook(marker: str, *, platform_key: str, dry_run: bool = False
     hooks_obj = settings.get("hooks", {})
     if not isinstance(hooks_obj, dict):
         return 0
-    total = 0
-    for event_list in hooks_obj.values():
-        if isinstance(event_list, list):
-            total += _remove_hook_commands_by_command(
-                event_list,
-                lambda command, marker=marker: _is_exact_adapter_hook_command(command, marker),
-            )
+    total, changes = _remove_hook_settings_commands(settings_file, hooks_obj,
+        lambda command: _is_exact_adapter_hook_command(command, marker), collect_trust=platform_key == "codex")
     if total and not dry_run:
-        _write_settings(settings_file, settings, dry_run=False)
+        _write_removed_hook_settings(settings_file, settings, platform_key, changes)
     return total
 
 
@@ -3007,8 +3033,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
             total_removed += _remove_hook_entries(hook_list, legacy_marker)
 
     # Remove the web-search-first hook (same UserPromptSubmit event).
-    if _hook_already_exists(hook_list, WEB_SEARCH_FIRST_MARKER):
-        total_removed += _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER)
+    total_removed += _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER, hook_id="web-search-first")
 
     # Remove the tool-checkpoint PreToolUse hook.
     tool_checkpoint_key = _resolve_hook_event("pre_tool_use", platform_key)
@@ -3123,14 +3148,6 @@ def check_status_detail(
         expected_command=_entry_command(prompt_pending_merge_entry),
     )
 
-    web_search_entry = _platform_web_search_entry(platform_key, hook_key)
-    web_search_present, web_search_ok = _hook_marker_match_status(
-        hook_list,
-        WEB_SEARCH_FIRST_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=_entry_command(web_search_entry),
-    )
-
     session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
     session_intent_present, session_intent_ok = _hook_marker_match_status(
         hook_list,
@@ -3207,7 +3224,6 @@ def check_status_detail(
     required = {
         "pending-merge-prompt": (prompt_pending_merge_present, prompt_pending_merge_ok),
         "session-intent": (session_intent_present, session_intent_ok),
-        "web-search-first": (web_search_present, web_search_ok),
         "tool-checkpoint": (tool_checkpoint_present, tool_checkpoint_ok),
         "completion": (stop_present, stop_ok),
         "session-start": (session_start_present, session_start_ok),
@@ -3225,8 +3241,6 @@ def check_status_detail(
             permission = f"Skill({skill_name})"
             present = permission in allowed_rules
             required[f"skill-permission:{skill_name}"] = (present, present)
-    if platform_key not in WEB_SEARCH_FIRST_PLATFORMS:
-        required.pop("web-search-first", None)
     missing = [label for label, (present, ok) in required.items() if not present]
     drifted = [label for label, (present, ok) in required.items() if present and not ok]
     incomplete = missing + drifted

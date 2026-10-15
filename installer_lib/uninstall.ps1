@@ -402,6 +402,7 @@ function Invoke-Uninstall {
         return
     }
 
+    $removalTargets = @()
     foreach ($skill in $SkillNames) {
         if (-not (Test-AddonDependentsForSkill -SkillName $skill)) {
             continue
@@ -411,9 +412,14 @@ function Invoke-Uninstall {
         foreach ($t in $targets) {
             $target = Join-Path $SkillsDir $t.Name
             $label = if ($t.IsFamily) { "$($t.Family)/$($t.Name)" } else { $t.Name }
-            if (Remove-InstalledTarget -DisplayName $label -TargetPath $target) {
-                $removed++
-            }
+            $removalTargets += [PSCustomObject]@{ Path = $target; Label = $label }
+        }
+    }
+
+    Invoke-GatewayRemovalGuard -Targets @($removalTargets | ForEach-Object { $_.Path })
+    foreach ($target in $removalTargets) {
+        if (Remove-InstalledTarget -DisplayName $target.Label -TargetPath $target.Path) {
+            $removed++
         }
     }
 

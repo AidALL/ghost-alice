@@ -98,6 +98,49 @@ class SessionIntentLedgerTests(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8", env=env, check=False,
         )
 
+    def test_intent_reference_omits_history_and_detail_lookup_retains_authority(self):
+        root = self.tmpdir / "ledger"
+        self.ledger.record_turn(root=root, platform="codex", session_id="s", intent_delta={
+            "routing_keywords": ["email", "read-only"],
+            "constraints": ["Do not send email"],
+            "open_questions": ["old question"],
+            "consumer_hints": {"skills": ["old-skill"]},
+            "current_goal": "retained detailed goal " * 1000})
+        result = self.run_cli(root, "--session-id", "s", "--read-intent")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        reference = json.loads(result.stdout)
+        self.assertEqual(reference["keywords"], ["email", "read-only"])
+        self.assertNotIn("retained detailed goal", result.stdout)
+        self.assertLess(len(result.stdout), 2000)
+        default_read = self.run_cli(root, "--session-id", "s", "--read-state")
+        self.assertEqual(default_read.returncode, 0, default_read.stderr)
+        self.assertEqual(json.loads(default_read.stdout), reference)
+        detail = self.run_cli(root, "--session-id", "s", "--read-state", "--pointer", "/constraints/0")
+        self.assertEqual(detail.returncode, 0, detail.stderr)
+        self.assertEqual(json.loads(detail.stdout)["value"], "Do not send email")
+        self.ledger.record_turn(root=root, platform="codex", session_id="s", intent_delta={
+            "routing_keywords": ["calendar"], "open_questions": [],
+            "consumer_hints": {"skills": ["calendar-skill"]}})
+        state = self.ledger.read_session_state(root=root, platform="codex", session_id="s")
+        self.assertEqual(state["routing_keywords"], ["calendar"])
+        self.assertEqual(state["open_questions"], [])
+        self.assertEqual(state["consumer_hints"], {"skills": ["calendar-skill"]})
+        self.assertEqual(state["constraints"], ["Do not send email"])
+
+    def test_explicit_current_lists_replace_prior_values_and_omission_preserves_them(self):
+        state = {"constraints": ["Read only"], "non_goals": ["Edit files"],
+                 "open_questions": ["Which file?"], "risk_flags": ["Unknown target"]}
+        delta = {"constraints": ["Edit the selected file only"], "non_goals": [],
+                 "open_questions": [], "risk_flags": []}
+        updated = self.ledger.apply_delta(state, delta)
+        for field, value in delta.items():
+            self.assertEqual(updated[field], value)
+        retained = self.ledger.apply_delta(updated, {"routing_keywords": ["file"]})
+        for field, value in delta.items():
+            self.assertEqual(retained[field], value)
+        with self.assertRaises(ValueError):
+            self.ledger.apply_delta(retained, {"constraints": None})
+
     def test_cli_native_identity_rejects_other_session_before_any_write(self) -> None:
         root = self.tmpdir / "ledger"
         self.ledger.record_turn(root=root, platform="codex", session_id="other-session",
@@ -177,8 +220,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 {"id": "report-instead-of-execute", "status": "encoded"}
             ]
         })
-        self.assertEqual(len(state["conduct_feedback"]), 1)
-        self.assertEqual(state["conduct_feedback"][0]["status"], "encoded")
+        self.assertEqual(state["conduct_feedback"], [])
 
     def test_conduct_feedback_repeated_same_id_increments_occurrence_count(self) -> None:
         state = self.ledger.default_state("codex", "session-cf")
@@ -208,7 +250,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(entry["occurrence_count"], 2)
         self.assertEqual(entry["summary"], "load the verification skill before completion-check")
 
-    def test_conduct_feedback_status_update_does_not_increment_occurrence_count(self) -> None:
+    def test_encoded_feedback_is_removed_from_current_guidance(self) -> None:
         state = self.ledger.default_state("codex", "session-cf")
         state = self.ledger.apply_delta(state, {
             "conduct_feedback": [
@@ -225,9 +267,19 @@ class SessionIntentLedgerTests(unittest.TestCase):
             ]
         })
 
-        entry = state["conduct_feedback"][0]
-        self.assertEqual(entry["occurrence_count"], 1)
-        self.assertEqual(entry["status"], "encoded")
+        self.assertEqual(state["conduct_feedback"], [])
+
+    def test_retired_feedback_keeps_only_audit_identity(self):
+        coords = dict(root=self.tmpdir / 'feedback', platform='codex', session_id='feedback')
+        self.ledger.record_turn(**coords, raw_user_input='Apply the correction', intent_delta={
+            'conduct_feedback': [{'id': 'done-rule', 'corrective_rule': 'Current correction', 'status': 'open'}]})
+        before = self.ledger.read_session_state(**coords)
+        self.ledger.record_turn(**coords, expected_input_event_id=before['latest_input_event_id'],
+            intent_delta={'conduct_feedback': [{'id': 'done-rule', 'status': 'encoded'}]})
+        self.assertEqual(self.ledger.read_session_state(**coords)['conduct_feedback'], [])
+        event = self.ledger.read_session_events(**coords)[-1]
+        self.assertEqual(event['retired_feedback_ids'], ['done-rule'])
+        self.assertNotIn('Current correction', json.dumps(event))
 
     def test_record_turn_never_persists_raw_prompt(self) -> None:
         root = self.tmpdir / "ledger"

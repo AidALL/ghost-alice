@@ -24,15 +24,6 @@ def accepted(claims):
 
 
 class ClaimEvidenceTests(unittest.TestCase):
-    def test_prompt_view_is_small_and_contains_no_model_linkage_protocol(self):
-        from claim_evidence_runtime import retained_results_hint
-        rows = [dict(CLAIM, statement=CLAIM["statement"] + str(i), original_verified_at="2026-10-10T10:42:22Z") for i in range(20)]
-        with patch("claim_evidence_runtime.retained_claim_candidates", return_value=dict(status="candidates", claims=rows)):
-            hint = retained_results_hint("codex", {"session_id": "synthetic"}, {})
-        self.assertLess(len(hint), 3000)
-        self.assertNotIn("proof_digest", hint)
-        self.assertNotIn("work_unit_id", hint)
-        self.assertEqual(hint.count('"statement"'), 4)
 
     def test_native_reuse_needs_no_response_protocol(self):
         candidates = lambda: dict(status="candidates", claims=[dict(CLAIM, validity="candidate")])

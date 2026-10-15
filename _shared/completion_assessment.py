@@ -23,6 +23,8 @@ from native_completion import _ledger
 _SEAL = object()
 _DEFINITION = ('work_unit_id', 'contract_revision', 'id', 'summary', 'source', 'admitted')
 _SOURCE_RESPONSE_KIND = 'source-response-review.v2'
+_RESPONSE_SCOPE_KIND = 'response-review-scope.v1'
+_NATIVE_RESPONSE_KIND = 'native-source-response-review.v1'
 
 
 class CompletionAssessmentError(ValueError):
@@ -50,16 +52,21 @@ def _reference(value):
 
 class VerifiedAssessment:
     """Read-only in-process result minted only after a Core database lookup."""
-    __slots__ = ('_json', '_seal', '_issues')
+    __slots__ = ('_json', '_seal', '_issues', '_candidate_json')
 
-    def __init__(self, payload, seal, source_issues=None):
+    def __init__(self, payload, seal, source_issues=None, *, candidate=None):
         _require(seal is _SEAL, 'assessment-invalid', 'A Core database assessment is required')
         self._json, self._seal = _json(payload), seal
+        self._candidate_json = _json(candidate if candidate is not None else payload['candidate'])
         self._issues = tuple((source_issues or {}).items())
 
     @property
     def candidate(self):
-        return json.loads(self._json)['candidate']
+        return json.loads(self._candidate_json)
+
+    @property
+    def candidate_reference(self):
+        return json.loads(self._json)['candidate_reference']
 
     @property
     def judgments(self):
@@ -95,6 +102,10 @@ def _schema(connection):
         for operation in ('UPDATE', 'DELETE'):
             connection.execute(f'''CREATE TRIGGER IF NOT EXISTS {table}_{operation.lower()}
                 BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'immutable Core assessment'); END''')
+
+
+
+
 
 
 def _stored(connection, table, reference):
@@ -138,38 +149,252 @@ def _lookup_key(contract, proof, verified_at):
 
 
 def _source_issues(candidate, source_ids=None):
-    # Accepted-proof reuse reads the authenticated retained bytes. Current
-    # business artifact dependencies are checked independently of those bytes.
-    if candidate.get('reuse_evidence'):
-        return {}
+    from source_reference import FORMAT, CORE_FORMAT, verify_source
     issues = {}
     for source in candidate['sources']:
         if source_ids is not None and source['source_id'] not in source_ids:
             continue
-        if source.get('kind') == 'accepted-proof':
-            continue  # Core retained bytes after trusted Ghost-ALICE Autopilot chain authentication.
+        reference = source.get('storage') in (FORMAT, CORE_FORMAT)
+        if not reference and (candidate.get('reuse_evidence') or source.get('kind') == 'accepted-proof'):
+            continue
         try:
-            actual = _digest(Path(source['locator']).read_bytes())
+            if reference:
+                verify_source(source)
+            elif _digest(Path(source['locator']).read_bytes()) != source['digest']:
+                issues[source['source_id']] = 'source-changed'
         except OSError:
             issues[source['source_id']] = 'source-unavailable'
-            continue
-        if actual != source['digest']:
+        except ValueError:
             issues[source['source_id']] = 'source-changed'
     return issues
 
 
-def _snapshot_sources(source_paths):
+def _require_record_sources(candidate, judgments):
+    """A new supported judgment needs its original bytes; existing records remain historical facts."""
+    from source_reference import FORMAT, CORE_FORMAT
+    selected = {sid for judgment in judgments if judgment.get('verdict') == 'supported'
+                for sid in judgment['source_ids']}
+    references = dict(candidate, sources=[s for s in candidate['sources'] if s.get('storage') in (FORMAT, CORE_FORMAT)])
+    issues = _source_issues(references, selected)
+    _require(not issues, next(iter(issues.values()), 'source-unavailable'),
+             'Original bytes for a new supported judgment are unavailable or changed')
+
+
+def _reference_sources(source_paths, appendable_sources=()):
+    from source_reference import reference_source
     _require(isinstance(source_paths, list) and len(source_paths) == len(set(source_paths))
         and all(isinstance(p, str) and Path(p).is_absolute() for p in source_paths),
         'source-unavailable', 'Unique explicit absolute source paths are required')
-    sources = []
-    for path in source_paths:
-        raw = Path(path).read_bytes()
-        item = dict(locator=path, digest=_digest(raw), bytes_base64=base64.b64encode(raw).decode())
-        item['source_id'] = _reference(item)
-        item['text'] = raw.decode('utf-8', errors='replace')
-        sources.append(item)
-    return sources
+    _require(set(appendable_sources) <= set(source_paths), 'source-unavailable',
+        'Appendable native logs must belong to this source selection')
+    return [reference_source(path, appendable=path in appendable_sources) for path in source_paths]
+
+
+def _native_row_input(connection, owner, native_input_row):
+    """Resolve a host-retained Claude row through Core's committed actor audit."""
+    import native_transcript
+    _require(owner['platform'] == 'claude' and isinstance(native_input_row, dict)
+        and set(native_input_row) == {'message_id', 'transcript_path'}
+        and all(isinstance(value, str) and bool(value) for value in native_input_row.values())
+        and Path(native_input_row['transcript_path']).is_absolute(),
+        'input-unavailable', 'An exact native Claude message and transcript are required')
+    path = Path(native_input_row['transcript_path']).resolve()
+    records = {}
+    try:
+        with path.open('rb') as stream:
+            identity = os.fstat(stream.fileno())
+            cursor = hashlib.sha256(json.dumps([str(path), identity.st_dev, identity.st_ino]).encode()).hexdigest()
+            offset = 0
+            for line in stream:
+                start = offset
+                offset += len(line)
+                if not line.endswith(b'\n'):
+                    break
+                try:
+                    entry = json.loads(line)
+                except (ValueError, UnicodeError):
+                    continue
+                if not isinstance(entry, dict) or not isinstance(entry.get('uuid'), str):
+                    continue
+                actor = native_transcript.native_input_actor(entry)
+                records.setdefault(entry['uuid'], []).append(dict(owner=entry.get('sessionId'),
+                    parent=entry.get('parentUuid'), actor=actor,
+                    text=native_transcript._input_text(entry) if actor == 'human' else None,
+                    locator=dict(cursor_key=cursor, start_offset=start, end_offset=offset)))
+    except OSError as exc:
+        raise CompletionAssessmentError('input-unavailable', 'Original native transcript is unavailable') from exc
+    identity, seen = native_input_row['message_id'], set()
+    while True:
+        _require(isinstance(identity, str) and bool(identity),
+            'input-unavailable', 'Native parent identity is unavailable')
+        matches = records.get(identity, [])
+        _require(len(matches) == 1 and identity not in seen,
+            'input-unavailable', 'One unambiguous native parent chain is required')
+        row = matches[0]
+        _require(row['owner'] == owner['session_id'], 'input-unavailable', 'Native parent belongs to another session')
+        if not seen:
+            _require(row['actor'] in ('human', 'notification'),
+                'input-unavailable', 'Native response input must be human or a host-stamped task result')
+        if row['actor'] == 'human':
+            locator, text = row['locator'], row['text']
+            break
+        seen.add(identity)
+        identity = row['parent']
+    _require(isinstance(text, str), 'input-unavailable', 'Native human input text is unavailable')
+    rows = connection.execute('''SELECT event_json FROM intent_events WHERE platform=? AND session_id=?
+        AND json_extract(event_json, '$.event')='native-input-resolved' ''',
+        (owner['platform'], owner['session_id'])).fetchall()
+    resolved = [event for raw, in rows if (event := json.loads(raw)).get('actor') == 'human'
+        and event.get('native_row') == locator]
+    _require(len(resolved) == 1, 'input-unavailable', 'Native row lacks one committed Core actor resolution')
+    return resolved[0]['input_event_id'], _digest(text), len(text), text
+
+
+def response_input_binding(source, expected_input_event_id=None, *, native_input_row=None,
+                           include_native_prompt=False, transaction=None):
+    """Authenticate an original native intake without promoting it to current input."""
+    core, root, owner = _coordinates(source)
+    with core._read_connection(root, transaction) as connection:
+        _require(connection is not None, 'input-unavailable', 'Original Core intake is unavailable')
+        native = _native_row_input(connection, owner, native_input_row) if native_input_row is not None else None
+        if native is not None:
+            _require(expected_input_event_id is None or expected_input_event_id == native[0],
+                'input-unavailable', 'Native row and supplied original input disagree')
+            expected_input_event_id = native[0]
+        _require(isinstance(expected_input_event_id, str) and bool(expected_input_event_id),
+            'input-unavailable', 'An exact original input event is required')
+        state = core._stored_state(connection, **owner)
+        _require(state is not None, 'input-unavailable', 'Original Core owner is unavailable')
+        rows = connection.execute('''SELECT sequence,event_json FROM intent_events
+            WHERE platform=? AND session_id=? AND json_extract(event_json, '$.event_id')=?''',
+            (owner['platform'], owner['session_id'], expected_input_event_id)).fetchall()
+        _require(len(rows) == 1, 'input-unavailable', 'One original Core intake is required')
+        sequence, raw = rows[0]
+        event = json.loads(raw)
+        digest, count = event.get('input_digest'), event.get('input_char_count')
+        _require(isinstance(digest, str) and digest.startswith('sha256:')
+            and len(digest) == 71 and type(count) is int and count >= 0
+            and core._observation_matches(event, owner['platform'], owner['session_id'],
+                expected_input_event_id, digest, count), 'input-unavailable', 'Original intake binding is invalid')
+        _require(native is None or native[:3] == (expected_input_event_id, digest, count),
+            'input-unavailable', 'Native row differs from its original Core intake')
+        canonical = core._canonical_intake_record(connection, state)
+        protected = canonical is not None and tuple(canonical) == (
+            expected_input_event_id, digest, count, sequence)
+        if not protected:
+            imported = core._imported_event_count(connection, root, state)
+            _require(imported is not None and sequence > imported,
+                'input-unavailable', 'Copied legacy input cannot establish native review authority')
+    binding = dict(owner, input_event_id=expected_input_event_id, input_digest=digest, input_char_count=count)
+    if include_native_prompt and native is not None:
+        binding['native_prompt'] = native[3]
+    return binding
+
+
+def _scope_contract(scope, work_unit_id=None):
+    route = scope['route']
+    _require(isinstance(route, dict), 'route-unavailable', 'Original owned route snapshot is required')
+    owner = {key: scope['input_binding'][key] for key in ('platform', 'session_id')}
+    units = [unit for unit in route['work_units'] if unit['work_unit_id'] in route['selected_work_unit_ids']
+        and (work_unit_id is None or unit['work_unit_id'] == work_unit_id)]
+    _require(len(units) == 1 and units[0]['owner'] == owner,
+        'criterion-unbound', 'Select exactly one originally owned work unit')
+    unit = units[0]
+    rows = [{key: row[key] for key in _DEFINITION} for row in scope['canonical_criteria']
+        if row['work_unit_id'] == unit['work_unit_id'] and row['contract_revision'] == unit['contract_revision']]
+    return dict(work_unit_id=unit['work_unit_id'], contract_revision=unit['contract_revision'],
+        owner=owner, criteria=rows, relevant_context=scope['relevant_context'])
+
+
+def prepare_response_scope(source, *, expected_input_event_id, source_paths, appendable_sources=(), native_output=None):
+    """Bind the original intake, recorded route and source references before nomination.
+
+    A scope without a recorded route supports ordinary nomination only. This
+    record supplies no claim judgment, completion admission or display receipt.
+    """
+    core, root, owner = _coordinates(source)
+    with core._transaction(root) as connection:
+        binding = response_input_binding(source, expected_input_event_id, transaction=connection)
+        rows = connection.execute('''SELECT event_json FROM intent_events WHERE platform=? AND session_id=?
+            AND json_extract(event_json, '$.event')='response-route-recorded'
+            AND json_extract(event_json, '$.input_event_id')=? ORDER BY sequence DESC''',
+            (owner['platform'], owner['session_id'], expected_input_event_id)).fetchall()
+        scope = dict(kind=_RESPONSE_SCOPE_KIND, intent_root=str(root), input_binding=binding,
+            route=None, relevant_context=None, canonical_criteria=[], sources=_reference_sources(source_paths, appendable_sources))
+        if native_output is not None:
+            _require(isinstance(native_output, dict) and set(native_output) == {'turn_id', 'message_id'}
+                and all(isinstance(v, str) and bool(v) for v in native_output.values()),
+                'scope-invalid', 'Exact native output coordinates are required')
+            scope['native_output'] = dict(native_output)
+        if rows:
+            event = json.loads(rows[0][0])
+            retained = event.get('review_scope')
+            if retained is not None:
+                _require(isinstance(retained, dict) and retained.get('input_binding') == binding
+                    and isinstance(retained.get('route'), dict)
+                    and core.json_digest(retained['route']) == event.get('response_route_digest')
+                    and all(retained['route'].get(key) == binding[key]
+                        for key in ('platform', 'session_id', 'input_event_id'))
+                    and retained['route'].get('status') == 'ready'
+                    and isinstance(retained.get('relevant_context'), dict)
+                    and isinstance(retained.get('canonical_criteria'), list),
+                    'scope-invalid', 'Original route snapshot does not match its owning intake')
+                scope.update(route=retained['route'], relevant_context=retained['relevant_context'],
+                    canonical_criteria=retained['canonical_criteria'])
+        scope['capture_bindings'] = {}
+        state = core._stored_state(connection, **owner)
+        if (scope['route'] is not None and scope['route'].get('response_purpose') != 'explanation'
+                and state.get('latest_input_event_id') == expected_input_event_id):
+            for unit in scope['route']['selected_work_unit_ids']:
+                contract = _scope_contract(scope, unit)
+                capture = _capture_binding(source, contract, expected_input_event_id, connection)
+                if capture is not None:
+                    scope['capture_bindings'][unit] = capture
+        _schema(connection)
+        reference = _reference(scope)
+        connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
+            (reference, reference, _json(scope)))
+    return dict(scope, scope_reference=reference)
+
+
+def _stored_response_scope(connection, reference, root, owner):
+    scope = _stored(connection, 'core_completion_candidates', reference)
+    _require(scope.get('kind') == _RESPONSE_SCOPE_KIND and scope.get('intent_root') == str(root)
+        and all(scope.get('input_binding', {}).get(key) == value for key, value in owner.items()),
+        'owner-mismatch', 'Review scope belongs to another native owner')
+    return scope
+
+
+def read_response_scope(source, scope_reference, expected_input_event_id):
+    """Read original source coordinates and scope without loading source bodies."""
+    core, root, owner = _coordinates(source)
+    with core._read_connection(root) as connection:
+        scope = _stored_response_scope(connection, scope_reference, root, owner)
+        _require(scope['input_binding']['input_event_id'] == expected_input_event_id,
+            'scope-invalid', 'Review scope belongs to another input')
+    return dict(scope, sources=_scope_sources(scope, [s['locator'] for s in scope['sources']]),
+                scope_reference=scope_reference)
+
+
+def _record_source_references(sources, root, owner, candidate_reference):
+    from source_reference import core_source_reference
+    return [core_source_reference(item, root, owner, candidate_reference) for item in sources]
+
+
+def _same_sources(left, right):
+    # Source IDs authenticate the original bytes and locator, independently of storage location.
+    return [{k: s[k] for k in ('source_id', 'locator', 'digest')} for s in left] == [
+        {k: s[k] for k in ('source_id', 'locator', 'digest')} for s in right]
+
+
+def _scope_sources(scope, source_paths):
+    owner = {k: scope['input_binding'][k] for k in ('platform', 'session_id')}
+    available = {item['locator']: item for item in _record_source_references(scope['sources'],
+        scope['intent_root'], owner, _reference(scope))}
+    _require(isinstance(source_paths, list) and all(isinstance(path, str) for path in source_paths)
+        and len(source_paths) == len(set(source_paths)) and set(source_paths) <= available.keys(),
+        'source-unavailable', 'Nomination may select only original scope sources')
+    return [available[path] for path in source_paths]
 
 
 def _response_review_key(root, owner, route, text):
@@ -221,10 +446,44 @@ def _source_response_records(connection, root, owner, route, text):
     return records
 
 
+
+
+def _validate_native_response(candidate, connection, root, owner):
+    _require(candidate.get('kind') == _NATIVE_RESPONSE_KIND
+        and candidate.get('intent_root') == str(root) and candidate.get('owner') == owner,
+        'owner-mismatch', 'Native review belongs to another owner')
+    scope = _stored_response_scope(connection, candidate['scope_reference'], root, owner)
+    _require(candidate['input_event_id'] == scope['input_binding']['input_event_id']
+        and candidate['sources'] == _scope_sources(scope, [s['locator'] for s in candidate['sources']]),
+        'scope-invalid', 'Native review must retain its original input and source bytes')
+
+
+def lookup_native_response_record(source, *, expected_input_event_id, text, native_output=None):
+    """Return the historical review for the exact original native output, not current work evidence."""
+    core, root, owner = _coordinates(source)
+    with core._read_connection(root) as connection:
+        if not connection.execute("SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone():
+            return None
+        rows = connection.execute('''SELECT r.reference, c.payload_json FROM core_completion_responses r
+            JOIN core_completion_candidates c ON c.reference=json_extract(r.payload_json, '$.candidate_reference')
+            WHERE json_extract(c.payload_json, '$.kind')=?
+            AND json_extract(c.payload_json, '$.owner.platform')=?
+            AND json_extract(c.payload_json, '$.owner.session_id')=?
+            AND json_extract(c.payload_json, '$.input_event_id')=?
+            AND json_extract(c.payload_json, '$.response_binding.text')=? ORDER BY r.rowid DESC''',
+            (_NATIVE_RESPONSE_KIND, owner['platform'], owner['session_id'], expected_input_event_id, text)).fetchall()
+        for reference, raw in rows:
+            candidate = json.loads(raw)
+            if native_output is not None and candidate.get('native_output') == native_output:
+                return lookup_original_response_record(source, reference,
+                    expected_input_event_id=expected_input_event_id, text=text, transaction=connection)
+    return None
+
+
 def prepare_response_review(source, *, response_text, source_paths, verified_at=None,
                             reuse_candidate=None, reuse_evidence=None, work_unit_id=None,
-                            claim_statements=None):
-    """Prepare one complete answer; derive completion proof from that same text.
+                            claim_statements=None, scope_reference=None):
+    """Retain the complete answer and return references for the two judgments.
 
     Source timestamps remain in the original bytes. observed_at dates this
     inspection only, never the business result described by those sources.
@@ -247,9 +506,9 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
                 proof = original['proof']
         _require(isinstance(verified_at, str) and bool(verified_at),
             'proof-invalid', 'Completion evidence requires its original verification time')
-        return prepare_assessment(source, proof=proof, verified_at=verified_at,
+        return review_receipt(prepare_assessment(source, proof=proof, verified_at=verified_at,
             source_paths=source_paths, reuse_candidate=reuse_candidate, reuse_evidence=reuse_evidence,
-            work_unit_id=work_unit_id, response_text=response_text)
+            work_unit_id=work_unit_id, response_text=response_text, scope_reference=scope_reference))
     core, root, owner = _coordinates(source)
     _require(verified_at is None, 'response-unbound', 'An explanation does not create a verification timestamp')
     _require(bool(source_paths), 'source-unavailable', 'Explanation sources are required')
@@ -264,25 +523,29 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
         binding['binding_id'] = _reference(binding)
         bindings.append(binding)
     with core._transaction(root) as connection:
-        _, route = _current_response_context(core, root, owner, connection)
+        scope = (_stored_response_scope(connection, scope_reference, root, owner)
+            if scope_reference is not None else None)
+        route = scope['route'] if scope is not None else _current_response_context(core, root, owner, connection)[1]
+        _require(isinstance(route, dict), 'route-unavailable', 'Original owned route snapshot is required')
         _require(route.get('response_purpose') == 'explanation', 'response-unbound',
             'Register the current explanation route before reviewing its sources')
         response = dict(text=response_text, purpose='explanation')
         response['binding_id'] = _reference(response)
         candidate = dict(kind=_SOURCE_RESPONSE_KIND, intent_root=str(root), owner=owner,
-            route=route, sources=_snapshot_sources(source_paths), bindings=bindings, response_binding=response)
+            route=route, sources=_scope_sources(scope, source_paths) if scope is not None else _reference_sources(source_paths),
+            bindings=bindings, response_binding=response)
         _schema(connection)
         key = _response_review_key(root, owner, route, response_text)
         retained = _source_response_records(connection, root, owner, route, response_text)
         for reference, original, _ in retained:
             if ({k: v for k, v in original.items() if k not in {'observed_at', 'route'}}
                     == {k: v for k, v in candidate.items() if k != 'route'}):
-                return dict(original, candidate_reference=reference)
+                return review_receipt(dict(original, candidate_reference=reference))
         candidate['observed_at'] = datetime.now(timezone.utc).isoformat()
         reference = _reference(candidate)
         connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
             (reference, key, _json(candidate)))
-    return dict(candidate, candidate_reference=reference)
+    return review_receipt(dict(candidate, candidate_reference=reference))
 
 
 def _validate_response_review(candidate, root, owner, route):
@@ -290,16 +553,26 @@ def _validate_response_review(candidate, root, owner, route):
         and candidate.get('intent_root') == str(root) and candidate.get('owner') == owner
         and _response_review_context(candidate['route']) == _response_review_context(route)
         and route.get('response_purpose') == 'explanation',
-        'response-unbound', 'Explanation review must retain its exact current owner, input and selected contract')
+        'response-unbound', 'Explanation review must retain its exact owner, input and selected contract')
 
 
-def record_response_review(source, candidate_reference, review):
-    """Commit claim and whole-answer judgments together; return only reviewed text."""
+def record_response_review(source, candidate_reference, review, *, context_use_judgments=None,
+                           expected_input_event_id=None, transaction=None):
+    """Commit both judgments and return their receipt without echoing the draft."""
     _require(isinstance(review, dict) and set(review) == {'claims', 'response'}
         and isinstance(review['claims'], list), 'response-assessment-required',
         'One review must contain claims and response judgments')
     core, root, owner = _coordinates(source)
-    with core._transaction(root) as connection:
+    if context_use_judgments is not None:
+        _require(isinstance(expected_input_event_id, str) and bool(expected_input_event_id),
+            'input-unbound', 'Post-use judgments require the exact current intake event')
+        from response_context_use import record_use_judgments
+        with core._transaction(root, transaction=transaction) as connection:
+            result = record_response_review(source, candidate_reference, review, transaction=connection)
+            judgment_receipt = record_use_judgments(source, expected_input_event_id,
+                context_use_judgments, transaction=connection)
+            return dict(result, context_use_judgments=judgment_receipt)
+    with core._transaction(root, transaction=transaction) as connection:
         candidate = _stored(connection, 'core_completion_candidates', candidate_reference)
         judgment = review['response']
         if candidate.get('schema_version') == 'completion-assessment-candidate.v1':
@@ -309,32 +582,33 @@ def record_response_review(source, candidate_reference, review):
                 response_judgment=judgment, transaction=connection)
             supported = all(j['verdict'] == 'supported' for j in review['claims'] + [judgment])
             result['status'] = 'reviewed' if supported else 'unsupported'
-            if supported:
-                result['response_text'] = candidate['response_binding']['text']
-            return result
-        _, route = _current_response_context(core, root, owner, connection)
-        _validate_response_review(candidate, root, owner, route)
+            return review_receipt(result)
+        native = candidate.get('kind') == _NATIVE_RESPONSE_KIND
+        route = candidate.get('route')
+        if native:
+            _validate_native_response(candidate, connection, root, owner)
+        else:
+            _validate_response_review(candidate, root, owner, route)
         _validate_claim_judgments(candidate, review['claims'])
         _require(_valid_judgment(judgment, candidate['response_binding']['binding_id'],
             {s['source_id'] for s in candidate['sources']}), 'response-assessment-required',
             'Review the complete explanation against identified sources with an explicit rationale')
-        issues = _source_issues(candidate, {sid for j in review['claims'] + [judgment] for sid in j['source_ids']})
-        _require(not issues, next(iter(issues.values()), 'source-changed'), 'Explanation source changed or is unavailable')
+        # These judgments concern the immutable bytes shown to both reviewers.
+        # Current lookup independently checks whether their live sources changed.
         payload = dict(kind=candidate['kind'], candidate_reference=candidate_reference,
             judgments=review['claims'], judgment=judgment)
-        key = _response_review_key(root, owner, route, candidate['response_binding']['text'])
-        previous = [reference for prepared, _, reference in _source_response_records(connection, root,
-            owner, route, candidate['response_binding']['text'])
-            if prepared == candidate_reference and reference is not None]
+        key = candidate_reference if native else _response_review_key(root, owner, route, candidate['response_binding']['text'])
+        previous = [row[0] for row in connection.execute('''SELECT reference FROM core_completion_responses
+            WHERE json_extract(payload_json, '$.candidate_reference')=?''', (candidate_reference,))]
         reference = _reference(payload)
         _require(not previous or (len(previous) == 1 and previous[0] == reference),
             'assessment-conflict', 'This explanation candidate already has an immutable review')
+        if not previous:
+            _require_record_sources(candidate, review['claims'] + [judgment])
         connection.execute('INSERT OR IGNORE INTO core_completion_responses VALUES (?,?,?)',
             (reference, key, _json(payload)))
     supported = all(j['verdict'] == 'supported' for j in review['claims'] + [judgment])
     result = dict(response_reference=reference, status='reviewed' if supported else 'unsupported')
-    if supported:
-        result['response_text'] = candidate['response_binding']['text']
     return result
 
 
@@ -372,6 +646,7 @@ def _lookup_source_response(core, root, owner, connection, text):
 
 def _accepted_observation(source, reference, contract, verified_at, *, transaction=None, criterion=None):
     from original_claim_evidence import _managed_archive_provider
+    _, root, owner = _coordinates(source)
     try:
         provider = _managed_archive_provider(source)
         with provider.open_claim_archive(source) as archive:
@@ -387,7 +662,7 @@ def _accepted_observation(source, reference, contract, verified_at, *, transacti
         try:
             original = lookup_assessment(source, record['contract'], record['proof'], record['verified_at'],
                 transaction=transaction, historical=True)
-            return original.candidate['sources'], original.candidate.get('capture_binding'), record['proof']
+            return _record_source_references(original.candidate['sources'], root, owner, original.candidate_reference), original.candidate.get('capture_binding'), record['proof']
         except CompletionAssessmentError as exc:
             if exc.reason != 'assessment-required':
                 raise
@@ -425,7 +700,8 @@ def _capture_binding(source, contract, event, connection):
 
 
 def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candidate=None,
-                       reuse_evidence=None, work_unit_id=None, response_text=None, transaction=None):
+                       reuse_evidence=None, work_unit_id=None, response_text=None, transaction=None,
+                       scope_reference=None):
     """Snapshot explicit observation paths and canonical conditions for review.
 
     This proof-storage primitive is also used for retained Ghost-ALICE Autopilot evidence. Native
@@ -450,7 +726,13 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
     except (ValueError, TypeError, AttributeError) as exc:
         raise CompletionAssessmentError('proof-invalid', str(exc)) from exc
     with core._transaction(root, transaction) as connection:
-        contract, event, selected = _current_contract(core, root, owner, connection, work_unit_id)
+        scope = (_stored_response_scope(connection, scope_reference, root, owner)
+            if scope_reference is not None else None)
+        if scope is None:
+            contract, event, selected = _current_contract(core, root, owner, connection, work_unit_id)
+        else:
+            contract = _scope_contract(scope, work_unit_id)
+            event, selected = scope['input_binding']['input_event_id'], scope['route']['selected_criteria']
         _schema(connection)
         _require(not (reuse_candidate and reuse_evidence), 'assessment-invalid', 'Choose one original source for reuse')
         if reuse_evidence:
@@ -464,14 +746,15 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
             _require(old['contract']['owner'] == owner and old['intent_root'] == str(root)
                 and old['contract']['work_unit_id'] == contract['work_unit_id'] and not source_paths
                 and old['verified_at'] == verified_at, 'assessment-invalid', 'Reuse preserves original owner, sources and time')
-            sources = old['sources']
+            sources = _record_source_references(old['sources'], root, owner, reuse_candidate)
             capture = old.get('capture_binding')
             if proof.strip() == old['proof'].strip():
                 proof = old['proof']
         else:
-            capture = _capture_binding(source, contract, event, connection)
+            capture = (scope['capture_bindings'].get(contract['work_unit_id']) if scope is not None
+                else _capture_binding(source, contract, event, connection))
             try:
-                sources = _snapshot_sources(source_paths)
+                sources = _scope_sources(scope, source_paths) if scope is not None else _reference_sources(source_paths)
             except OSError as exc:
                 raise CompletionAssessmentError('source-unavailable', str(exc)) from exc
         rows = {row['id']: row for row in contract['criteria']}
@@ -494,11 +777,12 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
         if response_text is not None:
             response = dict(text=response_text, proof_digest=_digest(proof))
             if report_only:
-                route = core.read_response_route(root=root, **owner, transaction=connection)
+                route = scope['route'] if scope is not None else core.read_response_route(root=root, **owner, transaction=connection)
                 _require(route.get('response_purpose') == 'explanation' and bool(reuse_candidate)
                     and old['proof'] == proof and old['contract'] == contract,
                     'response-unbound', 'An explanation must reuse an original reviewed proof under its current owned contract')
-                original = lookup_assessment(source, contract, proof, verified_at, transaction=connection)
+                original = lookup_assessment(source, contract, proof, verified_at, transaction=connection,
+                    historical=scope is not None)
                 _require(all(j['verdict'] == 'supported' for j in original.judgments),
                     'assessment-unsupported', 'An explanation requires supported original judgments')
                 response['purpose'] = 'explanation'
@@ -519,7 +803,7 @@ def _valid_judgment(judgment, binding_id, source_ids):
         and all(isinstance(sid, str) for sid in judgment['source_ids'])
         and len(judgment['source_ids']) == len(set(judgment['source_ids']))
         and set(judgment['source_ids']) <= source_ids
-        and (judgment['verdict'] == 'unavailable' or bool(judgment['source_ids'])))
+        and (judgment['verdict'] != 'supported' or bool(judgment['source_ids'])))
 
 
 def _validate_claim_judgments(candidate, judgments):
@@ -547,23 +831,26 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
     core, root, owner = _coordinates(source)
     with core._transaction(root, transaction) as connection:
         candidate = _stored(connection, 'core_completion_candidates', candidate_reference)
-        contract, event, _ = _current_contract(core, root, owner, connection, candidate['contract']['work_unit_id'])
-        _require(candidate['intent_root'] == str(root) and candidate['contract'] == contract
-            and candidate['input_event_id'] == event, 'assessment-stale', 'Review candidate no longer matches its current owner/contract/input')
+        _require(candidate.get('schema_version') == 'completion-assessment-candidate.v1'
+            and candidate.get('intent_root') == str(root) and candidate.get('contract', {}).get('owner') == owner
+            and isinstance(candidate.get('input_event_id'), str) and bool(candidate['input_event_id']),
+            'owner-mismatch', 'Review must retain its original Core owner, input and contract')
+        contract, event = candidate['contract'], candidate['input_event_id']
         source_ids = {s['source_id'] for s in candidate['sources']}
         _validate_claim_judgments(candidate, judgments)
         response = candidate.get('response_binding')
         _require((response is None and response_judgment is None)
             or (response is not None and _valid_judgment(response_judgment, response['binding_id'], source_ids)),
             'response-assessment-required', 'The review must cover the complete response as well as its claim bindings')
-        if not candidate['reuse_candidate']:
-            reviewed_sources = judgments + ([response_judgment] if response_judgment is not None else [])
-            issues = _source_issues(candidate, {sid for j in reviewed_sources for sid in j['source_ids']})
-            _require(not issues, next(iter(issues.values()), 'source-changed'), 'Reviewed observation source changed or is unavailable')
+        # Recording a judgment preserves its original snapshots; it does not
+        # attest that the same proof satisfies the latest work or source state.
         key = _lookup_key(contract, candidate['proof'], candidate['verified_at'])
         previous = connection.execute('SELECT reference FROM core_completion_assessments WHERE lookup_key=?', (key,)).fetchall()
         if previous:
             old = _stored(connection, 'core_completion_assessments', previous[0][0])
+            original_candidate = _stored(connection, 'core_completion_candidates', old['candidate_reference'])
+            _require('candidate' not in old or old['candidate'] == original_candidate,
+                'assessment-invalid', 'Embedded candidate differs from its authenticated reference')
             if response is None:
                 _require(old['candidate_reference'] == candidate_reference and old['judgments'] == judgments,
                          'assessment-conflict', 'An immutable assessment already exists for this original proof')
@@ -572,18 +859,19 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
                 # proof verdicts. Its new rationale/wording is a separate record.
                 def decisions(rows):
                     return {j['binding_id']: (j['verdict'], sorted(j['source_ids'])) for j in rows}
-                _require(old['candidate']['sources'] == candidate['sources']
-                    and old['candidate']['bindings'] == candidate['bindings']
-                    and old['candidate'].get('capture_binding') == candidate.get('capture_binding')
+                _require(_same_sources(original_candidate['sources'], candidate['sources'])
+                    and original_candidate['bindings'] == candidate['bindings']
+                    and original_candidate.get('capture_binding') == candidate.get('capture_binding')
                     and decisions(old['judgments']) == decisions(judgments),
                     'assessment-conflict', 'Response review cannot replace original observations or proof judgments')
             reference = previous[0][0]
         else:
+            _require_record_sources(candidate, judgments + ([response_judgment] if response_judgment else []))
             original = {k: v for k, v in candidate.items() if k != 'response_binding'}
             original_reference = _reference(original)
             connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
                 (original_reference, key, _json(original)))
-            payload = dict(candidate_reference=original_reference, candidate=original,
+            payload = dict(candidate_reference=original_reference,
                 judgments=judgments, assessed_at=datetime.now(timezone.utc).isoformat())
             reference = _reference(payload)
             connection.execute('INSERT INTO core_completion_assessments VALUES (?,?,?)', (reference, key, _json(payload)))
@@ -623,10 +911,10 @@ def lookup_assessment(source, contract, proof, verified_at, *, transaction=None,
         _require(len(rows) == 1, 'assessment-required', 'One exact original Core assessment is required')
         payload = _stored(connection, 'core_completion_assessments', rows[0][0])
         candidate = _stored(connection, 'core_completion_candidates', payload['candidate_reference'])
-        _require(candidate == payload['candidate'] and candidate['intent_root'] == str(root),
+        _require(('candidate' not in payload or candidate == payload['candidate']) and candidate['intent_root'] == str(root),
                  'assessment-invalid', 'Review candidate authority differs')
         issues = {} if historical else _source_issues(candidate, {sid for j in payload['judgments'] for sid in j['source_ids']})
-        result = VerifiedAssessment(payload, _SEAL, issues)
+        result = VerifiedAssessment(payload, _SEAL, issues, candidate=candidate)
         coverage = assessment_coverage(result, contract, proof, verified_at)
         _require(not issues or bool(coverage), next(iter(issues.values()), 'source-changed'),
                  'Reviewed observation sources changed or are unavailable')
@@ -650,13 +938,15 @@ def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
         exact, equivalent = [], []
         comparison = review_comparison_text(proof)
         for contract in contracts:
-            rows = connection.execute('''SELECT reference FROM core_completion_assessments WHERE
-                json_extract(payload_json, '$.candidate.contract.owner.platform')=? AND
-                json_extract(payload_json, '$.candidate.contract.owner.session_id')=? AND
-                json_extract(payload_json, '$.candidate.contract.work_unit_id')=?''',
+            rows = connection.execute('''SELECT a.reference FROM core_completion_assessments a
+                JOIN core_completion_candidates c ON c.reference=json_extract(a.payload_json, '$.candidate_reference')
+                WHERE json_extract(c.payload_json, '$.contract.owner.platform')=? AND
+                json_extract(c.payload_json, '$.contract.owner.session_id')=? AND
+                json_extract(c.payload_json, '$.contract.work_unit_id')=?''',
                 (owner['platform'], owner['session_id'], contract['work_unit_id']))
             for reference, in rows:
-                candidate = _stored(connection, 'core_completion_assessments', reference)['candidate']
+                assessment = _stored(connection, 'core_completion_assessments', reference)
+                candidate = _stored(connection, 'core_completion_candidates', assessment['candidate_reference'])
                 if candidate['contract'] != contract:
                     continue
                 if candidate['proof'].strip() == proof.strip():
@@ -684,8 +974,7 @@ def lookup_current_response(source, text, *, transaction=None):
             reviewed_source = _lookup_source_response(core, root, owner, connection, text)
             if reviewed_source is not None:
                 return reviewed_source
-            contract, event, _ = _current_contract(core, root, owner, connection)
-            route = core.read_response_route(root=root, **owner, transaction=connection)
+            _, route = _current_response_context(core, root, owner, connection)
             _require(route.get('response_purpose') == 'explanation', 'response-unbound',
                 'A retained explanation requires the current explanation route')
             rows = connection.execute('''SELECT r.reference FROM core_completion_responses r
@@ -696,9 +985,9 @@ def lookup_current_response(source, text, *, transaction=None):
                 AND json_extract(c.payload_json, '$.intent_root')=?
                 AND json_extract(c.payload_json, '$.contract.owner.platform')=?
                 AND json_extract(c.payload_json, '$.contract.owner.session_id')=?
-                AND json_extract(c.payload_json, '$.contract.work_unit_id')=?''',
-                (' \t\r\n', text.strip(), event, str(root), owner['platform'], owner['session_id'],
-                 contract['work_unit_id'])).fetchall()
+                AND json_extract(c.payload_json, '$.contract.work_unit_id') IN (SELECT value FROM json_each(?))''',
+                (' \t\r\n', text.strip(), route['input_event_id'], str(root),
+                 owner['platform'], owner['session_id'], _json(route['selected_work_unit_ids']))).fetchall()
         else:
             key = _reference(dict(assessment_reference=assessment.reference, body=text.strip()))
             rows = connection.execute('SELECT reference FROM core_completion_responses WHERE lookup_key=?', (key,)).fetchall()
@@ -713,6 +1002,9 @@ def lookup_current_response(source, text, *, transaction=None):
         reviewed = _stored(connection, 'core_completion_responses', rows[0][0])
         candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
         if report_only:
+            # Only a matching completion-backed review needs an execution contract.
+            contract, _, _ = _current_contract(core, root, owner, connection,
+                work_unit_id=candidate['contract']['work_unit_id'])
             _require(candidate['contract'] == contract and candidate.get('reuse_candidate'),
                 'response-unbound', 'The explanation must retain the current owned original proof')
             assessment = lookup_assessment(source, contract, candidate['proof'], candidate['verified_at'],
@@ -724,13 +1016,89 @@ def lookup_current_response(source, text, *, transaction=None):
             and candidate['contract'] == assessment.candidate['contract']
             and candidate['proof'] == assessment.candidate['proof']
             and candidate['verified_at'] == assessment.candidate['verified_at']
-            and candidate['sources'] == assessment.candidate['sources'],
+            and _same_sources(candidate['sources'], assessment.candidate['sources']),
             'response-unbound', 'Reviewed response differs from its original proof and observations')
         _require(reviewed['judgment']['verdict'] == 'supported', 'response-unsupported',
                  'The recorded assistant judgment does not support this complete response')
         issues = _source_issues(candidate, set(reviewed['judgment']['source_ids']))
         _require(not issues, next(iter(issues.values()), 'source-changed'), 'Response observations changed or are unavailable')
     return assessment
+
+
+def lookup_current_response_record(source, text, *, transaction=None):
+    """Return exact native output coordinates after the existing Core authentication.
+
+    Native rendering preserves every byte. The broader control-spacing lookup
+    remains available to its original consumers but cannot replace native text.
+    """
+    core, root, owner = _coordinates(source)
+    with core._read_connection(root, transaction) as connection:
+        authenticated = lookup_current_response(source, text, transaction=connection)
+        if isinstance(authenticated, dict):
+            reference = _reference(authenticated)
+            reviewed = authenticated
+        else:
+            rows = connection.execute('''SELECT reference FROM core_completion_responses
+                WHERE json_extract(payload_json, '$.assessment_reference')=?
+                AND json_extract(payload_json, '$.response_binding.text')=?''',
+                (authenticated.reference, text)).fetchall()
+            _require(len(rows) == 1, 'response-unbound', 'Native output requires one exact reviewed body')
+            reference = rows[0][0]
+            reviewed = _stored(connection, 'core_completion_responses', reference)
+        candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
+        _require(candidate['response_binding']['text'] == text,
+            'response-unbound', 'Native output must preserve the exact reviewed body')
+    return dict(status='reviewed', response_text=text, response_reference=reference,
+        candidate_reference=reviewed['candidate_reference'])
+
+
+def lookup_original_response_record(source, response_reference, *, expected_input_event_id, text,
+                                    transaction=None):
+    """Authenticate exact reviewed bytes for their original native input.
+
+    This read preserves historical judgments and never grants current work
+    completion, publication, or permission to replace another turn's output.
+    """
+    core, root, owner = _coordinates(source)
+    with core._read_connection(root, transaction) as connection:
+        reviewed = _stored(connection, 'core_completion_responses', response_reference)
+        candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
+        if candidate.get('kind') == _NATIVE_RESPONSE_KIND:
+            _validate_native_response(candidate, connection, root, owner)
+            event = candidate['input_event_id']
+            judgments = reviewed['judgments']
+            _validate_claim_judgments(candidate, judgments)
+        elif candidate.get('kind') == _SOURCE_RESPONSE_KIND:
+            route = candidate['route']
+            _validate_response_review(candidate, root, owner, route)
+            event = route['input_event_id']
+            judgments = reviewed['judgments']
+            _validate_claim_judgments(candidate, judgments)
+        else:
+            _require(candidate.get('schema_version') == 'completion-assessment-candidate.v1'
+                and candidate.get('intent_root') == str(root)
+                and candidate.get('contract', {}).get('owner') == owner,
+                'owner-mismatch', 'Original response belongs to another owner')
+            event = candidate['input_event_id']
+            assessment = lookup_assessment(source, candidate['contract'], candidate['proof'],
+                candidate['verified_at'], transaction=connection, historical=True)
+            _require(reviewed.get('assessment_reference') == assessment.reference
+                and reviewed.get('response_binding') == candidate.get('response_binding')
+                and _same_sources(candidate['sources'], assessment.candidate['sources'])
+                and candidate['bindings'] == assessment.candidate['bindings'],
+                'response-unbound', 'Response review differs from its authenticated original claim review')
+            judgments = assessment.judgments
+            _validate_claim_judgments(candidate, judgments)
+        response = candidate.get('response_binding')
+        _require(event == expected_input_event_id and isinstance(response, dict)
+            and response.get('text') == text, 'response-unbound',
+            'Return only the exact original body for its original input')
+        _require(_valid_judgment(reviewed.get('judgment'), response['binding_id'],
+            {item['source_id'] for item in candidate['sources']})
+            and all(j['verdict'] == 'supported' for j in judgments + [reviewed['judgment']]),
+            'response-unsupported', 'Both original claim and whole-response reviews must support the body')
+    return dict(status='reviewed', response_text=text, response_reference=response_reference,
+        candidate_reference=reviewed['candidate_reference'])
 
 
 def lookup_publication_assessment(source, contract, text, verified_at, *, transaction=None):
@@ -824,6 +1192,46 @@ def authorize_correction(source, *, criterion, proof, verified_at, contract,
     return True
 
 
+def read_review_claims(source, candidate_reference, claim_indices):
+    """Retrieve explicitly selected original claims, bound to their Core owner."""
+    core, root, owner = _coordinates(source)
+    _require(isinstance(claim_indices, list) and bool(claim_indices)
+        and all(type(i) is int and i >= 0 for i in claim_indices)
+        and len(claim_indices) == len(set(claim_indices)), 'assessment-invalid', 'Select exact original claim indices')
+    with core._read_connection(root) as connection:
+        candidate = _stored(connection, 'core_completion_candidates', candidate_reference)
+        original_owner = candidate.get('owner') or candidate.get('contract', {}).get('owner')
+        _require(candidate.get('intent_root') == str(root) and original_owner == owner,
+            'owner-mismatch', 'Original claims belong to another Core owner')
+        bindings = [b for b in candidate['bindings'] if b['claim_index'] in claim_indices]
+        _require({b['claim_index'] for b in bindings} == set(claim_indices),
+            'assessment-invalid', 'Selected original claims are unavailable')
+    return bindings
+
+
+def review_receipt(result):
+    """Return review coordinates to the caller without echoing its original inputs."""
+    receipt = {k: result[k] for k in ('status', 'candidate_reference', 'response_reference',
+        'assessment_reference', 'verified_at', 'issues', 'reason') if k in result}
+    if 'bindings' in result:
+        receipt['bindings'] = []
+        for binding in result['bindings']:
+            row = {k: binding[k] for k in ('binding_id', 'claim_index') if k in binding}
+            if 'criterion' in binding:
+                row['criterion'] = {k: binding['criterion'][k]
+                    for k in ('id', 'work_unit_id', 'contract_revision') if k in binding['criterion']}
+            receipt['bindings'].append(row)
+    if 'sources' in result:
+        receipt['sources'] = [{k: row[k] for k in ('source_id', 'locator', 'digest') if k in row}
+                              for row in result['sources']]
+    if 'response_binding' in result:
+        receipt['response_binding'] = {k: v for k, v in result['response_binding'].items() if k != 'text'}
+    if 'context_use_judgments' in result:
+        receipt['context_use_judgments'] = {k: result['context_use_judgments'][k]
+            for k in ('status', 'references', 'judgment_count') if k in result['context_use_judgments']}
+    return receipt
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='action', required=True)
@@ -838,8 +1246,16 @@ def main():
     response_record = commands.add_parser('record-response')
     response_record.add_argument('--candidate', required=True)
     response_record.add_argument('--judgment-file', required=True)
+    response_record.add_argument('--context-use-judgments-json')
+    response_record.add_argument('--expected-input-event-id')
+    claims_read = commands.add_parser('read-claims')
+    claims_read.add_argument('--candidate', required=True)
+    claims_read.add_argument('--index', type=int, action='append', required=True)
     args = parser.parse_args()
     try:
+        if args.action == 'read-claims':
+            print(json.dumps(read_review_claims(os.environ, args.candidate, args.index), ensure_ascii=False))
+            return 0
         if args.action == 'prepare-response':
             result = prepare_response_review(os.environ,
                 response_text=Path(args.response_file).read_text(), source_paths=args.source,
@@ -848,8 +1264,11 @@ def main():
                 claim_statements=json.loads(Path(args.claims_file).read_text()) if args.claims_file else None)
         else:
             result = record_response_review(os.environ, args.candidate,
-                json.loads(Path(args.judgment_file).read_text()))
-        print(json.dumps(result, ensure_ascii=False))
+                json.loads(Path(args.judgment_file).read_text()),
+                context_use_judgments=json.loads(args.context_use_judgments_json)
+                    if args.context_use_judgments_json is not None else None,
+                expected_input_event_id=args.expected_input_event_id)
+        print(json.dumps(review_receipt(result), ensure_ascii=False))
     except (CompletionAssessmentError, ValueError, OSError) as exc:
         print(json.dumps(dict(status='unavailable', reason=getattr(exc, 'reason', 'assessment-unavailable'), detail=str(exc))))
         return 1

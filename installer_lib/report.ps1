@@ -118,11 +118,7 @@ function Join-InstallLabels {
 function Get-HookSuiteLabel {
     param([string]$PlatformLabel = "")
 
-    # The web-search-first reminder is installed only where it reaches the model (Codex); Claude Code does not get it.
     $hooks = "prompt, session-intent"
-    if ($PlatformLabel -match "(?i)codex") {
-        $hooks += ", web-search-first"
-    }
     return "$hooks, tool-checkpoint, completion, session-start, io-trace"
 }
 

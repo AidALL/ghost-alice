@@ -41,7 +41,7 @@ SCHEMA_VERSION = "session-intent-ledger.v1"
 CURRENT_SESSION_SCHEMA = "session-intent-current.v1"
 SESSION_INTENT_ROOT_ENV = "GHOST_ALICE_SESSION_INTENT_ROOT"
 LEGACY_DEFAULT_ROOT = Path("~/.ghost-alice/session-intent")
-TEXT_FIELDS = ("current_goal", "user_intent_summary")
+TEXT_FIELDS = ("current_goal", "user_intent_summary", "routing_summary")
 LIST_FIELDS = ("constraints", "non_goals", "open_questions", "risk_flags")
 ACCEPTANCE_CRITERIA_SOURCES = {"user-explicit", "inferred", "previous-tool", "system-doc"}
 ACCEPTANCE_CRITERIA_STATUSES = {"unmet", "met"}
@@ -246,6 +246,7 @@ def default_state(platform: str, session_id: str) -> dict[str, Any]:
         "ledger_revision": 0,
         "latest_input_event_id": "",
         "canonical_input_event_id": "",
+        "current_context_input_event_id": "",
         "pending_native_inputs": [],
         "native_input_cursors": {},
         "latest_input_digest": "",
@@ -386,6 +387,8 @@ def _check_expected(state: dict[str, Any], expected_input_event_id: str | None,
                     expected_revision: int | None, *, new_input: bool = False) -> None:
     if _pending_native_inputs(state):
         raise ValueError("native input origin is pending; reconcile native intake before writing")
+    if state.get('current_context_input_event_id'):
+        raise ValueError("current SDK context input supplies no human mutation authority")
     if expected_revision is not None and (
         type(expected_revision) is not int or expected_revision != state["ledger_revision"]
     ):
@@ -444,6 +447,16 @@ def _initialize_database(connection: sqlite3.Connection) -> None:
         event_sequence INTEGER NOT NULL CHECK(event_sequence > 0), PRIMARY KEY(platform, session_id),
         FOREIGN KEY(platform, session_id, event_sequence)
         REFERENCES intent_events(platform, session_id, sequence))""")
+    connection.execute('''CREATE TABLE IF NOT EXISTS core_context_intakes (
+        platform TEXT NOT NULL, session_id TEXT NOT NULL, input_event_id TEXT NOT NULL,
+        payload_json TEXT NOT NULL, staged_sequence INTEGER NOT NULL, resolved_sequence INTEGER NOT NULL,
+        PRIMARY KEY(platform,session_id,input_event_id),
+        FOREIGN KEY(platform,session_id,staged_sequence) REFERENCES intent_events(platform,session_id,sequence),
+        FOREIGN KEY(platform,session_id,resolved_sequence) REFERENCES intent_events(platform,session_id,sequence))''')
+    for operation in ('UPDATE', 'DELETE'):
+        connection.execute(f'''CREATE TRIGGER IF NOT EXISTS immutable_context_intake_{operation.lower()}
+            BEFORE {operation} ON core_context_intakes
+            BEGIN SELECT RAISE(ABORT, 'immutable Core context intake'); END''')
     connection.execute("""CREATE TABLE IF NOT EXISTS legacy_migrations (
         platform TEXT NOT NULL, session_id TEXT NOT NULL, sources_json TEXT NOT NULL,
         imported_at TEXT NOT NULL, PRIMARY KEY(platform, session_id),
@@ -747,6 +760,7 @@ def _semantic_projection(state: dict[str, Any]) -> dict[str, Any]:
                   and isinstance(item[key], (str, bool, int))} if isinstance(item, dict) else item)
                 for item in value if isinstance(item, (dict, str))]
     projection = {key: state.get(key, "") for key in TEXT_FIELDS}
+    projection["routing_keywords"] = list(state.get("routing_keywords", []))
     for key in ("constraints", "non_goals", "open_questions"):
         projection[key] = objects(state.get(key), ("id", "summary", "source", "status"))
     projection["acceptance_criteria"] = objects(state.get("acceptance_criteria"),
@@ -768,7 +782,7 @@ def _semantic_projection(state: dict[str, Any]) -> dict[str, Any]:
 
 def _semantic_changes(before: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     after = _semantic_projection(state)
-    return {key: {"before": before[key], "after": value}
+    return {key: {"before_digest": json_digest(before[key]), "after_digest": json_digest(value)}
             for key, value in after.items() if before[key] != value}
 
 
@@ -1099,7 +1113,14 @@ def apply_delta(state: dict[str, Any], delta: dict[str, Any] | None) -> dict[str
 
     for field in LIST_FIELDS:
         if field in delta:
-            state[field] = merge_unique(state.get(field, []), delta.get(field))
+            if not isinstance(delta[field], list):
+                raise ValueError(f"{field} must be a complete current list")
+            state[field] = merge_unique([], delta[field])
+    if "routing_keywords" in delta:
+        words = delta["routing_keywords"]
+        if not isinstance(words, list) or any(not isinstance(w, str) or not w.strip() for w in words):
+            raise ValueError("routing_keywords must contain nonempty strings")
+        state["routing_keywords"] = list(dict.fromkeys(w.strip() for w in words))
 
     if "acceptance_criteria" in delta:
         state["acceptance_criteria"] = merge_acceptance_criteria(
@@ -1108,12 +1129,14 @@ def apply_delta(state: dict[str, Any], delta: dict[str, Any] | None) -> dict[str
         )
 
     if "consumer_hints" in delta:
-        state["consumer_hints"] = merge_consumer_hints(state.get("consumer_hints", {}), delta.get("consumer_hints"))
+        state["consumer_hints"] = merge_consumer_hints({}, delta.get("consumer_hints"))
 
     if "conduct_feedback" in delta:
         state["conduct_feedback"] = merge_conduct_feedback(
             state.get("conduct_feedback", []), delta.get("conduct_feedback"), now
         )
+    state["conduct_feedback"] = [item for item in state.get("conduct_feedback", [])
+                                 if item.get("status") != "encoded"]
 
     if "model_security_decision" in delta:
         normalized = normalize_security_decision(delta.get("model_security_decision"))
@@ -1159,12 +1182,16 @@ def apply_delta(state: dict[str, Any], delta: dict[str, Any] | None) -> dict[str
     return state
 
 
-def _commit_turn(connection, state, observation, *, has_input, intent_delta, source):
+def _commit_turn(connection, state, observation, *, has_input, intent_delta, source, native_human=False):
     """Single owner of semantic updates and canonical input promotion."""
     platform, session_id = state['platform'], state['session_id']
     if intent_delta is not None and not isinstance(intent_delta, dict):
         raise ValueError("intent_delta must be an object")
     if has_input:
+        if state.get('current_context_input_event_id') and not native_human:
+            raise ValueError('Only positively reconciled native human input clears SDK context authority')
+        if native_human:
+            state['current_context_input_event_id'] = ''
         route = state.get("response_route")
         if isinstance(route, dict) and route.get("input_event_id") != observation["input_event_id"]:
             # Reopen routing/authorization binding, never the business proof.
@@ -1180,7 +1207,11 @@ def _commit_turn(connection, state, observation, *, has_input, intent_delta, sou
         if decision.get("input_digest") not in (None, "", state["latest_input_digest"]):
             raise ValueError("security decision input digest mismatch")
     before = _semantic_projection(state)
+    feedback_ids = {item["id"] for item in state.get("conduct_feedback", []) if isinstance(item, dict) and item.get("id")}
     state = apply_delta(state, intent_delta)
+    retired_feedback = sorted(feedback_ids - {item["id"] for item in state.get("conduct_feedback", []) if item.get("id")})
+    if "routing_keywords" in (intent_delta or {}):
+        state["keywords_input_event_id"] = state.get("latest_input_event_id", "")
     state["intake_status"] = "pending-native-origin" if _pending_native_inputs(state) else "observed"
     state["last_intake_source"] = source
     state["last_semantic_delta_status"] = "recorded" if intent_delta else "not-provided"
@@ -1195,6 +1226,8 @@ def _commit_turn(connection, state, observation, *, has_input, intent_delta, sou
         "input_event_id": state["latest_input_event_id"],
         "semantic_changes": _semantic_changes(before, state),
     }
+    if retired_feedback:
+        event["retired_feedback_ids"] = retired_feedback
     if has_input:
         event["event_id"] = observation["input_event_id"]
         event["input_digest"] = observation["input_digest"]
@@ -1331,7 +1364,37 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
                 raise ValueError('native transcript cursors are invalid')
             resolved = native.resolve_staged_input(observation, session_id, cursors)
             if resolved is None:
-                break
+                # Unknown actors remain unauthenticated. A later bound human
+                # can take priority only after every earlier pending row is
+                # uniquely correlated in this same ordered native source.
+                correlated, probe_cursors, source_key = [], dict(cursors), None
+                for queued in pending:
+                    row = native.resolve_staged_input(queued, session_id, probe_cursors, allow_unknown=True)
+                    if row is None or (source_key is not None and row['cursor_key'] != source_key):
+                        row = None
+                        break
+                    source_key = row['cursor_key']
+                    if row['actor'] == 'human':
+                        break
+                    correlated.append((queued, row))
+                    probe_cursors[row['cursor_key']] = row['end_offset']
+                else:
+                    row = None
+                if row is None or row['actor'] != 'human' or not correlated:
+                    break
+                for earlier, located in correlated:
+                    state['pending_native_inputs'] = _pending_native_inputs(state)[1:]
+                    state['native_input_cursors'] = dict(state.get('native_input_cursors', {}),
+                        **{located['cursor_key']: located['end_offset']})
+                    _commit(connection, state, dict(ts=utc_now(), event='native-input-superseded',
+                        platform=platform, session_id=session_id,
+                        transport_observation_id=earlier['transport_observation_id'],
+                        superseded_by_transport_observation_id=queued['transport_observation_id'],
+                        actor=located['actor'] or 'unknown',
+                        native_row={key: located[key] for key in ('cursor_key', 'start_offset', 'end_offset')},
+                        reason='Later positively bound human input controls current authority; earlier actor is not promoted.',
+                        input_event_id=state['latest_input_event_id']))
+                continue
             state['pending_native_inputs'] = pending[1:]
             state['native_input_cursors'] = dict(cursors, **{resolved['cursor_key']: resolved['end_offset']})
             if resolved['actor'] == 'human':
@@ -1339,14 +1402,109 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
                     input_event_id=json_digest(dict(event='user-input-observed', platform=platform,
                         session_id=session_id, transport_observation_id=observation['transport_observation_id'])),
                     input_digest=observation['input_digest'], input_char_count=observation['input_char_count'])
-                state = _commit_turn(connection, state, promoted, has_input=True, intent_delta=None, source='hook')
+                state = _commit_turn(connection, state, promoted, has_input=True, intent_delta=None, source='hook', native_human=True)
+            context_event = None
+            if resolved['actor'] == 'sdk':
+                context_event = json_digest(dict(event='context-input-resolved', platform=platform,
+                    session_id=session_id, transport_observation_id=observation['transport_observation_id']))
+                state['current_context_input_event_id'] = context_event
+                if isinstance(state.get('response_route'),dict):
+                    state['response_route']['status'] = 'stale'
             state['intake_status'] = ('pending-native-origin' if state['pending_native_inputs'] else
+                                      'context-only' if state.get('current_context_input_event_id') else
                                       'observed' if state['latest_input_event_id'] else 'pending')
-            _commit(connection, state, dict(ts=utc_now(), event='native-input-resolved', platform=platform,
+            event = dict(ts=utc_now(), event='native-input-resolved', platform=platform,
                 session_id=session_id, transport_observation_id=observation['transport_observation_id'],
                 actor=resolved['actor'], native_row={key: resolved[key] for key in
-                    ('cursor_key', 'start_offset', 'end_offset')}, input_event_id=state['latest_input_event_id']))
+                    ('cursor_key', 'start_offset', 'end_offset')}, input_event_id=state['latest_input_event_id'])
+            if context_event:
+                event['context_input_event_id'] = context_event
+            _commit(connection, state, event)
+            if context_event:
+                staged = connection.execute('''SELECT sequence FROM intent_events WHERE platform=? AND session_id=?
+                    AND json_extract(event_json,'$.event')='native-input-staged'
+                    AND json_extract(event_json,'$.transport_observation_id')=?''',
+                    (platform,session_id,observation['transport_observation_id'])).fetchall()
+                if len(staged) != 1:
+                    raise ValueError('Context intake requires one original staged transport')
+                sequence = connection.execute('SELECT MAX(sequence) FROM intent_events WHERE platform=? AND session_id=?',
+                    (platform,session_id)).fetchone()[0]
+                payload = dict(schema_version='context-input.v1', intent_root=str(Path(root).resolve()),
+                    platform=platform,session_id=session_id,input_event_id=context_event,actor='sdk',
+                    observation=observation,native_row=event['native_row'],native_source=resolved['native_source'],
+                    native_file_identity=resolved['native_file_identity'])
+                connection.execute('INSERT INTO core_context_intakes VALUES (?,?,?,?,?,?)',
+                    (platform,session_id,context_event,json.dumps(payload,ensure_ascii=False,sort_keys=True),staged[0][0],sequence))
         return state
+
+
+def _context_input_binding(connection, root, state, event_id):
+    """Authenticate a context-only original at its frozen row, never later matches."""
+    def require(condition):
+        if not condition:
+            raise ValueError('Original SDK context intake is unavailable or unverified')
+    require(connection is not None and connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='core_context_intakes'").fetchone())
+    owner = (state['platform'],state['session_id'])
+    row = connection.execute('''SELECT payload_json,staged_sequence,resolved_sequence FROM core_context_intakes
+        WHERE platform=? AND session_id=? AND input_event_id=?''', (*owner,event_id)).fetchone()
+    require(row is not None)
+    payload = json.loads(row[0])
+    require(isinstance(payload,dict) and set(payload) == {'schema_version','intent_root','platform','session_id',
+        'input_event_id','actor','observation','native_row','native_source','native_file_identity'}
+        and payload['schema_version']=='context-input.v1' and payload['intent_root']==str(Path(root).resolve())
+        and (payload['platform'],payload['session_id'])==owner and payload['actor']=='sdk'
+        and payload['input_event_id']==event_id and owner[0]=='claude')
+    observation, locator, original, identity = (payload[key] for key in
+        ('observation','native_row','native_source','native_file_identity'))
+    require(isinstance(observation,dict) and observation.get('platform')==owner[0]
+        and observation.get('session_id')==owner[1] and event_id==json_digest(dict(event='context-input-resolved',
+            platform=owner[0],session_id=owner[1],transport_observation_id=observation.get('transport_observation_id'))))
+    imported = _imported_event_count(connection,Path(root),state)
+    require(imported is not None and row[1] > imported and row[2] > row[1])
+    audits = []
+    for sequence in row[1:]:
+        raw = connection.execute('SELECT event_json FROM intent_events WHERE platform=? AND session_id=? AND sequence=?',
+            (*owner,sequence)).fetchone()
+        require(raw is not None); audits.append(json.loads(raw[0]))
+    staged, resolved = audits
+    require(staged.get('event')=='native-input-staged' and staged.get('ts')==observation.get('observed_at')
+        and all(staged.get(key)==observation.get(key) for key in
+            ('platform','session_id','transport_observation_id','input_digest','input_char_count'))
+        and resolved.get('event')=='native-input-resolved' and resolved.get('actor')=='sdk'
+        and resolved.get('context_input_event_id')==event_id and resolved.get('native_row')==locator
+        and all(resolved.get(key)==observation.get(key) for key in ('platform','session_id','transport_observation_id')))
+    require(isinstance(original,dict) and set(original)=={'storage','locator','digest','byte_length','appendable','source_id'}
+        and original.get('storage')=='source-reference.v1' and original.get('appendable') is True
+        and isinstance(locator,dict) and set(locator)=={'cursor_key','start_offset','end_offset'}
+        and type(locator['start_offset']) is int and type(locator['end_offset']) is int
+        and 0 <= locator['start_offset'] < locator['end_offset']==original['byte_length']
+        and isinstance(identity,dict) and set(identity)=={'device','inode'})
+    source_api = _shared_module('source_reference')
+    source_api._validate(original)
+    with Path(original['locator']).open('rb') as stream:
+        actual = os.fstat(stream.fileno()); raw = stream.read(original['byte_length'])
+    require((actual.st_dev,actual.st_ino)==(identity['device'],identity['inode'])
+        and len(raw)==original['byte_length'] and 'sha256:'+hashlib.sha256(raw).hexdigest()==original['digest']
+        and locator['cursor_key']==hashlib.sha256(json.dumps([original['locator'],actual.st_dev,actual.st_ino]).encode()).hexdigest())
+    boundary = observation.get('transcript_boundary')
+    require(isinstance(boundary,dict) and boundary.get('path')==original['locator']
+        and type(boundary.get('offset')) is int and 0 <= boundary['offset'] <= locator['start_offset']
+        and hashlib.sha256(raw[:boundary['offset']]).hexdigest()==boundary.get('prefix_digest')
+        and (boundary.get('inode') is None or (boundary.get('device'),boundary['inode'])==(actual.st_dev,actual.st_ino)))
+    native_line = raw[locator['start_offset']:locator['end_offset']]
+    require(native_line.endswith(b'\n') and len(native_line.splitlines())==1)
+    entry = json.loads(native_line)
+    native = _shared_module('native_transcript')
+    require(isinstance(entry,dict) and entry.get('sessionId')==owner[1] and native.native_input_actor(entry)=='sdk'
+        and entry.get('promptId') in (None,observation.get('native_prompt_id'))
+        and native.matches_input_text(entry['message'].get('content'),observation))
+    adapter = _shared_module('claude_context_adapter')
+    message = adapter._normalize_message('user',entry['message']['content'])
+    return dict(platform=owner[0],session_id=owner[1],input_event_id=event_id,
+        input_digest=observation['input_digest'],input_char_count=observation['input_char_count'],context_only=True,
+        native_transcript_path=original['locator'],native_input_record=raw[:locator['start_offset']].count(b'\n')+1,
+        native_input_digest='sha256:'+hashlib.sha256(json.dumps(message,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest())
 
 
 def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> int | None:
@@ -1434,7 +1592,7 @@ def _trusted_current_intake_sequence(connection: sqlite3.Connection, state: dict
 
 def _canonical_input_bound(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> bool:
     """Only a protected SQLite record or verified native audit origin binds intake."""
-    if _pending_native_inputs(state) or not state.get("latest_input_event_id"):
+    if _pending_native_inputs(state) or state.get('current_context_input_event_id') or not state.get("latest_input_event_id"):
         return False
     record = _canonical_intake_record(connection, state)
     if record is not None and record[0] == state["latest_input_event_id"]:
@@ -1563,6 +1721,7 @@ def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_i
         state["canonical_input_event_id"] = state["latest_input_event_id"]
         _persist_canonical_intake(connection, state)
         projection, units = routes.validate_response_route(state, candidate, boundary_ref)
+        projection = routes.authenticate_continuation_feedback(projection, root, connection)
         state["response_route"] = projection
         state["work_units"] = units
         state["updated_at"] = utc_now()
@@ -1571,6 +1730,19 @@ def record_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_i
             "platform": platform, "session_id": session_id,
             "input_event_id": expected_input_event_id,
             "response_route_digest": json_digest(projection),
+            "review_scope": {
+                "route": deepcopy(projection),
+                "canonical_criteria": [deepcopy(row) for row in state["acceptance_criteria"]
+                    if any((row.get("work_unit_id"), row.get("contract_revision"), row["id"]) ==
+                        (selected["work_unit_id"], selected["contract_revision"], selected["id"])
+                        for selected in projection["selected_criteria"])],
+                "relevant_context": {key: deepcopy(state.get(key, {} if key == "latest_scope" else []))
+                    for key in ("constraints", "non_goals", "decisions", "latest_scope")},
+                "input_binding": {"platform": platform, "session_id": session_id,
+                    "input_event_id": expected_input_event_id,
+                    "input_digest": state["latest_input_digest"],
+                    "input_char_count": state["latest_input_char_count"]},
+            },
             "selected_work_unit_ids": projection["selected_work_unit_ids"],
             "selected_criteria": [{k: c[k] for k in ("work_unit_id", "contract_revision", "criterion_id")}
                                   for c in projection["selected_criteria"]],
@@ -1592,9 +1764,10 @@ def read_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id:
         if state is not None:
             state["canonical_input_event_id"] = (state["latest_input_event_id"]
                 if _canonical_input_bound(connection, root, state) else "")
-    if state is None:
-        return None
-    return routes.project_stored_response_route(state, expected_input_event_id)
+        if state is None:
+            return None
+        projection = routes.project_stored_response_route(state, expected_input_event_id)
+        return None if projection is None else routes.refresh_continuation_feedback(projection, root, connection)
 
 
 def mark_acceptance_criterion_met(
@@ -1793,9 +1966,10 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
         "schema_version": SCHEMA_VERSION,
         "platform": state.get("platform"),
         "session_id": state.get("session_id"),
-        "ledger_revision": state.get("ledger_revision"),
-        "latest_input_event_id": state.get("latest_input_event_id"),
+        **{key: state[key] for key in ("ledger_revision", "latest_input_event_id",
+            "latest_input_digest", "latest_input_char_count") if key in state},
         "canonical_input_event_id": state.get("canonical_input_event_id"),
+        "current_context_input_event_id": state.get('current_context_input_event_id',''),
         "intake_status": state.get("intake_status"),
         "pending_native_input_count": len(_pending_native_inputs(state)),
         "current_goal": state.get("current_goal", ""),
@@ -1822,6 +1996,47 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
     }
 
 
+def intent_reference(state):
+    """Small routing input; detailed state remains available by exact pointer."""
+    return {
+        "schema_version": "session-intent-reference.v1",
+        "input_event_id": state.get("latest_input_event_id", ""),
+        "ledger_revision": state.get("ledger_revision", 0),
+        "keywords": list(state.get("routing_keywords", [])),
+        "summary": state.get("routing_summary", ""),
+        "keywords_input_event_id": state.get("keywords_input_event_id", ""),
+        "references": {
+            "intent": "/user_intent_summary", "goal": "/current_goal",
+            "boundary": "/latest_scope", "constraints": "/constraints",
+            "decisions": "/decisions", "route": "/response_route",
+        },
+    }
+
+
+def state_detail(state, pointer):
+    """Resolve one RFC 6901 pointer, retaining the input/revision it came from."""
+    if not isinstance(pointer, str) or not pointer.startswith("/"):
+        raise ValueError("A non-root JSON pointer is required")
+    value = state
+    for part in pointer[1:].split("/"):
+        if re.search(r"~(?![01])", part):
+            raise ValueError("Invalid JSON pointer escape")
+        key = part.replace("~1", "/").replace("~0", "~")
+        try:
+            if isinstance(value, list):
+                if not key.isdigit() or str(int(key)) != key:
+                    raise ValueError("Invalid list index")
+                value = value[int(key)]
+            elif isinstance(value, dict):
+                value = value[key]
+            else:
+                raise ValueError("Pointer does not address a stored item")
+        except (KeyError, IndexError) as exc:
+            raise ValueError("State detail is unavailable") from exc
+    return dict(input_event_id=state.get("latest_input_event_id", ""),
+                ledger_revision=state.get("ledger_revision", 0), pointer=pointer, value=deepcopy(value))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Update or read a session intent ledger.")
     parser.add_argument("--root", default=str(default_root()), help="ledger root")
@@ -1834,7 +2049,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected-revision", type=int, default=None,
                         help="optional ledger_revision of the snapshot used for this update")
     parser.add_argument("--snapshot", action="store_true", help="emit consumer snapshot")
-    parser.add_argument("--read-state", action="store_true", help="read exact authoritative state without mutation")
+    parser.add_argument("--read-state", action="store_true", help="read intent references, or one detail with --pointer")
+    parser.add_argument("--read-intent", action="store_true", help="read routing keywords and detail references only")
+    parser.add_argument("--pointer", help="select one JSON pointer from --read-state")
     parser.add_argument("--read-events", action="store_true", help="read ordered authoritative audit events")
     parser.add_argument("--migrate", action="store_true", help="atomically import the explicitly selected JSON session")
     parser.add_argument("--export-to", help="write a portable projection to a separate root")
@@ -1849,8 +2066,10 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(delta, dict):
             raise SystemExit("--delta-json must decode to an object")
     root = Path(args.root)
-    read_only = (args.snapshot or args.read_state or args.read_events or args.export_to) and args.input is None and delta is None and not args.migrate
-    if (args.read_state or args.read_events or args.export_to) and not read_only:
+    read_only = (args.snapshot or args.read_intent or args.read_state or args.read_events or args.export_to) and args.input is None and delta is None and not args.migrate
+    if args.pointer and not args.read_state:
+        raise SystemExit("--pointer requires --read-state")
+    if (args.read_intent or args.read_state or args.read_events or args.export_to) and not read_only:
         raise SystemExit("read/export flags cannot be combined with mutations")
     # A platform-wide pointer can move while two sessions are active. Native
     # identity binds CLI mutations; an explicit historical snapshot remains a
@@ -1898,8 +2117,18 @@ def main(argv: list[str] | None = None) -> int:
                 result = read_session_events(**coordinates)
             else:
                 result = read_session_state(**coordinates)
-                if args.snapshot:
+                if args.expected_input_event_id and result.get("latest_input_event_id") != args.expected_input_event_id:
+                    raise ValueError("State input changed; read the current intent reference")
+                if args.expected_revision is not None and result.get("ledger_revision") != args.expected_revision:
+                    raise ValueError("State revision changed; read the current intent reference")
+                if args.read_intent:
+                    result = intent_reference(result)
+                elif args.pointer:
+                    result = state_detail(result, args.pointer)
+                elif args.snapshot:
                     result = consumer_snapshot(result)
+                else:
+                    result = intent_reference(result)
         except (OSError, ValueError, sqlite3.Error) as exc:
             raise SystemExit(str(exc)) from None
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

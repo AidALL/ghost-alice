@@ -15,7 +15,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-
 @dataclass
 class ContractIssue:
     severity: str
@@ -40,166 +39,100 @@ REQUIRED_CONTRACT_KEYS = {
 
 # Check protocol identifiers and canonical owner links, not repeated narrative wording.
 # These static checks establish document wiring; runtime tests establish behavior.
-REQUIRED_PATTERNS = {
-    "docs/policies/session-gate-matrix.md": [
-        "skill-catalog/session-gates.json",
-        "session-intent-analyzer",
-        "task-router",
-        "skill-evolution",
-        "tool-checkpoint",
-        "boundary-contract",
-        "verification-before-completion",
-        "routing-surface",
-        "clarification-only",
-        "direct-response"
-    ],
-    "AGENTS.md": [
-        "skill-catalog/session-gates.json",
-        "docs/policies/session-gate-matrix.md",
-        "session-intent-analyzer",
-        "task-router",
-        "boundary-contract",
-        "systematic-debugging",
-        "verification-before-completion",
-        "[gate-state]",
-        "[completion-check]",
-        "[partial-check]",
-        "unverified",
-        "clarification-only",
-        "direct-response"
-    ],
-    "platforms/codex/AGENTS.md": [
-        "session-intent-analyzer",
-        "task-router",
-        "boundary-contract",
-        "systematic-debugging",
-        "verification-before-completion",
-        "[gate-state]",
-        "[completion-check]",
-        "[partial-check]",
-        "clarification-only",
-        "direct-response"
-    ],
-    "platforms/claude/CLAUDE.md": [
-        "session-intent-analyzer",
-        "task-router",
-        "boundary-contract",
-        "verification-before-completion",
-        "[gate-state]",
-        "[completion-check]",
-        "[partial-check]",
-        "clarification-only",
-        "direct-response",
-        "Skill"
-    ],
-    "install.ps1": [
-        "session-gates.json",
-        "platforms\\codex\\AGENTS.md",
-        "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace"
-    ],
-    "install.sh": [
-        "session-gates.json",
-        "platforms/codex/AGENTS.md",
-        "pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace"
-    ],
-    "_shared/global_rule_blocks.py": [
-        "CODEX_SPEC",
-        "render_codex_bootstrap",
-        "apply_codex_bootstrap",
-        "codex-merge"
-    ],
-    "README.md": [
-        "skill-catalog/session-gates.json",
-        "python scripts/check_skill_gate_contract.py"
-    ],
-    "scripts/validate_skills.py": [
-        "run_contract_checks",
-        "gate-contract"
-    ],
-    "task-router/SKILL.md": [
-        "session-intent-analyzer",
-        "using-coding-convention",
-        "boundary-contract",
-        "routing-surface",
-        "primary-request",
-        "causal-axis",
-        "response-mode",
-        "response-order",
-        "clarification-only",
-        "direct-response",
-        "change-depth",
-        "focus-layer",
-        "verification-complexity",
-        "forced-visibility",
-        "record_response_route",
-        "authority-and-renewal",
-        "incident-accounting-and-continuation",
-        "evidence-selection-and-stop-gate"
-    ],
-    "boundary-contract/SKILL.md": [
-        "name: boundary-contract",
-        "## Authority and renewal",
-        "[boundary-contract]",
-        "objective",
-        "explicit-non-goals",
-        "allowed-surface",
-        "prohibited-surface",
-        "locked-decisions",
-        "acceptance-criteria",
-        "open-questions",
-        "test-purpose",
-        "stop-conditions",
-        "next-allowed-actions",
-        "human-owned",
-        "agent-declared"
-    ],
-    "_shared/install_hooks.py": [
-        "TOOL_CHECKPOINT_MARKER",
-        "TOOL_CHECKPOINT_INTERNAL",
-        "pre_tool_use",
-        "tool-checkpoint",
-        "task_router_reminder_hook.py"
-    ],
-    "_shared/ghost-alice-hook.mjs": [
-        "PreToolUse",
-        "readSessionIntentSnapshot",
-        "taskRouterReleaseMessage"
-    ],
-    "_shared/reminder_texts.json": [
-        "tool-checkpoint",
-        "PreToolUse"
-    ],
-    "coding-convention/using-coding-convention/SKILL.md": [
-        "verification-before-completion",
-        "boundary-contract",
-        "systematic-debugging",
-        "Instruction Body Reuse",
-        "one physical source line"
-    ],
-    "coding-convention/verification-before-completion/SKILL.md": [
-        "acceptance-criteria",
-        "claim-evidence-map",
-        "unverified",
-        "[completion-check]",
-        "[partial-check]",
-        "source and time",
-        "incident-accounting-and-continuation"
-    ],
-    "session-intent-analyzer/references/ledger-schema.md": [
-        "acceptance_criteria",
-        "Core Response Projection",
-        "record_response_route"
-    ],
-    "session-intent-analyzer/scripts/session_intent_ledger.py": [
-        "acceptance_criteria",
-        "consumer_snapshot",
-        "record_response_route"
-    ],
-    ".github/workflows/skill-gate-contract.yml": [
-        "python scripts/check_skill_gate_contract.py",
-        "python scripts/run_installer_compat_tests.py --group skill-gate-contract"
-    ]
-}
+REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/session-gates.json',
+                                          'session-intent-analyzer',
+                                          'task-router',
+                                          'skill-evolution',
+                                          'tool-checkpoint',
+                                          'boundary-contract',
+                                          'verification-before-completion',
+                                          'routing-surface',
+                                          'clarification-only',
+                                          'direct-response'],
+ 'AGENTS.md': ['installed common contract', 'current-session receipt', 'platforms/common-governance.md'],
+ 'platforms/codex/AGENTS.md': ['## Codex tools and installation',
+                               'Metadata alone is not execution',
+                               'current hook receipt'],
+ 'platforms/claude/CLAUDE.md': ['## Claude tools and installation',
+                                'visible `Skill` tool',
+                                'current hook receipt'],
+ 'install.ps1': ['session-gates.json',
+                 'platforms\\codex\\AGENTS.md',
+                 'pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion '
+                 '+ session-start + io-trace'],
+ 'install.sh': ['session-gates.json',
+                'platforms/codex/AGENTS.md',
+                'pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion '
+                '+ session-start + io-trace'],
+ '_shared/global_rule_blocks.py': ['CODEX_SPEC',
+                                   'render_codex_bootstrap',
+                                   'apply_codex_bootstrap',
+                                   'codex-merge'],
+ 'README.md': ['skill-catalog/session-gates.json', 'python scripts/check_skill_gate_contract.py'],
+ 'scripts/validate_skills.py': ['run_contract_checks', 'gate-contract'],
+ 'task-router/SKILL.md': ['session-intent-analyzer',
+                          'using-coding-convention',
+                          'boundary-contract',
+                          'response-route',
+                          'First-Entry Contract',
+                          'verification-before-completion',
+                          'references/routing-details.md',
+                          'ledger-schema.md#core-response-projection',
+                          'direct-response',
+                          'clarification-only'],
+ 'boundary-contract/SKILL.md': ['name: boundary-contract',
+                                '## Authority and renewal',
+                                '[boundary-contract]',
+                                'objective',
+                                'explicit-non-goals',
+                                'allowed-surface',
+                                'prohibited-surface',
+                                'locked-decisions',
+                                'acceptance-criteria',
+                                'open-questions',
+                                'test-purpose',
+                                'stop-conditions',
+                                'next-allowed-actions',
+                                'human-owned',
+                                'agent-declared'],
+ '_shared/install_hooks.py': ['TOOL_CHECKPOINT_MARKER',
+                              'TOOL_CHECKPOINT_INTERNAL',
+                              'pre_tool_use',
+                              'tool-checkpoint',
+                              'task_router_reminder_hook.py'],
+ '_shared/ghost-alice-hook.mjs': ['PreToolUse', 'readSessionIntentSnapshot', 'taskRouterReleaseMessage'],
+ '_shared/reminder_texts.json': ['tool-checkpoint', 'PreToolUse'],
+ 'coding-convention/using-coding-convention/SKILL.md': ['verification-before-completion',
+                                                        'boundary-contract',
+                                                        'systematic-debugging',
+                                                        'Instruction Body Reuse',
+                                                        'one physical source line'],
+ 'coding-convention/verification-before-completion/SKILL.md': ['acceptance-criteria',
+                                                               'claim-evidence-map',
+                                                               'unverified',
+                                                               '[completion-check]',
+                                                               '[partial-check]',
+                                                               'source and time',
+                                                               'incident-accounting-and-continuation'],
+ 'session-intent-analyzer/references/ledger-schema.md': ['acceptance_criteria',
+                                                         'Core Response Projection',
+                                                         'record_response_route'],
+ 'session-intent-analyzer/scripts/session_intent_ledger.py': ['acceptance_criteria',
+                                                              'consumer_snapshot',
+                                                              'record_response_route'],
+ '.github/workflows/skill-gate-contract.yml': ['python scripts/check_skill_gate_contract.py',
+                                               'python scripts/run_installer_compat_tests.py --group '
+                                               'skill-gate-contract'],
+ 'platforms/common-governance.md': ['## Operating Model',
+                                    '## First-Entry Contract',
+                                    'session-intent-analyzer',
+                                    'task-router',
+                                    'boundary-contract',
+                                    'systematic-debugging',
+                                    'verification-before-completion',
+                                    'clarification-only',
+                                    'direct-response',
+                                    'skill-evolution is a report-only branch']}
 
 
 @dataclass(frozen=True)
@@ -215,7 +148,7 @@ class OwnerSection:
 # Callers name the owning procedure; only that section owns its detailed fields.
 OWNER_SECTIONS = (
     OwnerSection(
-        "_shared/reminder_texts.json", "common governance rule 9", "AGENTS.md",
+        "_shared/reminder_texts.json", "common governance rule 9", "platforms/common-governance.md",
         "9. io-trace Transparency Rule",
         ("intent", "why", "hook-stage: PreToolUse", "contract-ref", "contract-check"),
         message_key="tool-checkpoint",
@@ -228,8 +161,8 @@ OWNER_SECTIONS = (
     ),
     OwnerSection(
         "coding-convention/verification-before-completion/SKILL.md",
-        "../../task-router/SKILL.md#register-the-core-projection",
-        "task-router/SKILL.md", "Register the Core projection",
+        "session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection",
+        "session-intent-analyzer/references/ledger-schema.md", "Core Response Projection",
         ("response-route.v1", "record_response_route"),
     ),
     OwnerSection(
@@ -237,8 +170,7 @@ OWNER_SECTIONS = (
         "references/autopilot-publication.md#apply-and-deliver",
         "coding-convention/verification-before-completion/references/autopilot-publication.md",
         "Apply and deliver",
-        ("delivery-route", "repair-target", "preserve_answer_and_patch_metadata",
-         "assembled_complete_payload", "corrected_complete_answer", "resolve_host_delivery"),
+        ("continue: true", "response_assessment.body_issue", "strict audit", "does not hold or replace desktop output"),
     ),
 )
 
@@ -414,7 +346,7 @@ def _check_owner_sections(root: Path) -> list[ContractIssue]:
         consumer_path = root / contract.consumer
         if consumer_path.is_file():
             consumer = _read_text(consumer_path)
-            reference = f"({contract.reference})"
+            reference = contract.reference
             if contract.message_key is not None:
                 try:
                     messages = json.loads(consumer)
@@ -535,24 +467,13 @@ def _check_claude_first_turn_contract(root: Path) -> list[ContractIssue]:
     path = root / "platforms/claude/CLAUDE.md"
     if not path.is_file():
         return []  # The required-file check reports this separately.
-    section = re.search(
-        r"^## (?:Claude First-Turn Contract|First-Entry Contract)\s*\n(.*?)(?=^## |\Z)",
-        _read_text(path), flags=re.MULTILINE | re.DOTALL,
-    )
-    steps = re.findall(r"^(\d+)\. (.+)$", section.group(1), flags=re.MULTILINE) if section else []
-    numbers = [int(number) for number, _ in steps]
-    actions = [action for _, action in steps]
-    intake = [index for index, action in enumerate(actions) if ("session-intent-analyzer" in action or "session-intent observation" in action) and "task-router" not in action]
-    router = [index for index, action in enumerate(actions) if "task-router" in action]
-    direct = (
-        len(intake) == len(router) == 1
-        and router[0] == intake[0] + 1
-        and re.search(r"\b(?:if|unless|block)\b", actions[router[0]], re.IGNORECASE) is None
-    )
-    if not direct or numbers != list(range(1, len(steps) + 1)):
+    common = root / "platforms/common-governance.md"
+    if (path.read_text(encoding="utf-8").count("{{COMMON_GOVERNANCE}}") != 1
+            or not common.is_file()
+            or not _owner_section(common.read_text(encoding="utf-8"), "First-Entry Contract")):
         return [ContractIssue(
             "ERROR", "platforms/claude/CLAUDE.md",
-            "Claude first-turn must route directly after exact intake with consecutive steps",
+            "Claude bootstrap must reference one common governance First-Entry Contract",
         )]
     return []
 

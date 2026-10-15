@@ -9,105 +9,27 @@ compatibility:
 
 # Task Router
 
-The current-session assistant applies task-router after session-intent intake to perform request decomposition, work placement, skill routing and boundary-skill selection. The current-session assistant uses accepted intent without repeating raw user intent inference, granting authority, obtaining credentials or deciding native tool permission. Core's response_route.py validates and stores the candidate that this assistant submits.
+The response model selects work and skills from the supplied request and applicable current intent. It retrieves a stored summary or referenced detail only when that value can change the selection. Core validates the submitted response-route. Routing neither performs native tool permission checks nor repeats intake's semantic analysis.
 
-A delegated assistant assigned only a specific subtask skips this routing workflow. The parent assistant retains responsibility for routing the user's request.
+## Select the next action
 
-## Entry and authority
+The common First-Entry Contract owns terminal answers and pending-merge intake. For normal work:
 
-The common governance First-Entry Contract owns classification before tools, pending-merge intake order, terminal answers and opening visibility. After that contract selects normal work, the current-session assistant applies this body to the exact session-intent state. The same session may supply skill-evolution's independent report-only branch.
+1. Reconcile the input with unfinished authorized work. A status question does not cancel that work; an explicit stop or replacement governs it.
+2. Select the response purpose: execution, explanation, approval-wait, partial or completion. A new completion judgment requires its evidence; a progress explanation does not publish completion.
+3. Select a focus (micro, meso, macro or meta) and verification depth from the decision actually needed. Select the information for that decision at the same time: retain needed bodies, and express the conclusion and remaining need for bodies whose use is finished. Native origin does not exempt a prior message from that judgment. Retrieve only referenced constraints, work contracts or criteria that can affect that decision. Do not read all historical work units.
+4. Match available skill descriptions to the task. Load or reuse the selected skill's procedure, then its referenced detail only when the next action needs it. Intake observation alone does not select the semantic-update procedure. Independent required source reads can share one native tool invocation; a new model round is justified by information that must be interpreted before the dependent action.
+5. Apply boundary-contract for implementation, mutable or external targets, an unresolved authority boundary, or verification that changes an execution criterion. A bounded read-only source lookup within an established purpose and known targets requires no new boundary contract. Apply using-coding-convention for development and verification-before-completion for new result claims. Use systematic-debugging for a failure whose cause needs correction.
+6. Before dependent evidence submission, execution-state changes or completion recording, register the Core response-route using the current receipt's root, platform, session and input ID, the selected owned work units and criteria, and the declared boundary reference. When actual continued work requires changing the input representation of already-used material, follow the receipt's `context_selection` procedure. Compare that material with the next decision; retain needed details or publish its conclusion, uncertainty and original reference. Combine a changed selection with another required action where possible. A routine lookup does not require a separate route or context-judgment call, and the model does not predict the material's future lifetime. Core authenticates content use independently of work authority; Ghost-ALICE Autopilot's continuation decision does not change this rule. An unpublished selection leaves the body intact. Register an explanation route when the user explicitly requests an authenticated review record.
 
-Missing intake context leaves dependent registration unavailable. Restore only the context needed by an authorized next action; do not substitute another session. Apply boundary-contract for authority, resource limits and renewal.
+The routing surface requires only `response_mode` and `boundary_contract`; include decision-relevant optional judgments instead of filling every field. A general question supported by supplied content remains direct-response. Lookup, execution and fresh verification select normal work. A missing user-owned decision selects clarification-only.
 
-## Select the response and work
+## Referenced contracts
 
-1. Use the pending-merge result obtained under the common First-Entry Contract; apply merge-companion only for its reported undecided entries.
-2. Consume the exact session-intent summary. Reconcile current goal, latest scope, active decisions, accumulated constraints/non-goals and acceptance criteria. Apply boundary chronology from `references/routing-details.md` when those facts conflict. Ask only for an unresolved human-owned decision; existing authorization does not need renewed approval.
-3. Identify the primary question or instruction, action category, domain, output shape, input file type, verification signal, boundary signal and sufficient change depth. Preserve a causal axis only when the request asks about a cause or relationship.
-4. Reconcile unfinished authorized work before selecting a terminal response. A status question or correction normally receives a brief commentary answer followed by continued work. An explicit stop, pause, cancellation or incompatible replacement governs continuation. An ambient workspace, tool availability or an unresolved ledger flag alone grants no authority.
-5. Select the response mode using the table below. Route classification precedes evidence planning. A general explanatory premise does not become an inspection request because verification could be performed.
-6. Match available skills, establish a required boundary, and register the normal route within the user's tool budget before the downstream consumer captures its response.
+[references/routing-details.md](references/routing-details.md) owns boundary chronology and terminal examples. [The ledger schema](../session-intent-analyzer/references/ledger-schema.md#core-response-projection) owns the exact `response-route.v1` API and current-input binding. Read the relevant section when registering or changing that record. Native receipt fields, work-unit IDs and criterion ownership are values supplied by the host or stored Core records, not terms to infer from prose.
 
-| Mode | Condition | Agent action |
-| --- | --- | --- |
-| `clarification-only` | An essential referent or decision is missing, and the conversation supports neither an answer nor safe work | Ask the minimum decisive question; perform no agent-side inspection or metadata repair |
-| `direct-response` | Supplied conversation or retained valid evidence supports a bounded answer without work, lookup, tools or fresh verification | Return the resolved content; perform no agent-side inspection or metadata repair |
-| `normal` | Authorized work continues, or the request needs lookup, inspection, modification, verification, current/version-specific claims or high-risk advice | Follow the owning work and verification workflows |
+The response model names the user objective and the reason for the chosen work. At a handoff, it passes the concise current summary, selected work references and source locators. It does not copy the whole intent ledger or repeat other skills' procedures.
 
-The terminal restrictions govern genuinely no-work answers. They do not prohibit authorized Core route repair on a normal completion path. A delivery instruction about visible answer text does not change the route or remove a required recording operation. The full terminal conditions and examples are in `references/routing-details.md`.
+## Failure modes
 
-The current-session assistant preserves the attained stage when reporting progress: feedback recorded, source changed, behavior tested, and runtime installed/adopted are distinct claims. A branch-local obstacle blocks only dependent work. When the user authorizes correction of an execution failure, the current-session assistant routes implementation and an original-failure regression; a conduct-feedback record or evolution report does not implement the correction.
-
-## Match skills and scope
-
-The current-session assistant applying task-router scans available descriptions against the accepted action, domain, input type and verification burden. It records a plausible match or a short reason for no match.
-
-- Output skills produce the requested artifact. No output match does not block work.
-- Adversarial-verification handles admitted source-heavy, consistency, factual, numeric, legal, patent, grant and investor-relations claims.
-- Necessity-gate runs when the current-session assistant defines new work, a file, an audit cycle or a follow-up.
-- Using-coding-convention runs at the start of development work.
-- Verification-before-completion runs before an executed-work closure or freshly verified result.
-- Other lifecycle skills run when their applicable phase is reached.
-
-The current-session assistant applying task-router sets `boundary-contract: required` for implementation, modification or verification; explicit prohibited surfaces; auth/API/DI/navigation/dependency/config/schema or external side effects; discovery of unknown target files/tests; constrained visual/read-only checks; or a correction to objective/scope/priority/completion meaning when actionable work remains. The current-session assistant applying task-router states the reason only. The same assistant applies boundary-contract to state filenames, allowed surfaces, test purpose and stop conditions.
-
-When required, boundary-contract runs before discovery, output work and edits, then using-coding-convention runs for development. Without a required boundary, using-coding-convention runs immediately for development.
-
-The current-session assistant selects the focus needed for the next decision, independently of verification depth. A meta judgment can revise the assistant's premise inside existing authority; it does not itself require a user question. The assistant selects `minimal | localized | structural | systemic` change depth from the supported cause and impact surface. A structural cause requires a sufficient structural correction. A full-set objective cannot become a sample. A user-authorized temporary correction retains its residual impact.
-
-## Routing records
-
-The routing-surface is the reusable work judgment for boundary, verification, lifecycle and visibility consumers. The current-session assistant records semantic facts through the intake writer, then makes this work judgment while applying task-router.
-
-```text
-[routing-surface]
-- intent-relation: new | continuation | accepted-continuation | changed | correction | ambiguous
-- primary-request: <primary question or instruction>
-- causal-axis: <cause or relationship | n/a>
-- response-mode: normal | clarification-only | direct-response
-- response-order: causal-answer-first-after-necessary-evidence | imperative-result-first-after-necessary-work | clarification-question-only | resolved-intent-first
-- change-depth: minimal | localized | structural | systemic
-- focus-layer: micro | meso | macro | meta
-- verification-complexity: level-1 | level-2 | level-3
-- boundary-contract: required | n/a
-- forced-visibility: yes | no
-- reason: <decision-relevant reason>
-```
-
-`accepted-continuation` requires recorded acceptance in intent facts, not a phrase alone. Unknown routing-surface values fail closed: consumers expose the full surface and reopen focus. Focus and complexity use the session gate matrix's existing levels. The routing record grants no tool permission.
-
-For normal causal questions, the final answer leads with the supported causal answer after necessary evidence; for imperative requests, it leads with the result after necessary work. The response-order never requires inventing an answer before work. Terminal responses use clarification-question-only or resolved-intent-first respectively.
-
-```text
-[task-router]
-domain: <domain>
-response-mode: normal | clarification-only | direct-response
-output-skills: <skill and reason | none>
-verification-skills: <skill and reason | none>
-lifecycle: <applicable skills | none>
-boundary-contract: required | n/a
-boundary-reason: <reason when required>
-next-required: boundary-contract | <skill> | user-input | none
-```
-
-A normal route reports factual gate state using the common contract's `[gate-state]` schema. Runtime hooks own tool-checkpoint visibility and strict audit.
-
-Instruction-body reuse follows `../coding-convention/verification-before-completion/references/verify-or-reuse.md`. On Codex, a skill-call record requires a fresh or valid retained body and execution of its current workflow. Runtime hooks own tool-checkpoint schema, per-input visibility deduplication and strict audit. Its stable meaning is `hook-stage: PreToolUse` and `meaning: tool-call retry checkpoint, not user-input intake`.
-
-## Register the Core projection
-
-For a normal route, the current-session assistant submits `response-route.v1` through `_shared/response_route.py` or `record_response_route` using exact current input binding: receipt root, platform, session ID and expected input-event ID. When a boundary is required, the current-session assistant declares it first and supplies its reference. The complete schema, guarded legacy binding and API behavior are in `../session-intent-analyzer/references/ledger-schema.md`, section Core Response Projection.
-
-The current-session assistant following the selected procedure records each criterion with its work-unit ID and contract revision before selection. The current-session assistant applying task-router assigns stable IDs to continuing authorized work and selects only currently authorized, admitted units and criteria. A repeated local criterion ID does not establish ownership. Changed kind, owner or criterion definition requires a newer contract revision.
-
-The current-session assistant records response purpose independently as `execution | explanation | approval-wait | partial | completion`. Core selects completion processing from an actual completion/partial control marker or registered purpose `completion`; prose wording and an execution work selection do not declare completion or publication. The current-session assistant identifies its new completion claims, explicitly routes them and applies verification-before-completion. Explanation or progress can retain continuing work without submitting completion. Legacy candidates without purpose retain execution behavior.
-
-For exact existing ownerless criteria, the current-session assistant calls Core's guarded legacy-binding API described in the schema reference through a host tool. It does not resubmit rows through the semantic writer or invent ownership, admission or evidence. A changed input requires reconciliation and a current route binding; it does not erase stable work units or unchanged business proof.
-
-A terminal answer may use only an already supplied internal host handoff. If none exists, the projection stays absent. The current-session assistant must not open tools or manufacture a receipt merely to register that answer. A stale/schema rejection leaves dependent registration unavailable. The assistant corrects the affected binding or contract when a required claim or authorized next action needs it; it never attaches an old judgment to a new input event.
-
-## Failure modes and repair
-
-The current-session assistant must not infer inspection authority from a general question, replace a requested implementation with reporting, or use a route/purpose label to evade verification of a real completion claim. A formatting or route-recording error does not invalidate unchanged business proof.
-
-For authority and contract renewal, apply `../boundary-contract/SKILL.md#authority-and-renewal`. For incident counts and continuation, apply `../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation`. For useful checks, apply `../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate`; that skill and its references also own proof reuse, Ghost-ALICE Autopilot publication and native delivery. Preserve original evidence source and time; run affected new verification only for a changed condition, contrary evidence, explicit recheck or an actually expanded claim.
+Do not infer execution authority from stored unfinished work, ambient paths, tools, or routing keywords. Do not replace a requested repair with a report. A route or publication failure does not refute unchanged business proof. Preserve the distinctions between source change, checks, installation, native adoption, completion acceptance and actual continuation. The owning skills determine correction and stopping conditions; routing does not invent another recovery loop.

@@ -109,15 +109,19 @@ def _routing_surface_reason(context: dict[str, Any]) -> str | None:
     boundary_contract = _normalize_token(_surface_value(surface, "boundary_contract", "boundary-contract"))
     forced_visibility = _normalize_yes_no(_surface_value(surface, "forced_visibility", "forced-visibility"))
 
-    if (
-        intent_relation not in INTENT_RELATIONS
-        or change_depth not in CHANGE_DEPTHS
-        or focus_layer not in FOCUS_LAYERS
-        or verification_complexity not in VERIFICATION_COMPLEXITIES
-        or boundary_contract not in BOUNDARY_CONTRACTS
-        or forced_visibility not in {"yes", "no"}
-    ):
-        return "routing-surface-fail-closed"
+    judgments = (
+        ("intent_relation", intent_relation, INTENT_RELATIONS),
+        ("change_depth", change_depth, CHANGE_DEPTHS),
+        ("focus_layer", focus_layer, FOCUS_LAYERS),
+        ("verification_complexity", verification_complexity, VERIFICATION_COMPLEXITIES),
+        ("boundary_contract", boundary_contract, BOUNDARY_CONTRACTS),
+        ("forced_visibility", forced_visibility, {"yes", "no"}),
+    )
+    for key, normalized, choices in judgments:
+        aliases = (key, key.replace("_", "-"))
+        if any(alias in surface for alias in aliases):
+            if _surface_value(surface, *aliases) is None or normalized not in choices:
+                return "routing-surface-fail-closed"
 
     if intent_relation == "ambiguous":
         return "routing-surface-fail-closed"

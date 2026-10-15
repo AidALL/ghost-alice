@@ -28,7 +28,7 @@ bash install.sh --addon autopilot
 
 Core `0.5.1`과 Ghost-ALICE Autopilot `0.5.1`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.1` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
 
-응답 모델은 작업과 의미를 판단하고 Core가 검토 기록을 인증합니다. Ghost-ALICE Autopilot은 인증 결과를 사용하며 모델이 등록한 승인 계획에서 적격 작업을 선택합니다. 입력·반환·호스트 전달은 [아키텍처](../../../architecture_ko.md)를 확인해 주세요.
+응답 모델은 작업과 의미를 판단하고 Core가 검토 기록을 인증합니다. Ghost-ALICE Autopilot은 인증 결과를 사용하며 모델이 등록한 승인 계획에서 적격 작업을 선택합니다. 단독 흐름은 [Core 아키텍처](../../../architecture_ko.md), 애드온 훅과 조건부 호스트 전달은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)를 확인해 주세요.
 
 ## Custom, Tenant, And Local Development Addons
 

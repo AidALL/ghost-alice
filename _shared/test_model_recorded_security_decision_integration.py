@@ -39,7 +39,7 @@ class ModelRecordedSecurityDecisionIntegration(unittest.TestCase):
     def latest_input_event_id(self) -> str:
         result = subprocess.run(
             [sys.executable, str(LEDGER), "--root", str(self.tmp),
-             "--platform", "claude", "--session-id", self.session, "--read-state"],
+             "--platform", "claude", "--session-id", self.session, "--snapshot"],
             check=True, capture_output=True, text=True,
         )
         return json.loads(result.stdout)["latest_input_event_id"]
@@ -77,7 +77,7 @@ class ModelRecordedSecurityDecisionIntegration(unittest.TestCase):
         self.assertFalse((self.session_dir() / "downstream-gates.json").exists())
         self.assertNotIn("permissionDecision", out.stdout)
         result = subprocess.run([sys.executable, "-B", str(LEDGER), "--root", str(self.tmp),
-            "--platform", "claude", "--session-id", self.session, "--read-state"],
+            "--platform", "claude", "--session-id", self.session, "--snapshot"],
             check=True, capture_output=True, text=True)
         state = json.loads(result.stdout)
         self.assertEqual(state["model_security_decision"]["decision"], "block")

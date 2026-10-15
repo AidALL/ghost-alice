@@ -114,7 +114,7 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             fallback = dest.with_name("ghost-alice-governance.md")
             self.assertIn(str(fallback), dest.read_text())
             # Required governance procedures remain available to ordinary projects.
-            self.assertIn(CONTRACT.read_text().split("\n", 1)[1].strip(), fallback.read_text())
+            self.assertIn((ROOT / "platforms/common-governance.md").read_text().strip(), fallback.read_text())
             self.assertNotIn("## Codex Hookless Fallback", dest.read_text())
 
     def test_user_owned_fallback_blocks_loader_installation(self):
@@ -235,8 +235,8 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertEqual(rendered.returncode, 0, rendered.stderr)
             instructions = "\n".join(strings(json.loads(rendered.stdout)))
             self.assertIn(source, instructions, "Project contract was truncated")
-            rule = "### 12. Sufficient Change Principle (no minimal patch bias)"
-            self.assertEqual(instructions.count(rule), 1, "Full governance was delivered twice")
+            rule = "## First-Entry Contract"
+            self.assertEqual(instructions.count(rule), 0, "Project input preloaded the common procedure")
             self.assertNotIn("## Codex Hookless Fallback", instructions)
 
 

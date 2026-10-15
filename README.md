@@ -20,13 +20,12 @@ The responding model keeps the user's objective and constraints, performs author
 
 1. Input hooks record the current human input without storing the raw prompt. The responding model selects authorized work; a host tool passes that selection to Core for validation and storage.
 2. The model asks the host to run the needed tools and reads their actual observations. Valid unchanged evidence retains its original source and verification time.
-3. Through a host execution tool, the model sends Core its complete answer draft and original source paths. Core saves and returns the exact review inputs. The model first judges each claim against those sources, then judges the whole answer against the user's objective and constraints.
-4. The model submits both judgments through a host tool. Core validates and records them together, returning the exact answer only when supported. Recording does not perform the model's meaning judgment.
-5. At Stop, the host independently invokes the Core guard and Ghost-ALICE Autopilot adapter. Each reads Core's authenticated result. Ghost-ALICE Autopilot records supported criteria and may return a task from a plan the model already registered using actual user approval. The host delivers any task request to the triggering conversation.
+3. The model judges each claim against original evidence, then the complete answer against the user's objective and constraints. Core authenticates and records both judgments, returning status and references.
+4. The model submits its answer through the native host. Core's Stop guard checks the submitted review records. Unresolved required work remains visible.
 
 A route or saved plan does not grant permission. A supported answer can accurately report unfinished work. New input reopens routing without invalidating unchanged evidence; recording errors do not require replaying the business operation.
 
-See the [architecture](./architecture.md) for the responsibility diagram and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract.
+See the [Core architecture](./architecture.md) for the standalone flow and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract. Installing Autopilot adds proof application and approved-plan continuation, as described in the [Autopilot architecture](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README.md#how-autopilot-extends-core).
 
 ## Quick Start
 

@@ -1,5 +1,6 @@
 """SQLite authority through the live Python/Node hook and diagnostic readers."""
 
+import io
 import json
 import os
 from pathlib import Path
@@ -79,12 +80,23 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
         self.assertIsNone(router.session_material(self.root, self.platform, self.sid)["state"].get("model_security_decision"))
         self.assertNotEqual(self.node().get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
 
-    def test_diagnostic_reads_committed_events_without_jsonl_export(self):
+    def test_posttool_audits_tools_without_inferring_missing_semantic_changes(self):
         for index in range(3):
             self.observe(f"request {index}")
         (self.directory / "intent-events.jsonl").unlink(missing_ok=True)
-        with patch.dict(os.environ, self.env, clear=True):
-            self.assertIsNotNone(trace._semantic_delta_warning({"session_id": self.sid}))
+        env = {"HOME": self.env["HOME"], "GHOST_ALICE_PLATFORM": self.platform,
+               "GHOST_ALICE_SESSION_INTENT_ROOT": str(self.root)}
+        payload = json.dumps({"session_id": self.sid, "tool_name": "Read",
+                              "tool_input": {"file_path": "/tmp/source.txt"}})
+        with patch.dict(os.environ, env, clear=True):
+            for _ in range(2):
+                with patch.object(sys, "stdin", io.StringIO(payload)):
+                    self.assertEqual(trace.main(), 0)
+        audit = Path(env["HOME"]) / ".ghost-alice" / "io-trace.jsonl"
+        rows = [json.loads(line) for line in audit.read_text().splitlines()]
+        self.assertEqual([row["tool"] for row in rows], ["Read", "Read"])
+        self.assertTrue(all(row["session"] == self.sid and
+                            row["path"] == "/tmp/source.txt" for row in rows))
 
     def test_corrupt_database_never_falls_back_to_json_decision(self):
         state = self.block()

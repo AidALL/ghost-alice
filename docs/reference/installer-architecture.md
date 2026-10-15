@@ -10,6 +10,7 @@ For quick user instructions, read [installation](../getting-started/installation
 - [Reading Path](#reading-path)
 - [Architecture Summary](#architecture-summary)
 - [Install Flow](#install-flow)
+- [Gateway Lifecycle](#gateway-lifecycle)
 - [Platform Surfaces](#platform-surfaces)
 - [State And Safety Model](#state-and-safety-model)
 - [Contributor Entry Points](#contributor-entry-points)
@@ -49,6 +50,14 @@ The hook runtime contains both `_shared` modules and `session-intent-analyzer/sc
 | Installer → install-state writer → status output | Actual changed targets, hashes and rollback information. | Per-platform manifest and an install report for status, doctor and uninstall. |
 
 `install.cmd` is only a Windows wrapper. The substantive Windows path is `install.ps1`. On Unix-like environments, `install.sh` owns the shell entry path and re-enters Bash when needed.
+
+## Gateway Lifecycle
+
+Gateway installation, refresh and detachment use six `_shared/context_gateway_*` modules. `model` defines request, observation, plan, result and effects types; it does not invoke an AI model. `inventory` reads facts through an injected platform adapter. `plan` authenticates ownership, compares selected mutations with actual gateway dependencies and produces an ordered plan without I/O. `transaction` applies the plan and owns reverse recovery. `platform` implements individual filesystem/native-service operations. `install` composes them behind the existing Python/CLI entrypoints.
+
+General payload replacement exposes reversible `ReplacementBatch` effects from `install_transaction.py`; managed Git updates expose reversible `SourceUpdate` effects from `installer_source_update.py`. When their selected paths affect an owned gateway, the same gateway transaction stops the service before replacement, establishes candidate readiness and updates the receipt/binding. Proven independent changes leave the gateway untouched. Core cleanup detaches affected gateway dependencies before deleting them. An unowned or inconclusive dependency cannot authorize detachment or dependent deletion.
+
+The gateway install CLI's `--dry-run` option prints the validated proposed changes and exits without application or an approval wait. Gateway/component errors retain their phase and stable identifier: exit 2 for a failed precondition, 3 for unconfirmed service state before active file replacement, 4 for an operation that failed but restored the prior installation, and 5 for uncertain recovery after changes began. General shell/PowerShell callers retain their existing overall failure reporting and the structured component cause. Installation requires Python 3.14 with a working zstd codec; detachment supports Python 3.11. The [installer lifecycle specification](../coding-convention/specs/2026-10-15-gateway-installer-design.md) contains the operation-specific conditions, data handoffs and failure diagrams.
 
 ## Platform Surfaces
 

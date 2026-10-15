@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import stat
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Sequence
@@ -761,7 +762,30 @@ def _target_item(
     return item
 
 
-def _support_artifact_item(name: str, path: Path, *, confirm: bool) -> dict[str, Any]:
+def _recovery_layout(path: Path) -> tuple[Path | None, list[tuple[Path, int]]]:
+    """Locate junctions and original link mtimes without following link destinations."""
+    pending = [(path, Path("."))]
+    links: list[tuple[Path, int]] = []
+    while pending:
+        current, relative = pending.pop()
+        if current.is_symlink():
+            links.append((relative, current.lstat().st_mtime_ns))
+            continue
+        if _is_junction(current):
+            return current, links
+        if current.is_dir():
+            pending.extend((child, relative / child.name) for child in current.iterdir())
+    return None, links
+
+
+def _support_artifact_item(
+    name: str,
+    path: Path,
+    *,
+    confirm: bool,
+    shared_platforms: list[str] | None = None,
+    recovery_platform: str | None = None,
+) -> dict[str, Any]:
     item: dict[str, Any] = {
         "kind": "support-artifact",
         "target_name": name,
@@ -772,6 +796,45 @@ def _support_artifact_item(name: str, path: Path, *, confirm: bool) -> dict[str,
         return item
     if not path.exists() and not path.is_symlink():
         item.update(action="missing", reason="support-artifact-absent")
+        return item
+    if shared_platforms:
+        item.update(action="manual-review", reason="shared-support-in-use-by-other-platform",
+                    shared_platforms=shared_platforms)
+        return item
+    if recovery_platform is not None:
+        junction, original_links = _recovery_layout(path)
+        if junction is not None:
+            item.update(action="manual-review", reason="recovery-junction-needs-review",
+                        junction_path=junction.as_posix())
+            return item
+        backup_root = _uninstall_backup_root(recovery_platform) / "support-state"
+        if not confirm:
+            item.update(action="would-quarantine-remove", reason="preserve-original-recovery-material",
+                        backup_root=backup_root.as_posix())
+            return item
+        backup_root.mkdir(parents=True, exist_ok=True)
+        # A new directory keeps earlier removal originals; copy first so failure
+        # cannot erase the only original. Preserve links rather than their targets.
+        backup_dir = Path(tempfile.mkdtemp(prefix=f"{name}-", dir=backup_root))
+        target_backup = backup_dir / "original"
+        if path.is_symlink():
+            os.symlink(os.readlink(path), target_backup)
+            shutil.copystat(path, target_backup, follow_symlinks=False)
+        elif path.is_dir():
+            shutil.copytree(path, target_backup, symlinks=True)
+        else:
+            shutil.copy2(path, target_backup)
+        # copystat may silently skip unsupported link timestamps. Check every
+        # root/nested link against its pre-copy metadata before deleting the tree.
+        for relative, original_mtime in original_links:
+            copied_link = target_backup / relative
+            if not copied_link.is_symlink() or copied_link.lstat().st_mtime_ns != original_mtime:
+                item.update(action="manual-review", reason="recovery-link-time-not-preserved",
+                            backup_path=target_backup.as_posix(), link_path=(path / relative).as_posix())
+                return item
+        _remove_path(path)
+        item.update(action="quarantined-removed", reason="preserve-original-recovery-material",
+                    backup_path=target_backup.as_posix())
         return item
     return _apply_remove_action(item, path, confirm=confirm, reason="trace-backed-support-artifact")
 
@@ -832,8 +895,33 @@ def _runtime_core_item(args: argparse.Namespace) -> dict[str, Any]:
 def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
     manifest_path = args.install_state_manifest
     install_state_dir = manifest_path.parent
-    return [
-        _support_artifact_item("install-state-manifest", manifest_path, confirm=args.confirm),
+    others = _other_platform_install_states(manifest_path, args.platform)
+    items = [
+        _support_artifact_item(
+            "pending-merges",
+            _ghost_alice_root() / "pending-merges" / args.platform,
+            confirm=args.confirm,
+            recovery_platform=args.platform,
+        ),
+        _support_artifact_item(
+            "hook-dispatcher-assets",
+            _ghost_alice_root() / "hooks",
+            confirm=args.confirm,
+            shared_platforms=others,
+        ),
+        _support_artifact_item(
+            "install-rollbacks",
+            _ghost_alice_root() / "install-rollbacks",
+            confirm=args.confirm,
+            shared_platforms=others,
+            recovery_platform=args.platform,
+        ),
+        _support_artifact_item(
+            "addon-sidecars",
+            _ghost_alice_root() / "addons" / args.platform,
+            confirm=args.confirm,
+        ),
+        _runtime_core_item(args),
         _support_artifact_item(
             "install-state-events",
             install_state_dir / f"{args.platform}-events.jsonl",
@@ -849,28 +937,17 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             install_state_dir / f"{args.platform}-project-trust-change.json",
             confirm=args.confirm,
         ),
-        _support_artifact_item(
-            "pending-merges",
-            _ghost_alice_root() / "pending-merges" / args.platform,
-            confirm=args.confirm,
-        ),
-        _support_artifact_item(
-            "hook-dispatcher-assets",
-            _ghost_alice_root() / "hooks",
-            confirm=args.confirm,
-        ),
-        _support_artifact_item(
-            "install-rollbacks",
-            _ghost_alice_root() / "install-rollbacks",
-            confirm=args.confirm,
-        ),
-        _support_artifact_item(
-            "addon-sidecars",
-            _ghost_alice_root() / "addons" / args.platform,
-            confirm=args.confirm,
-        ),
-        _runtime_core_item(args),
     ]
+    unresolved_recovery = any(item.get("reason") in {
+        "recovery-junction-needs-review", "recovery-link-time-not-preserved",
+    } for item in items)
+    manifest_item = _support_artifact_item(
+        "install-state-manifest", manifest_path, confirm=args.confirm and not unresolved_recovery,
+    )
+    if unresolved_recovery and manifest_item["action"] == "would-remove":
+        manifest_item.update(action="manual-review", reason="recovery-removal-pending")
+    items.append(manifest_item)
+    return items
 
 
 def _global_rule_item(platform: str, *, confirm: bool, companion: bool = False) -> dict[str, Any] | None:
@@ -948,6 +1025,7 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
         action = str(item.get("action", ""))
         if action in {
             "would-remove",
+            "would-quarantine-remove",
             "would-remove-global-rule",
             "would-remove-source-repo-hook-path",
             "would-remove-codex-project-trust",
@@ -955,6 +1033,7 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
             summary["would_remove"] += 1
         elif action in {
             "removed",
+            "quarantined-removed",
             "removed-global-rule",
             "removed-source-repo-hook-path",
             "removed-codex-project-trust",
@@ -972,6 +1051,31 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     manifest, manifest_error = _load_manifest(args.install_state_manifest)
     items: list[dict[str, Any]] = []
+    from context_gateway_install import detach_for_uninstall
+    # Gateway dependencies follow the same ownership/shared-platform plan as
+    # deletion. A raw manifest row does not establish that its target can go.
+    preview = argparse.Namespace(**dict(vars(args), confirm=False))
+    planned = _support_artifact_items(preview)
+    for target in (manifest or {}).get('targets', []):
+        if isinstance(target, dict):
+            planned.append(_target_item(target, manifest=manifest,
+                manifest_path=args.install_state_manifest, platform=args.platform,
+                confirm=False, purge_modified=getattr(args, 'purge_modified', False)))
+    removing_paths = [Path(item['path']) for item in planned
+                      if item.get('action') in {'would-remove', 'would-quarantine-remove'} and item.get('path')]
+    blocked = False
+    try:
+        gateway = detach_for_uninstall(user_home=_user_home(), remove_codex=args.platform == 'codex',
+            removing_paths=removing_paths, confirm=args.confirm, codex_dir=_codex_home())
+    except (ValueError, OSError, RuntimeError) as exc:
+        gateway = dict(kind='context-gateway', action='manual-review', reason='gateway-detach-unresolved', detail=str(exc))
+        blocked = True
+    if gateway['action'] != 'missing':
+        items.append(gateway)
+    if blocked:
+        return dict(schema_version=1, platform=args.platform, mode='confirm' if args.confirm else 'dry-run',
+            generated_at=_now(), install_state_manifest=args.install_state_manifest.as_posix(),
+            items=items, summary=_summary(items), blocked=True)
     items.append(_hook_item(args.platform, confirm=args.confirm))
     items.extend(_global_rule_items(args.platform, confirm=args.confirm))
     if manifest is None:
@@ -1055,7 +1159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Uninstall cleanup {mode}: {args.platform}")
     print(f"Report: {args.report_path}")
     print(json.dumps(report["summary"], ensure_ascii=False, sort_keys=True))
-    return 0
+    return 1 if report.get('blocked') else 0
 
 
 if __name__ == "__main__":

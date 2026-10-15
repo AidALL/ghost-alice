@@ -6,9 +6,51 @@ identifies the actor. Unresolved transport never becomes user authority.
 from __future__ import annotations
 
 import hashlib
+import glob
 import json
 import os
 from pathlib import Path
+
+
+def codex_transcript_path(platform_dir, session_id):
+    """Find one host-owned transcript by native session identity, without copying it."""
+    if not isinstance(platform_dir, str) or not Path(platform_dir).is_absolute():
+        return None
+    matches = []
+    for area in ('sessions', 'archived_sessions'):
+        matches.extend((Path(platform_dir) / area).rglob('*-' + glob.escape(session_id) + '.jsonl'))
+    if len(matches) != 1:
+        return None
+    path = matches[0]
+    try:
+        with path.open() as stream:
+            header = json.loads(stream.readline())
+    except (OSError, ValueError):
+        return None
+    if header.get('type') != 'session_meta' or header.get('payload', {}).get('id') != session_id:
+        return None
+    return str(path.resolve())
+
+
+def codex_transcript_contains_response(path, turn_id, text):
+    """A session filename alone does not establish coverage of the current turn."""
+    current_turn = None
+    with Path(path).open() as stream:
+        for line in stream:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            payload = row.get('payload', {})
+            if row.get('type') == 'turn_context':
+                current_turn = payload.get('turn_id')
+            if (current_turn == turn_id and row.get('type') == 'response_item'
+                    and payload.get('type') == 'message' and payload.get('role') == 'assistant'):
+                body = '\n'.join(p.get('text', '') for p in payload.get('content', [])
+                    if isinstance(p, dict) and p.get('type') == 'output_text')
+                if body == text:
+                    return True
+    return False
 
 
 def read_entries(path_value, session=None):
@@ -34,6 +76,12 @@ def is_task_notification(entry):
     if not isinstance(message, dict):
         return False
     origin = message.get('origin')
+    if (entry.get('type') == 'user' and entry.get('promptSource') == 'system'
+            and entry.get('turnOrigin') == 'peer' and isinstance(origin, dict)
+            and origin.get('kind') == 'peer' and origin.get('handback') is True
+            and isinstance(origin.get('senderTaskId'), str) and origin['senderTaskId']
+            and origin.get('from') == origin['senderTaskId']):
+        return True
     native_origin = (isinstance(origin, dict) and origin.get('kind') == 'task-notification'
                      and origin.get('producer') == 'session-task')
     return native_origin and (
@@ -53,6 +101,73 @@ def is_actual_user_prompt(entry):
     items = content if isinstance(content, list) else [content]
     return bool(content) and not any(isinstance(item, dict) and item.get('type') == 'tool_result'
                                      for item in items)
+
+
+def assistant_text_this_turn(entries):
+    """Select the last Claude assistant message after the latest human input."""
+    start = next((i for i in range(len(entries) - 1, -1, -1)
+                  if is_actual_user_prompt(entries[i])), -1)
+    for entry in reversed(entries[start + 1:]):
+        message = entry.get('message')
+        if not isinstance(message, dict) or message.get('role') != 'assistant':
+            continue
+        content = message.get('content')
+        items = content if isinstance(content, list) else [content]
+        return '\n'.join(item if isinstance(item, str) else item['text']
+            for item in items if isinstance(item, str) or (isinstance(item, dict)
+                and item.get('type') == 'text' and isinstance(item.get('text'), str)))
+    return ''
+
+
+def stop_response_text(native_input):
+    """Select one native Stop body for both Core and its completion consumer.
+
+    Inline event text outranks a transcript that can lag behind that event.
+    Transcript fallback retains native session and turn boundaries.
+    """
+    data = native_input if isinstance(native_input, dict) else {}
+    for key in ('last_assistant_message', 'lastAssistantMessage', 'prompt_response', 'promptResponse'):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    entries = read_entries(data.get('transcript_path') or data.get('transcriptPath'))
+    session = data.get('session_id') or data.get('sessionId')
+    if not isinstance(session, str) or not session:
+        return ''
+    owners = [row.get('payload', {}).get('id') for row in entries
+              if row.get('type') == 'session_meta' and isinstance(row.get('payload'), dict)]
+    if owners:
+        turn = data.get('turn_id')
+        contexts = [i for i, row in enumerate(entries) if row.get('type') == 'turn_context'
+                    and isinstance(row.get('payload'), dict)]
+        if (any(owner != session for owner in owners) or not turn or not contexts
+                or entries[contexts[-1]]['payload'].get('turn_id') != turn):
+            return ''
+        for row in reversed(entries[contexts[-1] + 1:]):
+            body = row.get('payload', {})
+            if row.get('type') != 'response_item' or not isinstance(body, dict):
+                continue
+            if body.get('type') == 'message' and body.get('role') == 'user':
+                return ''
+            if body.get('type') != 'message' or body.get('role') != 'assistant':
+                continue
+            metadata = body.get('internal_chat_message_metadata_passthrough', {})
+            if metadata.get('turn_id') != turn:
+                return ''
+            return '\n'.join(part['text'] for part in body.get('content', [])
+                if isinstance(part, dict) and part.get('type') == 'output_text'
+                and isinstance(part.get('text'), str))
+        return ''
+    return assistant_text_this_turn([row for row in entries
+        if row.get('sessionId') == session and not row.get('isSidechain')])
+
+
+def completion_scope(native_input):
+    """Preserve the Stop phase even when the host supplies its body in a transcript."""
+    observed = native_input if isinstance(native_input, dict) else {}
+    text = stop_response_text(observed)
+    return dict(text=text, phase='final' if text or observed.get('hook_event_name') == 'Stop'
+                else 'before_tool', native_input=observed)
 
 
 def native_tool_activity(platform, session_id, native_input, *, input_observation=None):
@@ -168,14 +283,27 @@ def capture_append_boundary(path_value):
 
 def native_input_actor(entry):
     """Require positive host origin; message wording supplies no actor evidence."""
-    if entry.get('isMeta') or entry.get('isSidechain'):
+    if entry.get('isSidechain'):
         return None
     if is_task_notification(entry):
         return 'notification'
+    if entry.get('isMeta'):
+        return None
     origin = entry.get('origin')
     if (is_actual_user_prompt(entry) and isinstance(origin, dict) and origin.get('kind') == 'human'
             and entry.get('promptSource') != 'system' and entry.get('turnOrigin') in (None, 'human')):
         return 'human'
+    if (is_actual_user_prompt(entry) and origin is None
+        and entry.get('entrypoint') == 'sdk-cli' and entry.get('userType') == 'external'
+        and entry.get('promptSource') == 'sdk' and entry.get('turnOrigin') == 'sdk'
+        and (entry.get('isMeta') is None or entry.get('isMeta') is False)
+        and (entry.get('isSidechain') is None or entry.get('isSidechain') is False)):
+        content = entry['message'].get('content')
+        if isinstance(content, str) or (isinstance(content, list) and content and all(
+            isinstance(block, dict) and block.get('type') == 'text'
+            and isinstance(block.get('text'), str) and not set(block) - {'type', 'text', 'cache_control'}
+            for block in content)):
+            return 'sdk'
     return None
 
 
@@ -191,7 +319,35 @@ def _input_text(entry):
     return content if isinstance(content, str) else None
 
 
-def resolve_staged_input(observation, session_id, cursors):
+def matches_input_text(content, binding):
+    """Correlate a hook prompt with a full text or one unique complete block.
+
+    Whole plaintext envelopes retain either native concatenation or the host's
+    newline-joined prompt serialization, without whitespace normalization.
+    Native actor metadata authenticates the actor separately. Desktop can add
+    host guidance beside the submitted prompt; this match removes no sibling
+    and never treats a substring or a textual marker as origin evidence.
+    """
+    if (not isinstance(binding, dict) or type(binding.get('input_char_count')) is not int
+        or not isinstance(binding.get('input_digest'), str)):
+        return False
+    def exact(text):
+        return (isinstance(text, str) and len(text) == binding['input_char_count']
+                and 'sha256:' + hashlib.sha256(text.encode()).hexdigest() == binding['input_digest'])
+    if isinstance(content, str):
+        return exact(content)
+    if (not isinstance(content, list) or any(not isinstance(block, dict)
+        or not isinstance(block.get('type'), str)
+        or (block['type'] == 'text' and not isinstance(block.get('text'), str)) for block in content)):
+        return False
+    texts = [block['text'] for block in content if block['type'] == 'text']
+    if texts and (exact(''.join(texts)) or exact('\n'.join(texts))):
+        return True
+    return sum(block.get('type') == 'text' and not set(block) - {'type', 'text', 'cache_control'}
+               and exact(block.get('text')) for block in content) == 1
+
+
+def resolve_staged_input(observation, session_id, cursors, *, allow_unknown=False):
     """Return one native actor/row locator, or leave the transport unresolved.
 
     A digest correlates content within an authenticated append window; it does
@@ -205,15 +361,15 @@ def resolve_staged_input(observation, session_id, cursors):
             identity = os.fstat(stream.fileno())
             if boundary['inode'] is not None and (identity.st_dev, identity.st_ino) != (boundary['device'], boundary['inode']):
                 return None
-            prefix = stream.read(boundary['offset'])
+            raw = stream.read()
+            prefix = raw[:boundary['offset']]
             if len(prefix) != boundary['offset'] or hashlib.sha256(prefix).hexdigest() != boundary['prefix_digest']:
                 return None
             cursor_key = hashlib.sha256(json.dumps([boundary['path'], identity.st_dev, identity.st_ino]).encode()).hexdigest()
             start = max(boundary['offset'], cursors.get(cursor_key, 0))
-            if start > identity.st_size:
+            if start > len(raw):
                 return None
-            stream.seek(start)
-            content = stream.read()
+            content = raw[start:]
     except (OSError, KeyError, TypeError, ValueError):
         return None
     matches = []
@@ -228,7 +384,7 @@ def resolve_staged_input(observation, session_id, cursors):
         except (ValueError, UnicodeError):
             continue
         if (not isinstance(entry, dict) or entry.get('sessionId') != session_id
-                or entry.get('isMeta') or entry.get('isSidechain')):
+                or (entry.get('isMeta') and not is_task_notification(entry)) or entry.get('isSidechain')):
             continue
         if entry.get('type') not in ('user', 'attachment'):
             continue
@@ -237,10 +393,17 @@ def resolve_staged_input(observation, session_id, cursors):
         native_id = entry.get('promptId')
         if native_id is not None and native_id != observation.get('native_prompt_id'):
             continue
-        text = _input_text(entry)
-        if (text is None or len(text) != observation['input_char_count']
-                or 'sha256:' + hashlib.sha256(text.encode('utf-8')).hexdigest() != observation['input_digest']):
+        content = (entry.get('message', {}).get('content') if isinstance(entry.get('message'), dict)
+                   else _input_text(entry))
+        if not matches_input_text(content, observation):
             continue
-        matches.append(dict(actor=native_input_actor(entry), cursor_key=cursor_key,
-                            start_offset=row_start, end_offset=offset))
-    return matches[0] if len(matches) == 1 and matches[0]['actor'] is not None else None
+        match = dict(actor=native_input_actor(entry), cursor_key=cursor_key,
+                     start_offset=row_start, end_offset=offset)
+        if match['actor'] == 'sdk':
+            source = dict(storage='source-reference.v1', locator=boundary['path'],
+                digest='sha256:' + hashlib.sha256(raw[:offset]).hexdigest(), byte_length=offset, appendable=True)
+            match.update(native_source=dict(source, source_id='sha256:' + hashlib.sha256(json.dumps(
+                source, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()),
+                native_file_identity=dict(device=identity.st_dev, inode=identity.st_ino))
+        matches.append(match)
+    return matches[0] if len(matches) == 1 and (matches[0]['actor'] is not None or allow_unknown is True) else None

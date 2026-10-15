@@ -17,8 +17,8 @@ def suite_label(platform_label: str) -> str:
 
 
 class ReportHookSuiteLabelTests(unittest.TestCase):
-    def test_codex_report_lists_the_web_search_first_hook(self):
-        self.assertIn("web-search-first", suite_label("codex"))
+    def test_codex_report_does_not_list_an_external_search_reminder(self):
+        self.assertNotIn("web-search-first", suite_label("codex"))
 
     def test_claude_report_does_not_list_a_hook_it_does_not_install(self):
         self.assertNotIn("web-search-first", suite_label("claude"))

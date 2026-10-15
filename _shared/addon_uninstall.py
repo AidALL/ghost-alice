@@ -388,6 +388,22 @@ def _managed_executable_items(
     return (
         _addon_hook_items(record, platform=platform, confirm=confirm)
         + _adapter_hook_items(provided, platform=platform, confirm=confirm)
+        + _skill_permission_items(record, platform=platform, confirm=confirm)
+    )
+
+
+def _skill_permission_items(record, *, platform, confirm):
+    if platform != "claude":
+        return []
+    import install_hooks
+    import addon_skill_permissions
+    settings_file = install_hooks.PLATFORMS[platform]["hook_file"]()
+    settings = json.loads(settings_file.read_text()) if settings_file.exists() else {}
+    if not isinstance(settings, dict):
+        raise ValueError("Claude settings must be a JSON object")
+    return addon_skill_permissions.detach(
+        record, settings_file, settings, set(install_hooks._ghost_alice_installed_skill_names()),
+        install_hooks._write_settings, dry_run=not confirm,
     )
 
 
@@ -426,23 +442,28 @@ def uninstall_addon(
     if confirm:
         _write_marker(marker, addon_id, provided)  # intent marker BEFORE any removal
 
+    # Detach executable entrypoints before changing their files. A configuration
+    # write failure leaves the targets and sidecar intact for a later resume.
+    hook_items = _managed_executable_items(record, provided, platform=platform, confirm=confirm)
+
     # Adapter entries are intentionally excluded from the hash-gated file removal below. A privileged adapter's script lives inside its owning skill directory, so the skill target is the file deletion unit and the adapter entry is an install-time integrity/ownership snapshot, not a second uninstall-time delete gate. If the skill target is fully removable, its own hash gate covers the adapter script along with the rest of the skill tree. If the skill target is blocked for manual review, the script stays with it. In both cases only the adapter HOOK is removed here, by exact marker, via _adapter_hook_items.
     file_targets = [entry for entry in provided if entry.get("kind") != "adapter"]
+    if confirm and any(item["action"] in _BLOCKED_ACTIONS for item in hook_items):
+        return {"addon_id": addon_id, "status": "partial", "items": hook_items}
     items = [_process_target(entry, allowed_roots=allowed_roots, confirm=confirm) for entry in file_targets]
-    blocked = [item for item in items if item["action"] in _BLOCKED_ACTIONS]
+    blocked = [item for item in items + hook_items if item["action"] in _BLOCKED_ACTIONS]
 
     if not confirm:
         report = {"addon_id": addon_id, "status": "dry-run",
-                  "items": items + _managed_executable_items(record, provided, platform=platform, confirm=False)}
+                  "items": items + hook_items}
         report["has_pending_marker"] = marker.exists()
         return report
     if blocked:
-        # Keep sidecar + .removing marker for retry/manual review, but disable the addon's managed hook commands. Hook ownership is proven by exact marker + hook-runner signature, so removing them does not risk user data.
-        hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
+        # The hooks are already detached; preserve blocked targets, the sidecar
+        # and the removal marker for retry/manual review.
         return {"addon_id": addon_id, "status": "partial", "items": items + hook_items}
 
-    # Fully removable: strip the addon's observational hooks from the platform config before deleting the sidecar that records their markers.
-    hook_items = _managed_executable_items(record, provided, platform=platform, confirm=True)
+    # Fully removable: delete the sidecar only after hooks and targets are handled.
     addon_registry.remove_record(addon_id, addons_dir=addons_dir)  # sidecar deleted LAST
     _prune_install_state(addon_id, addons_dir=addons_dir, platform=platform)
     _prune_pending_merge_state(addon_id, addons_dir=addons_dir, platform=platform, provided=provided)
@@ -479,6 +500,8 @@ def resume_pending(
         except addon_registry.RecordNotFound:
             # Sidecar and marker both vanished concurrently; nothing to do for this id.
             continue
+        except (OSError, ValueError, addon_registry.RegistryError) as exc:
+            results.append({"addon_id": stem, "status": "error", "reason": str(exc), "items": []})
     return results
 
 
@@ -534,13 +557,15 @@ def main(argv: list[str] | None = None) -> int:
         results = resume_pending(addons_dir=args.addons_dir, allowed_roots=allowed_roots,
                                  platform=args.platform, confirm=confirm)
         print(json.dumps({"resumed": results}, ensure_ascii=False, indent=2))
-        return 0
+        return 2 if any(r["status"] not in {"removed", "dry-run", "resumed-noop"} for r in results) else 0
     try:
         result = uninstall_addon(args.addon_id, addons_dir=args.addons_dir,
                                  allowed_roots=allowed_roots, platform=args.platform, confirm=confirm)
     except addon_registry.RecordNotFound:
         print(json.dumps({"addon_id": args.addon_id, "status": "not-found", "items": []}))
         return 1
+    except (OSError, ValueError, addon_registry.RegistryError) as exc:
+        result = {"addon_id": args.addon_id, "status": "error", "reason": str(exc), "items": []}
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["status"] in {"removed", "dry-run", "resumed-noop"} else 2
 

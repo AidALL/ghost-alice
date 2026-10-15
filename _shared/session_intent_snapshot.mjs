@@ -92,7 +92,7 @@ function latestIntentEvent(sessionDir, platform, sessionId) {
 export function readSessionIntentSnapshot(sessionDir, platform, sessionId) {
   if (!isCanonicalIdentityComponent(platform) || !isCanonicalIdentityComponent(sessionId)) return null;
   try {
-    const state = readLedger(sessionDir, platform, sessionId, "--read-state");
+    const state = readLedger(sessionDir, platform, sessionId, "--snapshot");
     if (!identityMatches(state, platform, sessionId, "session-intent-ledger.v1")) return null;
     // Failed bound intake means the persisted input can belong to a prior turn.
     // This invalidates freshness; it does not create a model security decision.
@@ -100,7 +100,7 @@ export function readSessionIntentSnapshot(sessionDir, platform, sessionId) {
       return { state, lineageSource: "degraded", degraded: true, latestInput: null };
     }
     const pending = state.pending_native_inputs;
-    if (state.intake_status === "pending-native-origin"
+    if (state.intake_status === "pending-native-origin" || state.current_context_input_event_id
         || (pending !== undefined && (!Array.isArray(pending) || pending.length > 0))) {
       // Keep state provenance so checkpoint callers cannot fall back to an old
       // transcript row. The prior human anchor remains stored, but is not fresh.

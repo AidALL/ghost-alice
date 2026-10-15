@@ -1,4 +1,4 @@
-"""Isolated production-hook matrix for optional screen traces and bounded recovery.
+"""Isolated production-hook matrix for retained proof, diagnostic assessment and native envelopes.
 
 Runs real subprocess hooks and installer-generated commands in a disposable
 source/home tree. This proves supplied-payload behavior, not external host event
@@ -128,16 +128,17 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         self.assertTrue(payload.get("continue"), msg=payload)
         self.assertNotIn("decision", payload)
 
-    def assert_block(self, payload):
-        self.assertEqual(payload.get("decision"), "block", msg=payload)
-        self.assertNotEqual(payload.get("continue"), True)
+    def assert_unaccepted(self, payload):
+        self.assert_allow(payload)
+        observation = payload.get("response_assessment", {})
+        self.assertEqual(observation.get("status"), "unaccepted")
+        self.assertTrue(observation.get("body_issue"))
+        self.assertNotIn("systemMessage", payload)
 
-    def assert_bounded_recovery(self, payload):
-        self.assert_block(payload)
-        reason = payload['reason']
-        self.assertIn('repair-target: completion_metadata', reason)
-        self.assertIn('delivery-route: preserve_answer_and_patch_metadata', reason)
-        self.assertIn('without repeating that answer', reason)
+    def assert_diagnostic(self, payload):
+        self.assert_unaccepted(payload)
+        self.assertEqual(payload['response_assessment']['repair_target'], 'completion_metadata')
+        self.assertNotIn('reason', payload)
 
     def bind_review(self, platform, text, env, *, purpose=None, session='fixture-stop', ledger_root=None):
         """Authenticate synthetic protocol observations; submit defects separately."""
@@ -221,7 +222,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                                    "--platform", platform, "--session-id", session,
                                    "--input", "Synthetic isolated security case."])
         state = self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
-                                  "--platform", platform, "--session-id", session, "--read-state"])
+                                  "--platform", platform, "--session-id", session, "--snapshot"])
         return json.loads(state.stdout)["latest_input_event_id"]
 
     def test_optional_trace_forms_full_and_compact_across_platforms_and_profiles(self):
@@ -267,8 +268,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             with self.subTest(platform=platform, profile=profile, text=text):
                 self.assert_allow(self.stop(platform, text, entries=[prompt(), reply(text)], profile=profile))
                 rejected = self.stop(platform, text, profile=profile, purpose='completion')
-                self.assert_block(rejected)
-                self.assertIn('[completion-check]', rejected['reason'])
+                self.assert_unaccepted(rejected)
+                self.assertIn('[completion-check]', rejected['response_assessment']['body_issue'])
 
 
     def test_empty_and_non_object_stop_payloads_are_protocol_noops(self):
@@ -292,7 +293,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         )
         for platform, profile, (old, new) in itertools.product(PLATFORMS, PROFILES, changes):
             with self.subTest(platform=platform, profile=profile, change=new):
-                self.assert_block(self.stop(platform, valid_text(platform).replace(old, new), profile=profile))
+                self.assert_unaccepted(self.stop(platform, valid_text(platform).replace(old, new), profile=profile))
         for profile in PROFILES:
             text = valid_text("codex", trace="[io-trace]\n- skills-loaded: [verification-before-completion]\n")
             for bad in (text.replace("- verification-before-completion: done\n", ""),
@@ -311,12 +312,12 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 result = self.stop(platform, direct, entries=[prompt(), skill(), reply(recorded)],
                                    direct_key=key, transcript_key=path_key)
                 expected_valid = direct_valid
-                (self.assert_allow if expected_valid else self.assert_block)(result)
+                (self.assert_allow if expected_valid else self.assert_unaccepted)(result)
         for platform, key in itertools.product(PLATFORMS, DIRECT_KEYS):
             good = valid_text(platform)
             self.assert_allow(self.stop(platform, "", direct_key=key, entries=[prompt(), skill(), reply(good)]))
         bad = valid_text("codex").replace("    evidence: synthetic calculation subprocess exited 0\n", "")
-        self.assert_block(self.stop("codex", bad, direct_key="lastAssistantMessage",
+        self.assert_unaccepted(self.stop("codex", bad, direct_key="lastAssistantMessage",
                                     extra={"last_assistant_message": bad, "prompt_response": valid_text("codex")}))
 
     def test_last_reply_only_after_meta_tool_results_and_ask_answers(self):
@@ -333,14 +334,11 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             before, final = (bad, good) if final_valid else (good, bad)
             entries = [prompt(), skill(), reply(before), boundary, skill(), reply(final)]
             with self.subTest(platform=platform, boundary=boundary, final_valid=final_valid):
-                payload = self.stop(platform, None, entries=entries)
+                payload = self.stop(platform, final, entries=entries)
                 if final_valid:
                     self.assert_allow(payload)
-                elif platform == "claude" and boundary.get("isMeta") and "[completion-gate]" in str(boundary):
-                    self.assert_allow(payload)
-                    self.assertIn("Remaining defect", payload.get("systemMessage", ""))
                 else:
-                    self.assert_block(payload)
+                    self.assert_unaccepted(payload)
 
     def test_claude_review_is_independent_of_skill_call_display(self):
         good = valid_text('claude')
@@ -363,7 +361,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 previous = previous.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
             with self.subTest(platform=platform, previous_valid=previous_valid, new_turn=new_turn, boundary=boundary):
                 payload = self.stop(platform, None, entries=[prompt(), skill(), reply(previous), boundary])
-                (self.assert_allow if new_turn or previous_valid else self.assert_block)(payload)
+                self.assert_allow(payload)
+                self.assertNotIn("response_assessment", payload)
 
     def test_recovery_never_forces_business_replay_for_any_configured_host(self):
         for platform, profile, host, defect in itertools.product(PLATFORMS, PROFILES, HOSTS,
@@ -376,30 +375,17 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             else:
                 text = "The requested work is complete."
             with self.subTest(platform=platform, profile=profile, host=host, defect=defect):
-                self.assert_bounded_recovery(self.stop(platform, text, profile=profile, host=host, purpose="completion"))
+                self.assert_diagnostic(self.stop(platform, text, profile=profile, host=host, purpose="completion"))
 
-    def test_retry_limit_and_new_user_reset_preserve_failure_status(self):
-        for platform, profile, host in itertools.product(PLATFORMS, PROFILES,
-                                                         ("claude-desktop", "sdk-py", None)):
-            good = valid_text(platform)
-            bad = good.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
-            first = self.stop(platform, bad, profile=profile, host=host)
-            self.assert_bounded_recovery(first)
-            feedback = prompt(f"Stop hook feedback:\n{first['reason']}", isMeta=True)
-            retried = [prompt(), skill(), reply(bad), feedback, reply(bad)]
-            with self.subTest(platform=platform, profile=profile, host=host):
-                second = self.stop(platform, None, entries=retried, profile=profile, host=host,
-                                   extra={"stop_hook_active": True})
-                if platform == "claude":
-                    self.assert_allow(second)
-                    self.assertIn("Core has not accepted the submitted completion proof after one retry", second.get("systemMessage", ""))
-                    self.assertIn("evidence", second.get("systemMessage", ""))
-                else:
-                    self.assert_block(second)
-                reset = self.stop(platform, None, entries=retried + [prompt("Next real input."), skill(), reply(bad)],
-                                  profile=profile, host=host)
-                self.assert_block(reset)
-                self.assert_allow(self.stop(platform, None, entries=retried + [reply(good)], profile=profile, host=host))
+    def test_repeated_metadata_defect_does_not_request_answer_retry(self):
+        for platform, profile in itertools.product(PLATFORMS, PROFILES):
+            bad = valid_text(platform).replace("    evidence: synthetic calculation subprocess exited 0\n", "")
+            for hook_active in (False, True):
+                with self.subTest(platform=platform, profile=profile, hook_active=hook_active):
+                    result = self.stop(platform, bad, profile=profile, extra={"stop_hook_active": hook_active})
+                    self.assert_diagnostic(result)
+                    self.assertFalse('retry' in json.dumps(result).lower())
+            self.assert_allow(self.stop(platform, valid_text(platform), profile=profile))
 
     def test_installed_lifecycle_profile_matrix_keeps_audit_and_control_protocol(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
@@ -412,7 +398,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                            "prompt_id": "lifecycle-prompt", "transcript_path": str(transcript),
                            "hook_event_name": "SessionStart"}
                 json.loads(self.installed_hook(hooks, "SessionStart", "session-start", payload, env).stdout)
-                for hook_id in ("pending-merge-prompt", "session-intent") + (("web-search-first",) if platform == "codex" else ()):
+                for hook_id in ("pending-merge-prompt", "session-intent"):
                     payload["hook_event_name"] = "UserPromptSubmit"
                     json.loads(self.installed_hook(hooks, "UserPromptSubmit", hook_id, payload, env).stdout)
                 if platform == 'claude':
@@ -432,7 +418,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 payload.update({"hook_event_name": "Stop", "last_assistant_message": good, "transcript_path": str(transcript)})
                 self.assert_allow(json.loads(self.installed_hook(hooks, "Stop", "completion", payload, env).stdout))
                 rows = self.strict_rows(home, platform, session)
-                self.assertEqual(len(rows), 8 if platform == "codex" else 7)
+                self.assertEqual(len(rows), 7)
                 self.assertEqual({row["event"] for row in rows}, set(hooks))
                 for row in rows:
                     self.assertEqual(row["agent_visibility_profile"], profile)
@@ -465,11 +451,13 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                             self.counter += 1
                             self.bind_review(platform, good, env, session=session, ledger_root=self.ledger_root)
                         output = self.installed_hook(hooks, "Stop", "completion", payload, env)
-                        (self.assert_allow if allowed else self.assert_block)(json.loads(output.stdout))
+                        self.assert_allow(json.loads(output.stdout))
                 rows = self.strict_rows(home, platform, session)
                 self.assertEqual(len(rows), len(scenarios))
                 self.assertTrue(all(row["hook_id"] == "completion" and row["event"] == "Stop" for row in rows))
-                self.assertEqual(rows[1]["visible_decision"], "force_show")
+                diagnostic = json.loads(rows[1]["stdout"])["response_assessment"]
+                self.assertEqual(diagnostic["status"], "unaccepted")
+                self.assertTrue(diagnostic["body_issue"])
 
     def test_installed_checkpoint_retains_block_data_without_widening_current_admission(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
@@ -486,7 +474,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 # Retained model-security data is a storage fact after removal
                 # of the standalone classifier, never native permission authority.
                 state_command = [sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
-                                 "--platform", platform, "--session-id", session, "--read-state"]
+                                 "--platform", platform, "--session-id", session, "--snapshot"]
                 before = json.loads(self.run_process(state_command).stdout)
                 observed = self.installed_hook(hooks, "PreToolUse", "tool-checkpoint", payload, env)
                 protocol = json.loads(observed.stdout)

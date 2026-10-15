@@ -584,7 +584,7 @@ def _strip_private_protocol_metadata(stdout: str) -> str:
 def _native_protocol_output(stdout: str, *, platform: str, event: str) -> str:
     """Project only the host envelope; raw output and domain state stay intact."""
     pretool = platform in {"codex", "claude"} and event == "PreToolUse"
-    if not pretool and (platform != "codex" or event not in {"Stop", "SubagentStop"}):
+    if not pretool and (platform not in {"codex", "claude"} or event not in {"Stop", "SubagentStop"}):
         return stdout
     try:
         protocol = json.loads(stdout)
@@ -599,7 +599,7 @@ def _native_protocol_output(stdout: str, *, platform: str, event: str) -> str:
             return stdout
         protocol.pop("completion_recording")
         return json.dumps(protocol, ensure_ascii=False) + "\n"
-    # Codex Stop accepts universal fields plus the block decision and its reason.
+    # Native Stop receives the host envelope, not internal assessment records.
     # Internal recording and recovery records belong in the domain and strict log.
     fields = {"continue", "decision", "reason", "stopReason", "suppressOutput", "systemMessage"}
     projected = {key: value for key, value in protocol.items() if key in fields}

@@ -107,21 +107,6 @@ class SessionCheckReuseTest(unittest.TestCase):
             self.assertNotEqual(result["status"], "reused")
             self.assertEqual(result["value"], {"observed": "changed during lookup"})
 
-    def test_fixed_instruction_delivery_is_once_per_session_and_revision(self):
-        from session_check_cache import instruction_delivery
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            source = root / "hook.py"
-            source.write_text("v1")
-            def deliver(session, text):
-                return instruction_delivery(root, "codex", session, "intake", source, text)
-            self.assertTrue(deliver("a", "full rules"))
-            self.assertFalse(deliver("a", "full rules"))
-            self.assertTrue(deliver("b", "full rules"))
-            self.assertTrue(deliver("a", "revised rules"))
-            source.write_text("v2")
-            self.assertTrue(deliver("a", "full rules"))
-
     def test_pending_hook_reuses_same_session_and_notices_manifest_change(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
@@ -134,6 +119,16 @@ class SessionCheckReuseTest(unittest.TestCase):
             def run():
                 return json.loads(subprocess.run(command, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
             first, second = run(), run()
+            self.assertTrue('hookSpecificOutput' in first, 'precheck was not delivered to the model channel')
+            public = json.loads(first['hookSpecificOutput']['additionalContext'].split(': ', 1)[1])
+            self.assertEqual(public['session_id'], 'session-test')
+            self.assertEqual(public['platform'], 'codex')
+            self.assertEqual(public['undecided_count'], 1)
+            self.assertEqual(public['status'], 'checked')
+            self.assertFalse('LONG WORKFLOW' in first['hookSpecificOutput']['additionalContext'])
+            reused = json.loads(second['hookSpecificOutput']['additionalContext'].split(': ', 1)[1])
+            self.assertEqual(reused['status'], 'reused')
+            self.assertEqual(reused['checked_at'], public['checked_at'])
             self.assertEqual(first["ghostAlicePendingMergeCheck"]["status"], "checked")
             self.assertEqual(second["ghostAlicePendingMergeCheck"]["status"], "reused")
             self.assertNotIn("Surface merge-companion first", second["systemMessage"])
@@ -148,6 +143,24 @@ class SessionCheckReuseTest(unittest.TestCase):
             changed = run()
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["status"], "checked")
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
+
+    def test_pending_receipt_enters_only_bound_prompt_context(self):
+        import pending_merge_precheck_hook as hook
+        result = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
+                      value=dict(undecided_count=0))
+        for context, session in [('session_start', 'own'), ('prompt_submit', None),
+                                 ('prompt_submit', 'unknown')]:
+            body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result,
+                              context=context, session_id=session))
+            self.assertNotIn('hookSpecificOutput', body)
+        body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result,
+                          context='prompt_submit', session_id='own'))
+        self.assertEqual(body['hookSpecificOutput']['hookEventName'], 'UserPromptSubmit')
+        text = body['hookSpecificOutput']['additionalContext']
+        self.assertFalse('LONG WORKFLOW' in text)
+        receipt = json.loads(text.split(': ', 1)[1])
+        self.assertEqual(receipt['session_id'], 'own')
+        self.assertEqual(receipt['undecided_count'], 0)
 
     def test_same_session_reuses_and_mutation_or_new_session_rechecks(self):
         from session_check_cache import observe_check

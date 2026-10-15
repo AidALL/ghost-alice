@@ -6,11 +6,9 @@ Dependencies: Python 3.11+ standard library and the sibling intake hook.
 
 from __future__ import annotations
 
-from reminder_texts import reminder_text
+from reminder_texts import instruction_override, reminder_text
 
 import argparse
-import base64
-import hashlib
 import importlib
 import json
 import shlex
@@ -22,19 +20,10 @@ from session_intent_analyzer_hook import (
     bound_session_identity, _safe_component as safe_path_component, TERMINAL_ROUTING_INSTRUCTION,
     terminal_routing_instruction,
 )
-from session_check_cache import instruction_delivery
 
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[1] / ".tmp" / "session-intent"
 DEFAULT_INTERNAL = reminder_text('task-router')
-# Exact prior/current installer messages; custom --internal-b64 remains intact.
-BUILTIN_INTERNAL_DIGESTS = frozenset({
-    'aefa8d90775e96cd1d5d5ecc34d44f9924fc6817c1fadc4d504f71c5880ab8a0',
-    '324cc5f4ca4b3e4d0d91a35a197cd65bad466bf9b975ee15ba6b958507d15c4f',
-    'a108a60542a39273cdd6b77d29eab749c4b0fb965f2c1a4403df334b2f06baac',
-    "5a31b2b40c4a777438fef4dde0bd0026fb77e0c166fcfc5a5531b1e4693643c0",
-    "5c6839cdfdf2d42b58299ea8f6ecf353d291bcff8bdf0f2549576d23067d8cde",
-})
 
 
 def read_payload() -> dict[str, Any]:
@@ -118,7 +107,7 @@ def ledger_state_path(root: Path, platform: str, session_id: str) -> str:
 def ledger_read_instruction(root: Path, platform: str, session_id: str) -> str:
     ledger = importlib.import_module("session_intent_ledger")
     args = [sys.executable, str(Path(ledger.__file__).resolve()),
-            "--read-state", "--root", str(root),
+            "--read-intent", "--root", str(root),
             "--platform", platform, "--session-id", session_id]
     return (f"Normal route only, within the explicit user tool budget. intent-ledger: use {shlex.join(args)} after session-intent preflight. "
             "SQLite is authoritative; compatibility exports are not.")
@@ -227,21 +216,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--platform", default="codex")
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--root", default=str(DEFAULT_ROOT))
-    parser.add_argument("--internal-b64", default="")
+    parser.add_argument("--internal-b64", default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args, _unknown = build_parser().parse_known_args(argv)
-    base_message = DEFAULT_INTERNAL
-    if args.internal_b64:
-        try:
-            base_message = base64.urlsafe_b64decode(args.internal_b64.encode("ascii")).decode("utf-8")
-        except Exception:
-            base_message = DEFAULT_INTERNAL
+    parser = build_parser()
+    args, _unknown = parser.parse_known_args(argv)
+    try:
+        base_message = instruction_override(args.internal_b64) or ""
+    except (ValueError, UnicodeError):
+        parser.error('Invalid custom instruction encoding')
     root = Path(args.root).expanduser()
-    if hashlib.sha256(base_message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS:
-        base_message = DEFAULT_INTERNAL
 
     payload = read_payload()
     if (payload.get("hook_event_name") or payload.get("hookEventName")) == "UserPromptSubmit":
@@ -250,14 +236,6 @@ def main(argv: list[str] | None = None) -> int:
         sys.stdout.write(json.dumps({"continue": True, "ghostAliceSurface": "routine"}) + "\n")
         return 0
     message, routine = reminder_result(base_message, root, args.platform, payload)
-    # The current input binding was evaluated above. Only repeated prose is cached.
-    builtin = (base_message == DEFAULT_INTERNAL
-               or hashlib.sha256(base_message.encode("utf-8")).hexdigest() in BUILTIN_INTERNAL_DIGESTS)
-    if routine and builtin:
-        # Bind to the inspected material's session, never the discovery pointer.
-        session_id = resolve_session_id(root, args.platform, payload)
-        if not instruction_delivery(root, args.platform, session_id, "hook-router-instructions", Path(__file__), base_message):
-            message = message.replace(base_message, "hook-reminder: execute task-router for this input; apply the supplied terminal procedure first; on normal routes reuse retained instructions, reload if lost.", 1)
     sys.stdout.write(render_payload(args.format, message, routine=routine))
     if args.format == "json":
         sys.stdout.write("\n")

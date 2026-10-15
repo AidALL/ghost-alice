@@ -26,7 +26,7 @@ The machine gate index is [skill-catalog/session-gates.json](../../skill-catalog
 
 | Condition | Agent procedure |
 | --- | --- |
-| Every user input | session-intent-analyzer intake, then task-router |
+| Every user input | Native intake observation, then task selection; stored intent is read when the decision depends on it |
 | The current-session assistant selects boundary-contract: required | boundary-contract before dependent work |
 | Development work begins | coding-convention/using-coding-convention |
 | A bug needs investigation | coding-convention/systematic-debugging |
@@ -37,7 +37,7 @@ The machine gate index is [skill-catalog/session-gates.json](../../skill-catalog
 
 ## Turn Routing Contract
 
-The normal order is `pending-merge precheck -> session-intent-analyzer -> task-router -> downstream/tool-checkpoint`. The current-session assistant reuses a current hook-provided merge result. Without one, it performs the manual precheck before actionable work; a genuine no-work terminal answer defers that inspection. A known undecided entry surfaces merge-companion, and an explicit defer/skip leaves it undecided.
+Native prechecks remain observations. The assistant reuses them, selects the needed work, and applies merge-companion before affected skill changes or an explicitly requested backup review. Unrelated read-only lookup does not load that procedure or inspect the manifest again. A missing manual precheck precedes affected skill changes; an explicit defer leaves the entries undecided.
 
 The current-session assistant routes every input, including a follow-up or status question, using current intent and continuing authority. A prior route is not the current input's route. The current-session assistant may separately apply skill-evolution to the same exact session for a report; this procedure neither feeds task-router nor dispatches work.
 
@@ -49,7 +49,7 @@ Core records canonical human input as a digest, character count and ordered even
 
 Runtime consumers use the public API with the exact receipt root/platform/session/input. SQLite is authoritative; intent-state.json and intent-events.jsonl are import/export forms, and current-session.json is an advisory pointer. None supplies a substitute write identity. Missing recording leaves dependent operations unresolved. The assistant selects recovery only when needed for the objective or a required dependency and within existing authority; it never guesses identity or invents permission.
 
-[Session-intent-analyzer](../../session-intent-analyzer/SKILL.md) owns intake and correction provenance. Its [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) owns state fields, transaction rules, migration hashes and current response projection. Intake events and intent-state fields do not store raw prompts, full conversations or tool outputs, system/developer instructions or secrets. The separate Core review tables (`core_completion_candidates`, `core_completion_assessments`, `core_completion_responses`) retain authorized answer and original-source snapshots and the model’s review judgments; those review records are not session-intent summaries. Hookless normal work follows the same identity contract; no-work answers use the supplied terminal procedure.
+[Session-intent-analyzer](../../session-intent-analyzer/SKILL.md) owns intake and correction provenance. Its [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) owns state fields, transaction rules, migration hashes and current response projection. Intake events and intent-state fields do not store raw prompts, full conversations or tool outputs, system/developer instructions or secrets. Separate Core review records retain authorized answer and original-source snapshots and the model’s review judgments; those review records are not session-intent summaries. Hookless normal work follows the same identity contract; no-work answers use the supplied terminal procedure.
 
 ## Runtime Hook Graph Contract
 
@@ -87,7 +87,7 @@ Duplicate clean reminders, no-op audit entries and correlation metadata do not i
 
 ## Runtime Checkpoints
 
-The normal route's opening gate-state and routing formats are owned by [task-router](../../task-router/SKILL.md#routing-records). The current-session assistant records a skill call only after using a fresh or valid retained instruction body and following that workflow; metadata matching is not execution.
+Decision-relevant routing guidance is owned by [task-router](../../task-router/SKILL.md#referenced-contracts). The current-session assistant records a skill call only after using a fresh or valid retained instruction body and following that workflow; metadata matching is not execution.
 
 [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md#completion-check-format) owns the shared completion-check and partial-check formats and their criterion/claim/evidence mapping. Core completion acceptance requires authenticated review of the claims, original sources and complete response under the current owned route. Skill loading remains workflow guidance and audit activity, not a separate acceptance prerequisite. Finalized completion requires supported verdicts with no unverified criteria. A partial-success report retains the full contract and identifies unresolved criteria; it cannot present the successful subset as whole-task completion.
 
@@ -95,17 +95,13 @@ The current-session assistant uses valid unchanged proof at its original source/
 
 ## tool-checkpoint Visible Surface
 
-The current-session assistant surfaces one tool-checkpoint for the input batch, with `hook-stage: PreToolUse`, `meaning: tool-call retry checkpoint, not user-input intake`, intent and why. It adds procedure for a decision-relevant nonroutine step and contract-ref/contract-check when a boundary is active.
-
-The current-session assistant adds localized-human-note, rejected-alternatives, unverified-premises and failure-mode-if-wrong only when a side effect, forced signal, mismatch or meaningful user decision makes them useful. A concrete recovery need adds recovery-action. If that recovery changes focus, procedure or recovery-action names focus-layer and the scope-reopen target.
-
-Before rereading an artifact to support a claim, the current-session assistant applies verify-or-reuse and names the observed trigger in why. The checkpoint neither grants native permission nor requires routine recovery-cost/recovery-note fields.
+The common governance contract owns checkpoint visibility. The current-session assistant surfaces a checkpoint when its result changes authority, the next decision or required verification. It reuses unchanged evidence and reads only material that can affect the decision. A receipt or a healthy tool call alone does not require another message.
 
 ## tool-checkpoint Batch / Continuation Compression
 
 Hooks check every call and preserve strict audit while suppressing unchanged repeated user-facing blocks in the same input lineage. Batch and continuation forms do not grant permission.
 
-Continuation refers only to polling the same process/session/tool-call ID. The first poll or a new input, denial, mismatch or relevant state change surfaces the checkpoint again. Compact polling is not an instruction to poll indefinitely.
+Continuation refers only to polling the same process/session/tool-call ID. A denial, mismatch or relevant state change can require a new checkpoint. Polling and a new input alone do not require repeating guidance.
 
 ## Notes
 
@@ -117,7 +113,7 @@ Source edit, named test pass, installed bytes, native execution, accepted public
 
 For a new completion or partial submission, Core Python code checks the current owned route before proof formatting and authenticated semantic review. A missing route therefore returns the route defect before requesting corrected proof fields.
 
-For this condition, the responding model records both judgments using the [owning review procedure](../../coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review). The [architecture interface table](../../architecture.md#2-send-the-answer-and-original-sources-to-core) identifies callers, inputs and returns; [output semantics](tool-output-semantics.md#completion-recording-and-delivery) distinguishes supported and unsupported results.
+For this condition, the responding model records both judgments using the [owning review procedure](../../coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review). The [Core response flow](../../architecture.md#evidence-and-native-delivery) explains authentication and native answer delivery; [output semantics](tool-output-semantics.md#review-output-and-continuation) distinguishes supported and unsupported results.
 
 The managed registered hook chain uses v2 unit-qualified admitted criteria; direct public APIs retain the v1 default. Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
 
@@ -129,7 +125,7 @@ Core validates the current response route supplied by the model following task-r
 
 A named route, proof or recording defect returns to its procedure owner below. The model chooses correction only when needed for the objective or a required dependency and within authority. Unsupported claims are revised or withdrawn; required unresolved criteria stay unmet. Identical unchanged recording failure parks dependent application without replaying business work or blocking independent authorized work.
 
-[Review and delivery](../../coding-convention/verification-before-completion/references/autopilot-publication.md) owns the calling sequence and correction shape. [Tool output semantics](tool-output-semantics.md#completion-recording-and-delivery) names the returned selectors. Core's retained-report path applies only when original applied proof supports the exact entire statement; added prose or a broader claim needs its own review.
+[Review and delivery](../../coding-convention/verification-before-completion/references/autopilot-publication.md) owns the calling sequence and correction shape. [Tool output semantics](tool-output-semantics.md#review-output-and-continuation) names the returned selectors. Core's retained-report path applies only when original applied proof supports the exact entire statement; added prose or a broader claim needs its own review.
 
 ## Repair and authority conditions
 

@@ -1,17 +1,22 @@
 """Consumer guidance refers to owning procedures without duplicating them."""
 from pathlib import Path
 import unittest
+from _shared.global_rule_blocks import platform_contract_text
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 class GateSurfaceDesignTest(unittest.TestCase):
-    def test_common_skill_call_template_records_actual_work(self):
-        for name in ('AGENTS.md', 'platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
+    def test_composed_contract_requires_actual_workflow_without_prefilled_audit(self):
+        common = (ROOT / 'platforms/common-governance.md').read_text().strip()
+        self.assertIn('installed common contract', (ROOT / 'AGENTS.md').read_text())
+        for name in ('platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
             with self.subTest(path=name):
-                text = (ROOT / name).read_text()
-                self.assertIn('skill-call: <skills actually executed this turn>', text)
-                self.assertIn('does not mark a skill done after reading only its name or description', text)
+                text = platform_contract_text(ROOT / name)
+                self.assertEqual(text.count(common), 1)
+                self.assertNotIn('{{COMMON_GOVERNANCE}}', text)
+                self.assertIn('Metadata alone is not execution' if 'codex' in name
+                              else 'follows their bodies', text)
                 self.assertNotIn('skill-call: session-intent-analyzer (this turn); task-router (this turn)', text)
 
     def test_router_keeps_scope_reconciliation_and_refers_to_gate_schema(self):
@@ -20,7 +25,8 @@ class GateSurfaceDesignTest(unittest.TestCase):
         owner = (ROOT / 'task-router/references/routing-details.md').read_text()
         self.assertIn('current human instructions', owner)
         self.assertIn('bounded change without formal revocation wording', owner)
-        self.assertIn("common contract's `[gate-state]` schema", body)
+        self.assertIn('The common First-Entry Contract owns terminal answers and pending-merge intake', body)
+        self.assertIn('Core validates the submitted response-route', body)
         self.assertNotIn('skill-call: session-intent-analyzer (this turn)', body)
 
     def test_finalization_allows_actual_returned_results_and_separate_reviews(self):

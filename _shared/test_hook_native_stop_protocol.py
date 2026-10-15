@@ -97,9 +97,10 @@ class NativeStopProtocolTests(unittest.TestCase):
         self.assertIsInstance(host["reason"], str)
         self.assertTrue(host["reason"].strip())
 
-    def test_claude_stop_keeps_its_existing_envelope(self):
+    def test_claude_stop_preserves_controls_and_keeps_internal_records_in_audit(self):
         body = self.body()
-        self.assertEqual(self.run_command(body, platform="claude"), body)
+        self.assertEqual(self.run_command(body, platform="claude"),
+                         {key: value for key, value in body.items() if key not in {"completion_recording", "recovery"}})
 
     def test_pretool_retains_native_controls_and_audits_internal_recording(self):
         body = self.body(hookSpecificOutput={"hookEventName": "PreToolUse", "permissionDecision": "deny"})

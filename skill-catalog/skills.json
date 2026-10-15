@@ -164,7 +164,7 @@
     {
       "name": "session-intent-analyzer",
       "path": "session-intent-analyzer/SKILL.md",
-      "description": "Use after every user input to maintain exact session intent and provide context for task-router and report-only skill-evolution without storing raw prompts.",
+      "description": "Use when stored intent affects work selection or a semantic update is needed. Native intake records every input; this procedure resolves current state without storing raw prompts.",
       "family": "system",
       "governance_class": "intent-state-producer",
       "compatibility": [

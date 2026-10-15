@@ -102,7 +102,8 @@ class PatternClassNormalizationTests(unittest.TestCase):
 class CaptureReminderTests(unittest.TestCase):
     def test_capture_reminder_asks_for_pattern_class(self) -> None:
         body = (REPO_ROOT / "session-intent-analyzer/SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("Conduct correction evidence", body)
+        self.assertIn("A material conduct correction", body)
+        self.assertIn("compressed `conduct_feedback` entry with a stable ID and supported source", body)
         self.assertIn("pattern_class", SCHEMA_DOC.read_text())
         self.assertIn("ledger-schema.md", body)
         self.assertIn("session-intent-analyzer", INSTALL_HOOKS.read_text(encoding="utf-8"))
@@ -112,22 +113,25 @@ class CliRejectionTests(unittest.TestCase):
     def test_rejected_delta_writes_nothing_and_lists_the_allowed_values(self) -> None:
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
-        env = {**os.environ, "CODEX_THREAD_ID": "", "GHOST_ALICE_SESSION_ID": ""}
-        base = [sys.executable, str(LEDGER_PATH), "--root", temporary.name, "--platform", "claude",
+        env = {key: value for key, value in os.environ.items()
+               if not key.startswith(('GHOST_ALICE_', 'CODEX_', 'CLAUDE_'))}
+        base = [sys.executable, str(LEDGER_PATH), "--root", temporary.name, "--platform", "codex",
                 "--session-id", "cli-rejection"]
 
         def run(*args: str) -> subprocess.CompletedProcess:
             return subprocess.run([*base, *args], capture_output=True, text=True, encoding="utf-8", env=env, check=False)
 
         self.assertEqual(run("--input", "first input").returncode, 0)
-        before = json.loads(run("--read-state").stdout)
+        before = json.loads(run("--read-intent").stdout)
+        goal_before = json.loads(run("--read-state", "--pointer", "/current_goal").stdout)['value']
         delta = {"current_goal": "must not be written", "conduct_feedback": [{**_entry("typo"), "source": "infered"}]}
-        result = run("--expected-input-event-id", before["latest_input_event_id"], "--delta-json", json.dumps(delta))
+        result = run("--expected-input-event-id", before["input_event_id"], "--delta-json", json.dumps(delta))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("'user-explicit'", result.stderr)
-        after = json.loads(run("--read-state").stdout)
-        self.assertEqual((after["ledger_revision"], after.get("current_goal")),
-                         (before["ledger_revision"], before.get("current_goal")))
+        after = json.loads(run("--read-intent").stdout)
+        goal_after = json.loads(run("--read-state", "--pointer", "/current_goal").stdout)['value']
+        self.assertEqual(after, before)
+        self.assertEqual(goal_after, goal_before)
 
 
 class AggregatorGroupingTests(unittest.TestCase):

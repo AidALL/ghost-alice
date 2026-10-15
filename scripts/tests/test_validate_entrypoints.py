@@ -5,6 +5,7 @@ from pathlib import Path
 
 from scripts.validate_entrypoints import (
     Finding,
+    SSOT_RULES_FILE,
     check_platform_ports,
     check_ssot_rules,
     check_task_router_body,
@@ -17,6 +18,8 @@ class EntrypointBodyContractTest(unittest.TestCase):
         source = Path(__file__).resolve().parents[2]
         for rel in (
             "AGENTS.md",
+            "platforms/common-governance.md",
+            "task-router/references/routing-details.md",
             "task-router/SKILL.md",
             "coding-convention/using-coding-convention/SKILL.md",
             "boundary-contract/SKILL.md",
@@ -39,7 +42,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
             codex_port.parent.mkdir(parents=True)
             claude_port.parent.mkdir(parents=True)
             ssot_rules = "\n".join(f"### {number}. Rule {number}" for number in range(13))
-            (repo / "AGENTS.md").write_text(ssot_rules + "\n", encoding="utf-8")
+            (repo / SSOT_RULES_FILE).write_text(ssot_rules + "\n", encoding="utf-8")
             codex_port.write_text(ssot_rules + "\ntask-router\n", encoding="utf-8")
             claude_port.write_text(
                 "\n".join(f"### {number}. Rule {number}" for number in range(12))
@@ -76,7 +79,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             self.copy_owner_contract(repo)
-            ssot = repo / "AGENTS.md"
+            ssot = repo / SSOT_RULES_FILE
             ssot.write_text(
                 ssot.read_text(encoding="utf-8").replace("## First-Entry Contract\n", "## Other section\n"),
                 encoding="utf-8",
@@ -89,9 +92,9 @@ class EntrypointBodyContractTest(unittest.TestCase):
 
     def test_missing_owner_reference_is_rejected(self) -> None:
         cases = (
-            ("AGENTS.md", check_ssot_rules, "boundary-contract/SKILL.md"),
+            (SSOT_RULES_FILE, check_ssot_rules, "boundary-contract"),
             ("task-router/SKILL.md", check_task_router_body,
-             "../boundary-contract/SKILL.md#authority-and-renewal"),
+             "../session-intent-analyzer/references/ledger-schema.md#core-response-projection"),
             ("coding-convention/using-coding-convention/SKILL.md", check_using_cc_body,
              "../systematic-debugging/SKILL.md#incident-accounting-and-continuation"),
         )
@@ -114,29 +117,32 @@ class EntrypointBodyContractTest(unittest.TestCase):
                 )
 
     def test_missing_owner_file_is_rejected(self) -> None:
-        for check in (check_ssot_rules, check_task_router_body, check_using_cc_body):
+        for check, target in ((check_ssot_rules, "coding-convention/systematic-debugging/SKILL.md"),
+                              (check_task_router_body, "session-intent-analyzer/references/ledger-schema.md"),
+                              (check_using_cc_body, "coding-convention/systematic-debugging/SKILL.md")):
             with self.subTest(check=check.__name__), tempfile.TemporaryDirectory() as tmp:
                 repo = Path(tmp)
                 self.copy_owner_contract(repo)
-                (repo / "coding-convention/systematic-debugging/SKILL.md").unlink()
+                (repo / target).unlink()
 
                 findings: list[Finding] = []
                 check(repo, findings)
 
                 self.assertTrue(
-                    any(f.check == "owner-missing" and "systematic-debugging" in f.message for f in findings),
+                    any(f.check == "owner-missing" for f in findings),
                     [f.to_dict() for f in findings],
                 )
 
     def test_missing_owner_heading_is_rejected(self) -> None:
-        for check in (check_task_router_body, check_using_cc_body):
+        for check, target, heading in ((check_task_router_body, "session-intent-analyzer/references/ledger-schema.md", "Core Response Projection"),
+                                       (check_using_cc_body, "coding-convention/systematic-debugging/SKILL.md", "Incident accounting and continuation")):
             with self.subTest(check=check.__name__), tempfile.TemporaryDirectory() as tmp:
                 repo = Path(tmp)
                 self.copy_owner_contract(repo)
-                owner = repo / "coding-convention/systematic-debugging/SKILL.md"
+                owner = repo / target
                 owner.write_text(
                     owner.read_text(encoding="utf-8").replace(
-                        "## Incident accounting and continuation", "## Other section"
+                        "## " + heading, "## Other section"
                     ),
                     encoding="utf-8",
                 )
@@ -145,7 +151,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
                 check(repo, findings)
 
                 self.assertTrue(
-                    any(f.check == "owner-anchor" and "incident-accounting-and-continuation" in f.message
+                    any(f.check == "owner-anchor" and heading.lower().replace(" ", "-") in f.message
                         for f in findings),
                     [f.to_dict() for f in findings],
                 )

@@ -6,8 +6,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,38 +17,6 @@ import io_trace_hook
 
 
 class TestIoTraceHook(unittest.TestCase):
-    def write_digest_only_session(
-        self,
-        session_root: str,
-        *,
-        platform: str = "codex",
-        session_id: str = "s-digest-only",
-        event_count: int = 3,
-    ) -> None:
-        session_dir = Path(session_root) / platform / session_id
-        session_dir.mkdir(parents=True)
-        (session_dir / "intent-state.json").write_text(json.dumps({
-            "schema_version": "session-intent-ledger.v1",
-            "platform": platform,
-            "session_id": session_id,
-            "last_semantic_delta_status": "not-provided",
-        }) + "\n", encoding="utf-8")
-        events = [
-            {
-                "event": "user-input-observed",
-                "platform": platform,
-                "session_id": session_id,
-                "event_id": f"evt-{index}",
-                "input_digest": f"sha256:{index}",
-                "intent_delta_status": "not-provided",
-            }
-            for index in range(1, event_count + 1)
-        ]
-        (session_dir / "intent-events.jsonl").write_text(
-            "".join(json.dumps(event) + "\n" for event in events),
-            encoding="utf-8",
-        )
-
     def test_main_logs_payload_with_surrogate_path(self):
         raw = (
             '{"session_id":"s-win","tool_name":"Read",'
@@ -221,114 +187,6 @@ class TestIoTraceHook(unittest.TestCase):
         self.assertEqual(row["path"], "n/a")
         self.assertEqual(row["pattern"], "Move-Item C:/a.txt C:/b.txt; Get-Content C:/b.txt")
 
-    def test_main_emits_semantic_delta_starvation_warning_after_three_digest_only_turns(self):
-        raw = json.dumps({
-            "session_id": "s-digest-only",
-            "platform": "codex",
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/tmp/example.txt"},
-        })
-
-        with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as session_root:
-            self.write_digest_only_session(session_root)
-
-            with (
-                mock.patch.dict(os.environ, {
-                    "HOME": temp_home,
-                    "GHOST_ALICE_SESSION_INTENT_ROOT": session_root,
-                }, clear=False),
-                mock.patch.object(sys, "stdin", io.StringIO(raw)),
-            ):
-                exit_code = io_trace_hook.main()
-
-            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
-            rows = [
-                json.loads(line)
-                for line in path.read_text(encoding="utf-8").splitlines()
-            ]
-
-        self.assertEqual(exit_code, 0)
-        warning_rows = [
-            row for row in rows
-            if row.get("tool") == "governance-warning"
-        ]
-        self.assertEqual(len(warning_rows), 1)
-        self.assertEqual(
-            warning_rows[0]["pattern"],
-            "semantic-delta-starvation: 3 consecutive digest-only user inputs",
-        )
-        self.assertEqual(
-            warning_rows[0]["dedup_key"],
-            "semantic-delta-starvation:codex:s-digest-only:evt-3",
-        )
-
-    def test_main_skips_semantic_delta_warning_for_recovery_command(self):
-        raw = json.dumps({
-            "session_id": "s-digest-only",
-            "platform": "codex",
-            "tool_name": "Bash",
-            "tool_input": {
-                "command": "python3 session_intent_ledger.py --delta-json '{}'",
-            },
-        })
-
-        with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as session_root:
-            self.write_digest_only_session(session_root)
-
-            with (
-                mock.patch.dict(os.environ, {
-                    "HOME": temp_home,
-                    "GHOST_ALICE_SESSION_INTENT_ROOT": session_root,
-                }, clear=False),
-                mock.patch.object(sys, "stdin", io.StringIO(raw)),
-            ):
-                exit_code = io_trace_hook.main()
-
-            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
-            rows = [
-                json.loads(line)
-                for line in path.read_text(encoding="utf-8").splitlines()
-            ]
-
-        self.assertEqual(exit_code, 0)
-        self.assertFalse(any(row.get("tool") == "governance-warning" for row in rows))
-
-    def test_main_deduplicates_semantic_delta_warning_for_same_latest_event(self):
-        raw = json.dumps({
-            "session_id": "s-digest-only",
-            "platform": "codex",
-            "tool_name": "Read",
-            "tool_input": {"file_path": "/tmp/example.txt"},
-        })
-
-        with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as session_root:
-            self.write_digest_only_session(session_root)
-
-            for _ in range(2):
-                with (
-                    mock.patch.dict(os.environ, {
-                        "HOME": temp_home,
-                        "GHOST_ALICE_SESSION_INTENT_ROOT": session_root,
-                    }, clear=False),
-                    mock.patch.object(sys, "stdin", io.StringIO(raw)),
-                ):
-                    exit_code = io_trace_hook.main()
-                    self.assertEqual(exit_code, 0)
-
-            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
-            rows = [
-                json.loads(line)
-                for line in path.read_text(encoding="utf-8").splitlines()
-            ]
-
-        warning_rows = [
-            row for row in rows
-            if row.get("tool") == "governance-warning"
-        ]
-        self.assertEqual(len(warning_rows), 1)
-
-
-class TestSessionIntentRootResolution(unittest.TestCase):
     def test_installed_platform_is_not_inferred_as_codex(self):
         with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "claude", "CODEX_THREAD_ID": "foreign"}, clear=True):
             row = io_trace_hook._extract({"session_id": "same-id", "platform": "codex"})
@@ -340,71 +198,6 @@ class TestSessionIntentRootResolution(unittest.TestCase):
             self.assertEqual(io_trace_hook._extract({"session_id": "own"}).get("platform"), "unknown")
             self.assertEqual(io_trace_hook._extract({"platform": "codex", "session_id": "../other"})["session"], "unknown")
 
-    def test_warning_requires_same_identity_and_latest_committed_input(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            directory = root / "claude" / "same-id"
-            directory.mkdir(parents=True)
-            state = {"schema_version": "session-intent-ledger.v1", "platform": "claude", "session_id": "same-id",
-                     "last_semantic_delta_status": "not-provided", "ledger_revision": 4,
-                     "latest_input_event_id": "evt-4", "latest_input_digest": "digest-4", "latest_input_char_count": 1}
-            events = [{"event": "user-input-observed", "platform": "claude", "session_id": "same-id",
-                       "event_id": f"evt-{i}", "input_digest": f"digest-{i}"} for i in range(1, 4)]
-            (directory / "intent-state.json").write_text(json.dumps(state))
-            (directory / "intent-events.jsonl").write_text("\n".join(map(json.dumps, events)))
-            with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "claude", "GHOST_ALICE_SESSION_INTENT_ROOT": tmp}, clear=True):
-                payload = {"session_id": "same-id"}
-                with mock.patch.object(io_trace_hook, "_dedup_key_seen", return_value=False):
-                    self.assertIsNone(io_trace_hook._semantic_delta_warning(payload))
-                    events.append(dict(events[-1], event_id="evt-4", input_digest="digest-4"))
-                    (directory / "intent-events.jsonl").write_text("\n".join(map(json.dumps, events)))
-                    self.assertIsNotNone(io_trace_hook._semantic_delta_warning(payload))
-                    state["platform"] = "codex"
-                    (directory / "intent-state.json").write_text(json.dumps(state))
-                    self.assertIsNone(io_trace_hook._semantic_delta_warning(payload))
-
-    def test_runtime_copy_resolves_ledger_root_from_skill_install(self):
-        # Resolve the ledger from its installed skill location when runtime-core contains only _shared. The subprocess isolates module caching and checks the repository-aware authority root.
-        repo_shared = Path(__file__).resolve().parent
-        repo_root = repo_shared.parent
-        real_ledger = repo_root / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
-        with tempfile.TemporaryDirectory() as tmp:
-            base = Path(tmp)
-            home = base / "home"
-            skill_scripts = home / ".agents" / "skills" / "session-intent-analyzer" / "scripts"
-            skill_scripts.mkdir(parents=True)
-            shutil.copy2(real_ledger, skill_scripts / "session_intent_ledger.py")
-            runtime_shared = base / "runtime" / "current" / "_shared"
-            runtime_shared.mkdir(parents=True)
-            for name in ("io_trace_hook.py", "session_intent_analyzer_hook.py", "task_router_reminder_hook.py", "session_check_cache.py", "install_destination.py", "reminder_texts.py", "reminder_texts.json"):
-                shutil.copy2(repo_shared / name, runtime_shared / name)
-            fake_repo = base / "repo"
-            (fake_repo / "skill-catalog").mkdir(parents=True)
-            (fake_repo / "session-intent-analyzer").mkdir()
-            (fake_repo / "install.sh").write_text("#!/bin/sh\n", encoding="utf-8")
-
-            env = {k: v for k, v in os.environ.items() if k != "GHOST_ALICE_SESSION_INTENT_ROOT"}
-            env["HOME"] = str(home)
-            env["USERPROFILE"] = str(home)
-            hook_path = str(runtime_shared / "io_trace_hook.py").replace("\\", "/")
-            script = (
-                f"import importlib.util,sys; sys.path.insert(0, {str(runtime_shared)!r}); "
-                f"spec = importlib.util.spec_from_file_location('io_trace_hook_rt', '{hook_path}'); "
-                "mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod); "
-                "print(mod._session_intent_root())"
-            )
-            result = subprocess.run(
-                [sys.executable, "-c", script],
-                capture_output=True,
-                text=True,
-                cwd=str(fake_repo),
-                env=env,
-            )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        resolved = Path(result.stdout.strip())
-        expected = (fake_repo / ".tmp" / "session-intent").resolve()
-        self.assertEqual(resolved.resolve(), expected)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 from contextlib import closing
-import hashlib
 from datetime import datetime, timezone
 import json
 import os
@@ -123,15 +122,6 @@ def load_instruction(root: Path, platform: str, session_id: str, path: Path,
     if body:
         result["body"] = body[-1]
     return result
-
-
-def instruction_delivery(root: Path, platform: str, session_id: str,
-                         key: str, source: Path, message: str) -> bool:
-    """True once per unchanged instruction source and session; no text stored."""
-    digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
-    result = observe_check(root, platform, session_id, key + ":" + digest, source,
-                           lambda: {"delivered": True}, validate=lambda value: value == {"delivered": True})
-    return result["status"] != "reused"
 
 
 def main() -> int:

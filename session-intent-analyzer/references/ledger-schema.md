@@ -10,9 +10,15 @@ Revision and input character count are integers from zero through `2**53 - 1`, e
 
 The current-session assistant requests portable exports with `--export-to <separate-root>` and must not overwrite original migration inputs. A missing or modified export cannot override an imported database session.
 
+## Routing input and selective lookup
+
+`--read-intent` returns the current `routing_keywords`, `routing_summary`, input identity, revision and detail pointers. Keywords select procedures; they do not replace authority or proof. The model uses `--read-state --pointer /constraints/0` (or another returned pointer) only when that detail is needed. `--expected-input-event-id` and `--expected-revision` reject a stale lookup. Unqualified `--read-state` returns the same compact references as `--read-intent`. Use `--export-to` when an authorized diagnostic requires a complete file export; the CLI returns its paths.
+
+The response model replaces `routing_summary` with a short current objective, relevant restriction and next action. `keywords_input_event_id` identifies the input that supplied the keywords, so an unchanged retained keyword is not mistaken for a fresh interpretation.
+
 ## intent-state.json
 
-The Python ledger writer replaces scalar goal/summary fields with the latest semantic delta. Constraints, non-goals, questions and risk flags accumulate with value-based deduplication. Owned criteria merge by `(work_unit_id, contract_revision, id)`; ownerless criteria merge by stable ID. Decisions merge by stable ID and may supersede prior decisions with `supersedes`. The state is not a transcript.
+The Python ledger writer replaces scalar goal/summary fields with the latest semantic delta. Constraints and non-goals retain active authority until explicitly superseded. Supplied questions, risk flags, routing keywords and consumer hints replace their current values. Omitted fields remain unchanged. Owned criteria merge by `(work_unit_id, contract_revision, id)`; ownerless criteria merge by stable ID. Decisions merge by stable ID and may supersede prior decisions with `supersedes`. The state is not a transcript.
 
 ```json
 {
@@ -59,7 +65,7 @@ Optional pattern_class groups recurring failures across differently named entrie
 
 An update omitting pattern_class preserves the stored class. Unknown supplied source or class rejects the entire write with allowed values; absent source defaults to user-explicit, absent class stays unclassified, and stored entries are not revalidated. That parser default does not establish provenance: the current-session assistant follows the correction evidence rules in `../SKILL.md`.
 
-The snapshot returns detached active non-superseded decision objects, latest_scope or {} when absent/malformed, and decision_count. It preserves accumulated constraints/non-goals and model_security_decision. The current-session assistant must reconcile these facts with human instructions; scope presence, timestamps, admission and previous edits do not independently establish authorization or restriction chronology.
+The snapshot returns detached active non-superseded decision objects, latest_scope or {} when absent/malformed, and decision_count. It returns the current constraints, non-goals and model_security_decision. An explicit list update replaces that field; an omitted field remains unchanged. The current-session assistant must reconcile these facts with human instructions; scope presence, timestamps, admission and previous edits do not independently establish authorization or restriction chronology.
 
 Snapshots also expose persisted platform, session_id, ledger_revision and latest_input_event_id from the same read. Missing metadata is null rather than invented. An explicitly persisted empty input ID means no input was observed in that state. A read-only snapshot is not an authorization check; writers validate bindings.
 
@@ -69,7 +75,7 @@ The database event table is append-only and available through `--read-events` an
 
 An event accompanying raw input is user-input-observed and contains event_id equal to the observation's input_event_id plus input_digest. An agent-only delta is intent-updated: it references the input_event_id without creating/displacing an input event. API-written events include ledger_revision and unique mutation_id; older imported events without them remain readable.
 
-The Python ledger writer derives semantic_changes from normalized before/after state for goals, summaries, constraints, non-goals, questions, criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, security reasons, hints, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
+The Python ledger writer derives semantic_changes as before/after digests of normalized state for goals, summaries, constraints, non-goals, questions, criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, security reasons, hints, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
 
 The compatibility `current-session.json` pointer is advisory discovery:
 
@@ -87,7 +93,7 @@ Read-only consumers may use it for discovery. Writers use exact receipt/host ide
 
 ## Hook Observation Receipt
 
-Codex intake commits the canonical digest observation directly and places receipt JSON in hookSpecificOutput.additionalContext with hookEventName UserPromptSubmit. It also supplies systemMessage for display and equivalent text output. Claude UserPromptSubmit stages digest, count and native correlation without creating canonical input authority; the trusted PreToolUse or Stop wrapper reconciles native actor rows after the host appends the transcript. Human input produces canonical observation; a task notification retains the last human input and route. Unresolved staging remains pending and supplies no canonical receipt for new input. Wrappers preserve machine JSON and model context independently of display verbosity. A log of intended output does not prove model delivery. The upstream Codex output contract is the [Codex hooks reference](https://learn.chatgpt.com/docs/hooks#userpromptsubmit).
+Codex intake commits the canonical digest observation directly and places receipt JSON in hookSpecificOutput.additionalContext with hookEventName UserPromptSubmit. It also supplies systemMessage for display and equivalent text output. Claude UserPromptSubmit stages digest, count and native correlation without creating canonical input authority; the trusted PreToolUse or Stop wrapper reconciles native actor rows after the host appends the transcript. Human input produces canonical observation; a task notification retains the last human input and route. Unresolved staging supplies no canonical receipt. A hook prompt can match the complete native text or one unique complete plaintext block beside Desktop host guidance; the wrapper preserves every sibling and still requires positive native actor metadata. A later positively bound human row can supersede earlier unresolved observations for current input only when all preceding pending rows are uniquely correlated in the same ordered original. Core retains their staging events and explicit native-input-superseded links without promoting unknown actors. A notification, missing or ambiguous row, changed prefix or source-order mismatch cannot take that path. Wrappers preserve machine JSON and model context independently of display verbosity. A log of intended output does not prove model delivery. The upstream Codex output contract is the [Codex hooks reference](https://learn.chatgpt.com/docs/hooks#userpromptsubmit).
 
 ```json
 {
@@ -104,7 +110,7 @@ Codex intake commits the canonical digest observation directly and places receip
 }
 ```
 
-All canonical receipt coordinates and the event ID come from the same successful observation, without rereading the shared pointer. Claude staging metadata is correlation evidence for the trusted reconciler, not canonical write authority. Its pending receipt carries root/platform/session without an input_event_id; after wrapper reconciliation, the pure read-state result supplies latest_input_event_id for subsequent expected-input comparisons. Unresolved pending_native_inputs keep dependent writes closed. The receipt has no raw or semantic body and is not a separately persisted ledger file. Empty-input or degraded paths emit no receipt.
+All canonical receipt coordinates and the event ID come from the same successful observation, without rereading the shared pointer. Claude staging metadata is correlation evidence for the trusted reconciler, not canonical write authority. Its pending receipt carries root/platform/session without an input_event_id; after wrapper reconciliation, --read-intent supplies input_event_id for subsequent expected-input comparisons. Unresolved pending_native_inputs keep dependent writes closed. The receipt has no raw or semantic body and is not a separately persisted ledger file. Empty-input or degraded paths emit no receipt.
 
 Semantic writers pass receipt root/platform/session and the canonical input-event ID used for the decision, obtained directly from an observed receipt or from the authoritative state after trusted Claude reconciliation. A new ID cannot be substituted onto an old judgment. Codex mutation binds to native CODEX_THREAD_ID, then GHOST_ALICE_SESSION_ID when native identity is absent; a conflict fails before a write. Without either binding, the caller explicitly selects session-id. Hook intake uses payload then environment identity and degrades when both are absent.
 
@@ -148,7 +154,6 @@ Each owned criterion carries both work_unit_id and contract_revision; a partial/
   "routing_surface": {
     "intent_relation": "continuation",
     "primary_request": "implement the approved contract",
-    "causal_axis": "n/a",
     "response_mode": "normal",
     "response_order": "imperative-result-first-after-necessary-work",
     "change_depth": "structural",
@@ -170,11 +175,48 @@ Each owned criterion carries both work_unit_id and contract_revision; a partial/
 }
 ```
 
-Routing enums match task-router, with underscore field names. All eleven routing fields are required; primary_request, causal_axis and reason are compressed nonempty summaries of at most 500 characters. Unknown fields/schema/enums, duplicate references, inconsistent owners, unadmitted selection and unbound references raise RouteSchemaError with code route-schema.
+The routing_surface requires response_mode (`normal | direct-response | clarification-only`) and boundary_contract (`required | n/a`). The other fields in the example and causal_axis are optional work judgments: the assistant supplies them when they affect the downstream decision, and Core validates supplied values without inventing omitted judgments. Supplied primary_request, causal_axis and reason are compressed nonempty summaries of at most 500 characters; an inapplicable causal_axis is omitted. Optional enum values are:
+
+| Field | Values |
+| --- | --- |
+| intent_relation | new, continuation, accepted-continuation, changed, correction, ambiguous |
+| response_order | causal-answer-first-after-necessary-evidence, imperative-result-first-after-necessary-work, clarification-question-only, resolved-intent-first |
+| change_depth | minimal, localized, structural, systemic |
+| focus_layer | micro, meso, macro, meta |
+| verification_complexity | level-1, level-2, level-3 |
+| forced_visibility | yes, no |
+
+A supplied terminal response_order must agree with response_mode. Focus layer and verification complexity are independent. Unknown fields/schema/enums, malformed supplied values, duplicate references, inconsistent owners, unadmitted selection and unbound references raise RouteSchemaError with code route-schema. Optional explanations do not relax current input, boundary reference, owner, admission or criterion/source validation.
 
 Selection covers only this response and may be empty. Terminal direct-response/clarification-only projections cannot select execution units; writer and reader reject that contradiction, and completion selection never publishes it. Unselected execution units may remain without activating work. A requested lookup selects normal execution; a terminal explanation or explicit stop clears execution selection while retaining backlog/proof. An invalid route does not exempt an actual closure claim from proof.
 
 The validated projection adds ready status, authoritative identity/input and canonical boundary_ref or null. A required boundary needs a nonnull reference. Selected criteria are detached snapshots with criterion_id as the local-ID alias; they freeze the selected condition, not current proof/status. The reader adds current_input_event_id and returns stale for changed input/definition, rejecting malformed stored schemas.
+
+### Current necessary continuation feedback
+
+When authorized continued work needs a next input, the responding model declares its current necessity within the already required route registration. The optional `continuation_feedback` uses this shape:
+
+```json
+{
+  "schema_version": "continuation-feedback.v1",
+  "control": "active",
+  "required_unprocessed": [{
+    "criterion_refs": [{"work_unit_id": "repair", "contract_revision": 1, "criterion_id": "AC1"}],
+    "reason": "The unresolved comparison still needs the current original evidence.",
+    "next_information": "Compare the selected original passage with the changed requirement.",
+    "prerequisite": "ready",
+    "source_refs": [{"candidate_reference": "<existing Core candidate reference>", "source_id": "<its original source ID>"}]
+  }]
+}
+```
+
+This is an illustrative declaration, not execution authority. `control` is `active | human-stop`; `prerequisite` is `ready | missing`. Each row has nonempty model-supplied `reason` and `next_information`, and nonempty selected, admitted owned criterion references. Rows cannot overlap. `source_refs` is an explicit list and may be empty when current information needs no original lookup. Absence leaves necessity undeclared; an explicit empty `required_unprocessed` list declares no currently necessary follow-up and does not mark unmet criteria complete. An unmet status alone establishes no necessity.
+
+The canonical route writer authenticates each `(candidate_reference, source_id)` selector against an existing immutable candidate in the exact owning root and platform/session, verifies its original, and stores only authenticated source-reference metadata. A source ID is local to its candidate. Inline originals remain in their existing Core record; feedback copies neither text nor bytes. A fabricated, changed or unavailable original rejects the declaration and rolls back the route transaction. Current input and the declared boundary continue to bind the normal route.
+
+The reader revalidates referenced originals without rewriting the stored declaration. An affected row receives a read-only `continuation_feedback_issues` entry `{pointer, issue}`; its pointer is `/continuation_feedback/required_unprocessed/<index>` and its issue is `source-unverified | source-owner-unbound | source-changed | source-unavailable`. Consumers hold that row and can continue unrelated approved groups. The declaration contents and row indices stay unchanged, so the existing `response-route-recorded` event remains the original source. A consumer computing its event digest excludes only read-added `current_input_event_id` and `continuation_feedback_issues`. These metadata fields cannot be supplied to the route writer. A later human input stales the route and its feedback together.
+
+Ghost-ALICE Autopilot consumes this authenticated current declaration after independent proof bookkeeping. It maps a whole necessity row to one already approved task, checks the frozen boundary, allowed surfaces, dependencies and current prerequisite, and requests only the needed information. Core-only installations record the same judgment without automatically scheduling it. The Autopilot installed `references/continuation.md` owns plan admission and delivery; queueing a request proves neither host receipt nor execution.
 
 ### APIs and CLI
 
@@ -213,4 +255,6 @@ The CLI binds rows and registers the route in one transaction; either failure ro
 
 ## Forbidden persistence
 
-For intake events and intent-state fields, callers store only compressed semantic summaries and defined audit metadata. They must not copy raw user prompts, system/developer instructions, tool output, credentials/tokens/API keys/private keys or external fetch bodies into those records. The same SQLite database also contains separate `core_completion_candidates`, `core_completion_assessments` and `core_completion_responses` tables. The completion-assessment API stores the authorized answer draft, selected original source snapshots and review judgments there, as specified by the installed verification-before-completion response-review procedure. Evidence snapshots are not intent summaries; sharing a database does not give the two record types the same content contract.
+For intake events and intent-state fields, callers store only compressed semantic summaries and defined audit metadata. They must not copy raw user prompts, system/developer instructions, tool output, credentials/tokens/API keys/private keys or external fetch bodies into those records. The same SQLite database also contains separate `core_completion_candidates`, `core_completion_assessments` and `core_completion_responses` tables. The completion-assessment API stores the authorized answer draft, authenticated original-source references and review judgments there, as specified by the installed verification-before-completion response-review procedure. Original-source references are not intent summaries; sharing a database does not give the two record types the same content contract.
+
+Current `conduct_feedback` contains open corrections only. Setting a correction to `encoded` removes its prose from current state and records its ID in `retired_feedback_ids`. Semantic-change audit entries retain field names and before/after digests, not additional copies of current or prior values. Authority-bearing constraints, owned criteria and correction links retain their separate contracts.

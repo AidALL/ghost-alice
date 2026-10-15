@@ -197,6 +197,8 @@ class SourceHealthGateTest(unittest.TestCase):
 
         source = installer_bash_source()
         function_bundle = _extract_bash_function(source, "update_source_checkout")
+        function_bundle = function_bundle.replace('${SCRIPT_DIR}/_shared/installer_source_update.py',
+            str(ROOT / '_shared' / 'installer_source_update.py'))
 
         with tempfile.TemporaryDirectory() as temp_dir:
             runner = Path(temp_dir) / "runner.sh"
@@ -220,6 +222,7 @@ class SourceHealthGateTest(unittest.TestCase):
                     error() {{ printf "ERROR:%s\\n" "$*" >&2; }}
                     ok() {{ printf "OK:%s\\n" "$*" >&2; }}
 
+                    _find_python_runtime() {{ printf '%s' '{sys.executable}'; }}
                     {function_bundle}
 
                     cd "{repo.as_posix()}"
@@ -486,7 +489,7 @@ class SourceHealthGateTest(unittest.TestCase):
             f'"{self.bash}" -s -- --source-dir "{repo.as_posix()}" --no-install'
         )
         result = subprocess.run(
-            [self.bash, "-lc", command],
+            [self.bash, "-c", command],
             capture_output=True,
             text=True,
         )
@@ -519,9 +522,11 @@ class SourceHealthGateTest(unittest.TestCase):
         source_update_body = _extract_powershell_function(body, "Update-SourceCheckout")
 
         self.assertIn("[switch]$UpdateSource", body)
-        self.assertIn("git stash push -u", source_update_body)
-        self.assertIn("pull --ff-only", source_update_body)
-        self.assertIn("Source local changes saved in git stash", source_update_body)
+        self.assertIn("installer_source_update.py", source_update_body)
+        helper = (ROOT / "_shared/installer_source_update.py").read_text(encoding="utf-8")
+        self.assertIn("'stash', 'push', '-u'", helper)
+        self.assertIn("pull --ff-only", helper)
+        self.assertIn("Source local changes saved in git stash", helper)
         self.assertIn("if ($UpdateSource)", body)
         self.assertLess(body.index("if ($UpdateSource)"), body.index("Initialize-GitHooks"))
 
