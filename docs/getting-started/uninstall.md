@@ -1,6 +1,6 @@
 # Uninstall Cleanup Procedure
 
-Language: English | [Korean](../ko/getting-started/uninstall.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/uninstall.md)
 
 Ghost-ALICE uninstall is driven by the `install-state` manifest written by the installer. The uninstall path removes or restores only entries that the Ghost-ALICE installer recorded as installed or changed.
 

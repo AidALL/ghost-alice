@@ -1,10 +1,10 @@
 # Official Addons
 
-언어: [🇺🇸 English](../../reference/official-addons.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../reference/official-addons.md) | 🇰🇷 한국어
 
 애드온은 Core 스킬에 선택적인 기능 패키지를 더합니다. 이 문서는 기여자와 운영자가 공식 별칭, 사용자 정의 저장소, 조직별 패키지와 로컬 개발 애드온의 설치 소스를 선택하도록 안내합니다. 모든 소스는 같은 Core 설치 진입점을 사용합니다.
 
-전체 install command surface는 [installation](../getting-started/installation.md)을 봅니다. 직접 만들거나 가져온 addon을 packaging하는 방법은 [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/addon-authoring_ko)를 봅니다.
+전체 install command surface는 [installation](../getting-started/installation.md)을 봅니다. 직접 만들거나 가져온 addon을 packaging하는 방법은 [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/애드온-작성)를 봅니다.
 
 ## Contents
 
@@ -51,4 +51,4 @@ bash install.sh --addon-source https://github.com/your-org/your-addon.git
 ## Where To Go Next
 
 - [Installation](../getting-started/installation.md): core install, official addon, custom addon source, status, doctor, update, platform selection.
-- [Addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/addon-authoring_ko): 직접 만들거나 가져온 addon의 manifest format과 packaging 안내.
+- [Addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/애드온-작성): 직접 만들거나 가져온 addon의 manifest format과 packaging 안내.

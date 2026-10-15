@@ -1,6 +1,6 @@
 # Platform Adapter Compliance
 
-언어: [🇺🇸 English](../../policies/platform-adapter-compliance.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../policies/platform-adapter-compliance.md) | 🇰🇷 한국어
 
 플랫폼 어댑터 관리자는 이 계약에 따라 Claude, Codex와 terminal-only 어댑터가 실제로 제공하는 기능과 검증 상태를 기록합니다.
 

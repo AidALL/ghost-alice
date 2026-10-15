@@ -1,10 +1,10 @@
 # Documentation
 
-Language: 🇺🇸 English | [🇰🇷 한국어](./ko/README.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](./ko/README.md)
 
 Ghost-ALICE OS documentation is bilingual at the reader-facing documentation layer. English remains the default repository entry path. Korean counterparts live under `docs/ko/` with the same subdirectory shape.
 
-Every paired document should expose a language switch near the top. In an English document, the English side is plain text and the Korean side is a link. In a Korean document, the English side is a link and the Korean side is plain text.
+Every paired document has a language switch near the top. The [language policy](concepts/language-policy.md) defines its format.
 
 Core `0.5.1` and Ghost-ALICE Autopilot `0.5.1` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.1` or later. Source checks, native runtime validation and publication establish separate evidence.
 

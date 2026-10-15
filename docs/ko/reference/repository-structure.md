@@ -1,6 +1,6 @@
 # Repository Structure
 
-언어: [🇺🇸 English](../../reference/repository-structure.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../reference/repository-structure.md) | 🇰🇷 한국어
 
 README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는 각 구성 요소의 파일 위치와 역할을 자세히 안내합니다.
 ## Contents
@@ -88,4 +88,4 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 - 자세한 설치·업데이트 안내는 [installation guide](../getting-started/installation.md)에 둡니다.
 - 기여자용 설치 흐름과 보호 규칙은 [installer architecture](./installer-architecture.md)에 둡니다.
 - 정책과 실행 환경별 계약 표는 [docs/ko/policies](https://github.com/AidALL/ghost-alice/tree/main/docs/ko/policies)에 둡니다.
-- 장문 철학과 결과를 판단에 다시 반영하는 작업 흐름은 [Wiki](https://github.com/AidALL/ghost-alice/wiki/Home_ko)에 두며 [official-docs/derived](https://github.com/AidALL/ghost-alice/tree/main/official-docs/derived)는 공개 기여자 절차를 담습니다.
+- 장문 철학과 결과를 판단에 다시 반영하는 작업 흐름은 [Wiki](https://github.com/AidALL/ghost-alice/wiki/홈)에 두며 [official-docs/derived](https://github.com/AidALL/ghost-alice/tree/main/official-docs/derived)는 공개 기여자 절차를 담습니다.

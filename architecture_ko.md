@@ -1,6 +1,8 @@
 # Ghost-ALICE Core 아키텍처
 
-Core는 대화에 응답하는 모델에 공통 지침·네이티브 입력 연결·인증된 작업과 근거 기록을 제공합니다. 승인된 작업의 수행과 결과 판단은 응답 모델이 담당합니다. [설계 철학](https://github.com/AidALL/ghost-alice/wiki/design-philosophy-floor-not-ceiling)은 사용자 목적을 판단의 기준으로 삼으며, 절차나 기록이 서로 일치한다는 사실만으로 성공을 입증하지 않습니다.
+Language: [🇺🇸 English](architecture.md) | 🇰🇷 한국어
+
+Core는 대화에 응답하는 모델에 공통 지침·네이티브 입력 연결·인증된 작업과 근거 기록을 제공합니다. 승인된 작업의 수행과 결과 판단은 응답 모델이 담당합니다. [설계 철학](https://github.com/AidALL/ghost-alice/wiki/설계-원칙)은 사용자 목적을 판단의 기준으로 삼으며, 절차나 기록이 서로 일치한다는 사실만으로 성공을 입증하지 않습니다.
 
 ## 책임과 흐름
 
@@ -27,7 +29,7 @@ flowchart TD
   D --> H["네이티브 호스트: 답변 표시"]
 ```
 
-모델은 다음 판단 대상을 선택합니다. micro는 개별 결과, meso는 하위 작업이나 대응 관계, macro는 통합 결과와 의존 관계, meta는 필요성이나 전제를 가리킵니다. 검증 깊이와 근거가 전체 완료 또는 부분 완료를 지원하는지는 별도로 판단합니다. 불일치는 조사의 출발점이며 원인을 확정하지 않습니다. 미해결 조건은 그 조건에 의존하는 주장이나 작업을 막지만, 독립적으로 승인된 작업은 계속할 수 있습니다. [닫힌 루프 운영 모델](https://github.com/AidALL/ghost-alice/wiki/operating-model-closed-loop-reasoning)은 이 판단을 설명합니다.
+모델은 다음 판단 대상을 선택합니다. micro는 개별 결과, meso는 하위 작업이나 대응 관계, macro는 통합 결과와 의존 관계, meta는 필요성이나 전제를 가리킵니다. 검증 깊이와 근거가 전체 완료 또는 부분 완료를 지원하는지는 별도로 판단합니다. 불일치는 조사의 출발점이며 원인을 확정하지 않습니다. 미해결 조건은 그 조건에 의존하는 주장이나 작업을 막지만, 독립적으로 승인된 작업은 계속할 수 있습니다. 위키의 [검증과 증거](https://github.com/AidALL/ghost-alice/wiki/검증과-증거) 페이지가 이 판단을 설명합니다.
 
 ## 답변 종료 경계
 
@@ -91,7 +93,7 @@ flowchart LR
 
 [검증 절차](coding-convention/verification-before-completion/SKILL.md)는 근거 선택과 완료 주장을 소유합니다. 그 [답변 검토 절차](coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review)는 기록의 인계를 소유합니다. 다른 문서는 명령을 복제하지 않고 해당 절차를 참조합니다.
 
-지원된 결과는 원본 근거·검증 시각·정정 연결을 유지합니다. 기준·관련 산출물의 변경이나 반대 관찰은 영향받는 근거만 다시 검토하게 합니다. 기록·표시 결함 때문에 변하지 않은 실제 업무를 다시 실행하지 않습니다. 정확한 부분 답변은 답변으로서 인정될 수 있지만 필수 작업은 여전히 미완료일 수 있습니다. [대안·상향 판단 모델](https://github.com/AidALL/ghost-alice/wiki/operating-model-fallback-and-escalation)은 미해결 조건과 모델의 다음 판단을 다룹니다.
+지원된 결과는 원본 근거·검증 시각·정정 연결을 유지합니다. 기준·관련 산출물의 변경이나 반대 관찰은 영향받는 근거만 다시 검토하게 합니다. 기록·표시 결함 때문에 변하지 않은 실제 업무를 다시 실행하지 않습니다. 정확한 부분 답변은 답변으로서 인정될 수 있지만 필수 작업은 여전히 미완료일 수 있습니다. 위키의 [판단 범위와 복구](https://github.com/AidALL/ghost-alice/wiki/판단-범위와-복구) 페이지가 미해결 조건과 모델의 다음 판단을 다룹니다.
 
 ## 선택적인 Autopilot 확장
 

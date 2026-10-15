@@ -1,6 +1,6 @@
 # Session Gate Matrix
 
-언어: [🇺🇸 English](../../policies/session-gate-matrix.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../policies/session-gate-matrix.md) | 🇰🇷 한국어
 
 기계가 읽는 게이트 인덱스는 [skill-catalog/session-gates.json](../../../skill-catalog/session-gates.json)입니다. 이 문서는 각 조건의 절차 담당자를 연결합니다. [아키텍처](../../../architecture_ko.md)는 구성요소의 책임을, 연결된 스킬은 에이전트의 행동을 정의합니다.
 

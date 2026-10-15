@@ -1,6 +1,6 @@
 # Ghost-ALICE OS
 
-Language: English | [Korean](./README_ko.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](./README_ko.md)
 
 ![Ghost-ALICE OS logo](imgs/Ghost-ALICE_logo.png)
 
@@ -54,9 +54,9 @@ For native commands, custom addon sources, platform selection and removal, use t
 | Skill catalog reference | [Skill catalog guide](./docs/reference/skills.md) |
 | Session gate contract | [Session gate matrix](./docs/policies/session-gate-matrix.md) |
 | Installer compatibility contract | [Installer platform compatibility](./docs/policies/installer-platform-compatibility-matrix.md) |
-| Team onboarding and background | [GitHub Wiki](https://github.com/AidALL/ghost-alice/wiki) |
+| Design principles and architecture | [GitHub Wiki](https://github.com/AidALL/ghost-alice/wiki) |
 | Official addon usage | [Official addon reference](./docs/reference/official-addons.md) |
-| Addon authoring | [Wiki: addon authoring](https://github.com/AidALL/ghost-alice/wiki/addon-authoring) |
+| Addon authoring | [Wiki: Addon Authoring](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring) |
 
 ## Project Guarantees
 

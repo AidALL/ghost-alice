@@ -1,10 +1,10 @@
 # Troubleshooting
 
-언어: [🇺🇸 English](../../getting-started/troubleshooting.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../getting-started/troubleshooting.md) | 🇰🇷 한국어
 
-이 문서는 사용자가 Ghost-ALICE 설치·업데이트 중 저장소의 최신 문서를 가져오지 못할 때 따르는 복구 절차입니다. GitHub Wiki의 `install-troubleshooting_ko` 페이지가 이 온라인 안내로 연결하므로 로컬 저장소를 갱신하지 않고 읽으실 수 있습니다.
+이 문서는 사용자가 Ghost-ALICE 설치·업데이트 중 저장소의 최신 문서를 가져오지 못할 때 따르는 복구 절차입니다. GitHub Wiki의 홈 페이지가 이 온라인 안내로 연결하므로 로컬 저장소를 갱신하지 않고 읽으실 수 있습니다.
 
-- Wiki: https://github.com/AidALL/ghost-alice/wiki/install-troubleshooting_ko
+- Wiki: [GitHub 위키 홈](https://github.com/AidALL/ghost-alice/wiki/홈)
 - Repo copy: `docs/ko/getting-started/troubleshooting.md`
 
 ## Contents

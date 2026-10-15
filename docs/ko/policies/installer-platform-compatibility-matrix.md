@@ -1,6 +1,6 @@
 # Installer Platform Compatibility Matrix
 
-언어: [🇺🇸 English](../../policies/installer-platform-compatibility-matrix.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../policies/installer-platform-compatibility-matrix.md) | 🇰🇷 한국어
 
 개발자는 이 계약을 기준으로 Ghost-ALICE 설치기의 플랫폼별 호환성을 구현하고, 각 행에 지정된 담당 테스트로 해당 동작을 검증합니다. 단독 실행의 책임과 반환 경로는 [Core 아키텍처](../../../architecture_ko.md), 애드온 확장은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)를 따릅니다.
 

@@ -1,10 +1,10 @@
 # Troubleshooting
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/troubleshooting.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/troubleshooting.md)
 
-This document is a fast recovery playbook for cases where a user cannot pull the latest repository docs while installing or updating Ghost-ALICE. The GitHub Wiki page `install-troubleshooting` links to this guide online, so users can read it without updating their checkout.
+This document is a fast recovery playbook for cases where a user cannot pull the latest repository docs while installing or updating Ghost-ALICE. The GitHub Wiki home links to this guide online, so users can read it without updating their checkout.
 
-- Wiki: https://github.com/AidALL/ghost-alice/wiki/install-troubleshooting
+- Wiki: [GitHub Wiki home](https://github.com/AidALL/ghost-alice/wiki)
 - Repo copy: `docs/getting-started/troubleshooting.md`
 
 ## Contents

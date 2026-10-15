@@ -1,6 +1,8 @@
 # Ghost-ALICE Core Architecture
 
-Core supplies shared instructions, native input bindings and authenticated work and evidence records for the model responding in a conversation. The responding model performs authorized work and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/design-philosophy-floor-not-ceiling) makes the user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
+언어: 🇺🇸 English | [🇰🇷 한국어](architecture_ko.md)
+
+Core supplies shared instructions, native input bindings and authenticated work and evidence records for the model responding in a conversation. The responding model performs authorized work and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/Design-Principles) makes the user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
 
 ## Responsibilities and flow
 
@@ -27,7 +29,7 @@ flowchart TD
   D --> H["Native host: display the answer"]
 ```
 
-The model chooses the next judgment target: micro for an individual result, meso for a subtask or mapping, macro for the integrated outcome and dependencies, or meta for necessity or premise. Verification depth and whether the evidence supports full or partial completion are separate decisions. A mismatch starts investigation; it does not identify the cause. Unresolved conditions prevent their dependent claims or actions while independent authorized work can continue. The [closed loop operating model](https://github.com/AidALL/ghost-alice/wiki/operating-model-closed-loop-reasoning) describes these decisions.
+The model chooses the next judgment target: micro for an individual result, meso for a subtask or mapping, macro for the integrated outcome and dependencies, or meta for necessity or premise. Verification depth and whether the evidence supports full or partial completion are separate decisions. A mismatch starts investigation; it does not identify the cause. Unresolved conditions prevent their dependent claims or actions while independent authorized work can continue. The wiki page [Verification and Evidence](https://github.com/AidALL/ghost-alice/wiki/Verification-and-Evidence) describes these decisions.
 
 ## Response boundary
 
@@ -91,7 +93,7 @@ The model makes two distinct judgments: each claim against original evidence, an
 
 The [verification procedure](coding-convention/verification-before-completion/SKILL.md) owns evidence selection and completion claims. Its [response review procedure](coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review) owns the recording handoff. Other documents refer to that procedure rather than duplicating its commands.
 
-Supported results retain their original evidence, verification times and correction links. A changed criterion, artifact or contrary observation reopens only the affected evidence. A recording or delivery defect does not justify replaying unchanged business work. An accurate partial answer may be accepted as an answer while required work remains incomplete. The [fallback and escalation model](https://github.com/AidALL/ghost-alice/wiki/operating-model-fallback-and-escalation) governs unresolved conditions and the model's next judgment.
+Supported results retain their original evidence, verification times and correction links. A changed criterion, artifact or contrary observation reopens only the affected evidence. A recording or delivery defect does not justify replaying unchanged business work. An accurate partial answer may be accepted as an answer while required work remains incomplete. The wiki page [Focus and Recovery](https://github.com/AidALL/ghost-alice/wiki/Focus-and-Recovery) describes unresolved conditions and the model's next judgment.
 
 ## Optional Autopilot extension
 

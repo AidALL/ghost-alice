@@ -1,6 +1,6 @@
 # Installation And Update Guide
 
-언어: [English](../../getting-started/installation.md) | Korean
+Language: [🇺🇸 English](../../getting-started/installation.md) | 🇰🇷 한국어
 
 이 문서는 Ghost-ALICE OS의 설치, 업데이트, 상태 점검과 복구 명령을 안내합니다. 운영체제별 기본 실행 명령에서도 같은 긴 옵션 이름을 사용합니다.
 

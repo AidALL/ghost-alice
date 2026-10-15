@@ -1,6 +1,6 @@
 # Uninstall Cleanup Procedure
 
-언어: [English](../../getting-started/uninstall.md) | Korean
+Language: [🇺🇸 English](../../getting-started/uninstall.md) | 🇰🇷 한국어
 
 제거 명령은 설치기가 작성한 `install-state` 매니페스트를 읽습니다. 설치기가 설치하거나 변경했다고 기록한 항목만 제거하거나 복원합니다.
 

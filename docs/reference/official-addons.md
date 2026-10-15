@@ -1,10 +1,10 @@
 # Official Addons
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/official-addons.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/official-addons.md)
 
 Addons extend a Ghost-ALICE OS install with optional capability packages on top of the core skills. This page is the contributor and operator reference for the addon sources surfaced on the homepage: official aliases, custom repositories, tenant packages, and local development addons. They all enter through the same installer entrypoint.
 
-For the full install command surface, read [installation](../getting-started/installation.md). For how to package an addon you build or bring in, read the [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/addon-authoring).
+For the full install command surface, read [installation](../getting-started/installation.md). For how to package an addon you build or bring in, read the [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring).
 
 ## Contents
 
@@ -51,4 +51,4 @@ bash install.sh --addon-source https://github.com/your-org/your-addon.git
 ## Where To Go Next
 
 - [Installation](../getting-started/installation.md): core install, official addons, custom addon sources, status, doctor, update, and platform selection.
-- [Addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/addon-authoring): manifest format and packaging guidance for addons you build or bring in.
+- [Addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring): manifest format and packaging guidance for addons you build or bring in.

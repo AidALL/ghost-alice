@@ -1,6 +1,6 @@
 # Skill Catalog Guide
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/skills.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/skills.md)
 
 The installable skill catalog source of truth is [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json).
 
