@@ -1,20 +1,26 @@
 #!/usr/bin/env python3
 """audit_wiki_integrity.py. Report-only structural integrity audit for the Wiki.
 
-The Wiki is a separate checkout containing guides and links to the canonical
-repository contracts. This command checks local wiki page links and language
-pairs. It does not validate architecture prose, runtime behavior or remote
-publication state. Findings produce a nonzero exit status; the audit neither
-edits pages nor controls runtime permission.
+The Wiki is a separate checkout containing design pages and links to the
+canonical repository contracts. The language policy
+(docs/concepts/language-policy.md) defines its layout: English pages at the
+Wiki root, Korean pages under ``ko/``, a sidebar per folder in that folder's
+language, and a language switch line at the top of every content page. This
+command checks page links and that layout. It does not validate architecture
+prose, runtime behavior or remote publication state. Findings produce a
+nonzero exit status; the audit neither edits pages nor controls runtime
+permission.
 
 Checks:
-- broken-link : a [text](Target) link pointing at a non-existent wiki page.
-- missing-ko  : an English content page with no Korean counterpart.
-- missing-en  : a Korean content page with no English counterpart.
+- broken-link      : a [text](Target) link pointing at a non-existent wiki page.
+- duplicate-page   : two files share one page name; GitHub serves pages by name.
+- switch-format    : a content page whose first line is not a language switch line.
+- switch-folder    : a Korean page outside ``ko/`` or an English page inside it.
+- switch-pair      : a switch link whose target does not switch back to the page.
+- sidebar-language : a sidebar link to a page in the other language.
 
-Pairing conventions handled: ``name`` <-> ``name_ko`` and ``name_en`` <-> ``name_ko``.
-GitHub wiki special pages (``_Sidebar``, ``_Footer``, any ``_``-prefixed page) are
-exempt from pairing but still have their links checked.
+GitHub wiki special pages (any ``_``-prefixed page such as ``_Sidebar``) carry
+no switch line; their links are still checked.
 
 Usage:
     python3 scripts/audit_wiki_integrity.py --wiki /path/to/ghost-alice.wiki
@@ -27,24 +33,49 @@ import argparse
 import json
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote
 
 # [text](target) — non-greedy text, target up to the first closing paren.
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:", "ftp://", "//", "/")
 
+# The switch label is written in the other language.
+_EN_SWITCH_RE = re.compile(r"^언어: 🇺🇸 English \| \[🇰🇷 한국어\]\(([^)]+)\)$")
+_KO_SWITCH_RE = re.compile(r"^Language: \[🇺🇸 English\]\(([^)]+)\) \| 🇰🇷 한국어$")
+
+_KO_FOLDER = "ko"
+
 
 @dataclass(frozen=True)
 class Finding:
-    check: str  # "broken-link" | "missing-ko" | "missing-en"
-    page: str  # wiki page slug where the problem is observed
+    check: str  # see the module docstring for check names
+    page: str  # wiki page path (relative, without .md) where the problem is observed
     detail: str  # human-readable message
 
 
+def _nfc(value: str) -> str:
+    return unicodedata.normalize("NFC", value)
+
+
+def page_name(key: str) -> str:
+    """The name GitHub serves a page under: its file name without folders."""
+    return key.rsplit("/", 1)[-1]
+
+
+def _in_ko_folder(key: str) -> bool:
+    return key.startswith(_KO_FOLDER + "/")
+
+
+def _is_special(key: str) -> bool:
+    return page_name(key).startswith("_")
+
+
 def link_target_to_slug(raw: str) -> str | None:
-    'Resolve a markdown link target to a wiki page slug, or None if not a\n    wiki-internal page link (external, image, same-page anchor, or nested path).'
+    'Resolve a markdown link target to a wiki page name, or None if not a\n    wiki-internal page link (external, image, same-page anchor, or nested path).'
     target = raw.strip()
     if not target:
         return None
@@ -58,72 +89,132 @@ def link_target_to_slug(raw: str) -> str | None:
     if not page_part:
         return None
     if "/" in page_part:
-        # nested path (image dir, asset) — wiki pages are flat slugs
+        # nested path (image dir, asset) — wiki page links use page names
         return None
     if page_part.endswith(".md"):
         page_part = page_part[:-3]
-    return page_part or None
+    return _nfc(unquote(page_part)) or None
 
 
-def _is_special(slug: str) -> bool:
-    return slug.startswith("_")
+def _internal_targets(text: str) -> list[str]:
+    targets = []
+    for raw in _LINK_RE.findall(text):
+        target = link_target_to_slug(raw)
+        if target is not None:
+            targets.append(target)
+    return targets
+
+
+def parse_switch(text: str) -> tuple[str, str] | None:
+    """Return (language, target page name) from the first non-empty line."""
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    for language, pattern in (("en", _EN_SWITCH_RE), ("ko", _KO_SWITCH_RE)):
+        match = pattern.match(first)
+        if match:
+            return language, link_target_to_slug(match.group(1)) or ""
+    return None
+
+
+def _by_name(pages: dict[str, str]) -> dict[str, str]:
+    return {page_name(key): key for key in sorted(pages)}
+
+
+def check_duplicate_pages(pages: dict[str, str]) -> list[Finding]:
+    findings: list[Finding] = []
+    seen: dict[str, str] = {}
+    for key in sorted(pages):
+        if _is_special(key):
+            continue  # each folder may carry its own _Sidebar
+        name = page_name(key)
+        if name in seen:
+            findings.append(
+                Finding("duplicate-page", key, f"page name '{name}' is also used by '{seen[name]}'")
+            )
+        else:
+            seen[name] = key
+    return findings
 
 
 def check_broken_links(pages: dict[str, str]) -> list[Finding]:
     findings: list[Finding] = []
-    known = set(pages)
-    for slug in sorted(pages):
-        for raw in _LINK_RE.findall(pages[slug]):
-            target = link_target_to_slug(raw)
-            if target is None:
-                continue
+    known = set(_by_name(pages))
+    for key in sorted(pages):
+        for target in _internal_targets(pages[key]):
             if target not in known:
                 findings.append(
-                    Finding("broken-link", slug, f"link to missing wiki page '{target}'")
+                    Finding("broken-link", key, f"link to missing wiki page '{target}'")
                 )
     return findings
 
 
-def _ko_counterpart_candidates(slug: str) -> list[str]:
-    if slug.endswith("_en"):
-        return [slug[:-3] + "_ko"]
-    return [slug + "_ko"]
-
-
-def _en_counterpart_candidates(slug: str) -> list[str]:
-    base = slug[:-3]  # strip "_ko"
-    return [base, base + "_en"]
-
-
-def check_pairing(pages: dict[str, str]) -> list[Finding]:
+def check_language_switches(pages: dict[str, str]) -> list[Finding]:
     findings: list[Finding] = []
-    known = set(pages)
-    for slug in sorted(pages):
-        if _is_special(slug):
+    names = _by_name(pages)
+    for key in sorted(pages):
+        if _is_special(key):
             continue
-        if slug.endswith("_ko"):
-            if not any(c in known for c in _en_counterpart_candidates(slug)):
+        switch = parse_switch(pages[key])
+        if switch is None:
+            findings.append(
+                Finding("switch-format", key, "first line is not a language switch line")
+            )
+            continue
+        language, target = switch
+        if (language == "ko") != _in_ko_folder(key):
+            expected = "under ko/" if language == "ko" else "outside ko/"
+            findings.append(
+                Finding("switch-folder", key, f"{language} page must live {expected}")
+            )
+        target_key = names.get(target)
+        if target_key is None:
+            continue  # reported as broken-link
+        back = parse_switch(pages[target_key])
+        if back is None or back[0] == language or back[1] != page_name(key):
+            findings.append(
+                Finding("switch-pair", key, f"switch target '{target}' does not switch back to this page")
+            )
+    return findings
+
+
+def check_sidebar_language(pages: dict[str, str]) -> list[Finding]:
+    findings: list[Finding] = []
+    names = _by_name(pages)
+    for key in sorted(pages):
+        if page_name(key) != "_Sidebar":
+            continue
+        language = "ko" if _in_ko_folder(key) else "en"
+        for target in _internal_targets(pages[key]):
+            target_key = names.get(target)
+            if target_key is None:
+                continue  # reported as broken-link
+            switch = parse_switch(pages[target_key])
+            if switch is not None and switch[0] != language:
                 findings.append(
-                    Finding("missing-en", slug, "Korean page has no English counterpart")
-                )
-        else:
-            if not any(c in known for c in _ko_counterpart_candidates(slug)):
-                findings.append(
-                    Finding("missing-ko", slug, "English page has no Korean counterpart")
+                    Finding("sidebar-language", key, f"{language} sidebar links {switch[0]} page '{target}'")
                 )
     return findings
 
 
 def audit(pages: dict[str, str]) -> list[Finding]:
-    """Run all deterministic structural checks over a {slug: text} wiki map."""
-    return check_broken_links(pages) + check_pairing(pages)
+    """Run all deterministic structural checks over a {page path: text} wiki map."""
+    return (
+        check_duplicate_pages(pages)
+        + check_broken_links(pages)
+        + check_language_switches(pages)
+        + check_sidebar_language(pages)
+    )
 
 
 def load_wiki(wiki_dir: Path) -> dict[str, str]:
-    """Load a wiki checkout into a {slug: text} map (slug = filename without .md)."""
+    """Load a wiki checkout into {page path: text}; the path is relative to the
+    wiki root, without .md, with '/' separators (for example 'ko/홈')."""
+    root = Path(wiki_dir)
     pages: dict[str, str] = {}
-    for md in sorted(Path(wiki_dir).glob("*.md")):
-        pages[md.stem] = md.read_text(encoding="utf-8")
+    for md in sorted(root.rglob("*.md")):
+        relative = md.relative_to(root)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        pages[_nfc(relative.with_suffix("").as_posix())] = md.read_text(encoding="utf-8")
     return pages
 
 

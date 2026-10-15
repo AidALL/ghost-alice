@@ -166,7 +166,7 @@ When adding or modifying a skill:
 4. Run the skill compliance checklist referenced from [README.md](./README.md).
 5. Update `skill-catalog/skills.json` and public docs when the public surface changes.
 
-For an addon, which is a third-party skill bundle installed with `--addon-source`, author it in your own repository against the `addons-manifest.json` and `addon.json` format, keep its skill names from colliding with core skills, and follow the [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/addon-authoring). Do not submit private addon skills into this public repository.
+For an addon, which is a third-party skill bundle installed with `--addon-source`, author it in your own repository against the `addons-manifest.json` and `addon.json` format, keep its skill names from colliding with core skills, and follow the [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring). Do not submit private addon skills into this public repository.
 
 ## Reporting Security Issues
 

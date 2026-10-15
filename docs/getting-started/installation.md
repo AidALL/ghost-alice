@@ -1,6 +1,6 @@
 # Installation And Update Guide
 
-Language: English | [Korean](../ko/getting-started/installation.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/installation.md)
 
 This guide is the command reference for installing, updating, checking, and repairing Ghost-ALICE OS. Public guidance uses OS-native entrypoints with the same long flag surface.
 

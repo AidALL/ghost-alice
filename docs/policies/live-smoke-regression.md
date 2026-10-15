@@ -1,6 +1,6 @@
 # Live Smoke Regression
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/live-smoke-regression.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/live-smoke-regression.md)
 
 This procedure runs the same small request in real agent runtimes to verify that hook, gate, permission, and completion contracts are alive. Automated unit tests cover hook payload and file contracts; this smoke closes the final connection on the actual session surface.
 ## Contents

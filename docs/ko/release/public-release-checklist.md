@@ -1,6 +1,6 @@
 # Public Release Checklist
 
-언어: [🇺🇸 English](../../release/public-release-checklist.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../release/public-release-checklist.md) | 🇰🇷 한국어
 
 배포 담당자는 이 점검표로 현재 Ghost-ALICE Core 저장소와 공개 문서를 배포합니다. 기존 저장소 이력을 유지하고 승인된 배포 범위만 준비합니다. 이 문서는 배포 요건을 정의하며 특정 후보의 통과를 증명하지 않습니다.
 

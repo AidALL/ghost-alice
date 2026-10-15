@@ -1,6 +1,6 @@
 # 게이트웨이 설치 생명주기 설계
 
-🇰🇷 한국어 | [🇺🇸 English](../../../coding-convention/specs/2026-10-15-gateway-installer-design.md)
+Language: [🇺🇸 English](../../../coding-convention/specs/2026-10-15-gateway-installer-design.md) | 🇰🇷 한국어
 
 상태: 소스 체크아웃에 구현한 구조입니다. 로컬 검증, 원격 게시와 실제 사용자 설치본 반영은 각각 별도 단계입니다. 이번 재편에서 실제 사용자 HOME을 대상으로 설치나 네이티브 서비스 재시작을 실행하지 않았습니다. 기존 소스 링크를 통하는 설치기 파일은 이 체크아웃의 변경을 그대로 가리킵니다.
 

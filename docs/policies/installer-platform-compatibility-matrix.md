@@ -1,6 +1,6 @@
 # Installer Platform Compatibility Matrix
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/installer-platform-compatibility-matrix.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/installer-platform-compatibility-matrix.md)
 
 This document is the compatibility test contract for the Ghost-ALICE installer. The [Core architecture](../../architecture.md) describes the standalone responsibilities and return paths; the [Autopilot architecture](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README.md#how-autopilot-extends-core) describes the addon extension.
 

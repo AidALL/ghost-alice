@@ -1,6 +1,6 @@
 # Ghost-ALICE OS
 
-언어: [English](./README.md) | 한국어
+Language: [🇺🇸 English](./README.md) | 🇰🇷 한국어
 
 ![Ghost-ALICE OS logo](imgs/Ghost-ALICE_logo.png)
 
@@ -54,9 +54,9 @@ Ghost-ALICE Autopilot은 명시적으로 승인된 작업을 해당 세션의 �
 | 스킬 목록과 참조 정보 | [스킬 카탈로그](./docs/ko/reference/skills.md) |
 | 세션 처리 단계와 필수 검사 규칙 | [세션 게이트 매트릭스](./docs/ko/policies/session-gate-matrix.md) |
 | 설치기의 플랫폼별 호환성 기준 | [설치기 플랫폼 호환성](./docs/ko/policies/installer-platform-compatibility-matrix.md) |
-| 팀 도입 안내와 설계 배경 | [GitHub 위키](https://github.com/AidALL/ghost-alice/wiki/Home_ko) |
+| 설계 원칙과 아키텍처 | [GitHub 위키](https://github.com/AidALL/ghost-alice/wiki/홈) |
 | 공식 애드온 사용법 | [공식 애드온 참조](./docs/ko/reference/official-addons.md) |
-| 애드온 제작 방법 | [위키: 애드온 작성](https://github.com/AidALL/ghost-alice/wiki/addon-authoring_ko) |
+| 애드온 제작 방법 | [위키: 애드온 작성](https://github.com/AidALL/ghost-alice/wiki/애드온-작성) |
 
 ## 프로젝트가 지키는 기준
 

@@ -1,10 +1,10 @@
 # 문서 안내
 
-언어: [🇺🇸 English](../README.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../README.md) | 🇰🇷 한국어
 
 Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다. 저장소의 기본 안내는 영어이며, 한국어 문서는 `docs/ko/` 아래에서 영어 문서와 같은 디렉터리 구조로 관리합니다.
 
-쌍을 이루는 문서는 상단에서 언어를 전환하실 수 있습니다. 영어 문서에서는 한국어 링크를, 한국어 문서에서는 영어 링크를 제공합니다.
+쌍을 이루는 문서는 상단의 언어 전환 줄로 오가실 수 있습니다. 전환 줄 형식은 [언어 정책](concepts/language-policy.md)에서 정합니다.
 
 Core `0.5.1`과 Ghost-ALICE Autopilot `0.5.1`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.1` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
 

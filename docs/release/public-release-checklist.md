@@ -1,6 +1,6 @@
 # Public Release Checklist
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/release/public-release-checklist.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/release/public-release-checklist.md)
 
 Use this checklist to release the current Ghost-ALICE Core repository and its public documentation. Keep the existing repository history and prepare only the authorized release scope. This page defines release requirements; it does not attest that a particular candidate has passed them.
 

@@ -1,6 +1,6 @@
 # Gateway installer lifecycle design
 
-[🇰🇷 한국어](../../ko/coding-convention/specs/2026-10-15-gateway-installer-design.md) | 🇺🇸 English
+언어: 🇺🇸 English | [🇰🇷 한국어](../../ko/coding-convention/specs/2026-10-15-gateway-installer-design.md)
 
 Status: implemented in the source checkout; local acceptance and remote publication are separate stages. No installer deployment or native-service restart has targeted the actual user HOME during this restructuring. Existing source links continue to expose this checkout's installer files.
 

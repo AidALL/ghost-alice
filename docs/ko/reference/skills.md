@@ -1,6 +1,6 @@
 # Skill Catalog Guide
 
-언어: [🇺🇸 English](../../reference/skills.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../reference/skills.md) | 🇰🇷 한국어
 
 설치 가능한 스킬 목록의 기준 자료는 [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json)입니다.
 

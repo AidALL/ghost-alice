@@ -1,6 +1,6 @@
 # Installer Architecture
 
-언어: [🇺🇸 English](../../reference/installer-architecture.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../reference/installer-architecture.md) | 🇰🇷 한국어
 
 이 문서는 기여자가 빠른 설치 안내에서 설치기 호환성 계약으로 넘어갈 때 사용하는 구조 안내입니다. 설치기, 훅 입력·출력, 설치 상태와 테스트 사이의 연결을 설명합니다.
 

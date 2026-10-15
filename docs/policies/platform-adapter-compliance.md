@@ -1,6 +1,6 @@
 # Platform Adapter Compliance
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/platform-adapter-compliance.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/platform-adapter-compliance.md)
 
 This contract records, without exaggeration, which surfaces are actually supported by the Claude, Codex, and terminal-only adapters.
 ## Contents

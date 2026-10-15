@@ -1,6 +1,6 @@
 # Evaluator Artifact Contract
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/evaluator-artifact-contract.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/evaluator-artifact-contract.md)
 
 This artifact contract applies to verification-complexity-level-3-plus work, intake of external agent-governance logic, and RAG/evaluator-driven improvement candidates. Its purpose is not to produce more reports; it is to preserve promotable evidence together with rejected candidates.
 ## Contents

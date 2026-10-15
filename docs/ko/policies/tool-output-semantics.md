@@ -1,6 +1,6 @@
 # 도구 출력의 의미
 
-언어: [English](../../policies/tool-output-semantics.md) | 한국어
+Language: [🇺🇸 English](../../policies/tool-output-semantics.md) | 🇰🇷 한국어
 
 도구 결과는 관찰·인증된 검토·실행한 동작을 구분합니다. 표시 문구는 이해를 돕고, 문서화된 기계 필드는 소비 코드의 판단을 관리합니다. 호환성 표시가 그 필드를 대신하지 않습니다.
 

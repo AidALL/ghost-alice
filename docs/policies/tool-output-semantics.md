@@ -1,6 +1,6 @@
 # Tool Output Semantics
 
-Language: English | [한국어](../ko/policies/tool-output-semantics.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/tool-output-semantics.md)
 
 Tool results distinguish an observation, an authenticated review, and an executed action. Human labels help readers; the documented machine fields govern consumers. Compatibility labels do not replace those fields.
 

@@ -1,6 +1,6 @@
 # Evaluator Artifact Contract
 
-언어: [🇺🇸 English](../../policies/evaluator-artifact-contract.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../policies/evaluator-artifact-contract.md) | 🇰🇷 한국어
 
 이 산출물 계약은 verification-complexity-level-3-plus 작업, 외부 에이전트 거버넌스 논리 도입, RAG·평가 도구를 통한 개선 후보에 적용됩니다. 평가 담당자는 채택 가능한 근거와 거부된 후보를 함께 보존합니다. 낮은 복잡도의 작업에서 보고서를 늘리기 위한 절차가 아닙니다.
 

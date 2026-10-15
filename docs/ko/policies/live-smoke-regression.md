@@ -1,6 +1,6 @@
 # Live Smoke Regression
 
-언어: [🇺🇸 English](../../policies/live-smoke-regression.md) | 🇰🇷 한국어
+Language: [🇺🇸 English](../../policies/live-smoke-regression.md) | 🇰🇷 한국어
 
 검증 담당자는 이 절차로 실제 에이전트 실행 환경에 같은 작은 요청을 보내 훅, 검사 절차, 권한과 완료 계약이 실제로 동작하는지 관측합니다. 단위 테스트는 훅 입력·출력과 파일 계약을 확인하며, 이 점검은 실제 세션에서 그 연결을 확인합니다.
 

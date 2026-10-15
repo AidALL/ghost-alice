@@ -1,6 +1,6 @@
 # Installer Architecture
 
-Language: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/installer-architecture.md)
+언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/installer-architecture.md)
 
 This document is the contributor bridge between the quick installation docs and the installer compatibility contracts. It does not make the whole installer trivial. It gives contributors the architecture map they need before tracing a change through the installer, hook payloads, install state, and tests.
 
