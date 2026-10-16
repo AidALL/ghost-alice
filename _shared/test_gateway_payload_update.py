@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 import context_gateway_install as gateway
+from context_gateway_model import RETIRED_MODULES
 import install_transaction as files
 import test_context_gateway_install as fixtures
 
@@ -72,6 +73,37 @@ class GatewayPayloadUpdateTests(unittest.TestCase):
         self.assertTrue(self.active)
         self.assertEqual({p.relative_to(self.shared): p.read_bytes() for p in self.shared.rglob('*') if p.is_file()}, self.original)
 
+    def own_retired_module(self, raw=b'retired gateway module'):
+        """An earlier installation owned a module that the current payload no longer ships."""
+        path = self.shared / RETIRED_MODULES[0]
+        path.write_bytes(raw)
+        receipt_path = self.args[4] / 'installation.json'
+        receipt = json.loads(receipt_path.read_bytes())
+        receipt['files'][str(path)] = gateway._digest(raw)
+        receipt_raw = json.dumps(receipt).encode()
+        receipt_path.write_bytes(receipt_raw)
+        binding_path = self.root / '.ghost-alice/context-gateway-binding.json'
+        binding = dict(json.loads(binding_path.read_bytes()), installation_digest=gateway._digest(receipt_raw))
+        binding_path.write_bytes(json.dumps(binding).encode())
+        return path
+
+    def test_update_retires_an_unchanged_module_the_payload_no_longer_ships(self):
+        retired = self.own_retired_module()
+        files.staged_copy_replace(self.source, self.shared, rollback_root=self.root / 'rollbacks')
+        self.assertEqual((self.stops, self.active), (1, True))
+        self.assertFalse(retired.exists())
+        receipt = json.loads((self.args[4] / 'installation.json').read_bytes())
+        self.assertNotIn(str(retired), receipt['files'])
+        self.assertIn(str(self.shared / 'context_gateway.py'), receipt['files'])
+
+    def test_update_preserves_a_changed_retired_module_for_review(self):
+        retired = self.own_retired_module()
+        retired.write_bytes(b'locally changed retired module')
+        with self.assertRaisesRegex(RuntimeError, 'component changed'):
+            files.staged_copy_replace(self.source, self.shared, rollback_root=self.root / 'rollbacks')
+        self.assertEqual(retired.read_bytes(), b'locally changed retired module')
+        self.assertEqual((self.stops, self.active), (0, True))
+
     def test_independent_payload_keeps_gateway_running_and_ownership_unchanged(self):
         destination = self.root / 'independent-claude'
         receipt = (self.args[4] / 'installation.json').read_bytes()
@@ -79,7 +111,7 @@ class GatewayPayloadUpdateTests(unittest.TestCase):
         self.assertEqual((self.stops, self.active), (0, True))
         self.assertEqual((self.args[4] / 'installation.json').read_bytes(), receipt)
 
-    def source_update_fixture(self, *, rename_companion=False):
+    def source_update_fixture(self, *, rename_companion=False, retire=False):
         from installer_source_update import SourceUpdate
         repository, origin = self.root / 'linked-source', self.root / 'origin.git'
         repository.mkdir()
@@ -105,6 +137,8 @@ class GatewayPayloadUpdateTests(unittest.TestCase):
         if rename_companion:
             companion = upstream / gateway.COMPANIONS[0]
             companion.rename(companion.with_name('ledger.py'))
+        elif retire:
+            (upstream / '_shared' / RETIRED_MODULES[0]).unlink()
         else:
             (upstream / '_shared/context_gateway.py').write_bytes(b'new upstream gateway')
         git(upstream, 'add', '.')
@@ -120,6 +154,15 @@ class GatewayPayloadUpdateTests(unittest.TestCase):
         gateway.coordinate_payload_replacement(operation)
         self.assertEqual((self.stops, self.active), (1, True))
         self.assertEqual((self.shared / 'context_gateway.py').read_bytes(), b'new upstream gateway')
+
+    def test_managed_source_update_retires_a_module_removed_upstream(self):
+        retired = self.own_retired_module()
+        operation = self.source_update_fixture(retire=True)
+        gateway.coordinate_payload_replacement(operation)
+        self.assertEqual((self.stops, self.active), (1, True))
+        self.assertFalse(retired.exists())
+        receipt = json.loads((self.args[4] / 'installation.json').read_bytes())
+        self.assertNotIn(str(retired), receipt['files'])
 
     def test_managed_source_update_restores_source_before_restarting_prior_service(self):
         operation = self.source_update_fixture()
