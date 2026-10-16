@@ -11,7 +11,7 @@ def context():
                   owner=dict(platform="claude", session_id="session"))
              for u, k in (("fix", "execution"), ("explain", "nonexecution"), ("backlog", "execution"))]
     criteria = [dict(work_unit_id="fix", contract_revision=1, criterion_id="AC1", id="AC1",
-                     summary="Repair the original failure", source="user-explicit", admitted=True, status="unmet")]
+                     summary="Repair the original failure", source="user-said", admitted=True, status="unmet")]
     surface = dict(intent_relation="continuation", response_mode="normal",
                    response_order="imperative-result-first-after-necessary-work", change_depth="localized",
                    focus_layer="micro", verification_complexity="level-2", boundary_contract="n/a",
@@ -41,8 +41,8 @@ class PartialEvidenceRouteTests(unittest.TestCase):
 - verification-before-completion: done
 - skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
-  - AC1: Repair the original failure [source: user-explicit]
-  - waiting: Unresolved condition [source: user-explicit]
+  - AC1: Repair the original failure [source: user-said]
+  - waiting: Unresolved condition [source: user-said]
 - claim-evidence-map:
   - claim: The targeted regression passed.
     criterion: AC1

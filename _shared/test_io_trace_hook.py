@@ -198,6 +198,42 @@ class TestIoTraceHook(unittest.TestCase):
             self.assertEqual(io_trace_hook._extract({"session_id": "own"}).get("platform"), "unknown")
             self.assertEqual(io_trace_hook._extract({"platform": "codex", "session_id": "../other"})["session"], "unknown")
 
+    def test_codex_apply_patch_records_each_patched_file(self):
+        patch = ("*** Begin Patch\n*** Update File: src/app.py\n@@\n-old\n+new\n"
+                 "*** Add File: docs/new.md\n+text\n*** Delete File: old.txt\n*** End Patch\n")
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "codex"}, clear=True):
+            row = io_trace_hook._extract({"session_id": "s-patch", "tool_name": "apply_patch",
+                                          "tool_input": {"command": patch}})
+        self.assertEqual(row["path"], "src/app.py")
+        self.assertEqual(row["pattern"], "src/app.py; docs/new.md; old.txt")
+        self.assertNotIn("op", row)
+
+    def test_codex_apply_patch_move_records_source_and_destination(self):
+        patch = "*** Begin Patch\n*** Update File: a.py\n*** Move to: b.py\n@@\n-x\n+y\n*** End Patch\n"
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "codex"}, clear=True):
+            row = io_trace_hook._extract({"session_id": "s-move", "tool_name": "apply_patch",
+                                          "tool_input": {"command": patch}})
+        self.assertEqual((row["path"], row["pattern"]), ("a.py", "a.py; b.py"))
+
+    def test_codex_apply_patch_keeps_every_path_past_200_characters(self):
+        paths = [f"src/package_{index:02d}/module_with_a_long_name_{index:02d}.py" for index in range(8)]
+        patch = "*** Begin Patch\n" + "".join(f"*** Add File: {path}\n+x\n" for path in paths) + "*** End Patch\n"
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "codex"}, clear=True):
+            row = io_trace_hook._extract({"session_id": "s-long", "tool_name": "apply_patch",
+                                          "tool_input": {"command": patch}})
+        self.assertGreater(len("; ".join(paths)), 200)
+        self.assertEqual((row["path"], row["pattern"]), (paths[0], "; ".join(paths)))
+
+    def test_empty_patch_and_notebook_edit_paths(self):
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "codex"}, clear=True):
+            empty = io_trace_hook._extract({"session_id": "s-empty", "tool_name": "apply_patch",
+                                            "tool_input": {"command": "*** Begin Patch\n*** End Patch\n"}})
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "claude"}, clear=True):
+            notebook = io_trace_hook._extract({"session_id": "s-nb", "tool_name": "NotebookEdit",
+                                               "tool_input": {"notebook_path": "/work/analysis.ipynb"}})
+        self.assertEqual((empty["path"], empty["pattern"]), ("n/a", ""))
+        self.assertEqual(notebook["path"], "/work/analysis.ipynb")
+
 
 
 if __name__ == "__main__":

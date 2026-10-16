@@ -77,7 +77,7 @@ def test_router_uses_intake_without_legacy_classifier_or_backlog_authority(tmp_p
     destination, env, binding, coordinates = fixture(tmp_path)
     ledger.record_turn(**coordinates, expected_input_event_id=binding['input_event_id'], intent_delta={
         'acceptance_criteria':[dict(id='old-local-id', summary='Historical unmet work',
-            source='user-explicit', admitted=True, status='unmet')]})
+            source='user-said', admitted=True, status='unmet')]})
     result = subprocess.run([sys.executable, '-B', str(CORE/'_shared/task_router_reminder_hook.py'),
         '--platform', 'claude', '--format', 'json', '--root', destination.ledger_root],
         input=json.dumps({'session_id':binding['session_id']}), env=env, text=True, capture_output=True, check=True)

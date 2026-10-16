@@ -19,7 +19,7 @@ VALID = """Business result: 82 hours 40 minutes.
 - verification-before-completion: done
 - skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
-  - calculation: recompute the operating time [source: user-explicit]
+  - calculation: recompute the operating time [source: user-said]
 - claim-evidence-map:
   - claim: operating time was checked
     criterion: calculation
@@ -107,7 +107,7 @@ class CompletionRecoveryTests(unittest.TestCase):
                 self.assertIsNone(self.check(VALID.replace('skill-call: verification-before-completion (this turn)', 'skill-call: '+value)))
 
     def test_multiple_declared_criteria_accept_equivalent_delimiters(self):
-        text = VALID.replace('- claim-evidence-map:', '  - boundary: Preserve the protected file. [source: user-explicit]\n- claim-evidence-map:')
+        text = VALID.replace('- claim-evidence-map:', '  - boundary: Preserve the protected file. [source: user-said]\n- claim-evidence-map:')
         for value in ('calculation,boundary', 'calculation boundary', 'calculation; boundary'):
             with self.subTest(value=value):
                 self.assertIsNone(self.check(text.replace('criterion: calculation', 'criterion: '+value)))

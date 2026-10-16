@@ -59,9 +59,8 @@ class GlobalRuleBlockTest(unittest.TestCase):
                 common.write_text('# Ghost-ALICE Common Governance\n\nOne current procedure.\n')
 
     def assert_intake_routing_authority(self, body: str) -> None:
-        self.assertIn("through `task-router`", body)
-        self.assertIn("Apply `session-intent-analyzer` when stored intent can change that selection or a semantic update is needed", body)
-        self.assertIn("skill-evolution is a report-only branch", body)
+        self.assertIn("`task-router` decides between a direct answer and work", body)
+        self.assertIn("`session-intent-analyzer`: reading or writing the intent record", body)
         self.assertIn("The native host executes tools and enforces permission", body)
         self.assertNotIn("jailbreak-detector", body)
 
@@ -70,7 +69,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
         for rel, render in (("platforms/codex/AGENTS.md", blocks.render_codex_bootstrap),
                             ("platforms/claude/CLAUDE.md", blocks.render_claude_bootstrap)):
             body = render(blocks.platform_contract_text(REPO_ROOT / rel))
-            for old, new in (("Apply `session-intent-analyzer` when stored intent can change that selection or a semantic update is needed", "Session intake requires jailbreak-detector permission before task-router"),
+            for old, new in (("`session-intent-analyzer`: reading or writing the intent record", "Session intake requires jailbreak-detector permission before task-router"),
                              ("The native host executes tools and enforces permission", "Audit records grant execution permission")):
                 with self.subTest(path=rel, change=old), self.assertRaises(AssertionError):
                     self.assert_intake_routing_authority(body.replace(old, new))
@@ -265,13 +264,12 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assert_intake_routing_authority(body)
         self.assertEqual(body.count("When hooks are unavailable"), 1)
         self.assertIn("manual", body)
-        self.assertIn("within the user's tool budget", body)
         self.assertIn("does not claim native hook execution or invent a session receipt", body)
-        self.assertIn("Repeated healthy tool calls and new input receipts alone do not require another checkpoint message", body)
-        self.assertIn("when its result changes an authority boundary, the next work decision or a required verification", body)
+        self.assertIn("Repeated healthy tool calls and new input receipts alone need no checkpoint", body)
+        self.assertIn("Before a tool call that changes an authority boundary, the next work decision or a required verification", body)
         self.assertIn("strict audit", body)
 
-    def test_claude_source_owns_rules_zero_through_twelve_and_one_hookless_fallback(self) -> None:
+    def test_claude_source_owns_the_common_contract_and_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
         ssot = (REPO_ROOT / "platforms/common-governance.md").read_text(encoding="utf-8")
         source = blocks.platform_contract_text(REPO_ROOT / "platforms/claude/CLAUDE.md")
@@ -294,12 +292,11 @@ class GlobalRuleBlockTest(unittest.TestCase):
         body = blocks.render_claude_bootstrap(source)
 
         self.assertEqual(body.count("When hooks are disabled, unavailable, or not trusted"), 1)
-        self.assertIn("within the user's tool budget", body)
         self.assertIn("does not claim native intake, routing, Stop or audit observations", body)
         self.assert_intake_routing_authority(body)
         self.assertIn("task-router", body)
         self.assertIn("verification-before-completion", body)
-        self.assertIn("[io-trace]", body)
+        self.assertIn("## io-trace Transparency Rule", body)
 
     def test_installers_route_global_rule_files_through_block_helper(self) -> None:
         sh = installer_bash_source()

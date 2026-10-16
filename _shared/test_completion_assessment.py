@@ -589,7 +589,7 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def proof(self, claim='폴더 탭의 푸터가 목록을 더 이상 가리지 않습니다.', declaration=None):
         return '\n'.join(['[completion-check]', '- acceptance-criteria:',
-            '  - AC1: ' + (declaration or self.summary) + ' [source: user-explicit]',
+            '  - AC1: ' + (declaration or self.summary) + ' [source: user-said]',
             '- claim-evidence-map:', '  - claim: ' + claim, '    criterion: AC1',
             '    evidence: ' + str(self.observation), '    verdict: pass',
             '- unverified:', '  - none', '- evidence: original observation'])

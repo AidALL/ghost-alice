@@ -61,10 +61,13 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         for phrase in ('Reuse unchanged evidence at its original time and source',
                        'A recording error does not refute the business result or authorize replay',
-                       'These are separate judgments',
-                       'Core validates record ownership, input binding and source integrity',
-                       '`verification-before-completion` owns evidence selection'):
+                       'Core authenticates records and source bindings',
+                       '`verification-before-completion` owns evidence selection, the per-claim and whole-answer judgments'):
             self.assertIn(phrase, common)
+        verification = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
+        for phrase in ('then separately judge the complete draft',
+                       'Core authenticates and stores them; code does not decide their meaning'):
+            self.assertIn(phrase, verification)
         for name in ('platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
             with self.subTest(path=name):
                 template = (ROOT / name).read_text()

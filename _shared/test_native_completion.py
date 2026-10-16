@@ -61,7 +61,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
             installed_case='publication and isolated Stop application passed',
             replay=['route-unavailable'] * 3, real_business_continuation='not observed')))
         self.proof = '\n'.join(['[completion-check]', '- acceptance-criteria:',
-            '  - AC1: Report the existing Core/AP checks and their limits. [source: user-explicit]',
+            '  - AC1: Report the existing Core/AP checks and their limits. [source: user-said]',
             '- claim-evidence-map:', '  - claim: Existing tests cover recording, not complete business continuation.',
             '    criterion: AC1', '    evidence: ' + str(self.observation), '    verdict: pass',
             '- unverified:', '  - none', '- evidence: ' + str(self.observation)])
@@ -750,7 +750,7 @@ class NativeProofBindingTests(unittest.TestCase):
         route['selected_criteria'].append(dict(work_unit_id='first', contract_revision=2, criterion_id='AC2'))
         self.owner.fixture.record(route)
         self.proof = self.proof.replace('- claim-evidence-map:',
-            '  - AC2: Retain the independent check. [source: user-explicit]\n- claim-evidence-map:')
+            '  - AC2: Retain the independent check. [source: user-said]\n- claim-evidence-map:')
         self.proof = self.proof.replace('- unverified:',
             '  - claim: The independent check passed.\n    criterion: AC2\n'
             '    evidence: ' + str(independent) + '\n    verdict: pass\n- unverified:')

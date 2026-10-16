@@ -38,8 +38,8 @@ The change is complete and all tests pass.
 - verification-before-completion: done
 - skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
-  - C1: validator enforces the completion contract [source: user-explicit]
-  - C2: stdlib only [source: user-explicit]
+  - C1: validator enforces the completion contract [source: user-said]
+  - C2: stdlib only [source: user-said]
 - claim-evidence-map:
   - claim: the validator enforces the completion contract
     criterion: C1
@@ -247,8 +247,8 @@ class ValidateCompletionResponseTest(unittest.TestCase):
     def test_compact_form_without_acceptance_criteria_is_accepted(self) -> None:
         # Compact form: no acceptance-criteria enumeration, but the claim-evidence-map still binds each claim to evidence and a verdict.
         text = VALID_TEXT.replace(
-            "  - C1: validator enforces the completion contract [source: user-explicit]\n"
-            "  - C2: stdlib only [source: user-explicit]\n",
+            "  - C1: validator enforces the completion contract [source: user-said]\n"
+            "  - C2: stdlib only [source: user-said]\n",
             "  - <criterion-id>: <placeholder>\n",
         )
         reason = MOD.validate_completion_text(text)

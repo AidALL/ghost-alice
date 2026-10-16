@@ -13,7 +13,7 @@ class CriterionInvalidationTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
         self.coords=dict(root=self.root,platform='codex',session_id='owner')
-        self.rows=[dict(id='same',summary='Output '+u,source='user-explicit',admitted=True,
+        self.rows=[dict(id='same',summary='Output '+u,source='user-said',admitted=True,
             work_unit_id=u,contract_revision=1) for u in ('one','two')]
         ledger.record_turn(**self.coords,raw_user_input='Verify owned outputs',intent_delta={'acceptance_criteria':self.rows})
         self.event=ledger.read_session_state(**self.coords)['latest_input_event_id'];self.route()
@@ -52,7 +52,7 @@ class CriterionInvalidationTests(unittest.TestCase):
         event=[e for e in self.events() if e['event']=='acceptance-criterion-evidence-invalidated'][0]
         self.assertEqual(event['prior_completion_check_digest'],'a'*64)
         self.assertEqual(event['prior_met_at'],before['acceptance_criteria'][1]['met_at'])
-        self.assertEqual(event['criterion_source'],'user-explicit')
+        self.assertEqual(event['criterion_source'],'user-said')
         self.assertNotIn('artifact',event);self.assertNotIn('proof',event)
 
     def test_duplicate_same_invalidation_is_noop_and_newer_proof_is_not_undone(self):

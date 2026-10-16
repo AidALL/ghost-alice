@@ -30,7 +30,7 @@ For a full cross-session backlog request, the current-session assistant runs `py
 
 ## Conduct feedback
 
-Session-intent-analyzer owns capture and provenance of corrections. The report reads `conduct_feedback` as a first-class signal. The aggregator groups entries with `pattern_class` by failure family and includes their member IDs; unclassified entries remain grouped by ID. The stored occurrence count preserves repeated supported corrections within a session. A user-explicit correction or recurring pattern receives high priority, but priority does not authorize implementation.
+Session-intent-analyzer owns capture and provenance of corrections. The report reads `conduct_feedback` as a first-class signal. The aggregator groups entries with `pattern_class` by failure family and includes their member IDs; unclassified entries remain grouped by ID. The stored occurrence count preserves repeated supported corrections within a session. A user-said correction or recurring pattern receives high priority, but priority does not authorize implementation.
 
 The current-session assistant names the contract owner that could prevent the behavior: for example, boundary-contract for scope, using-coding-convention for execution discipline, and verification-before-completion for false completion. It assesses behavior and contract impact before deciding whether a proposed change is justified.
 

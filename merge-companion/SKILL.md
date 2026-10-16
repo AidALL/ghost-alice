@@ -14,7 +14,7 @@ The current-session assistant uses this lifecycle workflow to protect user chang
 
 The current-session assistant applies this skill when the current-platform pending-merge check finds an undecided entry and the user requests its review or selected work can modify, replace or install an affected skill. Reuse the result supplied by the native hook; perform a missing manual precheck before affected changes. A bounded read-only lookup unrelated to those changes does not load this procedure, inspect backups or request a merge decision. Other skills must not invoke it speculatively. At least one current-platform entry must have `decided=false`. A missing manifest, empty entries or JSON parse failure passes silently.
 
-The SessionStart and UserPromptSubmit hooks, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and SessionStart failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. The common First-Entry Contract owns precheck timing.
+The session-start and input hooks, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and session-start failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. An explicit user defer permits other authorized work and leaves the backups undecided.
 
 ## Review and apply
 
@@ -35,6 +35,6 @@ The current-session assistant marks an entry merged or discarded only after the 
 
 ## Audit and warnings
 
-The current-session assistant retains manifest operations, backup reads/copies, staged writes and confirmation evidence internally. PostToolUse audit stays active. It shows a concise trace or locator when requested or decision-relevant; this skill does not require a printed io-trace block.
+The current-session assistant retains manifest operations, backup reads/copies, staged writes and confirmation evidence internally. After-tool audit stays active.
 
 The current-session assistant must not overwrite live files before required approval, merge the three choices into one default, bypass adversarial verification or propagate without authority. Already supplied authorization applies to its actual scope and does not require redundant confirmation.

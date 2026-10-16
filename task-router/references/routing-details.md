@@ -1,6 +1,6 @@
 # Routing Details
 
-The current-session assistant uses this reference when terminal-route selection or boundary reconciliation is uncertain. `../SKILL.md` owns the route procedure and schemas.
+The current-session assistant uses this reference when boundary reconciliation is uncertain or a supplied phrase leaves unclear whether it calls for a direct answer, a confirmation question or work. `../SKILL.md` owns the route procedure and schemas.
 
 ## Boundary reconciliation
 
@@ -8,15 +8,15 @@ The current-session assistant compares current human instructions and supplied e
 
 If only conflicting snapshot fields remain, the current-session assistant leaves the conflict unresolved and asks for the exact contested decision. It must not call one field obsolete without evidence. Missing task files do not resolve authority. Existing authority that already resolves the conflict requires no new approval.
 
-## Terminal route conditions
+## Direct answer and confirmation conditions
 
-The common First-Entry Contract owns terminal classification and its no-tool actions. Use the examples below when a supplied phrase leaves the intended work uncertain.
+The common contract's Work Selection section carries task-router's direct-answer rule and its no-tool action; its Session Intent section owns confirmation questions. Use the examples below when a supplied phrase leaves the intended work uncertain.
 
 A general why/how premise remains an explanation topic unless the user identifies a workspace, supplies workspace evidence, requests exact diagnosis, or the conversation establishes the inspected referent. First-person wording, past tense, technical-state vocabulary and an open project do not independently establish inspection authority. An established referent permits inspection but does not require it when retained evidence answers the question.
 
-## Terminal actions and visibility
+## Direct-answer actions and visibility
 
-Follow the common First-Entry Contract for the selected terminal answer. For normal work, task-router owns route registration and verification-before-completion owns closure claims; a visibility instruction does not replace either workflow.
+Follow the common contract's Work Selection section for a direct answer and its Session Intent section for a confirmation question. For work, task-router owns route registration and verification-before-completion owns closure claims; a visibility instruction does not replace either workflow.
 
 ## Examples
 

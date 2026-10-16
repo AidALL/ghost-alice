@@ -35,7 +35,7 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
   "acceptance_criteria": [{
     "id": "AC1",
     "summary": "verifiable completion criterion",
-    "source": "user-explicit"
+    "source": "user-said"
   }],
   "decisions": [],
   "risk_flags": [],
@@ -63,7 +63,7 @@ Optional pattern_class groups recurring failures across differently named entrie
 
 `redundant-verification | missed-reverification | wrong-copy-evidence | unsupported-claim | restatement-loop | unrequested-content | under-delivery | unnecessary-reapproval | scope-widening | scope-narrowing | premise-mismatch-without-stop | governance-record-error | domain-rule`.
 
-An update omitting pattern_class preserves the stored class. Unknown supplied source or class rejects the entire write with allowed values; absent source defaults to user-explicit, absent class stays unclassified, and stored entries are not revalidated. That parser default does not establish provenance: the current-session assistant follows the correction evidence rules in `../SKILL.md`.
+An update omitting pattern_class preserves the stored class. Unknown supplied source or class rejects the entire write with allowed values; absent source defaults to user-said, absent class stays unclassified, and stored entries are not revalidated. The ledger stores a supplied source label as given and never rewrites a stored one. A legacy `user-explicit` or `inferred` label stays valid; admission, route validation and skill-evolution read it as `user-said` or `interpreted-as`. That parser default does not establish provenance: the current-session assistant follows the correction evidence rules in `../SKILL.md`.
 
 The snapshot returns detached active non-superseded decision objects, latest_scope or {} when absent/malformed, and decision_count. It returns the current constraints, non-goals and model_security_decision. An explicit list update replaces that field; an omitted field remains unchanged. The current-session assistant must reconcile these facts with human instructions; scope presence, timestamps, admission and previous edits do not independently establish authorization or restriction chronology.
 
@@ -142,7 +142,7 @@ A new input marks the retained route stale and preserves stable work units and p
 
 The optional response_purpose is `execution | explanation | approval-wait | partial | completion`; legacy v1 defaults to execution. Changing purpose neither revises the contract nor marks a criterion met. An actual completion/partial control marker or registered purpose `completion` declares a completion submission; prose and selected execution work alone do not. Explanatory, waiting or partial responses can retain continuing selected work without new publication. The current-session assistant explicitly routes and verifies new completion claims under the owning workflow.
 
-A genuinely no-work terminal answer follows the trusted supplied procedure without agent-side ledger access or route registration. Hook observation still stales the prior projection, and semantic persistence waits for the next authorized normal route. An already supplied internal host handoff may carry a terminal projection; without it the projection remains absent. These restrictions do not prohibit authorized Core recording repair on a normal route.
+A direct answer or a confirmation question follows the common contract without agent-side ledger access or route registration. Hook observation still stales the prior projection, and semantic persistence waits for the next authorized normal route. An already supplied internal host handoff may carry a terminal projection; without it the projection remains absent. These restrictions do not prohibit authorized Core recording repair on a normal route.
 
 The work_units registry freezes contracts by `(work_unit_id, contract_revision)`. Revision is an integer from one through `2**53 - 1`, excluding booleans. Each unit declares kind execution/nonexecution, boolean admitted and exact owner platform/session. Stored criteria freeze ID, summary and source. Same-revision kind, owner or definition changes fail; a newer revision is required. Admission may change with authority without erasing business proof. Selection cannot revive an older revision.
 

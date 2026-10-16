@@ -83,7 +83,7 @@ class TransactionTests(unittest.TestCase):
 
     def setup_criterion(self):
         self.write(intent_delta={"acceptance_criteria": [
-            {"id": "report", "summary": "Validate revision one", "source": "user-explicit"}]})
+            {"id": "report", "summary": "Validate revision one", "source": "user-said"}]})
 
     def mark(self, **kwargs):
         return self.ledger.mark_acceptance_criterion_met(
@@ -251,7 +251,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
     def test_failed_event_insert_rolls_back_state_and_retry_does_not_duplicate_feedback(self):
         self.write()
         before = self.state(), self.events()
-        delta = {"conduct_feedback": [{"id": "scope", "summary": "Preserve the approved scope", "source": "user-explicit"}]}
+        delta = {"conduct_feedback": [{"id": "scope", "summary": "Preserve the approved scope", "source": "user-said"}]}
         self.fail_trigger("fail_event", "BEFORE INSERT ON intent_events")
         with self.assertRaisesRegex(sqlite3.IntegrityError, "injected storage failure"):
             self.write(intent_delta=delta, expected_revision=1)

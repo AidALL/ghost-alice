@@ -49,10 +49,9 @@ Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one pa
 - `tool/runtime errors`: log에 tool router error, hook failure, traceback, runtime panic, cache initialization error가 없습니다.
 - `harness validity`: prompt가 request를 만족하는 데 필요한 read-only tool action을 허용합니다. 모순된 prompt는 `pass`가 아니라 `invalid-harness`입니다.
 - `task-router`: first tool action 전에 routing이 보입니다.
-- `session-intent-analyzer`: raw prompt 저장 없이 intent delta 또는 hook observation이 기록됩니다.
+- `session-intent-analyzer`: 새 해석이나 바뀐 해석이 있는 작업은 raw prompt 저장 없이 첫 tool 호출 전에 `interpreted-as: `를 기록합니다.
 - `boundary-contract`: 현재 routing-surface의 결정을 따릅니다. 읽기 전용 검증에도 계약이 필요할 수 있으며 해당 경로가 요구하지 않을 때만 `n/a`를 기록합니다.
-- conditional `failure-mode-if-wrong`: side effect, forced signal, mismatch 또는 의미 있는 사용자 결정에 필요할 때 표시합니다. routine read-only checkpoint에는 `intent`와 `why`가 필요합니다.
-- conditional `recovery-action`: mismatch, scope reopen, external side effect, hard-to-recover action에 concrete next step이 필요할 때만 나타납니다.
+- `tool checkpoint`: 공통 계약의 io-trace Transparency Rule을 따릅니다. 일상적인 읽기 전용 호출에는 체크포인트가 필요하지 않습니다.
 - `skill activation permission`: Claude Code가 Core 검사 스킬만 담은 축소된 허용 목록 때문에 막히지 않습니다.
 - `verification-before-completion`: 워크플로가 각 완료 주장을 해당 근거와 연결하며 변경 없는 유효한 근거는 원래 출처와 시각을 유지합니다.
 - `internal audit`: 화면의 `[io-trace]`를 요구하지 않고도 도구 접근 기록을 감사할 수 있습니다.
@@ -81,8 +80,7 @@ input_case: README first 10 lines
 observed:
   task-router:
   session-intent-analyzer:
-  failure-mode-if-wrong:
-  recovery-action:
+  tool checkpoint:
   skill activation permission:
   verification-before-completion:
   internal-audit:

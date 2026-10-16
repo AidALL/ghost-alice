@@ -17,7 +17,7 @@ import completion_check_validator as validator
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 BODY = """[completion-check]
 - acceptance-criteria:
-  - c1: recompute the operating time [source: user-explicit]
+  - c1: recompute the operating time [source: user-said]
 - claim-evidence-map:
   - claim: operating time was checked
     criterion: c1
@@ -146,7 +146,7 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
         fixtures.ledger.record_turn(**coords, raw_user_input=input_text, source='hook')
         event = fixtures.ledger.read_session_state(**coords)['latest_input_event_id']
         ids = validator.extract_acceptance_criteria_ids(proof) if proof else ['c1']
-        criteria = [dict(id=key, summary='Synthetic criterion ' + key, source='user-explicit',
+        criteria = [dict(id=key, summary='Synthetic criterion ' + key, source='user-said',
                         admitted=True, work_unit_id='first', contract_revision=1) for key in ids]
         fixtures.ledger.record_turn(**coords, expected_input_event_id=event,
             intent_delta={'acceptance_criteria': criteria})

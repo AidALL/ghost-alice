@@ -142,7 +142,7 @@ def _criterion(value, *, resolved=False):
     key = (*_unit_key(value), _identifier(value["id"], "criterion id"))
     if not isinstance(value["summary"], str) or not value["summary"].strip():
         raise RouteSchemaError("owned criterion summary must be a nonempty string")
-    if not isinstance(value["source"], str) or value["source"] not in ledger.ACCEPTANCE_CRITERIA_SOURCES:
+    if not isinstance(value["source"], str) or ledger.canonical_source(value["source"], "") not in ledger.ACCEPTANCE_CRITERIA_SOURCES:
         raise RouteSchemaError("owned criterion source is invalid")
     if not isinstance(value["status"], str) or value["status"] not in ledger.ACCEPTANCE_CRITERIA_STATUSES:
         raise RouteSchemaError("owned criterion status is invalid")

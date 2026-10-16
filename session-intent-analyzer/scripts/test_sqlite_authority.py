@@ -149,7 +149,7 @@ class SQLiteAuthorityTests(unittest.TestCase):
     def test_reporting_consumers_read_without_exports(self):
         old = self.seed()
         ledger.record_turn(**self.args, expected_input_event_id=old["latest_input_event_id"], intent_delta={
-            "current_goal": "current DB goal", "conduct_feedback": [{"id": "feedback", "source": "user-explicit",
+            "current_goal": "current DB goal", "conduct_feedback": [{"id": "feedback", "source": "user-said",
             "corrective_rule": "Respect the revised condition", "status": "open"}]})
         root = Path(__file__).resolve().parents[2]
         def load(relative):

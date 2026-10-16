@@ -230,7 +230,7 @@ def _write_session_intent_preflight(
         {
             "id": "test-semantic-delta",
             "summary": "semantic delta is recorded for this turn",
-            "source": "inferred",
+            "source": "interpreted-as",
         }
     ] if semantic_delta else []
     state_path.write_text(
@@ -721,7 +721,7 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn("after exact session-intent intake", install_hooks.HOOK_INTERNAL)
         self.assertIn("follows task-router", install_hooks.HOOK_INTERNAL)
         self.assertIn("register the Core response-route", install_hooks.HOOK_INTERNAL)
-        self.assertIn("common governance First-Entry Contract", install_hooks.HOOK_INTERNAL)
+        self.assertIn("common contract's Work Selection section", install_hooks.HOOK_INTERNAL)
         self.assertNotIn("downstream-gates.json", install_hooks.HOOK_INTERNAL)
         self.assertNotIn("[tool-checkpoint]", install_hooks.HOOK_INTERNAL)
 
@@ -916,7 +916,7 @@ class TestMessageLanguage(unittest.TestCase):
                                     "- verification-before-completion: done\n"
                                     "- skill-call: verification-before-completion (this turn)\n"
                                     "- acceptance-criteria:\n"
-                                    "  - c1: cite two papers [source: user-explicit]\n"
+                                    "  - c1: cite two papers [source: user-said]\n"
                                     "- claim-evidence-map:\n"
                                     "  - claim: two papers cited\n"
                                     "    criterion: c1\n"
@@ -1189,11 +1189,11 @@ class TestMessageLanguage(unittest.TestCase):
     def test_tool_checkpoint_runtime_hook_uses_concise_enforced_instruction(self):
         """The hook points to one field owner and still runs through its host command."""
         instruction = install_hooks.TOOL_CHECKPOINT_INTERNAL
-        self.assertIn('common governance rule 9', instruction)
+        self.assertIn("common contract's io-trace Transparency Rule", instruction)
         self.assertIn('Native checks and strict audit run independently', instruction)
         self.assertNotIn('rejected-alternatives', instruction)
         contract = (Path(__file__).resolve().parents[1] / 'platforms/common-governance.md').read_text()
-        for field in ('intent', 'why', 'hook-stage: PreToolUse', 'contract-ref', 'contract-check'):
+        for field in ('intent', 'why', 'stage: before-tool', 'contract-ref', 'contract-check'):
             self.assertIn(field, contract)
         result = _run_hook_command(install_hooks.TOOL_CHECKPOINT_COMMAND, env=_strict_hook_env())
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -5943,7 +5943,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                     "- verification-before-completion: done\n"
                     "- skill-call: verification-before-completion (this turn)\n"
                     "- acceptance-criteria:\n"
-                    "  - c1: fixed formatting [source: user-explicit]\n"
+                    "  - c1: fixed formatting [source: user-said]\n"
                     "- claim-evidence-map:\n"
                     "  - claim: fixed formatting\n"
                     "    criterion: c1\n"

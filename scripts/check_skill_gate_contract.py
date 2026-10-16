@@ -74,12 +74,11 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                           'using-coding-convention',
                           'boundary-contract',
                           'response-route',
-                          'First-Entry Contract',
+                          'systematic-debugging',
+                          'Work Selection section',
                           'verification-before-completion',
                           'references/routing-details.md',
-                          'ledger-schema.md#core-response-projection',
-                          'direct-response',
-                          'clarification-only'],
+                          'ledger-schema.md#core-response-projection'],
  'boundary-contract/SKILL.md': ['name: boundary-contract',
                                 '## Authority and renewal',
                                 '[boundary-contract]',
@@ -101,7 +100,7 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                               'tool-checkpoint',
                               'task_router_reminder_hook.py'],
  '_shared/ghost-alice-hook.mjs': ['PreToolUse', 'readSessionIntentSnapshot', 'taskRouterReleaseMessage'],
- '_shared/reminder_texts.json': ['tool-checkpoint', 'PreToolUse'],
+ '_shared/reminder_texts.json': ['tool-checkpoint'],
  'coding-convention/using-coding-convention/SKILL.md': ['verification-before-completion',
                                                         'boundary-contract',
                                                         'systematic-debugging',
@@ -116,7 +115,9 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                                                'incident-accounting-and-continuation'],
  'session-intent-analyzer/references/ledger-schema.md': ['acceptance_criteria',
                                                          'Core Response Projection',
-                                                         'record_response_route'],
+                                                         'record_response_route',
+                                                         'direct-response',
+                                                         'clarification-only'],
  'session-intent-analyzer/scripts/session_intent_ledger.py': ['acceptance_criteria',
                                                               'consumer_snapshot',
                                                               'record_response_route'],
@@ -124,15 +125,15 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                                'python scripts/run_installer_compat_tests.py --group '
                                                'skill-gate-contract'],
  'platforms/common-governance.md': ['## Operating Model',
-                                    '## First-Entry Contract',
+                                    '## Session Intent',
+                                    '## Work Selection',
+                                    '`user-said: `',
+                                    '`interpreted-as: `',
+                                    '`[focus: ',
                                     'session-intent-analyzer',
                                     'task-router',
-                                    'boundary-contract',
-                                    'systematic-debugging',
                                     'verification-before-completion',
-                                    'clarification-only',
-                                    'direct-response',
-                                    'skill-evolution is a report-only branch']}
+                                    'merge-companion']}
 
 
 @dataclass(frozen=True)
@@ -148,9 +149,9 @@ class OwnerSection:
 # Callers name the owning procedure; only that section owns its detailed fields.
 OWNER_SECTIONS = (
     OwnerSection(
-        "_shared/reminder_texts.json", "common governance rule 9", "platforms/common-governance.md",
-        "9. io-trace Transparency Rule",
-        ("intent", "why", "hook-stage: PreToolUse", "contract-ref", "contract-check"),
+        "_shared/reminder_texts.json", "io-trace Transparency Rule", "platforms/common-governance.md",
+        "io-trace Transparency Rule",
+        ("intent", "why", "stage: before-tool", "contract-ref", "contract-check"),
         message_key="tool-checkpoint",
     ),
     OwnerSection(
@@ -189,6 +190,19 @@ LEGACY_TOOL_CHECKPOINT_TOKENS = (
     "Action" + " gate",
     "Action" + "-Gate",
     "[action" + "-gate]",
+)
+
+# Removed contract wording must not return to prompt or policy text.
+REMOVED_CONTRACT_TOKENS = (
+    "First" + "-Entry Contract",
+    "hook" + "-stage",
+    "retry" + " checkpoint",
+    "printed io" + "-trace is optional",
+    "Printed `[io" + "-trace]` is optional",
+    "counts against" + " the user's tool limit",
+    "or count includes" + " governance calls",
+    "tool-count limit" + " includes",
+    "[gate" + "-state]",
 )
 
 SCAN_EXCLUDED_DIRS = {
@@ -251,7 +265,7 @@ FORBIDDEN_PATTERNS = {
     ],
     "_shared/install_hooks.py": [
         (
-            r"run merge-companion before normal work|before task-router or session-intent semantic work",
+            r"run merge-companion before normal work|merge-companion before other work|before task-router or session-intent semantic work",
             "pending-merge hard-block wording is forbidden",
         ),
         (
@@ -463,17 +477,40 @@ def _check_legacy_tool_checkpoint_names(root: Path) -> list[ContractIssue]:
     return issues
 
 
+def _is_prompt_or_policy_text(rel: Path) -> bool:
+    parts = rel.parts
+    return (parts[:1] == ("platforms",) or parts[:2] == ("docs", "policies") or parts[:3] == ("docs", "ko", "policies")
+            or rel.name == "SKILL.md" or (len(parts) > 1 and parts[-2] == "references" and rel.suffix == ".md")
+            or rel.as_posix() == "_shared/reminder_texts.json")
+
+
+def _check_removed_contract_wording(root: Path) -> list[ContractIssue]:
+    issues: list[ContractIssue] = []
+    for path in _iter_contract_text_files(root):
+        rel = path.relative_to(root)
+        if not _is_prompt_or_policy_text(rel):
+            continue
+        try:
+            text = _read_text(path)
+        except UnicodeDecodeError:
+            continue
+        for token in REMOVED_CONTRACT_TOKENS:
+            if token in text:
+                issues.append(ContractIssue("ERROR", str(rel), f"removed contract wording is forbidden: {token}"))
+    return issues
+
+
 def _check_claude_first_turn_contract(root: Path) -> list[ContractIssue]:
     path = root / "platforms/claude/CLAUDE.md"
     if not path.is_file():
         return []  # The required-file check reports this separately.
     common = root / "platforms/common-governance.md"
+    common_text = common.read_text(encoding="utf-8") if common.is_file() else ""
     if (path.read_text(encoding="utf-8").count("{{COMMON_GOVERNANCE}}") != 1
-            or not common.is_file()
-            or not _owner_section(common.read_text(encoding="utf-8"), "First-Entry Contract")):
+            or not all(_owner_section(common_text, heading) for heading in ("Session Intent", "Work Selection"))):
         return [ContractIssue(
             "ERROR", "platforms/claude/CLAUDE.md",
-            "Claude bootstrap must reference one common governance First-Entry Contract",
+            "Claude bootstrap must reference one common governance contract with Session Intent and Work Selection sections",
         )]
     return []
 
@@ -609,7 +646,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
     terminal_routes = contract.get("terminal_routes", {})
     clarification_route = terminal_routes.get("clarification-only", {}) if isinstance(terminal_routes, dict) else {}
     clarification_contract = {
-        "owner": "task-router",
+        "owner": "session-intent",
         "manual_pending_merge": "defer-until-next-actionable-turn",
         "downstream_work": "none",
         "user_surface": "minimum-decisive-information-only",
@@ -739,6 +776,7 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
     issues.extend(_check_gate_state_order(root))
     issues.extend(_check_claude_first_turn_contract(root))
     issues.extend(_check_legacy_tool_checkpoint_names(root))
+    issues.extend(_check_removed_contract_wording(root))
 
     return issues
 

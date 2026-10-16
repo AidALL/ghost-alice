@@ -8,13 +8,19 @@ ROOT = Path(__file__).resolve().parents[2]
 class OperatingRuleContractTest(unittest.TestCase):
     def test_terminal_routes_preserve_authority_and_avoid_governance_work(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
-        first = common.split('## First-Entry Contract\n', 1)[1].split('\n## ', 1)[0]
-        for term in ('direct-response', 'clarification-only', 'answer without reading skills',
-                     'does not cancel authorized work', 'never substitute another session'):
-            self.assertIn(term, first)
+        intent = common.split('## Session Intent\n', 1)[1].split('\n## ', 1)[0]
+        selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]
+        for term in ('does not cancel authorized work',
+                     'When your interpretation changes the next action',
+                     'ask the user before that action'):
+            self.assertIn(term, intent)
+        for term in ('`task-router` decides between a direct answer and work',
+                     'A direct answer reads no skills, accesses no ledger, registers no route'):
+            self.assertIn(term, selection)
+        self.assertIn('Do not substitute another session', common)
         self.assertIn('stored result or available tool grants no authority', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
-        self.assertIn('First-Entry Contract', router)
+        self.assertIn('Work Selection section', router)
         self.assertIn('register the Core response-route using the current receipt', router)
 
     def test_reuse_instruction_contract_stays_at_its_owner(self):
@@ -28,14 +34,24 @@ class OperatingRuleContractTest(unittest.TestCase):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         for term in ('micro', 'meso', 'macro', 'meta', 'Verification depth is a separate choice'):
             self.assertIn(term, common)
-        self.assertIn('sufficient correction depth', common)
-        self.assertIn('systematic-debugging', common)
+        router = (ROOT / 'task-router/SKILL.md').read_text()
+        self.assertIn('sufficient correction depth', router)
+        self.assertIn('systematic-debugging', router)
+
+    def test_focus_changes_are_shown_with_a_reason(self):
+        common = (ROOT / 'platforms/common-governance.md').read_text()
+        operating = common.split('## Operating Model\n', 1)[1].split('\n## ', 1)[0]
+        for phrase in ('the focus of the next judgment', 'When the focus differs from the last one shown',
+                       '`[focus: micro -> meta]`', 'with a one-phrase reason'):
+            self.assertIn(phrase, operating)
+        selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('other than a focus line', selection)
 
     def test_visibility_does_not_disable_audit_or_execution(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         self.assertIn('strict audit independently of displayed guidance', common)
         self.assertIn('Do not print full audit records', common)
-        self.assertIn('Printed `[io-trace]` is optional and never establishes proof', common)
+        self.assertIn('A displayed trace does not establish proof', common)
 
     def test_external_and_evaluator_details_are_reachable_from_verification(self):
         skill = ROOT / 'coding-convention/verification-before-completion/SKILL.md'

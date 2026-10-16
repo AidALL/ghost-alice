@@ -15,7 +15,7 @@ Current and prior human instructions supply the authorization envelope: objectiv
 
 The current-session assistant distinguishes a human-owned boundary from a narrower agent-declared implementation limit. When a necessary action exceeds only the narrower implementation limit, the current-session assistant renews that contract inside existing authority and continues. When the action exceeds a human-owned boundary or requires a missing decisive input, the current-session assistant asks for that exact decision before the dependent action. A grant changes only its stated scope; denial parks that branch; no answer leaves it waiting. Other eligible authorized work continues.
 
-An explicit command/tool allowlist or count includes governance calls. The current-session assistant must not label the cap business-only or exempt bookkeeping. If required verification or Ghost-ALICE Autopilot recording cannot fit, the requirement remains unresolved. An absent explicit resource cap is not a user-approved limit invented by the current-session assistant.
+An absent explicit resource cap is not a user-approved limit invented by the current-session assistant.
 
 The current-session assistant preserves the terminal objective separately from investigative or implementation means. It must not narrow a committed full surface to selected examples, or replace the requested result with a method. When the request covers every member of a set, the coverage criterion enumerates the set or its count. Partial coverage remains partial status.
 
@@ -37,9 +37,9 @@ Human explanations follow the current user language. Keep field names in English
 - prohibited-surface:
   - <prohibited path, layer or action>
 - locked-decisions:
-  - <decision> [source: user-explicit | inferred | previous-tool | system-doc | unknown]
+  - <decision> [source: user-said | interpreted-as | previous-tool | system-doc | unknown]
 - acceptance-criteria:
-  - <criterion-id>: <verifiable outcome> [source: user-explicit | inferred | previous-tool | system-doc]
+  - <criterion-id>: <verifiable outcome> [source: user-said | interpreted-as | previous-tool | system-doc]
 - open-questions:
   - <unresolved question>
 - test-purpose: none | smoke | regression | contract | domain-rule | visual | integration
@@ -65,13 +65,13 @@ A phase change preserves the original acceptance criteria. If verification revea
 
 The current-session assistant assigns a source to each atomic proposition and splits statements with different origins.
 
-- `user-explicit`: the human directly supplied the instruction or approval.
-- `inferred`: the current-session assistant selected a conservative assumption for the current phase.
+- `user-said`: the human directly supplied the instruction or approval.
+- `interpreted-as`: the current-session assistant selected a conservative interpretation for the current phase.
 - `previous-tool`: a tool or runtime supplied the fact/control, including generated text transported with a user role. A generated approval digest is not human approval.
 - `system-doc`: AGENTS.md, a skill or a policy requires the condition.
 - `unknown`: provenance is unresolved; the current-session assistant cannot use this as an execution-phase lock.
 
-For example, “preserve protected.txt as requested” may be user-explicit, while “preserve the hook approval-generation value” is previous-tool. Their shared transport does not merge their authority.
+For example, “preserve protected.txt as requested” may be user-said, while “preserve the hook approval-generation value” is previous-tool. Their shared transport does not merge their authority.
 
 ## Tool checkpoint
 
@@ -101,6 +101,6 @@ The helper observes regular files at one point in time; it is neither an atomic 
 
 ## Failure modes and proof
 
-The current-session assistant must not label an inference user-explicit, perform implementation under discovery, omit coverage from a full-set objective, or report a successful subset as the whole outcome. Peripheral checks support only criteria they actually measure.
+The current-session assistant must not label an interpretation user-said, perform implementation under discovery, omit coverage from a full-set objective, or report a successful subset as the whole outcome. Peripheral checks support only criteria they actually measure.
 
-The current-session assistant following the selected procedure executes the action and judges its returned evidence against the criteria. For incident-based repair limits, discretionary checks, evidence source/time reuse and Ghost-ALICE Autopilot publication/native completion, apply `../coding-convention/verification-before-completion/SKILL.md`. The incident workflow in `../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation` preserves cumulative attempts and user resources across agents and handoffs. Contract renewal does not reset those limits or require replay of completed business work.
+The current-session assistant following the selected procedure executes the action and judges its returned evidence against the criteria. For discretionary checks, evidence source/time reuse and Ghost-ALICE Autopilot publication/native completion, apply `../coding-convention/verification-before-completion/SKILL.md`. The incident workflow in `../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation` preserves cumulative attempts and user resources across agents and handoffs. Contract renewal does not reset those limits or require replay of completed business work.

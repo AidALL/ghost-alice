@@ -49,17 +49,18 @@ PLATFORM_PORTS = [
 REQUIRED_SSOT_PHRASES = [
     ("Operating Model section", r"(?m)^##\s+Operating Model\s*$"),
     ("task-router name reference", r"task-router"),
-    ("First-Entry Contract section", r"(?m)^##\s+First-Entry Contract\s*$"),
+    ("Session Intent section", r"(?m)^##\s+Session Intent\s*$"),
+    ("Work Selection section", r"(?m)^##\s+Work Selection\s*$"),
 ]
 
 REQUIRED_TASK_ROUTER_PHRASES = [
-    ("First-Entry Contract owner reference", r"First-Entry Contract"),
+    ("Work Selection owner reference", r"Work Selection section"),
     ("response-route record", r"response-route"),
     ("meta:\\* calls", r"meta:\*"),
 ]
 
 REQUIRED_USING_CC_PHRASES = [
-    ("First-Entry Contract owner reference", r"First-Entry Contract"),
+    ("Session Intent and Work Selection owner reference", r"Session Intent and Work Selection sections"),
     ("verification owner reference", r"verification-before-completion"),
 ]
 
@@ -79,9 +80,8 @@ REQUIRED_OWNER_REFERENCES = {
 NAMED_PROCEDURE_OWNERS = {
     'session-intent-analyzer': 'session-intent-analyzer/SKILL.md',
     'task-router': 'task-router/SKILL.md',
-    'boundary-contract': 'boundary-contract/SKILL.md',
-    'systematic-debugging': 'coding-convention/systematic-debugging/SKILL.md',
     'verification-before-completion': 'coding-convention/verification-before-completion/SKILL.md',
+    'merge-companion': 'merge-companion/SKILL.md',
 }
 
 
@@ -227,14 +227,16 @@ def check_platform_ports(repo: Path, findings: list[Finding]) -> None:
             findings.append(Finding("ERROR", "platform-port", "common-source", str(error)))
             continue
 
-        # The rule 0 Task Routing Gate keeps a keyword match as a strong signal.
-        if not re.search(r"(?m)^##\s+First-Entry Contract\s*$", text) and not re.search(r"###\s*0\.\s*Task\s*Routing\s*Gate", text):
+        # The composed platform contract carries the common input entry sections.
+        missing = [name for name in ("Session Intent", "Work Selection")
+                   if not re.search(rf"(?m)^##\s+{name}\s*$", text)]
+        if missing:
             findings.append(
                 Finding(
                     "ERROR",
                     "platform-port",
-                    "rule-0",
-                    f"{rel} is missing the rule 0 Task Routing Gate section. Platform sessions lack that gate.",
+                    "entry-sections",
+                    f"{rel} is missing the common {' and '.join(missing)} section. Platform sessions lack the input entry rules.",
                 )
             )
         if "task-router" not in text:

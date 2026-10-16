@@ -27,6 +27,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
             "session-intent-analyzer/references/ledger-schema.md",
             "coding-convention/systematic-debugging/SKILL.md",
             "coding-convention/verification-before-completion/SKILL.md",
+            "merge-companion/SKILL.md",
             "coding-convention/verification-before-completion/references/verify-or-reuse.md",
             "coding-convention/verification-before-completion/references/autopilot-publication.md",
         ):
@@ -75,24 +76,24 @@ class EntrypointBodyContractTest(unittest.TestCase):
 
             self.assertEqual([], [f.to_dict() for f in findings])
 
-    def test_first_entry_contract_requires_its_section_not_only_a_mention(self) -> None:
+    def test_entry_sections_require_headings_not_only_mentions(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             self.copy_owner_contract(repo)
             ssot = repo / SSOT_RULES_FILE
             ssot.write_text(
-                ssot.read_text(encoding="utf-8").replace("## First-Entry Contract\n", "## Other section\n"),
+                ssot.read_text(encoding="utf-8").replace("## Work Selection\n", "## Other section\n"),
                 encoding="utf-8",
             )
 
             findings: list[Finding] = []
             check_ssot_rules(repo, findings)
 
-            self.assertTrue(any("First-Entry Contract" in f.message for f in findings))
+            self.assertTrue(any("Work Selection section" in f.message for f in findings))
 
     def test_missing_owner_reference_is_rejected(self) -> None:
         cases = (
-            (SSOT_RULES_FILE, check_ssot_rules, "boundary-contract"),
+            (SSOT_RULES_FILE, check_ssot_rules, "merge-companion"),
             ("task-router/SKILL.md", check_task_router_body,
              "../session-intent-analyzer/references/ledger-schema.md#core-response-projection"),
             ("coding-convention/using-coding-convention/SKILL.md", check_using_cc_body,
@@ -117,7 +118,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
                 )
 
     def test_missing_owner_file_is_rejected(self) -> None:
-        for check, target in ((check_ssot_rules, "coding-convention/systematic-debugging/SKILL.md"),
+        for check, target in ((check_ssot_rules, "merge-companion/SKILL.md"),
                               (check_task_router_body, "session-intent-analyzer/references/ledger-schema.md"),
                               (check_using_cc_body, "coding-convention/systematic-debugging/SKILL.md")):
             with self.subTest(check=check.__name__), tempfile.TemporaryDirectory() as tmp:

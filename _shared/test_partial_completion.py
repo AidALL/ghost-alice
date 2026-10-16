@@ -10,9 +10,9 @@ PARTIAL_BODY = """[partial-check]
 - skill-call: verification-before-completion (this turn)
 - scope: partial
 - acceptance-criteria:
-  - behavior: targeted behavior checks [source: user-explicit]
-  - lint: Clippy warning assessment [source: user-explicit]
-  - console: console warning assessment [source: user-explicit]
+  - behavior: targeted behavior checks [source: user-said]
+  - lint: Clippy warning assessment [source: user-said]
+  - console: console warning assessment [source: user-said]
 - claim-evidence-map:
   - claim: targeted tests passed
     criterion: behavior
@@ -42,7 +42,7 @@ SUPPLIED_PARTIAL_EVIDENCE = """[partial-check]
   - repairs: Rust warnings, security restoration, layout fixes [source: previous-tool]
   - tests: Rust, documentation and Xcode checks [source: previous-tool]
   - appkit: independent minimal application reproduction [source: previous-tool]
-  - clippy: strict Clippy verification [source: user-explicit]
+  - clippy: strict Clippy verification [source: user-said]
   - recording: automatic completion recording [source: system-doc]
 - claim-evidence-map:
   - claim: Xcode issue list is No Issues without suppressing warnings

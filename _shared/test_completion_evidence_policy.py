@@ -18,7 +18,7 @@ class CompletionEvidencePolicyTest(unittest.TestCase):
         self.a = self.root / 'a'; self.a.write_text('original')
         self.b = self.root / 'b'; self.b.write_text('other')
         self.criteria = [dict(work_unit_id='unit', contract_revision=1, id=key,
-            summary=key, source='user-explicit', admitted=True) for key in ('a', 'b')]
+            summary=key, source='user-said', admitted=True) for key in ('a', 'b')]
         self.contract = dict(owner=dict(platform='codex', session_id='session'), work_unit_id='unit',
             contract_revision=1, relevant_context={'constraint': ['local']}, criteria=self.criteria)
         self.target = dict(path=str(self.root), authority=str(self.root), owner=self.contract['owner'], selection_origin='derived')
@@ -39,7 +39,7 @@ class CompletionEvidencePolicyTest(unittest.TestCase):
             GHOST_ALICE_SESSION_INTENT_ROOT=str(self.fixture.root), GHOST_ALICE_PLATFORM='codex', GHOST_ALICE_SESSION_ID='current')
         import completion_assessment as assessment
         proof = '\n'.join(['[completion-check]', '- acceptance-criteria:',
-            '  - a: a [source: user-explicit]', '  - b: b [source: user-explicit]', '- claim-evidence-map:',
+            '  - a: a [source: user-said]', '  - b: b [source: user-said]', '- claim-evidence-map:',
             '  - claim: a', '    criterion: a', '    evidence: original a', '    verdict: pass',
             '  - claim: b', '    criterion: b', '    evidence: original b', '    verdict: pass',
             '- unverified:', '  - none', '- evidence: original observation'])

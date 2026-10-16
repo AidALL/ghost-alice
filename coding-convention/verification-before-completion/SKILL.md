@@ -55,7 +55,7 @@ Explaining an unchanged prior result is not a new completion submission and does
 
 ## Retained original results and delivery
 
-Routine explanation from supplied conversation remains tool-free. For a source-backed explanation, the assistant compares each claim with the relevant originals, then separately judges the whole answer against the user's objective and constraints. Reuse available source passages and their original locators; this judgment requires neither a new route write nor a separate preparation or recording call. When the user explicitly requests an authenticated explanation review, follow [Prepare and record the response review](references/autopilot-publication.md#prepare-and-record-the-response-review). An explanation does not refresh prior evidence time or publish completion. New completion and partial-completion claims follow the finalization sequence above.
+Routine explanation from supplied conversation remains tool-free. For a source-backed explanation, the assistant compares each claim with the relevant originals, then separately judges the whole answer against the user's objective and constraints. Reuse available source passages and their original locators; this judgment requires neither a new route write nor a separate preparation or recording call. When the user explicitly requests an authenticated explanation review, follow [Prepare and record the response review](references/autopilot-publication.md#prepare-and-record-the-response-review). An explanation does not refresh prior evidence time or publish completion. The native host displays the answer without another model call. The answer-end hook records assessment outcomes; it does not create missing judgments or request another answer. New completion and partial-completion claims follow the finalization sequence above.
 
 For a correction to an already submitted answer, follow the reference's [Apply and deliver](references/autopilot-publication.md#apply-and-deliver) procedure using the host's supplied visibility context. That procedure owns replacement payloads and required recording; the assistant does not infer visibility from an unrelated tool result.
 
@@ -88,7 +88,7 @@ Full result:
 ```text
 [completion-check]
 - acceptance-criteria:
-  - target: The requested behavior passes its regression [source: user-explicit]
+  - target: The requested behavior passes its regression [source: user-said]
 - claim-evidence-map:
   - claim: The requested behavior passed its regression
     criterion: target
@@ -105,8 +105,8 @@ Partial result:
 [partial-check]
 - scope: partial
 - acceptance-criteria:
-  - target: The requested behavior passes its regression [source: user-explicit]
-  - installed: The installed behavior is verified [source: user-explicit]
+  - target: The requested behavior passes its regression [source: user-said]
+  - installed: The installed behavior is verified [source: user-said]
 - claim-evidence-map:
   - claim: The requested behavior passed its regression
     criterion: target
@@ -117,7 +117,7 @@ Partial result:
 - evidence: Original regression output with source locator
 ```
 
-Retain actual body-load/reuse facts in the internal audit. The project response contract controls whether `[io-trace]` is displayed; printing it does not prove verification.
+Retain actual body-load/reuse facts in the internal audit. The common contract's io-trace Transparency Rule governs what the answer shows.
 
 The publication reference's [Apply and deliver](references/autopilot-publication.md#apply-and-deliver) procedure owns criterion application and the explicit managed output contract. The control block alone establishes neither application nor continuation.
 

@@ -91,6 +91,18 @@ def _shell_op_and_path(command: str) -> tuple[str, str]:
     return op, path
 
 
+_PATCH_FILE_RE = re.compile(r"^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+?)\s*$", re.MULTILINE)
+
+
+def _patch_paths(patch: str) -> list[str]:
+    """Return the files a Codex apply_patch body names, in order and without duplicates."""
+    paths: list[str] = []
+    for match in _PATCH_FILE_RE.finditer(patch):
+        if match.group(1) not in paths:
+            paths.append(match.group(1))
+    return paths
+
+
 def _home() -> Path:
     configured = os.environ.get("HOME")
     if configured:
@@ -175,6 +187,12 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
         op, extracted = _shell_op_and_path(command)
         if extracted:
             path = extracted
+    elif tool == "apply_patch":
+        paths = _patch_paths(_text(tool_input.get("command")))
+        if paths:
+            path = paths[0]
+            # The file list is the audit record, so unlike a shell command it is never cut.
+            pattern = "; ".join(paths)
     elif tool == "Agent":
         pattern = _text(tool_input.get("description"))
     elif tool == "Skill":
@@ -182,7 +200,7 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
     elif tool in {"WebFetch", "WebSearch"}:
         path = _text(tool_input.get("url") or tool_input.get("query"), "n/a")
     else:
-        path = _text(tool_input.get("file_path") or tool_input.get("path"), "n/a")
+        path = _text(tool_input.get("file_path") or tool_input.get("path") or tool_input.get("notebook_path"), "n/a")
 
     row = {"platform": platform, "session": session, "tool": tool, "path": path, "pattern": pattern}
     if op and path != "n/a":

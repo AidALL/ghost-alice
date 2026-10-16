@@ -23,8 +23,8 @@ class CriterionRevisionTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.criteria = [
-            {"id": "report", "summary": "Check the approved report revision 1", "source": "user-explicit"},
-            {"id": "readonly", "summary": "Keep source data unchanged", "source": "user-explicit"},
+            {"id": "report", "summary": "Check the approved report revision 1", "source": "user-said"},
+            {"id": "readonly", "summary": "Keep source data unchanged", "source": "user-said"},
         ]
         self.write(self.criteria)
         for criterion in self.criteria:

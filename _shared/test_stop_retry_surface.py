@@ -17,7 +17,7 @@ CHECK_WITHOUT_EVIDENCE = """[completion-check]
 - verification-before-completion: done
 - skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
-  - calculation: recompute the operating time [source: user-explicit]
+  - calculation: recompute the operating time [source: user-said]
 - claim-evidence-map:
   - claim: operating time was checked
     criterion: calculation

@@ -101,7 +101,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
                 result = skill_fixture.StopHookSkillEvidenceTests().run_hook(platform="codex", message=text)
                 assert_stop_observation(self, result)
 
-    def test_generated_platform_contracts_keep_trace_optional(self):
+    def test_generated_platform_contracts_do_not_require_trace_output(self):
         repo = HOOK.parents[1]
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -114,7 +114,7 @@ class TraceDisplayRepairTests(unittest.TestCase):
             global_rule_blocks.apply_claude_bootstrap(repo / "platforms/claude/CLAUDE.md", claude)
             for path in (root / "codex/ghost-alice-governance.md", claude):
                 body = path.read_text()
-                self.assertIn("Printed `[io-trace]` is optional", body)
+                self.assertIn("A displayed trace does not establish proof", body)
                 self.assertNotIn("End every normal response with `[io-trace]`", body)
                 self.assertNotIn("Output an `[io-trace]` block at the end of every normal response", body)
                 self.assertIn("Hooks record strict audit independently of displayed guidance", body)
