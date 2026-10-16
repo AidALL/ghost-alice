@@ -10,6 +10,7 @@ import json
 import re
 
 from completion_check_validator import _strip_block_examples, looks_like_evidence_claim
+from text_lines import split_lines
 
 SCHEMA_VERSION = "claim-evidence.v1"
 _FIELDS = {"statement", "work_unit_id", "contract_revision", "criterion_id", "proof_digest"}
@@ -33,8 +34,8 @@ def evaluate_claim_report(text, resolver):
     Invalid envelopes preserve all original text and fail closed.
     """
     result = dict(present=False, valid=False, residual_text=text, claims=[], issue=None)
-    lines = text.splitlines()
-    visible = _strip_block_examples(text).splitlines()
+    lines = split_lines(text)
+    visible = split_lines(_strip_block_examples(text))
     markers = [i for i, line in enumerate(visible) if _MARKER.fullmatch(line.strip())]
     if not markers:
         return result

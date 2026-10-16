@@ -10,6 +10,8 @@ import json
 import os
 from pathlib import Path
 
+from text_lines import line_at, split_lines
+
 
 def _pointer(value, pointer):
     if pointer and not pointer.startswith('/'):
@@ -21,11 +23,10 @@ def _pointer(value, pointer):
 
 
 def _line(path, number):
-    with path.open(encoding='utf-8') as stream:
-        for i, text in enumerate(stream, 1):
-            if i == number:
-                return text.rstrip('\r\n')
-    raise ValueError('Requested line is outside the source')
+    line = line_at(path.read_bytes(), number)
+    if line is None:
+        raise ValueError('Requested line is outside the source')
+    return line
 
 
 def lookup(path, *, pointer=None, record=None, line=None, query=None, offset=None, length=None, full=False):
@@ -56,12 +57,11 @@ def lookup(path, *, pointer=None, record=None, line=None, query=None, offset=Non
         if not query:
             raise ValueError('Literal search must not be empty')
         matches = []
-        with path.open(encoding='utf-8') as stream:
-            for i, text in enumerate(stream, 1):
-                pos = text.casefold().find(query.casefold())
-                if pos < 0:
-                    continue
-                matches.append(dict(line=i, offset=pos))
+        for i, text in enumerate(split_lines(path.read_text(encoding='utf-8')), 1):
+            pos = text.casefold().find(query.casefold())
+            if pos < 0:
+                continue
+            matches.append(dict(line=i, offset=pos))
         result.update(matches=matches, total_matches=len(matches),
                       selection='Matching source coordinates; select the needed line or JSON field')
     elif pointer is not None:

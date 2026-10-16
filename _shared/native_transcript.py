@@ -11,6 +11,8 @@ import json
 import os
 from pathlib import Path
 
+from text_lines import committed_byte_lines, committed_length, committed_lines, committed_records
+
 
 def codex_transcript_path(platform_dir, session_id):
     """Find one host-owned transcript by native session identity, without copying it."""
@@ -35,37 +37,21 @@ def codex_transcript_path(platform_dir, session_id):
 def codex_transcript_contains_response(path, turn_id, text):
     """A session filename alone does not establish coverage of the current turn."""
     current_turn = None
-    with Path(path).open() as stream:
-        for line in stream:
-            try:
-                row = json.loads(line)
-            except ValueError:
-                continue
-            payload = row.get('payload', {})
-            if row.get('type') == 'turn_context':
-                current_turn = payload.get('turn_id')
-            if (current_turn == turn_id and row.get('type') == 'response_item'
-                    and payload.get('type') == 'message' and payload.get('role') == 'assistant'):
-                body = '\n'.join(p.get('text', '') for p in payload.get('content', [])
-                    if isinstance(p, dict) and p.get('type') == 'output_text')
-                if body == text:
-                    return True
+    for line in committed_lines(Path(path).read_bytes()).values():
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        payload = row.get('payload', {})
+        if row.get('type') == 'turn_context':
+            current_turn = payload.get('turn_id')
+        if (current_turn == turn_id and row.get('type') == 'response_item'
+                and payload.get('type') == 'message' and payload.get('role') == 'assistant'):
+            body = '\n'.join(p.get('text', '') for p in payload.get('content', [])
+                if isinstance(p, dict) and p.get('type') == 'output_text')
+            if body == text:
+                return True
     return False
-
-
-def committed_lines(content):
-    """Number the complete lines of an append-only JSONL log from 1.
-
-    A writer ends each record with a newline, so content after the last newline
-    is a record it is still appending; that record is read after its newline
-    arrives. Only the newline separates records: str.splitlines() also splits at
-    U+2028, U+2029 and U+0085, which hosts write unescaped inside JSON strings.
-    Bytes are decoded after the unfinished record is removed.
-    """
-    if isinstance(content, bytes):
-        content = content[:content.rfind(b'\n') + 1].decode('utf-8')
-    complete = content[:content.rfind('\n') + 1]
-    return {number: line for number, line in enumerate(complete.split('\n')[:-1], 1) if line.strip()}
 
 
 def read_entries(path_value, session=None):
@@ -202,7 +188,7 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
     if not isinstance(path, str) or not Path(path).is_absolute():
         return result('unavailable', 'native-transcript-path-missing')
     try:
-        rows = [json.loads(line) for line in committed_lines(Path(path).read_bytes()).values()]
+        rows = list(committed_records(Path(path).read_bytes()).values())
     except (OSError, ValueError, UnicodeError):
         return result('unavailable', 'native-transcript-unreadable')
     if not rows or any(not isinstance(row, dict) for row in rows):
@@ -291,7 +277,7 @@ def capture_append_boundary(path_value):
     except OSError:
         return None
     # An incomplete final line was not committed; inspect it after its newline arrives.
-    offset = content.rfind(b'\n') + 1
+    offset = committed_length(content)
     return dict(path=str(path), device=identity.st_dev, inode=identity.st_ino, offset=offset,
                 prefix_digest=hashlib.sha256(content[:offset]).hexdigest())
 
@@ -384,16 +370,10 @@ def resolve_staged_input(observation, session_id, cursors, *, allow_unknown=Fals
             start = max(boundary['offset'], cursors.get(cursor_key, 0))
             if start > len(raw):
                 return None
-            content = raw[start:]
     except (OSError, KeyError, TypeError, ValueError):
         return None
     matches = []
-    offset = start
-    for line in content.splitlines(keepends=True):
-        row_start = offset
-        offset += len(line)
-        if not line.endswith(b'\n'):
-            break
+    for row_start, offset, line in committed_byte_lines(raw, start):
         try:
             entry = json.loads(line)
         except (ValueError, UnicodeError):

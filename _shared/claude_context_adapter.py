@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 import re
 
-from native_transcript import committed_lines
+from text_lines import committed_records
 
 platform = 'claude'
 
@@ -79,7 +79,7 @@ def native_records(path):
     """Normalize message envelopes while retaining their one-based JSONL lines."""
     if not isinstance(path, (str, Path)) or not Path(path).is_absolute():
         raise NativeContextRejected('An absolute native transcript path is required')
-    rows = {record: json.loads(line) for record, line in committed_lines(Path(path).read_bytes()).items()}
+    rows = committed_records(Path(path).read_bytes())
     return native_records_from_rows(rows)
 
 

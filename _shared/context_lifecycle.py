@@ -20,8 +20,9 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import completion_assessment as core_api
 from claude_context_adapter import NativeContextRejected, SignedPrefixSelectionUnsupported, ToolInputSelectionUnsupported
-from native_transcript import codex_transcript_path, committed_lines
+from native_transcript import codex_transcript_path
 from source_reference import FORMAT as FILE_SOURCE_FORMAT, SourceReferenceError, reference_source, source_text, verify_source
+from text_lines import committed_byte_lines, committed_records, line_number
 
 
 class ContextSelectionRejected(ValueError):
@@ -60,8 +61,8 @@ def _item(value):
 
 
 def _native(path):
-    return {number: _item(row['payload']) for number, line in committed_lines(Path(path).read_bytes()).items()
-            if (row := json.loads(line)).get('type') == 'response_item'}
+    return {number: _item(row['payload']) for number, row in committed_records(Path(path).read_bytes()).items()
+            if row.get('type') == 'response_item'}
 
 
 def _input_item(items):
@@ -301,8 +302,7 @@ def _codex_decisions(connection, reference, payload, source, path, originals):
                 raise ContextSelectionRejected('The retained decision belongs to a different input or original')
             # Authenticate the original prefix, rather than rebinding a choice
             # to the later input that published this update.
-            rows = {number: json.loads(line) for number, line in
-                    committed_lines(source_text(decision['original'])).items()}
+            rows = committed_records(source_text(decision['original']))
             if (not all(isinstance(row, dict) for row in rows.values())
                 or not any(row.get('type') == 'session_meta' for row in rows.values())
                 or any(not isinstance(row.get('payload'), dict)
@@ -836,8 +836,7 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
                 or fingerprint(payload) != reference or payload['input_binding'] != original_binding
                 or payload['original']['locator'] != path):
                 return RequestSelection(request, 'preserved', 'selection-unverified')
-            prefix_rows = {number: json.loads(line) for number, line in
-                           committed_lines(source_text(original)).items()}
+            prefix_rows = committed_records(source_text(original))
             prefix_records = adapter.native_records_from_rows(prefix_rows)
             original_human = payload['native_input_record']
             if (original_human not in native.humans or original_human not in prefix_records
@@ -1136,8 +1135,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
             native = _native(original['locator'],'claude',owner['session_id'])
         except ResponseUseRejected:
             return None
-        prefix = adapter.native_records_from_rows({number:json.loads(line) for number,line in
-            committed_lines(source_text(original)).items()})
+        prefix = adapter.native_records_from_rows(committed_records(source_text(original)))
         if (payload['native_input_record'] not in prefix
             or fingerprint(prefix[payload['native_input_record']])!=payload.get('native_input_digest')):
             return None
@@ -1170,7 +1168,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
             # This is the earliest append position, not a fabricated input
             # record. The correlated wire position only excludes ineligible
             # selections; committed provenance still owns input admission.
-            native_boundary = content[:start].count(b'\n') + 1
+            native_boundary = line_number(content, start)
             requirements = _claude_wait_eligible(request,payload,reference,native,prefix,can_rewrite,root=root,
                 native_home=source['GHOST_ALICE_CLAUDE_DIR'],session=owner['session_id'],
                 native_boundary=native_boundary,wire_boundary=prompts[-1][0],native_betas=native_betas)
@@ -1180,9 +1178,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
                 allow_unknown=True)
             if resolved is not None:
                 return 'input-ready' if resolved['actor'] in ('human','sdk','notification') else None
-            for line in content[start:].splitlines(keepends=True):
-                if not line.endswith(b'\n'):
-                    break
+            for _, _, line in committed_byte_lines(content, start):
                 entry = json.loads(line)
                 if (isinstance(entry,dict) and entry.get('sessionId')==owner['session_id']
                     and entry.get('type') in ('user','attachment')

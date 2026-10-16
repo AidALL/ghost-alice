@@ -12,6 +12,11 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TextIO
 
+# Package-style loads (_shared.fresh_agent_session) still find the sibling owner.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from text_lines import split_lines
+
 try:
     from _shared.project_runtime import project_runtime
 except ModuleNotFoundError:  # Direct execution from the installed _shared directory.
@@ -166,7 +171,7 @@ def parse_claude_response(stream_text: str) -> str:
         raise FreshAgentSessionError("Claude output was not text")
     assistant_text: str | None = None
     result_event: dict[str, Any] | None = None
-    for line in stream_text.splitlines():
+    for line in split_lines(stream_text):
         try:
             event = json.loads(line)
         except json.JSONDecodeError:

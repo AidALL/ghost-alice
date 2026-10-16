@@ -15,6 +15,12 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
+
+_SHARED_DIR = Path(__file__).resolve().parents[1] / "_shared"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
+from text_lines import byte_lines
 
 TOKEN_FIELDS = ("server_input_tokens", "ordinary_input_tokens", "cache_read_tokens",
                 "cache_write_tokens", "cache_write_5m_tokens", "cache_write_1h_tokens",
@@ -627,13 +633,14 @@ def observe(provider, paths, *, through_line=None, receipt_paths=()):
         seen_paths.add(path)
         # Snapshot once: a live append after this read belongs to the next report.
         data = path.read_bytes()
+        # A record still being appended stays visible here and is reported as incomplete.
+        lines = byte_lines(data)
         if through_line is not None:
-            original_lines = data.splitlines(keepends=True)
-            if through_line > len(original_lines):
+            if through_line > len(lines):
                 raise ValueError("The original source has not reached the requested cutoff")
-            data = b"".join(original_lines[:through_line])
+            lines = lines[:through_line]
+            data = b"".join(lines)
         rows = []
-        lines = data.splitlines()
         for line, value in enumerate(lines, 1):
             try:
                 row = json.loads(value)

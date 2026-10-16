@@ -16,10 +16,17 @@ Helpers are exposed as module-level snake_case functions for unit testing:
     extract_acceptance_criteria_ids, extract_claim_evidence_entries,
     validate_completion_evidence_map
 
-Standard library only (Python 3.11+): the `re` module.
+Python 3.11+ standard library, plus the sibling text_lines module, which owns line boundaries.
 """
 
 import re
+import sys
+from pathlib import Path
+
+# A file-path load, such as the installed-runtime check, still finds the sibling owner.
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from text_lines import LINE_BREAK
 
 
 _CONTROL_BLOCKS = frozenset(
@@ -29,8 +36,6 @@ _CONTROL_BLOCKS = frozenset(
 # Match block headers case-insensitively and allow leading whitespace so position lookup agrees with control-block extraction.
 _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
 
-# Split on \r?\n only; splitlines() would also split on other Unicode line boundaries, which we do not want here.
-_NEWLINE_SPLIT_RE = re.compile(r"\r?\n")
 
 # Evidence detection recognizes structural control markers only. The caller supplies any mandatory evidence requirement.
 
@@ -71,7 +76,7 @@ _MULTILINE_QUOTED_SPAN_RE = re.compile(
 
 
 def _split_lines(text):
-    return _NEWLINE_SPLIT_RE.split("" if text is None else str(text))
+    return LINE_BREAK.split("" if text is None else str(text))
 
 
 def _consume_quote_container_prefixes(body, containers):
@@ -309,7 +314,7 @@ def strip_control_blocks(text):
 def _control_headers(text):
     """Locate real headers once; offsets always refer to the original text."""
     raw = "" if text is None else str(text)
-    offsets = [0] + [match.end() for match in _NEWLINE_SPLIT_RE.finditer(raw)]
+    offsets = [0] + [match.end() for match in LINE_BREAK.finditer(raw)]
     for index, line in enumerate(_split_lines(_strip_block_examples(raw))):
         match = _BLOCK_HEADER_RE.match(line.strip())
         if match:
@@ -546,7 +551,7 @@ def extract_original_proof(text):
     if len(starts) != 1:
         raise ValueError('Exactly one original completion or partial proof is required')
     index, start = starts[0]
-    offsets = [0] + [match.end() for match in _NEWLINE_SPLIT_RE.finditer(raw)]
+    offsets = [0] + [match.end() for match in LINE_BREAK.finditer(raw)]
     lines = _split_lines(raw)
     end = len(raw)
     for current in range(index + 1, len(lines)):
@@ -567,7 +572,7 @@ def review_comparison_text(text):
     """
     raw = "" if text is None else str(text)
     lines = _split_lines(raw)
-    offsets = [0] + [match.end() for match in _NEWLINE_SPLIT_RE.finditer(raw)]
+    offsets = [0] + [match.end() for match in LINE_BREAK.finditer(raw)]
     spans = []
     for marker, index, _ in _control_headers(raw):
         if marker not in {"completion-check", "partial-check"}:
@@ -606,15 +611,15 @@ def parse_original_completion_evidence(evidence_text, *, allow_partial=False, al
     if not acceptance_ids:
         raise ValueError("Original evidence requires qualified acceptance criterion IDs")
     if partial:
-        declarations = [line for line in extract_top_level_field_section(
-            evidence_text, "acceptance-criteria").splitlines() if line.strip()]
+        declarations = [line for line in _split_lines(extract_top_level_field_section(
+            evidence_text, "acceptance-criteria")) if line.strip()]
         if (len(declarations) != len(acceptance_ids)
                 or any(not re.fullmatch(r"\s*-\s*[A-Za-z0-9_.=-]+\s*:\s*\S.*", line)
                        for line in declarations)):
             raise ValueError("Partial acceptance criteria require unique exact IDs and descriptions")
         # The ordinary display parser tolerates commentary. Original partial
         # evidence has a closed field vocabulary, so unknown rows fail closed.
-        for raw in extract_top_level_field_section(evidence_text, "claim-evidence-map").splitlines():
+        for raw in _split_lines(extract_top_level_field_section(evidence_text, "claim-evidence-map")):
             for line in _split_entry_fields(raw):
                 if line.strip() and not (_CLAIM_RE.match(line) or _ENTRY_FIELD_RE.match(line)):
                     raise ValueError("Partial claim-evidence-map contains an unrecognized field")

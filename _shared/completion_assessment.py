@@ -19,6 +19,7 @@ import re
 from completion_check_validator import (extract_original_proof, parse_original_completion_evidence,
                                         looks_like_evidence_claim, review_comparison_text)
 from native_completion import _ledger
+from text_lines import committed_byte_lines
 
 _SEAL = object()
 _DEFINITION = ('work_unit_id', 'contract_revision', 'id', 'summary', 'source', 'admitted')
@@ -204,12 +205,7 @@ def _native_row_input(connection, owner, native_input_row):
         with path.open('rb') as stream:
             identity = os.fstat(stream.fileno())
             cursor = hashlib.sha256(json.dumps([str(path), identity.st_dev, identity.st_ino]).encode()).hexdigest()
-            offset = 0
-            for line in stream:
-                start = offset
-                offset += len(line)
-                if not line.endswith(b'\n'):
-                    break
+            for start, offset, line in committed_byte_lines(stream.read()):
                 try:
                     entry = json.loads(line)
                 except (ValueError, UnicodeError):
