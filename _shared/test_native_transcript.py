@@ -21,11 +21,11 @@ class CommittedLinesTests(unittest.TestCase):
         self.assertEqual(json.loads(committed_lines(raw)[2]), {'b': '가'})
 
     def test_json_string_line_separators_stay_inside_their_record(self):
-        record = json.dumps({'text': 'a b c\x85d'}, ensure_ascii=False)
-        self.assertIn(' ', record)
+        record = json.dumps({'text': 'a\u2028b\u2029c\x85d'}, ensure_ascii=False)
+        self.assertIn('\u2028', record)
         lines = committed_lines(record + '\n' + record + '\n')
         self.assertEqual(lines, {1: record, 2: record})
-        self.assertEqual(json.loads(lines[2]), {'text': 'a b c\x85d'})
+        self.assertEqual(json.loads(lines[2]), {'text': 'a\u2028b\u2029c\x85d'})
         self.assertEqual(committed_lines((record + '\n').encode()), {1: record})
 
     def test_numbers_are_physical_lines(self):
@@ -35,7 +35,7 @@ class CommittedLinesTests(unittest.TestCase):
 
 class StopResponseTextTests(unittest.TestCase):
     def test_transcript_fallback_keeps_a_record_with_a_line_separator(self):
-        text = 'first second'
+        text = 'first\u2028second'
         rows = [dict(type='session_meta', payload=dict(id='current')),
                 dict(type='turn_context', payload=dict(turn_id='turn')),
                 dict(type='response_item', payload=dict(type='message', role='assistant',

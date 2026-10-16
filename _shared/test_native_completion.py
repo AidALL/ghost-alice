@@ -332,7 +332,7 @@ class NativeActivityTests(unittest.TestCase):
     def test_codex_tool_activity_reads_complete_records_only(self):
         """A raw U+2028 stays inside its record; the record Codex is still appending is not read yet."""
         rows = self.rows + [self.item('message', 'followup', role='assistant', content=[
-                dict(type='output_text', text='first second')]),
+                dict(type='output_text', text='first\u2028second')]),
             self.item('custom_tool_call', 'followup', name='exec', call_id='call-1')]
         self.transcript.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in rows)
             + '{"type":"response_item","payload":{"type":"mess', encoding='utf-8')

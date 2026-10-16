@@ -997,9 +997,9 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
 
     def test_line_separator_inside_a_native_record_does_not_split_it(self):
         """Claude Code writes U+2028 unescaped inside JSON strings; only a newline ends a record."""
-        self.rows[0]['message']['content'] += ' after the separator'
+        self.rows[0]['message']['content'] += '\u2028after the separator'
         self.log.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in self.rows), encoding='utf-8')
-        self.assertIn(' ', self.log.read_text(encoding='utf-8'))
+        self.assertIn('\u2028', self.log.read_text(encoding='utf-8'))
         receipt = self.record()
         result = self.select()
         self.assertEqual((receipt['selected_count'], result.state), (1, 'selected'))

@@ -95,7 +95,7 @@ class CodexContextUpdateTests(unittest.TestCase):
 
     def test_line_separator_inside_a_record_does_not_split_a_retained_original(self):
         """Codex writes U+2028 unescaped inside JSON strings; only a newline ends a record."""
-        self.fixture.rows[0]['payload']['instructions'] = 'first second'
+        self.fixture.rows[0]['payload']['instructions'] = 'first\u2028second'
         self.fixture.log.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n'
                                             for row in self.fixture.rows), encoding='utf-8')
         self.fixture.record([self.first])
