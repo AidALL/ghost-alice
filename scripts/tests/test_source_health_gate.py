@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -137,6 +138,18 @@ class SourceHealthGateTest(unittest.TestCase):
         _git(repo, "commit", "-m", "baseline")
         _git(repo, "push", "-u", "origin", "HEAD")
         return repo, remote
+
+    def _isolated_bootstrap_env(self) -> dict[str, str]:
+        """Hide this machine's installed gateway so the old-checkout path sees a clean host."""
+        home = Path(tempfile.mkdtemp())
+        fake_bin = home / "bin"
+        fake_bin.mkdir()
+        launchctl = fake_bin / "launchctl"
+        launchctl.write_text("#!/bin/sh\nexit 113\n", encoding="utf-8")
+        launchctl.chmod(0o755)
+        env = {key: value for key, value in os.environ.items() if key not in ("GHOST_ALICE_CODEX_DIR", "CODEX_HOME")}
+        env.update(HOME=str(home), PATH=f"{fake_bin}{os.pathsep}{env.get('PATH', '')}")
+        return env
 
     def _add_commit(self, repo: Path, message: str, content: str) -> None:
         (repo / "tracked.txt").write_text(content, encoding="utf-8")
@@ -419,6 +432,7 @@ class SourceHealthGateTest(unittest.TestCase):
             ],
             capture_output=True,
             text=True,
+            env=self._isolated_bootstrap_env(),
         )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
@@ -492,6 +506,7 @@ class SourceHealthGateTest(unittest.TestCase):
             [self.bash, "-c", command],
             capture_output=True,
             text=True,
+            env=self._isolated_bootstrap_env(),
         )
 
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
