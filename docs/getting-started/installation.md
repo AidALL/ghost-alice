@@ -206,7 +206,7 @@ The default profile is `dynamic`. The profile controls how much governance surfa
 
 ### Slash Commands By Platform
 
-Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code workspace command. Codex handles `/visibility` through the trusted `UserPromptSubmit` hook pseudo-command. Use `_shared/agent_visibility_cli.py` to inspect or change the same profile directly when that trusted command path is unavailable.
+Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code workspace command. On Codex and every other platform, use `_shared/agent_visibility_cli.py` to inspect or change the same profile.
 
 ### Python Contract
 

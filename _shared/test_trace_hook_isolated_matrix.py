@@ -398,9 +398,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                            "prompt_id": "lifecycle-prompt", "transcript_path": str(transcript),
                            "hook_event_name": "SessionStart"}
                 json.loads(self.installed_hook(hooks, "SessionStart", "session-start", payload, env).stdout)
-                for hook_id in ("pending-merge-prompt", "session-intent"):
-                    payload["hook_event_name"] = "UserPromptSubmit"
-                    json.loads(self.installed_hook(hooks, "UserPromptSubmit", hook_id, payload, env).stdout)
+                payload["hook_event_name"] = "UserPromptSubmit"
+                json.loads(self.installed_hook(hooks, "UserPromptSubmit", "session-intent", payload, env).stdout)
                 if platform == 'claude':
                     transcript.write_text(json.dumps(dict(type='user', sessionId=session,
                         promptId='lifecycle-prompt', origin=dict(kind='human'), promptSource='sdk',
@@ -418,7 +417,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 payload.update({"hook_event_name": "Stop", "last_assistant_message": good, "transcript_path": str(transcript)})
                 self.assert_allow(json.loads(self.installed_hook(hooks, "Stop", "completion", payload, env).stdout))
                 rows = self.strict_rows(home, platform, session)
-                self.assertEqual(len(rows), 7)
+                self.assertEqual(len(rows), 6)
                 self.assertEqual({row["event"] for row in rows}, set(hooks))
                 for row in rows:
                     self.assertEqual(row["agent_visibility_profile"], profile)

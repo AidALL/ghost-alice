@@ -46,9 +46,6 @@ import install_hooks
 from test_completion_skill_evidence import assert_stop_observation
 
 
-# The Codex /visibility hook script, run directly with the test interpreter.
-VISIBILITY_HOOK_COMMAND = " ".join(shlex.quote(part) for part in (
-    sys.executable, str(Path(install_hooks.__file__).with_name("agent_visibility_hook.py"))))
 LEGACY_PROMPT_PENDING_MERGE_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": "echo legacy # " + install_hooks.PROMPT_PENDING_MERGE_MARKER}],
@@ -4002,7 +3999,6 @@ class TestInstallHook(TempHomeTestCase):
         self.assertEqual(len(hooks), 1)
         cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
         self.assertFalse(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in c for c in cmds))
-        self.assertFalse(any(install_hooks.VISIBILITY_COMMAND_MARKER in c for c in cmds))
         self.assertFalse(any(install_hooks.HOOK_MARKER in c for c in cmds))
         self.assertTrue(any(install_hooks.SESSION_INTENT_MARKER in c for c in cmds))
         self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
@@ -4028,8 +4024,6 @@ class TestInstallHook(TempHomeTestCase):
                     command = " ".join(hook.get("command", "") for hook in entry.get("hooks", []))
                     if install_hooks.PROMPT_PENDING_MERGE_MARKER in command:
                         marker_order.append("pending-merge")
-                    elif install_hooks.VISIBILITY_COMMAND_MARKER in command:
-                        marker_order.append("visibility")
                     elif install_hooks.SESSION_INTENT_MARKER in command:
                         marker_order.append("session-intent")
                     elif install_hooks.HOOK_MARKER in command:
@@ -4037,7 +4031,7 @@ class TestInstallHook(TempHomeTestCase):
                     elif install_hooks.WEB_SEARCH_FIRST_MARKER in command:
                         marker_order.append("web-search-first")
 
-                expected = ["visibility", "session-intent"] if platform == "codex" else ["session-intent"]
+                expected = ["session-intent"]
                 self.assertEqual(marker_order, expected)
                 with use(install_hooks._default_destination(platform)):
                     old = install_hooks._platform_hook_entry(platform, event)['hooks'][0]
@@ -4851,7 +4845,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         session_cmds = [h["command"] for entry in hooks["hooks"]["SessionStart"] for h in entry["hooks"]]
         self.assertFalse(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in cmd for cmd in prompt_cmds))
         for marker, cmds in (
-            (install_hooks.VISIBILITY_COMMAND_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
             (install_hooks.SESSION_RECEIPT_MARKER, session_cmds),
@@ -4862,8 +4855,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             self.assertEqual(result.returncode, 0)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
-            if marker in (install_hooks.VISIBILITY_COMMAND_MARKER, install_hooks.SESSION_RECEIPT_MARKER):
-                # An ordinary prompt and a session start without host identity add no message.
+            if marker == install_hooks.SESSION_RECEIPT_MARKER:
+                # A session start without host identity adds no message.
                 self.assertNotIn("systemMessage", payload)
                 continue
             self.assertIn("systemMessage", payload)
@@ -5237,7 +5230,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
 
         self.assertFalse(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in cmd for cmd in prompt_cmds))
         for marker, cmds in (
-            (install_hooks.VISIBILITY_COMMAND_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
             (install_hooks.SESSION_RECEIPT_MARKER, session_cmds),
@@ -5273,7 +5265,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self._write_settings("codex", {
             "hooks": {
                 user_prompt: [
-                    markerless(install_hooks._platform_visibility_command_entry("codex", user_prompt)),
                     markerless(install_hooks._platform_session_intent_entry("codex", user_prompt)),
                     markerless(install_hooks._hook_runner_command_entry(
                         "web-search-first", "echo old", install_hooks.WEB_SEARCH_FIRST_MARKER, platform_key="codex")),
@@ -5292,7 +5283,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         settings = self._read_settings("codex")
         expected = {
             user_prompt: [
-                install_hooks.VISIBILITY_COMMAND_MARKER,
                 install_hooks.SESSION_INTENT_MARKER,
             ],
             pre_tool: [install_hooks.TOOL_CHECKPOINT_MARKER],
@@ -6073,50 +6063,6 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         self.assertIn("merge-companion-precheck: clean (hook-verified)", payload["systemMessage"])
         self.assertNotIn("claude", payload["systemMessage"])
         self.assertNotIn("30 undecided", payload["systemMessage"])
-
-    def test_codex_visibility_command_sets_profile_and_blocks_original_prompt(self):
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            result = _run_hook_command(
-                VISIBILITY_HOOK_COMMAND,
-                input_text=json.dumps({"prompt": "/visibility dynamic"}),
-                env=env,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["decision"], "block")
-            self.assertIn("agent visibility profile set to dynamic", payload["reason"])
-
-            config_path = Path(temp_home) / ".ghost-alice" / "config.json"
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(config["agent_visibility"]["profile"], "dynamic")
-
-    def test_codex_visibility_command_without_profile_reports_current_status(self):
-        with tempfile.TemporaryDirectory() as temp_home:
-            config_dir = Path(temp_home) / ".ghost-alice"
-            config_dir.mkdir(parents=True)
-            (config_dir / "config.json").write_text(
-                json.dumps({
-                    "schema_version": "ghost-alice-config.v1",
-                    "agent_visibility": {"profile": "minimal"},
-                    "strict_session_log": {"mode": "always"},
-                }),
-                encoding="utf-8",
-            )
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            result = _run_hook_command(
-                VISIBILITY_HOOK_COMMAND,
-                input_text=json.dumps({"prompt": "/visibility"}),
-                env=env,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["decision"], "block")
-            self.assertIn("agent visibility profile is minimal", payload["reason"])
 
     def test_foreground_hook_messages_run_under_cmd_exe(self):
         for cmd, env in (

@@ -69,8 +69,7 @@ For native commands, custom addon sources, platform selection and removal, use t
 Agent visibility command surface:
 
 - Claude Code uses `/visibility strict|dynamic|minimal` as its workspace command.
-- Codex handles `/visibility` through the trusted `UserPromptSubmit` hook pseudo-command path.
-- Every platform can inspect and change the same profile value through `_shared/agent_visibility_cli.py`.
+- Every platform, including Codex, can inspect and change the same profile value through `_shared/agent_visibility_cli.py`. Codex has no `/visibility` command.
 - The install-time default is `dynamic`. Use `bash install.sh --visibility dynamic` or `.\install.cmd --visibility dynamic` to set the initial profile; `--agent-visibility` remains a compatibility alias.
 - Visibility changes the user-facing governance message surface only. It does not weaken hook execution, strict-grade logs, or Work-Impact Projection.
 

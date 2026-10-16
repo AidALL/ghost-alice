@@ -40,7 +40,6 @@ MCP_PACKAGE_MANAGER_RE = re.compile(
 )
 GHOST_ALICE_HOOK_MARKERS = (
     "[hook-reminder] AGENTS.md",
-    "[agent-visibility] command",
     "[web-search-first]",
     "[tool-checkpoint] pre-tool-check",
     "[completion-reminder] AGENTS.md",

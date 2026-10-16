@@ -2,9 +2,9 @@
 """Session-start pending-merge precheck hook.
 
 At session start, after resume, clear, compaction and fork, this hook checks the current platform's
-pending-merge manifest and gives the model one observation line. An installer run can add entries
-during the session, so merge-companion re-checks the manifest before work changes an installed skill;
-no input hook repeats this check.
+pending-merge manifest and reports the result on the user's screen; it adds nothing to the model
+context. An installer run can add entries during the session, so merge-companion re-checks the
+manifest before work changes an installed skill; no input hook repeats this check.
 """
 
 from __future__ import annotations
@@ -104,19 +104,12 @@ def _text_payload(platform: str, hook: HookKind, context: str, internal: str, re
     return _clean_contract_line(platform)
 
 
-def _json_payload(platform: str, internal: str, result: dict | None = None, *,
-                  context: str | None = None, session_id: str | None = None) -> str:
+def _json_payload(platform: str, internal: str, result: dict | None = None) -> str:
     count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
     receipt = {"platform": platform, "manifest_path": str(_pending_manifest_path(platform)), "undecided_count": count}
     if result is not None:
         receipt.update({"status": result["status"], "checked_at": result["checked_at"]})
     body: dict[str, Any] = {"continue": True, "ghostAlicePendingMergeCheck": receipt}
-    if context == 'session_start' and result is not None and session_id and session_id != 'unknown':
-        # The host repeats session start after resume, clear and compaction, so the model keeps one
-        # current copy. Return its native binding and metadata, never manifest entries or the procedure.
-        public = dict(receipt, session_id=session_id)
-        body['hookSpecificOutput'] = {'hookEventName': 'SessionStart',
-            'additionalContext': 'merge-companion-precheck: ' + json.dumps(public, ensure_ascii=False, separators=(',', ':'))}
     if count:
         message = (f"merge-companion precheck: pending={count} (unchanged; session check reused)."
                    if result is not None and result["status"] == "reused" else _pending_line(platform, count))
@@ -161,7 +154,7 @@ def main() -> int:
             print(reason, file=sys.stderr)
             return 2
     if args.format == "json":
-        print(_json_payload(args.platform, internal, result, context=args.context, session_id=session_id))
+        print(_json_payload(args.platform, internal, result))
     else:
         print(_text_payload(args.platform, args.hook, args.context, internal, result))
     return 0

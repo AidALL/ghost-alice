@@ -2437,8 +2437,6 @@ class TestHookCommandAllowlist(unittest.TestCase):
 class TestInstallHooksRunnerIntegration(unittest.TestCase):
     def test_generated_hook_commands_are_wrapped_with_hook_runner(self):
         cases = (
-            (install_hooks._platform_visibility_command_entry("codex", "UserPromptSubmit"),
-             "visibility-command", install_hooks.VISIBILITY_COMMAND_MARKER),
             (install_hooks._platform_session_receipt_entry("claude", "SessionStart"),
              "session-receipt", install_hooks.SESSION_RECEIPT_MARKER),
             (install_hooks._platform_session_start_entry("claude", "SessionStart"),
@@ -2452,7 +2450,7 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
                 self.assertNotIn('"strict,dynamic,minimal"', command)
                 self.assertIn(marker, command)
 
-    def test_installed_minimal_visibility_runs_prompt_and_session_start(self):
+    def test_installed_minimal_visibility_runs_session_start(self):
         if os.name == "nt":
             self.skipTest("POSIX shell launcher test does not apply on Windows")
 
@@ -2463,7 +2461,6 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         self.addCleanup(isolated_home.cleanup)
         env["HOME"] = isolated_home.name
         with mock.patch.dict(os.environ,{"HOME":isolated_home.name}):
-            visibility_entry = install_hooks._platform_visibility_command_entry("codex", "UserPromptSubmit")
             session_entry = install_hooks._platform_session_start_entry("claude", "SessionStart")
 
         def run(entry):
@@ -2478,14 +2475,9 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
                 check=False,
             )
 
-        visibility = run(visibility_entry)
         session_start = run(session_entry)
 
-        # An ordinary prompt passes the visibility hook silently; a clean merge check stays off the minimal screen.
-        self.assertEqual(visibility.returncode, 0)
-        visibility_payload = json.loads(visibility.stdout)
-        self.assertTrue(visibility_payload["continue"])
-        self.assertNotIn("systemMessage", visibility_payload)
+        # A clean merge check stays off the minimal screen.
         self.assertEqual(session_start.returncode, 0)
         session_payload = json.loads(session_start.stdout)
         self.assertTrue(session_payload["continue"])

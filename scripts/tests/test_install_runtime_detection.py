@@ -530,7 +530,7 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertNotIn("pure bash fallback", install_sh)
         self.assertNotIn("_install_hook_bash_native", install_sh)
         self.assertNotIn("prompt + completion + io-trace", install_sh)
-        self.assertIn("pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace", install_sh)
+        self.assertIn("session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace", install_sh)
 
     def test_install_ps1_has_no_partial_native_hook_fallback(self) -> None:
         install_ps1 = (REPO_ROOT / "install.ps1").read_text(encoding="utf-8-sig")

@@ -120,14 +120,13 @@ class SessionCheckReuseTest(unittest.TestCase):
                 return json.loads(subprocess.run(command, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
             first, second = run(), run()
             for body in (first, second):
-                # Every session start, including resume and compaction, gives the model one observation line.
-                self.assertEqual(body["hookSpecificOutput"]["hookEventName"], "SessionStart")
-                self.assertFalse("LONG WORKFLOW" in body["hookSpecificOutput"]["additionalContext"])
-            public = json.loads(first["hookSpecificOutput"]["additionalContext"].split(": ", 1)[1])
-            self.assertEqual((public["session_id"], public["platform"], public["undecided_count"], public["status"]),
-                             ("session-test", "codex", 1, "checked"))
-            reused = json.loads(second["hookSpecificOutput"]["additionalContext"].split(": ", 1)[1])
-            self.assertEqual((reused["status"], reused["checked_at"]), ("reused", public["checked_at"]))
+                # Session start reports the check on the user's screen and adds nothing to the model context.
+                self.assertNotIn("hookSpecificOutput", body)
+                self.assertNotIn("LONG WORKFLOW", json.dumps(body))
+            checked = first["ghostAlicePendingMergeCheck"]
+            self.assertEqual((checked["platform"], checked["undecided_count"], checked["status"]), ("codex", 1, "checked"))
+            reused = second["ghostAlicePendingMergeCheck"]
+            self.assertEqual((reused["status"], reused["checked_at"]), ("reused", checked["checked_at"]))
             self.assertNotIn("Surface merge-companion first", second["systemMessage"])
             import sqlite3
             with closing(sqlite3.connect(home / "ledger/session-checks.sqlite3")) as connection:
@@ -160,27 +159,22 @@ class SessionCheckReuseTest(unittest.TestCase):
             # re-checks the manifest before work changes an installed skill.
             self.assertEqual(run("prompt-check", "prompt_submit"), {"continue": True})
             compacted = run("session-check", "session_start")
-            public = json.loads(compacted["hookSpecificOutput"]["additionalContext"].split(": ", 1)[1])
-            self.assertEqual((public["undecided_count"], public["status"]), (1, "checked"))
+            self.assertNotIn("hookSpecificOutput", compacted)
+            checked = compacted["ghostAlicePendingMergeCheck"]
+            self.assertEqual((checked["undecided_count"], checked["status"]), (1, "checked"))
             self.assertIn("1 undecided", compacted["systemMessage"])
 
-    def test_pending_receipt_enters_model_context_only_at_bound_session_start(self):
+    def test_pending_check_stays_out_of_model_context(self):
         import pending_merge_precheck_hook as hook
-        result = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
-                      value=dict(undecided_count=0))
-        for context, session in [('prompt_submit', 'own'), ('session_start', None),
-                                 ('session_start', 'unknown')]:
-            body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result,
-                              context=context, session_id=session))
+        for count in (0, 2):
+            result = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
+                          value=dict(undecided_count=count))
+            body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result))
+            # The user sees the screen notice; merge-companion re-checks before work changes a skill.
             self.assertNotIn('hookSpecificOutput', body)
-        body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result,
-                          context='session_start', session_id='own'))
-        self.assertEqual(body['hookSpecificOutput']['hookEventName'], 'SessionStart')
-        text = body['hookSpecificOutput']['additionalContext']
-        self.assertFalse('LONG WORKFLOW' in text)
-        receipt = json.loads(text.split(': ', 1)[1])
-        self.assertEqual(receipt['session_id'], 'own')
-        self.assertEqual(receipt['undecided_count'], 0)
+            self.assertNotIn('LONG WORKFLOW', json.dumps(body))
+            self.assertEqual(body['ghostAlicePendingMergeCheck']['undecided_count'], count)
+            self.assertIn('systemMessage', body)
 
     def test_same_session_reuses_and_mutation_or_new_session_rechecks(self):
         from session_check_cache import observe_check

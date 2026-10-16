@@ -206,7 +206,7 @@ bash install.sh --status
 
 ### Slash Commands By Platform
 
-Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynamic|minimal`을 설치합니다. Codex는 신뢰된 `UserPromptSubmit` 훅의 의사 명령 경로로 `/visibility`를 처리합니다. 해당 경로를 사용할 수 없으면 `_shared/agent_visibility_cli.py`로 같은 프로필을 직접 확인하거나 변경해 주세요.
+Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynamic|minimal`을 설치합니다. Codex를 비롯한 다른 플랫폼에서는 `_shared/agent_visibility_cli.py`로 같은 프로필을 확인하거나 변경해 주세요.
 
 ### Python Contract
 

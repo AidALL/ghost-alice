@@ -344,8 +344,6 @@ def _pending_merge_precheck_command(
 # 1. Retired input pending-merge hook: the marker lets install and uninstall remove old entries.
 # merge-companion re-checks the manifest before work changes an installed skill.
 PROMPT_PENDING_MERGE_MARKER = "[merge-companion] prompt-check"
-# Codex /visibility pseudo-command; Claude Code runs /visibility as a workspace command.
-VISIBILITY_COMMAND_MARKER = "[agent-visibility] command"
 
 # 1-B. Work-start hook: reminder to call task-router.
 HOOK_MARKER = "[hook-reminder] AGENTS.md"
@@ -994,12 +992,6 @@ def _platform_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
     else:
         command = _hook_reminder_command(platform="claude", output_format="json", payload_mode=True)
     return _hook_runner_command_entry("prompt", command, HOOK_MARKER, platform_key=platform_key)
-
-
-def _platform_visibility_command_entry(platform_key: str, event: str) -> dict[str, Any]:
-    script = _resolve_shared_hook_script("agent_visibility_hook.py")
-    command = " ".join([_hook_python_command(payload=True), _quote_static_arg(script)]) + f" # {VISIBILITY_COMMAND_MARKER}"
-    return _hook_runner_command_entry("visibility-command", command, VISIBILITY_COMMAND_MARKER, platform_key=platform_key)
 
 
 def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -2103,55 +2095,8 @@ def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None =
     return removed
 
 
-def _entry_contains_marker(entry: dict[str, Any], marker: str) -> bool:
-    return any(marker in hook.get("command", "") for hook in entry.get("hooks", []))
-
-
-def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
-    """Keep managed UserPromptSubmit hook entries in install-surface order.
-
-    This is not the full semantic graph. session-intent-analyzer fans out to
-    task-router and skill-evolution (report-only). Intake owns routing guidance.
-    """
-    ordered_markers = [
-        VISIBILITY_COMMAND_MARKER,
-        SESSION_INTENT_MARKER,
-    ]
-    managed: dict[str, dict[str, Any]] = {}
-    first_managed_index: int | None = None
-
-    for index, entry in enumerate(hooks_list):
-        marker = next((item for item in ordered_markers if _entry_contains_marker(entry, item)), "")
-        if not marker:
-            continue
-        managed[marker] = entry
-        if first_managed_index is None:
-            first_managed_index = index
-
-    if first_managed_index is None or any(marker not in managed for marker in ordered_markers):
-        return False
-    present_markers = [marker for marker in ordered_markers if marker in managed]
-
-    rebuilt: list[dict[str, Any]] = []
-    inserted = False
-    for entry in hooks_list:
-        marker = next((item for item in ordered_markers if _entry_contains_marker(entry, item)), "")
-        if not marker:
-            rebuilt.append(entry)
-            continue
-        if not inserted:
-            rebuilt.extend(managed[item] for item in present_markers)
-            inserted = True
-
-    if rebuilt == hooks_list:
-        return False
-    hooks_list[:] = rebuilt
-    return True
-
-
 GHOST_ALICE_HOOK_MARKERS = (
     PROMPT_PENDING_MERGE_MARKER,
-    VISIBILITY_COMMAND_MARKER,
     HOOK_MARKER,
     SESSION_INTENT_MARKER,
     WEB_SEARCH_FIRST_MARKER,
@@ -2292,37 +2237,6 @@ def install_hook(
         _log(f"  Removed {removed} retired input pending-merge hook entry(ies)")
         changed = True
 
-    if platform_key == "codex":
-        # Codex has no workspace command, so this input hook serves /visibility.
-        visibility_entry = _platform_visibility_command_entry(platform_key, hook_key)
-        visibility_command = _entry_command(visibility_entry)
-        removed = _remove_stale_hook_entries(
-            hook_list,
-            VISIBILITY_COMMAND_MARKER,
-            visibility_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="visibility-command",
-        )
-        if removed:
-            _log(f"  Removed {removed} stale visibility-command hook entry(ies)")
-            changed = True
-        if _hook_already_exists(
-            hook_list,
-            VISIBILITY_COMMAND_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=visibility_command,
-        ):
-            _log("  visibility-command hook already exists. Skipping")
-        else:
-            hook_list.append(visibility_entry)
-            _log("  visibility-command hook added")
-            changed = True
-    else:
-        removed = _remove_hook_entries(hook_list, VISIBILITY_COMMAND_MARKER, hook_id="visibility-command")
-        if removed:
-            _log(f"  Removed {removed} visibility-command hook entry(ies); Claude Code uses its workspace command")
-            changed = True
-
     removed = remove_managed_prompt_reminders(hook_list)
     if removed:
         _log(f"  Removed {removed} redundant managed task-router reminder(s); intake owns routing guidance")
@@ -2363,13 +2277,6 @@ def install_hook(
         _log(_t(
             f"  Removed {removed} web-search-first hook entry(ies)",
             f"  Removed {removed} web-search-first hook entry(ies)",
-        ))
-        changed = True
-
-    if _reorder_user_prompt_governance_hooks(hook_list):
-        _log(_t(
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch)",
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch)",
         ))
         changed = True
 
@@ -3045,8 +2952,6 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
 
     if _hook_already_exists(hook_list, PROMPT_PENDING_MERGE_MARKER):
         total_removed += _remove_hook_entries(hook_list, PROMPT_PENDING_MERGE_MARKER)
-    if _hook_already_exists(hook_list, VISIBILITY_COMMAND_MARKER):
-        total_removed += _remove_hook_entries(hook_list, VISIBILITY_COMMAND_MARKER)
 
     if _hook_already_exists(hook_list, HOOK_MARKER):
         total_removed += _remove_hook_entries(hook_list, HOOK_MARKER)
@@ -3168,15 +3073,6 @@ def check_status_detail(
     )
 
     require_dispatcher = False
-    visibility_present = visibility_ok = True
-    if platform_key == "codex":
-        visibility_present, visibility_ok = _hook_marker_match_status(
-            hook_list,
-            VISIBILITY_COMMAND_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=_entry_command(_platform_visibility_command_entry(platform_key, hook_key)),
-        )
-
     session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
     session_intent_present, session_intent_ok = _hook_marker_match_status(
         hook_list,
@@ -3259,7 +3155,6 @@ def check_status_detail(
         )
 
     required = {
-        "visibility-command": (visibility_present, visibility_ok),
         "session-intent": (session_intent_present, session_intent_ok),
         "tool-checkpoint": (tool_checkpoint_present, tool_checkpoint_ok),
         "completion": (stop_present, stop_ok),

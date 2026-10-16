@@ -198,7 +198,7 @@ class InstallCharacterizationTest(unittest.TestCase):
 
             settings = json.loads((home / ".claude" / "settings.json").read_text(encoding="utf-8"))
             prompts = json.dumps(settings["hooks"]["UserPromptSubmit"])
-            self.assertIn("pending-merge", prompts)
+            self.assertNotIn("pending-merge", prompts)
             self.assertIn("session-intent", prompts)
             self.assertNotIn("web-search-first", prompts)
             snapshot = _snapshot_settings(home)

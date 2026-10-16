@@ -39,7 +39,7 @@
     "Addon sidecars written",
     "Addon source clone failed: ${source}",
     "Advanced/operator commands:",
-    "Agent hook ${action}... (pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)",
+    "Agent hook ${action}... (session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)",
     "Alias for --visibility",
     "Another install is already running; aborting install: ${lock_path}",
     "Ask which AI tool to install",

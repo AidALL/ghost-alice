@@ -58,11 +58,11 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                 'current hook receipt'],
  'install.ps1': ['session-gates.json',
                  'platforms\\codex\\AGENTS.md',
-                 'pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion '
+                 'session-intent + prompt + web-search + tool-checkpoint + completion '
                  '+ session-start + io-trace'],
  'install.sh': ['session-gates.json',
                 'platforms/codex/AGENTS.md',
-                'pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion '
+                'session-intent + prompt + web-search + tool-checkpoint + completion '
                 '+ session-start + io-trace'],
  '_shared/global_rule_blocks.py': ['CODEX_SPEC',
                                    'render_codex_bootstrap',
