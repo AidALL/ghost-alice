@@ -19,13 +19,13 @@ class GateSurfaceDesignTest(unittest.TestCase):
                               else 'follows their bodies', text)
                 self.assertNotIn('skill-call: session-intent-analyzer (this turn); task-router (this turn)', text)
 
-    def test_router_keeps_scope_reconciliation_and_refers_to_gate_schema(self):
+    def test_router_follows_entry_sections_and_refers_to_gate_schema(self):
         body = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('references/routing-details.md', body)
         owner = (ROOT / 'task-router/references/routing-details.md').read_text()
         self.assertIn('current human instructions', owner)
         self.assertIn('bounded change without formal revocation wording', owner)
-        self.assertIn('The common First-Entry Contract owns terminal answers and pending-merge intake', body)
+        self.assertIn("The common contract's Session Intent section interprets the input, and its Work Selection section sends work here", body)
         self.assertIn('Core validates the submitted response-route', body)
         self.assertNotIn('skill-call: session-intent-analyzer (this turn)', body)
 

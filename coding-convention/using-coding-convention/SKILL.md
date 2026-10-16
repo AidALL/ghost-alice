@@ -7,7 +7,7 @@ compatibility:
 
 # Using Coding Convention
 
-The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again. A task-router terminal explanation or clarification ends before this development workflow.
+The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again. A direct answer or a confirmation question ends before this development workflow.
 
 ## Priority and loading
 
@@ -24,7 +24,7 @@ For Codex operations, delegated-task boundaries and checkout selection, use [ref
 
 ## Workflow
 
-After normal routing selects development work, the current-session assistant uses the table below to choose its family workflow. The common First-Entry Contract owns earlier intake and terminal classification.
+After routing selects development work, the current-session assistant uses the table below to choose its family workflow. The common contract's Session Intent and Work Selection sections own the earlier interpretation and carry task-router's direct-answer rule.
 
 Before the next file read, command, edit, plan, review or development-status claim, select the applicable workflow below. Reuse accepted design and authorization. If evidence contradicts the plan, revise the implicated assumption or task within that authorization. Follow boundary-contract to distinguish an implementation change within existing authority from a change requiring the user’s decision.
 
@@ -46,11 +46,9 @@ Before the next file read, command, edit, plan, review or development-status cla
 
 Use the selected skill's body for its procedure, required calls and output format. Do not infer its procedure from this table.
 
-## Control fields and final claims
+## Final claims
 
-The project session contract owns the opening `[gate-state]` schema. Mark this entrypoint `done` only after loading or validly reusing its body and applying the current workflow. A printed `skill-call` line records execution; it does not prove execution.
-
-Verification-before-completion owns acceptance criteria, evidence reuse, completion and partial-control formats, and the finalization sequence. Invoke it before a new completion, fix, success, verified-status or material recommendation claim. Explaining an unchanged prior result preserves its original evidence and time; another input alone does not authorize repeating its check.
+Verification-before-completion owns evidence reuse, completion and partial-control formats, and the finalization sequence. Invoke it before a new completion, fix, success, verified-status or material recommendation claim. Explaining an unchanged prior result preserves its original evidence and time; another input alone does not authorize repeating its check.
 
 For repair attempts, follow systematic-debugging's [Incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). For authorization, follow boundary-contract. Do not copy either procedure into a task-specific plan.
 

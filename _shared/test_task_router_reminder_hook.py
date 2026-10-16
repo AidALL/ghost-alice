@@ -416,7 +416,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                                                .split('[/session-intent-receipt]', 1)[0]))
                     with self.subTest(platform=platform, turn=turn):
                         combined = '\n'.join(messages)
-                        self.assertNotIn('The current-session assistant classifies this input before calling tools', combined)
+                        self.assertNotIn("Interpret this input under the common contract's Session Intent section", combined)
                         self.assertNotIn('Every agent call', combined)
                         self.assertEqual(messages[1], '')
                 if platform == 'claude':
@@ -434,24 +434,24 @@ class RoutingDeliveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             first = analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-1')
-            self.assertIn('The current-session assistant classifies this input before calling tools', first)
+            self.assertIn("Interpret this input under the common contract's Session Intent section", first)
             self.assertEqual(analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-1'), '')
             for platform, session, event in (('codex', 'same-session', 'input-2'),
                                              ('codex', 'other-session', 'input-1'),
                                              ('claude', 'same-session', 'input-1')):
-                self.assertIn('The current-session assistant classifies this input before calling tools',
+                self.assertIn("Interpret this input under the common contract's Session Intent section",
                     analyzer.terminal_routing_instruction(root, platform, session, event))
             # Missing lineage and an unavailable cache must never suppress the policy.
             for event in ('', None):
-                self.assertIn('The current-session assistant classifies this input before calling tools',
+                self.assertIn("Interpret this input under the common contract's Session Intent section",
                     analyzer.terminal_routing_instruction(root, 'codex', 'same-session', event))
             with patch('session_check_cache.observe_check', side_effect=OSError('cache unavailable')):
-                self.assertIn('The current-session assistant classifies this input before calling tools',
+                self.assertIn("Interpret this input under the common contract's Session Intent section",
                     analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-2'))
             source = root / 'changed-hook.py'
             source.write_text('changed instructions')
             with patch.object(analyzer, '__file__', str(source)):
-                self.assertIn('The current-session assistant classifies this input before calling tools',
+                self.assertIn("Interpret this input under the common contract's Session Intent section",
                     analyzer.terminal_routing_instruction(root, 'codex', 'same-session', 'input-2'))
 
     def test_long_history_stays_in_authoritative_state_without_prompt_replay(self):
@@ -475,13 +475,13 @@ class RoutingDeliveryTests(unittest.TestCase):
             payload = {'session_id': 'degrade-after-ready'}
             first, routine = trh.reminder_result('base', root, 'codex', payload)
             self.assertTrue(routine)
-            self.assertIn('The current-session assistant classifies this input before calling tools', first)
+            self.assertIn("Interpret this input under the common contract's Session Intent section", first)
             marker = trh.session_dir(root, 'codex', payload['session_id']) / 'ledger-degraded.json'
             marker.parent.mkdir(parents=True, exist_ok=True)
             marker.write_text('{"reason":"ledger-write-failed"}')
             message, routine = trh.reminder_result('base', root, 'codex', payload)
             self.assertFalse(routine)
-            self.assertTrue(message.startswith('The current-session assistant classifies this input before calling tools'))
+            self.assertTrue(message.startswith("Interpret this input under the common contract's Session Intent section"))
             self.assertIn('latest input was NOT recorded', message)
             self.assertIn('ledger-write-failed', message)
             self.assertNotIn('intake-ready:', message)
@@ -504,10 +504,10 @@ class RoutingDeliveryTests(unittest.TestCase):
                             input=json.dumps({'session_id': 'terminal'}), text=True, capture_output=True, env=env)
                         self.assertEqual(result.returncode, 0, result.stderr)
                         message = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
-                        self.assertIn('The current-session assistant classifies this input before calling tools', message)
-                        self.assertIn('without file, ledger or route access', message)
-                        self.assertIn('A new completion judgment requires its own evidence', message)
-                        self.assertLess(message.index('The current-session assistant classifies this input before calling tools'), message.index('intent-ledger:'))
+                        self.assertIn("Interpret this input under the common contract's Session Intent section", message)
+                        self.assertIn("Work Selection section", message)
+                        self.assertNotIn("answer directly without tools", message)
+                        self.assertLess(message.index("Interpret this input under the common contract's Session Intent section"), message.index('intent-ledger:'))
                         self.assertIn('Normal route only', message)
                         self.assertNotIn('Read the ledger, decompose', message)
                         self.assertIn('intake-ready:', message)
@@ -531,8 +531,8 @@ class RoutingDeliveryTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     host = json.loads(result.stdout)
                     message = host['hookSpecificOutput']['additionalContext']
-                    self.assertTrue(message.startswith('The current-session assistant classifies this input before calling tools'))
-                    self.assertIn('without file, ledger or route access', message)
+                    self.assertTrue(message.startswith("Interpret this input under the common contract's Session Intent section"))
+                    self.assertIn("Work Selection section", message)
                     self.assertIn('Normal-route', message)
                     self.assertIn('withheld', message)
                     self.assertNotIn('intake-ready:', message)
@@ -546,11 +546,11 @@ class RoutingDeliveryTests(unittest.TestCase):
              patch.dict(os.environ, {'CODEX_THREAD_ID': '', 'GHOST_ALICE_SESSION_ID': ''}):
             message, routine = trh.reminder_result('base', Path(temporary), 'codex', {'session_id': 'broken-reader'})
         self.assertFalse(routine)
-        self.assertTrue(message.startswith('The current-session assistant classifies this input before calling tools'))
+        self.assertTrue(message.startswith("Interpret this input under the common contract's Session Intent section"))
         self.assertIn('Normal-route', message)
         self.assertIn('authoritative reader', message)
 
-    def test_command_budget_is_preserved_before_ready_or_unavailable_route_guidance(self):
+    def test_route_guidance_keeps_the_terminal_pointer_with_or_without_intake(self):
         import install_hooks
         ledger = trh.importlib.import_module('session_intent_ledger')
         with tempfile.TemporaryDirectory() as temporary:
@@ -561,8 +561,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                 ready = trh.reminder_message(install_hooks.HOOK_INTERNAL, root, 'codex', {'session_id': 'limited'})
             for message in (missing, ready):
                 with self.subTest(ready='intake-ready:' in message):
-                    self.assertIn('Every agent call, including governance and Ghost-ALICE Autopilot recording, counts against explicit user tool limits', message)
-                    self.assertIn('For a self-contained explanation or clarification', message)
+                    self.assertIn("Work Selection section", message)
             self.assertIn('Normal-route task-router registration is withheld', missing)
             self.assertIn('intake-ready: current input recorded', ready)
             self.assertIn('follows task-router', ready)
@@ -668,7 +667,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                         raw_user_input='status question',
                         intent_delta={'acceptance_criteria': [{
                             'id': 'order-fix', 'summary': 'Preserve first-seen order.',
-                            'source': 'user-explicit', 'admitted': True, 'status': 'unmet',
+                            'source': 'user-said', 'admitted': True, 'status': 'unmet',
                         }]},
                     )
                     # Once SQLite owns the state, an old export cannot erase the work.
@@ -713,7 +712,7 @@ class RoutingDeliveryTests(unittest.TestCase):
                     raw_user_input='status question',
                     intent_delta={'acceptance_criteria': [{
                         'id': 'order-fix', 'summary': 'Preserve first-seen order.',
-                        'source': 'user-explicit', 'admitted': True, 'status': 'unmet',
+                        'source': 'user-said', 'admitted': True, 'status': 'unmet',
                     }]},
                 )
                 with patch.object(install_hooks, '_session_intent_root', return_value=root), \

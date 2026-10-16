@@ -13,6 +13,7 @@ import re
 from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -300,16 +301,22 @@ def analyze_events(events: list[Event], window: int, min_count: int) -> dict[str
     }
 
 
+@lru_cache(maxsize=1)
+def _ledger_module() -> Any:
+    """Load the session-intent ledger once; it owns storage reads and source labels."""
+    entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
+    spec = importlib.util.spec_from_file_location("ghost_evolution_ledger", entry)
+    ledger = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ledger)
+    return ledger
+
+
 def load_intent_context(path: Path | None) -> dict[str, Any] | None:
     if path is None:
         return None
     path = path.expanduser()
     if path.name == "intent-state.json" and any((path.parents[2] / name).exists() for name in ("ghost-state.sqlite3", ".sqlite-authority.json")):
-        entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
-        spec = importlib.util.spec_from_file_location("ghost_evolution_ledger", entry)
-        ledger = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(ledger)
-        value = ledger.read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
+        value = _ledger_module().read_session_state(root=path.parents[2], platform=path.parent.parent.name, session_id=path.parent.name)
     else:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -412,11 +419,11 @@ def conduct_feedback_instincts(context: dict[str, Any] | None) -> list[dict[str,
             continue
         rule = str(entry.get("corrective_rule") or "").strip()
         pattern = str(entry.get("failure_pattern") or "").strip()
-        source = str(entry.get("source") or "user-explicit").strip()
+        source = _ledger_module().canonical_source(entry.get("source"), "user-said")
         instincts.append({
             "id": f"conduct:{entry_id}",
             "trigger": rule or pattern or entry_id,
-            "confidence": 0.9 if source == "user-explicit" else 0.6,
+            "confidence": 0.9 if source == "user-said" else 0.6,
             "domain": "conduct",
             "scope": "agent",
             "evidence": pattern or "user conduct correction",

@@ -14,7 +14,7 @@ import completion_check_validator as v
 def _block(acceptance=True, *, criterion="c1", evidence="ran test X", verdict="pass", unverified="  - none"):
     lines = ["[completion-check]"]
     if acceptance:
-        lines += ["- acceptance-criteria:", "  - c1: do the thing [source: user-explicit]"]
+        lines += ["- acceptance-criteria:", "  - c1: do the thing [source: user-said]"]
     lines += ["- claim-evidence-map:", "  - claim: did the thing"]
     if criterion is not None:
         lines.append(f"    criterion: {criterion}")
@@ -73,7 +73,7 @@ def _final_text(*parts):
             "- verification-before-completion: done",
             "- skill-call: verification-before-completion (this turn)",
             "- acceptance-criteria:",
-            "  - c1: do the thing [source: user-explicit]",
+            "  - c1: do the thing [source: user-said]",
             "- claim-evidence-map:",
             "  - claim: did the thing",
             "    criterion: c1",
@@ -110,7 +110,7 @@ class TestExplicitCompletionRequirement(unittest.TestCase):
     def test_scoped_partial_control_satisfies_the_explicit_requirement(self):
         partial = _block(unverified="  - c2: observation unavailable").replace(
             "[completion-check]", "[partial-check]\n- scope: partial").replace(
-            "- claim-evidence-map:", "  - c2: remaining condition [source: user-explicit]\n- claim-evidence-map:")
+            "- claim-evidence-map:", "  - c2: remaining condition [source: user-said]\n- claim-evidence-map:")
         self.assertIsNone(v.validate_completion_text(partial, require_completion_check=True))
 
 

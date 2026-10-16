@@ -374,15 +374,14 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                 self.assertEqual(receipt_from(message)["intake_status"], "observed")
         self.assertEqual(len(self.events("terminal-intake")), 2)
 
-    def test_common_contract_owns_intake_authority_and_tool_limits(self):
+    def test_identity_rules_stay_with_their_owners(self):
         from global_rule_blocks import platform_contract_text
+        root = SCRIPT.parents[1]
         for platform, filename in (('codex', 'AGENTS.md'), ('claude', 'CLAUDE.md')):
-            contract = platform_contract_text(SCRIPT.parents[1] / 'platforms' / platform / filename)
-            self.assertIn("intake receipt's exact root, platform, session and input identity", contract)
-            self.assertIn('Missing or pending identity', contract)
-            self.assertIn('Core still reads and validates canonical state', contract)
-            self.assertIn('Every agent call', contract)
-            self.assertIn("user's tool limit", contract)
+            contract = platform_contract_text(root / 'platforms' / platform / filename)
+            self.assertIn('Do not substitute another session', contract)
+            self.assertIn('Missing or pending identity blocks dependent writes', contract)
+        self.assertIn('exact intake receipt', (root / 'session-intent-analyzer/SKILL.md').read_text())
 
     def test_custom_instruction_survives_healthy_intake_on_both_platforms(self):
         import base64

@@ -26,8 +26,8 @@ Language: [🇺🇸 English](../../policies/session-gate-matrix.md) | 🇰🇷 �
 
 | 조건 | 현재 세션 어시스턴트가 따를 절차 |
 | --- | --- |
-| 모든 사용자 입력 | session-intent-analyzer 접수 후 task-router |
-| task-router가 boundary-contract: required를 선택 | 의존 작업 전에 boundary-contract |
+| 모든 사용자 입력 | 네이티브 접수 관찰 후 해석. 새 해석이나 바뀐 해석이 있는 작업은 첫 도구 호출 전에 `interpreted-as: `를 기록하고, 판단이 저장된 의도에 기댈 때만 그 의도를 읽습니다 |
+| 현재 세션 어시스턴트가 boundary-contract: required를 선택 | 의존 작업 전에 boundary-contract |
 | 개발 작업 시작 | coding-convention/using-coding-convention |
 | 버그 원인 조사 | coding-convention/systematic-debugging |
 | 구현할 동작이 알려져 있고 검사 가능 | coding-convention/test-driven-development |
@@ -37,11 +37,11 @@ Language: [🇺🇸 English](../../policies/session-gate-matrix.md) | 🇰🇷 �
 
 ## Turn Routing Contract
 
-정상 순서는 `pending-merge precheck -> session-intent-analyzer -> task-router -> downstream/tool-checkpoint`입니다. 현재 세션 어시스턴트는 현재 훅의 병합 확인 결과를 재사용합니다. 결과가 없으면 실제 작업 전에 수동 확인을 하며, 실제 작업이 없는 종결 답변에서는 이를 미룹니다. 이미 알려진 미결 항목은 merge-companion으로 안내하고, 사용자가 명시적으로 미루거나 건너뛰면 미결 상태를 유지합니다.
+네이티브 사전 확인은 관찰로 남습니다. 어시스턴트는 그 결과를 재사용해 필요한 작업을 고르고, 영향받는 스킬을 바꾸기 전이나 사용자가 백업 검토를 명시적으로 요청했을 때 merge-companion을 적용합니다. 관련 없는 읽기 전용 조회는 그 절차를 부르거나 매니페스트를 다시 확인하지 않습니다. 수동 사전 확인이 빠졌으면 영향받는 스킬을 바꾸기 전에 합니다. 명시적으로 미루면 항목은 미결로 남습니다.
 
 현재 세션 어시스턴트는 후속 질문이나 상태 질문도 현재 의도와 계속 유효한 권한으로 분류합니다. 이전 경로는 현재 입력의 경로가 아닙니다. 현재 세션 어시스턴트는 필요할 때 같은 정확한 세션에 skill-evolution을 별도로 적용하여 보고합니다. 이 절차는 task-router에 입력을 전달하거나 작업을 배정하지 않습니다.
 
-현재 세션 어시스턴트는 [task-router](../../../task-router/SKILL.md)를 적용하여 작업을 선택하고 현재 경로 후보를 작성합니다. [boundary-contract](../../../boundary-contract/SKILL.md)를 적용하여 허용 대상·제외 항목·자원을 선언합니다. 이 절차들은 네이티브 권한을 부여하지 않습니다. 사용자의 도구 허용 목록이나 호출 횟수에는 관리용 호출도 포함됩니다.
+현재 세션 어시스턴트는 [task-router](../../../task-router/SKILL.md)를 적용하여 작업을 선택하고 현재 경로 후보를 작성합니다. [boundary-contract](../../../boundary-contract/SKILL.md)를 적용하여 허용 대상·제외 항목·자원을 선언합니다. 이 절차들은 네이티브 권한을 부여하지 않습니다.
 
 ## Session Intent Ledger Contract
 
@@ -49,16 +49,16 @@ Core는 원문을 저장하지 않고 확정된 사용자 입력의 다이제스
 
 실행 소비자는 정확한 영수증의 root/platform/session/input으로 공개 API를 호출합니다. SQLite가 권위 있는 저장소입니다. intent-state.json과 intent-events.jsonl은 가져오기·내보내기 형식이며 current-session.json은 탐색 힌트입니다. 어느 것도 쓰기 식별자를 대신하지 않습니다. 기록이 없으면 의존 작업은 미해결로 남습니다. 어시스턴트는 목적이나 필수 의존 관계에 필요하며 기존 권한 안에 있는 복구만 선택하고, 식별자나 권한을 추측하지 않습니다.
 
-[Session-intent-analyzer](../../../session-intent-analyzer/SKILL.md)는 접수와 정정 출처를 담당합니다. [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)는 상태 필드·트랜잭션·이관 해시·현재 응답 경로를 정의합니다. 접수 이벤트와 intent-state 필드에는 원문 프롬프트·전체 대화·도구 출력·시스템/개발자 지침·비밀 값을 저장하지 않습니다. 별도의 Core 검토 테이블(`core_completion_candidates`, `core_completion_assessments`, `core_completion_responses`)은 승인된 답변·원본 출처 스냅샷과 모델의 검토 판단을 보존합니다. 이 검토 기록은 세션 의도 요약과 구별됩니다. 훅 없는 정상 작업도 같은 식별 계약을 따르며, 작업 없는 답변은 제공된 종결 절차를 사용합니다.
+[Session-intent-analyzer](../../../session-intent-analyzer/SKILL.md)는 접수와 정정 출처를 담당합니다. [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)는 상태 필드·트랜잭션·이관 해시·현재 응답 경로를 정의합니다. 접수 이벤트와 intent-state 필드에는 원문 프롬프트·전체 대화·도구 출력·시스템/개발자 지침·비밀 값을 저장하지 않습니다. 별도의 Core 검토 테이블(`core_completion_candidates`, `core_completion_assessments`, `core_completion_responses`)은 승인된 답변·원본 출처 스냅샷과 모델의 검토 판단을 보존합니다. 이 검토 기록은 세션 의도 요약과 구별됩니다. 훅 없는 작업도 같은 식별 계약을 따르며, 바로 답할 때는 도구를 쓰지 않습니다.
 
 ## Runtime Hook Graph Contract
 
-1. session-intent-analyzer UserPromptSubmit 훅이 접수 상태와 종결/task-router 안내를 제공합니다. Core는 Codex의 직접 접수 또는 Claude의 신뢰된 대조 절차로 정확한 기준 사용자 입력을 확정합니다. Read-state는 읽기만 수행합니다. 현재 세션 어시스턴트는 task-router를 적용하여 작업을 선택하며, 보고가 필요하면 같은 접수에 skill-evolution을 별도로 적용합니다.
+1. session-intent-analyzer UserPromptSubmit 훅이 접수 상태와 바로 답하기·task-router 안내를 제공합니다. Core는 Codex의 직접 접수 또는 Claude의 신뢰된 대조 절차로 정확한 기준 사용자 입력을 확정합니다. Read-state는 읽기만 수행합니다. 현재 세션 어시스턴트는 task-router를 적용하여 작업을 선택하며, 보고가 필요하면 같은 접수에 skill-evolution을 별도로 적용합니다.
 2. 현재 세션 어시스턴트는 정상 경로 후보를 Core에 제출합니다. Core Python 코드는 현재 입력·소유권·승인·선택 기준을 확인한 뒤 ready 경로를 기록합니다.
 3. 현재 세션 어시스턴트는 필요한 경계와 담당 스킬을 따릅니다. 호스트는 도구 권한을 적용하고 허용된 호출을 실행합니다. 해당 Ghost-ALICE Autopilot 사전 훅은 출처를 기록하고 PostToolUse는 엄격한 감사를 유지합니다.
 4. 완료 시 가드와 Ghost-ALICE Autopilot 어댑터는 같은 입력·본문에 연결된 Core 평가를 호출합니다. 독립적으로 등록된 훅 사이의 정책 실행 순서를 가정하지 않습니다.
 
-Tool-checkpoint는 `PreToolUse`/`BeforeTool` 재시도 점검이며 사용자 입력 접수가 아닙니다. 도구 입력이나 감사 메타데이터는 네이티브 권한을 부여하지 않습니다. 설치 설정만으로 훅 호출이나 호스트 실행을 입증할 수 없으며, 필요한 실행 관찰은 [live-smoke-regression](live-smoke-regression.md)이 담당합니다.
+Tool-checkpoint는 도구 호출 전 단계(호스트의 `PreToolUse`/`BeforeTool`)에서 실행되며 사용자 입력 접수가 아닙니다. 도구 입력이나 감사 메타데이터는 네이티브 권한을 부여하지 않습니다. 설치 설정만으로 훅 호출이나 호스트 실행을 입증할 수 없으며, 필요한 실행 관찰은 [live-smoke-regression](live-smoke-regression.md)이 담당합니다.
 
 ## Dynamic Focus Contract
 
@@ -72,7 +72,7 @@ Tool-checkpoint는 `PreToolUse`/`BeforeTool` 재시도 점검이며 사용자 �
 
 task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 목적을 보존합니다. 조사나 worktree 확인은 사용자가 산출물로 요구하지 않았다면 수단입니다. Accepted-continuation에는 기록된 수락이 필요하며 근거 요구를 낮추지 않습니다.
 
-[종결 경로 계약](../../../task-router/references/routing-details.md)은 clarification-only와 direct-response를 정상 작업과 구별합니다. 일반적인 이유·방법 질문의 전제나 열린 작업 공간만으로 로컬 진단을 승인하지 않습니다. 상태 질문이나 정정은 보통 미완료 승인 작업을 조정하며, 명시적 중단·일시정지는 계속 여부를 바꿉니다. 실제 작업이 없는 종결 답변은 제공된 대화를 사용하고 에이전트 측 도구나 메타데이터 복구 없이 답변 또는 결정적인 질문만 반환합니다. 이 조건은 정상 완료 경로의 승인된 경로 등록을 금지하지 않습니다.
+[경로 세부](../../../task-router/references/routing-details.md)는 바로 답하기(`direct-response`)와 확인 질문(`clarification-only`)을 작업과 구별합니다. 일반적인 이유·방법 질문의 전제나 열린 작업 공간만으로 로컬 진단을 승인하지 않습니다. 상태 질문이나 정정은 보통 미완료 승인 작업을 조정하며, 명시적 중단·일시정지는 계속 여부를 바꿉니다. 바로 답하기는 제공된 대화를 사용하고 에이전트 측 도구나 메타데이터 복구 없이 답변만 반환합니다. 확인 질문은 공통 계약의 Session Intent 절이 정한 형식을 따릅니다. 이 조건은 작업 완료 경로의 승인된 경로 등록을 금지하지 않습니다.
 
 ## Work-Impact Projection Contract
 
@@ -87,25 +87,22 @@ task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 �
 
 ## Runtime Checkpoints
 
-정상 경로의 첫 gate-state와 경로 출력 형식은 [task-router](../../../task-router/SKILL.md#referenced-contracts)가 담당합니다. 현재 세션 어시스턴트는 새로 읽거나 유효하게 보관한 스킬 본문을 사용하고 실제 절차를 수행한 뒤에만 호출을 기록합니다. 메타데이터 일치는 실행이 아닙니다.
+결정에 영향을 주는 경로 안내는 [task-router](../../../task-router/SKILL.md#referenced-contracts)가 담당합니다. 현재 세션 어시스턴트는 새로 읽거나 유효하게 보관한 지침 본문을 사용하고 그 절차를 따른 뒤에만 스킬 호출을 기록합니다. 메타데이터 일치는 실행이 아닙니다.
 
 [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md#completion-check-format)은 공통 completion-check·partial-check 형식과 기준·주장·근거 대응을 담당합니다. Core는 현재 소유 경로에 연결된 주장·원본 자료·응답 전체의 검토를 인증하여 완료 제출을 수락합니다. 스킬 로드는 절차 안내와 감사 활동이며 별도의 완료 선행 조건이 아닙니다. 최종 완료에는 미검증 기준 없이 근거가 지원하는 판정이 필요합니다. 부분 성공은 전체 계약과 미해결 기준을 유지하며 성공한 일부를 전체 완료로 제시하지 않습니다.
 
-현재 세션 어시스턴트는 변하지 않은 유효한 근거의 원본 출처와 시각을 재사용합니다. 형식이나 경로 오류만으로 업무를 다시 검증하지 않습니다. 화면 io-trace는 선택 사항이며 엄격한 내부 감사와 실제 절차 근거는 유지합니다. 제어 필드와 열거 값은 두 언어 문서 모두 영어를 유지합니다.
+현재 세션 어시스턴트는 변하지 않은 유효한 근거의 원본 출처와 시각을 재사용합니다. 형식이나 경로 오류만으로 업무를 다시 검증하지 않습니다. 화면에 보인 기록은 증거가 되지 않으며, 엄격한 내부 감사와 실제 절차 근거는 유지합니다. 제어 필드와 열거 값은 두 언어 문서 모두 영어를 유지합니다.
 
 ## tool-checkpoint Visible Surface
 
-현재 세션 어시스턴트는 입력 배치에 한 번 tool-checkpoint를 표시하며 `hook-stage: PreToolUse`, `meaning: tool-call retry checkpoint, not user-input intake`, intent, why를 포함합니다. 판단에 영향을 주는 비일상 절차에는 procedure를, 경계가 활성화되면 contract-ref와 contract-check를 추가합니다.
+공통 계약의 io-trace Transparency Rule이 체크포인트 표시를 맡습니다. 현재 세션 어시스턴트는 도구 호출의 결과가 권한, 다음 판단 또는 필요한 검증을 바꿀 때 체크포인트를 표시합니다. 바뀌지 않은 증거는 다시 쓰고, 판단에 영향을 줄 수 있는 자료만 읽습니다. 영수증이나 정상적인 도구 호출만으로는 메시지를 다시 표시하지 않습니다.
 
-현재 세션 어시스턴트는 부수 효과·강제 신호·불일치·중요한 사용자 결정이 있을 때만 localized-human-note, rejected-alternatives, unverified-premises, failure-mode-if-wrong을 추가합니다. 구체적 복구가 필요하면 recovery-action을 추가합니다. 복구로 초점이 바뀌면 procedure 또는 recovery-action에 focus-layer와 scope-reopen 대상을 명시합니다.
-
-주장의 근거로 파일을 다시 읽기 전에 verify-or-reuse를 적용하고 why에 관찰된 계기를 명시합니다. 점검은 네이티브 권한을 부여하지 않으며 일상적인 recovery-cost나 recovery-note 필드를 요구하지 않습니다.
 
 ## tool-checkpoint Batch / Continuation Compression
 
 훅은 모든 호출을 검사하고 엄격한 감사를 보존하며 같은 입력에서 변하지 않은 사용자 표시만 생략합니다. Batch와 continuation 형식은 권한을 부여하지 않습니다.
 
-Continuation은 같은 process/session/tool-call ID의 출력을 기다리는 경우에만 사용합니다. 첫 조회나 새 입력·거부·불일치·관련 상태 변경이 있으면 점검을 다시 표시합니다. 짧은 조회 형식은 무기한 반복하라는 지시가 아닙니다.
+Continuation은 같은 process/session/tool-call ID를 다시 조회하는 경우만 뜻합니다. 거부, 불일치, 관련 상태 변경이 있으면 새 체크포인트가 필요할 수 있습니다. 조회나 새 입력만으로는 안내를 다시 표시하지 않습니다.
 
 ## Notes
 
@@ -125,7 +122,7 @@ Continuation은 같은 process/session/tool-call ID의 출력을 기다리는 �
 
 ## Current Selection and Bounded Recovery
 
-Core는 task-router를 따르는 모델이 제출한 현재 응답 경로를 검증합니다. 종결 경로는 실행 단위를 선택하지 않으며 요청된 조회는 정상 작업입니다. 새 입력은 경로 연결을 바꾸되 안정된 작업 단위와 변경 없는 원본 근거를 보존합니다.
+Core는 task-router를 따르는 모델이 제출한 현재 응답 경로를 검증합니다. 바로 답하기나 확인 질문의 투영은 실행 단위를 선택하지 않으며, 요청된 조회는 작업입니다. 새 입력은 경로 연결을 바꾸되 안정된 작업 단위와 변경 없는 원본 근거를 보존합니다.
 
 구체적인 경로·증거·기록 오류는 아래의 담당 절차로 돌아갑니다. 모델은 목적이나 필수 의존 관계에 필요하고 권한 안에 있을 때만 수정을 선택합니다. 지원되지 않는 주장은 수정·철회하며 필수 미해결 기준은 미충족 상태로 남습니다. 동일한 기록 실패가 반복되면 의존 적용을 보류하되 업무를 재실행하거나 독립적인 승인 작업을 막지 않습니다.
 
@@ -138,4 +135,4 @@ Core는 task-router를 따르는 모델이 제출한 현재 응답 경로를 검
 - [Verification-before-completion: Evidence Selection And Stop Gate](../../../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate)은 유용한 검사와 근거 재사용을 담당합니다.
 - [Ghost-ALICE Autopilot publication contract](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)는 캡처·접수·적용·기록 복구를 담당합니다.
 
-담당 절차는 누적 시도·원본 출처와 시각·영향 없는 기준을 보존합니다. 한 경로의 실패는 그 의존 작업만 막으며 다른 승인 작업을 막지 않습니다. 사용자 한도에는 관리용 호출도 포함되며 내부 호출이라는 예외를 만들지 않습니다.
+담당 절차는 누적 시도·원본 출처와 시각·영향 없는 기준을 보존합니다. 한 경로의 실패는 그 의존 작업만 막으며 다른 승인 작업을 막지 않습니다.

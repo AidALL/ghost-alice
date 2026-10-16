@@ -10,15 +10,15 @@ calls:
 
 # Session Intent Analyzer
 
-The native intake hook records input identity without retaining raw prompt text. The response model interprets the supplied user input and updates the current routing summary only when meaning changes. Task-router selects work and skills from that summary and the current request.
+The native intake hook records input identity without retaining raw prompt text. The common contract's Session Intent section sets when the response model records its `interpreted-as: ` interpretation; this skill sets the record's fields. Task-router selects work and skills from that record and the current request.
 
 ## Current intent and references
 
 First identify the stored fact that can change the next decision. The supplied request and exact intake receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update; do not query the ledger merely because a tool will execute or a new input arrived. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work. Automatic intake and strict audit still run.
 
-For a required intent lookup, use the exact receipt coordinates with `scripts/session_intent_ledger.py --read-intent`. The result contains routing keywords, their original input binding, the current input/revision, and JSON pointers to detailed state. Keywords do not establish permission, work completion or current applicability by themselves. A simple answer supported by the supplied conversation follows the common First-Entry Contract without ledger tools.
+For a required intent lookup, use the exact receipt coordinates with `scripts/session_intent_ledger.py --read-intent`. The result contains routing keywords, their original input binding, the current input/revision, and JSON pointers to detailed state. Keywords do not establish permission, work completion or current applicability by themselves. A direct answer follows the common contract's Work Selection section without ledger tools.
 
-The response model writes `routing_keywords` and `routing_summary` as replacements: short selection terms and a concise current objective, relevant constraints, decision and next action. Neither field contains raw prompts, tool output, full documents or repeated history. Omit an unchanged update. `constraints`, `non_goals`, `open_questions`, `risk_flags` and `consumer_hints` describe current conditions. Supply the complete current value only when it changes; the ledger replaces that field and retains omitted fields. Preserve applicable user restrictions when preparing a replacement. A ledger edit does not authorize work.
+The `interpreted-as: ` record is a semantic update: `current_goal` holds the objective, `constraints` and `non_goals` hold the constraints, and `acceptance_criteria` holds the done conditions, each with the source `user-said` or `interpreted-as`. The response model writes `routing_keywords` and `routing_summary` as replacements: short selection terms and a concise current objective, relevant constraints, decision and next action. Neither field contains raw prompts, tool output, full documents or repeated history. Omit an unchanged update. `constraints`, `non_goals`, `open_questions`, `risk_flags` and `consumer_hints` describe current conditions. Supply the complete current value only when it changes; the ledger replaces that field and retains omitted fields; an empty list removes obsolete entries. Preserve applicable user restrictions when preparing a replacement. A ledger edit does not authorize work.
 
 Detailed work, authority and evidence records remain available to their owning code. When the next decision needs a stored detail, select its pointer instead of dumping the entire state:
 
@@ -34,7 +34,7 @@ For a semantic update, pass `--delta-json` with only changed current values and 
 
 Codex intake records canonical input identity. Claude stages the observation until its trusted native wrapper reconciles actor rows; a notification does not become human authority. Pending input cannot authorize dependent writes. A native session binding must match the selected write session. Core reads and validates canonical state for route registration, context dispositions, authority-dependent execution and completion records; supplied prose cannot replace those checks. Historical read-only lookup does not grant that session's execution permission.
 
-A material conduct correction can be recorded as one compressed `conduct_feedback` entry with a stable ID and supported source. User assertions support `user-explicit`; a directly observed mismatch supports `inferred`. A prospective constraint is not evidence of an earlier failure. Task-router consumes current intent; skill-evolution receives conduct feedback only as a report branch.
+A material conduct correction can be recorded as one compressed `conduct_feedback` entry with a stable ID and supported source. User assertions support `user-said`; a directly observed mismatch supports `interpreted-as`. A prospective constraint is not evidence of an earlier failure. Task-router consumes current intent; skill-evolution receives conduct feedback only as a report branch.
 
 ## Failure modes
 

@@ -19,6 +19,7 @@ import argparse
 import importlib.util
 import json
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -61,16 +62,22 @@ def iter_state_files(root: Path) -> list[Path]:
     return sorted(root.glob("*/*/intent-state.json"))
 
 
+@lru_cache(maxsize=1)
+def _ledger_module() -> Any:
+    """Load the session-intent ledger once; it owns storage reads and source labels."""
+    entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
+    spec = importlib.util.spec_from_file_location("ghost_backlog_ledger", entry)
+    ledger = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ledger)
+    return ledger
+
+
 def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
     now_dt = parse_ts(now) or datetime.now(timezone.utc)
     by_id: dict[str, dict[str, Any]] = {}
     state_files = iter_state_files(root)
     if (root / "ghost-state.sqlite3").exists() or (root / ".sqlite-authority.json").exists():
-        entry = Path(__file__).resolve().parents[2] / "session-intent-analyzer/scripts/session_intent_ledger.py"
-        spec = importlib.util.spec_from_file_location("ghost_backlog_ledger", entry)
-        ledger = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(ledger)
-        records = ledger.list_session_states(root)
+        records = _ledger_module().list_session_states(root)
         session_count = len(records)
     else:
         records = []
@@ -115,7 +122,7 @@ def aggregate(root: Path, now: str | None = None) -> dict[str, Any]:
                 agg["failure_pattern"] = str(entry["failure_pattern"])
             if entry.get("corrective_rule"):
                 agg["corrective_rule"] = str(entry["corrective_rule"])
-            agg["sources"].add(str(entry.get("source") or "user-explicit"))
+            agg["sources"].add(_ledger_module().canonical_source(entry.get("source"), "user-said"))
             agg["sessions"].add(session)
             agg["occurrence_count"] += positive_int(entry.get("occurrence_count"), 1)
             agg["statuses"].append(str(entry.get("status") or "open"))

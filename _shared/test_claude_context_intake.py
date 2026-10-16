@@ -142,7 +142,7 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         self.stage('Human authorized implementation.', actor='human'); state = self.reconcile()
         event = state['latest_input_event_id']
         core.record_turn(**self.coords, expected_input_event_id=event, intent_delta={'acceptance_criteria':[
-            self.fixture.criterion('first'),dict(id='ownerless', summary='Original proof', source='user-explicit', admitted=True)]})
+            self.fixture.criterion('first'),dict(id='ownerless', summary='Original proof', source='user-said', admitted=True)]})
         candidate = self.fixture.candidate(); candidate['work_units'][0]['owner']['platform'] = 'claude'
         core.record_response_route(**self.coords, expected_input_event_id=event, candidate=candidate, boundary_ref='boundary-1')
         return event, candidate, core.read_session_state(**self.coords)

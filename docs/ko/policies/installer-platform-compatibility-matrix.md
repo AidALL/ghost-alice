@@ -43,10 +43,10 @@ Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니�
 
 | Platform | Runtime surface | Contract | Regression owner |
 | --- | --- | --- | --- |
-| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks와 `permissions.allow` | `platforms/claude/CLAUDE.md`의 독립적인 관리 블록을 설치하여 임의 작업 디렉터리에서도 규칙 0부터 12와 hookless fallback을 제공합니다. 표시가 없는 사용자 파일은 설치 상태로 계산하지 않는 제안 파일로 보존합니다. 모든 설치된 Ghost-ALICE skill에 `Skill(<name>)` 권한을 허용하며 core-only allowlist로 축소하지 않습니다. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks와 `permissions.allow` | `platforms/claude/CLAUDE.md`의 독립적인 관리 블록을 설치하여 임의 작업 디렉터리에서도 공통 계약과 hookless fallback을 제공합니다. 표시가 없는 사용자 파일은 설치 상태로 계산하지 않는 제안 파일로 보존합니다. 모든 설치된 Ghost-ALICE skill에 `Skill(<name>)` 권한을 허용하며 core-only allowlist로 축소하지 않습니다. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
 | Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | visible Skill tool이 없으므로 required gates는 `SKILL.md` read와 workflow execution으로 기록합니다. `hooks.json`의 hook event names는 install-surface configuration이며 runtime firing proof가 아닙니다. gate-completion claim에는 observed hook payload evidence, runtime smoke, 또는 hookless/manual fallback wording이 필요합니다. `tool-checkpoint` payloads는 installation and drift verification targets입니다. 외부 도구 근거 선택은 해당 주장을 검증할 때 verification reference를 따릅니다. agent visibility profile은 hook execution을 줄이면 안 됩니다. Windows native Codex는 actual hook payload firing과 `SKILL.md` read records에 별도 smoke를 둡니다 | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
 
-Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공통 지침 소스로 지정합니다. 정상 작업 경로는 그 소스와 프로젝트 고유 제약을 함께 적용하며, 도구 없는 종결 답변은 로더의 종결 절차를 사용합니다. Status와 doctor는 문단 제목과 관계없이 로더가 지정한 공통 파일을 요구합니다. 설치기는 다른 프로젝트의 지침 예산을 늘리지 않습니다. 사용자 거버넌스 파일을 보호하며, Codex 공통 계약 경로가 심볼릭 링크이면 교체를 거부합니다. 자세한 내용은 [공통 거버넌스와 프로젝트 지침](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)을 확인해 주세요.
+Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공통 지침 소스로 지정합니다. 작업은 그 소스와 프로젝트 고유 제약을 함께 적용하며, 바로 답할 때는 로더의 도구 없는 답변 규칙을 따릅니다. Status와 doctor는 문단 제목과 관계없이 로더가 지정한 공통 파일을 요구합니다. 설치기는 다른 프로젝트의 지침 예산을 늘리지 않습니다. 사용자 거버넌스 파일을 보호하며, Codex 공통 계약 경로가 심볼릭 링크이면 교체를 거부합니다. 자세한 내용은 [공통 거버넌스와 프로젝트 지침](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)을 확인해 주세요.
 
 ## Hook Message Semantics
 
@@ -60,11 +60,11 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### pending merge precheck
 
-SessionStart 또는 UserPromptSubmit 훅이 현재 플랫폼의 병합 대기 확인을 수행했고 미결 항목 경고가 없다는 근거를 제공하면, 현재 세션 어시스턴트는 `merge-companion-precheck: clean (hook-verified)`를 기록하고 셸 확인을 반복하지 않습니다. 훅이 미결 항목을 보고하거나 훅 근거가 없을 때만 현재 플랫폼의 매니페스트를 직접 읽습니다. 미결 항목이 있으면 `merge-companion`을 먼저 연결합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
+SessionStart 또는 UserPromptSubmit 훅이 현재 플랫폼의 병합 대기 확인을 수행했고 미결 항목 경고가 없다는 근거를 제공하면, 현재 세션 어시스턴트는 `merge-companion-precheck: clean (hook-verified)`를 기록하고 셸 확인을 반복하지 않습니다. 훅이 미결 항목을 보고하거나 훅 근거가 없을 때만 현재 플랫폼의 매니페스트를 직접 읽습니다. 미결 항목이 있으면, 사용자가 검토를 요청하거나 선택된 작업이 영향받는 스킬을 바꿀 때 `merge-companion`을 적용합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
 
 ### tool-checkpoint recovery surface
 
-도구 점검 훅은 일상적인 호출에 복구 비용·메모 필드를 요구하지 않습니다. 기본 표시에는 `intent`와 `why`를 유지합니다. 부수 효과, 강제 신호, 불일치, 의미 있는 사용자 결정이나 복구가 어려운 행동 때문에 필요한 경우에만 `failure-mode-if-wrong`과 `recovery-action`을 표시합니다.
+도구 점검 훅은 일상적인 호출에 복구 비용·메모 필드를 요구하지 않습니다. 보이는 체크포인트 필드는 공통 계약의 io-trace Transparency Rule이 정합니다.
 
 ### completion-reminder
 

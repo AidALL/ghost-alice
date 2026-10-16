@@ -75,7 +75,7 @@ CONTRACT = {
     },
     "terminal_routes": {
         "clarification-only": {
-            "owner": "task-router",
+            "owner": "session-intent",
             "manual_pending_merge": "defer-until-next-actionable-turn",
             "downstream_work": "none",
             "user_surface": "minimum-decisive-information-only",
@@ -187,12 +187,11 @@ class SkillGateContractTest(unittest.TestCase):
                 self.assertIn(expected_message, messages)
 
     def test_no_work_terminal_routes_are_enforced_by_checker(self) -> None:
-        # Meaning is enforced by terminal_routes machine values, not duplicate prose.
+        # Meaning is enforced by terminal_routes machine values; the ledger schema owns the mode names.
         for mode in ("clarification-only", "direct-response"):
             self.assertEqual(CONTRACT["terminal_routes"][mode]["downstream_work"], "none")
             self.assertEqual(CONTRACT["terminal_routes"][mode]["strict_logging"], "active")
-            for path in ("task-router/SKILL.md", "platforms/common-governance.md"):
-                self.assertIn(mode, REQUIRED_PATTERNS[path])
+            self.assertIn(mode, REQUIRED_PATTERNS["session-intent-analyzer/references/ledger-schema.md"])
 
     def _extract_between(self, text: str, start_marker: str, end_marker: str) -> str:
         start = text.find(start_marker)
@@ -222,10 +221,10 @@ class SkillGateContractTest(unittest.TestCase):
         for relative, identifiers in REQUIRED_PATTERNS.items():
             self._write_file(root, relative, "\n".join(identifiers) + "\n")
         self._write_file(root, "_shared/reminder_texts.json", json.dumps({
-            "tool-checkpoint": "tool-checkpoint: PreToolUse follows common governance rule 9",
+            "tool-checkpoint": "tool-checkpoint: follows the common contract's io-trace Transparency Rule",
         }))
         additions = {
-            "platforms/common-governance.md": "## First-Entry Contract\nUse the exact intake receipt to select work through task-router.\n### 9. io-trace Transparency Rule\n`intent` `why` `hook-stage: PreToolUse` `contract-ref` `contract-check`\n",
+            "platforms/common-governance.md": "## Session Intent\n`user-said: ` `interpreted-as: `\n## Work Selection\n`task-router` decides between a direct answer and work.\n## io-trace Transparency Rule\n`intent` `why` `stage: before-tool` `contract-ref` `contract-check`\n",
             "session-intent-analyzer/references/ledger-schema.md": "## Core Response Projection\nresponse-route.v1 record_response_route\n",
             "coding-convention/using-coding-convention/SKILL.md": "[Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse)\n",
             "coding-convention/verification-before-completion/SKILL.md": "session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection\n[Apply and deliver](references/autopilot-publication.md#apply-and-deliver)\n",
@@ -275,15 +274,15 @@ class SkillGateContractTest(unittest.TestCase):
             root = Path(tmpdir)
             self._write_valid_fixture(root)
             self._write_file(root, "_shared/reminder_texts.json", json.dumps({
-                "tool-checkpoint": "tool-checkpoint PreToolUse intent why contract-ref contract-check",
-                "unrelated-message": "common governance rule 9",
+                "tool-checkpoint": "tool-checkpoint intent why contract-ref contract-check",
+                "unrelated-message": "io-trace Transparency Rule",
             }))
             self.assertTrue(any(issue.path == "_shared/reminder_texts.json" and "owner reference" in issue.message
                                 for issue in run_contract_checks(root)))
 
     def test_missing_canonical_owner_file_or_section_fails(self) -> None:
         cases = (
-            ("platforms/common-governance.md", "### 9. io-trace Transparency Rule"),
+            ("platforms/common-governance.md", "## io-trace Transparency Rule"),
             ("session-intent-analyzer/references/ledger-schema.md", "## Core Response Projection"),
             ("coding-convention/verification-before-completion/references/verify-or-reuse.md", "## Instruction Body Reuse"),
             ("coding-convention/verification-before-completion/references/autopilot-publication.md", "## Apply and deliver"),
@@ -695,13 +694,27 @@ class SkillGateContractTest(unittest.TestCase):
             path.write_text(path.read_text().replace("{{COMMON_GOVERNANCE}}", "Apply task-router after intake."))
             self.assertTrue(any("must reference one common governance" in issue.message for issue in run_contract_checks(root)))
 
-    def test_claude_bootstrap_rejects_missing_first_entry_contract(self) -> None:
+    def test_claude_bootstrap_rejects_missing_entry_sections(self) -> None:
         from check_skill_gate_contract import _check_claude_first_turn_contract
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
             (root / "platforms/common-governance.md").write_text("## Operating Model\nSelect relevant work.\n")
             self.assertTrue(_check_claude_first_turn_contract(root))
+
+    def test_removed_contract_wording_cannot_return(self) -> None:
+        from check_skill_gate_contract import REMOVED_CONTRACT_TOKENS
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            path = root / "platforms/common-governance.md"
+            original = path.read_text(encoding="utf-8")
+            for token in REMOVED_CONTRACT_TOKENS:
+                with self.subTest(token=token):
+                    path.write_text(original + "\n" + token + "\n", encoding="utf-8")
+                    self.assertTrue(any("removed contract wording" in issue.message for issue in run_contract_checks(root)))
+            path.write_text(original, encoding="utf-8")
+            self.assertFalse(any("removed contract wording" in issue.message for issue in run_contract_checks(root)))
 
     def test_real_claude_first_turn_routes_directly_after_exact_intake(self) -> None:
         from check_skill_gate_contract import _check_claude_first_turn_contract

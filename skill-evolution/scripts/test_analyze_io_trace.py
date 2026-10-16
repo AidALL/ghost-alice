@@ -58,14 +58,14 @@ class AnalyzeIoTraceTests(unittest.TestCase):
                     "id": "scope-narrowing",
                     "failure_pattern": "covered only key spots of a full-set objective",
                     "corrective_rule": "cover the whole committed scope",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "open",
                 },
                 {
                     "id": "already-encoded",
                     "failure_pattern": "x",
                     "corrective_rule": "y",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "encoded",
                 },
             ],
@@ -90,14 +90,14 @@ class AnalyzeIoTraceTests(unittest.TestCase):
                     "id": "intent-vs-skill-gap",
                     "failure_pattern": "skill behaves narrower than the user's stated intent",
                     "corrective_rule": "widen the skill to match intent",
-                    "source": "inferred",
+                    "source": "interpreted-as",
                     "status": "open",
                 },
                 {
                     "id": "already-applied",
                     "failure_pattern": "x",
                     "corrective_rule": "y",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "encoded",
                 },
             ],
@@ -107,7 +107,7 @@ class AnalyzeIoTraceTests(unittest.TestCase):
         conduct = [i for i in report["instincts"] if str(i["id"]).startswith("conduct:")]
         self.assertEqual(len(conduct), 1)
         self.assertEqual(conduct[0]["id"], "conduct:intent-vs-skill-gap")
-        self.assertEqual(conduct[0]["source"], "inferred")
+        self.assertEqual(conduct[0]["source"], "interpreted-as")
         self.assertEqual(conduct[0]["decision"], "necessity-gate")
 
     def test_generates_tool_workflow_and_sequence_instincts(self) -> None:
@@ -314,7 +314,7 @@ class AnalyzeIoTraceTests(unittest.TestCase):
             "non_goals": ["Edit configuration during diagnosis", "Publish externally"],
             "decisions": [
                 {"id": "diagnosis-only", "summary": "Inspect only", "superseded": True},
-                {"id": "repair-approved", "source": "user-explicit", "summary": "Repair is now authorized"},
+                {"id": "repair-approved", "source": "user-said", "summary": "Repair is now authorized"},
             ],
         }
         baseline = self.run_analyzer(rows, "--min-count", "1", "--intent-ledger", str(self.write_intent_state(state)))

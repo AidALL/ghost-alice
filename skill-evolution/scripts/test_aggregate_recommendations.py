@@ -42,19 +42,19 @@ class AggregateRecommendationsTests(unittest.TestCase):
 
     def test_recurrence_and_recency_ranked(self) -> None:
         self._write("claude", "s1", [
-            {"id": "a", "corrective_rule": "widen scope", "source": "user-explicit",
+            {"id": "a", "corrective_rule": "widen scope", "source": "user-said",
              "status": "open", "updated_at": "2026-06-01T00:00:00Z"},
         ])
         self._write("claude", "s2", [
-            {"id": "a", "corrective_rule": "widen scope", "source": "inferred",
+            {"id": "a", "corrective_rule": "widen scope", "source": "interpreted-as",
              "status": "open", "updated_at": "2026-06-05T00:00:00Z"},
         ])
         self._write("claude", "s3", [
-            {"id": "b", "corrective_rule": "read do not grep", "source": "user-explicit",
+            {"id": "b", "corrective_rule": "read do not grep", "source": "user-said",
              "status": "open", "updated_at": "2026-05-01T00:00:00Z"},
         ])
         self._write("claude", "s4", [
-            {"id": "c", "corrective_rule": "x", "source": "user-explicit",
+            {"id": "c", "corrective_rule": "x", "source": "user-said",
              "status": "encoded", "updated_at": "2026-06-05T00:00:00Z"},
         ])
         result = self.mod.aggregate(self.root, now="2026-06-05T00:00:00Z")
@@ -65,7 +65,7 @@ class AggregateRecommendationsTests(unittest.TestCase):
         self.assertEqual(top["session_count"], 2)
         self.assertEqual(top["occurrence_count"], 2)
         self.assertEqual(top["last_seen"], "2026-06-05T00:00:00Z")
-        self.assertEqual(top["sources"], ["inferred", "user-explicit"])
+        self.assertEqual(top["sources"], ["interpreted-as", "user-said"])
         self.assertEqual(result["recommendations"][1]["id"], "b")
         # no fabricated composite weight: the model judges priority from the objective signals, the code does not bake a magic score
         self.assertNotIn("priority_score", top)
@@ -80,7 +80,7 @@ class AggregateRecommendationsTests(unittest.TestCase):
             {
                 "id": "completioncheck-before-skill-call",
                 "summary": "load the verification skill before completion-check",
-                "source": "user-explicit",
+                "source": "user-said",
                 "status": "open",
                 "occurrence_count": 6,
                 "updated_at": "2026-06-01T00:00:00Z",
@@ -90,7 +90,7 @@ class AggregateRecommendationsTests(unittest.TestCase):
             {
                 "id": "newer-but-single",
                 "summary": "newer one-off correction",
-                "source": "user-explicit",
+                "source": "user-said",
                 "status": "open",
                 "occurrence_count": 1,
                 "updated_at": "2026-06-05T00:00:00Z",

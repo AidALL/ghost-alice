@@ -2,7 +2,7 @@
 """Static validation for the pending-merge/session-start layered gate.
 
 Statically checks whether the pending-merge self-check remains present in hooks,
-bootstrap, task-router, and install guidance. Exits 1 when any check fails. CI
+bootstrap, the common contract, merge-companion and install guidance. Exits 1 when any check fails. CI
 uses this as a regression gate.
 
 Usage:
@@ -87,18 +87,18 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-prose-rule",
-        description="common governance limits merge handling to affected changes or requested review",
+        description="common governance names merge-companion only for a requested review or an affected-skill change",
         file=REPO / "platforms" / "common-governance.md",
-        pattern=r"Apply `merge-companion` when the user requests review[\s\S]*bounded read-only lookup[\s\S]*explicit user defer",
+        pattern=r"`merge-companion`: an undecided pending merge, when the user asks to review it or the selected work changes an affected skill",
     ),
     LayerCheck(
-        layer="pending-merge-task-router-precheck",
-        description="task-router delegates pending-merge intake to the common First-Entry Contract",
-        file=REPO / "task-router" / "SKILL.md",
-        pattern=r"common First-Entry Contract.*pending-merge intake",
-        owner=REPO / "platforms" / "common-governance.md",
-        owner_section="First-Entry Contract",
-        owner_pattern=r"Reuse the native pending-merge precheck as an observation[\s\S]*Before affected changes",
+        layer="pending-merge-skill-activation",
+        description="the common Owners entry sends pending merges to merge-companion, which owns precheck reuse and the affected-change trigger",
+        file=REPO / "platforms" / "common-governance.md",
+        pattern=r"`merge-companion`: an undecided pending merge",
+        owner=REPO / "merge-companion" / "SKILL.md",
+        owner_section="Entry and activation",
+        owner_pattern=r"Reuse the result supplied by the native hook[\s\S]*perform a missing manual precheck before affected changes[\s\S]*bounded read-only lookup unrelated to those changes[\s\S]*leaves the backups undecided",
     ),
     LayerCheck(
         layer="pending-merge-bootstrap-self-check",
@@ -106,8 +106,8 @@ CHECKS: list[LayerCheck] = [
         file=REPO / "platforms" / "codex" / "AGENTS.md",
         pattern=r"\{\{COMMON_GOVERNANCE\}\}",
         owner=REPO / "platforms" / "common-governance.md",
-        owner_section="First-Entry Contract",
-        owner_pattern=r"pending-merge precheck[\s\S]*leaves the backups undecided",
+        owner_section="Owners",
+        owner_pattern=r"`merge-companion`: an undecided pending merge",
     ),
     LayerCheck(
         layer="pending-merge-install-tail",

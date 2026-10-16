@@ -343,7 +343,7 @@ def _pending_merge_precheck_command(
 
 # 1. User input pre-hook: run only the pending-merge precheck first.
 PROMPT_PENDING_MERGE_MARKER = "[merge-companion] prompt-check"
-PROMPT_PENDING_MERGE_INTERNAL = "merge-companion prompt-check: This hook checks the current platform's pending-merge manifest. If the hook reports undecided entries, the current-session assistant presents merge-companion before other work. A user's explicit defer or skip leaves those entries undecided and permits other authorized work. A clean hook result requires no second manifest inspection."
+PROMPT_PENDING_MERGE_INTERNAL = "merge-companion prompt-check: This hook checks the current platform's pending-merge manifest. If the hook reports undecided entries, the current-session assistant applies merge-companion when the user asks to review them or the selected work changes an affected skill. A user's explicit defer or skip leaves those entries undecided and permits other authorized work. A clean hook result requires no second manifest inspection."
 
 
 def _prompt_pending_merge_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
@@ -515,7 +515,7 @@ STOP_HOOK_ENTRY_CODEX = {
 
 # 3. Session-start hook: automatic merge-companion check (pending-merge-session-start layer).
 SESSION_START_MARKER = "[merge-companion] session-check"
-SESSION_START_INTERNAL = "merge-companion session-check: This hook checks the current platform's pending-merge manifest. The current-session assistant presents undecided entries through merge-companion. Missing, empty, fully decided or unparsable manifests pass silently under the current contract; a clean hook result requires no second shell inspection."
+SESSION_START_INTERNAL = "merge-companion session-check: This hook checks the current platform's pending-merge manifest. The current-session assistant applies merge-companion to undecided entries when the user asks to review them or the selected work changes an affected skill. Missing, empty, fully decided or unparsable manifests pass silently under the current contract; a clean hook result requires no second shell inspection."
 
 
 def _session_start_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
@@ -547,15 +547,15 @@ SESSION_START_ENTRY_CODEX = {
 # Managed marker retained only to remove the obsolete unconditional input reminder.
 WEB_SEARCH_FIRST_MARKER = "[web-search-first]"
 
-# 5. Pre-tool hook: tool-checkpoint hook-enforced retry point.
+# 5. Pre-tool hook: tool-checkpoint at the before-tool stage.
 TOOL_CHECKPOINT_MARKER = "[tool-checkpoint] pre-tool-check"
 LEGACY_TOOL_CHECKPOINT_MARKERS = (f"[{'action'}-{'gate'}] pre-tool-check",)
 TOOL_CHECKPOINT_INTERNAL = reminder_text("tool-checkpoint")
 TOOL_CHECKPOINT_COMMAND = (
     _shell_print_message(_localized_bridge(
         TOOL_CHECKPOINT_INTERNAL,
-        "hook-stage is PreToolUse. This hook is a tool-call retry checkpoint, not user-input intake.",
-        "hook-stage is PreToolUse. This hook is a tool-call retry checkpoint, not user-input intake.",
+        "stage: before-tool. This checkpoint runs before a tool call.",
+        "stage: before-tool. This checkpoint runs before a tool call.",
         "Field names and literal tokens stay in English. Human notes use the current user language.",
         "Field names and literal tokens stay in English. Human notes use the current user language.",
     ))

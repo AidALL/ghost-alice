@@ -39,7 +39,7 @@
   "pre_routing_gates": [
     {
       "id": "merge-companion-precheck",
-      "rule": "Common First-Entry Contract (pending-merge observation and affected-change handling)",
+      "rule": "merge-companion Entry and activation, named in the common contract Owners list (pending-merge observation and affected-change handling)",
       "skill": "merge-companion",
       "trigger": "pending entries plus selected affected-skill changes or explicit user review request",
       "manifest_path": "~/.ghost-alice/pending-merges/<platform>/manifest.json",
@@ -91,7 +91,7 @@
   },
   "terminal_routes": {
     "clarification-only": {
-      "owner": "task-router",
+      "owner": "session-intent",
       "manual_pending_merge": "defer-until-next-actionable-turn",
       "downstream_work": "none",
       "user_surface": "minimum-decisive-information-only",

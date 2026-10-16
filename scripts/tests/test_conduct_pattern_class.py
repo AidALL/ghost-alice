@@ -37,7 +37,7 @@ AGGREGATOR = _load(AGGREGATOR_PATH, "aggregate_recommendations_under_test")
 
 def _entry(entry_id: str, pattern_class: str | None = None) -> dict:
     entry = {"id": entry_id, "summary": f"{entry_id} summary", "corrective_rule": f"{entry_id} rule",
-             "source": "user-explicit", "status": "open", "occurrence_count": 1, "updated_at": TIMESTAMP}
+             "source": "user-said", "status": "open", "occurrence_count": 1, "updated_at": TIMESTAMP}
     if pattern_class is not None:
         entry["pattern_class"] = pattern_class
     return entry
@@ -62,7 +62,7 @@ class PatternClassNormalizationTests(unittest.TestCase):
     def test_unknown_source_is_rejected_with_the_allowed_values(self) -> None:
         with self.assertRaises(ValueError) as caught:
             LEDGER.normalize_conduct_feedback({**_entry("typo"), "source": "infered"}, TIMESTAMP)
-        for value in ("'infered'", "'inferred'", "'user-explicit'"):
+        for value in ("'infered'", "'interpreted-as'", "'user-said'"):
             self.assertIn(value, str(caught.exception))
 
     def test_both_unknown_values_are_reported_in_one_error(self) -> None:
@@ -79,7 +79,14 @@ class PatternClassNormalizationTests(unittest.TestCase):
     def test_missing_source_keeps_the_compatible_default(self) -> None:
         entry = _entry("legacy")
         del entry["source"]
-        self.assertEqual(LEDGER.normalize_conduct_feedback(entry, TIMESTAMP)["source"], "user-explicit")
+        self.assertEqual(LEDGER.normalize_conduct_feedback(entry, TIMESTAMP)["source"], "user-said")
+
+    def test_legacy_source_labels_are_kept_and_read_as_current_labels(self) -> None:
+        for legacy, current in (("user-explicit", "user-said"), ("inferred", "interpreted-as")):
+            with self.subTest(legacy=legacy):
+                entry = {**_entry("legacy-" + legacy), "source": legacy}
+                self.assertEqual(LEDGER.normalize_conduct_feedback(entry, TIMESTAMP)["source"], legacy)
+                self.assertEqual(LEDGER.canonical_source(legacy, "user-said"), current)
 
     def test_update_classifies_an_existing_entry_and_later_updates_keep_it(self) -> None:
         merged = LEDGER.merge_conduct_feedback([_entry("repeat-status")],
@@ -127,7 +134,7 @@ class CliRejectionTests(unittest.TestCase):
         delta = {"current_goal": "must not be written", "conduct_feedback": [{**_entry("typo"), "source": "infered"}]}
         result = run("--expected-input-event-id", before["input_event_id"], "--delta-json", json.dumps(delta))
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("'user-explicit'", result.stderr)
+        self.assertIn("'user-said'", result.stderr)
         after = json.loads(run("--read-intent").stdout)
         goal_after = json.loads(run("--read-state", "--pointer", "/current_goal").stdout)['value']
         self.assertEqual(after, before)

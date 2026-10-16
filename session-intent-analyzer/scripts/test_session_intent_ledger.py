@@ -204,7 +204,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                     "id": "report-instead-of-execute",
                     "failure_pattern": "reported findings instead of executing the instruction",
                     "corrective_rule": "an explicit remove/do/fix is an execution order",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "open",
                 }
             ]
@@ -212,7 +212,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(len(state["conduct_feedback"]), 1)
         entry = state["conduct_feedback"][0]
         self.assertEqual(entry["id"], "report-instead-of-execute")
-        self.assertEqual(entry["source"], "user-explicit")
+        self.assertEqual(entry["source"], "user-said")
         self.assertEqual(entry["status"], "open")
         self.assertEqual(entry["corrective_rule"], "an explicit remove/do/fix is an execution order")
         state = self.ledger.apply_delta(state, {
@@ -229,7 +229,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 {
                     "id": "completioncheck-before-skill-call",
                     "summary": "load the verification skill before completion-check",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "open",
                 }
             ]
@@ -239,7 +239,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 {
                     "id": "completioncheck-before-skill-call",
                     "summary": "load the verification skill before completion-check",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "open",
                 }
             ]
@@ -319,14 +319,14 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 {
                     "id": "bridge-jsonl",
                     "summary": "intent update event carries delta keys without raw prompt text",
-                    "source": "user-explicit",
+                    "source": "user-said",
                 }
             ],
             "conduct_feedback": [
                 {
                     "id": "premise-before-test-first",
                     "summary": "establish unknown premises before RED-first testing",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "open",
                 }
             ],
@@ -470,7 +470,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                     {
                         "id": "AC1",
                         "summary": "completion claims must map to fresh evidence",
-                        "source": "user-explicit",
+                        "source": "user-said",
                     }
                 ],
             },
@@ -485,7 +485,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 {
                     "id": "AC1",
                     "summary": "completion claims must map to fresh evidence",
-                    "source": "user-explicit",
+                    "source": "user-said",
                     "status": "unmet",
                     "admitted": True,
                 }
@@ -497,11 +497,11 @@ class SessionIntentLedgerTests(unittest.TestCase):
         root = self.tmpdir / "ledger"
         self.ledger.record_turn(root=root, platform="codex", session_id="owned", intent_delta={
             "acceptance_criteria": [
-                {"id": "AC1", "summary": "first contract", "source": "user-explicit",
+                {"id": "AC1", "summary": "first contract", "source": "user-said",
                  "work_unit_id": "first", "contract_revision": 1},
-                {"id": "AC1", "summary": "second contract", "source": "user-explicit",
+                {"id": "AC1", "summary": "second contract", "source": "user-said",
                  "work_unit_id": "second", "contract_revision": 1},
-                {"id": "old", "summary": "historical unbound condition", "source": "user-explicit"},
+                {"id": "old", "summary": "historical unbound condition", "source": "user-said"},
             ]})
         state = self.ledger.read_session_state(root=root, platform="codex", session_id="owned")
         self.assertEqual(len(state["acceptance_criteria"]), 3)
@@ -530,7 +530,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
             root=root, platform="codex", session_id="scope-correction",
             intent_delta={
                 "supersedes": ["diagnosis-only"],
-                "decisions": [{"id": "repair-approved", "source": "user-explicit",
+                "decisions": [{"id": "repair-approved", "source": "user-said",
                                "summary": "The user now authorizes the diagnosed configuration repair"}],
                 "latest_scope": scope,
             },
@@ -544,7 +544,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         snapshot = json.loads(completed.stdout)
         self.assertIn("active_decisions", snapshot)
         self.assertEqual([d["id"] for d in snapshot["active_decisions"]], ["repair-approved"])
-        self.assertEqual(snapshot["active_decisions"][0]["source"], "user-explicit")
+        self.assertEqual(snapshot["active_decisions"][0]["source"], "user-said")
         self.assertIn("configuration repair", snapshot["active_decisions"][0]["summary"])
         self.assertEqual(snapshot["decision_count"], 1)
         self.assertEqual(snapshot["latest_scope"], scope)
@@ -555,13 +555,13 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
     def test_snapshot_scope_context_is_detached_from_state(self) -> None:
         state = self.ledger.default_state("codex", "scope-copy")
-        state["decisions"] = [{"id": "repair", "summary": "Repair approved", "evidence": {"kind": "user-explicit"}}]
+        state["decisions"] = [{"id": "repair", "summary": "Repair approved", "evidence": {"kind": "user-said"}}]
         state["latest_scope"] = {"allowed": ["configuration"]}
         snapshot = self.ledger.consumer_snapshot(state)
         self.assertIn("active_decisions", snapshot)
         snapshot["active_decisions"][0]["evidence"]["kind"] = "changed"
         snapshot["latest_scope"]["allowed"].append("external-publish")
-        self.assertEqual(state["decisions"][0]["evidence"]["kind"], "user-explicit")
+        self.assertEqual(state["decisions"][0]["evidence"]["kind"], "user-said")
         self.assertEqual(state["latest_scope"], {"allowed": ["configuration"]})
 
     def test_snapshot_legacy_state_does_not_invent_scope(self) -> None:
@@ -580,8 +580,8 @@ class SessionIntentLedgerTests(unittest.TestCase):
             session_id="session-criteria-status",
             intent_delta={
                 "acceptance_criteria": [
-                    {"id": "c-user", "summary": "ship X", "source": "user-explicit"},
-                    {"id": "c-inf", "summary": "maybe Y", "source": "inferred"},
+                    {"id": "c-user", "summary": "ship X", "source": "user-said"},
+                    {"id": "c-inf", "summary": "maybe Y", "source": "interpreted-as"},
                 ],
             },
         )
@@ -592,13 +592,22 @@ class SessionIntentLedgerTests(unittest.TestCase):
         # Every criterion starts unmet.
         self.assertEqual(by_id["c-user"]["status"], "unmet")
         self.assertEqual(by_id["c-inf"]["status"], "unmet")
-        # Contract-bound sources are admitted; inferred is not admitted until promoted.
+        # Contract-bound sources are admitted; interpreted-as is not admitted until promoted.
         self.assertTrue(by_id["c-user"]["admitted"])
         self.assertFalse(by_id["c-inf"]["admitted"])
 
+    def test_legacy_criterion_sources_are_kept_and_read_as_current_labels(self) -> None:
+        for legacy, current, admitted in (("user-explicit", "user-said", True), ("inferred", "interpreted-as", False)):
+            with self.subTest(legacy=legacy):
+                criterion = self.ledger.normalize_acceptance_criterion(
+                    {"id": "legacy", "summary": "kept meaning", "source": legacy})
+                self.assertEqual(criterion["source"], legacy)
+                self.assertEqual(self.ledger.canonical_source(criterion["source"], "interpreted-as"), current)
+                self.assertIs(criterion["admitted"], admitted)
+
     def test_merge_reopens_changed_recriterion_without_status(self) -> None:
         root = self.tmpdir / "ledger"
-        common = {"id": "AC1", "summary": "do X", "source": "user-explicit"}
+        common = {"id": "AC1", "summary": "do X", "source": "user-said"}
         self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(common)]},
@@ -625,14 +634,14 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [
-                {"id": "AC1", "summary": "do X", "source": "user-explicit"},
+                {"id": "AC1", "summary": "do X", "source": "user-said"},
             ]},
         )
         digest = "a" * 64
         paths = self.ledger.mark_acceptance_criterion_met(
             root=root, platform="codex", session_id="s",
             criterion_id="AC1", completion_check_digest=digest,
-            expected_criterion={"id": "AC1", "summary": "do X", "source": "user-explicit", "admitted": True},
+            expected_criterion={"id": "AC1", "summary": "do X", "source": "user-said", "admitted": True},
         )
         state = authority_state(self.ledger, paths["state"])
         ac1 = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1")
@@ -650,7 +659,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [
-                {"id": "AC1", "summary": "do X", "source": "user-explicit", "status": "met"},
+                {"id": "AC1", "summary": "do X", "source": "user-said", "status": "met"},
             ]},
         )
         state = authority_state(self.ledger, paths["state"])
@@ -660,7 +669,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
     def test_inferred_criterion_is_admitted_only_after_explicit_promotion(self) -> None:
         root = self.tmpdir / "ledger"
-        base = {"id": "AC-inf", "summary": "maybe Z", "source": "inferred"}
+        base = {"id": "AC-inf", "summary": "maybe Z", "source": "interpreted-as"}
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base)]},
@@ -679,7 +688,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
     def test_invalid_admitted_field_preserves_prior_admission(self) -> None:
         root = self.tmpdir / "ledger"
-        base = {"id": "AC-inf", "summary": "maybe Z", "source": "inferred"}
+        base = {"id": "AC-inf", "summary": "maybe Z", "source": "interpreted-as"}
         self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base, admitted=True)]},
@@ -695,7 +704,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
     def test_invalid_status_field_preserves_prior_met(self) -> None:
         root = self.tmpdir / "ledger"
-        common = {"id": "AC1", "summary": "do X", "source": "user-explicit"}
+        common = {"id": "AC1", "summary": "do X", "source": "user-said"}
         self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(common)]},
@@ -716,7 +725,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
     def test_recording_inferred_criterion_with_contract_source_admits_it(self) -> None:
         root = self.tmpdir / "ledger"
-        base = {"id": "AC-up", "summary": "maybe Z", "source": "inferred"}
+        base = {"id": "AC-up", "summary": "maybe Z", "source": "interpreted-as"}
         self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(base)]},
@@ -724,7 +733,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
         # Re-recording with a contract-bound source admits the criterion even without an explicit admitted field (source-based admission, matching first-record behavior).
         paths = self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
-            intent_delta={"acceptance_criteria": [dict(base, source="user-explicit")]},
+            intent_delta={"acceptance_criteria": [dict(base, source="user-said")]},
         )
         state = authority_state(self.ledger, paths["state"])
         ac = next(c for c in state["acceptance_criteria"] if c["id"] == "AC-up")
@@ -732,7 +741,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
 
     def test_remerging_met_criterion_preserves_met_at(self) -> None:
         root = self.tmpdir / "ledger"
-        common = {"id": "AC1", "summary": "do X", "source": "user-explicit"}
+        common = {"id": "AC1", "summary": "do X", "source": "user-said"}
         self.ledger.record_turn(
             root=root, platform="codex", session_id="s",
             intent_delta={"acceptance_criteria": [dict(common)]},

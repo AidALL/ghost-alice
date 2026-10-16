@@ -43,14 +43,16 @@ SESSION_INTENT_ROOT_ENV = "GHOST_ALICE_SESSION_INTENT_ROOT"
 LEGACY_DEFAULT_ROOT = Path("~/.ghost-alice/session-intent")
 TEXT_FIELDS = ("current_goal", "user_intent_summary", "routing_summary")
 LIST_FIELDS = ("constraints", "non_goals", "open_questions", "risk_flags")
-ACCEPTANCE_CRITERIA_SOURCES = {"user-explicit", "inferred", "previous-tool", "system-doc"}
+ACCEPTANCE_CRITERIA_SOURCES = {"user-said", "interpreted-as", "previous-tool", "system-doc"}
 ACCEPTANCE_CRITERIA_STATUSES = {"unmet", "met"}
-ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-explicit", "previous-tool", "system-doc"}
+ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-said", "previous-tool", "system-doc"}
+# Stored labels are never rewritten; readers map a legacy label to its current name.
+LEGACY_SOURCE_ALIASES = {"user-explicit": "user-said", "inferred": "interpreted-as"}
 COMPLETION_CHECK_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 SECURITY_DECISIONS = {"allow", "block"}
 SECURITY_REASON_MAX = 240
 SECURITY_RISK_FLAG_MAX = 12
-CONDUCT_FEEDBACK_SOURCES = {"user-explicit", "inferred"}
+CONDUCT_FEEDBACK_SOURCES = {"user-said", "interpreted-as"}
 CONDUCT_FEEDBACK_STATUS = {"open", "encoded"}
 # Stable failure families let differently named corrections recur visibly across sessions.
 CONDUCT_PATTERN_CLASSES = (
@@ -856,6 +858,12 @@ def normalize_decision(raw: Any, timestamp: str) -> dict[str, Any] | None:
     return payload
 
 
+def canonical_source(value: Any, default: str) -> str:
+    """Return the current name of a source label; a legacy label maps to its current name."""
+    source = str(value or default).strip()
+    return LEGACY_SOURCE_ALIASES.get(source, source)
+
+
 def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     if isinstance(raw, str):
         summary = raw.strip()
@@ -864,7 +872,7 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
         return {
             "id": safe_component(summary.lower(), "criterion"),
             "summary": summary,
-            "source": "inferred",
+            "source": "interpreted-as",
             "status": "unmet",
             "admitted": False,
         }
@@ -874,15 +882,15 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     criterion_id = safe_component(str(raw.get("id") or summary.lower()), "criterion")
     if not summary:
         return None
-    source = str(raw.get("source") or "inferred").strip()
-    if source not in ACCEPTANCE_CRITERIA_SOURCES:
-        source = "inferred"
+    source = str(raw.get("source") or "interpreted-as").strip()
+    if canonical_source(source, "interpreted-as") not in ACCEPTANCE_CRITERIA_SOURCES:
+        source = "interpreted-as"
     status = str(raw.get("status") or "").strip().lower()
     if status not in ACCEPTANCE_CRITERIA_STATUSES:
         status = "unmet"
     admitted = raw.get("admitted")
     if not isinstance(admitted, bool):
-        admitted = source in ACCEPTANCE_CRITERIA_ADMITTED_SOURCES
+        admitted = canonical_source(source, "interpreted-as") in ACCEPTANCE_CRITERIA_ADMITTED_SOURCES
     criterion = {
         "id": criterion_id,
         "summary": summary,
@@ -1013,10 +1021,10 @@ def normalize_conduct_feedback(raw: Any, timestamp: str) -> dict[str, Any] | Non
     entry_id = str(payload.get("id") or rule or pattern or summary).strip()
     if not entry_id:
         return None
-    source = str(payload.get("source") or "user-explicit").strip()
+    source = str(payload.get("source") or "user-said").strip()
     pattern_class = str(payload.get("pattern_class") or "").strip()
     invalid = []
-    if source not in CONDUCT_FEEDBACK_SOURCES:
+    if canonical_source(source, "user-said") not in CONDUCT_FEEDBACK_SOURCES:
         invalid.append(f"source {source!r} is not one of {sorted(CONDUCT_FEEDBACK_SOURCES)}")
     if pattern_class and pattern_class not in CONDUCT_PATTERN_CLASSES:
         invalid.append(f"pattern_class {pattern_class!r} is not one of {list(CONDUCT_PATTERN_CLASSES)}")

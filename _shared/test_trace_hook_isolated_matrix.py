@@ -47,7 +47,7 @@ def reply(text):
 def valid_text(platform, *, compact=False, trace="", verdict="pass"):
     report = ("- verification-before-completion: done\n"
               "- skill-call: verification-before-completion (this turn)\n") if platform == "codex" else ""
-    criteria = "- acceptance-criteria:\n  - calculation: recompute time [source: user-explicit]\n"
+    criteria = "- acceptance-criteria:\n  - calculation: recompute time [source: user-said]\n"
     reference = "    criterion: calculation\n"
     return (f"{BUSINESS}\n\n[completion-check]\n{report}{criteria}"
             f"- claim-evidence-map:\n  - claim: operating time was checked\n{reference}"
@@ -492,7 +492,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 # Current work admission remains a separate owning Core check.
                 # A checkpoint or broader focus cannot admit the prohibited unit.
                 criterion = dict(id="protected-resource", summary="Protected target requires admission",
-                                 source="user-explicit", admitted=False, status="unmet",
+                                 source="user-said", admitted=False, status="unmet",
                                  work_unit_id="protected-unit", contract_revision=1)
                 self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                     "--platform", platform, "--session-id", session, "--expected-input-event-id", event_id,

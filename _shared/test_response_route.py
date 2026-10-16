@@ -122,7 +122,7 @@ class ResponseRouteTests(unittest.TestCase):
         return ledger.read_session_state(**self.coords)["latest_input_event_id"]
 
     def criterion(self, unit="first", revision=1, admitted=True, summary=None):
-        return dict(id="AC1", summary=summary or f"verify {unit}", source="user-explicit",
+        return dict(id="AC1", summary=summary or f"verify {unit}", source="user-said",
                     admitted=admitted, work_unit_id=unit, contract_revision=revision)
 
     def candidate(self, units=("first",), selected=None):
@@ -147,7 +147,7 @@ class ResponseRouteTests(unittest.TestCase):
         event = self.intake()
         ledger.record_turn(**self.coords, expected_input_event_id=event, intent_delta={
             "acceptance_criteria": [self.criterion("first"), self.criterion("second"),
-                dict(id="old", summary="historical unbound", source="user-explicit")]})
+                dict(id="old", summary="historical unbound", source="user-said")]})
         return event
 
     def record(self, candidate=None, event=None, **extra):
@@ -209,6 +209,18 @@ class ResponseRouteTests(unittest.TestCase):
         event = next(e for e in events if e["event"] == "acceptance-criteria-ownership-bound")
         self.assertEqual(event["criterion_ids"], ["AC1"])
         self.assertNotIn("proof", event)
+
+    def test_stored_legacy_source_survives_a_later_criterion_write(self):
+        before = self.legacy_registered()
+        with ledger.storage_transaction(self.root) as connection:
+            self.bind_legacy(before, transaction=connection)
+            self.record(transaction=connection)
+        ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+            "acceptance_criteria": [dict(id="AC9", summary="added after the upgrade", source="user-said")]})
+        after = ledger.read_session_state(**self.coords)
+        self.assertEqual(after["acceptance_criteria"][0]["source"], "user-explicit")
+        self.record()
+        self.assertEqual(self.api.read_response_route(**self.coords)["status"], "ready")
 
     def test_binding_rejects_ambiguity_foreign_revision_and_stale_full_snapshot(self):
         before = self.legacy_registered()

@@ -84,7 +84,7 @@ class TestDiffCollectorV2(unittest.TestCase):
         self.assertIn("local changes", body)
         self.assertIn("merge-companion", body)
         self.assertIn("Please review backed-up changes.", body)
-        self.assertIn("First-Entry Contract", body)
+        self.assertIn("Entry and activation", body)
         self.assertIn("id, source_path and backup_path", body)
         self.assertIn("references/manifest-schema.md", body)
         self.assertIn("this generated guide supplies no approval", body)

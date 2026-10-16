@@ -109,7 +109,7 @@ def ledger_read_instruction(root: Path, platform: str, session_id: str) -> str:
     args = [sys.executable, str(Path(ledger.__file__).resolve()),
             "--read-intent", "--root", str(root),
             "--platform", platform, "--session-id", session_id]
-    return (f"Normal route only, within the explicit user tool budget. intent-ledger: use {shlex.join(args)} after session-intent preflight. "
+    return (f"Normal route only. intent-ledger: use {shlex.join(args)} after session-intent preflight. "
             "SQLite is authoritative; compatibility exports are not.")
 
 
@@ -164,20 +164,20 @@ def _reminder_result(base_message: str, root: Path, platform: str, payload: dict
         return (
             "hook-reminder: Normal-route task-router registration is withheld: the session-intent ledger is degraded "
             f"({reason}) and the latest input was NOT recorded, so current-lineage checks "
-            "would ride a stale anchor. For an authorized normal route within the explicit user tool budget, repair the session-intent ledger before dependent registration. "
-            "Do not start repair merely to deliver a tool-free terminal answer."
+            "would ride a stale anchor. For an authorized normal route, repair the session-intent ledger before dependent registration. "
+            "Do not start repair merely to deliver a tool-free direct answer."
         ), False
 
     material = session_material(root, platform, session_id)
     if material['degraded']:
         return ("hook-reminder: Normal-route task-router registration is withheld: the session-intent ledger is degraded. "
-                "For an authorized normal route within the explicit user tool budget, repair the authoritative reader before dependent registration; "
-                "do not reuse a compatibility export or start repair for a tool-free terminal answer."), False
+                "For an authorized normal route, repair the authoritative reader before dependent registration; "
+                "do not reuse a compatibility export or start repair for a tool-free direct answer."), False
     if not material['latest_input']:
         return (
             "hook-reminder: Normal-route task-router registration is withheld until session-intent-analyzer records the current input "
-            f"for session {session_id}. Continue intake/bootstrap only for an authorized normal route within the explicit user tool budget; "
-            "do not ask for another input or start bootstrap for a tool-free terminal answer."
+            f"for session {session_id}. Continue intake/bootstrap only for an authorized normal route; "
+            "do not ask for another input or start bootstrap for a tool-free direct answer."
         ), False
     return "\n".join([
         terminal_routing_instruction(root, platform, session_id, material['latest_input'].get('event_id')),

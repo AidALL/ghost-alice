@@ -26,7 +26,7 @@ The machine gate index is [skill-catalog/session-gates.json](../../skill-catalog
 
 | Condition | Agent procedure |
 | --- | --- |
-| Every user input | Native intake observation, then task selection; stored intent is read when the decision depends on it |
+| Every user input | Native intake observation, then interpretation; work with a new or changed interpretation records `interpreted-as: ` before its first tool call; stored intent is read when the decision depends on it |
 | The current-session assistant selects boundary-contract: required | boundary-contract before dependent work |
 | Development work begins | coding-convention/using-coding-convention |
 | A bug needs investigation | coding-convention/systematic-debugging |
@@ -41,7 +41,7 @@ Native prechecks remain observations. The assistant reuses them, selects the nee
 
 The current-session assistant routes every input, including a follow-up or status question, using current intent and continuing authority. A prior route is not the current input's route. The current-session assistant may separately apply skill-evolution to the same exact session for a report; this procedure neither feeds task-router nor dispatches work.
 
-The current-session assistant follows [task-router](../../task-router/SKILL.md) to select work and construct the route candidate. It follows [boundary-contract](../../boundary-contract/SKILL.md) to declare allowed targets, exclusions and resources; neither procedure grants native permission. A user tool allowlist or count covers governance calls too.
+The current-session assistant follows [task-router](../../task-router/SKILL.md) to select work and construct the route candidate. It follows [boundary-contract](../../boundary-contract/SKILL.md) to declare allowed targets, exclusions and resources; neither procedure grants native permission.
 
 ## Session Intent Ledger Contract
 
@@ -49,16 +49,16 @@ Core records canonical human input as a digest, character count and ordered even
 
 Runtime consumers use the public API with the exact receipt root/platform/session/input. SQLite is authoritative; intent-state.json and intent-events.jsonl are import/export forms, and current-session.json is an advisory pointer. None supplies a substitute write identity. Missing recording leaves dependent operations unresolved. The assistant selects recovery only when needed for the objective or a required dependency and within existing authority; it never guesses identity or invents permission.
 
-[Session-intent-analyzer](../../session-intent-analyzer/SKILL.md) owns intake and correction provenance. Its [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) owns state fields, transaction rules, migration hashes and current response projection. Intake events and intent-state fields do not store raw prompts, full conversations or tool outputs, system/developer instructions or secrets. Separate Core review records retain authorized answer and original-source snapshots and the model’s review judgments; those review records are not session-intent summaries. Hookless normal work follows the same identity contract; no-work answers use the supplied terminal procedure.
+[Session-intent-analyzer](../../session-intent-analyzer/SKILL.md) owns intake and correction provenance. Its [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) owns state fields, transaction rules, migration hashes and current response projection. Intake events and intent-state fields do not store raw prompts, full conversations or tool outputs, system/developer instructions or secrets. Separate Core review records retain authorized answer and original-source snapshots and the model’s review judgments; those review records are not session-intent summaries. Hookless work follows the same identity contract; a direct answer uses no tools.
 
 ## Runtime Hook Graph Contract
 
-1. The session-intent-analyzer UserPromptSubmit hook supplies intake status and terminal/task-router guidance. Core intake establishes exact canonical human input through direct Codex observation or trusted Claude reconciliation. Read-state remains a pure read. The current-session assistant applies task-router to select work; it separately applies skill-evolution when report-only analysis is required.
+1. The session-intent-analyzer UserPromptSubmit hook supplies intake status and direct-answer and task-router guidance. Core intake establishes exact canonical human input through direct Codex observation or trusted Claude reconciliation. Read-state remains a pure read. The current-session assistant applies task-router to select work; it separately applies skill-evolution when report-only analysis is required.
 2. The current-session assistant submits the normal route candidate to Core. Core Python code validates current input, ownership, admission and selected criteria before storing the ready projection.
 3. The current-session assistant follows any required boundary and owning workflow. The host enforces tool permission and executes permitted calls. The applicable Ghost-ALICE Autopilot pretool records provenance; PostToolUse retains strict audit.
 4. At completion, the guard and Ghost-ALICE Autopilot call the same input/body-bound Core assessment. Their independently registered hooks do not require a policy ordering between them.
 
-Tool-checkpoint is a `PreToolUse`/`BeforeTool` retry checkpoint, not user-input intake. Tool payloads and audit metadata do not grant native permission. Installed configuration proves neither hook firing nor host execution; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
+Tool-checkpoint runs at the before-tool stage (host `PreToolUse`/`BeforeTool`) and is not user-input intake. Tool payloads and audit metadata do not grant native permission. Installed configuration proves neither hook firing nor host execution; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
 
 ## Dynamic Focus Contract
 
@@ -72,7 +72,7 @@ The current-session assistant applies session-intent-analyzer to express semanti
 
 The current-session assistant applying task-router preserves the primary request and terminal objective. Investigation and worktree inspection remain means unless requested as deliverables. Accepted-continuation requires recorded acceptance and does not lower proof requirements.
 
-The [terminal-route contract](../../task-router/references/routing-details.md) distinguishes clarification-only and direct-response from normal work. A general why/how premise and ambient workspace do not authorize local diagnosis. A status question or correction normally steers unfinished authorized work; an explicit stop/pause governs continuation. Genuine terminal answers use supplied conversation, perform no agent-side tools or metadata repair and emit only resolved content or the decisive question. That condition does not prohibit authorized route registration on a normal completion path.
+[Routing details](../../task-router/references/routing-details.md) separate a direct answer (`direct-response`) and a confirmation question (`clarification-only`) from work. A general why/how premise and ambient workspace do not authorize local diagnosis. A status question or correction normally steers unfinished authorized work; an explicit stop/pause governs continuation. A direct answer uses supplied conversation, performs no agent-side tools or metadata repair and emits only resolved content; a confirmation question takes the form the common contract's Session Intent section sets. That condition does not prohibit authorized route registration on a work completion path.
 
 ## Work-Impact Projection Contract
 
@@ -91,11 +91,11 @@ Decision-relevant routing guidance is owned by [task-router](../../task-router/S
 
 [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md#completion-check-format) owns the shared completion-check and partial-check formats and their criterion/claim/evidence mapping. Core completion acceptance requires authenticated review of the claims, original sources and complete response under the current owned route. Skill loading remains workflow guidance and audit activity, not a separate acceptance prerequisite. Finalized completion requires supported verdicts with no unverified criteria. A partial-success report retains the full contract and identifies unresolved criteria; it cannot present the successful subset as whole-task completion.
 
-The current-session assistant uses valid unchanged proof at its original source/time. A formatting or route error does not create a new business-verification requirement. A printed io-trace is optional; strict internal audit and actual workflow evidence remain required. Control names and enum values stay English in both language editions.
+The current-session assistant uses valid unchanged proof at its original source/time. A formatting or route error does not create a new business-verification requirement. A displayed trace does not establish proof; strict internal audit and actual workflow evidence remain required. Control names and enum values stay English in both language editions.
 
 ## tool-checkpoint Visible Surface
 
-The common governance contract owns checkpoint visibility. The current-session assistant surfaces a checkpoint when its result changes authority, the next decision or required verification. It reuses unchanged evidence and reads only material that can affect the decision. A receipt or a healthy tool call alone does not require another message.
+The common contract's io-trace Transparency Rule owns checkpoint visibility. The current-session assistant surfaces a checkpoint when its result changes authority, the next decision or required verification. It reuses unchanged evidence and reads only material that can affect the decision. A receipt or a healthy tool call alone does not require another message.
 
 ## tool-checkpoint Batch / Continuation Compression
 
@@ -121,7 +121,7 @@ On the managed native Stop path, the Ghost-ALICE Autopilot adapter uses its prep
 
 ## Current Selection and Bounded Recovery
 
-Core validates the current response route supplied by the model following task-router. A terminal route selects no execution units; requested lookup is normal work. New input changes the route binding while preserving stable work units and unchanged original evidence.
+Core validates the current response route supplied by the model following task-router. A direct-answer or confirmation projection selects no execution units; a requested lookup is work. New input changes the route binding while preserving stable work units and unchanged original evidence.
 
 A named route, proof or recording defect returns to its procedure owner below. The model chooses correction only when needed for the objective or a required dependency and within authority. Unsupported claims are revised or withdrawn; required unresolved criteria stay unmet. Identical unchanged recording failure parks dependent application without replaying business work or blocking independent authorized work.
 
@@ -134,4 +134,4 @@ A named route, proof or recording defect returns to its procedure owner below. T
 - [Verification-before-completion: Evidence Selection And Stop Gate](../../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate) owns useful checks and proof reuse.
 - [Ghost-ALICE Autopilot publication contract](../../coding-convention/verification-before-completion/references/autopilot-publication.md) owns capture, publication, application and recording recovery.
 
-These owners preserve cumulative attempts, original source/time and unaffected criteria. A branch-local failure blocks its dependencies, not unrelated authorized work. A user budget includes governance calls; no procedure creates an internal-call exemption.
+These owners preserve cumulative attempts, original source/time and unaffected criteria. A branch-local failure blocks its dependencies, not unrelated authorized work.
