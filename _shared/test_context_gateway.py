@@ -322,24 +322,28 @@ class ContextGatewayTests(unittest.TestCase):
             self.assertEqual(json.load(reply), {'status':'ready'})
         self.assertEqual(self.seen, [])
 
-    def test_selection_read_failure_never_reaches_the_paid_backend(self):
+    def test_selection_read_failure_forwards_the_original_request(self):
+        body = json.dumps(self.core.request).encode()
         with patch.object(context_lifecycle, '_native', side_effect=OSError('fixture read failure')):
-            with self.assertRaises(urllib.error.HTTPError) as caught:
-                self.request(json.dumps(self.core.request).encode())
-        caught.exception.close()
-        self.assertEqual(caught.exception.code, 503)
-        self.assertEqual(self.seen, [])
+            with self.request(body) as reply:
+                self.assertEqual(reply.read(), self.answer)
+        self.assertEqual(self.seen[-1][0], body)
         events = [json.loads(line) for line in self.wire.read_text().splitlines()]
-        self.assertTrue(any(e['event'] == 'request-not-forwarded' and e['reason'] == 'storage-unavailable' for e in events))
+        selection = next(e for e in events if e['event'] == 'request-selection')
+        self.assertEqual((selection['state'], selection['reason']), ('unavailable', 'storage-unavailable'))
+        self.assertEqual(selection['forwarded_wire_sha256'], selection['original_wire_sha256'])
 
-    def test_selection_bug_never_becomes_an_original_request(self):
+    def test_selection_bug_forwards_the_original_request_without_its_message(self):
+        body = json.dumps(self.core.request).encode()
         for error in (KeyError('fixture bug'), ValueError('fixture bug')):
             with patch.object(context_lifecycle, '_native', side_effect=error):
-                with self.assertRaises(urllib.error.HTTPError) as caught:
-                    self.request(json.dumps(self.core.request).encode())
-            caught.exception.close()
-            self.assertEqual(caught.exception.code, 500)
-        self.assertEqual(self.seen, [])
+                with self.request(body) as reply:
+                    self.assertEqual(reply.read(), self.answer)
+            self.assertEqual(self.seen[-1][0], body)
+        events = [json.loads(line) for line in self.wire.read_text().splitlines()]
+        failed = [e for e in events if e['event'] == 'request-selection' and e['state'] == 'error']
+        self.assertEqual([(e['reason'], e['error_type']) for e in failed],
+                         [('selection-error', 'KeyError'), ('selection-error', 'ValueError')])
         self.assertNotIn('fixture bug', self.wire.read_text())
 
     def test_preservation_is_observed_without_reencoding(self):
@@ -550,17 +554,18 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
         self.assertTrue(json.loads(gzip.decompress(self.seen[0][1]))['selected_fixture'])
         self.assertEqual({key.lower(): value for key, value in self.seen[0][2].items()}['content-encoding'], 'gzip')
 
-    def test_missing_or_invalid_declared_session_cannot_forward(self):
+    def test_missing_or_invalid_declared_session_forwards_without_selection(self):
         self.start(selectors={'claude': self.selector})
         for session in (None, '', 'not-a-native-uuid'):
-            with self.subTest(session=session), self.assertRaises(urllib.error.HTTPError) as caught:
-                self.request(session_id=session)
-            caught.exception.close()
-            self.assertEqual(caught.exception.code, 400)
-        self.assertEqual(self.seen, [])
+            with self.subTest(session=session), self.request(session_id=session) as reply:
+                self.assertEqual(reply.read(), self.answer)
+                self.assertEqual(self.seen[-1][1], b'{"messages":[]}')
         self.assertEqual(self.dispatched, [])
+        events = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([(e['state'], e['reason']) for e in events if e['event'] == 'request-selection'],
+                         [('unavailable', 'native-session-unavailable')] * 3)
 
-    def test_duplicate_declared_session_headers_cannot_forward(self):
+    def test_duplicate_declared_session_headers_forward_without_selection(self):
         self.start(selectors={'claude': self.selector})
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port)
         self.addCleanup(connection.close)
@@ -571,20 +576,21 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
         connection.putheader('Content-Length', '2')
         connection.endheaders(b'{}')
         reply = connection.getresponse()
-        reply.read()
-        self.assertEqual(reply.status, 400)
-        self.assertEqual(self.seen, [])
+        self.assertEqual((reply.status, reply.read()), (200, self.answer))
+        self.assertEqual(self.seen[-1][1], b'{}')
+        self.assertEqual(self.dispatched, [])
 
-    def test_unavailable_claude_selection_cannot_forward(self):
+    def test_unavailable_claude_selection_forwards_the_original_request(self):
         def unavailable(request, session):
-            return SimpleNamespace(state='unavailable', reason='fixture-source-unavailable', request=request,
-                                   observations=())
+            return SimpleNamespace(state='unavailable', reason='fixture-source-unavailable',
+                                   request=dict(request, selected_fixture=True), observations=())
         self.start(selectors={'claude': unavailable})
-        with self.assertRaises(urllib.error.HTTPError) as caught:
-            self.request(session_id=self.session)
-        caught.exception.close()
-        self.assertEqual(caught.exception.code, 503)
-        self.assertEqual(self.seen, [])
+        with self.request(session_id=self.session) as reply:
+            self.assertEqual(reply.read(), self.answer)
+        self.assertEqual(self.seen[-1][1], b'{"messages":[]}')
+        events = [json.loads(line) for line in self.log.read_text().splitlines()]
+        selection = next(e for e in events if e['event'] == 'request-selection')
+        self.assertEqual((selection['state'], selection['reason']), ('unavailable', 'fixture-source-unavailable'))
 
     def test_dispatcher_rejects_unknown_platform_noncallable_and_overlap(self):
         for kwargs in (dict(selectors={'unknown': self.selector}), dict(selectors={'claude': 'not-callable'}),

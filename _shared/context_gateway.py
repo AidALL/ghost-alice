@@ -307,17 +307,13 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
             server_selector = server_dispatch.get(platform) if suffix in SELECTION_ENDPOINTS[provider] else None
             session_headers = self.headers.get_all('X-Ghost-Context-Session') or []
             session_id = session_headers[0] if len(session_headers) == 1 else None
-            if platform == 'claude' and (selector is not None or server_selector is not None):
+            valid_session = True
+            if platform == 'claude':
                 try:
                     valid_session = (isinstance(session_id, str)
                                      and str(uuid.UUID(session_id)) == session_id.lower())
                 except ValueError:
                     valid_session = False
-                if not valid_session:
-                    record({'event': 'request-not-forwarded', 'provider': provider, 'platform': platform,
-                            'reason': 'native-session-unavailable', 'status': 400})
-                    self.reject(400)
-                    return
             request_id = str(uuid.uuid4())
             body = self.read_body()
             encoding = self.headers.get('Content-Encoding', '').lower()
@@ -328,33 +324,34 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                     'native_authorization_present': bool(self.headers.get('Authorization') or self.headers.get('X-Api-Key')),
                     'shape': request_shape(body, encoding)})
             if selector is not None or server_selector is not None:
-                try:
-                    decoded = json.loads(decode_body(body, encoding))
-                    betas = tuple(value.strip() for header in self.headers.get_all('anthropic-beta', [])
-                                  for value in header.split(',') if value.strip())
-                    result = (server_selector(decoded, session_id, betas) if server_selector is not None
-                              else selector(decoded, session_id))
-                    if result.state == 'unavailable':
-                        record({'event': 'request-not-forwarded', 'request_id': request_id,
-                                'reason': result.reason, 'status': 503})
-                        self.reject(503)
-                        return
-                    if result.state not in {'selected', 'preserved'}:
-                        raise ValueError('Invalid request selection state')
-                    original_hash = digest(body)
-                    if result.state == 'selected':
-                        body = encode_body(json.dumps(result.request, ensure_ascii=False, separators=(',', ':')).encode(), encoding)
-                    record({'event': 'request-selection', 'request_id': request_id, 'provider': provider,
+                betas = tuple(value.strip() for header in self.headers.get_all('anthropic-beta', [])
+                              for value in header.split(',') if value.strip())
+                observed = {'event': 'request-selection', 'request_id': request_id, 'provider': provider,
                             'platform': platform, 'native_session_id': session_id,
                             'native_betas': list(betas) if platform == 'claude' else [],
-                            'state': result.state, 'reason': result.reason,
-                            'original_wire_sha256': original_hash, 'forwarded_wire_sha256': digest(body),
-                            'selected_blocks': result.observations, 'forwarded_shape': request_shape(body, encoding)})
-                except Exception as error:
-                    record({'event': 'request-not-forwarded', 'request_id': request_id,
-                            'reason': 'selection-error', 'error_type': type(error).__name__, 'status': 500})
-                    self.reject(500)
-                    return
+                            'original_wire_sha256': digest(body), 'selected_blocks': []}
+                # Selection only removes material. When the gateway cannot complete it,
+                # the native request goes upstream unchanged and the reason is recorded.
+                if not valid_session:
+                    observed.update(state='unavailable', reason='native-session-unavailable')
+                else:
+                    try:
+                        decoded = json.loads(decode_body(body, encoding))
+                        result = (server_selector(decoded, session_id, betas) if server_selector is not None
+                                  else selector(decoded, session_id))
+                        if result.state not in {'selected', 'preserved', 'unavailable'}:
+                            raise ValueError('Invalid request selection state')
+                        forwarded = body
+                        if result.state == 'selected':
+                            forwarded = encode_body(json.dumps(result.request, ensure_ascii=False,
+                                                               separators=(',', ':')).encode(), encoding)
+                            observed['selected_blocks'] = result.observations
+                        observed.update(state=result.state, reason=result.reason)
+                        body = forwarded
+                    except Exception as error:
+                        observed.update(state='error', reason='selection-error', error_type=type(error).__name__)
+                observed.update(forwarded_wire_sha256=digest(body), forwarded_shape=request_shape(body, encoding))
+                record(observed)
             url = origins[provider].rstrip('/') + '/' + suffix
             if parsed.query:
                 url += '?' + parsed.query
