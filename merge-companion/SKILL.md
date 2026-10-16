@@ -12,9 +12,14 @@ The current-session assistant uses this lifecycle workflow to protect user chang
 
 ## Entry and activation
 
-The current-session assistant applies this skill before selected work modifies, replaces or installs an installed skill, and when the user asks to review backed-up changes. It must first re-check the current platform's manifest; an earlier observation does not answer that check because an installer run can add entries during the session. The review below runs for an undecided entry that the selected work affects, or for any undecided entry when the user asked for the review. A missing manifest, empty entries or JSON parse failure passes silently, and the work continues. A bounded read-only lookup unrelated to those changes does not load this procedure, inspect backups or request a merge decision. Other skills must not invoke it speculatively.
+The current-session assistant applies this skill in two cases. In both, it must first re-check the current platform's manifest; an earlier observation does not answer that check because an installer run can add entries during the session.
 
-The session-start hook, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and session-start failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. An explicit user defer permits other authorized work and leaves the backups undecided.
+- Before selected work modifies, replaces or installs an installed skill, the review below runs only for an undecided entry for that skill. Without one, including a missing manifest, empty entries or a JSON parse failure, the work continues without a notice.
+- When the user asks to review backed-up changes, the review below runs for every undecided entry. Without one, the assistant tells the user that no backed-up change is waiting, or that the manifest could not be read.
+
+A bounded read-only lookup unrelated to those changes does not load this procedure, inspect backups or request a merge decision. Other skills must not invoke it speculatively.
+
+The session-start hook, installer tail, pending-merges READ-ME-FIRST and session-start failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. An explicit user defer permits other authorized work and leaves the backups undecided.
 
 ## Review and apply
 
