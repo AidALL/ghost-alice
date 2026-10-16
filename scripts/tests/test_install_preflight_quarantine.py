@@ -102,13 +102,19 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
         if not bash_exe:
             self.skipTest("No non-WSL bash executable available for install.sh integration test")
 
+        # A root this install replaces is checked even after its install marker disappears.
+        for remove_marker in (False, True):
+            with self.subTest(remove_marker=remove_marker):
+                self._assert_install_sh_backs_up_user_edit(bash_exe, remove_marker)
+
+    def _assert_install_sh_backs_up_user_edit(self, executable: str, remove_marker: bool) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             env = os.environ.copy()
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
 
-            cmd = [bash_exe, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
+            cmd = [executable, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
             first = subprocess.run(
                 cmd,
                 cwd=REPO_ROOT,
@@ -122,6 +128,8 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
 
             installed_skill = temp_home / ".agents" / "skills" / "task-router" / "SKILL.md"
             self.assertTrue(installed_skill.exists())
+            if remove_marker:
+                (installed_skill.parent / ".ghost-alice-install.json").unlink()
             installed_skill.write_text("user edit before reinstall\n", encoding="utf-8")
 
             second = subprocess.run(
@@ -137,8 +145,11 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
 
             pending = temp_home / ".ghost-alice" / "pending-merges" / "codex"
             backup_files = list(pending.rglob("*.bak"))
-            self.assertEqual(len(backup_files), 1, msg=second.stderr + second.stdout)
-            self.assertEqual(backup_files[0].read_text(encoding="utf-8"), "user edit before reinstall\n")
+            # A missing marker is an ownership change, so the whole root is backed up.
+            self.assertIn("user edit before reinstall\n", [b.read_text(encoding="utf-8") for b in backup_files],
+                          msg=second.stderr + second.stdout)
+            if not remove_marker:
+                self.assertEqual(len(backup_files), 1, msg=second.stderr + second.stdout)
 
     def test_install_sh_aborts_before_overwrite_when_preflight_fails(self) -> None:
         bash_exe = _find_test_bash()
@@ -325,6 +336,12 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
         if not powershell:
             self.skipTest("No PowerShell executable available for install.ps1 integration test")
 
+        # A root this install replaces is checked even after its install marker disappears.
+        for remove_marker in (False, True):
+            with self.subTest(remove_marker=remove_marker):
+                self._assert_install_ps1_backs_up_user_edit(powershell, remove_marker)
+
+    def _assert_install_ps1_backs_up_user_edit(self, executable: str, remove_marker: bool) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_home = Path(temp_dir)
             env = os.environ.copy()
@@ -332,7 +349,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             env["USERPROFILE"] = str(temp_home)
 
             cmd = [
-                powershell,
+                executable,
                 "-NoProfile",
                 "-ExecutionPolicy",
                 "Bypass",
@@ -357,6 +374,8 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
 
             installed_skill = temp_home / ".agents" / "skills" / "task-router" / "SKILL.md"
             self.assertTrue(installed_skill.exists())
+            if remove_marker:
+                (installed_skill.parent / ".ghost-alice-install.json").unlink()
             installed_skill.write_text("powershell user edit before reinstall\n", encoding="utf-8")
 
             second = subprocess.run(
@@ -372,11 +391,14 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
 
             pending = temp_home / ".ghost-alice" / "pending-merges" / "codex"
             backup_files = list(pending.rglob("*.bak"))
-            self.assertEqual(len(backup_files), 1, msg=second.stderr + second.stdout)
-            self.assertEqual(
-                backup_files[0].read_text(encoding="utf-8"),
+            # A missing marker is an ownership change, so the whole root is backed up.
+            self.assertIn(
                 "powershell user edit before reinstall\n",
+                [b.read_text(encoding="utf-8") for b in backup_files],
+                msg=second.stderr + second.stdout,
             )
+            if not remove_marker:
+                self.assertEqual(len(backup_files), 1, msg=second.stderr + second.stdout)
 
     def test_install_ps1_aborts_before_overwrite_when_preflight_fails(self) -> None:
         powershell = _find_test_powershell()

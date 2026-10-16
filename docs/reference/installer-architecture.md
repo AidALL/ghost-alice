@@ -80,7 +80,7 @@ The installer records what it changes instead of guessing during cleanup.
 | State path | Why it exists |
 | --- | --- |
 | `~/.ghost-alice/install-state/<platform>.json` | Records installer-owned targets and environment changes for status and uninstall |
-| `~/.ghost-alice/pending-merges/<platform>/` | Preserves user-modified installed files that cannot be overwritten silently |
+| `~/.ghost-alice/pending-merges/<platform>/` | Preserves the user's edits to Ghost-ALICE copy-mode skill files before the installer replaces them. It checks roots with the install marker and every root the current install replaces, even when that root's marker has disappeared; merge-companion and the user decide whether to merge. Folders that Ghost-ALICE does not install, such as the Claude app's `synced`, are never recorded |
 | `~/.ghost-alice/install/` | Keeps install reports and event traces for audit and recovery |
 
 This is why update and uninstall are part of the installer architecture, not separate chores. A change that affects copied assets, hooks, or runtime config usually also affects status, doctor, pending merge behavior, and uninstall rollback.

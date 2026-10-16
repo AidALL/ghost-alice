@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import stat
 from pathlib import Path
+from typing import Iterable
 
 EXCLUDED_DIR_NAMES = {
     "__pycache__",
@@ -17,7 +18,8 @@ EXCLUDED_DIR_NAMES = {
     ".git",
 }
 
-EXCLUDED_FILE_NAMES = {".ghost-alice-install.json", ".DS_Store"}
+INSTALL_MARKER_NAME = ".ghost-alice-install.json"
+EXCLUDED_FILE_NAMES = {INSTALL_MARKER_NAME, ".DS_Store"}
 EXCLUDED_FILE_SUFFIXES = {".pyc"}
 
 
@@ -42,14 +44,24 @@ def _is_reparse_point(path: Path) -> bool:
     return bool(attrs & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0))
 
 
-def walk_user_files(skills_dir: Path) -> list[Path]:
-    """Return user-owned installed skill files, excluding generated/cache files."""
+def walk_user_files(skills_dir: Path, targets: Iterable[str] = ()) -> list[Path]:
+    """Return files in Ghost-ALICE copy-mode skill roots, excluding generated/cache files.
+
+    A root with the install marker holds Ghost-ALICE files that the installer replaces. So does a
+    root the current install names in targets, even after its marker disappears. Any other root,
+    such as the Claude app's synced folder or the user's own skill, is never replaced, so its files
+    never enter the pending-merge store. Symlink and junction roots point at the source checkout,
+    where git keeps the user's edits.
+    """
+    replaced = set(targets)
     files: list[Path] = []
     if not skills_dir.is_dir():
         return files
 
     for skill_root in sorted(skills_dir.iterdir()):
         if _is_reparse_point(skill_root) or not skill_root.is_dir():
+            continue
+        if skill_root.name not in replaced and not (skill_root / INSTALL_MARKER_NAME).is_file():
             continue
 
         for root, dirs, filenames in os.walk(skill_root):
