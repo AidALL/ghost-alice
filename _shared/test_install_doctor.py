@@ -1054,6 +1054,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             "work_impact_projection.py",
             "strict_session_log.py",
             "governance_events.py",
+            "text_lines.py",
         ):
             self.assertIn(dependency, install_doctor.RUNTIME_SHARED_FILES)
 

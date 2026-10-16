@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Validate compact-handoff blocks without modifying the workspace.
 
-Dependencies: Python 3.11+ standard library only.
+Dependencies: Python 3.11+ standard library and Ghost-ALICE `_shared/text_lines.py`,
+which the installer places beside every installed skill and which owns line boundaries.
 """
 
 from __future__ import annotations

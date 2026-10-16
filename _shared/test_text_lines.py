@@ -1,4 +1,5 @@
 """One line rule for text and append-only JSON Lines logs. Python standard library."""
+import io
 import json
 from pathlib import Path
 import sys
@@ -6,7 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from text_lines import (LINE_BREAK, committed_byte_lines, committed_length, committed_lines, committed_records,
-                        byte_lines, line_at, line_number, split_lines)
+                        byte_lines, line_at, line_number, split_lines, stream_lines)
 
 SEPARATORS = 'a\u2028b\u2029c\x85d'
 
@@ -59,13 +60,21 @@ class CommittedLogTests(unittest.TestCase):
         self.assertEqual(list(committed_byte_lines(raw, 8)), [(8, 17, b'{"b":2}\r\n')])
         self.assertEqual([line_number(raw, offset) for offset in (0, 8, 17)], [1, 2, 3])
 
-    def test_line_at_decodes_only_the_selected_line(self):
+    def test_line_at_reads_and_decodes_only_through_the_selected_line(self):
         raw = b'first\r\n\nthird\n' + '가'.encode()[:2]
-        self.assertEqual([line_at(raw, number) for number in (1, 2, 3)], ['first', '', 'third'])
-        self.assertIsNone(line_at(raw, 5))
+        self.assertEqual([line_at(io.BytesIO(raw), number) for number in (1, 2, 3)], ['first', '', 'third'])
+        self.assertIsNone(line_at(io.BytesIO(raw), 5))
+        self.assertIsNone(line_at(io.BytesIO(raw), 0))
         with self.assertRaises(UnicodeDecodeError):
-            line_at(raw, 4)
-        self.assertEqual(line_at(b'a\nlast', 2), 'last')
+            line_at(io.BytesIO(raw), 4)
+        stream = io.BytesIO(raw)
+        line_at(stream, 1)
+        self.assertEqual(stream.tell(), len(b'first\r\n'))
+        self.assertEqual(line_at(io.BytesIO(b'a\nlast'), 2), 'last')
+
+    def test_stream_lines_number_each_line_and_keep_separators_inside(self):
+        stream = io.BytesIO(('a\r\n' + SEPARATORS + '\nlast').encode())
+        self.assertEqual(list(stream_lines(stream)), [(1, 'a'), (2, SEPARATORS), (3, 'last')])
         self.assertEqual(byte_lines(b'a\r\nb\nc'), [b'a\r\n', b'b\n', b'c'])
 
 

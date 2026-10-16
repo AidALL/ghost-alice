@@ -64,15 +64,24 @@ def byte_lines(raw):
     return lines
 
 
-def line_at(raw, number):
-    """Text of one-based line number in raw, or None. A final line without LF counts.
+def line_at(stream, number):
+    """Text of one-based line number in a binary stream, or None. A final line without LF counts.
 
-    Only the selected line is decoded, so an unfinished record elsewhere cannot fail the lookup.
+    Binary line iteration ends lines at LF only. The stream is read through the
+    selected line and only that line is decoded, so a large file stays unloaded
+    and an unfinished record after it cannot fail the lookup.
     """
-    lines = byte_lines(raw)
-    if not 1 <= number <= len(lines):
-        return None
-    return split_lines(lines[number - 1].decode('utf-8'))[0]
+    if number >= 1:
+        for index, line in enumerate(stream, 1):
+            if index == number:
+                return split_lines(line.decode('utf-8'))[0]
+    return None
+
+
+def stream_lines(stream):
+    """(number, text) for each line of a binary stream, read and decoded one line at a time."""
+    for number, line in enumerate(stream, 1):
+        yield number, split_lines(line.decode('utf-8'))[0]
 
 
 def line_number(raw, offset):
