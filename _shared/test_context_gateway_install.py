@@ -12,7 +12,7 @@ import context_gateway_install as install
 
 
 class ContextGatewayInstallTests(unittest.TestCase):
-    new_dependencies = ('response_context_use.py', 'claude_context_adapter.py', 'source_lookup.py')
+    new_dependencies = ('response_context_use.py', 'claude_context_adapter.py', 'source_lookup.py', 'text_lines.py')
 
     def installation_fixture(self):
         tmp = tempfile.TemporaryDirectory()

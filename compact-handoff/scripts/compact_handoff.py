@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Validate compact-handoff blocks without modifying the workspace.
 
-Dependencies: Python 3.11+ standard library only.
+Dependencies: Python 3.11+ standard library and Ghost-ALICE `_shared/text_lines.py`,
+which the installer places beside every installed skill and which owns line boundaries.
 """
 
 from __future__ import annotations
@@ -12,6 +13,11 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+
+_SHARED_DIR = Path(__file__).resolve().parents[2] / "_shared"
+if str(_SHARED_DIR) not in sys.path:
+    sys.path.insert(0, str(_SHARED_DIR))
+from text_lines import split_lines
 
 
 REQUIRED_FIELDS = [
@@ -49,7 +55,7 @@ def read_input(path: str) -> str:
 def parse_handoff(text: str) -> dict[str, str]:
     fields: dict[str, str] = {}
     in_block = False
-    for raw_line in text.splitlines():
+    for raw_line in split_lines(text):
         line = raw_line.strip()
         if line == "[compact-handoff]":
             in_block = True

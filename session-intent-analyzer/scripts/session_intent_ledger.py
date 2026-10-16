@@ -361,8 +361,11 @@ def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *
         # For imported v1 state without an anchor, recover it from the validated
         # audit before committing the session to SQLite.
         try:
-            rows = paths["events"].read_text(encoding="utf-8").splitlines() if paths["events"].exists() else []
+            rows = (_shared_module('text_lines').split_lines(paths["events"].read_text(encoding="utf-8"))
+                    if paths["events"].exists() else [])
             for line in rows:
+                if not line.strip():
+                    continue
                 event = json.loads(line)
                 if not isinstance(event, dict) or event.get("platform") != platform or event.get("session_id") != session_id:
                     raise ValueError("legacy ledger audit identity mismatch")
@@ -607,7 +610,7 @@ def _legacy_events(paths: dict[str, Path], platform: str, session_id: str) -> li
     if not paths["events"].exists():
         return []
     result = []
-    for line in paths["events"].read_text(encoding="utf-8").splitlines():
+    for line in _shared_module('text_lines').split_lines(paths["events"].read_text(encoding="utf-8")):
         if not line.strip():
             continue
         event = json.loads(line)
@@ -1501,7 +1504,7 @@ def _context_input_binding(connection, root, state, event_id):
         and hashlib.sha256(raw[:boundary['offset']]).hexdigest()==boundary.get('prefix_digest')
         and (boundary.get('inode') is None or (boundary.get('device'),boundary['inode'])==(actual.st_dev,actual.st_ino)))
     native_line = raw[locator['start_offset']:locator['end_offset']]
-    require(native_line.endswith(b'\n') and len(native_line.splitlines())==1)
+    require([line for _, _, line in _shared_module('text_lines').committed_byte_lines(native_line)]==[native_line])
     entry = json.loads(native_line)
     native = _shared_module('native_transcript')
     require(isinstance(entry,dict) and entry.get('sessionId')==owner[1] and native.native_input_actor(entry)=='sdk'
@@ -1511,7 +1514,7 @@ def _context_input_binding(connection, root, state, event_id):
     message = adapter._normalize_message('user',entry['message']['content'])
     return dict(platform=owner[0],session_id=owner[1],input_event_id=event_id,
         input_digest=observation['input_digest'],input_char_count=observation['input_char_count'],context_only=True,
-        native_transcript_path=original['locator'],native_input_record=raw[:locator['start_offset']].count(b'\n')+1,
+        native_transcript_path=original['locator'],native_input_record=_shared_module('text_lines').line_number(raw,locator['start_offset']),
         native_input_digest='sha256:'+hashlib.sha256(json.dumps(message,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest())
 
 

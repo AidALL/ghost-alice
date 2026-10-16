@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from text_lines import split_lines
+
 try:
     from _shared.project_runtime import ProjectRuntime, project_runtime
 except ModuleNotFoundError:  # Direct execution from the installed _shared directory.
@@ -121,7 +123,7 @@ def _runtime_diagnostic_log_text(log_text: str) -> str:
 
     diagnostic_lines: list[str] = []
     timestamped = re.compile(r"^\d{4}-\d{2}-\d{2}T\S+\s+(?:ERROR|WARN|INFO|DEBUG)\s+")
-    for line in log_text.splitlines():
+    for line in split_lines(log_text):
         stripped = line.strip()
         if not stripped:
             continue

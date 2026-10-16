@@ -3,6 +3,7 @@ name: compact-handoff
 description: "Use during long tasks when evidence, state, and next actions must survive context compaction. Handles compaction judgment and handoff records only; no automatic hook behavior."
 compatibility:
   - "Python 3.11+ standard library"
+  - "Ghost-ALICE _shared/text_lines.py, installed beside the skill"
 ---
 
 # Compact Handoff

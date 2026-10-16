@@ -66,6 +66,7 @@ RUNTIME_SHARED_FILES = (
     "merge_companion_messages.py",
     "session_intent_analyzer_hook.py",
     "task_router_reminder_hook.py",
+    "text_lines.py",
 )
 RUNTIME_MANAGED_MARKERS = (
     "[merge-companion] prompt-check",

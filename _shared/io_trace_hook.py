@@ -18,6 +18,7 @@ import install_destination
 from typing import Any
 
 from session_intent_analyzer_hook import bound_session_identity, _safe_component
+from text_lines import committed_length, split_lines
 
 MAX_LINES = 10000
 
@@ -237,14 +238,17 @@ def _append_log(row: dict[str, str]) -> None:
 
 def _rotate(path: Path) -> None:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        raw = path.read_bytes()
     except OSError:
         return
+    end = committed_length(raw)
+    lines = split_lines(raw[:end].decode("utf-8"))
     if len(lines) <= MAX_LINES:
         return
     keep = MAX_LINES // 2
     install_destination.assert_mutation_path(path)
-    path.write_text("\n".join(lines[-keep:]) + "\n", encoding="utf-8")
+    # A record another hook is still appending stays after the kept lines for its writer to finish.
+    path.write_bytes(("\n".join(lines[-keep:]) + "\n").encode("utf-8") + raw[end:])
 
 
 def main() -> int:
