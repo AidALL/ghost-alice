@@ -80,7 +80,7 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 | State path | Why it exists |
 | --- | --- |
 | `~/.ghost-alice/install-state/<platform>.json` | 설치기가 관리한 대상과 환경 변경을 기록하며 상태 조회와 제거 명령이 읽습니다 |
-| `~/.ghost-alice/pending-merges/<platform>/` | 설치기가 덮어쓰지 않은 사용자 수정 파일을 보존하며 merge-companion과 사용자가 병합 여부를 결정합니다 |
+| `~/.ghost-alice/pending-merges/<platform>/` | 설치기가 Ghost-ALICE 복사 설치 스킬 파일(설치 표식이 있는 폴더)을 바꾸기 전에 사용자 수정본을 보존하며, merge-companion과 사용자가 병합 여부를 결정합니다. Claude 앱의 `synced`처럼 Ghost-ALICE가 설치하지 않는 폴더는 기록하지 않습니다 |
 | `~/.ghost-alice/install/` | 감사와 복구에 필요한 설치 결과와 이벤트를 보관합니다 |
 
 설치된 파일, 훅이나 실행 설정을 바꾸는 개발자는 상태 조회, 진단, 병합 대기 처리와 제거 복원에 미치는 영향도 확인해야 합니다. 이 절차들은 같은 설치 기록에 의존합니다.

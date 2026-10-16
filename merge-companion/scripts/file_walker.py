@@ -17,7 +17,8 @@ EXCLUDED_DIR_NAMES = {
     ".git",
 }
 
-EXCLUDED_FILE_NAMES = {".ghost-alice-install.json", ".DS_Store"}
+INSTALL_MARKER_NAME = ".ghost-alice-install.json"
+EXCLUDED_FILE_NAMES = {INSTALL_MARKER_NAME, ".DS_Store"}
 EXCLUDED_FILE_SUFFIXES = {".pyc"}
 
 
@@ -43,13 +44,21 @@ def _is_reparse_point(path: Path) -> bool:
 
 
 def walk_user_files(skills_dir: Path) -> list[Path]:
-    """Return user-owned installed skill files, excluding generated/cache files."""
+    """Return files in Ghost-ALICE copy-mode skill roots, excluding generated/cache files.
+
+    Only a root with the install marker holds Ghost-ALICE files that the installer replaces. A root
+    without it, such as the Claude app's synced folder or the user's own skill, is never replaced, so
+    its files never enter the pending-merge store. Symlink and junction roots point at the source
+    checkout, where git keeps the user's edits.
+    """
     files: list[Path] = []
     if not skills_dir.is_dir():
         return files
 
     for skill_root in sorted(skills_dir.iterdir()):
         if _is_reparse_point(skill_root) or not skill_root.is_dir():
+            continue
+        if not (skill_root / INSTALL_MARKER_NAME).is_file():
             continue
 
         for root, dirs, filenames in os.walk(skill_root):

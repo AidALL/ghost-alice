@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from diff_collector import README_FIRST_TEMPLATE, collect_user_changes, register_changes_in_manifest
+from file_walker import walk_user_files
 from manifest_io import read_manifest
 from snapshot import capture_snapshot, file_hash
 
@@ -406,6 +407,33 @@ class TestDiffCollectorV2(unittest.TestCase):
         changes = collect_user_changes(snap, [skill_file], skills_dir=self.skills_dir)
 
         self.assertEqual(changes, [])
+
+
+    def test_walker_tracks_only_skill_roots_with_install_marker(self):
+        managed = self.skills_dir / "task-router"
+        managed.mkdir()
+        (managed / ".ghost-alice-install.json").write_text('{"managed_by": "Ghost-ALICE"}\n', encoding="utf-8")
+        (managed / "SKILL.md").write_text("managed", encoding="utf-8")
+        synced = self.skills_dir / "synced" / "bucket" / "pptx"
+        synced.mkdir(parents=True)
+        (synced / "SKILL.md").write_text("synced by the Claude app", encoding="utf-8")
+        own = self.skills_dir / "my-notes"
+        own.mkdir()
+        (own / "SKILL.md").write_text("the user's own skill", encoding="utf-8")
+
+        # Only a marked root holds Ghost-ALICE files that the installer replaces.
+        self.assertEqual(walk_user_files(self.skills_dir), [managed / "SKILL.md"])
+
+    def test_app_synced_change_never_enters_pending_store(self):
+        synced_file = self.skills_dir / "synced" / "bucket" / "pptx" / "SKILL.md"
+        synced_file.parent.mkdir(parents=True)
+        synced_file.write_text("version 1", encoding="utf-8")
+        snap = self.root / "snapshot.json"
+        capture_snapshot(snap, walk_user_files(self.skills_dir), "claude", skills_dir=self.skills_dir)
+
+        synced_file.write_text("version 2 from the app", encoding="utf-8")
+
+        self.assertEqual(collect_user_changes(snap, walk_user_files(self.skills_dir), skills_dir=self.skills_dir), [])
 
 
 if __name__ == "__main__":
