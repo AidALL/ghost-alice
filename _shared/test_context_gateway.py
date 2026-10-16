@@ -95,12 +95,12 @@ class RedirectGatewayTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
-    def request(self, method='GET', provider='codex'):
+    def request(self, method='GET', provider='codex', path=None):
         suffix = 'models' if provider == 'codex' and method == 'GET' else (
             'responses' if provider == 'codex' else 'v1/messages')
         connection = http.client.HTTPConnection('127.0.0.1', self.gateway.server_port, timeout=5)
         try:
-            connection.request(method, f'/{provider}/{suffix}',
+            connection.request(method, path or f'/{provider}/{suffix}',
                 body=b'{ "input": [] }' if method == 'POST' else None,
                 headers={'X-Ghost-Context-Scope': 'redirect-fixture',
                          'Authorization': 'Bearer REDIRECT_FIXTURE_AUTH', 'X-Api-Key': 'REDIRECT_FIXTURE_KEY'})
@@ -108,6 +108,36 @@ class RedirectGatewayTests(unittest.TestCase):
             return reply.status, dict(reply.headers), reply.read()
         finally:
             connection.close()
+
+    def assert_reason_body(self, provider, headers, body, phrase):
+        self.assertEqual(headers['Content-Type'], 'application/json')
+        envelope = json.loads(body)
+        if provider == 'anthropic':
+            self.assertEqual(envelope['type'], 'error')
+        self.assertIn(phrase, envelope['error']['message'])
+
+    def test_unknown_endpoint_of_a_known_provider_passes_through_unchanged(self):
+        self.start_gateway()
+        code, _, body = self.request('POST', path='/codex/future/endpoint?mode=1')
+        self.assertEqual((code, body), (200, self.answer))
+        self.assertEqual(self.seen[-1][:3], ('POST', '/future/endpoint?mode=1', b'{ "input": [] }'))
+
+    def test_unknown_provider_has_no_destination(self):
+        self.start_gateway()
+        code, _, _ = self.request('POST', path='/unknown/v1/messages')
+        self.assertEqual(code, 404)
+        self.assertEqual(self.seen, [])
+
+    def test_unreachable_model_server_returns_a_reason(self):
+        self.start_gateway()
+        self.upstream.shutdown()
+        self.upstream.server_close()
+        for provider in ('codex', 'anthropic'):
+            with self.subTest(provider=provider):
+                code, headers, body = self.request('POST', provider)
+                self.assertEqual(code, 502)
+                self.assert_reason_body(provider, headers, body, 'could not reach the model server')
+        self.assertNotIn('REDIRECT_FIXTURE_AUTH', self.log.read_text())
 
     def test_cross_origin_redirects_never_receive_credentials_or_reach_native_client(self):
         self.start_gateway()
@@ -124,7 +154,7 @@ class RedirectGatewayTests(unittest.TestCase):
                                              for row in self.foreign), 'foreign fixture received native credentials')
                         self.assertEqual(code, 502)
                         self.assertNotIn('Location', headers)
-                        self.assertEqual(body, b'')
+                        self.assert_reason_body(provider, headers, body, 'redirect')
                         self.assertEqual(self.foreign, [])
         self.assertNotIn('REDIRECT_FIXTURE_AUTH', self.log.read_text())
         self.assertNotIn('REDIRECT_FIXTURE_KEY', self.log.read_text())
@@ -138,7 +168,8 @@ class RedirectGatewayTests(unittest.TestCase):
             target = f'http://127.0.0.1:{self.target.server_port}/foreign'
             self.routes = {'/models': (302, [('Location', target)])}
             code, headers, body = self.request()
-        self.assertEqual((code, body), (502, b''))
+        self.assertEqual(code, 502)
+        self.assert_reason_body('codex', headers, body, 'redirect')
         self.assertNotIn('Location', headers)
         self.assertEqual([entry[:2] for entry in self.seen], [('GET', '/models')])
         self.assertEqual(self.foreign, [])
@@ -209,7 +240,8 @@ class RedirectGatewayTests(unittest.TestCase):
                 with self.subTest(status=status, prefix=prefix):
                     self.routes = {'/responses': (status, [('Location', prefix + authority)])}
                     code, headers, body = self.request('POST')
-                    self.assertEqual((code, body), (502, b''))
+                    self.assertEqual(code, 502)
+                    self.assert_reason_body('codex', headers, body, 'Ghost-ALICE context gateway')
                     self.assertNotIn('Location', headers)
                     self.assertEqual(self.foreign, [])
 
@@ -218,7 +250,8 @@ class RedirectGatewayTests(unittest.TestCase):
         self.routes = {'/models': (302, [('Location', '/same')]),
                        '/same': (302, [('Location', f'http://127.0.0.1:{self.target.server_port}/foreign')])}
         code, headers, body = self.request()
-        self.assertEqual((code, body), (502, b''))
+        self.assertEqual(code, 502)
+        self.assert_reason_body('codex', headers, body, 'redirect')
         self.assertNotIn('Location', headers)
         self.assertEqual(self.foreign, [])
 
@@ -301,12 +334,15 @@ class ContextGatewayTests(unittest.TestCase):
         self.assertNotIn('PRIVATE_NATIVE_AUTH', self.wire.read_text())
         self.assertNotIn('required long source', self.wire.read_text())
 
-    def test_unknown_scope_does_not_forward_auth(self):
-        with self.assertRaises(urllib.error.HTTPError) as caught:
-            self.request(b'{}', scope='foreign')
-        caught.exception.close()
-        self.assertEqual(caught.exception.code, 403)
-        self.assertEqual(self.seen, [])
+    def test_foreign_scope_forwards_the_request_without_reduction(self):
+        body = json.dumps(self.core.request).encode()
+        with self.request(body, scope='foreign') as reply:
+            self.assertEqual(reply.read(), self.answer)
+        self.assertEqual(self.seen[-1][0], body)
+        self.assertNotIn('x-ghost-context-scope', {k.lower() for k in self.seen[-1][1]})
+        events = [json.loads(line) for line in self.wire.read_text().splitlines()]
+        selection = next(e for e in events if e['event'] == 'request-selection')
+        self.assertEqual((selection['state'], selection['reason']), ('unavailable', 'scope-mismatch'))
 
     def test_nonselection_and_compaction_keep_request_bytes(self):
         body = b'{ "input": [], "prompt_cache_key": "unknown" }'
@@ -322,24 +358,28 @@ class ContextGatewayTests(unittest.TestCase):
             self.assertEqual(json.load(reply), {'status':'ready'})
         self.assertEqual(self.seen, [])
 
-    def test_selection_read_failure_never_reaches_the_paid_backend(self):
+    def test_selection_read_failure_forwards_the_original_request(self):
+        body = json.dumps(self.core.request).encode()
         with patch.object(context_lifecycle, '_native', side_effect=OSError('fixture read failure')):
-            with self.assertRaises(urllib.error.HTTPError) as caught:
-                self.request(json.dumps(self.core.request).encode())
-        caught.exception.close()
-        self.assertEqual(caught.exception.code, 503)
-        self.assertEqual(self.seen, [])
+            with self.request(body) as reply:
+                self.assertEqual(reply.read(), self.answer)
+        self.assertEqual(self.seen[-1][0], body)
         events = [json.loads(line) for line in self.wire.read_text().splitlines()]
-        self.assertTrue(any(e['event'] == 'request-not-forwarded' and e['reason'] == 'storage-unavailable' for e in events))
+        selection = next(e for e in events if e['event'] == 'request-selection')
+        self.assertEqual((selection['state'], selection['reason']), ('unavailable', 'storage-unavailable'))
+        self.assertEqual(selection['forwarded_wire_sha256'], selection['original_wire_sha256'])
 
-    def test_selection_bug_never_becomes_an_original_request(self):
+    def test_selection_bug_forwards_the_original_request_without_its_message(self):
+        body = json.dumps(self.core.request).encode()
         for error in (KeyError('fixture bug'), ValueError('fixture bug')):
             with patch.object(context_lifecycle, '_native', side_effect=error):
-                with self.assertRaises(urllib.error.HTTPError) as caught:
-                    self.request(json.dumps(self.core.request).encode())
-            caught.exception.close()
-            self.assertEqual(caught.exception.code, 500)
-        self.assertEqual(self.seen, [])
+                with self.request(body) as reply:
+                    self.assertEqual(reply.read(), self.answer)
+            self.assertEqual(self.seen[-1][0], body)
+        events = [json.loads(line) for line in self.wire.read_text().splitlines()]
+        failed = [e for e in events if e['event'] == 'request-selection' and e['state'] == 'error']
+        self.assertEqual([(e['reason'], e['error_type']) for e in failed],
+                         [('selection-error', 'KeyError'), ('selection-error', 'ValueError')])
         self.assertNotIn('fixture bug', self.wire.read_text())
 
     def test_preservation_is_observed_without_reencoding(self):
@@ -550,17 +590,18 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
         self.assertTrue(json.loads(gzip.decompress(self.seen[0][1]))['selected_fixture'])
         self.assertEqual({key.lower(): value for key, value in self.seen[0][2].items()}['content-encoding'], 'gzip')
 
-    def test_missing_or_invalid_declared_session_cannot_forward(self):
+    def test_missing_or_invalid_declared_session_forwards_without_selection(self):
         self.start(selectors={'claude': self.selector})
         for session in (None, '', 'not-a-native-uuid'):
-            with self.subTest(session=session), self.assertRaises(urllib.error.HTTPError) as caught:
-                self.request(session_id=session)
-            caught.exception.close()
-            self.assertEqual(caught.exception.code, 400)
-        self.assertEqual(self.seen, [])
+            with self.subTest(session=session), self.request(session_id=session) as reply:
+                self.assertEqual(reply.read(), self.answer)
+                self.assertEqual(self.seen[-1][1], b'{"messages":[]}')
         self.assertEqual(self.dispatched, [])
+        events = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual([(e['state'], e['reason']) for e in events if e['event'] == 'request-selection'],
+                         [('unavailable', 'native-session-unavailable')] * 3)
 
-    def test_duplicate_declared_session_headers_cannot_forward(self):
+    def test_duplicate_declared_session_headers_forward_without_selection(self):
         self.start(selectors={'claude': self.selector})
         connection = http.client.HTTPConnection('127.0.0.1', self.server.server_port)
         self.addCleanup(connection.close)
@@ -571,20 +612,21 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
         connection.putheader('Content-Length', '2')
         connection.endheaders(b'{}')
         reply = connection.getresponse()
-        reply.read()
-        self.assertEqual(reply.status, 400)
-        self.assertEqual(self.seen, [])
+        self.assertEqual((reply.status, reply.read()), (200, self.answer))
+        self.assertEqual(self.seen[-1][1], b'{}')
+        self.assertEqual(self.dispatched, [])
 
-    def test_unavailable_claude_selection_cannot_forward(self):
+    def test_unavailable_claude_selection_forwards_the_original_request(self):
         def unavailable(request, session):
-            return SimpleNamespace(state='unavailable', reason='fixture-source-unavailable', request=request,
-                                   observations=())
+            return SimpleNamespace(state='unavailable', reason='fixture-source-unavailable',
+                                   request=dict(request, selected_fixture=True), observations=())
         self.start(selectors={'claude': unavailable})
-        with self.assertRaises(urllib.error.HTTPError) as caught:
-            self.request(session_id=self.session)
-        caught.exception.close()
-        self.assertEqual(caught.exception.code, 503)
-        self.assertEqual(self.seen, [])
+        with self.request(session_id=self.session) as reply:
+            self.assertEqual(reply.read(), self.answer)
+        self.assertEqual(self.seen[-1][1], b'{"messages":[]}')
+        events = [json.loads(line) for line in self.log.read_text().splitlines()]
+        selection = next(e for e in events if e['event'] == 'request-selection')
+        self.assertEqual((selection['state'], selection['reason']), ('unavailable', 'fixture-source-unavailable'))
 
     def test_dispatcher_rejects_unknown_platform_noncallable_and_overlap(self):
         for kwargs in (dict(selectors={'unknown': self.selector}), dict(selectors={'claude': 'not-callable'}),

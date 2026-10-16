@@ -24,6 +24,7 @@ INTERNAL_HEADERS = {'x-ghost-context-scope', 'x-ghost-context-session'}
 ORIGINS = {'codex': 'https://chatgpt.com/backend-api/codex', 'anthropic': 'https://api.anthropic.com'}
 PLATFORMS = {'codex': 'codex', 'anthropic': 'claude'}
 SELECTION_ENDPOINTS = {'codex': {'responses'}, 'anthropic': {'v1/messages', 'v1/messages/count_tokens'}}
+REDIRECT_REFUSED = 'the model server sent a redirect outside its origin; it was not followed'
 
 
 def _url_origin(url):
@@ -64,7 +65,7 @@ class _OriginRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, message, headers, new_url):
         if not _redirect_allowed(self.origin, request.full_url, new_url):
             fp.close()
-            raise urllib.error.URLError('redirect-outside-configured-origin')
+            raise urllib.error.URLError(REDIRECT_REFUSED)
         return super().redirect_request(request, fp, code, message, headers, new_url)
 
 
@@ -261,11 +262,21 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
         def log_message(self, *_args):
             pass
 
-        def reject(self, status):
+        def reject(self, status, provider=None, reason=None):
+            # The native client shows the provider-format error message instead of "Unknown error".
+            body = b''
+            if reason is not None:
+                message = 'Ghost-ALICE context gateway: ' + reason
+                body = json.dumps({'type': 'error', 'error': {'type': 'api_error', 'message': message}}
+                                  if provider == 'anthropic' else
+                                  {'error': {'message': message, 'type': 'ghost_alice_gateway_error'}}).encode()
             self.send_response(status)
-            self.send_header('Content-Length', '0')
+            if body:
+                self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
             self.send_header('Connection', 'close')
             self.end_headers()
+            self.wfile.write(body)
             self.close_connection = True
 
         def read_body(self):
@@ -283,11 +294,8 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
             return self.rfile.read(int(self.headers.get('Content-Length', '0')))
 
         def handle_request(self):
-            if self.headers.get_all('X-Ghost-Context-Scope') != [scope]:
-                record({'event': 'request-not-forwarded', 'reason': 'scope-mismatch', 'status': 403})
-                self.reject(403)
-                return
-            if self.path == '/health' and self.command == 'GET':
+            in_scope = self.headers.get_all('X-Ghost-Context-Scope') == [scope]
+            if self.path == '/health' and self.command == 'GET' and in_scope:
                 body = b'{"status":"ready"}'
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -297,27 +305,26 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                 return
             parsed = urllib.parse.urlsplit(self.path)
             provider, _, suffix = parsed.path.lstrip('/').partition('/')
-            allowed = {'codex': {'models', 'responses', 'responses/compact'},
-                       'anthropic': {'v1/messages', 'v1/messages/count_tokens'}}
-            if provider not in origins or suffix not in allowed.get(provider, set()):
+            if provider not in origins:
+                record({'event': 'request-not-forwarded', 'reason': 'unknown-provider', 'status': 404})
                 self.reject(404)
                 return
+            # Every path of a configured provider goes upstream. Reduction applies only to
+            # its known request endpoints, from a client in this installation's scope.
             platform = PLATFORMS[provider]
             selector = dispatch.get(platform) if suffix in SELECTION_ENDPOINTS[provider] else None
             server_selector = server_dispatch.get(platform) if suffix in SELECTION_ENDPOINTS[provider] else None
             session_headers = self.headers.get_all('X-Ghost-Context-Session') or []
             session_id = session_headers[0] if len(session_headers) == 1 else None
-            if platform == 'claude' and (selector is not None or server_selector is not None):
+            skipped = None if in_scope else 'scope-mismatch'
+            if platform == 'claude' and skipped is None:
                 try:
                     valid_session = (isinstance(session_id, str)
                                      and str(uuid.UUID(session_id)) == session_id.lower())
                 except ValueError:
                     valid_session = False
                 if not valid_session:
-                    record({'event': 'request-not-forwarded', 'provider': provider, 'platform': platform,
-                            'reason': 'native-session-unavailable', 'status': 400})
-                    self.reject(400)
-                    return
+                    skipped = 'native-session-unavailable'
             request_id = str(uuid.uuid4())
             body = self.read_body()
             encoding = self.headers.get('Content-Encoding', '').lower()
@@ -328,33 +335,34 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                     'native_authorization_present': bool(self.headers.get('Authorization') or self.headers.get('X-Api-Key')),
                     'shape': request_shape(body, encoding)})
             if selector is not None or server_selector is not None:
-                try:
-                    decoded = json.loads(decode_body(body, encoding))
-                    betas = tuple(value.strip() for header in self.headers.get_all('anthropic-beta', [])
-                                  for value in header.split(',') if value.strip())
-                    result = (server_selector(decoded, session_id, betas) if server_selector is not None
-                              else selector(decoded, session_id))
-                    if result.state == 'unavailable':
-                        record({'event': 'request-not-forwarded', 'request_id': request_id,
-                                'reason': result.reason, 'status': 503})
-                        self.reject(503)
-                        return
-                    if result.state not in {'selected', 'preserved'}:
-                        raise ValueError('Invalid request selection state')
-                    original_hash = digest(body)
-                    if result.state == 'selected':
-                        body = encode_body(json.dumps(result.request, ensure_ascii=False, separators=(',', ':')).encode(), encoding)
-                    record({'event': 'request-selection', 'request_id': request_id, 'provider': provider,
+                betas = tuple(value.strip() for header in self.headers.get_all('anthropic-beta', [])
+                              for value in header.split(',') if value.strip())
+                observed = {'event': 'request-selection', 'request_id': request_id, 'provider': provider,
                             'platform': platform, 'native_session_id': session_id,
                             'native_betas': list(betas) if platform == 'claude' else [],
-                            'state': result.state, 'reason': result.reason,
-                            'original_wire_sha256': original_hash, 'forwarded_wire_sha256': digest(body),
-                            'selected_blocks': result.observations, 'forwarded_shape': request_shape(body, encoding)})
-                except Exception as error:
-                    record({'event': 'request-not-forwarded', 'request_id': request_id,
-                            'reason': 'selection-error', 'error_type': type(error).__name__, 'status': 500})
-                    self.reject(500)
-                    return
+                            'original_wire_sha256': digest(body), 'selected_blocks': []}
+                # Selection only removes material. When the gateway cannot complete it,
+                # the native request goes upstream unchanged and the reason is recorded.
+                if skipped is not None:
+                    observed.update(state='unavailable', reason=skipped)
+                else:
+                    try:
+                        decoded = json.loads(decode_body(body, encoding))
+                        result = (server_selector(decoded, session_id, betas) if server_selector is not None
+                                  else selector(decoded, session_id))
+                        if result.state not in {'selected', 'preserved', 'unavailable'}:
+                            raise ValueError('Invalid request selection state')
+                        forwarded = body
+                        if result.state == 'selected':
+                            forwarded = encode_body(json.dumps(result.request, ensure_ascii=False,
+                                                               separators=(',', ':')).encode(), encoding)
+                            observed['selected_blocks'] = result.observations
+                        observed.update(state=result.state, reason=result.reason)
+                        body = forwarded
+                    except Exception as error:
+                        observed.update(state='error', reason='selection-error', error_type=type(error).__name__)
+                observed.update(forwarded_wire_sha256=digest(body), forwarded_shape=request_shape(body, encoding))
+                record(observed)
             url = origins[provider].rstrip('/') + '/' + suffix
             if parsed.query:
                 url += '?' + parsed.query
@@ -373,7 +381,8 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
             except (OSError, urllib.error.URLError) as error:
                 record({'event': 'transport-unavailable', 'request_id': request_id,
                         'provider': provider, 'error_type': type(error).__name__})
-                self.reject(502)
+                self.reject(502, provider, REDIRECT_REFUSED if getattr(error, 'reason', None) == REDIRECT_REFUSED
+                            else 'could not reach the model server (' + type(error).__name__ + ')')
                 return
             with upstream:
                 # Some methods/statuses (notably POST 307/308) become
@@ -385,7 +394,7 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                     for key in ('Location', 'URI') for location in upstream.headers.get_all(key, [])):
                     record({'event': 'redirect-not-forwarded', 'request_id': request_id,
                             'provider': provider, 'status': 502})
-                    self.reject(502)
+                    self.reject(502, provider, REDIRECT_REFUSED)
                     return
                 self.send_response(upstream.status)
                 for key, value in upstream.headers.items():

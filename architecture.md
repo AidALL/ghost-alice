@@ -66,7 +66,7 @@ A configured request adapter applies supported explicit content choices at the s
 
 Claude client substitution requires unsigned content and explicitly disabled thinking. Editing preceding messages would break their signed reasoning prefix. With an existing native context-management capability, the gateway can instead request server clearing for authenticated whole tool-result omissions that the provider's tool-name policy represents exactly. It preserves signed history and reasoning settings, protects necessary results of the same tool, and observes provider application separately from the request. Arbitrary text and producer-subbody replacement remain unsupported under signed thinking. The [native context procedure](_shared/context_lifecycle.md#apply-and-observe) owns these support conditions. Source conformance, installation and actual native adoption remain distinct observations.
 
-The adapter distinguishes an absent selection from a failed read or processing error. Without an authenticated supported input change, it preserves the request with an observable reason. A read failure or unexpected processing error stops transmission.
+The adapter records why it leaves a request unchanged: no authenticated supported input change, a failed read, or an unexpected processing error. In each case it forwards the original request. Selection only removes material, so a selection the adapter cannot complete never stops transmission. A request from outside the installation scope or for an endpoint without reduction support also goes upstream unchanged. Only an unknown provider path or an unreachable model server returns an error, and the error carries its reason.
 
 Installation preserves the listener binding, confirms service shutdown before replacing files and enables the provider after readiness. A failed candidate is recovered from preserved artifacts and service state.
 
@@ -77,8 +77,7 @@ flowchart LR
   H["Native history"] --> A["Request adapter"]
   C --> A
   A -->|Supported selected input| S["Model server"]
-  A -->|No authenticated supported change: original request| S
-  A -->|Storage or processing unavailable| U["Transmission stopped"]
+  A -->|No authenticated supported change, or a read or processing failure: original request and recorded reason| S
   S --> D["Native answer display"]
   O["Original locations"] -->|Explicit retrieval| M
 ```
