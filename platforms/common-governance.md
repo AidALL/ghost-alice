@@ -39,7 +39,7 @@ When the intent is clear, `task-router` decides between a direct answer and work
 Load only the owner that the next decision needs, then only the section that owner names.
 
 - `session-intent-analyzer`: reading or writing the intent record.
-- `merge-companion`: an undecided pending merge, when the user asks to review it or the selected work changes an affected skill.
+- `merge-companion`: before the selected work modifies, replaces or installs an installed skill, and when the user asks to review backed-up changes.
 - `verification-before-completion` owns evidence selection, the per-claim and whole-answer judgments, completion controls and delivery; load it before a new completion, fix, success, verified-status or material recommendation claim.
 - `task-router`'s `references/context-selection.md`: changing what already-used material stays in model input.
 

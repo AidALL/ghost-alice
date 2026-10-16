@@ -87,15 +87,15 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-prose-rule",
-        description="common governance names merge-companion only for a requested review or an affected-skill change",
+        description="common governance applies merge-companion before an installed-skill change and for a requested review",
         file=REPO / "platforms" / "common-governance.md",
-        pattern=r"`merge-companion`: an undecided pending merge, when the user asks to review it or the selected work changes an affected skill",
+        pattern=r"`merge-companion`: before the selected work modifies, replaces or installs an installed skill, and when the user asks to review backed-up changes",
     ),
     LayerCheck(
         layer="pending-merge-skill-activation",
-        description="the common Owners entry sends pending merges to merge-companion, which owns the re-check before changing an installed skill and the affected-change trigger",
+        description="the always-loaded Owners entry applies merge-companion before an installed-skill change, and the skill owns the manifest re-check",
         file=REPO / "platforms" / "common-governance.md",
-        pattern=r"`merge-companion`: an undecided pending merge",
+        pattern=r"`merge-companion`: before the selected work modifies, replaces or installs an installed skill",
         owner=REPO / "merge-companion" / "SKILL.md",
         owner_section="Entry and activation",
         owner_pattern=r"re-check the current platform's manifest[\s\S]*does not answer that check[\s\S]*bounded read-only lookup unrelated to those changes[\s\S]*leaves the backups undecided",
@@ -107,7 +107,7 @@ CHECKS: list[LayerCheck] = [
         pattern=r"\{\{COMMON_GOVERNANCE\}\}",
         owner=REPO / "platforms" / "common-governance.md",
         owner_section="Owners",
-        owner_pattern=r"`merge-companion`: an undecided pending merge",
+        owner_pattern=r"`merge-companion`: before the selected work modifies, replaces or installs an installed skill",
     ),
     LayerCheck(
         layer="pending-merge-install-tail",
