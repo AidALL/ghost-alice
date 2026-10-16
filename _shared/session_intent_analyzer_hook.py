@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""UserPromptSubmit hook for the session-intent-analyzer ledger."""
+"""Session-start and input hooks for the session-intent-analyzer ledger."""
 
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ try:
         record_turn,
         stage_native_input,
         resolve_session_id,
+        session_paths,
     )
     _LEDGER_SCRIPT = Path(sys.modules['session_intent_ledger'].__file__).resolve()
     _LEDGER_IMPORT_BROKEN = False
@@ -58,6 +59,7 @@ except ImportError as _ledger_exc:
     record_turn = None
     stage_native_input = None
     resolve_session_id = None
+    session_paths = None
     _LEDGER_IMPORT_BROKEN = getattr(_ledger_exc, "name", None) not in (None, "session_intent_ledger")
 except Exception:
     # Present but broken at import (syntax error, a failing transitive dependency). Still degrade non-blockingly, but flag it as broken so main() reports a distinct message instead of silently labelling a real defect "unavailable".
@@ -66,6 +68,7 @@ except Exception:
     record_turn = None
     stage_native_input = None
     resolve_session_id = None
+    session_paths = None
     _LEDGER_IMPORT_BROKEN = True
 
 
@@ -257,26 +260,10 @@ def native_context_capability(session_id: str, platform: str = 'codex') -> dict[
     return None
 
 
-def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | None) -> str:
-    """Expose canonical intake identity only after native actor reconciliation."""
-    state_path = Path(paths["state"]).resolve()
-    events_path = Path(paths["events"]).resolve()
-    receipt = {
-        "schema_version": "session-intent-observation-receipt.v1" if observation else "session-intent-transport-receipt.v1",
-        "intake_status": "observed" if observation else "pending-native-origin",
-        "ledger_root": str(state_path.parents[2]),
-        "platform": state_path.parents[1].name,
-        "session_id": state_path.parent.name,
-        "state_path": str(state_path),
-        "events_path": str(events_path),
-        "database_path": str(state_path.parents[2] / "ghost-state.sqlite3"),
-        "storage_backend": "sqlite",
-    }
-    if observation is not None:
-        receipt["input_event_id"] = observation["input_event_id"]
-    capability = native_context_capability(receipt['session_id'], receipt['platform'])
-    if capability is not None:
-        receipt['context_selection'] = capability
+SESSION_RECEIPT_KEY = "session-start-receipt"
+
+
+def _receipt_block(receipt: dict[str, Any]) -> str:
     return (
         "\n[session-intent-receipt]\n"
         + json.dumps(receipt, ensure_ascii=True, separators=(",", ":"))
@@ -284,21 +271,84 @@ def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | No
     )
 
 
-def render_payload(output_format: str, message: str, ledger_root: Path, *, routine: bool = False) -> str:
+def _session_coordinates(paths: dict[str, Path]) -> dict[str, str]:
+    state_path = Path(paths["state"]).resolve()
+    return {
+        "ledger_root": str(state_path.parents[2]),
+        "platform": state_path.parents[1].name,
+        "session_id": state_path.parent.name,
+        "state_path": str(state_path),
+        "events_path": str(Path(paths["events"]).resolve()),
+        "database_path": str(state_path.parents[2] / "ghost-state.sqlite3"),
+        "storage_backend": "sqlite",
+    }
+
+
+def observation_receipt(paths: dict[str, Path], observation: dict[str, Any] | None) -> str:
+    """Expose canonical intake identity only after native actor reconciliation."""
+    receipt = {
+        "schema_version": "session-intent-observation-receipt.v1" if observation else "session-intent-transport-receipt.v1",
+        "intake_status": "observed" if observation else "pending-native-origin",
+        **_session_coordinates(paths),
+    }
+    if observation is not None:
+        receipt["input_event_id"] = observation["input_event_id"]
+    capability = native_context_capability(receipt['session_id'], receipt['platform'])
+    if capability is not None:
+        receipt['context_selection'] = capability
+    return _receipt_block(receipt)
+
+
+def session_receipt(paths: dict[str, Path]) -> str:
+    """Fixed coordinates of this session; the input identity stays in the ledger."""
+    receipt = {"schema_version": "session-intent-session-receipt.v1", **_session_coordinates(paths)}
+    capability = native_context_capability(receipt['session_id'], receipt['platform'])
+    if capability is not None:
+        receipt['context_selection'] = capability
+    return _receipt_block(receipt)
+
+
+def _session_receipt_delivered(root: Path, platform: str, session_id: str) -> bool:
+    """Read-only: an input never creates the check store."""
+    try:
+        from session_check_cache import peek_check
+        value = peek_check(root, platform, session_id, SESSION_RECEIPT_KEY, Path(__file__))
+    except (ImportError, OSError, ValueError, TypeError):
+        return False
+    return bool(value) and value.get("delivered") is True
+
+
+def session_start(args: argparse.Namespace, payload: dict[str, Any], ledger_root: Path) -> str:
+    """The host repeats session start after resume, clear, compaction and fork, so one copy stays in context."""
+    try:
+        session_id = resolve_session_id(root=ledger_root, platform=args.platform, payload=payload,
+                                        env=os.environ, for_write=True)
+        message = session_receipt(session_paths(ledger_root, args.platform, session_id))
+    except (TypeError, ValueError, OSError):
+        return json.dumps({"continue": True})
+    try:
+        from session_check_cache import observe_check
+        observe_check(ledger_root, args.platform, session_id, SESSION_RECEIPT_KEY, Path(__file__),
+                      lambda: {"delivered": True}, force=True)
+    except (ImportError, OSError, ValueError, TypeError):
+        pass  # Without the delivery record, inputs keep sending the full receipt.
+    return render_payload(args.format, message, ledger_root, routine=True, event="SessionStart")
+
+
+def render_payload(output_format: str, message: str, ledger_root: Path, *, routine: bool = False,
+                   event: str = "UserPromptSubmit") -> str:
     if output_format == "json":
-        # systemMessage is a host UI warning, not the model context channel.
-        body: dict[str, object] = {
-            "continue": True,
-            "systemMessage": message,
-            "hookSpecificOutput": {
-                "hookEventName": "UserPromptSubmit",
-                "additionalContext": message,
-            },
-        }
+        body: dict[str, object] = {"continue": True}
+        if message.strip():
+            # systemMessage is a host UI warning, not the model context channel.
+            body["systemMessage"] = message
+            body["hookSpecificOutput"] = {"hookEventName": event, "additionalContext": message}
         if routine:
             # A recorded observation is routine for the user screen; the model context above is unchanged.
             body["ghostAliceSurface"] = "routine"
         return json.dumps(body, ensure_ascii=False)
+    if not message.strip():
+        return ""
     return "\n".join([
         f"Internal instruction: {message}",
         "User: Session intent tracking does not store raw prompts.",
@@ -311,7 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Record session intent guard hook event.")
     parser.add_argument("--platform", default="codex")
     parser.add_argument("--hook", default="session-intent")
-    parser.add_argument("--context", default="prompt_submit")
+    parser.add_argument("--context", default="prompt_submit", choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--internal-b64", default=None)
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="session intent ledger root")
@@ -330,6 +380,12 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
+    if args.context == "session_start":
+        if callable(resolve_session_id) and callable(session_paths):
+            sys.stdout.write(session_start(args, payload, ledger_root) + "\n")
+        else:
+            sys.stdout.write(json.dumps({"continue": True}) + "\n")
+        return 0
     routine = False
     terminal = TERMINAL_ROUTING_INSTRUCTION
     try:
@@ -358,7 +414,8 @@ def main(argv: list[str] | None = None) -> int:
                     raw_input=prompt, prompt_id=payload.get('prompt_id'),
                     transcript_path=payload.get('transcript_path') or payload.get('transcriptPath'))
                 _clear_degrade_marker(ledger_root, args.platform, payload)
-                message = custom_instruction + observation_receipt(paths, None)
+                delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
+                message = custom_instruction + ("" if delivered else observation_receipt(paths, None))
                 sys.stdout.write(render_payload(args.format, message, ledger_root, routine=True)
                                  + ('\n' if args.format == 'json' else ''))
                 return 0
@@ -378,7 +435,8 @@ def main(argv: list[str] | None = None) -> int:
                     observation=observation,
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
-                message = custom_instruction + observation_receipt(paths, observation)
+                delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
+                message = custom_instruction + ("" if delivered else observation_receipt(paths, observation))
                 routine = True
                 terminal = ""
     except Exception:

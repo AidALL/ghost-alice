@@ -31,7 +31,7 @@ ALLOWED_ADDON_HOOK_EVENTS = frozenset({"post_tool_use", "on_session_start"})
 # Reserved core hook ids an addon hook id must not collide with (the runner namespaces used by the core hook suite).
 RESERVED_CORE_HOOK_IDS = frozenset({
     "prompt", "pending-merge-prompt", "session-intent", "web-search-first",
-    "tool-checkpoint", "completion", "session-start", "io-trace",
+    "tool-checkpoint", "completion", "session-start", "session-receipt", "io-trace",
 })
 _SIDECAR_KNOWN_OPTIONAL_FIELDS = frozenset({"secrets", "hooks", "migration"})
 PRIVILEGED_ADAPTER_REQUEST_FIELD = "privileged_adapters"

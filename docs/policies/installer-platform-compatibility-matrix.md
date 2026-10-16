@@ -56,11 +56,11 @@ Every user input is a `task-router` target. Simple questions, opinions, status c
 
 ### session-intent-analyzer
 
-The installer registers session-intent-analyzer as the single UserPromptSubmit intake owner. Codex commits directly; Claude stages native correlation for trusted PreToolUse/Stop reconciliation. The installed wrapper must return the exact canonical human input or retain pending state; task notifications preserve the last human route. The [intake procedure](../../session-intent-analyzer/SKILL.md) and [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) own identity, compressed deltas, storage and compatibility exports.
+The installer registers session-intent-analyzer as the single UserPromptSubmit intake owner and as the SessionStart session-receipt hook. Codex commits directly; Claude stages native correlation for trusted PreToolUse/Stop reconciliation. The installed wrapper must return the exact canonical human input or retain pending state; task notifications preserve the last human route. The [intake procedure](../../session-intent-analyzer/SKILL.md) and [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) own identity, compressed deltas, storage and compatibility exports.
 
 ### pending merge precheck
 
-If the SessionStart or UserPromptSubmit hook provides a contract that current platform pending-merge precheck ran and no pending warning exists, runtime records `merge-companion-precheck: clean (hook-verified)` and does not repeat shell manifest checks. Read the current platform manifest directly only when the hook reports an undecided entry or hook evidence is absent. When an undecided entry exists, apply `merge-companion` when the user asks to review it or the selected work changes an affected skill; an explicit user defer or skip continues other work with the manifest entry still `decided=false`.
+If the SessionStart hook provides a contract that current platform pending-merge precheck ran and no pending warning exists, runtime records `merge-companion-precheck: clean (hook-verified)` and does not repeat shell manifest checks. Read the current platform manifest directly only when the hook reports an undecided entry or hook evidence is absent. When an undecided entry exists, apply `merge-companion` when the user asks to review it or the selected work changes an affected skill; an explicit user defer or skip continues other work with the manifest entry still `decided=false`.
 
 ### tool-checkpoint recovery surface
 

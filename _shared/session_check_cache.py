@@ -110,6 +110,24 @@ def observe_check(root: Path, platform: str, session_id: str, key: str,
             connection.close()
 
 
+def peek_check(root: Path, platform: str, session_id: str, key: str, target: Path) -> dict | None:
+    """Return this session's stored value for an unchanged target without creating or writing the store."""
+    store = root / "session-checks.sqlite3"
+    if not (platform and session_id and session_id != "unknown") or not store.is_file():
+        return None
+    target = target.resolve()
+    stamp = _stamp(target)
+    try:
+        with closing(sqlite3.connect(store.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
+            row = connection.execute("SELECT target,stamp,value,checked_at FROM checks WHERE platform=? AND session=? AND key=?", (platform, session_id, key)).fetchone()
+        if not row or row[0] != str(target) or stamp is None or json.loads(row[1]) != stamp or not _valid_check_time(row[3]):
+            return None
+        value = json.loads(row[2])
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
 def load_instruction(root: Path, platform: str, session_id: str, path: Path,
                      *, body_retained: bool) -> dict:
     body = []

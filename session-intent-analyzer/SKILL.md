@@ -14,7 +14,7 @@ The native intake hook records input identity without retaining raw prompt text.
 
 ## Current intent and references
 
-First identify the stored fact that can change the next decision. The supplied request and exact intake receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update; do not query the ledger merely because a tool will execute or a new input arrived. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work. Automatic intake and strict audit still run.
+First identify the stored fact that can change the next decision. The supplied request and the session-start receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update; do not query the ledger merely because a tool will execute or a new input arrived. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work. Automatic intake and strict audit still run.
 
 For a required intent lookup, use the exact receipt coordinates with `scripts/session_intent_ledger.py --read-intent`. The result contains routing keywords, their original input binding, the current input/revision, and JSON pointers to detailed state. Keywords do not establish permission, work completion or current applicability by themselves. A direct answer follows the common contract's Work Selection section without ledger tools.
 
@@ -28,7 +28,7 @@ session_intent_ledger.py --root "<receipt root>" --platform "<receipt platform>"
 
 Use `--expected-revision` when an indexed selection depends on an exact revision. The tool returns the selected value and its input/revision binding. A changed binding requires interpreting the newer input before a write.
 
-For a semantic update, pass `--delta-json` with only changed current values and bind `--expected-input-event-id` to the receipt. Code retains only the defined summary fields and required audit facts. Do not create a second state file or export merely to read current intent. The canonical SQLite API, ownership, work contract and correction details are in [references/ledger-schema.md](references/ledger-schema.md); open the relevant section only for that operation.
+For a semantic update, pass `--delta-json` with only changed current values and bind `--expected-input-event-id` to the current input identity that `--read-intent` returns. Code retains only the defined summary fields and required audit facts. Do not create a second state file or export merely to read current intent. The canonical SQLite API, ownership, work contract and correction details are in [references/ledger-schema.md](references/ledger-schema.md); open the relevant section only for that operation.
 
 ## Native input and authority
 

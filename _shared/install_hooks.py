@@ -251,7 +251,7 @@ def _retained_installed_ledger(platform_key):
         for group in groups if isinstance(groups,list) else []:
             for hook in group.get("hooks",[]):
                 command=hook.get("command","")
-                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","prompt","tool-checkpoint","session-start","pending-merge-prompt")):
+                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","prompt","tool-checkpoint","session-start","pending-merge-prompt","session-receipt")):
                     continue
                 outer=shlex.split(command,comments=True)
                 if "--binding-b64" in outer:
@@ -424,6 +424,8 @@ HOOK_ENTRY_CODEX = {
 
 # 1-A. Session intent hook: update the per-session intent ledger without the raw prompt.
 SESSION_INTENT_MARKER = "[session-intent-analyzer]"
+# Session start delivers the fixed session receipt; inputs then add nothing to model context.
+SESSION_RECEIPT_MARKER = "[session-intent-receipt] session-start"
 LEGACY_SESSION_INTENT_MARKERS = ("[" + "session-intent-" + "guard" + "]",)
 SESSION_INTENT_INTERNAL = reminder_text('session-intent')
 
@@ -432,7 +434,8 @@ def _resolve_session_intent_analyzer_hook_script() -> str:
     return _resolve_shared_hook_script("session_intent_analyzer_hook.py")
 
 
-def _session_intent_analyzer_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
+def _session_intent_analyzer_command(*, platform: str, output_format: str, payload_mode: bool = False,
+                                     context: str = "prompt_submit") -> str:
     script = _resolve_session_intent_analyzer_hook_script()
     if script:
         return " ".join([
@@ -443,7 +446,7 @@ def _session_intent_analyzer_command(*, platform: str, output_format: str, paylo
             "--hook",
             "session-intent",
             "--context",
-            "prompt_submit",
+            context,
             "--format",
             output_format,
             "--root",
@@ -1060,6 +1063,14 @@ def _platform_stop_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
     return _hook_runner_command_entry(
         "completion", _stop_hook_command("claude", payload_mode=True), STOP_HOOK_MARKER, platform_key=platform_key,
     )
+
+
+def _platform_session_receipt_entry(platform_key: str, event: str) -> dict[str, Any]:
+    platform = "codex" if platform_key == "codex" else "claude"
+    command = _session_intent_analyzer_command(
+        platform=platform, output_format="json", payload_mode=True, context="session_start",
+    ) + f" # {SESSION_RECEIPT_MARKER}"
+    return _hook_runner_command_entry("session-receipt", command, SESSION_RECEIPT_MARKER, platform_key=platform_key)
 
 
 def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -2168,6 +2179,7 @@ GHOST_ALICE_HOOK_MARKERS = (
     TOOL_CHECKPOINT_MARKER,
     STOP_HOOK_MARKER,
     SESSION_START_MARKER,
+    SESSION_RECEIPT_MARKER,
     IO_TRACE_MARKER,
 )
 
@@ -2469,6 +2481,31 @@ def install_hook(
         else:
             ss_list.append(ss_entry)
             _log(_t(f"  {ss_key} session-start hook added", f"  {ss_key} session-start hook added"))
+            changed = True
+
+        # Install the session receipt hook: the host repeats session start after resume, clear and compaction.
+        receipt_entry = _platform_session_receipt_entry(platform_key, ss_key)
+        receipt_command = _entry_command(receipt_entry)
+        removed = _remove_stale_hook_entries(
+            ss_list,
+            SESSION_RECEIPT_MARKER,
+            receipt_command,
+            require_dispatcher=require_dispatcher,
+            hook_id="session-receipt",
+        )
+        if removed:
+            _log(f"  Removed {removed} stale {ss_key} session-receipt hook entry(ies)")
+            changed = True
+        if _hook_already_exists(
+            ss_list,
+            SESSION_RECEIPT_MARKER,
+            require_dispatcher=require_dispatcher,
+            expected_command=receipt_command,
+        ):
+            _log(f"  {ss_key} session-receipt hook already exists. Skipping")
+        else:
+            ss_list.append(receipt_entry)
+            _log(f"  {ss_key} session-receipt hook added")
             changed = True
 
     # Install the io-trace tool-use audit hook.
@@ -3057,6 +3094,8 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
         ss_list = hooks_obj.get(ss_key, [])
         if _hook_already_exists(ss_list, SESSION_START_MARKER):
             total_removed += _remove_hook_entries(ss_list, SESSION_START_MARKER)
+        if _hook_already_exists(ss_list, SESSION_RECEIPT_MARKER):
+            total_removed += _remove_hook_entries(ss_list, SESSION_RECEIPT_MARKER)
 
     # Also remove the io-trace PostToolUse hook.
     post_tool_key = _resolve_hook_event("post_tool_use", platform_key)
@@ -3186,6 +3225,8 @@ def check_status_detail(
 
     session_start_ok = True
     session_start_present = True
+    session_receipt_ok = True
+    session_receipt_present = True
     ss_intent = platform.get("session_start_intent")
     if ss_intent and platform.get("session_start_entry"):
         ss_key = _resolve_hook_event(ss_intent, platform_key)
@@ -3196,6 +3237,12 @@ def check_status_detail(
             SESSION_START_MARKER,
             require_dispatcher=require_dispatcher,
             expected_command=_entry_command(ss_entry),
+        )
+        session_receipt_present, session_receipt_ok = _hook_marker_match_status(
+            ss_list,
+            SESSION_RECEIPT_MARKER,
+            require_dispatcher=require_dispatcher,
+            expected_command=_entry_command(_platform_session_receipt_entry(platform_key, ss_key)),
         )
 
     io_trace_ok = True
@@ -3227,6 +3274,7 @@ def check_status_detail(
         "tool-checkpoint": (tool_checkpoint_present, tool_checkpoint_ok),
         "completion": (stop_present, stop_ok),
         "session-start": (session_start_present, session_start_ok),
+        "session-receipt": (session_receipt_present, session_receipt_ok),
         "io-trace": (io_trace_present, io_trace_ok),
     }
     if platform_key == "claude":

@@ -115,52 +115,85 @@ class SessionCheckReuseTest(unittest.TestCase):
             manifest.write_text(json.dumps({"entries": [{"decided": False}]}))
             env = dict(os.environ)
             env.update({"HOME": directory, "CODEX_THREAD_ID": "session-test", "GHOST_ALICE_SESSION_ID": "session-test"})
-            command = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--hook", "prompt-check", "--context", "prompt_submit", "--format", "json", "--internal-b64", "TE9ORyBXT1JLRkxPVw=="]
-            def run():
+            base = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--format", "json", "--internal-b64", "TE9ORyBXT1JLRkxPVw=="]
+            def run(hook, context):
+                command = base + ["--hook", hook, "--context", context]
                 return json.loads(subprocess.run(command, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
-            first, second = run(), run()
-            self.assertTrue('hookSpecificOutput' in first, 'precheck was not delivered to the model channel')
-            public = json.loads(first['hookSpecificOutput']['additionalContext'].split(': ', 1)[1])
-            self.assertEqual(public['session_id'], 'session-test')
-            self.assertEqual(public['platform'], 'codex')
-            self.assertEqual(public['undecided_count'], 1)
-            self.assertEqual(public['status'], 'checked')
-            self.assertFalse('LONG WORKFLOW' in first['hookSpecificOutput']['additionalContext'])
-            reused = json.loads(second['hookSpecificOutput']['additionalContext'].split(': ', 1)[1])
-            self.assertEqual(reused['status'], 'reused')
-            self.assertEqual(reused['checked_at'], public['checked_at'])
-            self.assertEqual(first["ghostAlicePendingMergeCheck"]["status"], "checked")
-            self.assertEqual(second["ghostAlicePendingMergeCheck"]["status"], "reused")
-            self.assertNotIn("Surface merge-companion first", second["systemMessage"])
+            started = run("session-check", "session_start")
+            self.assertEqual(started["hookSpecificOutput"]["hookEventName"], "SessionStart",
+                             "the session-start precheck was not delivered to the model channel")
+            public = json.loads(started["hookSpecificOutput"]["additionalContext"].split(": ", 1)[1])
+            self.assertEqual(public["session_id"], "session-test")
+            self.assertEqual(public["platform"], "codex")
+            self.assertEqual(public["undecided_count"], 1)
+            self.assertEqual(public["status"], "checked")
+            self.assertFalse("LONG WORKFLOW" in started["hookSpecificOutput"]["additionalContext"])
+            first, second = run("prompt-check", "prompt_submit"), run("prompt-check", "prompt_submit")
+            for body in (first, second):
+                # An unchanged precheck adds nothing to the model context or the screen on later inputs.
+                self.assertNotIn("hookSpecificOutput", body)
+                self.assertNotIn("systemMessage", body)
+            self.assertEqual(first["ghostAlicePendingMergeCheck"]["status"], "reused")
+            self.assertEqual(first["ghostAlicePendingMergeCheck"]["checked_at"], public["checked_at"])
             import sqlite3
             with closing(sqlite3.connect(home / "ledger/session-checks.sqlite3")) as connection:
                 connection.execute("UPDATE checks SET value=? WHERE key='pending-merges'", (json.dumps({"wrong-shape": True}),))
                 connection.commit()
-            recovered = run()
+            recovered = run("prompt-check", "prompt_submit")
             self.assertEqual(recovered["ghostAlicePendingMergeCheck"]["status"], "checked")
             self.assertEqual(recovered["ghostAlicePendingMergeCheck"]["undecided_count"], 1)
             manifest.write_text(json.dumps({"entries": [{"decided": True}]}))
-            changed = run()
+            changed = run("prompt-check", "prompt_submit")
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["status"], "checked")
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
+            # A changed observation is new information, so the input delivers it to the model.
+            self.assertEqual(changed["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit")
+            self.assertEqual(json.loads(changed["hookSpecificOutput"]["additionalContext"].split(": ", 1)[1])["undecided_count"], 0)
 
-    def test_pending_receipt_enters_only_bound_prompt_context(self):
+    def test_pending_merge_created_after_session_start_reaches_model_and_screen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({"entries": []}))
+            env = dict(os.environ)
+            env.update({"HOME": directory, "CODEX_THREAD_ID": "session-new", "GHOST_ALICE_SESSION_ID": "session-new"})
+            base = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--format", "json", "--internal-b64", ""]
+            def run(hook, context):
+                command = base + ["--hook", hook, "--context", context]
+                return json.loads(subprocess.run(command, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
+            run("session-check", "session_start")
+            quiet = run("prompt-check", "prompt_submit")
+            self.assertNotIn("hookSpecificOutput", quiet)
+            # Another installer run backs up a modified skill during the session.
+            manifest.write_text(json.dumps({"entries": [{"decided": False}]}))
+            surfaced = run("prompt-check", "prompt_submit")
+            public = json.loads(surfaced["hookSpecificOutput"]["additionalContext"].split(": ", 1)[1])
+            self.assertEqual((public["undecided_count"], public["status"]), (1, "checked"))
+            self.assertIn("1 undecided", surfaced["systemMessage"])
+            again = run("prompt-check", "prompt_submit")
+            self.assertNotIn("hookSpecificOutput", again)
+            self.assertNotIn("systemMessage", again)
+
+    def test_pending_receipt_enters_model_context_at_session_start_and_on_change(self):
         import pending_merge_precheck_hook as hook
-        result = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
-                      value=dict(undecided_count=0))
-        for context, session in [('session_start', 'own'), ('prompt_submit', None),
-                                 ('prompt_submit', 'unknown')]:
+        checked = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
+                       value=dict(undecided_count=0))
+        reused = dict(checked, status='reused')
+        for result, context, session in [(reused, 'prompt_submit', 'own'), (checked, 'session_start', None),
+                                         (checked, 'session_start', 'unknown'), (checked, 'prompt_submit', 'unknown')]:
             body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result,
                               context=context, session_id=session))
             self.assertNotIn('hookSpecificOutput', body)
-        body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result,
-                          context='prompt_submit', session_id='own'))
-        self.assertEqual(body['hookSpecificOutput']['hookEventName'], 'UserPromptSubmit')
-        text = body['hookSpecificOutput']['additionalContext']
-        self.assertFalse('LONG WORKFLOW' in text)
-        receipt = json.loads(text.split(': ', 1)[1])
-        self.assertEqual(receipt['session_id'], 'own')
-        self.assertEqual(receipt['undecided_count'], 0)
+        for context, event in [('session_start', 'SessionStart'), ('prompt_submit', 'UserPromptSubmit')]:
+            body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', checked,
+                              context=context, session_id='own'))
+            self.assertEqual(body['hookSpecificOutput']['hookEventName'], event)
+            text = body['hookSpecificOutput']['additionalContext']
+            self.assertFalse('LONG WORKFLOW' in text)
+            receipt = json.loads(text.split(': ', 1)[1])
+            self.assertEqual(receipt['session_id'], 'own')
+            self.assertEqual(receipt['undecided_count'], 0)
 
     def test_same_session_reuses_and_mutation_or_new_session_rechecks(self):
         from session_check_cache import observe_check

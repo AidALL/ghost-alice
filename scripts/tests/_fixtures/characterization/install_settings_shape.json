@@ -2,7 +2,7 @@
   "hook_events": {
     "PostToolUse": 1,
     "PreToolUse": 1,
-    "SessionStart": 1,
+    "SessionStart": 2,
     "Stop": 1,
     "UserPromptSubmit": 2
   },
