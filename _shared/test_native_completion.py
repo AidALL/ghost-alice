@@ -226,7 +226,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
         entries = [dict(type='user', sessionId='current', message=dict(role='user', content='Create the memo.')),
             dict(type='assistant', sessionId='current', message=dict(role='assistant', content=[
                 dict(type='tool_use', name='Write', input=dict(file_path='/isolated/memo.md', content='memo'))]))]
-        transcript.write_text('\n'.join(json.dumps(row) for row in entries))
+        transcript.write_text(''.join(json.dumps(row) + '\n' for row in entries))
         body = '주간업무메모-20261011.md를 다운로드 폴더에 만들었습니다. 파일 하나를 만드는 작업이라 라우팅 절차를 생략했습니다.'
         hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
         def stop():
@@ -250,7 +250,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
         assert_stop_observation(self, stop())
         # A later tool-free input must not inherit the preceding Write call.
         entries.append(dict(type='user', sessionId='current', message=dict(role='user', content='Thanks.')))
-        transcript.write_text('\n'.join(json.dumps(row) for row in entries))
+        transcript.write_text(''.join(json.dumps(row) + '\n' for row in entries))
         assert_stop_observation(self, stop())
 
 
@@ -328,6 +328,15 @@ class NativeActivityTests(unittest.TestCase):
                 assessed = self.assess()
                 self.assertEqual(assessed.get('native_activity', {}).get('status'), 'observed')
                 self.assertFalse(assessed['has_evidence_marker'])
+
+    def test_codex_tool_activity_reads_complete_records_only(self):
+        """A raw U+2028 stays inside its record; the record Codex is still appending is not read yet."""
+        rows = self.rows + [self.item('message', 'followup', role='assistant', content=[
+                dict(type='output_text', text='first\u2028second')]),
+            self.item('custom_tool_call', 'followup', name='exec', call_id='call-1')]
+        self.transcript.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in rows)
+            + '{"type":"response_item","payload":{"type":"mess', encoding='utf-8')
+        self.assertEqual(self.assess().get('native_activity', {}).get('status'), 'observed')
 
     def test_codex_current_tool_free_turn_does_not_inherit_prior_tools(self):
         prior = [dict(type='turn_context', payload=dict(turn_id='prior')),

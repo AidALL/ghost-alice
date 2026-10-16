@@ -20,7 +20,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import completion_assessment as core_api
 from claude_context_adapter import NativeContextRejected, SignedPrefixSelectionUnsupported, ToolInputSelectionUnsupported
-from native_transcript import codex_transcript_path
+from native_transcript import codex_transcript_path, committed_lines
 from source_reference import FORMAT as FILE_SOURCE_FORMAT, SourceReferenceError, reference_source, source_text, verify_source
 
 
@@ -60,9 +60,8 @@ def _item(value):
 
 
 def _native(path):
-    with Path(path).open() as stream:
-        return {number: _item(row['payload']) for number, line in enumerate(stream, 1)
-                if (row := json.loads(line)).get('type') == 'response_item'}
+    return {number: _item(row['payload']) for number, line in committed_lines(Path(path).read_bytes()).items()
+            if (row := json.loads(line)).get('type') == 'response_item'}
 
 
 def _input_item(items):
@@ -303,7 +302,7 @@ def _codex_decisions(connection, reference, payload, source, path, originals):
             # Authenticate the original prefix, rather than rebinding a choice
             # to the later input that published this update.
             rows = {number: json.loads(line) for number, line in
-                    enumerate(source_text(decision['original']).splitlines(), 1) if line.strip()}
+                    committed_lines(source_text(decision['original'])).items()}
             if (not all(isinstance(row, dict) for row in rows.values())
                 or not any(row.get('type') == 'session_meta' for row in rows.values())
                 or any(not isinstance(row.get('payload'), dict)
@@ -838,7 +837,7 @@ def _select_claude_request(request, root, native_home, session, *, _inspect=None
                 or payload['original']['locator'] != path):
                 return RequestSelection(request, 'preserved', 'selection-unverified')
             prefix_rows = {number: json.loads(line) for number, line in
-                           enumerate(source_text(original).splitlines(), 1) if line.strip()}
+                           committed_lines(source_text(original)).items()}
             prefix_records = adapter.native_records_from_rows(prefix_rows)
             original_human = payload['native_input_record']
             if (original_human not in native.humans or original_human not in prefix_records
@@ -1138,7 +1137,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
         except ResponseUseRejected:
             return None
         prefix = adapter.native_records_from_rows({number:json.loads(line) for number,line in
-            enumerate(source_text(original).splitlines(),1) if line.strip()})
+            committed_lines(source_text(original)).items()})
         if (payload['native_input_record'] not in prefix
             or fingerprint(prefix[payload['native_input_record']])!=payload.get('native_input_digest')):
             return None
@@ -1232,7 +1231,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
 
 
 def prepare_native_request(request, root, native_home, *, platform='codex', session_id=None,
-                           strict_log_root=None, native_betas=()):
+                           native_betas=()):
     """Commit already staged native origin before the host's generation boundary.
 
     UserPromptSubmit can precede the native transcript append. PreToolUse/Stop
@@ -1267,15 +1266,12 @@ def prepare_native_request(request, root, native_home, *, platform='codex', sess
         except (OSError, sqlite3.Error):
             return RequestSelection(request, 'unavailable', 'intake-storage-unavailable')
     options = dict(platform=platform, session_id=session_id)
-    if platform == 'codex' and strict_log_root is not None:
-        options['strict_log_root'] = strict_log_root
     if native_betas != ():
         options['native_betas'] = native_betas
     return select_request(request, root, native_home, **options)
 
 
-def select_request(request, root, native_home, *, platform='codex', session_id=None, strict_log_root=None,
-                   native_betas=()):
+def select_request(request, root, native_home, *, platform='codex', session_id=None, native_betas=()):
     """Compose authenticated dispositions and declared response-bound uses."""
     from response_context_use import select_uses
     reason = request_support_reason(request, platform)
@@ -1288,16 +1284,11 @@ def select_request(request, root, native_home, *, platform='codex', session_id=N
             require_rewriteable_prefix(request)
         except SignedPrefixSelectionUnsupported:
             return _select_claude_server_omit(request, root, native_home, session_id)
-    administrative = RequestSelection(request, 'preserved', 'intake-view-disabled')
     blocked_manual, blocked_uses, conflict, failure = _cross_scope_blocks(request, root, native_home, platform, session_id)
     if failure is not None:
         return failure
     if platform == 'codex':
-        from codex_intake_view import select_intake_view
-        administrative = select_intake_view(request, root, native_home, strict_log_root)
-        if administrative.state == 'unavailable':
-            return administrative
-        manual = _select_manual_request(administrative.request, root, native_home, _blocked=blocked_manual)
+        manual = _select_manual_request(request, root, native_home, _blocked=blocked_manual)
     elif platform == 'claude':
         manual = _select_claude_request(request, root, native_home, session_id, _blocked=blocked_manual)
     else:
@@ -1317,7 +1308,7 @@ def select_request(request, root, native_home, *, platform='codex', session_id=N
         return RequestSelection(request, 'unavailable', used.reason)
     if used.reason == SignedPrefixSelectionUnsupported.reason:
         return RequestSelection(request, 'preserved', used.reason)
-    observations = administrative.observations + manual.observations + used.observations
+    observations = manual.observations + used.observations
     if observations:
         return RequestSelection(used.request, 'selected',
             'selected-with-preserved-context-conflict' if conflict else 'authenticated-selection', observations)

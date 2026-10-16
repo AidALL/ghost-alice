@@ -9,7 +9,7 @@ import re
 import tomllib
 
 from context_gateway_model import (COMPANIONS, Decision, GatewayBlocked, LABEL, MODULES, Mutation,
-    Plan, Preparation, PROVIDER, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest, encoded)
+    Plan, Preparation, PROVIDER, RETIRED_MODULES, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest, encoded)
 
 
 def regular(item, *, codex=False):
@@ -299,10 +299,18 @@ def replacement_plan(request, inventory, candidates, *, domain, updated_at):
         raise GatewayBlocked('General payload replacement overlaps gateway control/state; use the explicit gateway installation operation')
     updated = dict(component_baselines(receipt))
     guards = {a.path: a for a in prior.guards}
+    roots = receipt.get('shared_dirs', [receipt['runtime_shared_dir']])
+    retired = {str(Path(root) / name) for root in (roots if isinstance(roots, list) else ())
+               if _absolute(root) for name in RETIRED_MODULES}
     for path, candidate in candidates.items():
         regular(candidate)
         if candidate.kind != 'file':
-            raise GatewayBlocked('Candidate payload removes a required gateway dependency: ' + str(path))
+            if str(path) not in retired or str(path) not in updated:
+                raise GatewayBlocked('Candidate payload removes a required gateway dependency: ' + str(path))
+            # removal_plan already required the owned copy to match its baseline;
+            # publishing the payload moves it aside, so the receipt stops owning it.
+            del updated[str(path)]
+            continue
         current = inventory.file(path)
         regular(current)
         if str(path) not in updated and current.exists and current.raw != candidate.raw:

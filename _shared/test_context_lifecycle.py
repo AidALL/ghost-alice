@@ -157,6 +157,22 @@ class ContextLifecycleTests(unittest.TestCase):
             rows = connection.execute('SELECT payload_json FROM core_context_dispositions').fetchall()
         self.assertIn(self.selection['summary'], json.dumps(rows))
 
+    def test_unfinished_last_record_is_not_yet_in_the_native_log(self):
+        """Codex may still be appending a record when its request arrives."""
+        record = json.dumps(dict(type='event_msg', payload=dict(type='token_count', note='가')),
+                            ensure_ascii=False).encode() + b'\n'
+        cut = record.index('가'.encode()) + 1
+        with self.log.open('ab') as stream:
+            stream.write(record[:cut])
+        self.record([dict(self.selection, disposition='omit')])
+        omitted = dict(self.output, output=self.output['output'][1:])
+        result = lifecycle.select_request(self.request, self.fixture.root, self.home)
+        self.assertEqual((result.state, result.request['input'][2]), ('selected', omitted))
+        with self.log.open('ab') as stream:
+            stream.write(record[cut:] + record[:cut])
+        result = lifecycle.select_request(self.request, self.fixture.root, self.home)
+        self.assertEqual((result.state, result.request['input'][2]), ('selected', omitted))
+
     def test_omit_scalar_output_and_exact_exchange_have_no_capsule(self):
         self.output['output'] = 'scalar obsolete original'
         self.write_rows()
@@ -978,6 +994,24 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
             stored = connection.execute('SELECT payload_json FROM core_context_dispositions').fetchone()[0]
         self.assertNotIn('consumed existing navigation', stored)
         self.assertNotIn('necessary long sibling', stored)
+
+    def test_line_separator_inside_a_native_record_does_not_split_it(self):
+        """Claude Code writes U+2028 unescaped inside JSON strings; only a newline ends a record."""
+        self.rows[0]['message']['content'] += '\u2028after the separator'
+        self.log.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n' for row in self.rows), encoding='utf-8')
+        self.assertIn('\u2028', self.log.read_text(encoding='utf-8'))
+        receipt = self.record()
+        result = self.select()
+        self.assertEqual((receipt['selected_count'], result.state), (1, 'selected'))
+
+    def test_unfinished_last_record_is_not_yet_in_the_native_log(self):
+        """Claude Code may still be appending a record when its request arrives."""
+        record = json.dumps(self.row('assistant', [dict(type='text', text='가')]), ensure_ascii=False).encode()
+        with self.log.open('ab') as stream:
+            stream.write(record[:record.index('가'.encode()) + 1])
+        receipt = self.record()
+        result = self.select()
+        self.assertEqual((receipt['selected_count'], result.state), (1, 'selected'))
 
     def test_unique_literal_keep_replace_and_empty_refresh_need_no_lookup_receipt(self):
         choice = {k:v for k,v in self.choice.items() if k not in ('record','block_index')}

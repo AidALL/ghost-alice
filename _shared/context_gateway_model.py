@@ -16,8 +16,9 @@ TABLE_END = '# Ghost-ALICE managed context provider end'
 MODULES = ('context_lifecycle.py', 'context_gateway.py', 'context_gateway_install.py', 'context_lifecycle.md',
            'context_gateway_model.py', 'context_gateway_inventory.py', 'context_gateway_plan.py',
            'context_gateway_transaction.py', 'context_gateway_platform.py',
-           'response_context_use.py', 'claude_context_adapter.py', 'source_lookup.py', 'codex_intake_view.py',
-           'native_transcript.py')
+           'response_context_use.py', 'claude_context_adapter.py', 'source_lookup.py', 'native_transcript.py')
+# Modules that earlier installations own and the current payload no longer ships.
+RETIRED_MODULES = ('codex_intake_view.py',)
 COMPANIONS = ('session-intent-analyzer/scripts/session_intent_ledger.py',)
 
 

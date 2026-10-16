@@ -93,6 +93,15 @@ class CodexContextUpdateTests(unittest.TestCase):
         self.assertEqual(result.request, self.fixture.request)
         self.assertEqual(result.observations, ())
 
+    def test_line_separator_inside_a_record_does_not_split_a_retained_original(self):
+        """Codex writes U+2028 unescaped inside JSON strings; only a newline ends a record."""
+        self.fixture.rows[0]['payload']['instructions'] = 'first\u2028second'
+        self.fixture.log.write_text(''.join(json.dumps(row, ensure_ascii=False) + '\n'
+                                            for row in self.fixture.rows), encoding='utf-8')
+        self.fixture.record([self.first])
+        self.update([self.second])
+        self.assert_both_omitted(self.select())
+
     def test_targeted_keep_restores_only_the_selected_source(self):
         self.update([self.second])
         self.update([dict(self.first, disposition='keep')])

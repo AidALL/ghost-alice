@@ -53,11 +53,26 @@ def codex_transcript_contains_response(path, turn_id, text):
     return False
 
 
+def committed_lines(content):
+    """Number the complete lines of an append-only JSONL log from 1.
+
+    A writer ends each record with a newline, so content after the last newline
+    is a record it is still appending; that record is read after its newline
+    arrives. Only the newline separates records: str.splitlines() also splits at
+    U+2028, U+2029 and U+0085, which hosts write unescaped inside JSON strings.
+    Bytes are decoded after the unfinished record is removed.
+    """
+    if isinstance(content, bytes):
+        content = content[:content.rfind(b'\n') + 1].decode('utf-8')
+    complete = content[:content.rfind('\n') + 1]
+    return {number: line for number, line in enumerate(complete.split('\n')[:-1], 1) if line.strip()}
+
+
 def read_entries(path_value, session=None):
     if not isinstance(path_value, str) or not Path(path_value).is_absolute():
         return []
     try:
-        lines = Path(path_value).read_text(encoding='utf-8', errors='replace').splitlines()
+        lines = committed_lines(Path(path_value).read_text(encoding='utf-8', errors='replace')).values()
     except OSError:
         return []
     entries = []
@@ -187,7 +202,7 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
     if not isinstance(path, str) or not Path(path).is_absolute():
         return result('unavailable', 'native-transcript-path-missing')
     try:
-        rows = [json.loads(line) for line in Path(path).read_text(encoding='utf-8').splitlines() if line.strip()]
+        rows = [json.loads(line) for line in committed_lines(Path(path).read_bytes()).values()]
     except (OSError, ValueError, UnicodeError):
         return result('unavailable', 'native-transcript-unreadable')
     if not rows or any(not isinstance(row, dict) for row in rows):

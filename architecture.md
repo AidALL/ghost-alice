@@ -64,8 +64,6 @@ The native host independently retains conversation history and builds model requ
 
 A configured request adapter applies supported explicit content choices at the server boundary. When actual continued work requires changing the input representation of used material, the model compares that material with the next decision. It does not predict a lifetime or add a judgment call to every lookup. Core authenticates the native session, current input and original material independently of work authority and Autopilot's continuation decision. The adapter substitutes explicitly judged bodies with conclusions, unresolved conditions and an original retrieval reference when the protocol supports that change. It preserves needed or unjudged general source bodies and sends server answers unchanged. Original history remains available for explicit retrieval.
 
-The Codex adapter also keeps a current view of intake control. After authenticating the latest receipt and exact current human, it can omit superseded pure intake receipts from a configured request. Compound instructions and uncertain origins remain intact, and original records remain retrievable. General source bodies still require the model's purpose-based selection; this control view adds no judgment call.
-
 Claude client substitution requires unsigned content and explicitly disabled thinking. Editing preceding messages would break their signed reasoning prefix. With an existing native context-management capability, the gateway can instead request server clearing for authenticated whole tool-result omissions that the provider's tool-name policy represents exactly. It preserves signed history and reasoning settings, protects necessary results of the same tool, and observes provider application separately from the request. Arbitrary text and producer-subbody replacement remain unsupported under signed thinking. The [native context procedure](_shared/context_lifecycle.md#apply-and-observe) owns these support conditions. Source conformance, installation and actual native adoption remain distinct observations.
 
 The adapter distinguishes an absent selection from a failed read or processing error. Without an authenticated supported input change, it preserves the request with an observable reason. A read failure or unexpected processing error stops transmission.
@@ -78,8 +76,6 @@ flowchart LR
   M --> C["Core: authenticate the post-use judgment"]
   H["Native history"] --> A["Request adapter"]
   C --> A
-  N["Current intake and registered originals"] --> I["Core: authenticate the current intake view"]
-  I --> A
   A -->|Supported selected input| S["Model server"]
   A -->|No authenticated supported change: original request| S
   A -->|Storage or processing unavailable| U["Transmission stopped"]
