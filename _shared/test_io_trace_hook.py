@@ -215,6 +215,15 @@ class TestIoTraceHook(unittest.TestCase):
                                           "tool_input": {"command": patch}})
         self.assertEqual((row["path"], row["pattern"]), ("a.py", "a.py; b.py"))
 
+    def test_codex_apply_patch_keeps_every_path_past_200_characters(self):
+        paths = [f"src/package_{index:02d}/module_with_a_long_name_{index:02d}.py" for index in range(8)]
+        patch = "*** Begin Patch\n" + "".join(f"*** Add File: {path}\n+x\n" for path in paths) + "*** End Patch\n"
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "codex"}, clear=True):
+            row = io_trace_hook._extract({"session_id": "s-long", "tool_name": "apply_patch",
+                                          "tool_input": {"command": patch}})
+        self.assertGreater(len("; ".join(paths)), 200)
+        self.assertEqual((row["path"], row["pattern"]), (paths[0], "; ".join(paths)))
+
     def test_empty_patch_and_notebook_edit_paths(self):
         with mock.patch.dict(os.environ, {"GHOST_ALICE_PLATFORM": "codex"}, clear=True):
             empty = io_trace_hook._extract({"session_id": "s-empty", "tool_name": "apply_patch",

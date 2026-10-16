@@ -200,6 +200,8 @@ REMOVED_CONTRACT_TOKENS = (
     "printed io" + "-trace is optional",
     "Printed `[io" + "-trace]` is optional",
     "counts against" + " the user's tool limit",
+    "or count includes" + " governance calls",
+    "tool-count limit" + " includes",
     "[gate" + "-state]",
 )
 

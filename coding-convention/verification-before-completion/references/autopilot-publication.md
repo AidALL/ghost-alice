@@ -6,9 +6,9 @@ The compatible managed no-argument pretool/Stop chain selects `autopilot-complet
 
 ## Authority and route prerequisites
 
-An explicit user command allowlist or tool-count limit includes agent-issued route, ledger, preparation and publication calls. Use valid existing context within that limit. A permitted action remains execution even when recording is unavailable. Preserve its actual result; do not fabricate a ready route or exceed the limit for governance. Native hooks and strict audit retain their registered behavior.
+A permitted action remains execution even when recording is unavailable. Preserve its actual result; do not fabricate a ready route. Native hooks and strict audit retain their registered behavior.
 
-When a required capture or authorized next task depends on a missing or stale Core route, the current-session assistant loads `task-router` from the current host's skill catalog and follows step 6 in its `Select the next action` section, submitting `response-route.v1` through `_shared/response_route.py` or `record_response_route` with the exact current receipt binding. The [source-tree navigation link](../../../task-router/SKILL.md#select-the-next-action) does not identify an installed filesystem path: installed family skills may be flattened. Route absence does not invalidate business proof, require another business check, or grant additional tool authority.
+When a required capture or authorized next task depends on a missing or stale Core route, the current-session assistant loads `task-router` from the current host's skill catalog and follows the route-registration step in its `Select the next action` section, submitting `response-route.v1` through `_shared/response_route.py` or `record_response_route` with the exact current receipt binding. The [source-tree navigation link](../../../task-router/SKILL.md#select-the-next-action) does not identify an installed filesystem path: installed family skills may be flattened. Route absence does not invalidate business proof, require another business check, or grant additional tool authority.
 
 Keep Core APIs, runtime modules, ledger, project checkout and installed skills as separate exact locations. A transported path or available protocol does not establish admission, origin, approval or native permission.
 

@@ -191,7 +191,8 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
         paths = _patch_paths(_text(tool_input.get("command")))
         if paths:
             path = paths[0]
-            pattern = "; ".join(paths)[:200]
+            # The file list is the audit record, so unlike a shell command it is never cut.
+            pattern = "; ".join(paths)
     elif tool == "Agent":
         pattern = _text(tool_input.get("description"))
     elif tool == "Skill":
