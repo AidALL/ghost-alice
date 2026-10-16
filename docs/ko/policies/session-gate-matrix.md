@@ -47,13 +47,13 @@ Language: [🇺🇸 English](../../policies/session-gate-matrix.md) | 🇰🇷 �
 
 Core는 원문을 저장하지 않고 확정된 사용자 입력의 다이제스트·문자 수·순서가 있는 이벤트를 기록합니다. Codex는 접수 시 바로 기록합니다. Claude UserPromptSubmit은 다이제스트·문자 수·네이티브 연결 정보를 임시 기록하며, 신뢰된 PreToolUse 또는 Stop 래퍼가 호스트의 대화 기록 추가 후 발신 정보를 대조합니다. 사용자 입력은 기준 입력을 갱신하고, 작업 알림은 마지막 사용자 입력과 경로를 유지하며, 미확정 관찰은 pending으로 남습니다. 현재 세션 어시스턴트는 목표·제약·결정·질문·기준이 실질적으로 바뀔 때만 압축된 의미 변경을 기록합니다.
 
-실행 소비자는 정확한 영수증의 root/platform/session/input으로 공개 API를 호출합니다. SQLite가 권위 있는 저장소입니다. intent-state.json과 intent-events.jsonl은 가져오기·내보내기 형식이며 current-session.json은 탐색 힌트입니다. 어느 것도 쓰기 식별자를 대신하지 않습니다. 기록이 없으면 의존 작업은 미해결로 남습니다. 어시스턴트는 목적이나 필수 의존 관계에 필요하며 기존 권한 안에 있는 복구만 선택하고, 식별자나 권한을 추측하지 않습니다.
+실행 소비자는 세션 영수증의 정확한 root/platform/session과 원장의 현재 입력으로 공개 API를 호출합니다. SQLite가 권위 있는 저장소입니다. intent-state.json과 intent-events.jsonl은 가져오기·내보내기 형식이며 current-session.json은 탐색 힌트입니다. 어느 것도 쓰기 식별자를 대신하지 않습니다. 기록이 없으면 의존 작업은 미해결로 남습니다. 어시스턴트는 목적이나 필수 의존 관계에 필요하며 기존 권한 안에 있는 복구만 선택하고, 식별자나 권한을 추측하지 않습니다.
 
 [Session-intent-analyzer](../../../session-intent-analyzer/SKILL.md)는 접수와 정정 출처를 담당합니다. [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)는 상태 필드·트랜잭션·이관 해시·현재 응답 경로를 정의합니다. 접수 이벤트와 intent-state 필드에는 원문 프롬프트·전체 대화·도구 출력·시스템/개발자 지침·비밀 값을 저장하지 않습니다. 별도의 Core 검토 테이블(`core_completion_candidates`, `core_completion_assessments`, `core_completion_responses`)은 승인된 답변·원본 출처 스냅샷과 모델의 검토 판단을 보존합니다. 이 검토 기록은 세션 의도 요약과 구별됩니다. 훅 없는 작업도 같은 식별 계약을 따르며, 바로 답할 때는 도구를 쓰지 않습니다.
 
 ## Runtime Hook Graph Contract
 
-1. session-intent-analyzer UserPromptSubmit 훅이 접수 상태와 바로 답하기·task-router 안내를 제공합니다. Core는 Codex의 직접 접수 또는 Claude의 신뢰된 대조 절차로 정확한 기준 사용자 입력을 확정합니다. Read-state는 읽기만 수행합니다. 현재 세션 어시스턴트는 task-router를 적용하여 작업을 선택하며, 보고가 필요하면 같은 접수에 skill-evolution을 별도로 적용합니다.
+1. session-intent-analyzer SessionStart 훅이 세션 영수증을 제공합니다. UserPromptSubmit 훅은 입력마다 입력을 기록하고, 그 영수증을 보내지 못했거나 접수에 실패했을 때만 모델 문맥을 더합니다. Core는 Codex의 직접 접수 또는 Claude의 신뢰된 대조 절차로 정확한 기준 사용자 입력을 확정합니다. Read-state는 읽기만 수행합니다. 현재 세션 어시스턴트는 task-router를 적용하여 작업을 선택하며, 보고가 필요하면 같은 접수에 skill-evolution을 별도로 적용합니다.
 2. 현재 세션 어시스턴트는 정상 경로 후보를 Core에 제출합니다. Core Python 코드는 현재 입력·소유권·승인·선택 기준을 확인한 뒤 ready 경로를 기록합니다.
 3. 현재 세션 어시스턴트는 필요한 경계와 담당 스킬을 따릅니다. 호스트는 도구 권한을 적용하고 허용된 호출을 실행합니다. 해당 Ghost-ALICE Autopilot 사전 훅은 출처를 기록하고 PostToolUse는 엄격한 감사를 유지합니다.
 4. 완료 시 가드와 Ghost-ALICE Autopilot 어댑터는 같은 입력·본문에 연결된 Core 평가를 호출합니다. 독립적으로 등록된 훅 사이의 정책 실행 순서를 가정하지 않습니다.

@@ -4844,6 +4844,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             (install_hooks.PROMPT_PENDING_MERGE_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
+            (install_hooks.SESSION_RECEIPT_MARKER, session_cmds),
         ):
             matching = [cmd for cmd in cmds if marker in cmd]
             self.assertEqual(len(matching), 1)
@@ -4851,6 +4852,10 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             self.assertEqual(result.returncode, 0)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
+            if marker in (install_hooks.PROMPT_PENDING_MERGE_MARKER, install_hooks.SESSION_RECEIPT_MARKER):
+                # An input after session start, and a session start without identity, add no message.
+                self.assertNotIn("systemMessage", payload)
+                continue
             self.assertIn("systemMessage", payload)
             self.assertNotIn("User:", payload["systemMessage"])
             self.assertNotIn("Tech:", payload["systemMessage"])
@@ -5224,6 +5229,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             (install_hooks.PROMPT_PENDING_MERGE_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
+            (install_hooks.SESSION_RECEIPT_MARKER, session_cmds),
         ):
             matching = [cmd for cmd in cmds if marker in cmd]
             self.assertEqual(len(matching), 1)
@@ -5232,8 +5238,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
             self.assertNotIn("Internal instruction:", result.stdout)
-            self.assertNotIn("User:", payload["systemMessage"])
-            self.assertNotIn("Tech:", payload["systemMessage"])
+            self.assertNotIn("User:", payload.get("systemMessage", ""))
+            self.assertNotIn("Tech:", payload.get("systemMessage", ""))
 
     def test_install_codex_replaces_markerless_hook_runner_wrappers(self):
         """Hook-runner wrappers without outer markers are replaced without duplicate execution."""
@@ -5281,7 +5287,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             pre_tool: [install_hooks.TOOL_CHECKPOINT_MARKER],
             post_tool: [install_hooks.IO_TRACE_MARKER],
             stop: [install_hooks.STOP_HOOK_MARKER],
-            session_start: [install_hooks.SESSION_START_MARKER],
+            session_start: [install_hooks.SESSION_START_MARKER, install_hooks.SESSION_RECEIPT_MARKER],
         }
 
         for event, markers in expected.items():
@@ -5670,6 +5676,30 @@ class TestSessionStartHook(unittest.TestCase):
         cmds = [h["command"] for entry in settings["hooks"][ss_key] for h in entry["hooks"]]
         self.assertTrue(any(SESSION_START_MARKER in c for c in cmds))
 
+    def test_session_receipt_hook_installed_once_on_session_start(self):
+        from install_hooks import (
+            SESSION_RECEIPT_MARKER,
+            _platform_session_receipt_entry,
+            _resolve_hook_event,
+            install_hook,
+        )
+        Path(self.tmp.name).mkdir(parents=True, exist_ok=True)
+        self.assertEqual(install_hook("claude"), "installed")
+        install_hook("claude")
+        settings = json.loads((Path(self.tmp.name) / "settings.json").read_text(encoding="utf-8"))
+        ss_key = _resolve_hook_event("on_session_start", "claude")
+        cmds = [h["command"] for entry in settings["hooks"][ss_key] for h in entry["hooks"]]
+        self.assertEqual(sum(SESSION_RECEIPT_MARKER in c for c in cmds), 1)
+        for platform in ("claude", "codex"):
+            command = _platform_session_receipt_entry(platform, "SessionStart")["hooks"][0]["command"]
+            encoded_args = re.findall(r'"([A-Za-z0-9_-]{40,}=*)"', command)
+            self.assertTrue(encoded_args, msg=command)
+            wrapped = base64.urlsafe_b64decode(encoded_args[0]).decode("utf-8")
+            self.assertIn("session_intent_analyzer_hook.py", wrapped)
+            self.assertIn(f"--platform {platform}", wrapped)
+            self.assertIn("--context session_start", wrapped)
+            self.assertIn("--format json", wrapped)
+
     def test_user_prompt_hook_uses_hook_verified_pending_merge_precheck(self):
         from install_hooks import PROMPT_PENDING_MERGE_COMMAND
         result = _run_hook_command(PROMPT_PENDING_MERGE_COMMAND)
@@ -5968,8 +5998,15 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         self.assertNotIn("completion-reminder: " + "Before " + "final " + "response", command)
 
     def test_codex_foreground_hooks_emit_valid_json_system_messages(self):
+        prompt = _run_hook_command(install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX,
+                                   env=_strict_hook_env({"HOME": str(self.fake_home)}))
+        self.assertEqual(prompt.returncode, 0, msg=prompt.stderr)
+        prompt_payload = json.loads(prompt.stdout)
+        # The session-start check owns the clean contract; an input adds no message.
+        self.assertEqual(prompt_payload["continue"], True)
+        self.assertNotIn("systemMessage", prompt_payload)
+        self.assertEqual(prompt_payload["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
         cases = (
-            (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
             (install_hooks.HOOK_COMMAND_CODEX, "hook-reminder"),
             (install_hooks.SESSION_START_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
         )
@@ -5991,10 +6028,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                 self.assertNotIn("Tech:", payload["systemMessage"])
 
     def test_codex_pending_merge_hooks_emit_explicit_hook_verified_clean_contract(self):
-        cases = (
-            install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX,
-            install_hooks.SESSION_START_COMMAND_CODEX,
-        )
+        cases = (install_hooks.SESSION_START_COMMAND_CODEX,)
 
         with tempfile.TemporaryDirectory() as temp_home:
             env = os.environ.copy()
@@ -6033,9 +6067,11 @@ class TestForegroundHookPayloads(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        self.assertIn("merge-companion-precheck: clean (hook-verified)", payload["systemMessage"])
-        self.assertNotIn("claude", payload["systemMessage"])
-        self.assertNotIn("30 undecided", payload["systemMessage"])
+        receipt = payload["ghostAlicePendingMergeCheck"]
+        self.assertEqual(receipt["platform"], "codex")
+        self.assertEqual(receipt["undecided_count"], 0)
+        self.assertNotIn("claude", receipt["manifest_path"])
+        self.assertNotIn("systemMessage", payload)
 
     def test_codex_visibility_command_sets_profile_and_blocks_original_prompt(self):
         with tempfile.TemporaryDirectory() as temp_home:

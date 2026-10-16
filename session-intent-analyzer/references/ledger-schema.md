@@ -93,7 +93,22 @@ Read-only consumers may use it for discovery. Writers use exact receipt/host ide
 
 ## Hook Observation Receipt
 
-Codex intake commits the canonical digest observation directly and places receipt JSON in hookSpecificOutput.additionalContext with hookEventName UserPromptSubmit. It also supplies systemMessage for display and equivalent text output. Claude UserPromptSubmit stages digest, count and native correlation without creating canonical input authority; the trusted PreToolUse or Stop wrapper reconciles native actor rows after the host appends the transcript. Human input produces canonical observation; a task notification retains the last human input and route. Unresolved staging supplies no canonical receipt. A hook prompt can match the complete native text or one unique complete plaintext block beside Desktop host guidance; the wrapper preserves every sibling and still requires positive native actor metadata. A later positively bound human row can supersede earlier unresolved observations for current input only when all preceding pending rows are uniquely correlated in the same ordered original. Core retains their staging events and explicit native-input-superseded links without promoting unknown actors. A notification, missing or ambiguous row, changed prefix or source-order mismatch cannot take that path. Wrappers preserve machine JSON and model context independently of display verbosity. A log of intended output does not prove model delivery. The upstream Codex output contract is the [Codex hooks reference](https://learn.chatgpt.com/docs/hooks#userpromptsubmit).
+The session-start hook delivers a session receipt with the fixed coordinates and no input identity. The host repeats session start after resume, clear, compaction and fork, so one current copy stays in model context. After the hook records that delivery for the session, the input hook records each input and adds nothing to model context. When no delivery is recorded for the session, the input hook supplies the per-input receipt described below.
+
+```json
+{
+  "schema_version": "session-intent-session-receipt.v1",
+  "ledger_root": "/absolute/ledger-root",
+  "platform": "codex",
+  "session_id": "abc",
+  "state_path": "/absolute/ledger-root/codex/abc/intent-state.json",
+  "events_path": "/absolute/ledger-root/codex/abc/intent-events.jsonl",
+  "database_path": "/absolute/ledger-root/ghost-state.sqlite3",
+  "storage_backend": "sqlite"
+}
+```
+
+Codex intake commits the canonical digest observation directly. Without a delivered session receipt, it places receipt JSON in hookSpecificOutput.additionalContext with hookEventName UserPromptSubmit. It also supplies systemMessage for display and equivalent text output. Claude UserPromptSubmit stages digest, count and native correlation without creating canonical input authority; the trusted PreToolUse or Stop wrapper reconciles native actor rows after the host appends the transcript. Human input produces canonical observation; a task notification retains the last human input and route. Unresolved staging supplies no canonical receipt. A hook prompt can match the complete native text or one unique complete plaintext block beside Desktop host guidance; the wrapper preserves every sibling and still requires positive native actor metadata. A later positively bound human row can supersede earlier unresolved observations for current input only when all preceding pending rows are uniquely correlated in the same ordered original. Core retains their staging events and explicit native-input-superseded links without promoting unknown actors. A notification, missing or ambiguous row, changed prefix or source-order mismatch cannot take that path. Wrappers preserve machine JSON and model context independently of display verbosity. A log of intended output does not prove model delivery. The upstream Codex output contract is the [Codex hooks reference](https://learn.chatgpt.com/docs/hooks#userpromptsubmit).
 
 ```json
 {

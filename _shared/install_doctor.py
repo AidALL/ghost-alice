@@ -75,6 +75,7 @@ RUNTIME_MANAGED_MARKERS = (
     "[tool-checkpoint] pre-tool-check",
     "[completion-reminder] AGENTS.md",
     "[merge-companion] session-check",
+    "[session-intent-receipt] session-start",
     "[io-trace] audit",
 )
 BASE64_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{32,}={0,2}")

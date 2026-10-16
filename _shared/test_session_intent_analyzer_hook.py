@@ -364,6 +364,47 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(len(self.events("reuse")), 2)
         self.assertFalse((self.ledger_root / "session-checks.sqlite3").exists())
 
+    def test_session_start_delivers_fixed_receipt_and_later_inputs_add_nothing(self):
+        for platform in ("codex", "claude"):
+            with self.subTest(platform=platform):
+                session = f"quiet-{platform}"
+                start = json.loads(self.run_hook({"session_id": session, "source": "startup"},
+                                                 "--platform", platform, "--context", "session_start").stdout)
+                self.assertEqual(start["hookSpecificOutput"]["hookEventName"], "SessionStart")
+                receipt = receipt_from(start["hookSpecificOutput"]["additionalContext"])
+                session_dir = (self.ledger_root / platform / session).resolve()
+                self.assertEqual(receipt, {
+                    "schema_version": "session-intent-session-receipt.v1",
+                    "ledger_root": str(self.ledger_root.resolve()),
+                    "platform": platform,
+                    "session_id": session,
+                    "state_path": str(session_dir / "intent-state.json"),
+                    "events_path": str(session_dir / "intent-events.jsonl"),
+                    "database_path": str(self.ledger_root.resolve() / "ghost-state.sqlite3"),
+                    "storage_backend": "sqlite",
+                })
+                for prompt in ("first objective", "second objective"):
+                    body = json.loads(self.run_hook({"session_id": session, "prompt": prompt},
+                                                    "--platform", platform).stdout)
+                    self.assertNotIn("hookSpecificOutput", body)
+                    self.assertNotIn("systemMessage", body)
+                compact = json.loads(self.run_hook({"session_id": session, "source": "compact"},
+                                                   "--platform", platform, "--context", "session_start").stdout)
+                self.assertEqual(receipt_from(compact["hookSpecificOutput"]["additionalContext"]), receipt)
+        self.assertEqual(len(self.events("quiet-codex")), 2)
+
+    def test_input_without_a_delivered_session_receipt_keeps_the_full_receipt(self):
+        self.run_hook({"session_id": "other", "source": "startup"}, "--context", "session_start")
+        body = json.loads(self.run_hook({"session_id": "fallback", "prompt": "first"}).stdout)
+        receipt = receipt_from(body["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(receipt["session_id"], "fallback")
+        self.assertIn("input_event_id", receipt)
+
+    def test_session_start_without_exact_identity_delivers_nothing(self):
+        start = self.run_hook({"source": "startup"}, "--context", "session_start")
+        self.assertEqual(start.returncode, 0)
+        self.assertNotIn("hookSpecificOutput", json.loads(start.stdout))
+
     def test_tool_free_terminal_input_still_records_intake(self):
         for turn in ("Explain the general mechanism without tools.", "Stop; explain the retained answer only."):
             with self.subTest(turn=turn):
@@ -381,7 +422,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             contract = platform_contract_text(root / 'platforms' / platform / filename)
             self.assertIn('Do not substitute another session', contract)
             self.assertIn('Missing or pending identity blocks dependent writes', contract)
-        self.assertIn('exact intake receipt', (root / 'session-intent-analyzer/SKILL.md').read_text())
+        self.assertIn('session-start receipt', (root / 'session-intent-analyzer/SKILL.md').read_text())
 
     def test_custom_instruction_survives_healthy_intake_on_both_platforms(self):
         import base64

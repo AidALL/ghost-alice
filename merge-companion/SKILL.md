@@ -14,7 +14,7 @@ The current-session assistant uses this lifecycle workflow to protect user chang
 
 The current-session assistant applies this skill when the current-platform pending-merge check finds an undecided entry and the user requests its review or selected work can modify, replace or install an affected skill. Reuse the result supplied by the native hook; perform a missing manual precheck before affected changes. A bounded read-only lookup unrelated to those changes does not load this procedure, inspect backups or request a merge decision. Other skills must not invoke it speculatively. At least one current-platform entry must have `decided=false`. A missing manifest, empty entries or JSON parse failure passes silently.
 
-The session-start and input hooks, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and session-start failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. An explicit user defer permits other authorized work and leaves the backups undecided.
+The session-start hook, platform bootstrap, installer tail, pending-merges READ-ME-FIRST and session-start failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. An explicit user defer permits other authorized work and leaves the backups undecided.
 
 ## Review and apply
 

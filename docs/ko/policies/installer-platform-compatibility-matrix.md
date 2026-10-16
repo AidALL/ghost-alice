@@ -56,11 +56,11 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### session-intent-analyzer
 
-설치기는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자로 등록합니다. Codex는 직접 확정하며 Claude는 신뢰된 PreToolUse/Stop 대조를 위해 네이티브 연결 정보를 보관합니다. 설치된 래퍼는 정확한 기준 사용자 입력을 반환하거나 pending을 유지하며, 작업 알림은 마지막 사용자 경로를 보존합니다. [접수 절차](../../../session-intent-analyzer/SKILL.md)와 [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)가 식별자·압축 변경·저장·호환성 내보내기를 담당합니다.
+설치기는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. Codex는 직접 확정하며 Claude는 신뢰된 PreToolUse/Stop 대조를 위해 네이티브 연결 정보를 보관합니다. 설치된 래퍼는 정확한 기준 사용자 입력을 반환하거나 pending을 유지하며, 작업 알림은 마지막 사용자 경로를 보존합니다. [접수 절차](../../../session-intent-analyzer/SKILL.md)와 [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)가 식별자·압축 변경·저장·호환성 내보내기를 담당합니다.
 
 ### pending merge precheck
 
-SessionStart 또는 UserPromptSubmit 훅이 현재 플랫폼의 병합 대기 확인을 수행했고 미결 항목 경고가 없다는 근거를 제공하면, 현재 세션 어시스턴트는 `merge-companion-precheck: clean (hook-verified)`를 기록하고 셸 확인을 반복하지 않습니다. 훅이 미결 항목을 보고하거나 훅 근거가 없을 때만 현재 플랫폼의 매니페스트를 직접 읽습니다. 미결 항목이 있으면, 사용자가 검토를 요청하거나 선택된 작업이 영향받는 스킬을 바꿀 때 `merge-companion`을 적용합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
+SessionStart 훅이 현재 플랫폼의 병합 대기 확인을 수행했고 미결 항목 경고가 없다는 근거를 제공하면, 현재 세션 어시스턴트는 `merge-companion-precheck: clean (hook-verified)`를 기록하고 셸 확인을 반복하지 않습니다. 훅이 미결 항목을 보고하거나 훅 근거가 없을 때만 현재 플랫폼의 매니페스트를 직접 읽습니다. 미결 항목이 있으면, 사용자가 검토를 요청하거나 선택된 작업이 영향받는 스킬을 바꿀 때 `merge-companion`을 적용합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
 
 ### tool-checkpoint recovery surface
 
