@@ -60,7 +60,7 @@ The installer registers session-intent-analyzer as the single UserPromptSubmit i
 
 ### pending merge precheck
 
-If the SessionStart hook provides a contract that current platform pending-merge precheck ran and no pending warning exists, runtime records `merge-companion-precheck: clean (hook-verified)` and does not repeat shell manifest checks. Read the current platform manifest directly only when the hook reports an undecided entry or hook evidence is absent. When an undecided entry exists, apply `merge-companion` when the user asks to review it or the selected work changes an affected skill; an explicit user defer or skip continues other work with the manifest entry still `decided=false`.
+The SessionStart hook checks the current platform's pending-merge manifest at session start and reports the result. Before selected work changes an installed skill, the current-session assistant re-checks the manifest, because an installer run can add entries during the session. When an undecided entry exists, apply `merge-companion` when the user asks to review it or the selected work changes an affected skill; an explicit user defer or skip continues other work with the manifest entry still `decided=false`.
 
 ### tool-checkpoint recovery surface
 

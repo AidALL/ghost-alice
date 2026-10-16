@@ -93,12 +93,12 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-skill-activation",
-        description="the common Owners entry sends pending merges to merge-companion, which owns precheck reuse and the affected-change trigger",
+        description="the common Owners entry sends pending merges to merge-companion, which owns the re-check before changing an installed skill and the affected-change trigger",
         file=REPO / "platforms" / "common-governance.md",
         pattern=r"`merge-companion`: an undecided pending merge",
         owner=REPO / "merge-companion" / "SKILL.md",
         owner_section="Entry and activation",
-        owner_pattern=r"Reuse the result supplied by the native hook[\s\S]*perform a missing manual precheck before affected changes[\s\S]*bounded read-only lookup unrelated to those changes[\s\S]*leaves the backups undecided",
+        owner_pattern=r"re-check the current platform's manifest[\s\S]*does not answer that check[\s\S]*bounded read-only lookup unrelated to those changes[\s\S]*leaves the backups undecided",
     ),
     LayerCheck(
         layer="pending-merge-bootstrap-self-check",

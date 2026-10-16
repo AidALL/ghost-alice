@@ -54,7 +54,7 @@ Each smoke record captures whether these signals were observed:
 - `skill activation permission`: Claude Code is not blocked by a shortened allowlist that covers only core gates.
 - `verification-before-completion`: the workflow connects each closure claim to applicable evidence, preserving the original source and time for valid unchanged proof.
 - `internal audit`: tool access remains auditable without requiring printed `[io-trace]`.
-- pending merge precheck: branch to hook-verified reuse when hook evidence exists; otherwise inspect the current platform manifest directly.
+- pending merge precheck: before changing an installed skill, re-check the current platform manifest; the session-start observation does not replace that check.
 
 ## Verification Layers
 

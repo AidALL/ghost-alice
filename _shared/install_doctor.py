@@ -65,10 +65,12 @@ RUNTIME_SHARED_FILES = (
     "pending_merge_precheck_hook.py",
     "merge_companion_messages.py",
     "session_intent_analyzer_hook.py",
+    "agent_visibility_hook.py",
     "task_router_reminder_hook.py",
 )
 RUNTIME_MANAGED_MARKERS = (
     "[merge-companion] prompt-check",
+    "[agent-visibility] command",
     "[hook-reminder] AGENTS.md",
     "[session-intent-analyzer]",
     "[web-search-first]",
