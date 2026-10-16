@@ -95,12 +95,12 @@ class RedirectGatewayTests(unittest.TestCase):
             server.shutdown()
             server.server_close()
 
-    def request(self, method='GET', provider='codex'):
+    def request(self, method='GET', provider='codex', path=None):
         suffix = 'models' if provider == 'codex' and method == 'GET' else (
             'responses' if provider == 'codex' else 'v1/messages')
         connection = http.client.HTTPConnection('127.0.0.1', self.gateway.server_port, timeout=5)
         try:
-            connection.request(method, f'/{provider}/{suffix}',
+            connection.request(method, path or f'/{provider}/{suffix}',
                 body=b'{ "input": [] }' if method == 'POST' else None,
                 headers={'X-Ghost-Context-Scope': 'redirect-fixture',
                          'Authorization': 'Bearer REDIRECT_FIXTURE_AUTH', 'X-Api-Key': 'REDIRECT_FIXTURE_KEY'})
@@ -108,6 +108,36 @@ class RedirectGatewayTests(unittest.TestCase):
             return reply.status, dict(reply.headers), reply.read()
         finally:
             connection.close()
+
+    def assert_reason_body(self, provider, headers, body, phrase):
+        self.assertEqual(headers['Content-Type'], 'application/json')
+        envelope = json.loads(body)
+        if provider == 'anthropic':
+            self.assertEqual(envelope['type'], 'error')
+        self.assertIn(phrase, envelope['error']['message'])
+
+    def test_unknown_endpoint_of_a_known_provider_passes_through_unchanged(self):
+        self.start_gateway()
+        code, _, body = self.request('POST', path='/codex/future/endpoint?mode=1')
+        self.assertEqual((code, body), (200, self.answer))
+        self.assertEqual(self.seen[-1][:3], ('POST', '/future/endpoint?mode=1', b'{ "input": [] }'))
+
+    def test_unknown_provider_has_no_destination(self):
+        self.start_gateway()
+        code, _, _ = self.request('POST', path='/unknown/v1/messages')
+        self.assertEqual(code, 404)
+        self.assertEqual(self.seen, [])
+
+    def test_unreachable_model_server_returns_a_reason(self):
+        self.start_gateway()
+        self.upstream.shutdown()
+        self.upstream.server_close()
+        for provider in ('codex', 'anthropic'):
+            with self.subTest(provider=provider):
+                code, headers, body = self.request('POST', provider)
+                self.assertEqual(code, 502)
+                self.assert_reason_body(provider, headers, body, 'could not reach the model server')
+        self.assertNotIn('REDIRECT_FIXTURE_AUTH', self.log.read_text())
 
     def test_cross_origin_redirects_never_receive_credentials_or_reach_native_client(self):
         self.start_gateway()
@@ -124,7 +154,7 @@ class RedirectGatewayTests(unittest.TestCase):
                                              for row in self.foreign), 'foreign fixture received native credentials')
                         self.assertEqual(code, 502)
                         self.assertNotIn('Location', headers)
-                        self.assertEqual(body, b'')
+                        self.assert_reason_body(provider, headers, body, 'redirect')
                         self.assertEqual(self.foreign, [])
         self.assertNotIn('REDIRECT_FIXTURE_AUTH', self.log.read_text())
         self.assertNotIn('REDIRECT_FIXTURE_KEY', self.log.read_text())
@@ -138,7 +168,8 @@ class RedirectGatewayTests(unittest.TestCase):
             target = f'http://127.0.0.1:{self.target.server_port}/foreign'
             self.routes = {'/models': (302, [('Location', target)])}
             code, headers, body = self.request()
-        self.assertEqual((code, body), (502, b''))
+        self.assertEqual(code, 502)
+        self.assert_reason_body('codex', headers, body, 'redirect')
         self.assertNotIn('Location', headers)
         self.assertEqual([entry[:2] for entry in self.seen], [('GET', '/models')])
         self.assertEqual(self.foreign, [])
@@ -209,7 +240,8 @@ class RedirectGatewayTests(unittest.TestCase):
                 with self.subTest(status=status, prefix=prefix):
                     self.routes = {'/responses': (status, [('Location', prefix + authority)])}
                     code, headers, body = self.request('POST')
-                    self.assertEqual((code, body), (502, b''))
+                    self.assertEqual(code, 502)
+                    self.assert_reason_body('codex', headers, body, 'Ghost-ALICE context gateway')
                     self.assertNotIn('Location', headers)
                     self.assertEqual(self.foreign, [])
 
@@ -218,7 +250,8 @@ class RedirectGatewayTests(unittest.TestCase):
         self.routes = {'/models': (302, [('Location', '/same')]),
                        '/same': (302, [('Location', f'http://127.0.0.1:{self.target.server_port}/foreign')])}
         code, headers, body = self.request()
-        self.assertEqual((code, body), (502, b''))
+        self.assertEqual(code, 502)
+        self.assert_reason_body('codex', headers, body, 'redirect')
         self.assertNotIn('Location', headers)
         self.assertEqual(self.foreign, [])
 
@@ -301,12 +334,15 @@ class ContextGatewayTests(unittest.TestCase):
         self.assertNotIn('PRIVATE_NATIVE_AUTH', self.wire.read_text())
         self.assertNotIn('required long source', self.wire.read_text())
 
-    def test_unknown_scope_does_not_forward_auth(self):
-        with self.assertRaises(urllib.error.HTTPError) as caught:
-            self.request(b'{}', scope='foreign')
-        caught.exception.close()
-        self.assertEqual(caught.exception.code, 403)
-        self.assertEqual(self.seen, [])
+    def test_foreign_scope_forwards_the_request_without_reduction(self):
+        body = json.dumps(self.core.request).encode()
+        with self.request(body, scope='foreign') as reply:
+            self.assertEqual(reply.read(), self.answer)
+        self.assertEqual(self.seen[-1][0], body)
+        self.assertNotIn('x-ghost-context-scope', {k.lower() for k in self.seen[-1][1]})
+        events = [json.loads(line) for line in self.wire.read_text().splitlines()]
+        selection = next(e for e in events if e['event'] == 'request-selection')
+        self.assertEqual((selection['state'], selection['reason']), ('unavailable', 'scope-mismatch'))
 
     def test_nonselection_and_compaction_keep_request_bytes(self):
         body = b'{ "input": [], "prompt_cache_key": "unknown" }'
