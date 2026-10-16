@@ -4852,8 +4852,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             self.assertEqual(result.returncode, 0)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
-            if marker in (install_hooks.PROMPT_PENDING_MERGE_MARKER, install_hooks.SESSION_RECEIPT_MARKER):
-                # An input after session start, and a session start without identity, add no message.
+            if marker == install_hooks.SESSION_RECEIPT_MARKER:
+                # A session start without host identity delivers nothing.
                 self.assertNotIn("systemMessage", payload)
                 continue
             self.assertIn("systemMessage", payload)
@@ -5998,15 +5998,8 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         self.assertNotIn("completion-reminder: " + "Before " + "final " + "response", command)
 
     def test_codex_foreground_hooks_emit_valid_json_system_messages(self):
-        prompt = _run_hook_command(install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX,
-                                   env=_strict_hook_env({"HOME": str(self.fake_home)}))
-        self.assertEqual(prompt.returncode, 0, msg=prompt.stderr)
-        prompt_payload = json.loads(prompt.stdout)
-        # The session-start check owns the clean contract; an input adds no message.
-        self.assertEqual(prompt_payload["continue"], True)
-        self.assertNotIn("systemMessage", prompt_payload)
-        self.assertEqual(prompt_payload["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
         cases = (
+            (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
             (install_hooks.HOOK_COMMAND_CODEX, "hook-reminder"),
             (install_hooks.SESSION_START_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
         )
@@ -6028,7 +6021,10 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                 self.assertNotIn("Tech:", payload["systemMessage"])
 
     def test_codex_pending_merge_hooks_emit_explicit_hook_verified_clean_contract(self):
-        cases = (install_hooks.SESSION_START_COMMAND_CODEX,)
+        cases = (
+            install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX,
+            install_hooks.SESSION_START_COMMAND_CODEX,
+        )
 
         with tempfile.TemporaryDirectory() as temp_home:
             env = os.environ.copy()
@@ -6067,11 +6063,9 @@ class TestForegroundHookPayloads(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        receipt = payload["ghostAlicePendingMergeCheck"]
-        self.assertEqual(receipt["platform"], "codex")
-        self.assertEqual(receipt["undecided_count"], 0)
-        self.assertNotIn("claude", receipt["manifest_path"])
-        self.assertNotIn("systemMessage", payload)
+        self.assertIn("merge-companion-precheck: clean (hook-verified)", payload["systemMessage"])
+        self.assertNotIn("claude", payload["systemMessage"])
+        self.assertNotIn("30 undecided", payload["systemMessage"])
 
     def test_codex_visibility_command_sets_profile_and_blocks_original_prompt(self):
         with tempfile.TemporaryDirectory() as temp_home:

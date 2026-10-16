@@ -201,15 +201,15 @@ def _json_payload(platform: str, internal: str, result: dict | None = None, *,
     if result is not None:
         receipt.update({"status": result["status"], "checked_at": result["checked_at"]})
     body: dict[str, Any] = {"continue": True, "ghostAlicePendingMergeCheck": receipt}
-    if context == 'prompt_submit':
-        # The session-start check already delivered this observation; an input adds nothing to the
-        # model context or the screen. Visibility commands return before this point.
+    if context == 'prompt_submit' and result is not None and result["status"] == "reused":
+        # An unchanged observation adds nothing to the model context or the screen; the session-start
+        # check or an earlier input already delivered it. Visibility commands return before this point.
         return json.dumps(body, ensure_ascii=False)
-    if context == 'session_start' and result is not None and session_id and session_id != 'unknown':
-        # The host repeats session start after resume, clear and compaction, so the model keeps one
-        # current copy. Return its native binding and metadata, never manifest entries or the procedure.
+    if result is not None and session_id and session_id != 'unknown':
+        # Session start repeats after resume, clear and compaction; an input delivers only a changed or
+        # first observation. Return its native binding and metadata, never manifest entries or the procedure.
         public = dict(receipt, session_id=session_id)
-        body['hookSpecificOutput'] = {'hookEventName': 'SessionStart',
+        body['hookSpecificOutput'] = {'hookEventName': 'SessionStart' if context == 'session_start' else 'UserPromptSubmit',
             'additionalContext': 'merge-companion-precheck: ' + json.dumps(public, ensure_ascii=False, separators=(',', ':'))}
     if count:
         message = (f"merge-companion precheck: pending={count} (unchanged; session check reused)."
