@@ -16,7 +16,7 @@ import sqlite3
 import completion_assessment as core_api
 from claude_context_adapter import (NativeContextRejected, SignedPrefixSelectionUnsupported,
                                     require_rewriteable_prefix)
-from native_transcript import codex_transcript_path, is_actual_user_prompt
+from native_transcript import codex_transcript_path, committed_lines, is_actual_user_prompt
 from source_reference import SourceReferenceError, reference_source, verify_source
 
 
@@ -51,8 +51,7 @@ class _Native:
 
 
 def _native(path, platform, session):
-    with Path(path).open(encoding='utf-8') as stream:
-        rows = {n: json.loads(line) for n, line in enumerate(stream, 1) if line.strip()}
+    rows = {n: json.loads(line) for n, line in committed_lines(Path(path).read_bytes()).items()}
     _require(all(isinstance(row, dict) for row in rows.values()), 'Native JSONL objects are required')
     calls, results, humans, finals = [], [], [], []
     if platform == 'codex':

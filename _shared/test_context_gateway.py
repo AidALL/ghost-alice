@@ -259,8 +259,7 @@ class ContextGatewayTests(unittest.TestCase):
         self.wire = Path(self.core.fixture.tmp.name) / 'usage.jsonl'
         self.server = context_gateway.make_server('test-scope', self.wire,
             origins={'codex': f'http://127.0.0.1:{self.upstream.server_port}'},
-            selection=lambda request: context_lifecycle.select_request(request, self.core.fixture.root, self.core.home,
-                strict_log_root=getattr(self.core, 'strict', None)))
+            selection=lambda request: context_lifecycle.select_request(request, self.core.fixture.root, self.core.home))
         for server in (self.upstream, self.server):
             threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(self.stop)
@@ -308,25 +307,6 @@ class ContextGatewayTests(unittest.TestCase):
         caught.exception.close()
         self.assertEqual(caught.exception.code, 403)
         self.assertEqual(self.seen, [])
-
-    def test_real_intake_view_reaches_forwarded_request_and_existing_observation(self):
-        from test_codex_intake_view import CodexIntakeViewTests
-        real = CodexIntakeViewTests()
-        real.setUp()
-        self.addCleanup(real.doCleanups)
-        self.core = SimpleNamespace(fixture=SimpleNamespace(root=real.root), home=real.home, strict=real.strict)
-        original = copy.deepcopy(real.request)
-        with self.request(json.dumps(real.request).encode()) as reply:
-            self.assertEqual(reply.read(), self.answer)
-        expected = dict(original, input=[item for item in original['input'] if item['id'] not in {'msg_admin_r1', 'msg_admin_r2'}])
-        self.assertEqual(json.loads(self.seen[-1][0]), expected)
-        records = [json.loads(line) for line in self.wire.read_text().splitlines()]
-        selected = next(row for row in records if row['event'] == 'request-selection')
-        self.assertEqual(selected['state'], 'selected')
-        self.assertEqual(len(selected['selected_blocks']), 2)
-        self.assertTrue(all(item['kind'] == 'current-intake-view' for item in selected['selected_blocks']))
-        self.assertNotEqual(selected['original_wire_sha256'], selected['forwarded_wire_sha256'])
-        self.assertEqual(real.request, original)
 
     def test_nonselection_and_compaction_keep_request_bytes(self):
         body = b'{ "input": [], "prompt_cache_key": "unknown" }'
@@ -640,30 +620,16 @@ class ClaudeGatewayTransportTests(unittest.TestCase):
             self.assertEqual(set(make.call_args.kwargs['selectors']), {'codex'})
             self.assertNotIn('anthropic', make.call_args.kwargs['origins'])
             make.call_args.kwargs['selectors']['codex']({'input': []}, None)
-            select.assert_called_once_with({'input': []}, config['ledger_root'], config['codex_dir'], strict_log_root=None)
+            select.assert_called_once_with({'input': []}, config['ledger_root'], config['codex_dir'])
 
-    def test_main_passes_only_explicit_strict_log_root_to_codex_selector(self):
+    def test_main_ignores_strict_log_root_from_an_existing_installation(self):
         config, path = self.configuration()
         config['strict_log_root'] = str(Path(self.tmp.name) / 'strict')
         path.write_text(json.dumps(config))
         with patch.object(context_lifecycle, 'select_request') as select, patch.object(context_gateway, 'make_server') as make:
             context_gateway.main(['--config', str(path)])
-            selectors = make.call_args.kwargs['selectors']
-            selectors['codex']({'input': []}, None)
-            select.assert_called_once_with({'input': []}, config['ledger_root'], config['codex_dir'],
-                                           strict_log_root=config['strict_log_root'])
-            select.reset_mock()
-            selectors['claude']({'messages': []}, self.session)
-            self.assertNotIn('strict_log_root', select.call_args.kwargs)
-
-    def test_main_rejects_nonexplicit_strict_root_before_server_start(self):
-        config, path = self.configuration()
-        for value in ('relative', '', None, 3):
-            with self.subTest(value=value), patch.object(context_gateway, 'make_server') as make:
-                path.write_text(json.dumps(dict(config, strict_log_root=value)))
-                with self.assertRaises(ValueError):
-                    context_gateway.main(['--config', str(path)])
-                make.assert_not_called()
+            make.call_args.kwargs['selectors']['codex']({'input': []}, None)
+            select.assert_called_once_with({'input': []}, config['ledger_root'], config['codex_dir'])
 
     def test_main_rejects_nonexplicit_claude_coordinates_before_server_start(self):
         config, path = self.configuration()

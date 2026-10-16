@@ -422,15 +422,11 @@ def main(argv=None):
     for key in ('ledger_root', 'codex_dir', 'usage_log'):
         if not isinstance(config.get(key), str) or not Path(config[key]).is_absolute():
             raise ValueError('Absolute installed coordinates are required')
-    if 'strict_log_root' in config and (not isinstance(config['strict_log_root'], str)
-                                      or not Path(config['strict_log_root']).is_absolute()):
-        raise ValueError('An explicit absolute strict log root is required')
     if 'claude_dir' in config and (not isinstance(config['claude_dir'], str)
                                   or not Path(config['claude_dir']).is_absolute()):
         raise ValueError('An explicit absolute Claude native home is required')
     from context_lifecycle import select_request, prepare_native_request
-    selectors = {'codex': lambda request, _session: select_request(
-        request, config['ledger_root'], config['codex_dir'], strict_log_root=config.get('strict_log_root'))}
+    selectors = {'codex': lambda request, _session: select_request(request, config['ledger_root'], config['codex_dir'])}
     origins = {'codex': ORIGINS['codex']}
     server_selectors = {}
     if 'claude_dir' in config:
