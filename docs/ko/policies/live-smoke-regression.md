@@ -55,7 +55,7 @@ Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one pa
 - `skill activation permission`: Claude Code가 Core 검사 스킬만 담은 축소된 허용 목록 때문에 막히지 않습니다.
 - `verification-before-completion`: 워크플로가 각 완료 주장을 해당 근거와 연결하며 변경 없는 유효한 근거는 원래 출처와 시각을 유지합니다.
 - `internal audit`: 화면의 `[io-trace]`를 요구하지 않고도 도구 접근 기록을 감사할 수 있습니다.
-- pending merge precheck: hook evidence가 있으면 hook-verified reuse로 분기하고, 없으면 current platform manifest를 직접 inspect합니다.
+- pending merge precheck: 설치된 스킬을 바꾸기 전에 현재 플랫폼 매니페스트를 다시 확인합니다. 세션 시작 때의 관찰이 그 확인을 대신하지 않습니다.
 
 ## Verification Layers
 

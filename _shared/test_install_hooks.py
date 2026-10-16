@@ -46,6 +46,10 @@ import install_hooks
 from test_completion_skill_evidence import assert_stop_observation
 
 
+LEGACY_PROMPT_PENDING_MERGE_ENTRY = {
+    "matcher": "",
+    "hooks": [{"type": "command", "command": "echo legacy # " + install_hooks.PROMPT_PENDING_MERGE_MARKER}],
+}
 LEGACY_WEB_SEARCH_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": "echo old # [web-search-first]"}],
@@ -3991,10 +3995,10 @@ class TestInstallHook(TempHomeTestCase):
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
-        # Intake owns routing guidance; the other prompt hook checks pending merges.
-        self.assertEqual(len(hooks), 2)
+        # Intake is the only Claude input hook; merge-companion re-checks before skill changes.
+        self.assertEqual(len(hooks), 1)
         cmds = [h["command"] for entry in hooks for h in entry["hooks"]]
-        self.assertTrue(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in c for c in cmds))
+        self.assertFalse(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in c for c in cmds))
         self.assertFalse(any(install_hooks.HOOK_MARKER in c for c in cmds))
         self.assertTrue(any(install_hooks.SESSION_INTENT_MARKER in c for c in cmds))
         self.assertFalse(any(install_hooks.WEB_SEARCH_FIRST_MARKER in c for c in cmds))
@@ -4027,7 +4031,7 @@ class TestInstallHook(TempHomeTestCase):
                     elif install_hooks.WEB_SEARCH_FIRST_MARKER in command:
                         marker_order.append("web-search-first")
 
-                expected = ["pending-merge", "session-intent"]
+                expected = ["session-intent"]
                 self.assertEqual(marker_order, expected)
                 with use(install_hooks._default_destination(platform)):
                     old = install_hooks._platform_hook_entry(platform, event)['hooks'][0]
@@ -4489,8 +4493,8 @@ class TestInstallHook(TempHomeTestCase):
 
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
-        # Existing 1 + prompt pending-merge + session-intent-analyzer = 3.
-        self.assertEqual(len(hooks), 3)
+        # Existing 1 + session-intent-analyzer = 2.
+        self.assertEqual(len(hooks), 2)
         self.assertEqual(hooks[0]["matcher"], "*.py")
 
     def test_install_creates_backup(self):
@@ -4719,7 +4723,6 @@ class TestCheckStatus(TempHomeTestCase):
         self._write_settings("claude", {
             "hooks": {
                 "UserPromptSubmit": [
-                    install_hooks.PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
                 ],
@@ -4741,7 +4744,7 @@ class TestCheckStatus(TempHomeTestCase):
         self._write_settings("claude", {
             "hooks": {
                 "UserPromptSubmit": [
-                    install_hooks.PROMPT_PENDING_MERGE_ENTRY,
+                    LEGACY_PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
@@ -4763,7 +4766,7 @@ class TestCheckStatus(TempHomeTestCase):
         self._write_settings("claude", {
             "hooks": {
                 "UserPromptSubmit": [
-                    install_hooks.PROMPT_PENDING_MERGE_ENTRY,
+                    LEGACY_PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
@@ -4840,8 +4843,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
 
         prompt_cmds = [h["command"] for entry in hooks["hooks"]["UserPromptSubmit"] for h in entry["hooks"]]
         session_cmds = [h["command"] for entry in hooks["hooks"]["SessionStart"] for h in entry["hooks"]]
+        self.assertFalse(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in cmd for cmd in prompt_cmds))
         for marker, cmds in (
-            (install_hooks.PROMPT_PENDING_MERGE_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
             (install_hooks.SESSION_RECEIPT_MARKER, session_cmds),
@@ -4853,7 +4856,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["continue"], True)
             if marker == install_hooks.SESSION_RECEIPT_MARKER:
-                # A session start without host identity delivers nothing.
+                # A session start without host identity adds no message.
                 self.assertNotIn("systemMessage", payload)
                 continue
             self.assertIn("systemMessage", payload)
@@ -5207,7 +5210,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self._write_settings("codex", {
             "hooks": {
                 "UserPromptSubmit": [
-                    install_hooks.PROMPT_PENDING_MERGE_ENTRY,
+                    LEGACY_PROMPT_PENDING_MERGE_ENTRY,
                     install_hooks.HOOK_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
@@ -5225,8 +5228,8 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         prompt_cmds = [h["command"] for entry in settings["hooks"]["UserPromptSubmit"] for h in entry["hooks"]]
         session_cmds = [h["command"] for entry in settings["hooks"]["SessionStart"] for h in entry["hooks"]]
 
+        self.assertFalse(any(install_hooks.PROMPT_PENDING_MERGE_MARKER in cmd for cmd in prompt_cmds))
         for marker, cmds in (
-            (install_hooks.PROMPT_PENDING_MERGE_MARKER, prompt_cmds),
             (install_hooks.SESSION_INTENT_MARKER, prompt_cmds),
             (install_hooks.SESSION_START_MARKER, session_cmds),
             (install_hooks.SESSION_RECEIPT_MARKER, session_cmds),
@@ -5262,7 +5265,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self._write_settings("codex", {
             "hooks": {
                 user_prompt: [
-                    markerless(install_hooks._platform_prompt_pending_merge_entry("codex", user_prompt)),
                     markerless(install_hooks._platform_session_intent_entry("codex", user_prompt)),
                     markerless(install_hooks._hook_runner_command_entry(
                         "web-search-first", "echo old", install_hooks.WEB_SEARCH_FIRST_MARKER, platform_key="codex")),
@@ -5281,7 +5283,6 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         settings = self._read_settings("codex")
         expected = {
             user_prompt: [
-                install_hooks.PROMPT_PENDING_MERGE_MARKER,
                 install_hooks.SESSION_INTENT_MARKER,
             ],
             pre_tool: [install_hooks.TOOL_CHECKPOINT_MARKER],
@@ -5700,21 +5701,21 @@ class TestSessionStartHook(unittest.TestCase):
             self.assertIn("--context session_start", wrapped)
             self.assertIn("--format json", wrapped)
 
-    def test_user_prompt_hook_uses_hook_verified_pending_merge_precheck(self):
-        from install_hooks import PROMPT_PENDING_MERGE_COMMAND
-        result = _run_hook_command(PROMPT_PENDING_MERGE_COMMAND)
+    def test_session_start_hook_uses_hook_verified_pending_merge_precheck(self):
+        from install_hooks import SESSION_START_COMMAND
+        result = _run_hook_command(SESSION_START_COMMAND)
         self.assertEqual(result.returncode, 0)
         self.assertIn("merge-companion-precheck: clean (hook-verified)", result.stdout)
         self.assertNotIn("Internal instruction:", result.stdout)
-        self.assertIn("do not run an extra shell manifest check", result.stdout)
+        self.assertIn("re-check it before changing an installed skill", result.stdout)
         self.assertIn("merge-companion", result.stdout)
         self.assertIn("pending-merges/claude/manifest.json", result.stdout)
         self.assertNotIn("Check the current platform pending-merge manifest", result.stdout)
         self.assertNotIn("next time Claude/Codex is opened", result.stdout)
         self.assertNotIn("The next time you open Claude/Codex", result.stdout)
 
-    def test_user_prompt_hook_reports_pending_entries_without_agent_shell_probe(self):
-        from install_hooks import PROMPT_PENDING_MERGE_COMMAND
+    def test_session_start_hook_reports_pending_entries_without_agent_shell_probe(self):
+        from install_hooks import SESSION_START_COMMAND
 
         with tempfile.TemporaryDirectory() as temp_home:
             manifest = Path(temp_home) / ".ghost-alice" / "pending-merges" / "claude" / "manifest.json"
@@ -5725,7 +5726,7 @@ class TestSessionStartHook(unittest.TestCase):
             )
             env = os.environ.copy()
             env["HOME"] = temp_home
-            result = _run_hook_command(PROMPT_PENDING_MERGE_COMMAND, env=env)
+            result = _run_hook_command(SESSION_START_COMMAND, env=env)
 
         self.assertEqual(result.returncode, 0)
         self.assertIn("has 1 undecided entry", result.stdout)
@@ -5736,13 +5737,13 @@ class TestSessionStartHook(unittest.TestCase):
     def test_claude_prompt_hooks_use_json_payloads_to_avoid_answer_text_leakage(self):
         from install_hooks import (
             _platform_hook_entry,
-            _platform_prompt_pending_merge_entry,
             _platform_session_intent_entry,
+            _platform_session_receipt_entry,
             _platform_session_start_entry,
         )
 
         entries = [
-            _platform_prompt_pending_merge_entry("claude", "UserPromptSubmit"),
+            _platform_session_receipt_entry("claude", "SessionStart"),
             _platform_hook_entry("claude", "UserPromptSubmit"),
             _platform_session_intent_entry("claude", "UserPromptSubmit"),
             _platform_session_start_entry("claude", "SessionStart"),
@@ -5772,7 +5773,7 @@ class TestSessionStartHook(unittest.TestCase):
         result = _run_hook_command(SESSION_START_COMMAND)
         self.assertEqual(result.returncode, 0)
         self.assertIn("merge-companion-precheck: clean (hook-verified)", result.stdout)
-        self.assertIn("do not run an extra shell manifest check", result.stdout)
+        self.assertIn("re-check it before changing an installed skill", result.stdout)
         self.assertIn("pending-merges/claude/manifest.json", result.stdout)
         self.assertNotIn("next time Claude/Codex is opened", result.stdout)
         self.assertNotIn("The next time you open Claude/Codex", result.stdout)
@@ -5999,7 +6000,6 @@ class TestForegroundHookPayloads(TempHomeTestCase):
 
     def test_codex_foreground_hooks_emit_valid_json_system_messages(self):
         cases = (
-            (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
             (install_hooks.HOOK_COMMAND_CODEX, "hook-reminder"),
             (install_hooks.SESSION_START_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
         )
@@ -6011,7 +6011,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                 payload = json.loads(result.stdout)
                 self.assertEqual(payload["continue"], True)
                 self.assertIn(expected, payload["systemMessage"])
-                if command in (install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, install_hooks.SESSION_START_COMMAND_CODEX):
+                if command == install_hooks.SESSION_START_COMMAND_CODEX:
                     receipt = payload["ghostAlicePendingMergeCheck"]
                     self.assertEqual(receipt["platform"], "codex")
                     self.assertEqual(receipt["undecided_count"], 0)
@@ -6021,10 +6021,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                 self.assertNotIn("Tech:", payload["systemMessage"])
 
     def test_codex_pending_merge_hooks_emit_explicit_hook_verified_clean_contract(self):
-        cases = (
-            install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX,
-            install_hooks.SESSION_START_COMMAND_CODEX,
-        )
+        cases = (install_hooks.SESSION_START_COMMAND_CODEX,)
 
         with tempfile.TemporaryDirectory() as temp_home:
             env = os.environ.copy()
@@ -6039,11 +6036,11 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                         payload["systemMessage"],
                     )
                     self.assertIn(
-                        "do not run an extra shell manifest check",
+                        "re-check it before changing an installed skill",
                         payload["systemMessage"],
                     )
 
-    def test_codex_prompt_pending_merge_hook_ignores_other_platform_pending_manifest(self):
+    def test_codex_session_start_pending_merge_hook_ignores_other_platform_pending_manifest(self):
         with tempfile.TemporaryDirectory() as temp_home:
             env = os.environ.copy()
             env["HOME"] = temp_home
@@ -6059,57 +6056,13 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                 encoding="utf-8",
             )
 
-            result = _run_hook_command(install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX, env=env)
+            result = _run_hook_command(install_hooks.SESSION_START_COMMAND_CODEX, env=env)
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
         self.assertIn("merge-companion-precheck: clean (hook-verified)", payload["systemMessage"])
         self.assertNotIn("claude", payload["systemMessage"])
         self.assertNotIn("30 undecided", payload["systemMessage"])
-
-    def test_codex_visibility_command_sets_profile_and_blocks_original_prompt(self):
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            result = _run_hook_command(
-                install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX,
-                input_text=json.dumps({"prompt": "/visibility dynamic"}),
-                env=env,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["decision"], "block")
-            self.assertIn("agent visibility profile set to dynamic", payload["reason"])
-
-            config_path = Path(temp_home) / ".ghost-alice" / "config.json"
-            config = json.loads(config_path.read_text(encoding="utf-8"))
-            self.assertEqual(config["agent_visibility"]["profile"], "dynamic")
-
-    def test_codex_visibility_command_without_profile_reports_current_status(self):
-        with tempfile.TemporaryDirectory() as temp_home:
-            config_dir = Path(temp_home) / ".ghost-alice"
-            config_dir.mkdir(parents=True)
-            (config_dir / "config.json").write_text(
-                json.dumps({
-                    "schema_version": "ghost-alice-config.v1",
-                    "agent_visibility": {"profile": "minimal"},
-                    "strict_session_log": {"mode": "always"},
-                }),
-                encoding="utf-8",
-            )
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            result = _run_hook_command(
-                install_hooks.PROMPT_PENDING_MERGE_COMMAND_CODEX,
-                input_text=json.dumps({"prompt": "/visibility"}),
-                env=env,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["decision"], "block")
-            self.assertIn("agent visibility profile is minimal", payload["reason"])
 
     def test_foreground_hook_messages_run_under_cmd_exe(self):
         for cmd, env in (

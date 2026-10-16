@@ -838,7 +838,9 @@ class InstallStatusContractTest(unittest.TestCase):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 
         self.assertIn("Claude Code uses `/visibility strict|dynamic|minimal`", readme)
-        self.assertIn("Codex handles `/visibility` through the trusted `UserPromptSubmit`", readme)
+        self.assertIn("Every platform, including Codex, can inspect and change the same profile value through "
+                      "`_shared/agent_visibility_cli.py`", readme)
+        self.assertIn("Codex has no `/visibility` command.", readme)
         self.assertNotIn("Claude workspace command `/visibility", readme)
 
 

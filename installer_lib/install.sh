@@ -783,7 +783,7 @@ _run_install_hooks() {
     *)         action_ko="$action" ;;
   esac
   echo ""
-  info "$(t "Agent hook ${action}... (pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)" "Agent hook ${action}... (pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)")"
+  info "$(t "Agent hook ${action}... (session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)" "Agent hook ${action}... (session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)")"
 
   if ! codex_hooks_supported "$platform"; then
     info "$(t "Codex hooks are unavailable in this runtime; skipping." "Codex hooks are unavailable in this runtime; skipping.")"

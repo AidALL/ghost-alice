@@ -31,7 +31,7 @@ Language: [🇺🇸 English](../../policies/installer-platform-compatibility-mat
 | Public surface parity | README, docs/index.html, Claude command wrappers는 `skill-catalog/skills.json` count, list, targets와 정렬되어야 합니다 | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
 | Ghost-ALICE fresh clone install policy | public installs는 fresh `AidALL/ghost-alice` clone plus install을 사용합니다. installer는 existing remotes를 rewrite하거나 local checkout directories를 rename하거나 repository migration flags를 expose하지 않습니다. installed Claude permission cleanup은 managed stale checkout path allow rules로 제한됩니다 | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook` |
 | Agent visibility profile | default `agent_visibility.profile`은 `dynamic`입니다. allowed values는 `strict`, `dynamic`, `minimal`입니다. public installer command surface는 `--visibility`를 사용합니다. native wrapper compatibility alias는 implementation-test coverage로 유지합니다. `--agent-visibility`는 long-form compatibility alias로 계속 허용됩니다. profile은 user-facing governance message surface만 제어합니다. hook installation/execution을 suppress하지 않고 generated hook command contracts를 바꾸지 않으며 strict-grade session logging은 always-on입니다 | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
-| Agent visibility runtime command surface | Claude Code는 `/visibility strict|dynamic|minimal`, Codex는 trusted `UserPromptSubmit` hook pseudo-command path for `/visibility`, 모든 platform은 `_shared/agent_visibility_cli.py`를 사용합니다. Documentation은 이것들을 하나의 slash-command spelling으로 collapse하면 안 됩니다 | `scripts.tests.test_install_status_contract` |
+| Agent visibility runtime command surface | Claude Code는 작업 공간 명령 `/visibility strict|dynamic|minimal`을 사용하고, Codex를 포함한 모든 플랫폼은 `_shared/agent_visibility_cli.py`를 사용합니다. 문서는 `/visibility`를 Codex 명령으로 안내하면 안 됩니다 | `scripts.tests.test_install_status_contract` |
 
 ## Agent Hook Runtime Contract
 
@@ -60,7 +60,7 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### pending merge precheck
 
-SessionStart 훅이 현재 플랫폼의 병합 대기 확인을 수행했고 미결 항목 경고가 없다는 근거를 제공하면, 현재 세션 어시스턴트는 `merge-companion-precheck: clean (hook-verified)`를 기록하고 셸 확인을 반복하지 않습니다. 훅이 미결 항목을 보고하거나 훅 근거가 없을 때만 현재 플랫폼의 매니페스트를 직접 읽습니다. 미결 항목이 있으면, 사용자가 검토를 요청하거나 선택된 작업이 영향받는 스킬을 바꿀 때 `merge-companion`을 적용합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
+SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니페스트를 확인하고 결과를 사용자 화면에 알립니다. 선택된 작업이 설치된 스킬을 바꾸기 전과 사용자가 백업된 변경의 검토를 요청할 때, 현재 세션 어시스턴트는 `merge-companion`을 적용합니다. `merge-companion`은 세션 중 설치기 실행으로 항목이 생길 수 있으므로 매니페스트를 먼저 다시 확인합니다. 작업이 영향을 주는 미결 항목, 또는 사용자가 검토를 요청했을 때의 모든 미결 항목을 검토합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
 
 ### tool-checkpoint recovery surface
 

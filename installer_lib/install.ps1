@@ -198,7 +198,7 @@ function Invoke-InstallHooks {
     )
 
     Write-Host ""
-    Write-Info "Running AI agent hook ${Action}... (pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)" "Running AI agent hook ${Action}... (pending-merge-prompt + session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)"
+    Write-Info "Running AI agent hook ${Action}... (session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)" "Running AI agent hook ${Action}... (session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace)"
 
     if (-not (Test-CodexHooksSupported)) {
         Write-Host "  [install_hooks]   Codex hooks are unavailable in this runtime; skipping."

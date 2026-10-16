@@ -2436,28 +2436,21 @@ class TestHookCommandAllowlist(unittest.TestCase):
 
 class TestInstallHooksRunnerIntegration(unittest.TestCase):
     def test_generated_hook_commands_are_wrapped_with_hook_runner(self):
-        pending_entry = install_hooks._platform_prompt_pending_merge_entry("claude", "UserPromptSubmit")
-        prompt_entry = install_hooks._platform_hook_entry("claude", "UserPromptSubmit")
-        session_entry = install_hooks._platform_session_start_entry("claude", "SessionStart")
+        cases = (
+            (install_hooks._platform_session_receipt_entry("claude", "SessionStart"),
+             "session-receipt", install_hooks.SESSION_RECEIPT_MARKER),
+            (install_hooks._platform_session_start_entry("claude", "SessionStart"),
+             "session-start", install_hooks.SESSION_START_MARKER),
+        )
+        for entry, hook_id, marker in cases:
+            with self.subTest(hook_id=hook_id):
+                command = install_hooks._entry_command(entry)
+                self.assertIn("hook_profile_gate.py", command)
+                self.assertIn(f"[hook-runner:{hook_id}]", command)
+                self.assertNotIn('"strict,dynamic,minimal"', command)
+                self.assertIn(marker, command)
 
-        pending_command = install_hooks._entry_command(pending_entry)
-        prompt_command = install_hooks._entry_command(prompt_entry)
-        session_command = install_hooks._entry_command(session_entry)
-
-        self.assertIn("hook_profile_gate.py", pending_command)
-        self.assertIn("[hook-runner:pending-merge-prompt]", pending_command)
-        self.assertNotIn('"strict,dynamic,minimal"', pending_command)
-        self.assertIn(install_hooks.PROMPT_PENDING_MERGE_MARKER, pending_command)
-        self.assertIn("hook_profile_gate.py", prompt_command)
-        self.assertIn("[hook-runner:prompt]", prompt_command)
-        self.assertNotIn('"strict,dynamic,minimal"', prompt_command)
-        self.assertIn(install_hooks.HOOK_MARKER, prompt_command)
-        self.assertIn("hook_profile_gate.py", session_command)
-        self.assertIn("[hook-runner:session-start]", session_command)
-        self.assertNotIn('"strict,dynamic,minimal"', session_command)
-        self.assertIn(install_hooks.SESSION_START_MARKER, session_command)
-
-    def test_installed_minimal_visibility_runs_prompt_and_session_start(self):
+    def test_installed_minimal_visibility_runs_session_start(self):
         if os.name == "nt":
             self.skipTest("POSIX shell launcher test does not apply on Windows")
 
@@ -2468,46 +2461,23 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         self.addCleanup(isolated_home.cleanup)
         env["HOME"] = isolated_home.name
         with mock.patch.dict(os.environ,{"HOME":isolated_home.name}):
-            pending_entry = install_hooks._platform_prompt_pending_merge_entry("claude", "UserPromptSubmit")
-            prompt_entry = install_hooks._platform_hook_entry("claude", "UserPromptSubmit")
             session_entry = install_hooks._platform_session_start_entry("claude", "SessionStart")
 
-        pending = subprocess.run(
-            ["/bin/bash", "-lc", install_hooks._entry_command(pending_entry)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=False,
-        )
-        prompt = subprocess.run(
-            ["/bin/bash", "-lc", install_hooks._entry_command(prompt_entry)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=False,
-        )
-        session_start = subprocess.run(
-            ["/bin/bash", "-lc", install_hooks._entry_command(session_entry)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env=env,
-            check=False,
-        )
+        def run(entry):
+            return subprocess.run(
+                ["/bin/bash", "-lc", install_hooks._entry_command(entry)],
+                input=json.dumps({"prompt": "Explain the router."}),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                check=False,
+            )
 
-        # A disabled hook prints nothing; a clean merge check runs and stays off the minimal user screen.
-        self.assertEqual(pending.returncode, 0)
-        pending_payload = json.loads(pending.stdout)
-        self.assertTrue(pending_payload["continue"])
-        self.assertNotIn("systemMessage", pending_payload)
-        self.assertNotIn("ghostAliceSurface", pending_payload)
-        self.assertEqual(prompt.returncode, 0)
-        self.assertIn("task-router", prompt.stdout)
+        session_start = run(session_entry)
+
+        # A clean merge check stays off the minimal screen.
         self.assertEqual(session_start.returncode, 0)
         session_payload = json.loads(session_start.stdout)
         self.assertTrue(session_payload["continue"])

@@ -236,7 +236,6 @@ def test_generated_chain_and_public_actions_under_os_write_deny(tmp_path):
     hooks=json.loads((root/'platform/hooks.json').read_text())['hooks']
     for event,marker,payload in (
         ('SessionStart','[hook-runner:session-start]',{}),
-        ('UserPromptSubmit','[hook-runner:pending-merge-prompt]',{}),
         ('UserPromptSubmit','[hook-runner:session-intent]',{'prompt':'Source-fixture input; no real execution admission.'}),
         ('PreToolUse','[hook-runner:tool-checkpoint]',{}),
         ('PostToolUse','[hook-runner:io-trace]',{'tool_name':'Bash','tool_input':{'command':'fixture .env'}}),

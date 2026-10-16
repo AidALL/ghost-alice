@@ -17,7 +17,6 @@ import install_hooks
 
 ENTRIES = {
     "prompt": (install_hooks._platform_hook_entry, "UserPromptSubmit"),
-    "pending-merge-prompt": (install_hooks._platform_prompt_pending_merge_entry, "UserPromptSubmit"),
     "session-intent": (install_hooks._platform_session_intent_entry, "UserPromptSubmit"),
     "completion": (install_hooks._platform_stop_hook_entry, "Stop"),
     "session-start": (install_hooks._platform_session_start_entry, "SessionStart"),

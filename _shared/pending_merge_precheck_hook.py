@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Runtime pending-merge precheck foreground hook.
+"""Session-start pending-merge precheck hook.
 
-Claude/Codex foreground hooks need to remind the agent about task-router without
-making the agent run its own Bash manifest probe. This hook performs the probe
-itself and prints a compact contract: pending entries are reported, and no
-pending warning means the current platform precheck is clean.
+At session start, after resume, clear, compaction and fork, this hook checks the current platform's
+pending-merge manifest and reports the result on the user's screen; it adds nothing to the model
+context. An installer run can add entries during the session, so merge-companion re-checks the
+manifest before work changes an installed skill; no input hook repeats this check.
 """
 
 from __future__ import annotations
@@ -13,13 +13,11 @@ import argparse
 import base64
 import json
 import os
-import shlex
 import sys
 from pathlib import Path
 from typing import Any, Literal
 
 from merge_companion_messages import render_pending_merge_message
-import runtime_config
 import install_destination
 from session_check_cache import observe_check, UnstableCheckTarget
 from session_intent_analyzer_hook import bound_session_identity
@@ -74,9 +72,9 @@ def _pending_line(platform: str, count: int) -> str:
 
 def _clean_contract_line(platform: str) -> str:
     return (
-        f"merge-companion-precheck: clean (hook-verified). "
+        f"merge-companion-precheck: clean (hook-verified) at session start. "
         f"This hook checked ~/.ghost-alice/pending-merges/{platform}/manifest.json; "
-        "do not run an extra shell manifest check."
+        "re-check it before changing an installed skill."
     )
 
 
@@ -93,94 +91,6 @@ def _read_hook_input() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _first_non_empty(*values: Any) -> str:
-    for value in values:
-        if value is None:
-            continue
-        text = str(value).strip()
-        if text:
-            return text
-    return ""
-
-
-def _extract_prompt(input_payload: dict[str, Any]) -> str:
-    message = input_payload.get("message")
-    if isinstance(message, dict):
-        content = message.get("content")
-        if isinstance(content, list):
-            text_parts = [
-                str(item.get("text") or "")
-                for item in content
-                if isinstance(item, dict)
-            ]
-            message = "\n".join(part for part in text_parts if part)
-        else:
-            message = content
-    return _first_non_empty(
-        input_payload.get("prompt"),
-        input_payload.get("user_prompt"),
-        input_payload.get("userPrompt"),
-        input_payload.get("input"),
-        input_payload.get("text"),
-        message,
-        input_payload.get("content"),
-    )
-
-
-def _parse_visibility_prompt(prompt: str) -> tuple[str, str | None] | None:
-    first_line = prompt.strip().splitlines()[0].strip() if prompt.strip() else ""
-    if not first_line:
-        return None
-    try:
-        parts = shlex.split(first_line)
-    except ValueError:
-        parts = first_line.split()
-    if not parts:
-        return None
-    command = parts[0].lower()
-    if command not in {"/visibility", "/show"}:
-        return None
-    if command == "/show" and len(parts) == 1:
-        return ("show", None)
-    if len(parts) == 1:
-        return ("show", None)
-    if len(parts) == 2 and parts[1].lower() in {"show", "status", "current"}:
-        return ("show", None)
-    if len(parts) == 2:
-        return ("set", parts[1])
-    return ("invalid", None)
-
-
-def _visibility_json_payload(input_payload: dict[str, Any]) -> str | None:
-    parsed = _parse_visibility_prompt(_extract_prompt(input_payload))
-    if parsed is None:
-        return None
-
-    action, profile = parsed
-    if action == "show":
-        current = runtime_config.load_config(home=_home())["agent_visibility"]["profile"]
-        reason = (
-            f"Ghost-ALICE agent visibility profile is {current}. "
-            "Use /visibility strict, /visibility dynamic, or /visibility minimal to change it."
-        )
-        return json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False)
-
-    if action == "set" and profile is not None:
-        normalized = runtime_config.canonical_agent_visibility_profile(profile)
-        if normalized == str(profile).strip().lower().replace("_", "-"):
-            runtime_config.save_config({"agent_visibility": {"profile": normalized}}, home=_home())
-            reason = (
-                f"Ghost-ALICE agent visibility profile set to {normalized}. "
-                "Hook execution and strict session logging remain unchanged."
-            )
-            return json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False)
-
-    reason = (
-        "Unknown Ghost-ALICE visibility command. " "Use /visibility, /visibility strict, /visibility dynamic, or /visibility minimal."
-    )
-    return json.dumps({"decision": "block", "reason": reason}, ensure_ascii=False)
-
-
 def _text_payload(platform: str, hook: HookKind, context: str, internal: str, result: dict | None = None) -> str:
     count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
     if count:
@@ -194,23 +104,12 @@ def _text_payload(platform: str, hook: HookKind, context: str, internal: str, re
     return _clean_contract_line(platform)
 
 
-def _json_payload(platform: str, internal: str, result: dict | None = None, *,
-                  context: str | None = None, session_id: str | None = None) -> str:
+def _json_payload(platform: str, internal: str, result: dict | None = None) -> str:
     count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
     receipt = {"platform": platform, "manifest_path": str(_pending_manifest_path(platform)), "undecided_count": count}
     if result is not None:
         receipt.update({"status": result["status"], "checked_at": result["checked_at"]})
     body: dict[str, Any] = {"continue": True, "ghostAlicePendingMergeCheck": receipt}
-    if context == 'prompt_submit' and result is not None and result["status"] == "reused":
-        # An unchanged observation adds nothing to the model context or the screen; the session-start
-        # check or an earlier input already delivered it. Visibility commands return before this point.
-        return json.dumps(body, ensure_ascii=False)
-    if result is not None and session_id and session_id != 'unknown':
-        # Session start repeats after resume, clear and compaction; an input delivers only a changed or
-        # first observation. Return its native binding and metadata, never manifest entries or the procedure.
-        public = dict(receipt, session_id=session_id)
-        body['hookSpecificOutput'] = {'hookEventName': 'SessionStart' if context == 'session_start' else 'UserPromptSubmit',
-            'additionalContext': 'merge-companion-precheck: ' + json.dumps(public, ensure_ascii=False, separators=(',', ':'))}
     if count:
         message = (f"merge-companion precheck: pending={count} (unchanged; session check reused)."
                    if result is not None and result["status"] == "reused" else _pending_line(platform, count))
@@ -232,13 +131,12 @@ def main() -> int:
     parser.add_argument("--root", type=Path)
     args, _unknown = parser.parse_known_args()
 
+    if args.hook != "session-check":
+        # Input registrations are retired; an older install that still calls one does nothing.
+        print(json.dumps({"continue": True}) if args.format == "json" else "")
+        return 0
     internal = _decode_internal(args.internal_b64)
     input_payload = _read_hook_input()
-    if args.hook in {"prompt-check", "hook-reminder"} and args.context == "prompt_submit" and args.format == "json":
-        visibility_payload = _visibility_json_payload(input_payload)
-        if visibility_payload is not None:
-            print(visibility_payload)
-            return 0
     result = None
     session_id = bound_session_identity(args.platform, input_payload)
     if args.root is not None:
@@ -256,7 +154,7 @@ def main() -> int:
             print(reason, file=sys.stderr)
             return 2
     if args.format == "json":
-        print(_json_payload(args.platform, internal, result, context=args.context, session_id=session_id))
+        print(_json_payload(args.platform, internal, result))
     else:
         print(_text_payload(args.platform, args.hook, args.context, internal, result))
     return 0

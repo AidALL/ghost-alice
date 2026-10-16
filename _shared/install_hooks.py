@@ -341,32 +341,10 @@ def _pending_merge_precheck_command(
         payload=payload_mode,
     )
 
-# 1. User input pre-hook: run only the pending-merge precheck first.
+# 1. Retired input pending-merge hook: the marker lets install and uninstall remove old entries.
+# merge-companion re-checks the manifest before work changes an installed skill.
 PROMPT_PENDING_MERGE_MARKER = "[merge-companion] prompt-check"
-PROMPT_PENDING_MERGE_INTERNAL = "merge-companion prompt-check: This hook checks the current platform's pending-merge manifest. If the hook reports undecided entries, the current-session assistant applies merge-companion when the user asks to review them or the selected work changes an affected skill. A user's explicit defer or skip leaves those entries undecided and permits other authorized work. A clean hook result requires no second manifest inspection."
 
-
-def _prompt_pending_merge_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
-    return (
-        _pending_merge_precheck_command(
-            platform=platform,
-            hook="prompt-check",
-            context="prompt_submit",
-            output_format=output_format,
-            internal_instruction=PROMPT_PENDING_MERGE_INTERNAL,
-            payload_mode=payload_mode,
-        )
-        + f" # {PROMPT_PENDING_MERGE_MARKER}"
-    )
-
-
-PROMPT_PENDING_MERGE_COMMAND = _prompt_pending_merge_command(platform="claude", output_format="text")
-PROMPT_PENDING_MERGE_COMMAND_CODEX = _prompt_pending_merge_command(platform="codex", output_format="json")
-
-PROMPT_PENDING_MERGE_ENTRY = {
-    "matcher": "",
-    "hooks": [{"type": "command", "command": PROMPT_PENDING_MERGE_COMMAND}],
-}
 # 1-B. Work-start hook: reminder to call task-router.
 HOOK_MARKER = "[hook-reminder] AGENTS.md"
 HOOK_INTERNAL = reminder_text('task-router')
@@ -1014,14 +992,6 @@ def _platform_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
     else:
         command = _hook_reminder_command(platform="claude", output_format="json", payload_mode=True)
     return _hook_runner_command_entry("prompt", command, HOOK_MARKER, platform_key=platform_key)
-
-
-def _platform_prompt_pending_merge_entry(platform_key: str, event: str) -> dict[str, Any]:
-    if platform_key == "codex":
-        command = _prompt_pending_merge_command(platform="codex", output_format="json", payload_mode=True)
-    else:
-        command = _prompt_pending_merge_command(platform="claude", output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("pending-merge-prompt", command, PROMPT_PENDING_MERGE_MARKER, platform_key=platform_key)
 
 
 def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -2125,52 +2095,6 @@ def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None =
     return removed
 
 
-def _entry_contains_marker(entry: dict[str, Any], marker: str) -> bool:
-    return any(marker in hook.get("command", "") for hook in entry.get("hooks", []))
-
-
-def _reorder_user_prompt_governance_hooks(hooks_list: list) -> bool:
-    """Keep managed UserPromptSubmit hook entries in install-surface order.
-
-    This is not the full semantic graph. session-intent-analyzer fans out to
-    task-router and skill-evolution (report-only). Intake owns routing guidance.
-    """
-    ordered_markers = [
-        PROMPT_PENDING_MERGE_MARKER,
-        SESSION_INTENT_MARKER,
-    ]
-    managed: dict[str, dict[str, Any]] = {}
-    first_managed_index: int | None = None
-
-    for index, entry in enumerate(hooks_list):
-        marker = next((item for item in ordered_markers if _entry_contains_marker(entry, item)), "")
-        if not marker:
-            continue
-        managed[marker] = entry
-        if first_managed_index is None:
-            first_managed_index = index
-
-    if first_managed_index is None or any(marker not in managed for marker in ordered_markers):
-        return False
-    present_markers = [marker for marker in ordered_markers if marker in managed]
-
-    rebuilt: list[dict[str, Any]] = []
-    inserted = False
-    for entry in hooks_list:
-        marker = next((item for item in ordered_markers if _entry_contains_marker(entry, item)), "")
-        if not marker:
-            rebuilt.append(entry)
-            continue
-        if not inserted:
-            rebuilt.extend(managed[item] for item in present_markers)
-            inserted = True
-
-    if rebuilt == hooks_list:
-        return False
-    hooks_list[:] = rebuilt
-    return True
-
-
 GHOST_ALICE_HOOK_MARKERS = (
     PROMPT_PENDING_MERGE_MARKER,
     HOOK_MARKER,
@@ -2307,33 +2231,10 @@ def install_hook(
         if _ensure_hook_dispatcher_installed(dry_run=dry_run):
             changed = True
 
-    # Install the prompt pending-merge precheck hook.
-    # This is the first entry on the UserPromptSubmit hook surface.
-    # Keep it separate from the task-router reminder so user-asset protection
-    # runs before semantic routing.
-    prompt_pending_merge_entry = _platform_prompt_pending_merge_entry(platform_key, hook_key)
-    prompt_pending_merge_command = _entry_command(prompt_pending_merge_entry)
-    removed = _remove_stale_hook_entries(
-        hook_list,
-        PROMPT_PENDING_MERGE_MARKER,
-        prompt_pending_merge_command,
-        require_dispatcher=require_dispatcher,
-        hook_id="pending-merge-prompt",
-    )
+    # The input pending-merge hook is retired; merge-companion re-checks before skill changes.
+    removed = _remove_hook_entries(hook_list, PROMPT_PENDING_MERGE_MARKER, hook_id="pending-merge-prompt")
     if removed:
-        _log(_t(f"  Removed {removed} stale prompt pending-merge hook entry(ies)", f"  Removed {removed} stale prompt pending-merge hook entry(ies)"))
-        changed = True
-
-    if _hook_already_exists(
-        hook_list,
-        PROMPT_PENDING_MERGE_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=prompt_pending_merge_command,
-    ):
-        _log(_t("  prompt pending-merge hook already exists. Skipping", "  prompt pending-merge hook already exists. Skipping"))
-    else:
-        hook_list.append(prompt_pending_merge_entry)
-        _log(_t("  prompt pending-merge hook added", "  prompt pending-merge hook added"))
+        _log(f"  Removed {removed} retired input pending-merge hook entry(ies)")
         changed = True
 
     removed = remove_managed_prompt_reminders(hook_list)
@@ -2376,13 +2277,6 @@ def install_hook(
         _log(_t(
             f"  Removed {removed} web-search-first hook entry(ies)",
             f"  Removed {removed} web-search-first hook entry(ies)",
-        ))
-        changed = True
-
-    if _reorder_user_prompt_governance_hooks(hook_list):
-        _log(_t(
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch)",
-            "  Reordered UserPromptSubmit hook surface: pending-merge -> session-intent (routing guidance; skill-evolution report-only branch)",
         ))
         changed = True
 
@@ -3179,14 +3073,6 @@ def check_status_detail(
     )
 
     require_dispatcher = False
-    prompt_pending_merge_entry = _platform_prompt_pending_merge_entry(platform_key, hook_key)
-    prompt_pending_merge_present, prompt_pending_merge_ok = _hook_marker_match_status(
-        hook_list,
-        PROMPT_PENDING_MERGE_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=_entry_command(prompt_pending_merge_entry),
-    )
-
     session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
     session_intent_present, session_intent_ok = _hook_marker_match_status(
         hook_list,
@@ -3269,7 +3155,6 @@ def check_status_detail(
         )
 
     required = {
-        "pending-merge-prompt": (prompt_pending_merge_present, prompt_pending_merge_ok),
         "session-intent": (session_intent_present, session_intent_ok),
         "tool-checkpoint": (tool_checkpoint_present, tool_checkpoint_ok),
         "completion": (stop_present, stop_ok),

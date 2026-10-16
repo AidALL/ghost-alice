@@ -31,7 +31,7 @@ This document is the compatibility test contract for the Ghost-ALICE installer. 
 | Public surface parity | README, docs/index.html, Claude command wrappers stay aligned with `skill-catalog/skills.json` count, list, and targets | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
 | Ghost-ALICE fresh clone install policy | Public installs use a fresh `AidALL/ghost-alice` clone plus install. The installer does not rewrite existing remotes, rename local checkout directories, or expose repository migration flags. Installed Claude permission cleanup is limited to managed stale checkout path allow rules. | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook` |
 | Agent visibility profile | Default `agent_visibility.profile` is `dynamic`. Allowed values are `strict`, `dynamic`, and `minimal`. The public installer command surface uses `--visibility`; native wrapper compatibility aliases remain implementation-test coverage. `--agent-visibility` remains accepted as the long-form compatibility alias. The profile controls the user-facing governance message surface only. It does not suppress hook installation or hook execution, does not change generated hook command contracts, and strict-grade session logging remains always-on. | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
-| Agent visibility runtime command surface | Claude Code uses `/visibility strict|dynamic|minimal`, Codex uses the trusted `UserPromptSubmit` hook pseudo-command path for `/visibility`, and all platforms can use `_shared/agent_visibility_cli.py`. Documentation must not collapse these into one slash-command spelling. | `scripts.tests.test_install_status_contract` |
+| Agent visibility runtime command surface | Claude Code uses the `/visibility strict|dynamic|minimal` workspace command, and every platform, including Codex, uses `_shared/agent_visibility_cli.py`. Documentation must not present `/visibility` as a Codex command. | `scripts.tests.test_install_status_contract` |
 
 ## Agent Hook Runtime Contract
 
@@ -60,7 +60,7 @@ The installer registers session-intent-analyzer as the single UserPromptSubmit i
 
 ### pending merge precheck
 
-If the SessionStart hook provides a contract that current platform pending-merge precheck ran and no pending warning exists, runtime records `merge-companion-precheck: clean (hook-verified)` and does not repeat shell manifest checks. Read the current platform manifest directly only when the hook reports an undecided entry or hook evidence is absent. When an undecided entry exists, apply `merge-companion` when the user asks to review it or the selected work changes an affected skill; an explicit user defer or skip continues other work with the manifest entry still `decided=false`.
+The SessionStart hook checks the current platform's pending-merge manifest at session start and shows the result on the user's screen. Before selected work changes an installed skill, and when the user asks to review backed-up changes, the current-session assistant applies `merge-companion`, which first re-checks the manifest because an installer run can add entries during the session. It reviews an undecided entry that the work affects, or any undecided entry when the user asked; an explicit user defer or skip continues other work with the manifest entry still `decided=false`.
 
 ### tool-checkpoint recovery surface
 

@@ -22,7 +22,7 @@ class OperatingRuleContractTest(unittest.TestCase):
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('Work Selection section', router)
         self.assertIn('register the Core response-route using the session-start receipt', router)
-        self.assertIn('the current input ID that `--read-intent` returns', router)
+        self.assertIn('the input ID that `--read-intent` returned when this input', router)
 
     def test_reuse_instruction_contract_stays_at_its_owner(self):
         reference = (ROOT / 'coding-convention/verification-before-completion/references/verify-or-reuse.md').read_text()
