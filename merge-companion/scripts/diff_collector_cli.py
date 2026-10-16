@@ -14,8 +14,8 @@ from diff_collector import collect_user_changes, register_changes_in_manifest
 from file_walker import walk_user_files
 
 
-def _walk_user_files(skills_dir: Path) -> list[Path]:
-    return walk_user_files(skills_dir)
+def _walk_user_files(skills_dir: Path, targets: list[str] | tuple[str, ...] = ()) -> list[Path]:
+    return walk_user_files(skills_dir, targets)
 
 
 def main() -> int:
@@ -25,9 +25,11 @@ def main() -> int:
     p.add_argument("--manifest", required=True)
     p.add_argument("--platform", required=True)
     p.add_argument("--skills-dir", required=True)
+    p.add_argument("--target", action="append", default=[],
+                   help="skill root this install replaces; checked even without its install marker")
     args = p.parse_args()
     skills_dir = Path(args.skills_dir)
-    files = _walk_user_files(skills_dir)
+    files = _walk_user_files(skills_dir, args.target)
     changes = collect_user_changes(Path(args.snapshot), files, skills_dir=skills_dir)
     register_changes_in_manifest(
         changes,

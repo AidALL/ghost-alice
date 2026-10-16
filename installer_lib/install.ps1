@@ -318,9 +318,17 @@ function Invoke-PreflightBeforeInstall {
         throw "merge-companion preflight cannot run - aborting installation"
     }
 
+    # Roots this install replaces are checked even when their install marker has disappeared.
+    $replacedArgs = @()
+    if (Test-Path -LiteralPath (Join-Path $script:GhostAliceRoot "_shared") -PathType Container) {
+        $replacedArgs += @("--target", "_shared")
+    }
+    foreach ($target in (Get-InstallTargetsForSkillNames -SkillNames $SkillNames -ExtraTargets $ExtraTargets)) {
+        $replacedArgs += @("--target", $target.Name)
+    }
     & $py (Join-Path $script:GhostAliceRoot "merge-companion/scripts/diff_collector_cli.py") `
         --snapshot $snapshot --pending $pending --manifest $manifest `
-        --platform $TargetPlatform --skills-dir $SkillsDir
+        --platform $TargetPlatform --skills-dir $SkillsDir @replacedArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Err "merge-companion preflight change detection failed; aborting install" "merge-companion preflight change detection failed; aborting install"
         throw "merge-companion preflight failed - aborting installation"

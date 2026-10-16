@@ -424,6 +424,17 @@ class TestDiffCollectorV2(unittest.TestCase):
         # Only a marked root holds Ghost-ALICE files that the installer replaces.
         self.assertEqual(walk_user_files(self.skills_dir), [managed / "SKILL.md"])
 
+    def test_walker_tracks_a_replaced_root_without_its_marker(self):
+        replaced = self.skills_dir / "task-router"
+        replaced.mkdir()
+        (replaced / "SKILL.md").write_text("managed", encoding="utf-8")
+        own = self.skills_dir / "my-notes"
+        own.mkdir()
+        (own / "SKILL.md").write_text("the user's own skill", encoding="utf-8")
+
+        # A root this install replaces is checked even when its marker is gone.
+        self.assertEqual(walk_user_files(self.skills_dir, ["task-router"]), [replaced / "SKILL.md"])
+
     def test_app_synced_change_never_enters_pending_store(self):
         synced_file = self.skills_dir / "synced" / "bucket" / "pptx" / "SKILL.md"
         synced_file.parent.mkdir(parents=True)

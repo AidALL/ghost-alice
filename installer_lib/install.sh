@@ -341,12 +341,21 @@ _run_preflight_before_install() {
     return 1
   fi
 
+  # Roots this install replaces are checked even when their install marker has disappeared.
+  local replaced_args=()
+  [ -d "${SCRIPT_DIR}/_shared" ] && replaced_args+=(--target "_shared")
+  local replaced_name replaced_path
+  while IFS='|' read -r replaced_name replaced_path; do
+    [ -n "$replaced_name" ] && replaced_args+=(--target "$replaced_name")
+  done < <(iter_install_targets "${skills[@]}")
+
   if ! "$py" "${SCRIPT_DIR}/merge-companion/scripts/diff_collector_cli.py" \
     --snapshot "$snapshot" \
     --pending "$pending_root" \
     --manifest "$manifest" \
     --platform "$platform_dir" \
-    --skills-dir "$SKILLS_DIR"; then
+    --skills-dir "$SKILLS_DIR" \
+    ${replaced_args[@]+"${replaced_args[@]}"}; then
     error "$(t 'merge-companion preflight change detection failed; aborting install' 'merge-companion preflight change detection failed; aborting install')"
     return 1
   fi
