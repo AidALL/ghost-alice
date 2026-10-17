@@ -42,6 +42,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_profile_gate
+import hook_definitions
 import install_hooks
 from test_completion_skill_evidence import assert_stop_observation
 
@@ -4017,7 +4018,7 @@ class TestInstallHook(TempHomeTestCase):
                 self.assertEqual(result, "installed")
 
                 settings = self._read_settings(platform)
-                event = install_hooks._resolve_hook_event("on_user_prompt", platform)
+                event = hook_definitions.resolve_hook_event("on_user_prompt", platform)
                 hooks = settings["hooks"][event]
                 marker_order = []
                 for entry in hooks:
@@ -4268,7 +4269,7 @@ class TestInstallHook(TempHomeTestCase):
 
                 self.assertEqual(result, 0, msg=output.getvalue())
                 settings = self._read_settings(platform)
-                pre_tool_key = install_hooks._resolve_hook_event("pre_tool_use", platform)
+                pre_tool_key = hook_definitions.resolve_hook_event("pre_tool_use", platform)
                 command = _visible_and_runner_payload_text(
                     settings["hooks"][pre_tool_key][0]["hooks"][0]["command"]
                 )
@@ -4319,7 +4320,7 @@ class TestInstallHook(TempHomeTestCase):
                         "installed",
                     )
                     settings = self._read_settings(platform)
-                    pre_tool = install_hooks._resolve_hook_event("pre_tool_use", platform)
+                    pre_tool = hook_definitions.resolve_hook_event("pre_tool_use", platform)
                     command = next(
                         hook["command"]
                         for entry in settings["hooks"][pre_tool]
@@ -4371,7 +4372,7 @@ class TestInstallHook(TempHomeTestCase):
                     self.assertEqual(json.loads(results[-1].stdout), {})
 
     def test_agent_visibility_env_does_not_change_generated_hook_command(self):
-        hook_key = install_hooks._resolve_hook_event("on_user_prompt", "claude")
+        hook_key = hook_definitions.resolve_hook_event("on_user_prompt", "claude")
         with patch.dict(os.environ, {"GHOST_ALICE_AGENT_VISIBILITY": "strict"}):
             strict_command = install_hooks._entry_command(install_hooks._platform_hook_entry("claude", hook_key))
         with patch.dict(os.environ, {"GHOST_ALICE_AGENT_VISIBILITY": "minimal"}):
@@ -5254,11 +5255,11 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
                 hook["command"] = re.sub(r"\s+# .*\[hook-runner:[^\]]+\].*$", "", command)
             return cloned
 
-        user_prompt = install_hooks._resolve_hook_event("on_user_prompt", "codex")
-        pre_tool = install_hooks._resolve_hook_event("pre_tool_use", "codex")
-        post_tool = install_hooks._resolve_hook_event("post_tool_use", "codex")
-        stop = install_hooks._resolve_hook_event("on_agent_stop", "codex")
-        session_start = install_hooks._resolve_hook_event("on_session_start", "codex")
+        user_prompt = hook_definitions.resolve_hook_event("on_user_prompt", "codex")
+        pre_tool = hook_definitions.resolve_hook_event("pre_tool_use", "codex")
+        post_tool = hook_definitions.resolve_hook_event("post_tool_use", "codex")
+        stop = hook_definitions.resolve_hook_event("on_agent_stop", "codex")
+        session_start = hook_definitions.resolve_hook_event("on_session_start", "codex")
         io_trace_entry = install_hooks._platform_io_trace_entry("codex", post_tool)
         self.assertIsNotNone(io_trace_entry)
 
@@ -5667,12 +5668,13 @@ class TestSessionStartHook(unittest.TestCase):
         os.environ.pop("CODEX_HOME", None)
 
     def test_session_start_hook_installed_for_claude(self):
-        from install_hooks import install_hook, SESSION_START_MARKER, _resolve_hook_event
+        from install_hooks import install_hook, SESSION_START_MARKER
+        from hook_definitions import resolve_hook_event
         Path(self.tmp.name).mkdir(parents=True, exist_ok=True)
         result = install_hook("claude")
         self.assertEqual(result, "installed")
         settings = json.loads((Path(self.tmp.name) / "settings.json").read_text(encoding="utf-8"))
-        ss_key = _resolve_hook_event("on_session_start", "claude")
+        ss_key = resolve_hook_event("on_session_start", "claude")
         self.assertIn(ss_key, settings["hooks"])
         cmds = [h["command"] for entry in settings["hooks"][ss_key] for h in entry["hooks"]]
         self.assertTrue(any(SESSION_START_MARKER in c for c in cmds))
@@ -5681,14 +5683,14 @@ class TestSessionStartHook(unittest.TestCase):
         from install_hooks import (
             SESSION_RECEIPT_MARKER,
             _platform_session_receipt_entry,
-            _resolve_hook_event,
             install_hook,
         )
+        from hook_definitions import resolve_hook_event
         Path(self.tmp.name).mkdir(parents=True, exist_ok=True)
         self.assertEqual(install_hook("claude"), "installed")
         install_hook("claude")
         settings = json.loads((Path(self.tmp.name) / "settings.json").read_text(encoding="utf-8"))
-        ss_key = _resolve_hook_event("on_session_start", "claude")
+        ss_key = resolve_hook_event("on_session_start", "claude")
         cmds = [h["command"] for entry in settings["hooks"][ss_key] for h in entry["hooks"]]
         self.assertEqual(sum(SESSION_RECEIPT_MARKER in c for c in cmds), 1)
         for platform in ("claude", "codex"):

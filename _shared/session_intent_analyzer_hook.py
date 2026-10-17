@@ -244,7 +244,7 @@ def native_context_capability(session_id: str, platform: str = 'codex') -> dict[
         if platform != 'codex':
             return None
         from native_transcript import codex_transcript_path
-        from context_gateway_install import PROVIDER
+        from hook_definitions import PROVIDER
         home = os.environ.get('GHOST_ALICE_CODEX_DIR') or os.environ.get('CODEX_HOME') or str(_home() / '.codex')
         path = codex_transcript_path(home, session_id)
         if path is None:

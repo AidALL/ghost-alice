@@ -39,6 +39,8 @@ Language: [🇺🇸 English](../../reference/installer-architecture.md) | 🇰�
 
 설치된 훅 런타임은 같은 런타임 루트 아래에 `_shared` 모듈과 `session-intent-analyzer/scripts/session_intent_ledger.py`를 함께 포함합니다. 네이티브 훅과 Ghost-ALICE Autopilot은 이 설치본에서 원장 API와 관련 모듈을 불러옵니다. 소스 체크아웃은 설치 입력을 지정하며, 소스 편집만으로 설치된 훅의 실행 모듈이 바뀌지 않습니다. 원장 데이터베이스 경로와 네이티브 세션 식별자는 별도의 실행 입력입니다.
 
+`_shared/hook_definitions.py`는 설치기와 훅 런타임이 함께 읽는 이름을 소유합니다. 훅 ID와 호스트 이벤트 이름, `ghost_alice_context` 제공자 이름, 권한 어댑터 허용 목록이 여기에 있습니다. 이 모듈은 표준 라이브러리만 가져옵니다. 훅 런타임(`hook_profile_gate.py`, `session_intent_analyzer_hook.py`)과 설치기(`install_hooks.py`, `addon_installer.py`, `context_gateway_*` 모듈)가 이 모듈을 가져옵니다. 런타임 모듈은 설치기 모듈을 가져오지 않고, 설치기 모듈은 런타임 모듈을 가져오지 않습니다. `_shared.test_hook_definitions`가 두 규칙을 검사합니다.
+
 ## Install Flow
 
 | 전달 주체 | 입력으로 넘기는 내용 | 다음 단계에서 사용하는 결과 |
@@ -91,6 +93,7 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 | --- | --- | --- |
 | Shell flag or platform bootstrap | `install.sh`, `install.ps1`, `install.cmd` | shell parser tests, runtime detection tests, compatibility matrix groups |
 | Hook payload or hook status wording | `_shared/install_hooks.py` | `_shared.test_install_hooks`, `scripts/check_skill_gate_contract.py` |
+| Hook id, host event name or privileged adapter allowlist | `_shared/hook_definitions.py` | `_shared.test_hook_definitions` |
 | Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `installer_lib/` | install-state schema tests and uninstall tests |
 | Public docs or command surface | `README.md`, `docs/`, `docs/index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
 | Platform compatibility rule | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list` and policy가 지정한 focused group |
