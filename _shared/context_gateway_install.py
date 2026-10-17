@@ -20,9 +20,10 @@ import context_gateway_inventory as inventory
 import context_gateway_plan as planning
 import context_gateway_platform as platform
 from context_gateway_model import (COMPANIONS, GatewayBlocked, GatewayFailure, GatewayServiceError,
-    LABEL, MODULES, PROVIDER, Request, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest as _digest)
+    LABEL, MODULES, Request, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest as _digest)
 from context_gateway_plan import render_provider, remove_provider
 from context_gateway_transaction import execute
+from hook_definitions import PROVIDER
 
 _write = platform.write
 _service_state = platform.service_state

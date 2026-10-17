@@ -7,7 +7,8 @@ from pathlib import Path
 import plistlib
 from types import MappingProxyType
 
-from context_gateway_model import COMPANIONS, Inventory, LABEL, MODULES, PROVIDER, ServiceObservation, TOP_BEGIN, TABLE_BEGIN
+from context_gateway_model import COMPANIONS, Inventory, LABEL, MODULES, ServiceObservation, TOP_BEGIN, TABLE_BEGIN
+from hook_definitions import PROVIDER
 
 
 class _Collector:

@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hook_definitions
 import hook_profile_gate
 import install_hooks
 import pending_merge_precheck_hook
@@ -433,7 +434,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             spec = dict(args_policy='no_args', hook_id_by_event={'on_agent_stop': 'continue'},
                 script_rel_by_event={'on_agent_stop': 'adapters/demo.py'})
             with (mock.patch.dict(os.environ, {'HOME': directory}, clear=True),
-                  mock.patch.object(addon_installer, 'load_privileged_adapter_allowlist', return_value={'demo': spec}),
+                  mock.patch.object(hook_definitions, 'load_privileged_adapter_allowlist', return_value={'demo': spec}),
                   mock.patch.object(hook_profile_gate, '_read_stdin', return_value=json.dumps(
                       dict(session_id='current', hook_event_name='Stop'))),
                   mock.patch.object(hook_profile_gate, '_validate_shell_command', return_value=[sys.executable, str(script)])):
@@ -1900,7 +1901,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
                       mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr),
                       mock.patch.object(hook_profile_gate, "_read_stdin", wraps=hook_profile_gate._read_stdin) as read_stdin,
                       mock.patch.object(hook_profile_gate, "_validate_shell_command", return_value=[sys.executable, str(script)]),
-                      mock.patch.object(addon_installer, "load_privileged_adapter_allowlist", return_value={"demo": spec}),
+                      mock.patch.object(hook_definitions, "load_privileged_adapter_allowlist", return_value={"demo": spec}),
                       mock.patch.object(hook_profile_gate.subprocess, "run") as child,
                       self.assertRaises(SystemExit) as rejected):
                     hook_profile_gate.main(["run", runner, "codex", payload,

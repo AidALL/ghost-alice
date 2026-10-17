@@ -35,6 +35,7 @@ if "--binding-b64" in sys.argv:
         raise SystemExit(126)
 
 import agent_visibility_policy
+from hook_definitions import normalize_hook_id
 import runtime_config
 import work_impact_projection
 import strict_session_log
@@ -61,14 +62,6 @@ class HookCommandRejected(ValueError):
         # Transient audit context only; it does not grant command authority.
         self.hook_payload = hook_payload
         self.audit_details = audit_details
-
-
-def normalize_hook_id(value: str) -> str:
-    text = (value or "").strip().lower().replace("_", "-").replace(" ", "-")
-    if ":" in text:
-        text = text.rsplit(":", 1)[-1]
-    text = re.sub(r"[^a-z0-9-]+", "-", text)
-    return re.sub(r"-+", "-", text).strip("-")
 
 
 def _split_tokens(raw: str | None) -> list[str]:
@@ -951,7 +944,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
             if flag in argv and argv[argv.index(flag)+1] != env["GHOST_ALICE_SESSION_INTENT_ROOT"]:
                 raise HookCommandRejected("inner ledger root conflicts with trusted binding", hook_payload=hook_payload)
         if adapter := binding.get("adapter"):
-            from addon_installer import load_privileged_adapter_allowlist, privileged_adapter_runner_id
+            from hook_definitions import load_privileged_adapter_allowlist, privileged_adapter_runner_id
             spec = load_privileged_adapter_allowlist(official_path=Path(env["GHOST_ALICE_CORE_ROOT"])/"skill-catalog/privileged-adapters.json").get(adapter.get("adapter_id"))
             if (not spec or spec.get("args_policy") != "no_args" or adapter.get("runner_id") != hook_id
                     or len(argv) != 2 or argv[1] != adapter.get("script")):

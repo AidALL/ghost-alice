@@ -9,7 +9,8 @@ import re
 import tomllib
 
 from context_gateway_model import (COMPANIONS, Decision, GatewayBlocked, LABEL, MODULES, Mutation,
-    Plan, Preparation, PROVIDER, RETIRED_MODULES, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest, encoded)
+    Plan, Preparation, RETIRED_MODULES, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest, encoded)
+from hook_definitions import PROVIDER
 
 
 def regular(item, *, codex=False):

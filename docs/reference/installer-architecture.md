@@ -39,6 +39,8 @@ The installer updates assets and hooks while protecting user edits and recording
 
 The hook runtime contains both `_shared` modules and `session-intent-analyzer/scripts/session_intent_ledger.py` under the same runtime root. Native hooks and Ghost-ALICE Autopilot resolve the ledger API and its sibling helpers from that deployment. The source checkout identifies installation inputs; editing that checkout does not select execution libraries for an installed hook. The ledger database path and native session identity remain separate runtime inputs.
 
+`_shared/hook_definitions.py` owns the names that the installer and the hook runtime read together: hook ids and host event names, the `ghost_alice_context` provider name, and the privileged adapter allowlist. It imports only the standard library. The hook runtime (`hook_profile_gate.py`, `session_intent_analyzer_hook.py`) and the installer (`install_hooks.py`, `addon_installer.py` and the `context_gateway_*` modules) import it; a runtime module imports no installer module, and an installer module imports no runtime module. `_shared.test_hook_definitions` checks both rules.
+
 ## Install Flow
 
 | Sender → receiver | Input passed | Result used by the next step |
@@ -91,6 +93,7 @@ This is why update and uninstall are part of the installer architecture, not sep
 | --- | --- | --- |
 | Shell flag or platform bootstrap | `install.sh`, `install.ps1`, `install.cmd` | shell parser tests, runtime detection tests, compatibility matrix groups |
 | Hook payload or hook status wording | `_shared/install_hooks.py` | `_shared.test_install_hooks`, `scripts/check_skill_gate_contract.py` |
+| Hook id, host event name or privileged adapter allowlist | `_shared/hook_definitions.py` | `_shared.test_hook_definitions` |
 | Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `installer_lib/` | install-state schema tests and uninstall tests |
 | Public docs or command surface | `README.md`, `docs/`, `docs/index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
 | Platform compatibility rule | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list` and the focused group named by the policy |

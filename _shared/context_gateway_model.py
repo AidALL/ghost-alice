@@ -7,7 +7,6 @@ import json
 from pathlib import Path
 from typing import Callable, Mapping, Protocol
 
-PROVIDER = 'ghost_alice_context'
 LABEL = 'org.ghost-alice.context-gateway'
 TOP_BEGIN = '# Ghost-ALICE managed context selection begin'
 TOP_END = '# Ghost-ALICE managed context selection end'
@@ -17,7 +16,7 @@ MODULES = ('context_lifecycle.py', 'context_gateway.py', 'context_gateway_instal
            'context_gateway_model.py', 'context_gateway_inventory.py', 'context_gateway_plan.py',
            'context_gateway_transaction.py', 'context_gateway_platform.py',
            'response_context_use.py', 'claude_context_adapter.py', 'source_lookup.py', 'native_transcript.py',
-           'text_lines.py')
+           'text_lines.py', 'hook_definitions.py')
 # Modules that earlier installations own and the current payload no longer ships.
 RETIRED_MODULES = ('codex_intake_view.py',)
 COMPANIONS = ('session-intent-analyzer/scripts/session_intent_ledger.py',)

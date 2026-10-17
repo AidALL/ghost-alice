@@ -75,7 +75,8 @@ if sys.version_info < MIN_PYTHON_VERSION:
     raise SystemExit(1)
 
 from merge_companion_messages import render_pending_merge_message
-from hook_profile_gate import normalize_hook_id
+import hook_definitions
+from hook_definitions import normalize_hook_id, resolve_hook_event
 import runtime_config
 import install_destination
 import addon_installer
@@ -692,49 +693,6 @@ def _hook_runner_command_entry(
 def _resolve_io_trace_script() -> str:
     """Return the io_trace_hook.py path relative to the install directory."""
     return _resolve_shared_hook_script("io_trace_hook.py")
-
-# ── Semantic Intent -> Platform Event Name Mapping ────────
-#
-# Each platform uses different event names for hooks with the same intent. Add only a mapping in this table when adding a new platform.
-#
-# Notes:
-#   - claude/codex: UserPromptSubmit fires once when user input is submitted.
-
-HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
-    "on_user_prompt": {
-        "claude": "UserPromptSubmit",
-        "codex":  "UserPromptSubmit",
-    },
-    "pre_tool_use": {
-        "claude": "PreToolUse",
-        "codex":  "PreToolUse",
-    },
-    "post_tool_use": {
-        "claude": "PostToolUse",
-        "codex":  "PostToolUse",
-    },
-    "on_agent_stop": {
-        "claude": "Stop",
-        "codex":  "Stop",
-    },
-}
-
-HOOK_EVENT_MAP["on_session_start"] = {
-    "claude": "SessionStart",
-    "codex":  "SessionStart",
-}
-
-
-def _resolve_hook_event(intent: str, platform: str) -> str:
-    """Convert a semantic intent to the concrete event name for a platform."""
-    try:
-        return HOOK_EVENT_MAP[intent][platform]
-    except KeyError:
-        raise ValueError(
-            f"Unknown hook intent '{intent}' or platform '{platform}'. "
-            f"Add the required mapping to HOOK_EVENT_MAP."
-        )
-
 
 # ── Framework Config Paths ────────────────────────────────
 #
@@ -2172,7 +2130,7 @@ def install_hook(
     name = platform["name"]
     settings_file = platform["hook_file"]()
     config_dir = platform["config_dir"]()
-    hook_key = _resolve_hook_event(platform["hook_intent"], platform_key)
+    hook_key = resolve_hook_event(platform["hook_intent"], platform_key)
 
     _log(f"── {name} ──")
 
@@ -2281,7 +2239,7 @@ def install_hook(
         changed = True
 
     # Install the pre_tool_use hook (tool-checkpoint: enforce narration before tool calls).
-    tool_checkpoint_key = _resolve_hook_event("pre_tool_use", platform_key)
+    tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
     tool_checkpoint_entry = _platform_tool_checkpoint_entry(
         platform_key,
         tool_checkpoint_key,
@@ -2318,7 +2276,7 @@ def install_hook(
     # Install the on_agent_stop hook (verification-before-completion reminder).
     stop_intent = platform.get("stop_hook_intent")
     if stop_intent and platform.get("stop_hook_entry"):
-        stop_key = _resolve_hook_event(stop_intent, platform_key)
+        stop_key = resolve_hook_event(stop_intent, platform_key)
         stop_entry = _platform_stop_hook_entry(platform_key, stop_key)
         stop_command = _entry_command(stop_entry)
         if stop_key not in hooks_obj:
@@ -2349,7 +2307,7 @@ def install_hook(
         # Install the SessionStart hook (pending-merge-session-start layer: automatic merge-companion check).
     ss_intent = platform.get("session_start_intent")
     if ss_intent and platform.get("session_start_entry"):
-        ss_key = _resolve_hook_event(ss_intent, platform_key)
+        ss_key = resolve_hook_event(ss_intent, platform_key)
         ss_entry = _platform_session_start_entry(platform_key, ss_key)
         ss_command = _entry_command(ss_entry)
         if ss_key not in hooks_obj:
@@ -2403,7 +2361,7 @@ def install_hook(
             changed = True
 
     # Install the io-trace tool-use audit hook.
-    post_tool_key = _resolve_hook_event("post_tool_use", platform_key)
+    post_tool_key = resolve_hook_event("post_tool_use", platform_key)
     io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
     if io_entry:
         io_command = _entry_command(io_entry)
@@ -2439,7 +2397,7 @@ def install_hook(
     verified_addon_commands: set[tuple[str, str]] = set()
     # Wire observational addon hooks after the Core suite. Empty addon_sources leaves the hook configuration unchanged.
     for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
-        event_name = _resolve_hook_event(event_intent, platform_key)
+        event_name = resolve_hook_event(event_intent, platform_key)
         marker = f"[addon:{addon_id}] {hook_id}"
         # The generated command embeds "{marker} [hook-runner:...]", so the marker is always followed by a space. Matching on "marker " makes removal exact and prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
         match_marker = marker + " "
@@ -2463,7 +2421,7 @@ def install_hook(
         else:
             _log(_t(f"  {event_name} addon hook already exists: {marker}", f"  {event_name} addon hook already exists: {marker}"))
 
-    # Privileged adapters are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from addon_installer.CORE_PRIVILEGED_ADAPTER_ALLOWLIST.
+    # Privileged adapters are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from the privileged adapter allowlist in hook_definitions.
     privileged_adapter_specs = _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir)
     if platform_key == "claude" and any(spec.get("adapter_id") == "autopilot-mode" for spec in privileged_adapter_specs):
         removed = _remove_legacy_autopilot_hook_entries(hooks_obj)
@@ -2474,7 +2432,7 @@ def install_hook(
             ))
             changed = True
     for spec in privileged_adapter_specs:
-        event_name = _resolve_hook_event(spec["event"], platform_key)
+        event_name = resolve_hook_event(spec["event"], platform_key)
         marker = spec["marker"]
         match_marker = marker + " "
         inner = _hook_python_command(spec["script"], payload=True)
@@ -2617,7 +2575,7 @@ def _is_exact_adapter_hook_command(command: str, marker: str) -> bool:
         return False
     adapter_id = match.group("adapter_id")
     hook_id = match.group("hook_id")
-    runner_id = addon_installer.privileged_adapter_runner_id(adapter_id, hook_id)
+    runner_id = hook_definitions.privileged_adapter_runner_id(adapter_id, hook_id)
     exact_comment = f"{marker} [hook-runner:{runner_id}]"
     return exact_comment in command and _hook_runner_id_match(command, runner_id)
 
@@ -2867,7 +2825,7 @@ def _is_managed_adapter_command(command: str) -> bool:
     match = _MANAGED_ADAPTER_HOOK_COMMENT_RE.search(command)
     if not match:
         return False
-    expected = addon_installer.privileged_adapter_runner_id(match.group("adapter_id"), match.group("hook_id"))
+    expected = hook_definitions.privileged_adapter_runner_id(match.group("adapter_id"), match.group("hook_id"))
     if match.group("runner_id") != expected:
         return False
     return _hook_runner_id_match(command, expected)
@@ -2926,7 +2884,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     name = platform["name"]
     settings_file = platform["hook_file"]()
     config_dir = platform["config_dir"]()
-    hook_key = _resolve_hook_event(platform["hook_intent"], platform_key)
+    hook_key = resolve_hook_event(platform["hook_intent"], platform_key)
 
     _log(f"── {name} ──")
 
@@ -2967,7 +2925,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     total_removed += _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER, hook_id="web-search-first")
 
     # Remove the tool-checkpoint PreToolUse hook.
-    tool_checkpoint_key = _resolve_hook_event("pre_tool_use", platform_key)
+    tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
     tool_checkpoint_list = hooks_obj.get(tool_checkpoint_key, [])
     for marker in (TOOL_CHECKPOINT_MARKER, *LEGACY_TOOL_CHECKPOINT_MARKERS):
         if _hook_already_exists(tool_checkpoint_list, marker):
@@ -2976,7 +2934,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     # Remove the on_agent_stop hook.
     stop_intent = platform.get("stop_hook_intent")
     if stop_intent:
-        stop_key = _resolve_hook_event(stop_intent, platform_key)
+        stop_key = resolve_hook_event(stop_intent, platform_key)
         stop_list = hooks_obj.get(stop_key, [])
         if _hook_already_exists(stop_list, STOP_HOOK_MARKER):
             total_removed += _remove_hook_entries(stop_list, STOP_HOOK_MARKER)
@@ -2984,7 +2942,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     # Remove the SessionStart hook.
     ss_intent = platform.get("session_start_intent")
     if ss_intent:
-        ss_key = _resolve_hook_event(ss_intent, platform_key)
+        ss_key = resolve_hook_event(ss_intent, platform_key)
         ss_list = hooks_obj.get(ss_key, [])
         if _hook_already_exists(ss_list, SESSION_START_MARKER):
             total_removed += _remove_hook_entries(ss_list, SESSION_START_MARKER)
@@ -2992,7 +2950,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
             total_removed += _remove_hook_entries(ss_list, SESSION_RECEIPT_MARKER)
 
     # Also remove the io-trace PostToolUse hook.
-    post_tool_key = _resolve_hook_event("post_tool_use", platform_key)
+    post_tool_key = resolve_hook_event("post_tool_use", platform_key)
     pt_list = hooks_obj.get(post_tool_key, [])
     if _hook_already_exists(pt_list, IO_TRACE_MARKER):
         total_removed += _remove_hook_entries(pt_list, IO_TRACE_MARKER)
@@ -3029,7 +2987,7 @@ def check_status_detail(
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
-    hook_key = _resolve_hook_event(platform["hook_intent"], platform_key)
+    hook_key = resolve_hook_event(platform["hook_intent"], platform_key)
 
     if platform_key == "codex" and not _codex_hooks_supported():
         _log(_t(f"  {name}: hooks are unavailable in this runtime", f"  {name}: hooks are unavailable in this runtime"))
@@ -3081,7 +3039,7 @@ def check_status_detail(
         expected_command=_entry_command(session_intent_entry),
     )
 
-    tool_checkpoint_key = _resolve_hook_event("pre_tool_use", platform_key)
+    tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
     tool_checkpoint_list = hooks_obj.get(tool_checkpoint_key, [])
     tool_checkpoint_entry = _platform_tool_checkpoint_entry(
         platform_key,
@@ -3099,7 +3057,7 @@ def check_status_detail(
     stop_present = False
     stop_intent = platform.get("stop_hook_intent")
     if stop_intent:
-        stop_key = _resolve_hook_event(stop_intent, platform_key)
+        stop_key = resolve_hook_event(stop_intent, platform_key)
         stop_list = hooks_obj.get(stop_key, [])
         stop_entry = _platform_stop_hook_entry(platform_key, stop_key)
         stop_present, stop_ok = _hook_marker_match_status(
@@ -3115,7 +3073,7 @@ def check_status_detail(
     session_receipt_present = True
     ss_intent = platform.get("session_start_intent")
     if ss_intent and platform.get("session_start_entry"):
-        ss_key = _resolve_hook_event(ss_intent, platform_key)
+        ss_key = resolve_hook_event(ss_intent, platform_key)
         ss_list = hooks_obj.get(ss_key, [])
         ss_entry = _platform_session_start_entry(platform_key, ss_key)
         session_start_present, session_start_ok = _hook_marker_match_status(
@@ -3133,7 +3091,7 @@ def check_status_detail(
 
     io_trace_ok = True
     io_trace_present = True
-    post_tool_key = _resolve_hook_event("post_tool_use", platform_key)
+    post_tool_key = resolve_hook_event("post_tool_use", platform_key)
     io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
     if io_entry:
         pt_list = hooks_obj.get(post_tool_key, [])

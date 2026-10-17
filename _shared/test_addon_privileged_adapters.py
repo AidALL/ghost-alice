@@ -19,6 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 import addon_installer as ai  # noqa: E402
+import hook_definitions  # noqa: E402
 import addon_registry as reg  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import hash_utils  # noqa: E402
@@ -193,7 +194,7 @@ class PrivilegedAdapterManifestTest(unittest.TestCase):
 
 class PrivilegedAdapterAllowlistRootTest(unittest.TestCase):
     def test_default_core_allowlist_contains_autopilot_adapter(self):
-        allowlist = ai.load_privileged_adapter_allowlist(user_path=None)
+        allowlist = hook_definitions.load_privileged_adapter_allowlist(user_path=None)
 
         spec = allowlist["autopilot-mode"]
         self.assertEqual(spec["allowed_addon_id"], "autopilot-mode")
@@ -208,7 +209,7 @@ class PrivilegedAdapterAllowlistRootTest(unittest.TestCase):
             root = Path(tmp)
             official = root / "skill-catalog" / "privileged-adapters.json"
             _write_allowlist(official, trust_owner="core", adapters=_adapter_allowlist())
-            allowlist = ai.load_privileged_adapter_allowlist(official_path=official, user_path=None)
+            allowlist = hook_definitions.load_privileged_adapter_allowlist(official_path=official, user_path=None)
 
             src = _make_adapter_addon(root / "addon-src")
             targets = ai.load_addon_targets(
@@ -233,7 +234,7 @@ class PrivilegedAdapterAllowlistRootTest(unittest.TestCase):
             })
 
             with self.assertRaises(ai.AddonManifestError) as ctx:
-                ai.load_privileged_adapter_allowlist(official_path=None, user_path=user_allowlist)
+                hook_definitions.load_privileged_adapter_allowlist(official_path=None, user_path=user_allowlist)
 
         self.assertIn("machine-owner", str(ctx.exception))
 
@@ -250,7 +251,7 @@ class PrivilegedAdapterAllowlistRootTest(unittest.TestCase):
                     hook_id="local-stop",
                 ),
             })
-            allowlist = ai.load_privileged_adapter_allowlist(official_path=None, user_path=user_allowlist)
+            allowlist = hook_definitions.load_privileged_adapter_allowlist(official_path=None, user_path=user_allowlist)
 
             src = _make_adapter_addon(
                 root / "addon-src",
@@ -284,7 +285,7 @@ class PrivilegedAdapterAllowlistRootTest(unittest.TestCase):
             })
 
             with mock.patch.dict(os.environ, {"HOME": str(home)}):
-                allowlist = ai.load_privileged_adapter_allowlist(official_path=None)
+                allowlist = hook_definitions.load_privileged_adapter_allowlist(official_path=None)
 
         self.assertIn("local-pilot", allowlist)
 
@@ -298,7 +299,7 @@ class PrivilegedAdapterSidecarTest(unittest.TestCase):
             skills.mkdir()
             with _directory_link(src / "addons" / "pilot" / "skill", skills / "pilot-skill"):
                 addons = root / "addons-state"
-                with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+                with mock.patch.dict(hook_definitions.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
                     rc = ai.main([
                         "write-sidecars",
                         "--source", str(src),
@@ -379,7 +380,7 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
 
     def test_adapter_hook_is_installed_and_removed_by_exact_marker(self):
         src = _make_adapter_addon(self.tmp)
-        with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+        with mock.patch.dict(hook_definitions.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
             self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]), "installed")
         commands = self._commands()
         self.assertTrue(any("[adapter:p5-demo] p5-hook" in command for command in commands))
@@ -394,7 +395,7 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
     def test_full_uninstall_removes_adapter_hook(self):
         # Full uninstall (install.sh --uninstall -> install_hooks.py --uninstall -> uninstall_hook) must strip managed [adapter:...] hooks, not only addon hooks, so a privileged adapter hook never survives a completed full uninstall.
         src = _make_adapter_addon(self.tmp)
-        with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+        with mock.patch.dict(hook_definitions.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
             self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]), "installed")
         self.assertTrue(any("[adapter:p5-demo] p5-hook" in c for c in self._commands()))
 
@@ -414,7 +415,7 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
             marker,
         )["hooks"][0]["command"]
 
-        with mock.patch.object(ai, "privileged_adapter_runner_id", return_value=runner_id):
+        with mock.patch.object(hook_definitions, "privileged_adapter_runner_id", return_value=runner_id):
             self.assertTrue(install_hooks._is_exact_adapter_hook_command(command, marker))
             self.assertTrue(install_hooks._is_managed_adapter_command(command))
 
@@ -426,7 +427,7 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
         skills.mkdir(parents=True)
         dest = skills / "pilot-skill"
         with _directory_link(skill_src, dest) as install_mode:
-            with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+            with mock.patch.dict(hook_definitions.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
                 install_hooks.install_hook("claude", addon_sources=[str(src)])
                 provided = [{
                     "kind": "skill",
@@ -470,7 +471,7 @@ class PrivilegedAdapterHookLifecycleTest(unittest.TestCase):
         skills.mkdir(parents=True)
         dest = skills / "pilot-skill"
         with _directory_link(skill_src, dest) as install_mode:
-            with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
+            with mock.patch.dict(hook_definitions.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, _adapter_allowlist(), clear=True):
                 install_hooks.install_hook("claude", addon_sources=[str(src)])
                 provided = [{
                     "kind": "skill",
@@ -539,7 +540,7 @@ class PrivilegedAdapterCodexHookLifecycleTest(unittest.TestCase):
     def test_codex_adapter_hook_installs_on_stop_and_uninstalls_by_marker(self):
         src = _make_adapter_addon(self.tmp)
         allowlist = {"p5-demo": _adapter_spec(event="on_agent_stop")}
-        with mock.patch.dict(ai.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, allowlist, clear=True):
+        with mock.patch.dict(hook_definitions.CORE_PRIVILEGED_ADAPTER_ALLOWLIST, allowlist, clear=True):
             self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(src)]), "installed")
 
         stop_commands = self._commands_by_event("Stop")
