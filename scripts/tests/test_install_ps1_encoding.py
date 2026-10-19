@@ -1,11 +1,7 @@
 import shutil
 import subprocess
-import sys
 import unittest
 from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -21,19 +17,11 @@ class InstallPs1EncodingTest(unittest.TestCase):
         raw = INSTALL_PS1.read_bytes()
         self.assertTrue(raw.startswith(UTF8_BOM))
 
-    def test_install_ps1_reads_utf8_files_with_explicit_encoding(self) -> None:
-        ps1 = installer_ps1_source()
+    def test_global_rule_block_helper_reads_utf8_explicitly(self) -> None:
         block_helper = GLOBAL_RULE_BLOCKS.read_text(encoding="utf-8")
 
-        self.assertIn(
-            '$script:CodexBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\\codex\\AGENTS.md"',
-            ps1,
-        )
-        self.assertIn('"--source", $CodexBootstrapSource', ps1)
-        self.assertIn("global_rule_blocks.py", ps1)
         self.assertIn('encoding="utf-8-sig"', block_helper)
         self.assertIn('encoding="utf-8"', block_helper)
-        self.assertIn("Get-Content -LiteralPath $SkillMdPath -TotalCount 8 -Encoding UTF8", ps1)
 
     def test_windows_powershell_5_can_parse_install_ps1(self) -> None:
         powershell = shutil.which("powershell.exe")

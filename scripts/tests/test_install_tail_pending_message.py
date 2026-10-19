@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_bash_source
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER_CLI = REPO_ROOT / "_shared" / "installer" / "cli.py"
@@ -24,17 +24,6 @@ class TestInstallTailPendingMessage(unittest.TestCase):
 
     def test_installer_cli_tail_points_to_next_session(self):
         self.assert_install_tail_copy(INSTALLER_CLI.read_text(encoding="utf-8"))
-
-    def test_install_ps1_tail_points_to_next_session(self):
-        self.assert_install_tail_copy(installer_ps1_source())
-
-    def test_install_ps1_is_english_only(self):
-        body = installer_ps1_source()
-
-        self.assertIn("Installer messages are English-only", body)
-        self.assertNotIn("Test-KoreanInstallLanguage", body)
-        self.assertNotIn("CurrentUICulture", body)
-        self.assertNotIn("CurrentCulture", body)
 
     def test_installer_messages_are_english_only(self):
         body = INSTALLER_REPORT.read_text(encoding="utf-8")

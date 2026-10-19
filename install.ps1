@@ -1,4 +1,4 @@
-﻿# Ghost-ALICE OS Installer (Windows PowerShell)
+﻿# Ghost-ALICE OS Installer (PowerShell 7.6 or newer)
 # Supports: Claude Code, Codex
 # Usage (PowerShell execution-policy safe wrapper):
 #   .\install.cmd                                  # Install to detected AI tools
@@ -7,441 +7,190 @@
 #   .\install.cmd --platform claude                # Install all skills to Claude Code
 #   .\install.cmd --platform codex                 # Install all skills to Codex
 #   .\install.cmd --platform codex --visibility dynamic
-#   .\install.cmd --platform codex skill-evolution # Install selected Codex core skills
+#   .\install.cmd --update-source                  # Stash source checkout local changes and fast-forward
 #   .\install.cmd --uninstall                      # Full uninstall for all detected Ghost-ALICE managed footprint
 #   .\install.cmd --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
-#   .\install.cmd --platform codex --uninstall --addon autopilot-mode  # Remove selected addon from one platform
-#   .\install.cmd --platform codex --uninstall skill-evolution --force # Override addon dependency guard
 #   .\install.cmd --list                           # List available skills
 #   .\install.cmd --addon autopilot                # Install official autopilot addon
-#   .\install.cmd --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
 #   .\install.cmd --status                         # Show current install status
-#   .\install.cmd --doctor                         # Diagnose install protection state
-#   .\install.cmd --cleanup-pending                # Clean installer-created false-positive pending entries
-#   .\install.cmd --update-source                  # Stash source checkout local changes and fast-forward
-# Direct .ps1 form, only when .ps1 script execution is already allowed:
-#   .\install.ps1                                  # Install to detected AI tools
-#   .\install.ps1 --prompt-platform                # Select AI tool interactively before installing
-#   .\install.ps1 task-router verification-before-completion    # Install selected core skills only
-#   .\install.ps1 --platform claude                # Install all skills to Claude Code
-#   .\install.ps1 --platform codex                 # Install all skills to Codex
-#   .\install.ps1 --platform codex --visibility dynamic
-#   .\install.ps1 --platform codex skill-evolution # Install selected Codex core skills
-#   .\install.ps1 --uninstall                      # Full uninstall for all detected Ghost-ALICE managed footprint
-#   .\install.ps1 --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
-#   .\install.ps1 --platform codex --uninstall --addon autopilot-mode  # Remove selected addon from one platform
-#   .\install.ps1 --platform codex --uninstall skill-evolution --force # Override addon dependency guard
-#   .\install.ps1 --list                           # List available skills
-#   .\install.ps1 --addon autopilot                # Install official autopilot addon
-#   .\install.ps1 --addon-source .\ghost-alice-addons --list-addons  # List addon manifest targets
-#   .\install.ps1 --status                         # Show current install status
-#   .\install.ps1 --doctor                         # Diagnose install protection state
-#   .\install.ps1 --cleanup-pending                # Clean installer-created false-positive pending entries
-#   .\install.ps1 --update-source                  # Stash source checkout local changes and fast-forward
+#   .\install.cmd --help                           # Show every command and option
+# Where .ps1 script execution is already allowed, .\install.ps1 takes the same arguments.
+#
+# This shell checks for PowerShell 7.6 or newer, sets UTF-8 console I/O, finds (or installs)
+# Python 3.11+ and runs the installer cli, which owns the options, the commands and the
+# install order. The file keeps Windows PowerShell 5.1 syntax, so that Windows
+# PowerShell 5.1 reaches the version check below and prints the requirement.
 
-param(
-    [string[]]$Skills,
-    [ValidateSet("claude", "codex")]
-    [string]$Platform = "claude",
-    [Alias("prompt-platform")]
-    [switch]$PromptPlatform,
-    [switch]$Auto,
-    [switch]$List,
-    [switch]$Status,
-    [switch]$Doctor,
-    [switch]$Uninstall,
-    [switch]$Force,
-    [Alias("cleanup-pending")]
-    [switch]$CleanupPending,
-    [string[]]$Addon,
-    [Alias("addon-source")]
-    [string[]]$AddonSource,
-    [Alias("addon-tag")]
-    [string[]]$AddonTag,
-    [Alias("addon-skip")]
-    [switch]$AddonSkip,
-    [Alias("list-addons")]
-    [switch]$ListAddons,
-    [Alias("Visibility", "agent-visibility")]
-    [ValidateSet("strict", "dynamic", "minimal")]
-    [string]$AgentVisibility = "",
-    [Alias("update-source")]
-    [switch]$UpdateSource,
-    [Alias("skip-source-health")]
-    [switch]$SkipSourceHealth,
-    [Alias("destination-file")]
-    [string]$DestinationFile,
-    [switch]$Help
-)
-
-if ($PSBoundParameters.ContainsKey('DestinationFile')) {
-    throw "Isolated destinations require the Python hook installer; PowerShell source integration is unsupported"
-}
-# Best-effort UTF-8 console output for Windows PowerShell 5.1 and console hosts.
-$LegacyAsciiConsole = ($PSVersionTable.PSVersion.Major -lt 6 -and $Host.Name -eq "ConsoleHost")
-try {
-    if ($LegacyAsciiConsole) {
-        $null = & cmd /c "chcp 65001 > nul"
-        $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-        [Console]::InputEncoding = $Utf8NoBom
-        [Console]::OutputEncoding = $Utf8NoBom
-        $OutputEncoding = $Utf8NoBom
+function Assert-PowerShellBaseline {
+    param($Version)
+    if ($Version.Major -gt 7 -or ($Version.Major -eq 7 -and $Version.Minor -ge 6)) {
+        return
     }
-} catch {
-    # Do not block installation if console encoding cannot be adjusted.
-    $null = $_
+    [Console]::Error.WriteLine(("[ERROR] PowerShell 7.6 or newer is required (this is PowerShell {0})." -f $Version))
+    [Console]::Error.WriteLine("  Install it: winget install --id Microsoft.PowerShell --exact")
+    [Console]::Error.WriteLine("  Then re-run: .\install.cmd")
+    exit 1
 }
 
+Assert-PowerShellBaseline -Version $PSVersionTable.PSVersion
+$ErrorActionPreference = "Stop"
+
+# ── UTF-8 console I/O ─────────────────────────────────────
+# Best effort: a host without a console keeps its own encodings.
+$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = $Utf8NoBom
+try { [Console]::OutputEncoding = $Utf8NoBom } catch { $null = $_ }
+try { [Console]::InputEncoding = $Utf8NoBom } catch { $null = $_ }
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
 
-# Capture the installer's own directory once. install.ps1 dot-sources installer_lib/*.ps1; inside a dot-sourced function $PSScriptRoot resolves to installer_lib/, so functions use $script:GhostAliceRoot (captured here = repo root) for repo-relative paths.
-$script:GhostAliceRoot = $PSScriptRoot
+# ── Messages for the Python runtime step only ─────────────
+function Write-Info { param([string]$Message) Write-Host ("[INFO] " + $Message) -ForegroundColor Cyan }
+function Write-Ok { param([string]$Message) Write-Host ("[OK] " + $Message) -ForegroundColor Green }
+function Write-Warn { param([string]$Message) Write-Host ("[WARN] " + $Message) -ForegroundColor Yellow }
+function Write-Err { param([string]$Message) [Console]::Error.WriteLine("[ERROR] " + $Message) }
 
-$ErrorActionPreference = "Stop"
-if ($args.Count -gt 0) {
-    [Console]::Error.WriteLine(("Unknown argument(s): {0}" -f ($args -join " ")))
-    [Console]::Error.WriteLine("Run .\install.cmd --help for usage.")
-    exit 64
-}
-$PlatformWasExplicit = $PSBoundParameters.ContainsKey("Platform")
-$script:InstallLockPath = $null
-$script:SourceRepoHookChange = $null
-$script:PwshLtsBaselineVersion = [version]"7.6.0"
-$script:PwshLtsReleaseLine = "7.6"
-$script:PwshLtsEnsureChecked = $false
-$script:InstallReportChild = ($env:GHOST_ALICE_INSTALL_REPORT_CHILD -eq "1")
-if ($script:InstallReportChild) {
-    $script:InstallReportLogFile = [string]$env:GHOST_ALICE_INSTALL_LOG_FILE
-    $script:InstallReportEventFile = [string]$env:GHOST_ALICE_INSTALL_EVENT_FILE
-} else {
-    $script:InstallReportLogFile = ""
-    $script:InstallReportEventFile = ""
-}
-$script:InstallCompactOutput = $false
-# Installer messages are English-only.
-
-$script:SessionGateContractSource = Join-Path $script:GhostAliceRoot "skill-catalog\session-gates.json"
-
-$script:CodexBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\codex\AGENTS.md"
-$script:CodexBootstrapMarker = "# Ghost-ALICE Codex Bootstrap"
-$script:CodexManagedBlockBegin = "<!-- Ghost-ALICE managed block begin: codex-bootstrap -->"
-$script:CodexManagedBlockEnd = "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
-$script:ClaudeBootstrapSource = Join-Path $script:GhostAliceRoot "platforms\claude\CLAUDE.md"
-$script:ClaudeBootstrapMarker = "# Ghost-ALICE Claude Bootstrap"
-$script:ClaudeManagedBlockBegin = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
-$script:ClaudeManagedBlockEnd = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
-
-$script:ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-# Dot-source installer_lib modules. Function definitions live in installer_lib/*.ps1 and are sourced here (before any top-level call) so install.ps1 stays a thin entrypoint.
-Get-ChildItem -Path (Join-Path $script:GhostAliceRoot 'installer_lib') -Filter '*.ps1' -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { . $_.FullName }
-$null = Assert-SessionGateContract
-$script:SkillsDir = Resolve-SkillsDir $Platform
-$AllSkills = @(
-    "adversarial-verification"
-    "boundary-contract"
-    "coding-convention"
-    "skill-evolution"
-    "agent-security-scan"
-    "merge-companion"
-    "necessity-gate"
-    "session-intent-analyzer"
-    "compact-handoff"
-    "task-router"
-)
-
-$script:DeprecatedInstalledSkills = @(
-    "harness-security-scan"
-    "session-intent-guard"
-)
-
-# ── Skill target expansion ─────────────────────────────────
-# Normal skill (root SKILL.md exists) -> returns one target for itself.
-# Family skill (no root SKILL.md, subdirectories have SKILL.md) -> returns N subskill targets.
-# Missing skill -> returns an empty array.
-
-# ── Skill list ─────────────────────────────────────────────
-
-# ── Install status ─────────────────────────────────────────
-
-# ── Uninstall ──────────────────────────────────────────────
-
-# ── Install ────────────────────────────────────────────────
-
-# ── UserPromptSubmit hook install/remove ───────────────────
-# Require Python 3.11+. Partial fallback violates the freshness contract.
-# Any failure blocks the whole install.
-
-# ── Help ───────────────────────────────────────────────────
-
-# ── Main ───────────────────────────────────────────────────
-if ($Help)      { Show-Help; return }
-if ($List)      { Show-List; return }
-Resolve-OfficialAddonShortcuts
-if ($ListAddons){ Show-Addons; return }
-if ($UpdateSource) { Update-SourceCheckout; return }
-
-# Default install: when no platform is specified, install to all detected tools. Plain full uninstall also detects platform homes and install-state manifests for full cleanup. Inspection, diagnostics, and partial removal commands keep the single-platform default (claude).
-$Auto = $false
-$hasInspectionCommand = $Help -or $List -or $ListAddons -or $Status -or $Doctor
-$PlainFullUninstall = $Uninstall -and (-not $Skills -or $Skills.Count -eq 0)
-if (-not $PlatformWasExplicit -and -not $PromptPlatform -and -not $hasInspectionCommand -and -not $PlainFullUninstall -and -not $CleanupPending -and -not $UpdateSource) {
-    $Auto = $true
-}
-
-if ($PlainFullUninstall -and -not $PlatformWasExplicit -and -not $PromptPlatform) {
-    $detected = Get-DetectedUninstallPlatforms
-    if ($detected.Count -eq 0) {
-        Write-Warn "No install targets detected. Need a platform home or ~/.ghost-alice/install-state/<platform>.json." "No install targets detected. Need a platform home or ~/.ghost-alice/install-state/<platform>.json."
-        return
-    }
-    $rc = 0
-    $selfPath = $MyInvocation.MyCommand.Path
-    $index = 0
-    Write-Info ("Detected uninstall targets: " + ($detected -join ', ')) ("Detected uninstall targets: " + ($detected -join ', '))
-    foreach ($plat in $detected) {
-        $index++
-        Write-Host ""
-        Write-Info `
-            ("[uninstall] ({0}/{1}) Starting {2} full cleanup" -f $index, $detected.Count, $plat) `
-            ("[uninstall] ({0}/{1}) starting {2} full cleanup" -f $index, $detected.Count, $plat)
-        try {
-            & $selfPath -Platform $plat -Uninstall
-            $platRc = $LASTEXITCODE
-        } catch {
-            Write-Warn "[uninstall] $plat exception: $_" "[uninstall] $plat exception: $_"
-            $platRc = 1
-        }
-        if ($platRc -and $platRc -ne 0) { $rc = 1 }
-    }
-    exit $rc
-}
-
-function Get-AutoCommonTargetCount {
-    param(
-        [string[]]$DetectedPlatforms,
-        [object[]]$FallbackTargets
-    )
-
-    $platformKeySets = @()
-    foreach ($plat in @($DetectedPlatforms)) {
-        $keys = @{}
-        if (Test-Path (Join-Path $ScriptDir "_shared")) {
-            $keys["support:_shared"] = $true
-        }
-        foreach ($target in @($FallbackTargets)) {
-            if ($target.Name) {
-                $keys[("skill:{0}" -f $target.Name)] = $true
-            }
-        }
-        if (-not $AddonSkip -and $AddonSource -and $AddonSource.Count -gt 0) {
-            try {
-                foreach ($target in @(Get-AddonTargets -TargetPlatform $plat)) {
-                    if ($target.Name) {
-                        $keys[("skill:{0}" -f $target.Name)] = $true
-                    }
-                }
-            } catch {
-                Write-InstallLogLine ("[WARN] [auto] addon target count preflight failed for {0}: {1}" -f $plat, $_)
-            }
-        }
-        $platformKeySets += ,$keys
-    }
-
-    if ($platformKeySets.Count -eq 0) {
-        return 0
-    }
-
-    $common = 0
-    foreach ($key in $platformKeySets[0].Keys) {
-        $presentOnAll = $true
-        foreach ($keys in @($platformKeySets)) {
-            if (-not $keys.ContainsKey($key)) {
-                $presentOnAll = $false
-                break
-            }
-        }
-        if ($presentOnAll) {
-            $common++
-        }
-    }
-    return $common
-}
-
-# auto/default: detect ~/.claude and ~/.codex, then recurse per platform. Auto child installs are separate install path operations, not a duplicate install.
-if ($Auto) {
-    $detected = Get-DetectedPlatforms
-    if ($detected.Count -eq 0) {
-        Write-Warn "No AI platform home directory detected. Need at least one of ~/.claude, ~/.codex." "No AI platform home directory detected. Need at least one of ~/.claude, ~/.codex."
-        return
-    }
-
-    Initialize-InstallLog
-    $autoEventFile = Join-Path `
-        (Split-Path -Parent $script:InstallReportLogFile) `
-        (([IO.Path]::GetFileNameWithoutExtension($script:InstallReportLogFile)) + ".events.jsonl")
-    if (Test-Path $autoEventFile) {
-        Remove-Item $autoEventFile -Force
-    }
-    New-Item -ItemType File -Path $autoEventFile -Force | Out-Null
-
-    $selectedSkills = if ($Skills -and $Skills.Count -gt 0) { $Skills } else { $AllSkills }
-    $fallbackTargets = @()
-    foreach ($skill in $selectedSkills) {
-        $fallbackTargets += Expand-SkillTargets $skill
-    }
-    $autoCommonTargets = Get-AutoCommonTargetCount -DetectedPlatforms $detected -FallbackTargets $fallbackTargets
-    $platformLabel = Join-InstallLabels -Items $detected
-    $visibility = Resolve-EffectiveVisibility -Flag $AgentVisibility
-    if (Test-LiveCounterEnabled) {
-        Write-InstallReportAutoStart -PlatformLabel $platformLabel -CommonTargets $autoCommonTargets -Visibility $visibility
-    }
-
-    $rc = 0
-    $selfPath = $MyInvocation.MyCommand.Path
+# ── Python 3.11+ runtime ──────────────────────────────────
+function Test-Python311OrNewer {
+    param([string]$PythonExe)
+    if (-not $PythonExe) { return $false }
     try {
-        $pwshExe = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+        & $PythonExe -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' *> $null
     } catch {
-        $pwshExe = ""
+        return $false
     }
-    if (-not $pwshExe) {
-        $pwshCommand = if ($PSVersionTable.PSEdition -eq "Desktop") {
-            Get-Command "powershell.exe" -ErrorAction SilentlyContinue
-        } else {
-            Get-Command "pwsh" -ErrorAction SilentlyContinue
-        }
-        $pwshExe = if ($pwshCommand) { $pwshCommand.Source } else { "" }
-    }
-    if (-not $pwshExe) {
-        $pwshExe = if ($PSVersionTable.PSEdition -eq "Desktop") { "powershell.exe" } else { "pwsh" }
-    }
-    $index = 0
-    $autoDisplayedTargets = 0
-    $oldReportChild = $env:GHOST_ALICE_INSTALL_REPORT_CHILD
-    $oldReportLog = $env:GHOST_ALICE_INSTALL_LOG_FILE
-    $oldReportEvent = $env:GHOST_ALICE_INSTALL_EVENT_FILE
-    try {
-        $env:GHOST_ALICE_INSTALL_REPORT_CHILD = "1"
-        $env:GHOST_ALICE_INSTALL_LOG_FILE = $script:InstallReportLogFile
-        $env:GHOST_ALICE_INSTALL_EVENT_FILE = $autoEventFile
-
-        foreach ($plat in $detected) {
-            $index++
-            Write-InstallLogLine ("[INFO] [auto] ({0}/{1}) starting {2} install (separate install path; not a duplicate install)" -f $index, $detected.Count, $plat)
-            $childArgs = @(
-                "-Platform", $plat
-            )
-            if ($Uninstall) {
-                $childArgs += "-Uninstall"
-            }
-            if ($Force) {
-                $childArgs += "-Force"
-            }
-            if ($Status) {
-                $childArgs += "-Status"
-            }
-            if ($Doctor) {
-                $childArgs += "-Doctor"
-            }
-            if ($SkipSourceHealth) {
-                $childArgs += "-SkipSourceHealth"
-            }
-            if ($Skills -and $Skills.Count -gt 0) {
-                $childArgs += "-Skills"
-                $childArgs += $Skills
-            }
-            if ($AgentVisibility) {
-                $childArgs += @("-Visibility", $AgentVisibility)
-            }
-            if ($AddonSource) {
-                foreach ($source in $AddonSource) {
-                    $childArgs += @("-AddonSource", $source)
-                }
-            }
-            if ($AddonTag) {
-                foreach ($tag in $AddonTag) {
-                    $childArgs += @("-AddonTag", $tag)
-                }
-            }
-            if ($AddonSkip) {
-                $childArgs += "-AddonSkip"
-            }
-
-            $childOutputFile = Join-Path `
-                ([IO.Path]::GetTempPath()) `
-                ("ghost-alice-install-{0}-{1}.log" -f $plat, ([guid]::NewGuid().ToString("N")))
-            try {
-                $engineArgs = @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $selfPath)
-                $engineArgs += $childArgs
-                & $pwshExe @engineArgs *> $childOutputFile
-                $platRc = $LASTEXITCODE
-                if (Test-Path $childOutputFile) {
-                    Get-Content -LiteralPath $childOutputFile -Encoding UTF8 -ErrorAction SilentlyContinue | ForEach-Object {
-                        Write-InstallLogLine ([string]$_)
-                    }
-                }
-            } catch {
-                Write-InstallLogLine ("[WARN] [auto] {0} install exception: {1}" -f $plat, $_)
-                $platRc = 1
-            } finally {
-                Remove-Item -LiteralPath $childOutputFile -Force -ErrorAction SilentlyContinue
-            }
-            if (Test-LiveCounterEnabled) {
-                $autoSyncedTargets = Read-WeightedCommonTargetProgress -EventFile $autoEventFile -PlatformCount $detected.Count -TotalCount $autoCommonTargets
-                Write-AutoAnimateCommonTargetProgress -FromCount $autoDisplayedTargets -ToCount $autoSyncedTargets -TotalCount $autoCommonTargets -Suffix ("For {0} [{1}/{2}]" -f $plat, $index, $detected.Count)
-                $autoDisplayedTargets = $autoSyncedTargets
-            }
-            if ($platRc -and $platRc -ne 0) {
-                $rc = 1
-                Write-InstallLogLine ("[WARN] [auto] {0} install failed (exit {1})" -f $plat, $platRc)
-            }
-        }
-    } finally {
-        if ($null -eq $oldReportChild) { Remove-Item Env:GHOST_ALICE_INSTALL_REPORT_CHILD -ErrorAction SilentlyContinue } else { $env:GHOST_ALICE_INSTALL_REPORT_CHILD = $oldReportChild }
-        if ($null -eq $oldReportLog) { Remove-Item Env:GHOST_ALICE_INSTALL_LOG_FILE -ErrorAction SilentlyContinue } else { $env:GHOST_ALICE_INSTALL_LOG_FILE = $oldReportLog }
-        if ($null -eq $oldReportEvent) { Remove-Item Env:GHOST_ALICE_INSTALL_EVENT_FILE -ErrorAction SilentlyContinue } else { $env:GHOST_ALICE_INSTALL_EVENT_FILE = $oldReportEvent }
-    }
-
-    $autoSyncedTargets = Read-AllCommonTargetProgress -EventFile $autoEventFile -PlatformCount $detected.Count
-    if ($rc -eq 0) {
-        if (Test-LiveCounterEnabled) {
-            Write-AutoAnimateCommonTargetProgress -FromCount $autoDisplayedTargets -ToCount $autoSyncedTargets -TotalCount $autoCommonTargets -Suffix "common targets synced on all platforms"
-            $autoDisplayedTargets = $autoSyncedTargets
-            Write-CommonTargetProgressFrame -DoneCount $autoSyncedTargets -TotalCount $autoCommonTargets -Suffix "common targets synced on all platforms"
-            Complete-CommonTargetProgressFrame
-            Write-InstallReportTail -PlatformLabel $platformLabel -Visibility $visibility
-        } else {
-            Write-InstallReportAutoFull `
-                -PlatformLabel $platformLabel `
-                -CommonTargets $autoCommonTargets `
-                -SyncedTargets $autoSyncedTargets `
-                -Visibility $visibility
-        }
-    } else {
-        Write-Err "[auto] some platforms failed. See log: $script:InstallReportLogFile" "[auto] some platforms failed. See log: $script:InstallReportLogFile"
-        foreach ($line in (Get-InstallReportFailureExcerpt -Path $script:InstallReportLogFile)) {
-            Write-Err ("[auto] " + $line) ("[auto] " + $line)
-        }
-    }
-    exit $rc
+    return ($LASTEXITCODE -eq 0)
 }
 
-if ($PromptPlatform -and -not $PlatformWasExplicit) {
-    $Platform = Select-TargetPlatform
-} elseif ($PromptPlatform -and $PlatformWasExplicit) {
-    Write-Warn "--prompt-platform is ignored because --platform was already specified." "--prompt-platform is ignored because --platform was already specified."
-}
-$script:SkillsDir = Resolve-SkillsDir $Platform
-
-if ($CleanupPending) {
-    Invoke-CleanupPendingFalsePositives
-    return
+function Get-PythonVersionKey {
+    param([string]$PythonExe)
+    if (-not (Test-Python311OrNewer $PythonExe)) { return $null }
+    $versionCode = 'import sys; v=sys.version_info; print(str(v.major).zfill(3)+chr(46)+str(v.minor).zfill(3)+chr(46)+str(v.micro).zfill(3))'
+    $version = & $PythonExe -c $versionCode 2>$null
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $version
 }
 
-if ($Doctor)    { Show-Doctor; return }
-if ($Status)    { Show-Status; return }
-if ($Uninstall) { Invoke-Uninstall -SkillNames $Skills -AddonIds $Addon; return }
-Install-Prerequisites
-Initialize-GitHooks
-Invoke-WithInstallLock { Invoke-Install -SkillNames $Skills }
-Initialize-PwshLtsBaseline
+function Find-PythonExe {
+    $candidates = @()
+    foreach ($cmd in @("python3", "python")) {
+        $found = Get-Command $cmd -ErrorAction SilentlyContinue
+        if ($found) { $candidates += $found.Source }
+    }
+    $candidates += @(Get-Command "python3*" -CommandType Application -ErrorAction SilentlyContinue | ForEach-Object { $_.Source })
+    $pythonRoots = @()
+    if ($env:LOCALAPPDATA) { $pythonRoots += (Join-Path $env:LOCALAPPDATA "Programs\Python") }
+    if ($env:ProgramFiles) { $pythonRoots += $env:ProgramFiles }
+    if (${env:ProgramFiles(x86)}) { $pythonRoots += ${env:ProgramFiles(x86)} }
+    foreach ($root in $pythonRoots) {
+        if (-not $root) { continue }
+        $candidates += @(Get-ChildItem -Path (Join-Path $root "Python*\python.exe") -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+    }
+
+    $bestPath = $null
+    $bestVersion = $null
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        $version = Get-PythonVersionKey $candidate
+        if (-not $version) { continue }
+        if (-not $bestVersion -or ([string]::CompareOrdinal($version, $bestVersion) -gt 0)) {
+            $bestVersion = $version
+            $bestPath = $candidate
+        }
+    }
+    return $bestPath
+}
+
+function Install-PythonRuntime {
+    Write-Info "Python 3.11+ not found; trying to install Python automatically."
+
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Info "winget install --id Python.Python.3 --exact"
+        & $winget.Source install --id Python.Python.3 --exact --accept-package-agreements --accept-source-agreements
+        return ($LASTEXITCODE -eq 0)
+    }
+
+    $choco = Get-Command choco -ErrorAction SilentlyContinue
+    if ($choco) {
+        Write-Info "choco install python -y"
+        & $choco.Source install python -y
+        return ($LASTEXITCODE -eq 0)
+    }
+
+    $scoop = Get-Command scoop -ErrorAction SilentlyContinue
+    if ($scoop) {
+        Write-Info "scoop install python"
+        & $scoop.Source install python
+        return ($LASTEXITCODE -eq 0)
+    }
+
+    Write-Warn "No supported Python installer was found."
+    return $false
+}
+
+function Initialize-PythonRuntimeForInstall {
+    $py = Find-PythonExe
+    if ($py) { return $py }
+    if (Install-PythonRuntime) {
+        $py = Find-PythonExe
+        if ($py) {
+            Write-Ok "Python is ready"
+            return $py
+        }
+    }
+    Write-Err "Python 3.11+ is required. Automatic setup did not produce a working Python 3.11+ runtime."
+    Write-Info "On Windows, run winget install --id Python.Python.3 --exact, then rerun .\install.cmd."
+    return $null
+}
+
+# ── Arguments ─────────────────────────────────────────────
+# The parameter names of the earlier install.ps1, written PowerShell style, become the
+# cli flags; -Skills disappears and its skill names follow as they are. Every other
+# argument, the cli's own --flags included, passes through unchanged and in order.
+$PowerShellParameterFlags = @{
+    "-Skills"           = ""
+    "-Platform"         = "--platform"
+    "-PromptPlatform"   = "--prompt-platform"
+    "-Auto"             = "--auto"
+    "-List"             = "--list"
+    "-Status"           = "--status"
+    "-Doctor"           = "--doctor"
+    "-Uninstall"        = "--uninstall"
+    "-Force"            = "--force"
+    "-CleanupPending"   = "--cleanup-pending"
+    "-Addon"            = "--addon"
+    "-AddonSource"      = "--addon-source"
+    "-AddonTag"         = "--addon-tag"
+    "-AddonSkip"        = "--addon-skip"
+    "-ListAddons"       = "--list-addons"
+    "-AgentVisibility"  = "--visibility"
+    "-Visibility"       = "--visibility"
+    "-UpdateSource"     = "--update-source"
+    "-SkipSourceHealth" = "--skip-source-health"
+    "-DestinationFile"  = "--destination-file"
+    "-Help"             = "--help"
+}
+
+function ConvertTo-InstallerArgument {
+    param([object[]]$Arguments)
+    $converted = @()
+    foreach ($argument in $Arguments) {
+        $text = [string]$argument
+        $name = $text.TrimEnd(":")
+        if ($text.StartsWith("-") -and -not $text.StartsWith("--") -and $PowerShellParameterFlags.ContainsKey($name)) {
+            if ($PowerShellParameterFlags[$name]) { $converted += $PowerShellParameterFlags[$name] }
+            continue
+        }
+        $converted += $text
+    }
+    return , $converted
+}
+
+# ── Run the installer ─────────────────────────────────────
+$python = Initialize-PythonRuntimeForInstall
+if (-not $python) {
+    exit 1
+}
+$installerArguments = ConvertTo-InstallerArgument -Arguments $args
+& $python (Join-Path -Path $PSScriptRoot -ChildPath "_shared/installer/cli.py") @installerArguments
+exit $LASTEXITCODE

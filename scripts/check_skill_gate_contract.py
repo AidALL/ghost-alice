@@ -56,10 +56,6 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
  'platforms/claude/CLAUDE.md': ['## Claude tools and installation',
                                 'visible `Skill` tool',
                                 'current hook receipt'],
- 'install.ps1': ['session-gates.json',
-                 'platforms\\codex\\AGENTS.md',
-                 'session-intent + prompt + web-search + tool-checkpoint + completion '
-                 '+ session-start + io-trace'],
  '_shared/installer/source.py': ['session-gates.json'],
  '_shared/installer/hosts.py': ['"platforms" / "codex" / "AGENTS.md"',
                                 'session-intent + prompt + web-search + tool-checkpoint + completion '
@@ -752,13 +748,6 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
             issues.append(ContractIssue("ERROR", rel_path, "required file missing"))
             continue
         text = _read_text(path)
-        if rel_path in ("install.sh", "install.ps1"):
-            # Validate the combined installer entrypoint and installer_lib modules, including their governance strings.
-            ext = ".sh" if rel_path == "install.sh" else ".ps1"
-            lib_dir = root / "installer_lib"
-            if lib_dir.is_dir():
-                for lib in sorted(lib_dir.glob(f"*{ext}")):
-                    text += "\n" + _read_text(lib)
         for pattern in patterns:
             if pattern not in text:
                 issues.append(ContractIssue("ERROR", rel_path, f"missing required pattern: {pattern}"))

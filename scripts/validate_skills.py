@@ -419,31 +419,10 @@ def _parse_python_install_skills(path: Path) -> set[str]:
     return names
 
 
-def _parse_powershell_install_skills(path: Path) -> set[str]:
-    if not path.is_file():
-        return set()
-    names: set[str] = set()
-    collecting = False
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
-        stripped = line.strip()
-        if stripped.startswith("$AllSkills") and "@(" in stripped:
-            collecting = True
-            continue
-        if not collecting:
-            continue
-        if stripped == ")":
-            break
-        token = _strip_install_token(stripped)
-        if token:
-            names.add(token)
-    return names
-
-
 def validate_install_list_sync(repo_root: Path, issues: list[Issue]) -> None:
     install_roots = set(discover_install_roots(repo_root))
     installers = {
         "_shared/installer/selection.py": _parse_python_install_skills(repo_root / "_shared" / "installer" / "selection.py"),
-        "install.ps1": _parse_powershell_install_skills(repo_root / "install.ps1"),
     }
     for filename, names in installers.items():
         if not names:

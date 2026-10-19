@@ -6,8 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -299,20 +297,6 @@ class InstallPostflightValidationTest(unittest.TestCase):
             self.assertEqual(state["failures"][0]["reason"], "link-target-mismatch")
             self.assertEqual(state["failures"][0]["expected_link_target"], source.resolve().as_posix())
             self.assertEqual(state["failures"][0]["actual_link_target"], wrong_source.resolve().as_posix())
-
-    def test_installers_run_verifier_before_snapshot_and_manifest(self) -> None:
-        # The bash order (verify, then snapshot and manifest) is fixed by _shared/test_installer_cli.py.
-        ps_body = installer_ps1_source()
-        ps_verify_call = "Invoke-PostflightInstallVerification -TargetPlatform $Platform"
-        self.assertIn(ps_verify_call, ps_body)
-        self.assertLess(
-            ps_body.index(ps_verify_call),
-            ps_body.index("Invoke-SnapshotAfterInstall -TargetPlatform $Platform"),
-        )
-        self.assertLess(
-            ps_body.index(ps_verify_call),
-            ps_body.index("Write-InstallStateManifest -TargetPlatform $Platform"),
-        )
 
 
 if __name__ == "__main__":

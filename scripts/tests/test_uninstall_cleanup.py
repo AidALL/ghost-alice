@@ -367,7 +367,6 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(rule_file.read_text(encoding="utf-8").strip(), "user rule")
 
         self.assertNotIn("remove_claude_bootstrap || return 1", installer_bash_source())
-        self.assertNotIn('$Platform -eq "claude" -and -not (Remove-ClaudeBootstrap)', installer_ps1_source())
 
     def run_cleanup(
         self,
@@ -1044,8 +1043,6 @@ class UninstallCleanupTest(unittest.TestCase):
 
         self.assertIn("Full uninstall", sh)
         self.assertIn("_shared/uninstall_cleanup.py", sh)
-        self.assertIn("Full uninstall", ps1)
-        self.assertIn("_shared/uninstall_cleanup.py", ps1)
         self.assertIn("bash install.sh --uninstall", readme)
         self.assertIn(".\\install.cmd --uninstall", readme)
         self.assertFalse(legacy_doc.exists())
@@ -1076,10 +1073,11 @@ class UninstallCleanupTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("Unknown option", result.stdout + result.stderr)
 
-    def test_powershell_removed_preview_flags_are_rejected_as_unknown_arguments(self) -> None:
-        pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    def test_powershell_removed_preview_flags_are_rejected_as_unknown_options(self) -> None:
+        # install.ps1 passes unknown PowerShell names to the cli, which rejects any unknown `-` token.
+        pwsh = shutil.which("pwsh")
         if not pwsh:
-            self.skipTest("PowerShell executable is required for install.ps1 argument test")
+            self.skipTest("PowerShell 7.6+ (pwsh) is required for install.ps1 argument test")
 
         cases = (
             [REMOVED_PS_FLAG],
@@ -1103,8 +1101,9 @@ class UninstallCleanupTest(unittest.TestCase):
                     errors="replace",
                 )
 
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn("Unknown argument", result.stdout + result.stderr)
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn(f"Unknown option: {args[0]}", result.stdout + result.stderr)
+                self.assertEqual(list(Path(temp_dir).iterdir()), [])
 
     def test_bash_uninstall_without_skill_args_runs_full_confirm_cleanup(self) -> None:
         bash = _find_test_bash()

@@ -10,9 +10,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SH = REPO_ROOT / "install.sh"
@@ -131,67 +128,12 @@ def _printable_live_progress_lines(output: str) -> list[str]:
 
 
 class InstallerDefaultAutoTest(unittest.TestCase):
-    def test_install_ps1_defaults_plain_install_to_auto_detect(self) -> None:
-        install_ps1 = installer_ps1_source()
-
-        self.assertIn("[switch]$Auto,", install_ps1)
-        self.assertIn("if (-not $PlatformWasExplicit -and -not $PromptPlatform -and -not $hasInspectionCommand -and -not $PlainFullUninstall -and -not $CleanupPending -and -not $UpdateSource) {", install_ps1)
-        self.assertIn("$Auto = $true", install_ps1)
-        self.assertIn(".\\install.cmd                          # Install to detected AI tools", install_ps1)
-        self.assertNotIn(".\\install.ps1 -Auto                    # Recommended", install_ps1)
-        self.assertNotIn("$AutoDetectRequested", install_ps1)
-        self.assertNotIn("-Auto and -Platform", install_ps1)
-        self.assertNotIn("-Auto and -PromptPlatform", install_ps1)
-
     def test_auto_install_messages_explain_distinct_platform_targets(self) -> None:
         auto_py = (REPO_ROOT / "_shared" / "installer" / "auto.py").read_text(encoding="utf-8")
-        install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
 
-        for body in (auto_py, install_ps1):
-            with self.subTest(installer=body[:20]):
-                self.assertIn("separate install path", body)
-                self.assertIn("not a duplicate install", body)
-
+        self.assertIn("separate install path", auto_py)
+        self.assertIn("not a duplicate install", auto_py)
         self.assertIn("[auto] ({index}/{total})", auto_py)
-        self.assertIn("[auto] ({0}/{1})", install_ps1)
-
-    def test_install_ps1_auto_report_uses_common_target_progress(self) -> None:
-        install_ps1 = installer_ps1_source()
-        auto_branch = install_ps1[
-            install_ps1.index("# auto/default:") : install_ps1.index("if ($PromptPlatform")
-        ]
-
-        self.assertIn("Write-InstallReportAutoFull", install_ps1)
-        self.assertIn("Write-InstallReportTargetEvent", install_ps1)
-        self.assertIn("Read-AllCommonTargetProgress", install_ps1)
-        self.assertIn("Read-WeightedCommonTargetProgress", install_ps1)
-        self.assertIn("common targets synced on all platforms", install_ps1)
-        self.assertIn("function Get-AutoCommonTargetCount", install_ps1)
-        self.assertIn("Get-AddonTargets -TargetPlatform $plat", install_ps1)
-        self.assertIn("$autoCommonTargets = Get-AutoCommonTargetCount -DetectedPlatforms $detected -FallbackTargets $fallbackTargets", auto_branch)
-        self.assertNotIn("* $detected.Count", auto_branch)
-
-    def test_install_ps1_auto_child_output_avoids_shared_log_redirection(self) -> None:
-        install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
-        auto_branch = install_ps1[
-            install_ps1.index("# auto/default:") : install_ps1.index("if ($PromptPlatform")
-        ]
-
-        self.assertIn("$childOutputFile = Join-Path", auto_branch)
-        self.assertIn("& $pwshExe @engineArgs *> $childOutputFile", auto_branch)
-        self.assertIn("Get-Content -LiteralPath $childOutputFile", auto_branch)
-        self.assertNotIn("*>> $script:InstallReportLogFile", auto_branch)
-
-    def test_auto_progress_uses_one_semantic_common_target_formatter(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_auto.py and test_installer_report.py.
-        install_ps1 = installer_ps1_source()
-
-        self.assertIn("[int]$Width = 30", install_ps1)
-        self.assertIn('"For {0} [{1}/{2}]" -f $plat, $index, $detected.Count', install_ps1)
-        self.assertIn("Read-WeightedCommonTargetProgress", install_ps1)
-        self.assertNotIn("common targets synced for", install_ps1)
-        self.assertNotIn('"-Uninstall:$Uninstall"', install_ps1)
-        self.assertNotIn('"-SkipSourceHealth:$SkipSourceHealth"', install_ps1)
 
     def test_readme_primary_usage_has_no_auto_flag(self) -> None:
         readme = README.read_text(encoding="utf-8")
@@ -208,14 +150,6 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertNotIn("--allow-dirty-source", readme)
         self.assertNotIn("--allow-dirty-source", install_sh)
         self.assertNotIn("AllowDirtySource", install_ps1)
-
-    def test_plain_uninstall_defaults_to_detected_full_cleanup(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_cli.py (plain full uninstall).
-        install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
-
-        self.assertIn("Get-DetectedUninstallPlatforms", install_ps1)
-        self.assertIn("$PlainFullUninstall", install_ps1)
-        self.assertIn("-Uninstall", install_ps1)
 
     def test_install_sh_auto_verbose_uses_expanded_output_not_process_report(self) -> None:
         bash = _find_test_bash()
@@ -566,158 +500,6 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertNotIn("ARGS[@]: unbound variable", output)
             self.assertEqual(output.count("Ghost-ALICE OS installation Process Report"), 1)
 
-    def test_install_ps1_default_output_uses_process_report_with_dynamic_counts(self) -> None:
-        pwsh = shutil.which("pwsh")
-        if not pwsh:
-            self.skipTest("pwsh executable is required for install.ps1 integration test")
-
-        requested_skills = ["coding-convention"]
-        expected_total_targets = _skill_target_count(*requested_skills) + 1
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_home = Path(temp_dir)
-            codex_home = temp_home / ".codex"
-            codex_home.mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
-            env["CODEX_HOME"] = codex_home.as_posix()
-            env["GHOST_ALICE_LANG"] = "en"
-            env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
-
-            result = subprocess.run(
-                [
-                    pwsh,
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(INSTALL_PS1),
-                    "-Platform",
-                    "codex",
-                    "-SkipSourceHealth",
-                    "-Skills",
-                    *requested_skills,
-                ],
-                cwd=REPO_ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            self.assertIn("Ghost-ALICE OS installation Process Report", result.stdout)
-            self.assertIn("  Platform: codex", result.stdout)
-            self.assertIn(f"  Skills: [{expected_total_targets}] targets", result.stdout)
-            self.assertIn("  Hooks: enabled", result.stdout)
-            self.assertIn("  Visibility Level: [dynamic]", result.stdout)
-            self.assertIn(
-                f"  [2/5] Skill sync          [0] [Current], [0] [updated], [{expected_total_targets}] [newly added]",
-                result.stdout,
-            )
-            self.assertIn("  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]", result.stdout)
-            self.assertIn("  [5/5] Verification        ok", result.stdout)
-            self.assertRegex(result.stdout, r"log: .+\.ghost-alice[/\\]install[/\\]\d{4}-\d{2}-\d{2}-\d{6}\.log")
-            self.assertNotIn("\r[2/5] Skill sync [", result.stdout)
-            self.assertNotIn("[install_hooks]", result.stdout)
-
-    def test_install_ps1_top_level_ignores_stale_report_env(self) -> None:
-        pwsh = shutil.which("pwsh")
-        if not pwsh:
-            self.skipTest("pwsh executable is required for install.ps1 integration test")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_home = Path(temp_dir)
-            codex_home = temp_home / ".codex"
-            codex_home.mkdir()
-            stale_dir = temp_home / "stale-report"
-            stale_dir.mkdir()
-            stale_log = stale_dir / "old.log"
-            stale_log.write_text("old log\n", encoding="utf-8")
-
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
-            env["CODEX_HOME"] = codex_home.as_posix()
-            env["GHOST_ALICE_LANG"] = "en"
-            env["GHOST_ALICE_INSTALL_LOG_FILE"] = stale_log.as_posix()
-            env["GHOST_ALICE_INSTALL_EVENT_FILE"] = (stale_dir / "old.events.jsonl").as_posix()
-            env.pop("GHOST_ALICE_INSTALL_REPORT_CHILD", None)
-            env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
-
-            result = subprocess.run(
-                [
-                    pwsh,
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(INSTALL_PS1),
-                    "-Platform",
-                    "codex",
-                    "-SkipSourceHealth",
-                    "-Skills",
-                    "coding-convention",
-                ],
-                cwd=REPO_ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            self.assertNotIn(stale_log.as_posix(), result.stdout)
-            self.assertRegex(result.stdout, r"log: .+\.ghost-alice[/\\]install[/\\]\d{4}-\d{2}-\d{2}-\d{6}\.log")
-
-    def test_install_ps1_tty_output_uses_one_line_skill_sync_counter(self) -> None:
-        pwsh = shutil.which("pwsh")
-        if not pwsh:
-            self.skipTest("pwsh executable is required for install.ps1 integration test")
-
-        requested_skills = ["coding-convention"]
-        expected_total = _skill_target_count(*requested_skills) + 1
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_home = Path(temp_dir)
-            codex_home = temp_home / ".codex"
-            codex_home.mkdir()
-            env = os.environ.copy()
-            env["HOME"] = temp_home.as_posix()
-            env["CODEX_HOME"] = codex_home.as_posix()
-            env["GHOST_ALICE_LANG"] = "en"
-            env.setdefault("TERM", "xterm-256color")
-            env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
-
-            return_code, output = _run_pty(
-                [
-                    pwsh,
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-File",
-                    str(INSTALL_PS1),
-                    "-Platform",
-                    "codex",
-                    "-SkipSourceHealth",
-                    "-Skills",
-                    *requested_skills,
-                ],
-                env=env,
-            )
-
-            self.assertEqual(return_code, 0, msg=output)
-            self.assertIn("\r  [2/5] Skill sync          [0] [Current], [0] [updated], [0] [newly added]", output)
-            self.assertIn(
-                f"\r  [2/5] Skill sync          [0] [Current], [0] [updated], [{expected_total}] [newly added]",
-                output,
-            )
-            self.assertEqual(output.count("Ghost-ALICE OS installation Process Report"), 1)
-
     def _write_existing_config(self, home: Path, profile: str) -> Path:
         config_dir = home / ".ghost-alice"
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -798,95 +580,6 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             self.assertIn("  Visibility Level: [minimal]", result.stdout)
             saved = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["agent_visibility"]["profile"], "minimal")
-
-    def test_report_ps1_resolve_effective_visibility_priority(self) -> None:
-        pwsh = shutil.which("pwsh")
-        if not pwsh:
-            self.skipTest("pwsh executable is required for report.ps1 helper test")
-
-        script = r"""
-$ErrorActionPreference = "Stop"
-$script:GhostAliceRoot = (Get-Location).Path
-. (Join-Path $script:GhostAliceRoot "installer_lib/python_runtime.ps1")
-. (Join-Path $script:GhostAliceRoot "installer_lib/report.ps1")
-$configDir = Join-Path $env:HOME ".ghost-alice"
-New-Item -ItemType Directory -Path $configDir -Force | Out-Null
-$configPath = Join-Path $configDir "config.json"
-'{"schema_version":"ghost-alice-config.v1","agent_visibility":{"profile":"minimal"},"strict_session_log":{"mode":"always"}}' | Set-Content -LiteralPath $configPath -Encoding UTF8
-"existing=$(Resolve-EffectiveVisibility -Flag '')"
-"flag=$(Resolve-EffectiveVisibility -Flag 'strict')"
-Remove-Item -LiteralPath $configPath -Force
-"default=$(Resolve-EffectiveVisibility -Flag '')"
-"""
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env = os.environ.copy()
-            env["HOME"] = temp_dir
-            result = subprocess.run(
-                [pwsh, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-                cwd=REPO_ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-        self.assertIn("existing=dynamic", result.stdout)
-        self.assertIn("flag=strict", result.stdout)
-        self.assertIn("default=dynamic", result.stdout)
-
-    def test_install_ps1_defaults_visibility_dynamic_over_existing_config_without_flag(self) -> None:
-        pwsh = shutil.which("pwsh")
-        if not pwsh:
-            self.skipTest("pwsh executable is required for install.ps1 integration test")
-
-        requested_skills = ["coding-convention"]
-        for existing in ("strict", "minimal"):
-            with self.subTest(existing=existing):
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    temp_home = Path(temp_dir)
-                    codex_home = temp_home / ".codex"
-                    codex_home.mkdir()
-                    config_path = self._write_existing_config(temp_home, existing)
-                    env = os.environ.copy()
-                    env["HOME"] = temp_home.as_posix()
-                    env["CODEX_HOME"] = codex_home.as_posix()
-                    env["GHOST_ALICE_LANG"] = "en"
-                    env["GHOST_ALICE_TEST_SKIP_PWSH_LTS_BASELINE"] = "1"
-
-                    result = subprocess.run(
-                        [
-                            pwsh,
-                            "-NoLogo",
-                            "-NoProfile",
-                            "-ExecutionPolicy",
-                            "Bypass",
-                            "-File",
-                            str(INSTALL_PS1),
-                            "-Platform",
-                            "codex",
-                            "-SkipSourceHealth",
-                            "-Skills",
-                            *requested_skills,
-                        ],
-                        cwd=REPO_ROOT,
-                        env=env,
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                    )
-
-                    self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-                    self.assertIn("  Visibility Level: [dynamic]", result.stdout)
-                    self.assertIn(
-                        "  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]",
-                        result.stdout,
-                    )
-                    saved = json.loads(config_path.read_text(encoding="utf-8"))
-                    self.assertEqual(saved["agent_visibility"]["profile"], "dynamic")
 
 
 if __name__ == "__main__":

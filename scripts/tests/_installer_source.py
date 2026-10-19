@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -13,16 +14,24 @@ def installer_bash_source() -> str:
 
 
 def installer_ps1_source() -> str:
-    """Return combined source from install.ps1 plus every installer_lib/*.ps1 file.
+    """Return the text of install.ps1, the thin PowerShell entry point, without its UTF-8 BOM.
 
-    PowerShell function definitions may live in install.ps1
-    or installer_lib/<name>.ps1, so static tests for function existence/content
-    should scan this combined source to preserve intent regardless of location.
-    install.ps1 and its modules use a UTF-8 BOM, so read with utf-8-sig to strip it.
+    The shell holds only the PowerShell 7.6 guard, the UTF-8 console setup, the
+    Python runtime detection and the mapping of the earlier PowerShell parameter
+    names; `_shared/installer/` owns every other installer step.
     """
-    parts = [(REPO_ROOT / "install.ps1").read_text(encoding="utf-8-sig")]
-    lib_dir = REPO_ROOT / "installer_lib"
-    if lib_dir.is_dir():
-        for path in sorted(lib_dir.glob("*.ps1")):
-            parts.append(path.read_text(encoding="utf-8-sig"))
-    return "\n".join(parts)
+    return (REPO_ROOT / "install.ps1").read_text(encoding="utf-8-sig")
+
+
+def powershell_function(text: str, name: str) -> str:
+    """The text of `function <name> { ... }` in a PowerShell source, found by brace depth."""
+    lines = text.splitlines(keepends=True)
+    start = next((i for i, line in enumerate(lines) if re.match(rf"function {re.escape(name)}\b", line)), None)
+    if start is None:
+        raise AssertionError(f"function not found: {name}")
+    depth = 0
+    for end in range(start, len(lines)):
+        depth += lines[end].count("{") - lines[end].count("}")
+        if depth == 0:
+            return "".join(lines[start:end + 1])
+    raise AssertionError(f"function does not end: {name}")

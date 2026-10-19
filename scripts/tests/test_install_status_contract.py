@@ -6,8 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -19,27 +17,6 @@ CODEX_BLOCK_END = "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
 CLAUDE_MARKER = "# Ghost-ALICE Claude Bootstrap"
 CLAUDE_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
 CLAUDE_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
-
-
-def _extract_powershell_function(source: str, name: str) -> str:
-    lines = source.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines):
-        if line.startswith(f"function {name} "):
-            start = idx
-            break
-    if start is None:
-        raise AssertionError(f"Function not found: {name}")
-
-    body = []
-    depth = 0
-    for line in lines[start:]:
-        body.append(line)
-        depth += line.count("{")
-        depth -= line.count("}")
-        if depth == 0:
-            return "".join(body)
-    raise AssertionError(f"Function did not terminate: {name}")
 
 
 class InstallStatusContractTest(unittest.TestCase):
@@ -693,64 +670,6 @@ class InstallStatusContractTest(unittest.TestCase):
             self.assertIn("claude-bootstrap", result.stdout)
             self.assertIn("user-owned markerless-existing-rule-file", result.stdout)
 
-    def test_installers_wire_status_and_doctor_to_common_cli(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_hosts_preservation_diagnostics.py.
-        ps1 = installer_ps1_source()
-        self.assertIn("[switch]$Doctor", ps1)
-        self.assertIn("function Invoke-InstallDoctor", ps1)
-        self.assertIn("install_doctor.py", ps1)
-        self.assertIn("--global-rule", ps1)
-        self.assertIn("$ClaudeManagedBlockBegin", ps1)
-        self.assertIn("$CodexManagedBlockBegin", ps1)
-        self.assertIn("if ($Doctor)", ps1)
-        self.assertIn('Invoke-InstallDoctor -Mode "status"', _extract_powershell_function(ps1, "Show-Status"))
-        ps_doctor = _extract_powershell_function(ps1, "Invoke-InstallDoctor")
-        self.assertIn('"--global-rule", "claude-bootstrap"', ps_doctor)
-        self.assertIn('"--encoding-root", $ScriptDir', ps_doctor)
-        self.assertIn('"--encoding-root", $SkillsRoot', ps_doctor)
-        self.assertIn("--install-state-manifest", ps_doctor)
-        powershell_supported = _extract_powershell_function(ps1, "Test-CodexHooksSupported")
-        self.assertIn("return $true", powershell_supported)
-        self.assertNotIn("Windows_NT", powershell_supported)
-        self.assertIn(
-            'Invoke-InstallHooks -Action "status" -TargetPlatform $Platform',
-            _extract_powershell_function(ps1, "Show-Status"),
-        )
-        powershell_hooks = _extract_powershell_function(ps1, "Invoke-InstallHooks")
-        self.assertIn("Test-CodexHooksSupported", powershell_hooks)
-        self.assertIn("Codex hooks are unavailable in this runtime", powershell_hooks)
-        self.assertNotIn("disabled on Windows", powershell_hooks)
-        self.assertIn('"--hook-shared-dir", (Resolve-GhostAliceRuntimeSharedDir)', powershell_hooks)
-        self.assertIn('"--runtime-shared", (Resolve-GhostAliceRuntimeSharedDir)', ps_doctor)
-        self.assertIn('"--hook-config", (Join-Path (Resolve-CodexHome) "hooks.json")', ps_doctor)
-        self.assertIn('[Alias("Visibility", "agent-visibility")]', ps1)
-        self.assertIn("[string]$AgentVisibility", ps1)
-        self.assertIn('$visibility = $AgentVisibility', powershell_hooks)
-        self.assertIn('if ($Action -eq "install" -and -not $visibility) {', powershell_hooks)
-        self.assertIn('$visibility = "dynamic"', powershell_hooks)
-        self.assertIn('"--visibility", $visibility', powershell_hooks)
-
-    def test_status_and_doctor_forward_selected_addon_sources_to_hook_status(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_hosts_preservation_diagnostics.py.
-        powershell_hooks = _extract_powershell_function(
-            installer_ps1_source(),
-            "Invoke-InstallHooks",
-        )
-        self.assertIn('$Action -ne "uninstall"', powershell_hooks)
-        self.assertIn('$pyArgs += @("--addon-source", $source)', powershell_hooks)
-
-        powershell_status = _extract_powershell_function(
-            installer_ps1_source(),
-            "Show-Status",
-        )
-        powershell_doctor = _extract_powershell_function(
-            installer_ps1_source(),
-            "Show-Doctor",
-        )
-        expected_call = 'Invoke-InstallHooks -Action "status" -TargetPlatform $Platform'
-        self.assertIn(expected_call, powershell_status)
-        self.assertIn(expected_call, powershell_doctor)
-
     def test_installers_write_empty_pending_merge_manifest_after_snapshot(self) -> None:
         transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
         # The installer delegates empty-manifest serialization to the _shared writer.
@@ -760,16 +679,6 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn('"version": 1', writer_py)
         self.assertIn('"platform": platform', writer_py)
         self.assertIn('"entries": []', writer_py)
-
-        ps1 = installer_ps1_source()
-        ps_writer = _extract_powershell_function(ps1, "Write-EmptyPendingManifestIfMissing")
-        self.assertIn("version = 1", ps_writer)
-        self.assertIn("platform = $TargetPlatform", ps_writer)
-        self.assertIn("entries = @()", ps_writer)
-        self.assertIn(
-            "Write-EmptyPendingManifestIfMissing -TargetPlatform $TargetPlatform -Manifest $manifest",
-            _extract_powershell_function(ps1, "Invoke-SnapshotAfterInstall"),
-        )
 
     def test_readme_documents_platform_specific_visibility_commands(self) -> None:
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")

@@ -62,10 +62,11 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
     ),
     TestGroup(
         "installer-runtime-detection",
-        "Python 3.11+ runtime lookup contracts",
+        "thin shells: PowerShell 7.6 guard, Python 3.11+ runtime lookup and the cli call",
         _py(
             "-m",
             "unittest",
+            "scripts.tests.test_thin_shells",
             "scripts.tests.test_install_runtime_detection",
             "scripts.tests.test_installer_default_auto",
             "scripts.tests.test_installer_compat_matrix",

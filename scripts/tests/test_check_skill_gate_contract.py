@@ -805,6 +805,13 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertIn("boundary-contract/SKILL.md", text)
             self.assertIn("verification-before-completion", text)
 
+    def test_session_gate_strings_are_required_from_the_installer_package_not_the_shells(self) -> None:
+        # The thin shells run the Python installer; `_shared/installer/` owns the gate contract and hook suite strings.
+        self.assertNotIn("install.sh", REQUIRED_PATTERNS)
+        self.assertNotIn("install.ps1", REQUIRED_PATTERNS)
+        self.assertIn("session-gates.json", REQUIRED_PATTERNS["_shared/installer/source.py"])
+        self.assertNotIn("installer_lib", (REPO_ROOT / "scripts" / "check_skill_gate_contract.py").read_text(encoding="utf-8"))
+
     def test_real_repo_contract_surfaces_do_not_reintroduce_tool_shape_policy(self) -> None:
         old_phrase = "deterministic " + "inspection"
         old_phrase_title = "Deterministic " + "inspection"

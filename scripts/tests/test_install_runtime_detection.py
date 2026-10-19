@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_bash_source, installer_ps1_source, powershell_function
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -321,37 +321,33 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertNotIn("Python.Python.3.13", install_ps1)
         self.assertNotIn("Python.Python.3.14", install_ps1)
 
-    def test_install_ps1_declares_git_node_python_prerequisite_bootstrap(self) -> None:
+    def test_install_ps1_installs_python_and_leaves_git_and_node_to_the_cli(self) -> None:
         install_ps1 = installer_ps1_source()
+        prerequisites = (REPO_ROOT / "_shared" / "installer" / "prerequisites.py").read_text(encoding="utf-8")
 
-        self.assertIn("function Install-Prerequisites", install_ps1)
         self.assertIn("Initialize-PythonRuntimeForInstall", install_ps1)
-        self.assertIn("Git.Git", install_ps1)
-        self.assertIn("OpenJS.NodeJS.LTS", install_ps1)
         self.assertIn("Python.Python.3", install_ps1)
-        self.assertIn("Install-Prerequisites\nInitialize-GitHooks", install_ps1)
+        for package in ("Git.Git", "OpenJS.NodeJS.LTS"):
+            self.assertNotIn(package, install_ps1)
+            self.assertIn(package, prerequisites)
+        self.assertNotIn("Install-Prerequisites", install_ps1)
 
     def test_install_ps1_python_version_key_runs_under_powershell(self) -> None:
         if not sys.platform.startswith("win"):
             self.skipTest("PowerShell native argument regression is Windows-specific")
         powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
         if not powershell:
-            self.skipTest("PowerShell executable is required for python_runtime.ps1 test")
+            self.skipTest("PowerShell executable is required for the install.ps1 runtime functions")
 
         python_exe = sys.executable.replace("'", "''")
-        script = textwrap.dedent(
-            f"""
-            $ErrorActionPreference = "Stop"
-            $script:GhostAliceRoot = (Get-Location).Path
-            . (Join-Path $script:GhostAliceRoot "installer_lib/python_runtime.ps1")
-            $key = Get-PythonVersionKey '{python_exe}'
-            if (-not $key) {{
-                Write-Output "KEY_MISSING"
-                exit 1
-            }}
-            Write-Output "KEY=$key"
-            """
-        )
+        install_ps1 = installer_ps1_source()
+        script = "\n".join([
+            '$ErrorActionPreference = "Stop"',
+            *(powershell_function(install_ps1, name) for name in ("Test-Python311OrNewer", "Get-PythonVersionKey")),
+            f"$key = Get-PythonVersionKey '{python_exe}'",
+            'if (-not $key) { Write-Output "KEY_MISSING"; exit 1 }',
+            'Write-Output "KEY=$key"',
+        ])
 
         result = subprocess.run(
             [powershell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],

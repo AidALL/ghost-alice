@@ -160,14 +160,8 @@ def operation_lock(home):
             raise GatewayBlocked('Installer lock metadata is not an object')
         # Reuse only this process's lock or its calling installer's lock. The Python
         # installer acquires in-process, so the lock's pid is this process's parent.
-        # install.ps1 still acquires through a child `install_lock.py` process and
-        # names its own PID at the end of the owner string (retired with the thin install.ps1).
-        owner = holder.get('owner', '')
-        shell_pid = owner.rsplit(':', 1)[-1] if isinstance(owner, str) else ''
-        inherited = holder.get('pid') == os.getppid() or (
-            isinstance(owner, str) and owner.startswith('install.ps1:')
-            and shell_pid.isdecimal() and int(shell_pid) == os.getppid())
-        if holder.get('pid') == os.getpid() or inherited:
+        # The owner string is a label and grants nothing.
+        if holder.get('pid') in (os.getpid(), os.getppid()):
             yield
             return
     before = path.parent.exists()

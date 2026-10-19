@@ -6,8 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -309,22 +307,6 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertIn("codex-remove", hosts_py)
         self.assertNotIn("get_codex_bootstrap_content", hosts_py)
         self.assertNotIn("--hookless-fallback", hosts_py)
-
-        ps1 = installer_ps1_source()
-        self.assertIn("global_rule_blocks.py", ps1)
-        self.assertIn('"claude-merge"', ps1)
-        self.assertIn('"claude-remove"', ps1)
-        self.assertIn("function Set-ClaudeBootstrap", ps1)
-        self.assertIn("function Remove-ClaudeBootstrapIfUnused", ps1)
-        self.assertIn("Invoke-LoggedIfCompact { Set-ClaudeBootstrap }", ps1)
-        self.assertIn("Remove-ClaudeBootstrapIfUnused -SkillsRoot $SkillsDir", ps1)
-        self.assertNotIn('$Platform -eq "claude" -and -not (Remove-ClaudeBootstrap)', ps1)
-        self.assertIn('"codex-merge"', ps1)
-        self.assertIn('"codex-remove"', ps1)
-        self.assertNotIn("[System.IO.File]::WriteAllText($agentsPath, $content", ps1)
-        self.assertNotIn("function Get-CodexBootstrapContent", ps1)
-        self.assertNotIn("function Get-CodexHooklessFallbackBlock", ps1)
-        self.assertNotIn("--hookless-fallback", ps1)
 
 
 if __name__ == "__main__":
