@@ -50,9 +50,11 @@ def tree(path: Path | str) -> dict[str, str]:
 
     Excluded folder names, file names and suffixes are left out; a linked file is left
     out and a linked folder is not entered, so the result describes only the bytes that
-    live in this folder.
+    live in this folder. A regular file is its own one entry, `{".": file_digest}`.
     """
     root = Path(path)
+    if root.is_file() and not _is_link(root):
+        return {".": file_digest(root)}
     files: dict[str, str] = {}
     for current, dirnames, filenames in os.walk(root):
         folder = Path(current)
@@ -69,7 +71,7 @@ def tree(path: Path | str) -> dict[str, str]:
 
 def _current_files(path: Path) -> dict[str, str]:
     """The files a copy has now: none when the path is absent or a link."""
-    if _is_link(path) or not path.is_dir():
+    if _is_link(path) or not (path.is_dir() or path.is_file()):
         return {}
     return tree(path)
 

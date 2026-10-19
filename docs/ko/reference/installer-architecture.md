@@ -85,7 +85,7 @@ Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달합니다. `i
 | `last_transaction` | 마지막 게시의 `id`, `updated_at`, `rollback_dir` |
 | `targets` | 설치 위치마다 `name`, `kind`(`skill`, `support`, `runtime`, `command`, `resource`), `mode`(`link`, `copy`), `provider`(`core` 또는 `addon:<id>`), `source`, `source_commit`, `used_by`, 링크이면 `link_target`, 복사이면 `files`, `installed_at`, `baseline` |
 
-복사 항목의 `files`는 상대 경로마다 파일 내용의 `sha256:<hex>` 지문을 기록하고, 링크 항목은 링크가 가리키는 경로만 기록합니다. `content_digest`가 둘을 생성하며 캐시(`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.git`), `.pyc`·`.DS_Store` 파일, 소유 표지 파일, 링크인 파일과 폴더를 제외합니다. `baseline`은 지문의 출처입니다. `recorded`는 게시가 작성한 지문, `migrated`는 이전 설치기의 기록에서 이관한 지문, `unknown`은 이전 기록에 지문이 없었다는 뜻입니다.
+복사 항목의 `files`는 상대 경로마다 파일 내용의 `sha256:<hex>` 지문을 기록하며, 파일 하나를 복사한 항목은 자기 자신을 경로 `.`로 기록합니다. 링크 항목은 링크가 가리키는 경로만 기록합니다. `content_digest`가 둘을 생성하며 캐시(`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.git`), `.pyc`·`.DS_Store` 파일, 소유 표지 파일, 링크인 파일과 폴더를 제외합니다. `baseline`은 지문의 출처입니다. `recorded`는 게시가 작성한 지문, `migrated`는 이전 설치기의 기록에서 이관한 지문, `unknown`은 이전 기록에 지문이 없었다는 뜻입니다.
 
 | Writer | When | What it writes |
 | --- | --- | --- |

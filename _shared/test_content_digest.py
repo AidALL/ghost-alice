@@ -73,6 +73,10 @@ class TreeTests(DigestCase):
         (skill / "linked-file.md").symlink_to(outside / "secret.md")
         self.assertEqual(content_digest.tree(skill), {"SKILL.md": _sha(b"skill")})
 
+    def test_a_single_file_is_its_own_one_entry(self):
+        path = self.write("commands/run.md", b"run")
+        self.assertEqual(content_digest.tree(path), {".": _sha(b"run")})
+
     def test_an_empty_folder_has_no_files(self):
         empty = self.root / "empty"
         (empty / "nested").mkdir(parents=True)
@@ -113,6 +117,15 @@ class CompareTests(DigestCase):
         entry = self.copy_entry(content_digest.tree(self.root / "source"))
         (self.root / "skill").symlink_to(self.root / "source", target_is_directory=True)
         self.assertEqual(content_digest.compare(entry, self.root / "skill")["missing"], ["SKILL.md"])
+
+    def test_a_copied_file_compares_like_a_folder_of_one_file(self):
+        path = self.write("commands/run.md", b"run")
+        entry = self.copy_entry(content_digest.tree(path))
+        self.assertEqual(content_digest.compare(entry, path)["changed"], [])
+        path.write_bytes(b"edited")
+        self.assertEqual(content_digest.compare(entry, path)["changed"], ["."])
+        path.unlink()
+        self.assertEqual(content_digest.compare(entry, path)["missing"], ["."])
 
     def test_a_copy_without_a_baseline_reports_nothing(self):
         self.write("skill/SKILL.md", b"skill")

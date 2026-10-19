@@ -447,7 +447,7 @@ def _write_json(path: Path, data: dict) -> None:
 
 
 def _state(path) -> dict | None:
-    """What is at an install location: absent (None), a link, a folder's file digests, or a file digest."""
+    """What is at an install location: absent (None), a link's target, or the file digests of a folder or file."""
     path = Path(path)
     if not os.path.lexists(path):
         return None
@@ -455,10 +455,8 @@ def _state(path) -> dict | None:
         return {"link_target": content_digest.link_target(path)}
     except OSError:
         pass
-    if path.is_dir():
+    if path.is_dir() or path.is_file():
         return {"files": content_digest.tree(path)}
-    if path.is_file():
-        return {"file": content_digest.file_digest(path)}
     return {"other": path.lstat().st_mode}
 
 

@@ -350,6 +350,22 @@ class MigrationTests(RecordCase):
         self.assertIsNone(self.migrate())
         self.assertFalse(self.record.exists())
 
+    def test_install_states_with_unusual_install_times_still_name_the_source(self):
+        # A time without an offset counts as UTC, and a value that is not a time counts as the earliest.
+        self.hold_lock()
+        for claude_time, codex_time in (("2026-10-01T00:00:00", "2026-10-03T00:00:00+00:00"),
+                                        ("not a time", "2026-10-03T00:00:00+00:00"),
+                                        ("2026-10-01T00:00:00+09:00", "2026-10-03T00:00:00")):
+            with self.subTest(claude=claude_time, codex=codex_time):
+                self.record.unlink(missing_ok=True)
+                for host, installed_at in (("claude", claude_time), ("codex", codex_time)):
+                    state_file = self.ghost / "install-state" / f"{host}.json"
+                    state = json.loads(state_file.read_text(encoding="utf-8"))
+                    state["installed_at"] = installed_at
+                    state_file.write_text(json.dumps(state), encoding="utf-8")
+                self.migrate()
+                self.assertEqual(installed_payload.read(self.ghost)["source"]["commit"], "bbb222")
+
     def test_an_unreadable_install_state_contributes_no_entries(self):
         self.hold_lock()
         (self.ghost / "install-state" / "claude.json").write_text("{broken", encoding="utf-8")

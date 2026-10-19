@@ -22,7 +22,7 @@ Dependencies: Python standard library, `content_digest`, `install_lock`.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -288,10 +288,13 @@ def _merge(existing: dict, new: dict) -> dict:
 
 
 def _installed_at(state: dict) -> datetime:
+    """When an install-state was written: a time without an offset counts as UTC,
+    and a value that is not a time counts as the earliest."""
     try:
-        return datetime.fromisoformat(str(state.get("installed_at")))
+        moment = datetime.fromisoformat(str(state.get("installed_at")))
     except ValueError:
-        return datetime.min
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=timezone.utc)
 
 
 def _source(states: list[dict]) -> dict | None:

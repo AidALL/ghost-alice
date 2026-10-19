@@ -112,6 +112,17 @@ class PublishTests(PublishCase):
         self.assertEqual(list(entry["files"]), ["SKILL.md"])
         self.assertNotIn("link_target", entry)
 
+    def test_a_copied_file_records_its_digest_under_its_own_path(self):
+        command = self.src / "noopcmd.md"
+        command.write_text("command v2\n", encoding="utf-8")
+        dest = self.home / ".claude" / "commands" / "noopcmd.md"
+        install_transaction.publish(self.request("claude", self.target(
+            "noopcmd", dest, "copy", kind="command", provider="addon:noop", source=command)))
+        entry = self.record()["targets"][str(dest)]
+        self.assertEqual(entry["files"], {".": content_digest.file_digest(dest)})
+        self.assertNotIn("file", entry)
+        self.assertEqual(content_digest.compare(entry, dest)["changed"], [])
+
     def test_one_request_is_one_transaction_and_keeps_the_replaced_originals_in_its_folder(self):
         self.old_copy(self.codex / "alpha", "alpha v1\n")
         self.old_copy(self.codex / "beta", "beta v1\n")
