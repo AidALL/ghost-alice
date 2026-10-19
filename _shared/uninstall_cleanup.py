@@ -916,6 +916,21 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             shared_platforms=others,
             recovery_platform=args.platform,
         ),
+        # The install record and the publish rollbacks are shared by every host, so the last
+        # host's removal takes them; the rollbacks keep replaced originals and are archived first.
+        _support_artifact_item(
+            "publish-rollbacks",
+            _ghost_alice_root() / "rollbacks",
+            confirm=args.confirm,
+            shared_platforms=others,
+            recovery_platform=args.platform,
+        ),
+        _support_artifact_item(
+            "install-record",
+            _ghost_alice_root() / "installed-payload.json",
+            confirm=args.confirm,
+            shared_platforms=others,
+        ),
         _support_artifact_item(
             "addon-sidecars",
             _ghost_alice_root() / "addons" / args.platform,

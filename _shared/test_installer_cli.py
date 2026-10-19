@@ -521,7 +521,8 @@ class InstallOrderTests(CliCase):
     STEPS = ("install_prerequisites", "setup_git_hooks", "acquire", "migrate_record", "check_source_health",
              "collect_targets",
              "cleanup_deprecated_installed_skills", "encoding_guard", "preflight", "resume_pending_uninstalls",
-             "check_addon_collisions", "sync_runtime_shared", "install_hooks", "ensure_bootstrap", "sync_commands",
+             "check_addon_collisions", "sync_runtime_shared", "report_gateway", "install_hooks", "ensure_bootstrap",
+             "sync_commands",
              "verify_after_copy", "write_ownership_markers", "snapshot_after_install", "migrate_state_once",
              "write_sidecars", "write_install_state_manifest", "write_event", "release")
 
@@ -546,6 +547,7 @@ class InstallOrderTests(CliCase):
         self.stub("installer.transaction.copy_targets_batch", True)
         self.stub("installer.transaction.record_current_links")
         self.stub("installer.transaction.sync_runtime_shared", True)
+        self.stub("installer.transaction.report_gateway")
         self.stub("installer.hosts.install_hooks", True)
         self.stub("installer.hosts.ensure_claude_bootstrap", True)
         self.stub("installer.hosts.ensure_codex_bootstrap", True)
@@ -600,6 +602,38 @@ class InstallOrderTests(CliCase):
                           ("task-router", claude_skills / "task-router", "skill")])
         replaced = [args[1].name for name, args, _ in self.calls if name == "link_or_copy"]
         self.assertEqual(replaced, ["alpha"])
+
+    def test_the_gateway_line_reaches_the_terminal_in_every_output_mode(self):
+        note = "Context gateway: registered from /src, 32 files, service not running"
+        self.patches.enter_context(mock.patch("installer.transaction.report_gateway", return_value=(note, False)))
+        # Compact mode: steps go to the log, the report tail carries the note under Attention.
+        report.configure(verbose=False, report_child=False, tty=False, progress_env="off", home=self.home)
+        ctx = make_context(self.home, "claude", args=["task-router"])
+        rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"Attention\n  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n"
+                      f"  - {note}\n", out)
+        # Verbose mode: the line prints where it happens and the tail is not printed.
+        quiet(self.home, verbose=True)
+        ctx = make_context(self.home, "claude", args=["task-router"])
+        rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertNotIn("Attention", out)
+        # A child of the auto mode writes the note as an event for the parent's tail.
+        event_file = self.home / "run.events.jsonl"
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_EVENT_FILE": str(event_file)}):
+            quiet(self.home, report_child=True)
+        ctx = make_context(self.home, "codex", args=["task-router"])
+        rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertEqual(rc, 0)
+        events = [json.loads(line) for line in event_file.read_text(encoding="utf-8").splitlines()]
+        self.assertIn({"type": "gateway-result", "platform": "codex", "summary": note, "running": False}, events)
+        # Without a gateway nothing is written or printed.
+        self.patches.enter_context(mock.patch("installer.transaction.report_gateway", return_value=None))
+        event_file.write_text("", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_EVENT_FILE": str(event_file)}):
+            quiet(self.home, report_child=True)
+        self.captured(cli.run_command, cli.INSTALL, make_context(self.home, "codex", args=["task-router"]))
+        self.assertNotIn("gateway-result", event_file.read_text(encoding="utf-8"))
 
     def test_codex_copy_mode_uses_one_batch(self):
         ctx = make_context(self.home, "codex", args=["task-router", "alpha"])
@@ -661,7 +695,7 @@ class InstallOrderTests(CliCase):
              "sync_runtime_shared"),
             ("codex", "installer.transaction.copy_targets_batch", False, 1, None, "sync_runtime_shared"),
             ("claude", "installer.transaction.sync_runtime_shared", False, 1,
-             "[ERROR] Runtime shared core sync failed. Aborting hook install", "install_hooks"),
+             "[ERROR] Runtime shared core sync failed. Aborting hook install", "report_gateway"),
             ("claude", "installer.hosts.install_hooks", False, 1, "[ERROR] Hook install failed. Aborting skill install",
              "ensure_claude_bootstrap"),
             ("claude", "installer.hosts.ensure_claude_bootstrap", False, 1, None, "sync_commands"),

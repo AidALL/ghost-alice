@@ -188,6 +188,13 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.dispatcher = self.ghost / "hooks"
         self.dispatcher.mkdir(parents=True, exist_ok=True)
         (self.dispatcher / "dispatcher.mjs").write_text("shared", encoding="utf-8")
+        self.record = self.ghost / "installed-payload.json"
+        self.record.write_text('{"schema_version": 1, "targets": {}}', encoding="utf-8")
+        self.publish_rollbacks = self.ghost / "rollbacks" / "20261020T000000Z-1-aaaaaaaa"
+        self.publish_rollbacks.mkdir(parents=True, exist_ok=True)
+        (self.publish_rollbacks / "journal.json").write_text('{"phase": "done"}', encoding="utf-8")
+        (self.publish_rollbacks / "rollback-task-router").mkdir(exist_ok=True)
+        (self.publish_rollbacks / "rollback-task-router" / "SKILL.md").write_text(value, encoding="utf-8")
 
     def _support(self, confirm=True):
         args = cleanup.build_parser().parse_args([
@@ -204,9 +211,22 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.assertEqual((self.dispatcher / "dispatcher.mjs").read_text(), "shared")
         self.assertEqual((self.rollbacks / "previous-copy.txt").read_text(), "original")
         self.assertEqual(other.read_bytes(), original_other)
-        for name in ["hook-dispatcher-assets", "install-rollbacks"]:
+        for name in ["hook-dispatcher-assets", "install-rollbacks", "install-record", "publish-rollbacks"]:
             self.assertEqual(report[name]["action"], "manual-review")
             self.assertEqual(report[name]["shared_platforms"], ["claude"])
+        # The install record names both hosts, so the last host's removal is the one that removes it.
+        self.assertTrue(self.record.exists())
+        self.assertTrue((self.publish_rollbacks / "rollback-task-router" / "SKILL.md").exists())
+
+    def test_last_platform_removes_the_install_record_and_archives_publish_rollbacks(self):
+        report = self._support()
+        self.assertFalse(self.record.exists())
+        self.assertFalse(self.publish_rollbacks.parent.exists())
+        self.assertEqual(report["install-record"]["action"], "removed")
+        self.assertEqual(report["publish-rollbacks"]["action"], "quarantined-removed")
+        copy = Path(report["publish-rollbacks"]["backup_path"]) / self.publish_rollbacks.name / "rollback-task-router" / "SKILL.md"
+        self.assertEqual(copy.read_text(encoding="utf-8"), "original")
+        self.assertEqual(cleanup._summary(list(report.values()))["removed"], 6)
 
     def test_last_platform_archives_recovery_material_before_removal(self):
         original_times = [(self.pending / "user-original.txt").stat().st_mtime_ns,
@@ -215,7 +235,7 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.assertFalse(self.pending.exists())
         self.assertFalse(self.rollbacks.exists())
         self.assertFalse(self.dispatcher.exists())
-        self.assertEqual(cleanup._summary(list(report.values()))["removed"], 4)
+        self.assertEqual(cleanup._summary(list(report.values()))["removed"], 6)
         for index, (name, filename) in enumerate([
             ("pending-merges", "user-original.txt"),
             ("install-rollbacks", "previous-copy.txt"),
@@ -242,6 +262,8 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.assertFalse((self.ghost / "uninstall-backup").exists())
         self.assertEqual(report["pending-merges"]["action"], "would-quarantine-remove")
         self.assertEqual(report["install-rollbacks"]["action"], "would-quarantine-remove")
+        self.assertEqual(report["publish-rollbacks"]["action"], "would-quarantine-remove")
+        self.assertEqual(report["install-record"]["action"], "would-remove")
 
     def test_failed_recovery_copy_keeps_original_material(self):
         with mock.patch.object(cleanup.shutil, "copytree", side_effect=OSError("copy interrupted")):

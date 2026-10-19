@@ -490,6 +490,10 @@ def run_install(ctx: Context) -> int:
         report.error("Runtime shared core sync failed. Aborting hook install")
         _details_log()
         raise InstallerExit(1)
+    gateway = report.run_logged(transaction.report_gateway, ctx)
+    notes = [gateway[0]] if gateway else []
+    if gateway:
+        report.write_gateway_event(ctx.platform, gateway[0], running=gateway[1])
     if not report.run_logged(hosts.install_hooks, ctx, "install", ctx.platform):
         report.error("Hook install failed. Aborting skill install")
         _details_log()
@@ -519,10 +523,10 @@ def run_install(ctx: Context) -> int:
         if report.live_counter_enabled():
             if not copy_only:
                 report.emit("\r" + report.skill_sync_line(counts.skipped, counts.updated, counts.installed))
-            report.print_tail(ctx.platform, visibility)
+            report.print_tail(ctx.platform, visibility, notes)
         else:
             report.print_full(ctx.platform, collected.total_target_count, counts.skipped, counts.updated,
-                              counts.installed, visibility)
+                              counts.installed, visibility, notes=notes)
     else:
         report.ok("[5/5] Verification: install state recorded")
         report.emit("")

@@ -192,6 +192,48 @@ def sync_runtime_shared(ctx: "Context") -> bool:
     return True
 
 
+GATEWAY_SERVICE_LABEL = "org.ghost-alice.context-gateway"
+
+
+def _gateway_service_running() -> bool:
+    """`launchctl print gui/<uid>/<label>` exits 0 while the service is loaded."""
+    domain = f"gui/{os.getuid()}" if hasattr(os, "getuid") else ""
+    return runner.run_command(["launchctl", "print", f"{domain}/{GATEWAY_SERVICE_LABEL}"], capture=True).ok
+
+
+def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
+    """One line about the context gateway after the runtime publish, read-only, and the same line
+    returned as `(summary, running)` for the report tail: None without a binding; INFO with the
+    receipt's source and file count while the service runs, WARN when it does not or when the binding
+    or receipt cannot be read. The publish coordination already stopped and restarted the service for
+    a changed module; this line only tells the user what it found."""
+    binding_path = locations.record_root() / "context-gateway-binding.json"
+    if not binding_path.is_file():
+        return None
+    try:
+        binding = json.loads(binding_path.read_text(encoding="utf-8"))
+        receipt_path = Path(binding["installation_path"])
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
+        summary = f"Context gateway: registered, but its binding cannot be read: {binding_path}"
+        report.warn(summary)
+        return summary, False
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        source_root, files = receipt["source_root"], len(receipt["files"])
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
+        summary = f"Context gateway: registered, but its receipt cannot be read: {receipt_path}"
+        report.warn(summary)
+        return summary, False
+    summary = f"Context gateway: registered from {source_root}, {report.count_label(files, 'file', 'files')}"
+    if _gateway_service_running():
+        summary += ", service running"
+        report.info(summary)
+        return summary, True
+    summary += ", service not running"
+    report.warn(summary)
+    return summary, False
+
+
 def migrate_record(ctx: "Context") -> None:
     """Create the install record once from an earlier installer's records (`installed_payload.migrate`)
     for every host; a migration that cannot finish is reported and the command goes on."""
