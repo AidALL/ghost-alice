@@ -146,24 +146,17 @@ class Platform:
 @contextmanager
 def operation_lock(home):
     """Use the installer's existing lock; never adopt an unrelated holder."""
+    import install_lock
     from install_lock import InstallLockError, acquire_lock, release_lock
     path = Path(home) / '.ghost-alice/install.lock'
-    initial = snapshot(path)
-    if initial.exists:
-        if initial.kind != 'file':
-            raise GatewayBlocked('Installer lock is not a regular owned file')
-        try:
-            holder = json.loads(initial.raw)
-        except ValueError as exc:
-            raise GatewayBlocked('Installer lock metadata is unreadable') from exc
-        if not isinstance(holder, dict):
-            raise GatewayBlocked('Installer lock metadata is not an object')
-        # Reuse only this process's lock or its calling installer's lock. The Python
-        # installer acquires in-process, so the lock's pid is this process's parent.
-        # The owner string is a label and grants nothing.
-        if holder.get('pid') in (os.getpid(), os.getppid()):
-            yield
-            return
+    # Reuse only this process's lock or its calling installer's lock; install_lock owns that judgment.
+    try:
+        held = install_lock.held_by_process_tree(path)
+    except InstallLockError as exc:
+        raise GatewayBlocked(str(exc)) from exc
+    if held:
+        yield
+        return
     before = path.parent.exists()
     try:
         acquire_lock(path, owner='context-gateway')
