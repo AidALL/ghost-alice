@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from installer import lock  # noqa: E402
 from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
+from installer.runner import ToolResult  # noqa: E402
+from installer_testing import FakeRunner  # noqa: E402
 
 
 class LockTests(unittest.TestCase):
@@ -61,6 +63,70 @@ class LockTests(unittest.TestCase):
         self.assertEqual(lock.acquire("cleanup-pending", "claude", lock_path=custom), custom)
         self.assertTrue(custom.is_file())
         lock.release(custom)
+
+
+class UnfinishedPublishTests(unittest.TestCase):
+    """Right after the lock, a publish that stopped halfway is restored before the command does anything else."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.home = Path(self.temp.name)
+        self.ghost = self.home / ".ghost-alice"
+        self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
+        self.env.start()
+        report.configure(verbose=False, report_child=False, tty=False, progress_env="auto", home=self.home)
+        self.runner = FakeRunner()
+
+    def tearDown(self):
+        self.env.stop()
+        self.temp.cleanup()
+
+    def journal(self, txid: str, phase: str) -> Path:
+        folder = self.ghost / "rollbacks" / txid
+        folder.mkdir(parents=True)
+        (folder / "journal.json").write_text(json.dumps({"schema_version": 1, "txid": txid, "phase": phase}),
+                                             encoding="utf-8")
+        return folder
+
+    def test_finished_publishes_need_no_restore(self):
+        self.journal("20261020T000000Z-1-aaaaaaaa", "done")
+        self.journal("20261020T000001Z-1-bbbbbbbb", "restored")
+        with self.runner.patch():
+            path = lock.acquire("install", "claude")
+        self.assertEqual(self.runner.calls, [])
+        self.assertTrue(path.is_file())
+        lock.release(path)
+
+    def test_unfinished_publishes_are_restored_newest_first_while_the_lock_is_held(self):
+        self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
+        self.journal("20261020T000002Z-1-cccccccc", "done")
+        self.journal("20261020T000001Z-1-bbbbbbbb", "prepare")
+        held = []
+
+        def recover(script, args, kwargs):
+            held.append((self.ghost / "install.lock").is_file())
+            return ToolResult(0)
+
+        self.runner.respond(lambda script, args: script.endswith("install_transaction.py"), recover)
+        with self.runner.patch():
+            path = lock.acquire("repair", "codex")
+        self.assertEqual(self.runner.tool_calls("install_transaction.py"), [
+            ["recover", "--ghost-root", str(self.ghost), "--txid", "20261020T000001Z-1-bbbbbbbb"],
+            ["recover", "--ghost-root", str(self.ghost), "--txid", "20261020T000000Z-1-aaaaaaaa"]])
+        self.assertEqual(held, [True, True])
+        self.assertTrue(path.is_file())
+        lock.release(path)
+
+    def test_a_publish_that_cannot_be_restored_stops_the_command_and_releases_the_lock(self):
+        folder = self.journal("20261020T000000Z-1-aaaaaaaa", "prepare")
+        self.runner.respond_to("install_transaction.py", ToolResult(1))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.runner.patch(), self.assertRaises(runner.InstallerExit) as stop:
+            lock.acquire("uninstall", "claude")
+        self.assertEqual(stop.exception.code, 1)
+        self.assertIn(f"[ERROR] An unfinished publish could not be restored; review {folder} "
+                      "and run the installer again", out.getvalue())
+        self.assertFalse((self.ghost / "install.lock").exists())
 
 
 class RunnerTests(unittest.TestCase):

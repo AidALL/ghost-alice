@@ -69,6 +69,34 @@ def release_lock(lock_path: Path | str) -> None:
         return
 
 
+def held_by_process_tree(lock_path: Path | str) -> bool:
+    """True when the lock file names this process or the process that started it.
+
+    The installer acquires the lock in its own process and runs its tools as child
+    processes, so a tool inherits the lock of its parent. The owner text is a label
+    and grants nothing. An absent lock, a lock without a pid and another process's
+    lock are not held; a lock that is not a regular file or whose metadata is not
+    a readable JSON object raises InstallLockError.
+    """
+    path = Path(lock_path)
+    try:
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            raise InstallLockError("Installer lock is not a regular owned file")
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return False
+    except (OSError, UnicodeDecodeError) as exc:
+        raise InstallLockError(f"Installer lock metadata is unreadable: {exc}") from exc
+    try:
+        holder = json.loads(raw)
+    except ValueError as exc:
+        raise InstallLockError("Installer lock metadata is unreadable") from exc
+    if not isinstance(holder, dict):
+        raise InstallLockError("Installer lock metadata is not an object")
+    pid = holder.get("pid")
+    return isinstance(pid, int) and not isinstance(pid, bool) and pid in (os.getpid(), os.getppid())
+
+
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Acquire or release the Ghost-ALICE installer lock.")
     subparsers = parser.add_subparsers(dest="command", required=True)

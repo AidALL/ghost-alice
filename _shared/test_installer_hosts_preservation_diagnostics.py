@@ -15,6 +15,9 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import content_digest  # noqa: E402
+import install_lock  # noqa: E402
+import installed_payload  # noqa: E402
 from installer import diagnostics, hosts, preservation  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Target  # noqa: E402
@@ -355,6 +358,138 @@ class InspectTests(HostCase):
         with hooks_failing.patch():
             rc, _ = self.captured(diagnostics.run_doctor, self.context("codex"))
         self.assertEqual(rc, 1)
+
+
+class InstallRecordReportTests(HostCase):
+    """`--status` and `--doctor` read the install record and report it; their result stays what the checks decide."""
+
+    def write_record(self, targets, **sections):
+        lock = self.ghost / "install.lock"
+        install_lock.acquire_lock(lock, owner="test")
+        try:
+            installed_payload.update(self.ghost, {"targets": targets, **sections})
+        finally:
+            install_lock.release_lock(lock)
+
+    @staticmethod
+    def entry(mode, used_by, **fields):
+        entry = {"name": "x", "kind": "skill", "mode": mode, "provider": "core", "source": "/src/x",
+                 "source_commit": "abc", "used_by": used_by, "installed_at": "2026-10-20T00:00:00+00:00",
+                 "baseline": "recorded"}
+        entry.update(fields)
+        return entry
+
+    def run_both(self, ctx):
+        for run in (diagnostics.check_status, diagnostics.run_doctor):
+            runner = FakeRunner()
+            with runner.patch():
+                rc, out = self.captured(run, ctx)
+            yield run.__name__, rc, out
+
+    def test_no_install_record_yet(self):
+        record = self.ghost / "installed-payload.json"
+        for name, rc, out in self.run_both(self.context("claude")):
+            with self.subTest(command=name):
+                self.assertEqual(rc, 0)
+                self.assertIn(f"[INFO] Install record: none yet; the next install writes {record}", out)
+
+    def test_the_summary_and_every_difference_of_this_hosts_targets(self):
+        ctx = self.context("claude")
+        linked = ctx.skills_dir / "alpha"
+        linked.symlink_to(self.source / "alpha")
+        moved = ctx.skills_dir / "one"
+        moved.symlink_to(self.home / "elsewhere")
+        runtime = self.ghost / "runtime" / "current" / "_shared"
+        runtime.mkdir(parents=True)
+        (runtime / "a.py").write_text("a", encoding="utf-8")
+        (runtime / "b.py").write_text("b", encoding="utf-8")
+        files = content_digest.tree(runtime)
+        (runtime / "a.py").write_text("edited", encoding="utf-8")
+        (runtime / "b.py").unlink()
+        (runtime / "c.py").write_text("new", encoding="utf-8")
+        codex_copy = self.home / ".agents" / "skills" / "alpha"
+        self.write_record({
+            str(linked): self.entry("link", ["claude"], link_target=str(self.source / "alpha")),
+            str(moved): self.entry("link", ["claude"], link_target=str(self.source / "fam" / "one")),
+            str(runtime): self.entry("copy", ["claude", "codex"], kind="runtime", files=files),
+            str(ctx.skills_dir / "two"): self.entry("copy", ["claude"], baseline="unknown"),
+            str(codex_copy): self.entry("copy", ["codex"], files={"SKILL.md": "sha256:" + "0" * 64}),
+        }, last_transaction={"id": "20261020T000000Z-1-aaaaaaaa", "updated_at": "2026-10-20T00:00:00+00:00",
+                             "rollback_dir": str(self.ghost / "rollbacks" / "20261020T000000Z-1-aaaaaaaa")})
+        record = self.ghost / "installed-payload.json"
+        for name, rc, out in self.run_both(ctx):
+            with self.subTest(command=name):
+                self.assertEqual(rc, 0)
+                self.assertIn(f"[INFO] Install record ({record}): 4 claude targets (link 2, copy 2; baseline recorded 3, "
+                              "migrated 0, unknown 1); last publish 20261020T000000Z-1-aaaaaaaa", out)
+                self.assertIn(f"[WARN] Differs from the install record: {moved} (link target differs)", out)
+                self.assertIn(f"[WARN] Differs from the install record: {runtime} (missing b.py; changed a.py; "
+                              "extra c.py)", out)
+                self.assertNotIn(f"Differs from the install record: {linked}", out)
+                self.assertNotIn(str(codex_copy), out)
+                self.assertNotIn("match the install record", out)
+
+    def test_matching_targets_are_reported_as_matching(self):
+        ctx = self.context("claude")
+        linked = ctx.skills_dir / "alpha"
+        linked.symlink_to(self.source / "alpha")
+        self.write_record({str(linked): self.entry("link", ["claude"], link_target=str(self.source / "alpha"))})
+        for name, rc, out in self.run_both(ctx):
+            with self.subTest(command=name):
+                self.assertIn("[INFO] Install record (", out)
+                self.assertIn("last publish none", out)
+                self.assertIn("[OK] Installed targets match the install record", out)
+
+    @unittest.skipIf(not hasattr(os, "geteuid") or os.geteuid() == 0, "needs a file this user cannot read")
+    def test_a_target_that_cannot_be_read_is_reported_and_the_command_goes_on(self):
+        ctx = self.context("claude")
+        runtime = self.ghost / "runtime" / "current" / "_shared"
+        runtime.mkdir(parents=True)
+        secret = runtime / "a.py"
+        secret.write_text("a", encoding="utf-8")
+        self.write_record({str(runtime): self.entry("copy", ["claude"], kind="runtime",
+                                                    files=content_digest.tree(runtime))})
+        secret.chmod(0)
+        try:
+            results = list(self.run_both(ctx))
+        finally:
+            secret.chmod(0o644)
+        for name, rc, out in results:
+            with self.subTest(command=name):
+                self.assertEqual(rc, 0)
+                self.assertIn(f"[WARN] Install record comparison failed for {runtime}: ", out)
+
+    def test_targets_without_a_baseline_are_counted_and_never_reported_as_matching(self):
+        ctx = self.context("claude")
+        linked = ctx.skills_dir / "alpha"
+        linked.symlink_to(self.source / "alpha")
+        self.write_record({
+            str(linked): self.entry("link", ["claude"], link_target=str(self.source / "alpha")),
+            str(ctx.skills_dir / "two"): self.entry("copy", ["claude"], baseline="unknown"),
+            str(ctx.skills_dir / "one"): self.entry("copy", ["claude"], baseline="unknown"),
+        })
+        for name, rc, out in self.run_both(ctx):
+            with self.subTest(command=name):
+                self.assertEqual(rc, 0)
+                self.assertIn("[INFO] Not compared, no baseline in the install record: 2 targets", out)
+                self.assertIn("[OK] Compared targets match the install record: 1 target", out)
+                self.assertNotIn("Installed targets match the install record", out)
+        self.write_record({str(ctx.skills_dir / name): self.entry("copy", ["claude"], baseline="unknown")
+                           for name in ("one", "two")} | {
+            str(linked): self.entry("link", ["claude"], baseline="unknown")})
+        for name, rc, out in self.run_both(ctx):
+            with self.subTest(command=name, compared="none"):
+                self.assertIn("[INFO] Not compared, no baseline in the install record: 3 targets", out)
+                self.assertNotIn("match the install record", out)
+
+    def test_an_unreadable_install_record_is_reported_and_changes_no_result(self):
+        record = self.ghost / "installed-payload.json"
+        self.ghost.mkdir(parents=True)
+        record.write_text("{broken", encoding="utf-8")
+        for name, rc, out in self.run_both(self.context("claude")):
+            with self.subTest(command=name):
+                self.assertEqual(rc, 0)
+                self.assertIn(f"[WARN] Install record unreadable ({record}): ", out)
 
 
 if __name__ == "__main__":

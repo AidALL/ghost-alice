@@ -45,6 +45,11 @@ class Target:
     path: Path
     addon_id: str | None = None
 
+    @property
+    def provider(self) -> str:
+        """`core`, or `addon:<id>` for an addon's target: the provider the install record names."""
+        return f"addon:{self.addon_id}" if self.addon_id else "core"
+
 
 @dataclass
 class Collected:

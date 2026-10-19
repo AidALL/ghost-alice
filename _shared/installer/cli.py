@@ -65,6 +65,7 @@ class Context:
     addon_targets: list = field(default_factory=list)
     visibility: str = "dynamic"
     hook_change: object | None = None
+    record_source: dict | None = None
 
     @property
     def verbose(self) -> bool:
@@ -352,6 +353,7 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
     shared_dest = skills_dir / "_shared"
     counts = transaction.SyncCounts()
     batch = transaction.CopyBatch()
+    current_links: list[tuple[selection.Target, Path, str]] = []
     installed = skipped = 0
     if copy_only:
         if shared_src.is_dir():
@@ -367,6 +369,7 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
         if shared_dest.is_symlink() and os.readlink(shared_dest) == str(shared_src):
             counts.skipped += 1
             status = "current"
+            current_links.append((selection.Target("_shared", shared_src), shared_dest, "support"))
         elif shared_dest.exists() or shared_dest.is_symlink():
             counts.updated += 1
             status = "updated"
@@ -387,13 +390,14 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
             else:
                 counts.installed += 1
                 status = "new"
-            batch.add(target.path, dest, target.name, "skill", status)
+            batch.add(target.path, dest, target.name, "skill", status, target.provider)
             installed += 1
             continue
         if dest.is_symlink() and os.readlink(dest) == str(target.path):
             counts.skipped += 1
             report.detail_warn(f"{target.name}. Already installed (skipped)")
             report.write_target_event(ctx.platform, target.name, "skill", "current")
+            current_links.append((target, dest, "skill"))
             skipped += 1
             continue
         if dest.exists() or dest.is_symlink():
@@ -403,12 +407,14 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
         else:
             counts.installed += 1
             status = "new"
-        if transaction.link_or_copy(ctx, target.path, dest) != 0:
+        if transaction.link_or_copy(ctx, target, dest) != 0:
             report.error(f"Managed target replacement failed: {dest}")
             raise InstallerExit(1)
         report.detail_ok(f"{target.name} -> installed")
         report.write_target_event(ctx.platform, target.name, "skill", status)
         installed += 1
+    # Links already pointing at their source are not replaced, but the install record still names them.
+    transaction.record_current_links(ctx, current_links)
     if copy_only and batch.pairs:
         label = "  [2/5] Skill sync         " if report.report_enabled() and report.live_counter_enabled() else None
         events_during_batch = report.state().event_file is not None
@@ -438,6 +444,8 @@ def run_install(ctx: Context) -> int:
     skills = list(options.args) or list(selection.ALL_SKILLS)
     skills_dir = Path(ctx.skills_dir)
     visibility = ctx.visibility
+    # The first install over an earlier installer's records creates the install record before anything is placed.
+    report.run_logged(transaction.migrate_record, ctx)
     # S4 source, S5 selection (contradiction 9: the source check comes first)
     if not report.run_logged(source.check_source_health, skip=options.skip_source_health):
         raise InstallerExit(1)

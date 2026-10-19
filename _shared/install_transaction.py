@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Transactional installer filesystem operations."""
+"""Transactional installer filesystem operations.
+
+`publish --request <file>` places the targets one request names and writes their
+install record entries in the same step. The original each target replaces moves
+into `~/.ghost-alice/rollbacks/<txid>/`, whose `journal.json` says what the publish
+replaces and how far it got (`prepare`, then `done` or `restored`). Any failure
+restores the files and the record. `recover --txid` restores a publish that stopped
+before its journal said `done`, and `unfinished` lists those publishes.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +25,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
+import content_digest
+import installed_payload
+
 EXCLUDED_COPY_DIR_NAMES = {
     "__pycache__",
     ".pytest_cache",
@@ -28,6 +39,12 @@ EXCLUDED_COPY_DIR_NAMES = {
 EXCLUDED_COPY_FILE_NAMES = {".DS_Store"}
 EXCLUDED_COPY_FILE_SUFFIXES = {".pyc"}
 DEFAULT_ROLLBACK_KEEP = 20
+REQUEST_SCHEMA_VERSION = 1
+JOURNAL_SCHEMA_VERSION = 1
+ROLLBACKS_DIRNAME = "rollbacks"
+JOURNAL_FILENAME = "journal.json"
+FINISHED_PHASES = ("done", "restored")
+TARGET_STATUSES = ("current", "updated", "new")
 
 
 class InstallTransactionError(RuntimeError):
@@ -251,7 +268,7 @@ class ReplacementBatch:
         if self.events is not None and len(self.events) != len(self.targets):
             raise InstallTransactionError('progress event count must match target count')
         self.prepared, self.phase = [], 'prepare'
-        self.source, self.dest = self.targets[0][:2]
+        self.source, self.dest = self.targets[0][:2] if self.targets else (None, None)
 
     @staticmethod
     def identity(path):
@@ -369,6 +386,21 @@ class ReplacementBatch:
             raise
 
 
+def _wrapped_failure(exc, batch, detail=None):
+    """An InstallTransactionError that keeps the cause's code, exit code, outcome and phase."""
+    if detail is not None:
+        wrapped = InstallTransactionError(detail)
+    elif isinstance(exc, InstallTransactionError):
+        wrapped = exc
+    else:
+        wrapped = InstallTransactionError('staged replacement failed for ' + str(batch.dest) + ': ' + str(exc))
+    for name in ('code', 'exit_code', 'outcome'):
+        if hasattr(exc, name):
+            setattr(wrapped, name, getattr(exc, name))
+    wrapped.phase = getattr(exc, 'phase', batch.phase)
+    return wrapped
+
+
 def _replace(targets, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP,
              progress_callback=None, progress_event_file=None, progress_events=None):
     if not targets:
@@ -381,17 +413,368 @@ def _replace(targets, *, rollback_root=None, event_log=None, rollback_keep=DEFAU
         coordinate_payload_replacement(batch)
         batch.finalize()
     except Exception as exc:
-        wrapped = exc if isinstance(exc, InstallTransactionError) else InstallTransactionError(
-            'staged replacement failed for ' + str(batch.dest) + ': ' + str(exc))
-        for name in ('code', 'exit_code', 'outcome'):
-            if hasattr(exc, name):
-                setattr(wrapped, name, getattr(exc, name))
-        wrapped.phase = getattr(exc, 'phase', batch.phase)
+        wrapped = _wrapped_failure(exc, batch)
         _write_failure_event(Path(event_log) if event_log is not None else None,
             source=batch.source, dest=batch.dest, phase=wrapped.phase, error=str(wrapped))
         raise wrapped from exc
     finally:
         batch.cleanup()
+
+
+def rollbacks_root(ghost_root) -> Path:
+    """`<ghost_root>/rollbacks`: one folder per publish, named by its transaction id."""
+    return Path(ghost_root) / ROLLBACKS_DIRNAME
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _write_json(path: Path, data: dict) -> None:
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+    try:
+        with open(temporary, "x", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+class Journal:
+    """`rollbacks/<txid>/journal.json`: the targets one publish replaces and how far it got.
+
+    `prepare` is written before anything changes, `done` after the files, the install
+    record and the gateway coordination all finished, `restored` after a restore.
+    The install record as it was before the publish is kept next to the journal.
+    """
+
+    def __init__(self, folder: Path, data: dict):
+        self.folder, self.data = Path(folder), data
+
+    @property
+    def txid(self) -> str:
+        return self.folder.name
+
+    @property
+    def phase(self):
+        return self.data.get("phase")
+
+    def record_copy(self) -> Path | None:
+        """The saved install record, or None when there was no record before the publish."""
+        name = self.data.get("record_copy")
+        return self.folder / name if name else None
+
+    def save(self) -> None:
+        self.data["updated_at"] = _now()
+        _write_json(self.folder / JOURNAL_FILENAME, self.data)
+
+    def mark(self, phase: str) -> None:
+        self.data["phase"] = phase
+        self.save()
+
+    @classmethod
+    def begin(cls, request: dict, targets: list[dict]) -> "Journal":
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        folder = rollbacks_root(request["ghost_root"]) / f"{stamp}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+        folder.mkdir(parents=True)
+        record = installed_payload.path(request["ghost_root"])
+        copy = None
+        if record.exists():
+            shutil.copyfile(record, folder / installed_payload.FILENAME)
+            copy = installed_payload.FILENAME
+        journal = cls(folder, {
+            "schema_version": JOURNAL_SCHEMA_VERSION, "txid": folder.name, "phase": "prepare",
+            "host": request["host"], "created_at": _now(), "record_copy": copy,
+            "targets": [{key: target[key] for key in ("name", "kind", "mode", "source", "dest")}
+                        for target in targets]})
+        journal.save()
+        return journal
+
+    @classmethod
+    def load(cls, ghost_root, txid: str) -> "Journal":
+        folder = rollbacks_root(ghost_root) / txid
+        try:
+            data = json.loads((folder / JOURNAL_FILENAME).read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            raise InstallTransactionError(f"journal of publish {txid} cannot be read ({exc}); review {folder}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("targets", []), list):
+            raise InstallTransactionError(f"journal of publish {txid} is not a journal; review {folder}")
+        return cls(folder, data)
+
+
+def _journal_phase(folder: Path):
+    """The phase a publish folder's journal says; "absent" without a journal, None when it cannot be read."""
+    file = folder / JOURNAL_FILENAME
+    if not os.path.lexists(file):
+        return "absent"
+    try:
+        data = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return data.get("phase") if isinstance(data, dict) else None
+
+
+def unfinished(ghost_root) -> list[str]:
+    """Transaction ids whose journal says neither done nor restored, newest first; an unreadable journal counts."""
+    root = rollbacks_root(ghost_root)
+    try:
+        folders = [path for path in root.iterdir() if path.is_dir() and not path.is_symlink()]
+    except OSError:
+        return []
+    return [folder.name for folder in sorted(folders, key=lambda path: path.name, reverse=True)
+            if _journal_phase(folder) not in (*FINISHED_PHASES, "absent")]
+
+
+def _prune_transactions(root: Path, keep: int) -> None:
+    """Keep the newest `keep` finished publish folders; an unfinished one stays until it is restored."""
+    try:
+        folders = sorted((path for path in root.iterdir() if path.is_dir() and not path.is_symlink()),
+                         key=lambda path: path.name)
+    except OSError:
+        return
+    finished = [folder for folder in folders if _journal_phase(folder) in (*FINISHED_PHASES, "absent")]
+    for folder in finished[: max(0, len(finished) - max(0, keep))]:
+        try:
+            shutil.rmtree(folder)
+        except OSError:
+            continue
+
+
+def _record_key(dest) -> str:
+    return Path(dest).as_posix()
+
+
+def _record_value(path, mode: str) -> dict:
+    """What the install record keeps for a published target: the link's target, or the copy's file digests."""
+    if mode == "link":
+        return {"link_target": content_digest.link_target(path)}
+    return {"files": content_digest.tree(path)}
+
+
+def _links_to_its_source(target: dict) -> bool:
+    """A link the installer found already in place (status `current`) that still points at its source."""
+    if target["mode"] != "link" or target.get("status") != "current":
+        return False
+    try:
+        return content_digest.link_target(target["dest"]) == target["source"]
+    except OSError:
+        return False
+
+
+class PublishBatch(ReplacementBatch):
+    """The targets of one publish request.
+
+    Each replaced target is staged next to its install location; publishing moves the
+    original into `rollbacks/<txid>/`, renames the staged copy or link into place and
+    writes the install record entries of every target, the current links included, with
+    the source, installer and transaction in the same step. Restoring puts back the files
+    and the record a journal saved.
+    """
+
+    def __init__(self, request: dict, replaced: list[dict], current: list[dict], journal: Journal, *,
+                 rollback_keep=DEFAULT_ROLLBACK_KEEP, progress_callback=None, progress_events=None):
+        self.request, self.journal = request, journal
+        self.replaced, self.current = replaced, current
+        self.ghost_root = Path(request["ghost_root"])
+        progress = request.get("progress") or {}
+        super().__init__([(target["source"], target["dest"], "symlink" if target["mode"] == "link" else "copy")
+                          for target in replaced],
+                         rollback_root=journal.folder, rollback_keep=rollback_keep,
+                         progress_callback=progress_callback, progress_event_file=progress.get("event_file"),
+                         progress_events=progress_events)
+
+    def stage(self):
+        super().stage()
+        for item, target in zip(self.prepared, self.journal.data["targets"]):
+            target.update(stage=str(item["stage"]), rollback=str(item["rollback"]),
+                          before=content_digest.state(item["dest"]), candidate=content_digest.state(item["stage"]))
+            item["record"] = _record_value(item["stage"], target["mode"])
+        self.journal.save()
+
+    def publish(self):
+        super().publish()
+        self._write_record()
+
+    def _write_record(self):
+        installed_at = _now()
+        entries = {}
+        recorded = [(target, item["record"]) for target, item in zip(self.replaced, self.prepared)]
+        recorded += [(target, _record_value(target["dest"], "link")) for target in self.current]
+        for target, value in recorded:
+            entry = {key: target[key] for key in ("name", "kind", "mode", "provider", "source", "source_commit")}
+            entry.update(used_by=[self.request["host"]], installed_at=installed_at, baseline="recorded")
+            entry.update(value)
+            entries[_record_key(target["dest"])] = entry
+        patches = {"targets": entries, "installer": dict(self.request["installer"]),
+                   "source": dict(self.request["source"]),
+                   "last_transaction": {"id": self.journal.txid, "updated_at": installed_at,
+                                        "rollback_dir": str(self.journal.folder)}}
+        try:
+            installed_payload.update(self.ghost_root, patches)
+        except installed_payload.RecordError as exc:
+            # A record this installer cannot read is never overwritten; the published files stay.
+            print(f"[WARN] Install record left unchanged: {exc}", file=sys.stderr)
+
+    def restore(self):
+        super().restore()
+        installed_payload.restore(self.ghost_root, self.journal.record_copy())
+        self.journal.mark("restored")
+
+    def finalize(self):
+        self.journal.mark("done")
+        _prune_transactions(rollbacks_root(self.ghost_root), self.keep)
+
+
+def _validated_request(request) -> dict:
+    def fail(reason):
+        raise InstallTransactionError(f"invalid publish request: {reason}")
+
+    if not isinstance(request, dict) or request.get("schema_version") != REQUEST_SCHEMA_VERSION:
+        fail(f"schema_version must be {REQUEST_SCHEMA_VERSION}")
+    for key in ("host", "ghost_root"):
+        if not isinstance(request.get(key), str) or not request[key]:
+            fail(f"{key} must be a nonempty string")
+    for key in ("installer", "source"):
+        if not isinstance(request.get(key), dict):
+            fail(f"{key} must be an object")
+    targets = request.get("targets")
+    if not isinstance(targets, list) or not targets:
+        fail("targets must be a nonempty list")
+    for target in targets:
+        if not isinstance(target, dict):
+            fail("every target must be an object")
+        for key in ("name", "provider", "source", "source_commit", "dest"):
+            if not isinstance(target.get(key), str) or not target[key]:
+                fail(f"target {key} must be a nonempty string")
+        if target.get("kind") not in installed_payload.KINDS or target.get("mode") not in installed_payload.MODES:
+            fail(f"target {target['name']} needs kind {installed_payload.KINDS} and mode {installed_payload.MODES}")
+        if "status" in target and target["status"] not in TARGET_STATUSES:
+            fail(f"target {target['name']} status must be one of {TARGET_STATUSES}")
+    progress = request.get("progress", {})
+    if not isinstance(progress, dict):
+        fail("progress must be an object")
+    if progress.get("event_file") and any(target.get("status") is None for target in targets):
+        fail("every target needs a status when progress events are written")
+    return request
+
+
+def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str:
+    """Publish the request's targets and their install record entries; return the transaction id.
+
+    A failure anywhere restores every file and the record, says `restored` in the
+    journal and raises InstallTransactionError with the cause's exit code. A restore
+    that fails leaves the journal unfinished and names its folder.
+    """
+    request = _validated_request(request)
+    current = [target for target in request["targets"] if _links_to_its_source(target)]
+    replaced = [target for target in request["targets"] if not _links_to_its_source(target)]
+    try:
+        journal = Journal.begin(request, replaced)
+    except OSError as exc:
+        raise InstallTransactionError(f"publish journal cannot be written under "
+                                      f"{rollbacks_root(request['ghost_root'])}: {exc}") from exc
+    progress = request.get("progress") or {}
+    statuses = [target.get("status") for target in replaced]
+    callback = None
+    if progress.get("label"):
+        counted = statuses if all(statuses) else None
+        _write_progress(progress["label"], 0, len(statuses), counted)
+
+        def callback(done: int, total: int) -> None:
+            _write_progress(progress["label"], done, total, counted)
+
+    events = None
+    if progress.get("event_file"):
+        events = [{"platform": request["host"], "target_id": target["name"], "target_kind": target["kind"],
+                   "status": target["status"]} for target in replaced]
+    batch = PublishBatch(request, replaced, current, journal, rollback_keep=rollback_keep,
+                         progress_callback=callback, progress_events=events)
+    try:
+        batch.stage()
+        if batch.prepared:
+            from context_gateway_install import coordinate_payload_replacement
+            coordinate_payload_replacement(batch)
+        else:
+            # Only current links: no file changes, so nothing for the gateway to coordinate.
+            batch.publish()
+        batch.finalize()
+    except Exception as exc:
+        wrapped = _wrapped_failure(exc, batch)
+        try:
+            batch.restore()
+        except Exception as recovery:
+            wrapped = _wrapped_failure(exc, batch, f"{wrapped}; restore failed ({recovery}); review {journal.folder}")
+        event_log = request.get("event_log")
+        _write_failure_event(Path(event_log) if event_log else None, source=batch.source, dest=batch.dest,
+                             phase=wrapped.phase, error=str(wrapped))
+        raise wrapped from exc
+    finally:
+        batch.cleanup()
+        if progress.get("label"):
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+    return journal.txid
+
+
+def _recovery_action(folder: Path, target: dict):
+    """What restores one journaled target: None when it never changed, else (action, dest, kept original)."""
+    if "candidate" not in target:
+        # The publish never finished staging, so nothing was moved.
+        return None
+    dest = Path(target["dest"])
+    kept = Path(target["rollback"]) if target.get("rollback") else None
+    current = content_digest.state(dest)
+    if kept is not None and os.path.lexists(kept):
+        if current is None:
+            return "put-back", dest, kept
+        if current == target["candidate"]:
+            return "replace", dest, kept
+    elif target.get("before") is None:
+        if current is None:
+            return None
+        if current == target["candidate"]:
+            return "remove", dest, None
+    elif current == target["before"]:
+        return None
+    raise InstallTransactionError(f"{dest} is neither its original nor what the publish left there; "
+                                  f"review {folder}")
+
+
+def recover(ghost_root, txid: str) -> list[str]:
+    """Restore the publish `txid` from its journal unless the journal says done or restored.
+
+    Every target is checked before any changes: the install location must still hold
+    what the publish left there (or its original), and a moved original must still be
+    kept. Then the originals return, the install record returns to its saved copy and
+    the journal says `restored`. Returns one line per restored target.
+    """
+    journal = Journal.load(ghost_root, txid)
+    if journal.phase in FINISHED_PHASES:
+        return []
+    actions = [action for action in (_recovery_action(journal.folder, target)
+                                     for target in reversed(journal.data.get("targets", []))) if action]
+    lines = []
+    for action, dest, kept in actions:
+        if action in ("replace", "remove"):
+            _remove_path(dest)
+        if action == "remove":
+            lines.append(f"Removed {dest}; it did not exist before publish {txid}")
+            continue
+        _rename_path(kept, dest)
+        lines.append(f"Restored {dest} from {kept}")
+    installed_payload.restore(ghost_root, journal.record_copy())
+    journal.mark("restored")
+    for target in journal.data.get("targets", []):
+        stage = target.get("stage")
+        if stage and os.path.lexists(stage) and content_digest.state(stage) == target.get("candidate"):
+            _remove_path(Path(stage))
+    return lines
 
 
 def staged_copy_replace(source, dest, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP):
@@ -450,6 +833,14 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         choices=("current", "updated", "new"),
         default=[],
     )
+
+    publish_parser = subparsers.add_parser("publish", help="Publish the targets of a request file with their record.")
+    publish_parser.add_argument("--request", required=True, type=Path)
+    publish_parser.add_argument("--rollback-keep", type=int, default=DEFAULT_ROLLBACK_KEEP)
+
+    recover_parser = subparsers.add_parser("recover", help="Restore an unfinished publish from its journal.")
+    recover_parser.add_argument("--txid", required=True)
+    recover_parser.add_argument("--ghost-root", type=Path, default=None)
 
     return parser.parse_args(argv)
 
@@ -554,6 +945,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             if args.progress_label:
                 sys.stdout.write("\n")
+        elif args.command == "publish":
+            try:
+                request = json.loads(args.request.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, ValueError) as exc:
+                raise InstallTransactionError(f"publish request {args.request} cannot be read: {exc}") from exc
+            publish(request, rollback_keep=args.rollback_keep)
+        elif args.command == "recover":
+            for line in recover(args.ghost_root or Path.home() / ".ghost-alice", args.txid):
+                print(line)
         else:
             raise AssertionError(args.command)
     except InstallTransactionError as exc:

@@ -276,7 +276,9 @@ Claude 설치기는 매니페스트가 선택한 애드온의 `Skill(...)` 권�
 - Claude Code 권한 허용 목록
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` 전역 부트스트랩
 - Codex `~/.codex/AGENTS.md` 로더와 관리되는 `~/.codex/ghost-alice-governance.md` 공통 계약
-- 설치 상태, 미결 병합, 설치 복구와 제거 보고서의 지원 상태
+- 설치 기록 `~/.ghost-alice/installed-payload.json`: 두 호스트가 함께 쓰는 파일 하나이며, 배치와 같은 단계에서 설치 위치마다 출처와 복사한 파일의 지문을 기록합니다
+- `~/.ghost-alice/rollbacks/<txid>/`: 배치 한 번이 교체한 원래 파일, 배치 전의 설치 기록, 배치의 저널을 보관합니다. 다음 잠금 명령이 중간에 중지된 배치를 복원하며, 완료된 폴더는 최근 20개를 유지합니다
+- 설치 상태, 미결 병합과 제거 보고서의 지원 상태
 
 설치기는 전역 규칙 파일에서 표시된 Ghost-ALICE 블록만 관리합니다. 그 블록을 갱신하면서 주변 사용자 문구는 보존합니다. 대상이 표시 없는 사용자 파일이면 원본 대신 `<rule-file>.ghost-alice-proposed` 제안 파일을 작성하며, status와 doctor는 이를 설치된 전역 규칙으로 취급하지 않습니다.
 

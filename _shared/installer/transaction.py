@@ -1,18 +1,26 @@
-"""Place the selected targets, and write the records after placement until one install record replaces them.
+"""Place the selected targets through publish requests, and write the earlier records after placement.
 
 Port of `installer_lib/install.sh:75-223, 411-610, 640-653` and
-`installer_lib/targets.sh:248-261, 275-338`. The placement itself is
-`install_transaction.py`; this module decides what to call for which target.
+`installer_lib/targets.sh:248-261, 275-338`. Every placement writes one publish
+request and runs `install_transaction.py publish --request <file>`, which places
+the targets and writes their install record entries in the same step; this module
+decides what each request names. The markers, the snapshot, the sidecars and the
+install-state are still written after placement until their readers move to the
+install record.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
 import shutil
+import tempfile
 from typing import TYPE_CHECKING
 
+import install_transaction
+import installed_payload
 from installer import locations, report, runner, source
 
 if TYPE_CHECKING:
@@ -23,18 +31,20 @@ if TYPE_CHECKING:
 
 @dataclass
 class CopyBatch:
-    """Targets a copy-only install replaces in one `copy-replace-many` call."""
+    """Targets a copy-only install publishes in one request."""
 
     pairs: list[tuple[Path, Path]] = field(default_factory=list)
     labels: list[str] = field(default_factory=list)
     kinds: list[str] = field(default_factory=list)
     statuses: list[str] = field(default_factory=list)
+    providers: list[str] = field(default_factory=list)
 
-    def add(self, src: Path, dest: Path, label: str, kind: str, status: str) -> None:
+    def add(self, src: Path, dest: Path, label: str, kind: str, status: str, provider: str = "core") -> None:
         self.pairs.append((Path(src), Path(dest)))
         self.labels.append(label)
         self.kinds.append(kind)
         self.statuses.append(status)
+        self.providers.append(provider)
 
 
 @dataclass
@@ -50,77 +60,150 @@ def _targets(ctx: "Context", skills: list[str]) -> "list[Target]":
     return selection.iter_install_targets(skills, ctx.addon_targets)
 
 
-def copy_target(ctx: "Context", source_path: Path, dest: Path) -> bool:
-    """`install_transaction.py copy-replace --source --dest --rollback-root --event-log`;
-    `Staged copy replace failed: <dest>` on failure (`install.sh:75-93`)."""
-    result = runner.run_tool("_shared/install_transaction.py", "copy-replace", "--source", str(source_path),
-                             "--dest", str(dest), "--rollback-root", str(locations.rollback_root()),
-                             "--event-log", str(locations.events_log(ctx.platform)))
-    if not result.ok:
+def record_source(ctx: "Context") -> dict:
+    """The `source` section every publish of this command records: the checkout's root,
+    commit, dirty state and git hook path, read once per command."""
+    if ctx.record_source is None:
+        info = source.resolve_source()
+        ctx.record_source = {"root": str(info.root), "commit": info.head, "dirty": info.dirty,
+                             "hooks_path": source.configured_hooks_path()}
+    return ctx.record_source
+
+
+def _request_target(ctx: "Context", name: str, source_path: Path, dest: Path, *, kind: str, mode: str,
+                    provider: str = "core", status: str | None = None) -> dict:
+    """One target of a publish request; an addon target records the commit of its own checkout."""
+    commit = record_source(ctx)["commit"] if provider == "core" else source.commit_of(Path(source_path))
+    target = {"name": name, "kind": kind, "provider": provider, "source": str(source_path),
+              "source_commit": commit, "dest": str(dest), "mode": mode}
+    if status:
+        target["status"] = status
+    return target
+
+
+def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -> runner.ToolResult:
+    """Write one publish request for `targets` and run `install_transaction.py publish --request <file>`.
+
+    The request names the host, the record root, the failure event log, the installer
+    and source sections and the targets; the file is transport only and is removed
+    once the child returns.
+    """
+    checkout = record_source(ctx)
+    request = {"schema_version": install_transaction.REQUEST_SCHEMA_VERSION, "host": ctx.platform,
+               "ghost_root": str(locations.record_root()), "event_log": str(locations.events_log(ctx.platform)),
+               "installer": {"commit": checkout["commit"], "schema_version": installed_payload.SCHEMA_VERSION},
+               "source": dict(checkout), "targets": targets}
+    if progress:
+        request["progress"] = progress
+    descriptor, name = tempfile.mkstemp(prefix="ghost-alice-publish-", suffix=".json")
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(request, handle, ensure_ascii=False)
+        return runner.run_tool("_shared/install_transaction.py", "publish", "--request", name)
+    finally:
+        try:
+            os.unlink(name)
+        except FileNotFoundError:
+            pass
+
+
+def copy_target(ctx: "Context", target: "Target", dest: Path, kind: str = "skill") -> bool:
+    """One copy publish of `target` at `dest`; `Staged copy replace failed: <dest>` on failure (`install.sh:75-93`)."""
+    request = _request_target(ctx, target.name, target.path, dest, kind=kind, mode="copy", provider=target.provider)
+    if not publish(ctx, [request]).ok:
         report.error(f"Staged copy replace failed: {dest}")
         return False
     return True
 
 
 def copy_targets_batch(ctx: "Context", batch: CopyBatch, *, progress_label: str | None = None) -> bool:
-    """`copy-replace-many` with the progress arguments when a label or event file is set (`install.sh:105-223`)."""
+    """Every target of the batch in one publish request, with the progress label and the
+    event file when they are set (`install.sh:105-223`)."""
     if not batch.pairs:
         return True
-    args = ["copy-replace-many", "--rollback-root", str(locations.rollback_root()),
-            "--event-log", str(locations.events_log(ctx.platform))]
+    targets = [_request_target(ctx, label, src, dest, kind=kind, mode="copy", provider=provider, status=status)
+               for (src, dest), label, kind, status, provider
+               in zip(batch.pairs, batch.labels, batch.kinds, batch.statuses, batch.providers)]
+    progress = {}
     if progress_label:
-        args.extend(["--progress-label", progress_label])
-        for status in batch.statuses:
-            args.extend(["--progress-status", status])
+        progress["label"] = progress_label
     event_file = report.state().event_file
     if event_file is not None:
-        args.extend(["--progress-event-file", str(event_file), "--progress-platform", ctx.platform])
-        for label, kind, status in zip(batch.labels, batch.kinds, batch.statuses):
-            args.extend(["--progress-target-id", label, "--progress-target-kind", kind, "--progress-target-status", status])
-    for src, dest in batch.pairs:
-        args.extend(["--target", str(src), str(dest)])
-    if not runner.run_tool("_shared/install_transaction.py", *args).ok:
+        progress["event_file"] = str(event_file)
+    if not publish(ctx, targets, progress).ok:
         report.error("Staged copy batch replace failed")
         return False
     return True
 
 
-def link_or_copy(ctx: "Context", source_path: Path, dest: Path) -> int:
-    """`symlink-replace`; only exit code 1 falls back to a staged copy, other
-    codes are returned as they are (`install.sh:640-653`)."""
-    result = runner.run_tool("_shared/install_transaction.py", "symlink-replace", "--source", str(source_path),
-                             "--dest", str(dest), "--event-log", str(locations.events_log(ctx.platform)))
+def link_or_copy(ctx: "Context", target: "Target", dest: Path, kind: str = "skill") -> int:
+    """A link publish; only exit code 1 falls back to a copy publish, other codes are
+    returned as they are (`install.sh:640-653`)."""
+    request = _request_target(ctx, target.name, target.path, dest, kind=kind, mode="link", provider=target.provider)
+    result = publish(ctx, [request])
     if result.ok:
         return 0
     if result.returncode != 1:
         return result.returncode
-    return 0 if copy_target(ctx, source_path, dest) else 1
+    return 0 if copy_target(ctx, target, dest, kind) else 1
+
+
+def record_current_links(ctx: "Context", links: list[tuple["Target", Path, str]]) -> None:
+    """One publish request for the `(target, install location, kind)` links that placement found
+    already pointing at their source: the publish records them and replaces nothing. A failure is
+    reported and the install goes on."""
+    if not links:
+        return
+    targets = [_request_target(ctx, target.name, target.path, dest, kind=kind, mode="link", provider=target.provider,
+                               status="current") for target, dest, kind in links]
+    if not publish(ctx, targets).ok:
+        report.warn("The install record could not record the targets that were already installed")
+
+
+def _shared_target() -> "Target":
+    from installer.selection import Target
+
+    return Target("_shared", runner.REPO_ROOT / "_shared")
 
 
 def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool) -> int:
     """`_shared` placement: copy in copy mode, skip when already linked to the
     source, else link-or-copy (`targets.sh:248-261`)."""
-    shared_src = runner.REPO_ROOT / "_shared"
+    shared = _shared_target()
     shared_dest = Path(skills_dir) / "_shared"
-    if not shared_src.is_dir():
+    if not shared.path.is_dir():
         return 0
     if copy_only:
-        return 0 if copy_target(ctx, shared_src, shared_dest) else 1
-    if shared_dest.is_symlink() and os.readlink(shared_dest) == str(shared_src):
+        return 0 if copy_target(ctx, shared, shared_dest, "support") else 1
+    if shared_dest.is_symlink() and os.readlink(shared_dest) == str(shared.path):
         report.warn("_shared. Already installed (skipped)")
         return 0
-    return link_or_copy(ctx, shared_src, shared_dest)
+    return link_or_copy(ctx, shared, shared_dest, "support")
 
 
 def sync_runtime_shared(ctx: "Context") -> bool:
     """Copy `<checkout>/_shared` to the runtime shared dir (`install.sh:95-103`)."""
-    shared_src = runner.REPO_ROOT / "_shared"
-    if not shared_src.is_dir():
+    shared = _shared_target()
+    if not shared.path.is_dir():
         return True
-    if not copy_target(ctx, shared_src, locations.runtime_shared_dir()):
+    if not copy_target(ctx, shared, locations.runtime_shared_dir(), "runtime"):
         return False
     report.detail_ok("runtime _shared -> copied")
     return True
+
+
+def migrate_record(ctx: "Context") -> None:
+    """Create the install record once from an earlier installer's records (`installed_payload.migrate`)
+    for every host; a migration that cannot finish is reported and the command goes on."""
+    try:
+        summary = installed_payload.migrate(locations.record_root(), locations.PLATFORMS,
+                                            installer_commit=record_source(ctx)["commit"])
+    except (installed_payload.RecordError, installed_payload.NotLockHolder, OSError) as exc:
+        report.warn(f"Install record migration skipped: {exc}")
+        return
+    if summary is not None:
+        report.info(f"Install record created from earlier install records: {summary['targets']} targets "
+                    f"(migrated {summary['migrated']}, unknown {summary['unknown']})")
 
 
 def detect_install_mode(dest: Path, copy_only: bool) -> str:

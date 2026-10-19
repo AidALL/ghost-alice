@@ -142,6 +142,16 @@ def setup_git_hooks() -> HookPathChange:
     return change
 
 
+def configured_hooks_path() -> str | None:
+    """The checkout's `core.hooksPath`, or None when it is not set."""
+    return _git_value(runner.REPO_ROOT, "config", "--local", "core.hooksPath") or None
+
+
+def commit_of(path: Path) -> str:
+    """The commit of the repository that holds `path` (an addon source), `unknown` without one."""
+    return _git_value(Path(path), "rev-parse", "HEAD") or "unknown"
+
+
 def resolve_source() -> SourceInfo:
     """The checkout's root, branch, head and dirty state for the install-state manifest (`install.sh:538-551`)."""
     root_path = runner.REPO_ROOT
