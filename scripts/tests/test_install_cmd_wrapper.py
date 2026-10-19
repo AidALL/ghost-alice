@@ -40,6 +40,12 @@ class InstallCmdWrapperTest(unittest.TestCase):
         self.assertIn("Python 3.11+", guide)
         self.assertIn("UTF-8 console setup", guide)
         self.assertIn("`-NoProfile -ExecutionPolicy Bypass`", guide)
+        for path in (INSTALLATION_DOC, INSTALLATION_DOC_KO):
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("PowerShell 7.6", text)
+                self.assertIn("Windows PowerShell 5.1", text)
+                self.assertIn("winget install --id Microsoft.PowerShell --exact", text)
 
     def test_docs_prefer_cmd_wrapper_when_powershell_policy_blocks_ps1(self) -> None:
         expectations = {

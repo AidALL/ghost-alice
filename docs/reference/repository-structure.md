@@ -31,7 +31,7 @@ This document is the repository map. The README stays a concise public entry poi
 | Path | Role |
 | --- | --- |
 | [install.sh](https://github.com/AidALL/ghost-alice/blob/main/install.sh) | macOS, Linux, WSL, and Git Bash installer entrypoint |
-| [install.ps1](https://github.com/AidALL/ghost-alice/blob/main/install.ps1) | Windows PowerShell installer entrypoint |
+| [install.ps1](https://github.com/AidALL/ghost-alice/blob/main/install.ps1) | Windows installer entrypoint for PowerShell 7.6 or newer |
 | [install.cmd](https://github.com/AidALL/ghost-alice/blob/main/install.cmd) | Windows CMD wrapper |
 | [platforms/codex/](https://github.com/AidALL/ghost-alice/tree/main/platforms/codex) | Codex bootstrap source |
 | [hooks/](https://github.com/AidALL/ghost-alice/tree/main/hooks) | Repository hook-related files |
