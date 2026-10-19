@@ -544,6 +544,7 @@ class InstallOrderTests(CliCase):
         self.stub("installer.transaction.install_shared", 0)
         self.stub("installer.transaction.link_or_copy", 0)
         self.stub("installer.transaction.copy_targets_batch", True)
+        self.stub("installer.transaction.record_current_links")
         self.stub("installer.transaction.sync_runtime_shared", True)
         self.stub("installer.hosts.install_hooks", True)
         self.stub("installer.hosts.ensure_claude_bootstrap", True)
@@ -584,6 +585,21 @@ class InstallOrderTests(CliCase):
         self.assertLess(names.index("install_hooks"), names.index("ensure_claude_bootstrap"))
         self.assertLess(names.index("sync_runtime_shared"), names.index("install_hooks"))
         self.assertIn("[OK] [5/5] Verification: install state recorded", out) if report.state().report_child else None
+
+    def test_links_that_already_point_at_their_source_are_recorded_not_replaced(self):
+        claude_skills = self.home / ".claude" / "skills"
+        claude_skills.mkdir(parents=True)
+        (claude_skills / "_shared").symlink_to(self.source / "_shared")
+        (claude_skills / "task-router").symlink_to(self.source / "task-router")
+        ctx = make_context(self.home, "claude", args=["task-router", "alpha"])
+        rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertEqual(rc, 0)
+        _, args, _ = next(c for c in self.calls if c[0] == "record_current_links")
+        self.assertEqual([(target.name, dest, kind) for target, dest, kind in args[1]],
+                         [("_shared", claude_skills / "_shared", "support"),
+                          ("task-router", claude_skills / "task-router", "skill")])
+        replaced = [args[1].name for name, args, _ in self.calls if name == "link_or_copy"]
+        self.assertEqual(replaced, ["alpha"])
 
     def test_codex_copy_mode_uses_one_batch(self):
         ctx = make_context(self.home, "codex", args=["task-router", "alpha"])

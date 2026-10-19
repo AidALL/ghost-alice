@@ -109,6 +109,20 @@ class InstallRecordShellTest(unittest.TestCase):
         self.assertIn(f"{len(names) + 1} claude targets (link {len(names)}, copy 1", status)
         self.assertIn("[OK] Installed targets match the install record", status)
 
+    def test_links_already_in_place_are_recorded_without_being_replaced(self):
+        # No install record and no earlier record name these links, and placement skips them as current.
+        (self.home / ".claude").mkdir()
+        self.run_installer("--platform", "claude", "--skip-source-health")
+        installed_payload.path(self.ghost).unlink()
+        (self.ghost / "install-state" / "claude.json").unlink()
+        links = {name: os.lstat(self.claude / name).st_ino for name in _target_names()}
+        self.run_installer("--platform", "claude", "--skip-source-health")
+        targets = self.record()["targets"]
+        self.assertEqual(set(targets), {(self.claude / name).as_posix() for name in links} | {self.runtime.as_posix()})
+        self.assertEqual({name: os.lstat(self.claude / name).st_ino for name in links}, links)
+        self.assertEqual({entry["baseline"] for entry in targets.values()}, {"recorded"})
+        self.assert_matches_the_disk(targets)
+
     def test_the_first_install_over_earlier_records_creates_the_record_from_them(self):
         (self.home / ".codex").mkdir()
         self.run_installer("--platform", "codex", "--skip-source-health")

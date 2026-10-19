@@ -148,6 +148,18 @@ def link_or_copy(ctx: "Context", target: "Target", dest: Path, kind: str = "skil
     return 0 if copy_target(ctx, target, dest, kind) else 1
 
 
+def record_current_links(ctx: "Context", links: list[tuple["Target", Path, str]]) -> None:
+    """One publish request for the `(target, install location, kind)` links that placement found
+    already pointing at their source: the publish records them and replaces nothing. A failure is
+    reported and the install goes on."""
+    if not links:
+        return
+    targets = [_request_target(ctx, target.name, target.path, dest, kind=kind, mode="link", provider=target.provider,
+                               status="current") for target, dest, kind in links]
+    if not publish(ctx, targets).ok:
+        report.warn("The install record could not record the targets that were already installed")
+
+
 def _shared_target() -> "Target":
     from installer.selection import Target
 

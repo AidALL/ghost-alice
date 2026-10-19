@@ -69,6 +69,59 @@ def tree(path: Path | str) -> dict[str, str]:
     return files
 
 
+def _is_generated(name: str, is_dir: bool) -> bool:
+    if is_dir:
+        return name in EXCLUDED_DIR_NAMES
+    return name in EXCLUDED_FILE_NAMES or Path(name).suffix in EXCLUDED_FILE_SUFFIXES
+
+
+def state(path: Path | str) -> dict | None:
+    """Everything at a path except generated files, so a restore can tell whether the path still holds
+    exactly what it saw.
+
+    None when nothing is there; `{"link": target}` for a link (not followed); `{"file": digest}` for a
+    file; `{"folder": {relative path: entry}}` for a folder, where an entry is the digest of a file,
+    `link:<target>` for a link (not entered), `folder` for every folder (an empty one too) and `other`
+    for anything else. Caches, generated files and the ownership marker are left out, as in `tree`.
+    """
+    root = Path(path)
+    if not os.path.lexists(root):
+        return None
+    if _is_link(root):
+        return {"link": link_target(root)}
+    if root.is_file():
+        return {"file": file_digest(root)}
+    if not root.is_dir():
+        return {"other": root.lstat().st_mode}
+    entries: dict[str, str] = {}
+    for current, dirnames, filenames in os.walk(root):
+        folder = Path(current)
+        kept = []
+        for name in sorted(dirnames):
+            child = folder / name
+            if _is_generated(name, True):
+                continue
+            rel = child.relative_to(root).as_posix()
+            if _is_link(child):
+                entries[rel] = "link:" + link_target(child)
+            else:
+                entries[rel] = "folder"
+                kept.append(name)
+        dirnames[:] = kept
+        for name in sorted(filenames):
+            child = folder / name
+            if _is_generated(name, False):
+                continue
+            rel = child.relative_to(root).as_posix()
+            if _is_link(child):
+                entries[rel] = "link:" + link_target(child)
+            elif child.is_file():
+                entries[rel] = file_digest(child)
+            else:
+                entries[rel] = "other"
+    return {"folder": dict(sorted(entries.items()))}
+
+
 def _current_files(path: Path) -> dict[str, str]:
     """The files a copy has now: none when the path is absent or a link."""
     if _is_link(path) or not (path.is_dir() or path.is_file()):

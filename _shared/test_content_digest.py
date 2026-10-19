@@ -83,6 +83,31 @@ class TreeTests(DigestCase):
         self.assertEqual(content_digest.tree(empty), {})
 
 
+class StateTests(DigestCase):
+    """`state` keeps every entry except generated files, so a restore can tell whether a path is still unchanged."""
+
+    def test_a_folder_state_names_files_links_and_every_folder(self):
+        skill = self.write("skill/SKILL.md", b"skill").parent
+        self.write("skill/refs/a.md", b"a")
+        (skill / "empty").mkdir()
+        outside = self.write("outside/x.md", b"x").parent
+        (skill / "linked").symlink_to(outside, target_is_directory=True)
+        (skill / "file-link.md").symlink_to(outside / "x.md")
+        self.write("skill/__pycache__/x.cpython-314.pyc", b"cache")
+        self.write("skill/.DS_Store", b"finder")
+        self.assertEqual(content_digest.state(skill), {"folder": {
+            "SKILL.md": _sha(b"skill"), "empty": "folder", "file-link.md": f"link:{outside / 'x.md'}",
+            "linked": f"link:{outside}", "refs": "folder", "refs/a.md": _sha(b"a")}})
+
+    def test_the_state_of_a_link_a_file_and_nothing(self):
+        path = self.write("a.md", b"a")
+        link = self.root / "link"
+        link.symlink_to(self.root / "elsewhere")
+        self.assertEqual(content_digest.state(path), {"file": _sha(b"a")})
+        self.assertEqual(content_digest.state(link), {"link": str(self.root / "elsewhere")})
+        self.assertIsNone(content_digest.state(self.root / "absent"))
+
+
 class CompareTests(DigestCase):
     def copy_entry(self, files):
         return {"mode": "copy", "files": files, "baseline": "recorded"}

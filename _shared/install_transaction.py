@@ -268,7 +268,7 @@ class ReplacementBatch:
         if self.events is not None and len(self.events) != len(self.targets):
             raise InstallTransactionError('progress event count must match target count')
         self.prepared, self.phase = [], 'prepare'
-        self.source, self.dest = self.targets[0][:2]
+        self.source, self.dest = self.targets[0][:2] if self.targets else (None, None)
 
     @staticmethod
     def identity(path):
@@ -446,20 +446,6 @@ def _write_json(path: Path, data: dict) -> None:
             pass
 
 
-def _state(path) -> dict | None:
-    """What is at an install location: absent (None), a link's target, or the file digests of a folder or file."""
-    path = Path(path)
-    if not os.path.lexists(path):
-        return None
-    try:
-        return {"link_target": content_digest.link_target(path)}
-    except OSError:
-        pass
-    if path.is_dir() or path.is_file():
-        return {"files": content_digest.tree(path)}
-    return {"other": path.lstat().st_mode}
-
-
 class Journal:
     """`rollbacks/<txid>/journal.json`: the targets one publish replaces and how far it got.
 
@@ -493,7 +479,7 @@ class Journal:
         self.save()
 
     @classmethod
-    def begin(cls, request: dict) -> "Journal":
+    def begin(cls, request: dict, targets: list[dict]) -> "Journal":
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
         folder = rollbacks_root(request["ghost_root"]) / f"{stamp}-{os.getpid()}-{uuid.uuid4().hex[:8]}"
         folder.mkdir(parents=True)
@@ -506,7 +492,7 @@ class Journal:
             "schema_version": JOURNAL_SCHEMA_VERSION, "txid": folder.name, "phase": "prepare",
             "host": request["host"], "created_at": _now(), "record_copy": copy,
             "targets": [{key: target[key] for key in ("name", "kind", "mode", "source", "dest")}
-                        for target in request["targets"]]})
+                        for target in targets]})
         journal.save()
         return journal
 
@@ -564,22 +550,41 @@ def _record_key(dest) -> str:
     return Path(dest).as_posix()
 
 
+def _record_value(path, mode: str) -> dict:
+    """What the install record keeps for a published target: the link's target, or the copy's file digests."""
+    if mode == "link":
+        return {"link_target": content_digest.link_target(path)}
+    return {"files": content_digest.tree(path)}
+
+
+def _links_to_its_source(target: dict) -> bool:
+    """A link the installer found already in place (status `current`) that still points at its source."""
+    if target["mode"] != "link" or target.get("status") != "current":
+        return False
+    try:
+        return content_digest.link_target(target["dest"]) == target["source"]
+    except OSError:
+        return False
+
+
 class PublishBatch(ReplacementBatch):
     """The targets of one publish request.
 
-    Each target is staged next to its install location; publishing moves the original
-    into `rollbacks/<txid>/`, renames the staged copy or link into place and writes the
-    targets' install record entries with the source, installer and transaction in the
-    same step. Restoring puts back the files and the record a journal saved.
+    Each replaced target is staged next to its install location; publishing moves the
+    original into `rollbacks/<txid>/`, renames the staged copy or link into place and
+    writes the install record entries of every target, the current links included, with
+    the source, installer and transaction in the same step. Restoring puts back the files
+    and the record a journal saved.
     """
 
-    def __init__(self, request: dict, journal: Journal, *, rollback_keep=DEFAULT_ROLLBACK_KEEP,
-                 progress_callback=None, progress_events=None):
+    def __init__(self, request: dict, replaced: list[dict], current: list[dict], journal: Journal, *,
+                 rollback_keep=DEFAULT_ROLLBACK_KEEP, progress_callback=None, progress_events=None):
         self.request, self.journal = request, journal
+        self.replaced, self.current = replaced, current
         self.ghost_root = Path(request["ghost_root"])
         progress = request.get("progress") or {}
         super().__init__([(target["source"], target["dest"], "symlink" if target["mode"] == "link" else "copy")
-                          for target in request["targets"]],
+                          for target in replaced],
                          rollback_root=journal.folder, rollback_keep=rollback_keep,
                          progress_callback=progress_callback, progress_event_file=progress.get("event_file"),
                          progress_events=progress_events)
@@ -587,8 +592,9 @@ class PublishBatch(ReplacementBatch):
     def stage(self):
         super().stage()
         for item, target in zip(self.prepared, self.journal.data["targets"]):
-            target.update(stage=str(item["stage"]), rollback=str(item["rollback"]), before=_state(item["dest"]),
-                          candidate=_state(item["stage"]))
+            target.update(stage=str(item["stage"]), rollback=str(item["rollback"]),
+                          before=content_digest.state(item["dest"]), candidate=content_digest.state(item["stage"]))
+            item["record"] = _record_value(item["stage"], target["mode"])
         self.journal.save()
 
     def publish(self):
@@ -598,10 +604,12 @@ class PublishBatch(ReplacementBatch):
     def _write_record(self):
         installed_at = _now()
         entries = {}
-        for target, journaled in zip(self.request["targets"], self.journal.data["targets"]):
+        recorded = [(target, item["record"]) for target, item in zip(self.replaced, self.prepared)]
+        recorded += [(target, _record_value(target["dest"], "link")) for target in self.current]
+        for target, value in recorded:
             entry = {key: target[key] for key in ("name", "kind", "mode", "provider", "source", "source_commit")}
             entry.update(used_by=[self.request["host"]], installed_at=installed_at, baseline="recorded")
-            entry.update(journaled["candidate"])
+            entry.update(value)
             entries[_record_key(target["dest"])] = entry
         patches = {"targets": entries, "installer": dict(self.request["installer"]),
                    "source": dict(self.request["source"]),
@@ -664,13 +672,15 @@ def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str
     that fails leaves the journal unfinished and names its folder.
     """
     request = _validated_request(request)
+    current = [target for target in request["targets"] if _links_to_its_source(target)]
+    replaced = [target for target in request["targets"] if not _links_to_its_source(target)]
     try:
-        journal = Journal.begin(request)
+        journal = Journal.begin(request, replaced)
     except OSError as exc:
         raise InstallTransactionError(f"publish journal cannot be written under "
                                       f"{rollbacks_root(request['ghost_root'])}: {exc}") from exc
     progress = request.get("progress") or {}
-    statuses = [target.get("status") for target in request["targets"]]
+    statuses = [target.get("status") for target in replaced]
     callback = None
     if progress.get("label"):
         counted = statuses if all(statuses) else None
@@ -682,13 +692,17 @@ def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str
     events = None
     if progress.get("event_file"):
         events = [{"platform": request["host"], "target_id": target["name"], "target_kind": target["kind"],
-                   "status": target["status"]} for target in request["targets"]]
-    batch = PublishBatch(request, journal, rollback_keep=rollback_keep, progress_callback=callback,
-                         progress_events=events)
+                   "status": target["status"]} for target in replaced]
+    batch = PublishBatch(request, replaced, current, journal, rollback_keep=rollback_keep,
+                         progress_callback=callback, progress_events=events)
     try:
         batch.stage()
-        from context_gateway_install import coordinate_payload_replacement
-        coordinate_payload_replacement(batch)
+        if batch.prepared:
+            from context_gateway_install import coordinate_payload_replacement
+            coordinate_payload_replacement(batch)
+        else:
+            # Only current links: no file changes, so nothing for the gateway to coordinate.
+            batch.publish()
         batch.finalize()
     except Exception as exc:
         wrapped = _wrapped_failure(exc, batch)
@@ -715,7 +729,7 @@ def _recovery_action(folder: Path, target: dict):
         return None
     dest = Path(target["dest"])
     kept = Path(target["rollback"]) if target.get("rollback") else None
-    current = _state(dest)
+    current = content_digest.state(dest)
     if kept is not None and os.path.lexists(kept):
         if current is None:
             return "put-back", dest, kept
@@ -758,7 +772,7 @@ def recover(ghost_root, txid: str) -> list[str]:
     journal.mark("restored")
     for target in journal.data.get("targets", []):
         stage = target.get("stage")
-        if stage and os.path.lexists(stage) and _state(stage) == target.get("candidate"):
+        if stage and os.path.lexists(stage) and content_digest.state(stage) == target.get("candidate"):
             _remove_path(Path(stage))
     return lines
 

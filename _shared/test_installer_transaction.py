@@ -202,6 +202,26 @@ class PlacementTests(TransactionCase):
         self.assertFalse(ok)
         self.assertIn(f"[ERROR] Staged copy replace failed: {runtime}", out)
 
+    def test_links_already_pointing_at_their_source_are_recorded_in_one_request(self):
+        ctx = self.context("claude")
+        with self.runner.patch():
+            transaction.record_current_links(ctx, [])
+        self.assertEqual(self.requests, [])
+        links = [(Target("_shared", self.source / "_shared"), ctx.skills_dir / "_shared", "support"),
+                 (Target("alpha", self.source / "alpha"), ctx.skills_dir / "alpha", "skill")]
+        with self.runner.patch():
+            transaction.record_current_links(ctx, links)
+        self.assertEqual(self.requests, [self.expected_request(
+            "claude",
+            self.expected_target("_shared", self.source / "_shared", ctx.skills_dir / "_shared", "link",
+                                 kind="support", status="current"),
+            self.expected_target("alpha", self.source / "alpha", ctx.skills_dir / "alpha", "link",
+                                 status="current"))])
+        self.codes.append(1)
+        with self.runner.patch():
+            _, out = self.captured(transaction.record_current_links, ctx, links)
+        self.assertIn("[WARN] The install record could not record the targets that were already installed", out)
+
     def test_the_source_is_read_once_per_command(self):
         ctx = self.context("claude")
         with self.runner.patch():

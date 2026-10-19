@@ -101,6 +101,40 @@ class PublishTests(PublishCase):
                                                       "rollback_dir": str(self.ghost / "rollbacks" / txid)})
         self.assertEqual(self.journal(txid)["phase"], "done")
 
+    def test_a_link_that_already_points_at_its_source_is_recorded_without_a_replacement(self):
+        current = self.claude / "alpha"
+        current.symlink_to(self.src / "alpha", target_is_directory=True)
+        before = os.lstat(current)
+        new = self.claude / "beta"
+        txid = install_transaction.publish(self.request(
+            "claude", self.target("alpha", current, "link", status="current"),
+            self.target("beta", new, "link", status="new")))
+        after = os.lstat(current)
+        self.assertEqual((after.st_ino, after.st_mtime_ns), (before.st_ino, before.st_mtime_ns))
+        self.assertEqual(os.readlink(new), str(self.src / "beta"))
+        targets = self.record()["targets"]
+        self.assertEqual((targets[str(current)]["link_target"], targets[str(current)]["baseline"]),
+                         (str(self.src / "alpha"), "recorded"))
+        self.assertEqual(targets[str(new)]["link_target"], str(self.src / "beta"))
+        journal = self.journal(txid)
+        self.assertEqual(([t["dest"] for t in journal["targets"]], journal["phase"]), ([str(new)], "done"))
+
+    def test_a_request_of_current_links_only_replaces_nothing(self):
+        current = self.claude / "alpha"
+        current.symlink_to(self.src / "alpha", target_is_directory=True)
+        with mock.patch("context_gateway_install.coordinate_payload_replacement") as coordinate:
+            txid = install_transaction.publish(self.request("claude", self.target("alpha", current, "link",
+                                                                                    status="current")))
+        coordinate.assert_not_called()
+        self.assertEqual(self.record()["targets"][str(current)]["link_target"], str(self.src / "alpha"))
+        self.assertEqual(sorted(p.name for p in (self.ghost / "rollbacks" / txid).iterdir()), ["journal.json"])
+
+    def test_a_current_link_that_points_elsewhere_is_replaced(self):
+        dest = self.claude / "alpha"
+        dest.symlink_to(self.home / "elsewhere", target_is_directory=True)
+        install_transaction.publish(self.request("claude", self.target("alpha", dest, "link", status="current")))
+        self.assertEqual(os.readlink(dest), str(self.src / "alpha"))
+
     def test_a_copy_records_the_digest_of_every_copied_file(self):
         dest = self.codex / "_shared"
         install_transaction.publish(self.request("codex", self.target("_shared", dest, "copy", kind="support")))
@@ -166,8 +200,8 @@ class PublishTests(PublishCase):
         self.assertEqual(journal["phase"], "done")
         target = journal["targets"][0]
         self.assertEqual(Path(target["rollback"]).parent, self.ghost / "rollbacks" / txid)
-        self.assertEqual(target["before"], {"files": content_digest.tree(Path(target["rollback"]))})
-        self.assertEqual(target["candidate"], {"files": content_digest.tree(dest)})
+        self.assertEqual(target["before"], content_digest.state(Path(target["rollback"])))
+        self.assertEqual(target["candidate"], content_digest.state(dest))
 
     def test_a_record_this_installer_cannot_read_stays_as_it_is_and_the_files_still_publish(self):
         # A newer or damaged record is never overwritten; the install goes on and says why the record did not change.
@@ -283,6 +317,38 @@ class FailureTests(PublishCase):
         self.assertEqual(installed_payload.path(self.ghost).read_bytes(), record)
         self.assertEqual(self.journal(txid)["phase"], "prepare")
         self.assertEqual(install_transaction.unfinished(self.ghost), [txid])
+
+    def crash_after_publish(self) -> str:
+        first = self.only_txid()
+        with mock.patch.object(install_transaction.PublishBatch, "finalize", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                install_transaction.publish(self.batch())
+        return self.only_txid(exclude=(first,))
+
+    def assert_recover_refused(self, txid):
+        with self.assertRaises(install_transaction.InstallTransactionError):
+            install_transaction.recover(self.ghost, txid)
+        self.assertEqual(self.journal(txid)["phase"], "prepare")
+        self.assertEqual(install_transaction.unfinished(self.ghost), [txid])
+
+    def test_recover_refuses_an_empty_folder_added_after_the_publish(self):
+        # Nothing the user adds after the stop may disappear with the published copy.
+        txid = self.crash_after_publish()
+        (self.codex / "beta" / "notes").mkdir()
+        self.assert_recover_refused(txid)
+
+    def test_recover_refuses_a_link_added_after_the_publish(self):
+        txid = self.crash_after_publish()
+        (self.codex / "beta" / "shortcut").symlink_to(self.home)
+        self.assert_recover_refused(txid)
+
+    def test_recover_ignores_caches_written_after_the_publish(self):
+        # A hook run after the stop may write __pycache__ into the published copy; that does not block the restore.
+        txid = self.crash_after_publish()
+        (self.codex / "beta" / "__pycache__").mkdir()
+        (self.codex / "beta" / "__pycache__" / "x.cpython-314.pyc").write_bytes(b"cache")
+        self.assertEqual(len(install_transaction.recover(self.ghost, txid)), 3)
+        self.assert_restored(txid)
 
     def test_recover_refuses_when_the_kept_original_is_gone(self):
         first = self.only_txid()
