@@ -4,6 +4,8 @@ Expected texts and the child protocol come from install.sh:271-299, 306-446 and 
 """
 from __future__ import annotations
 
+import json
+
 import contextlib
 import io
 import os
@@ -184,6 +186,17 @@ class CompactAutoTests(AutoCase):
         self.assertIn("  [4/5] Runtime config      claude, codex hooks=true, Visibility Level=[dynamic]\n", out)
         self.assertIn(f"  log: {log}\n", out)
         self.assertNotIn("[auto] Install failed", out)
+
+    def test_the_tail_carries_the_childrens_gateway_note_once(self):
+        note = "Context gateway: registered from /src, 32 files, service running"
+        line = json.dumps({"type": "gateway-result", "platform": "%s", "summary": note, "running": True})
+        result = '{"type":"platform-result","platform":"%s","total_targets":5,"current":0,"updated":0,"new":5,"verification":"ok","hooks":"enabled"}'
+        self.child_results = {platform: (0, [result % platform, line % platform]) for platform in ("claude", "codex")}
+        rc, out = self.run_children(self.context(args=["task-router"]), ["claude", "codex"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(out.count(f"  - {note}\n"), 1)
+        self.assertIn("  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n"
+                      f"  - {note}\n\nDetails\n", out)
 
     def test_failure_excerpt(self):
         ctx = self.context()

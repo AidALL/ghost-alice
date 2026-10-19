@@ -299,16 +299,18 @@ class GatewayReportTests(TransactionCase):
 
     def test_no_binding_prints_nothing(self):
         with self.runner.patch():
-            _, out = self.captured(transaction.report_gateway, self.context("claude"))
+            observed, out = self.captured(transaction.report_gateway, self.context("claude"))
         self.assertEqual(out, "")
+        self.assertIsNone(observed)
         self.assertEqual(self.runner.calls, [])
 
     def test_a_registered_running_gateway_is_one_info_line(self):
         self.register()
         self.runner.respond(lambda script, args: script == "command" and args[:2] == ["launchctl", "print"], ToolResult(0))
         with self.runner.patch():
-            _, out = self.captured(transaction.report_gateway, self.context("codex"))
+            observed, out = self.captured(transaction.report_gateway, self.context("codex"))
         self.assertIn("[INFO] Context gateway: registered from /src/checkout, 3 files, service running", out)
+        self.assertEqual(observed, ("Context gateway: registered from /src/checkout, 3 files, service running", True))
         self.assertEqual(self.runner.commands()[0][:2], ["launchctl", "print"])
         self.assertTrue(self.runner.commands()[0][2].endswith("/org.ghost-alice.context-gateway"))
 
@@ -316,15 +318,17 @@ class GatewayReportTests(TransactionCase):
         self.register(files=1)
         self.runner.respond(lambda script, args: script == "command", ToolResult(113))
         with self.runner.patch():
-            _, out = self.captured(transaction.report_gateway, self.context("codex"))
+            observed, out = self.captured(transaction.report_gateway, self.context("codex"))
         self.assertIn("[WARN] Context gateway: registered from /src/checkout, 1 file, service not running", out)
+        self.assertEqual(observed, ("Context gateway: registered from /src/checkout, 1 file, service not running", False))
 
     def test_an_unreadable_receipt_is_a_warning_and_the_install_goes_on(self):
         receipt = self.register()
         receipt.write_text("{broken", encoding="utf-8")
         with self.runner.patch():
-            _, out = self.captured(transaction.report_gateway, self.context("claude"))
+            observed, out = self.captured(transaction.report_gateway, self.context("claude"))
         self.assertIn(f"[WARN] Context gateway: registered, but its receipt cannot be read: {receipt}", out)
+        self.assertEqual(observed, (f"Context gateway: registered, but its receipt cannot be read: {receipt}", False))
         (self.ghost / "context-gateway-binding.json").write_text("[]", encoding="utf-8")
         with self.runner.patch():
             _, out = self.captured(transaction.report_gateway, self.context("claude"))

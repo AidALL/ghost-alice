@@ -131,15 +131,16 @@ def _run_compact(ctx: "Context", detected: list[str]) -> int:
             report.auto_animate_common_target_progress_line(displayed, synced, common, PROGRESS_SUFFIX)
             displayed = synced
     synced = report.read_all_common_target_progress(event_file, total)
+    notes = report.read_gateway_notes(event_file)
     if rc == 0:
         if live:
             report.auto_animate_common_target_progress_line(displayed, synced, common, PROGRESS_SUFFIX)
             displayed = min(synced, common)
             report.auto_update_common_target_progress_line(displayed, common, PROGRESS_SUFFIX)
             report.emit("")
-            report.print_tail(label, visibility)
+            report.print_tail(label, visibility, notes)
         else:
-            report.print_auto_full(label, common, visibility, synced)
+            report.print_auto_full(label, common, visibility, synced, notes=notes)
     else:
         if live:
             report.emit("")

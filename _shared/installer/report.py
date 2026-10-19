@@ -12,6 +12,7 @@ import contextlib
 from dataclasses import dataclass, field
 from datetime import datetime
 import io
+import json
 import os
 from pathlib import Path
 import re
@@ -295,24 +296,28 @@ def print_start(platform_label: str, total_targets: int, visibility: str = "dyna
     emit(skill_sync_line(0, 0, 0), newline=False)
 
 
-def print_tail(platform_label: str, visibility: str = "dynamic") -> None:
-    """`[3/5] Hooks`, `[4/5] Runtime config`, `[5/5] Verification`, Attention, Details (`report.sh:201-211`)."""
+def print_tail(platform_label: str, visibility: str = "dynamic", notes: Sequence[str] = ()) -> None:
+    """`[3/5] Hooks`, `[4/5] Runtime config`, `[5/5] Verification`, Attention with `notes` after the
+    visibility hint, Details (`report.sh:201-211`)."""
     log = log_init()
     emit(f"  [3/5] Hooks               {hook_suite_label(platform_label)} enabled")
     emit(f"  [4/5] Runtime config      {platform_label} hooks=true, Visibility Level=[{visibility}]")
     emit("  [5/5] Verification        ok\n")
     emit("Attention")
-    emit("  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n")
+    emit("  - visibility can be changed later with /visibility between: dynamic | minimal | strict")
+    for note in notes:
+        emit(f"  - {note}")
+    emit("")
     emit("Details")
     emit(f"  log: {log}")
     emit("  rerun with --verbose to show per-skill actions")
 
 
 def print_full(platform_label: str, total_targets: int, current: int, updated: int, new: int,
-               visibility: str = "dynamic", target_unit: str = "targets") -> None:
+               visibility: str = "dynamic", target_unit: str = "targets", notes: Sequence[str] = ()) -> None:
     _print_header(platform_label, f"  Skills: [{total_targets}] {target_unit}", visibility)
     emit(skill_sync_line(current, updated, new))
-    print_tail(platform_label, visibility)
+    print_tail(platform_label, visibility, notes)
 
 
 def print_auto_start(platform_label: str, common_targets: int, visibility: str = "dynamic") -> None:
@@ -322,11 +327,11 @@ def print_auto_start(platform_label: str, common_targets: int, visibility: str =
 
 
 def print_auto_full(platform_label: str, common_targets: int, visibility: str = "dynamic",
-                    synced_targets: int = 0) -> None:
+                    synced_targets: int = 0, notes: Sequence[str] = ()) -> None:
     _print_header(platform_label, f"  Skills: [{common_targets}] common targets", visibility)
     emit(common_skill_sync_line(common_targets))
     emit(common_target_progress_line(synced_targets, common_targets, "common targets synced on all platforms"))
-    print_tail(platform_label, visibility)
+    print_tail(platform_label, visibility, notes)
 
 
 def _append_event(line: str) -> None:
@@ -341,6 +346,30 @@ def write_event(platform: str, total_targets: int, current: int, updated: int, n
     """Append a `platform-result` JSON line to the event file when one is set (`report.sh:263-268`)."""
     _append_event('{"type":"platform-result","platform":"%s","total_targets":%s,"current":%s,"updated":%s,'
                   '"new":%s,"verification":"ok","hooks":"enabled"}' % (platform, total_targets, current, updated, new))
+
+
+def write_gateway_event(platform: str, summary: str, *, running: bool) -> None:
+    """Append a `gateway-result` JSON line: the context gateway observation one child made for the parent's report."""
+    _append_event(json.dumps({"type": "gateway-result", "platform": platform, "summary": summary, "running": running}))
+
+
+def read_gateway_notes(event_file: Path) -> list[str]:
+    """The distinct gateway summaries the children wrote, in order; none for a missing or empty file."""
+    path = Path(event_file)
+    notes: list[str] = []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return notes
+    for line in lines:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "gateway-result" and isinstance(event.get("summary"), str):
+            if event["summary"] not in notes:
+                notes.append(event["summary"])
+    return notes
 
 
 def write_target_event(platform: str, target_id: str, target_kind: str, status: str) -> None:

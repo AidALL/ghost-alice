@@ -603,6 +603,38 @@ class InstallOrderTests(CliCase):
         replaced = [args[1].name for name, args, _ in self.calls if name == "link_or_copy"]
         self.assertEqual(replaced, ["alpha"])
 
+    def test_the_gateway_line_reaches_the_terminal_in_every_output_mode(self):
+        note = "Context gateway: registered from /src, 32 files, service not running"
+        self.patches.enter_context(mock.patch("installer.transaction.report_gateway", return_value=(note, False)))
+        # Compact mode: steps go to the log, the report tail carries the note under Attention.
+        report.configure(verbose=False, report_child=False, tty=False, progress_env="off", home=self.home)
+        ctx = make_context(self.home, "claude", args=["task-router"])
+        rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn(f"Attention\n  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n"
+                      f"  - {note}\n", out)
+        # Verbose mode: the line prints where it happens and the tail is not printed.
+        quiet(self.home, verbose=True)
+        ctx = make_context(self.home, "claude", args=["task-router"])
+        rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertNotIn("Attention", out)
+        # A child of the auto mode writes the note as an event for the parent's tail.
+        event_file = self.home / "run.events.jsonl"
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_EVENT_FILE": str(event_file)}):
+            quiet(self.home, report_child=True)
+        ctx = make_context(self.home, "codex", args=["task-router"])
+        rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertEqual(rc, 0)
+        events = [json.loads(line) for line in event_file.read_text(encoding="utf-8").splitlines()]
+        self.assertIn({"type": "gateway-result", "platform": "codex", "summary": note, "running": False}, events)
+        # Without a gateway nothing is written or printed.
+        self.patches.enter_context(mock.patch("installer.transaction.report_gateway", return_value=None))
+        event_file.write_text("", encoding="utf-8")
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_EVENT_FILE": str(event_file)}):
+            quiet(self.home, report_child=True)
+        self.captured(cli.run_command, cli.INSTALL, make_context(self.home, "codex", args=["task-router"]))
+        self.assertNotIn("gateway-result", event_file.read_text(encoding="utf-8"))
+
     def test_codex_copy_mode_uses_one_batch(self):
         ctx = make_context(self.home, "codex", args=["task-router", "alpha"])
         rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)

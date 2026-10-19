@@ -201,31 +201,37 @@ def _gateway_service_running() -> bool:
     return runner.run_command(["launchctl", "print", f"{domain}/{GATEWAY_SERVICE_LABEL}"], capture=True).ok
 
 
-def report_gateway(ctx: "Context") -> None:
-    """One line about the context gateway after the runtime publish, read-only: nothing without a
-    binding; INFO with the receipt's source and file count while the service runs, WARN when it does
-    not or when the binding or receipt cannot be read. The publish coordination already stopped and
-    restarted the service for a changed module; this line only tells the user what it found."""
+def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
+    """One line about the context gateway after the runtime publish, read-only, and the same line
+    returned as `(summary, running)` for the report tail: None without a binding; INFO with the
+    receipt's source and file count while the service runs, WARN when it does not or when the binding
+    or receipt cannot be read. The publish coordination already stopped and restarted the service for
+    a changed module; this line only tells the user what it found."""
     binding_path = locations.record_root() / "context-gateway-binding.json"
     if not binding_path.is_file():
-        return
+        return None
     try:
         binding = json.loads(binding_path.read_text(encoding="utf-8"))
         receipt_path = Path(binding["installation_path"])
     except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
-        report.warn(f"Context gateway: registered, but its binding cannot be read: {binding_path}")
-        return
+        summary = f"Context gateway: registered, but its binding cannot be read: {binding_path}"
+        report.warn(summary)
+        return summary, False
     try:
         receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         source_root, files = receipt["source_root"], len(receipt["files"])
     except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
-        report.warn(f"Context gateway: registered, but its receipt cannot be read: {receipt_path}")
-        return
+        summary = f"Context gateway: registered, but its receipt cannot be read: {receipt_path}"
+        report.warn(summary)
+        return summary, False
     summary = f"Context gateway: registered from {source_root}, {report.count_label(files, 'file', 'files')}"
     if _gateway_service_running():
-        report.info(f"{summary}, service running")
-    else:
-        report.warn(f"{summary}, service not running")
+        summary += ", service running"
+        report.info(summary)
+        return summary, True
+    summary += ", service not running"
+    report.warn(summary)
+    return summary, False
 
 
 def migrate_record(ctx: "Context") -> None:

@@ -288,6 +288,35 @@ class ReportTextTests(ReportCase):
         self.assertIn("  [4/5] Runtime config      claude hooks=true, Visibility Level=[minimal]\n", full)
         self.assertEqual(full.count("Ghost-ALICE OS installation Process Report"), 1)
 
+    def test_tail_attention_takes_extra_notes(self):
+        tail = self.captured(report.print_tail, "claude", "dynamic",
+                             notes=["Context gateway: registered from /src, 32 files, service running"])
+        self.assertIn("Attention\n"
+                      "  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n"
+                      "  - Context gateway: registered from /src, 32 files, service running\n\n"
+                      "Details\n", tail)
+        full = self.captured(report.print_full, "claude", 7, 1, 2, 4, "minimal", notes=["one note"])
+        self.assertIn("  - one note\n", full)
+        auto = self.captured(report.print_auto_full, "claude, codex", 24, "dynamic", 24, notes=["one note"])
+        self.assertIn("  - one note\n", auto)
+
+    def test_gateway_event_round_trip(self):
+        event_file = self.home / "run.events.jsonl"
+        report.configure(verbose=False, report_child=True, tty=False, progress_env="off", home=self.home,
+                         event_file=event_file)
+        report.write_gateway_event("codex", "Context gateway: registered from /src, 3 files, service running",
+                                   running=True)
+        report.write_gateway_event("claude", "Context gateway: registered from /src, 3 files, service running",
+                                   running=True)
+        lines = [json.loads(line) for line in event_file.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual(lines[0], {"type": "gateway-result", "platform": "codex",
+                                    "summary": "Context gateway: registered from /src, 3 files, service running",
+                                    "running": True})
+        # The same observation from every host is one note.
+        self.assertEqual(report.read_gateway_notes(event_file),
+                         ["Context gateway: registered from /src, 3 files, service running"])
+        self.assertEqual(report.read_gateway_notes(self.home / "absent.jsonl"), [])
+
     def test_print_auto_start_and_full(self):
         # report.sh:229-261; test_installer_default_auto.py:409-433, 476-479
         start = self.captured(report.print_auto_start, "claude, codex", 24, "dynamic")
