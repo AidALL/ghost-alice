@@ -43,24 +43,24 @@ def _git_value(root: Path, *args: str) -> str | None:
     return result.stdout.strip() if result.ok else None
 
 
-def assert_session_gate_contract(source_root: Path) -> None:
-    """`skill-catalog/session-gates.json` must exist, else
+def assert_session_gate_contract() -> None:
+    """`skill-catalog/session-gates.json` must exist in the checkout, else
     `Session gate contract file missing: <path>` and exit 1 (`bootstrap.sh:5-10`)."""
-    path = Path(source_root) / "skill-catalog" / "session-gates.json"
+    path = runner.REPO_ROOT / "skill-catalog" / "session-gates.json"
     if not path.is_file():
         report.error(f"Session gate contract file missing: {path}")
         raise InstallerExit(1)
 
 
-def check_source_health(source_root: Path, *, skip: bool) -> bool:
-    """Print the source health and return False only when the branch is behind its upstream.
+def check_source_health(*, skip: bool) -> bool:
+    """Print the checkout's source health and return False only when the branch is behind its upstream.
 
     Same messages and decisions as `source_health.sh:5-79`: skip → warn and
     pass; no git or not a worktree → warn and pass; `Source health: branch=,
     head=, upstream=`; diverged → two warnings; behind → four errors, False;
     ahead → warning; untracked → warning; tracked changes → warning.
     """
-    root = Path(source_root)
+    root = runner.REPO_ROOT
     if skip:
         report.warn("Skipping source health gate (--skip-source-health)")
         return True
@@ -98,7 +98,7 @@ def check_source_health(source_root: Path, *, skip: bool) -> bool:
                 report.error("Source branch is behind its upstream; refusing to install from stale source.")
                 report.error("Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout "
                              "before installing. If this local source is intentional, rerun with --skip-source-health.")
-                report.error("To preserve source-local changes while updating, run bash install.sh --update-source.")
+                report.error(f"To preserve source-local changes while updating, run {report.install_command()} --update-source.")
                 report.error("If an old checkout is already blocked by local changes during git pull, use the bootstrap "
                              "one-command update in docs/getting-started/troubleshooting.md.")
                 return False
@@ -114,15 +114,15 @@ def check_source_health(source_root: Path, *, skip: bool) -> bool:
     return True
 
 
-def update_source(source_root: Path) -> int:
-    """`installer_source_update.py --source-dir <root>`; its exit code (`source_health.sh:81-89`)."""
-    return runner.run_tool("_shared/installer_source_update.py", "--source-dir", str(source_root)).returncode
+def update_source() -> int:
+    """`installer_source_update.py --source-dir <checkout>`; its exit code (`source_health.sh:81-89`)."""
+    return runner.run_tool("_shared/installer_source_update.py", "--source-dir", str(runner.REPO_ROOT)).returncode
 
 
-def setup_git_hooks(source_root: Path) -> HookPathChange:
-    """Set `core.hooksPath=hooks` when it differs, record the change for the
-    install-state manifest, make `hooks/post-merge` executable (`source_health.sh:91-116`)."""
-    root = Path(source_root)
+def setup_git_hooks() -> HookPathChange:
+    """Set the checkout's `core.hooksPath=hooks` when it differs, record the change
+    for the install-state manifest, make `hooks/post-merge` executable (`source_health.sh:91-116`)."""
+    root = runner.REPO_ROOT
     current = _git(root, "config", "--local", "core.hooksPath")
     current_path = current.stdout.strip() if current.ok and current.stdout else ""
     if current_path != HOOKS_DIR:
@@ -142,9 +142,9 @@ def setup_git_hooks(source_root: Path) -> HookPathChange:
     return change
 
 
-def resolve_source(source_root: Path) -> SourceInfo:
-    """Root, branch, head and dirty state for the install-state manifest (`install.sh:538-551`)."""
-    root_path = Path(source_root)
+def resolve_source() -> SourceInfo:
+    """The checkout's root, branch, head and dirty state for the install-state manifest (`install.sh:538-551`)."""
+    root_path = runner.REPO_ROOT
     toplevel = _git_value(root_path, "rev-parse", "--show-toplevel")
     branch = _git_value(root_path, "symbolic-ref", "--quiet", "--short", "HEAD") or "DETACHED"
     head = _git_value(root_path, "rev-parse", "HEAD") or "unknown"

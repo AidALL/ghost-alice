@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from installer import addons  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Target  # noqa: E402
-from installer_testing import FakeRunner, make_context, make_source, quiet  # noqa: E402
+from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
 
 
 class AddonCase(unittest.TestCase):
@@ -30,6 +30,7 @@ class AddonCase(unittest.TestCase):
         self.home = root / "home"
         self.home.mkdir()
         self.source = make_source(root / "src")
+        self.enterContext(use_source(self.source))
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_GHOST_ROOT", "GHOST_ALICE_ADDON_SOURCE_CACHE_DIR",
@@ -43,7 +44,7 @@ class AddonCase(unittest.TestCase):
         self.temp.cleanup()
 
     def context(self, platform="claude", **options):
-        return make_context(self.source, self.home, platform, **options)
+        return make_context(self.home, platform, **options)
 
     @staticmethod
     def captured(fn, *args, **kwargs):

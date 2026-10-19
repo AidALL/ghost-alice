@@ -20,8 +20,6 @@ if str(SHARED) not in sys.path:
 
 from installer_assets import write_ownership_marker
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source
 
 
 def _load_install_lock():
@@ -46,27 +44,6 @@ def _load_install_transaction():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _extract_powershell_function(source: str, name: str) -> str:
-    lines = source.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines):
-        if line.startswith(f"function {name} "):
-            start = idx
-            break
-    if start is None:
-        raise AssertionError(f"Function not found: {name}")
-
-    body = []
-    depth = 0
-    for line in lines[start:]:
-        body.append(line)
-        depth += line.count("{")
-        depth -= line.count("}")
-        if depth == 0:
-            return "".join(body)
-    raise AssertionError(f"Function did not terminate: {name}")
 
 
 class InstallTransactionTest(unittest.TestCase):
@@ -211,26 +188,6 @@ class InstallTransactionTest(unittest.TestCase):
                 self.assertIn('"owner": "new"', body)
             finally:
                 lock.release_lock(lock_path)
-
-    def test_install_ps1_snapshot_failure_is_blocking(self) -> None:
-        source = installer_ps1_source()
-        snapshot_fn = _extract_powershell_function(source, "Invoke-SnapshotAfterInstall")
-
-        self.assertIn("aborting because merge-companion snapshot cannot run", snapshot_fn)
-        self.assertIn("snapshot capture failed; aborting install", snapshot_fn)
-        self.assertIn("throw", snapshot_fn)
-        self.assertNotIn("Write-Warn", snapshot_fn)
-        self.assertNotIn("continuing", snapshot_fn)
-
-    def test_installers_wrap_install_with_lock_and_release(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_cli.py (lock around every command).
-        ps1 = installer_ps1_source()
-        self.assertIn("function Invoke-WithInstallLock", ps1)
-        self.assertIn("function Enter-InstallLock", ps1)
-        self.assertIn("function Exit-InstallLock", ps1)
-        self.assertIn("install_lock.py\") \"acquire\"", ps1)
-        self.assertIn("install_lock.py\") \"release\"", ps1)
-        self.assertIn("finally", ps1)
 
     def test_staged_copy_replace_preserves_existing_dest_when_staging_fails(self) -> None:
         transaction = _load_install_transaction()
@@ -631,31 +588,6 @@ class InstallTransactionTest(unittest.TestCase):
                 ],
             )
 
-    def test_installers_use_staged_copy_replace_for_copy_installs(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_transaction.py.
-        ps1 = installer_ps1_source()
-        self.assertIn("function Invoke-StagedCopyReplace", ps1)
-        self.assertIn('"copy-replace"', ps1)
-        self.assertNotIn("Copy-Item -Path $src -Destination $dest -Recurse -Force", ps1)
-        self.assertNotIn("Copy-Item -Path $Source -Destination $Dest -Recurse -Force", ps1)
-        self.assertNotIn("Copy-Item -Path $sharedSrc -Destination $sharedDest -Recurse -Force", ps1)
-
-    def test_installers_pass_event_log_to_staged_copy_replace(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_transaction.py.
-        ps1 = installer_ps1_source()
-        copy_fn_ps1 = _extract_powershell_function(ps1, "Invoke-StagedCopyReplace")
-        self.assertIn("--event-log", copy_fn_ps1)
-        self.assertIn('$Platform-events.jsonl', copy_fn_ps1)
-
-    def test_installers_use_batch_copy_transaction_for_copy_only_installs(self) -> None:
-        # The bash side of this contract now lives in _shared/test_installer_cli.py (one copy batch for codex).
-        ps1 = installer_ps1_source()
-        self.assertIn("function Invoke-StagedCopyReplaceMany", ps1)
-        self.assertIn('"copy-replace-many"', ps1)
-        install_fn_ps1 = _extract_powershell_function(ps1, "Invoke-Install")
-        self.assertIn("$copyTargets", install_fn_ps1)
-        self.assertIn("Invoke-StagedCopyReplaceMany", install_fn_ps1)
-
     def test_cleanup_pending_apply_marks_clean_legacy_entry_decided_and_removes_backup(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -831,12 +763,6 @@ class InstallTransactionTest(unittest.TestCase):
         self.assertIn("def cleanup_pending", preservation_py)
         self.assertIn("cleanup_false_positive_legacy.py", preservation_py)
         self.assertIn("--apply", preservation_py)
-
-        ps1 = installer_ps1_source()
-        self.assertIn("-CleanupPending", ps1)
-        self.assertIn("Invoke-CleanupPendingFalsePositives", ps1)
-        self.assertIn("cleanup_false_positive_legacy.py", ps1)
-        self.assertIn("--apply", ps1)
 
 
 class StagedSymlinkReplaceTests(unittest.TestCase):

@@ -45,6 +45,18 @@ class ReportCase(unittest.TestCase):
         return buffer.getvalue()
 
 
+class InstallCommandTests(ReportCase):
+    def test_hints_name_the_command_the_shell_reports(self):
+        # install.ps1 reports `.\\install.cmd`; without a report the hints name `bash install.sh`.
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("GHOST_ALICE_INSTALL_COMMAND", None)
+            self.assertEqual(report.install_command(), "bash install.sh")
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
+            self.assertEqual(report.install_command(), ".\\install.cmd")
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ""}):
+            self.assertEqual(report.install_command(), "bash install.sh")
+
+
 class MessageTests(ReportCase):
     def test_prefixes_without_color_when_not_a_tty(self):
         # report.sh:5-11; colors only on a terminal (install.sh:95-99)

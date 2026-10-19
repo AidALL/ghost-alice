@@ -6,8 +6,6 @@ import subprocess
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -209,20 +207,9 @@ class InstallerAssetInventoryTest(unittest.TestCase):
 
     def test_installers_call_ownership_marker_writer_before_snapshot(self) -> None:
         transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
-        install_ps1 = installer_ps1_source()
-
-        ps1_call = "Invoke-WriteOwnershipMarker -TargetPlatform $Platform"
-        ps1_snapshot_call = "Invoke-SnapshotAfterInstall -TargetPlatform $Platform"
 
         # The Python order (markers before the snapshot) is fixed by _shared/test_installer_cli.py.
         self.assertIn("installer_assets_cli.py", transaction_py)
-
-        self.assertIn(ps1_call, install_ps1)
-        self.assertIn("installer_assets_cli.py", install_ps1)
-        self.assertLess(
-            install_ps1.index(ps1_call),
-            install_ps1.index(ps1_snapshot_call),
-        )
 
 
 if __name__ == "__main__":

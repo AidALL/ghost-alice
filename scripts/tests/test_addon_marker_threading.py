@@ -15,8 +15,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_ps1_source  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKER_CLI = REPO_ROOT / "_shared" / "installer_assets_cli.py"
@@ -88,48 +86,6 @@ class AddonTargetCliTest(unittest.TestCase):
 class InstallerThreadsAddonAttributionTest(unittest.TestCase):
     """PowerShell parity: the Windows installer is only assertable by source on
     this platform. The bash path is proven end-to-end by the shell e2e."""
-
-    def test_ps1_threads_addon_id_into_marker_writer(self) -> None:
-        self.assertIn("--addon-target", installer_ps1_source())
-
-    def test_ps1_selected_uninstall_checks_addon_dependents_before_removal(self) -> None:
-        source = installer_ps1_source()
-
-        self.assertIn("[switch]$Force", source)
-        self.assertIn("Test-AddonDependentsForSkill", source)
-        self.assertIn("--dependents", source)
-        uninstall_body = source.split("function Invoke-Uninstall", 1)[1].split("function Invoke-UninstallCleanup", 1)[0]
-        self.assertLess(
-            uninstall_body.index("Test-AddonDependentsForSkill"),
-            uninstall_body.index("Remove-InstalledTarget"),
-        )
-
-    def test_ps1_selected_uninstall_routes_addon_ids_before_skill_assertion(self) -> None:
-        source = installer_ps1_source()
-
-        self.assertIn("Invoke-Uninstall -SkillNames $Skills -AddonIds $Addon", source)
-        self.assertIn("Split-UninstallSelection", source)
-        self.assertIn("Test-InstalledAddonIdForUninstall", source)
-        uninstall_body = source.split("function Invoke-Uninstall", 1)[1].split("function Invoke-UninstallCleanup", 1)[0]
-        self.assertLess(
-            uninstall_body.index("Split-UninstallSelection"),
-            uninstall_body.index("Assert-SkillNames"),
-        )
-        self.assertLess(
-            uninstall_body.index("Invoke-ResumePendingAddonUninstalls"),
-            uninstall_body.index("Assert-SkillNames"),
-        )
-
-    def test_ps1_uninstall_addon_does_not_resolve_official_source_shortcut(self) -> None:
-        source = installer_ps1_source()
-
-        shortcut_body = source.split("function Resolve-OfficialAddonShortcuts", 1)[1].split(
-            "function Test-AddonSourceIsGitUrl", 1
-        )[0]
-        self.assertLess(
-            shortcut_body.index("if ($Uninstall)"),
-            shortcut_body.index("Resolve-OfficialAddonSource"),
-        )
 
 
 if __name__ == "__main__":

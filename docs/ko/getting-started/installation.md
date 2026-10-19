@@ -9,6 +9,8 @@ Language: [🇺🇸 English](../../getting-started/installation.md) | 🇰🇷 �
 
 Windows에서는 `install.cmd`가 기본 래퍼를 통해 설치기를 실행합니다. Python 3.11 이상을 요구하고 콘솔을 UTF-8로 설정하며 `-NoProfile -ExecutionPolicy Bypass`를 사용합니다. PowerShell 실행 정책으로 인한 차단을 처리하되 사용자나 컴퓨터의 실행 정책은 변경하지 않습니다.
 
+Windows 설치기에는 PowerShell 7.6 이상이 필요합니다. Windows PowerShell 5.1은 은퇴했습니다. 더 낮은 PowerShell에서는 설치기가 요구 사항을 출력하고 멈춥니다. `winget install --id Microsoft.PowerShell --exact`로 PowerShell을 설치한 뒤 `.\install.cmd`를 다시 실행해 주세요.
+
 ## Core와 Ghost-ALICE Autopilot 함께 설치
 
 저장소를 복제한 뒤 아래 명령으로 에이전트 플랫폼을 자동 감지하여 함께 설치해 주세요.
@@ -219,6 +221,10 @@ Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynami
 - Windows: `winget`, `choco`, 그 다음 `scoop`
 
 Python 3.11 이상을 준비하지 못하면 설치를 멈추고 수동 복구 안내를 제공합니다.
+
+### PowerShell Contract
+
+`.\install.cmd`는 PowerShell 7(`pwsh.exe`)로 Windows 설치기를 실행하고, `pwsh.exe`가 없으면 Windows PowerShell(`powershell.exe`)로 실행합니다. Windows 설치기에는 7.6 LTS 계열인 PowerShell 7.6 이상이 필요합니다. Windows PowerShell 5.1을 포함해 더 낮은 PowerShell에서는 `PowerShell 7.6 or newer is required`와 설치 명령 `winget install --id Microsoft.PowerShell --exact`를 출력하고 종료 코드 1로 멈춥니다. 설치기가 PowerShell을 직접 설치하지는 않습니다. 이 확인을 통과하면 콘솔 입출력을 UTF-8로 설정하고 Python 3.11 이상을 준비한 뒤, 모든 인수를 순서대로 `_shared/installer/cli.py`에 넘깁니다. `install.sh`가 실행하는 설치기와 같은 설치기이므로 Windows에서도 같은 긴 옵션을 씁니다.
 
 macOS와 다른 POSIX 호스트의 설치된 훅은 `GHOST_ALICE_PYTHON`, 실행 환경의 `PATH`와 일반 설치 위치, 설치에 사용한 인터프리터 순서로 Python을 찾습니다. 각 후보는 Python 3.11 이상 검사를 통과해야 합니다. 마지막 대체 경로는 데스크톱 앱의 `PATH`에 설치용 Python 디렉터리가 없어도 훅을 실행할 수 있도록 합니다. 호스트의 전역 Python이나 `PATH`는 변경하지 않습니다. 해당 인터프리터가 이동했고 다른 후보도 없으면 설치기를 다시 실행해 주세요.
 

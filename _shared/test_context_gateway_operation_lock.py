@@ -43,12 +43,18 @@ class OperationLockTests(unittest.TestCase):
             pass
         self.assertTrue(path.exists())
 
-    def test_reuses_a_powershell_installers_lock_by_the_owner_pid(self):
-        # install.ps1 still acquires through a child `install_lock.py` process: only its owner string names the shell.
-        path = _write_lock(self.home, pid=424242, owner=f"install.ps1:codex:{os.getppid()}")
-        with platform.operation_lock(self.home):
-            pass
-        self.assertTrue(path.exists())
+    def test_an_owner_string_naming_the_parent_grants_nothing(self):
+        # Only the lock file's pid identifies the holder; a shell-style owner string that ends with the
+        # parent's pid is an unrelated holder when the pid itself is another process.
+        for owner in (f"install.ps1:codex:{os.getppid()}", f"install.sh:claude:{os.getppid()}"):
+            with self.subTest(owner=owner):
+                path = _write_lock(self.home, pid=424242, owner=owner)
+                before = path.read_text(encoding="utf-8")
+                with self.assertRaises(GatewayBlocked) as blocked:
+                    with platform.operation_lock(self.home):
+                        pass
+                self.assertEqual(str(blocked.exception), "Another installer holds the operation lock")
+                self.assertEqual(path.read_text(encoding="utf-8"), before)
 
     def test_refuses_an_unrelated_holder(self):
         _write_lock(self.home, pid=424242, owner="installer:install:claude:424242")

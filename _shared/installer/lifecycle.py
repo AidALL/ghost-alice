@@ -79,7 +79,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
                 report.info("No addon targets to remove.")
             return 1 if failed else 0
         return run_full_uninstall(ctx)
-    selection.validate_requested_skills(ctx.source_root, skills)
+    selection.validate_requested_skills(skills)
     report.info("Removing selected skills...")
     skills_dir = Path(ctx.skills_dir)
     removal: list[tuple[str, Path]] = []
@@ -91,7 +91,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
                 continue
             if dependents != 0:
                 report.warn(f"Dependency check failed for {skill}; proceeding with removal")
-        targets = selection.expand_skill_targets(ctx.source_root, skill)
+        targets = selection.expand_skill_targets(skill)
         if not targets:
             removal.append((skill, skills_dir / skill))
             continue
@@ -118,7 +118,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
         report.info("No skills to remove.")
     else:
         report.ok(f"{removed} item(s) removed.")
-    if selection.has_managed_installs(ctx.source_root, skills_dir):
+    if selection.has_managed_installs(skills_dir):
         report.info("Managed skills remain; keeping hooks installed.")
     elif not hosts.install_hooks(ctx, "uninstall", ctx.platform):
         report.error("Hook removal failed. Aborting skill removal")
@@ -163,7 +163,7 @@ def run_repair(ctx: "Context") -> int:
     else:
         kept += 1
         report.warn("repair: _shared is occupied and not cleanly managed; left untouched")
-    for target in selection.iter_install_targets(ctx.source_root, list(selection.ALL_SKILLS)):
+    for target in selection.iter_install_targets(list(selection.ALL_SKILLS)):
         dest = skills_dir / target.name
         if not dest.exists() and not dest.is_symlink():
             if copy_only:

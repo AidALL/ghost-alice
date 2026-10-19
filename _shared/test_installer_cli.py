@@ -5,6 +5,8 @@ Expected texts come from install.sh:29-37, 115-201, 203-269, 448-562 and install
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import inspect
 import io
 import os
 from pathlib import Path
@@ -18,7 +20,60 @@ from installer import cli, report  # noqa: E402
 from installer.runner import InstallerExit  # noqa: E402
 from installer.selection import ALL_SKILLS, Collected, Target  # noqa: E402
 from installer.source import HookPathChange  # noqa: E402
-from installer_testing import make_context, make_source, quiet  # noqa: E402
+from installer_testing import make_context, make_source, quiet, use_source  # noqa: E402
+
+
+HELP = """Usage:
+  bash install.sh                              # Install to detected AI tools
+  bash install.sh --addon autopilot            # Install official autopilot addon to detected AI tools
+  bash install.sh --platform claude            # Install only to Claude Code
+  bash install.sh --platform codex             # Install to Codex
+
+Common commands:
+  --platform, -p PLAT    Choose claude | codex
+  --prompt-platform      Ask which AI tool to install
+  --status, -s           Show install status
+  --visibility strict|dynamic|minimal
+                          Set user-facing governance message visibility profile
+  --agent-visibility strict|dynamic|minimal
+                          Alias for --visibility
+  --doctor               Run install diagnostics
+  --repair               Re-provision missing managed targets (never overwrites user-owned slots)
+  --verbose, -v          Show per-target install details
+  --addon autopilot      Install official autopilot addon; --platform is optional
+
+Removal commands:
+  --uninstall, -u        Full uninstall: remove managed hooks, bootstrap, support state, and install targets
+  --platform PLAT --uninstall SKILL_NAMES
+                          Remove selected skills from one platform
+
+Advanced/operator commands:
+  SKILL_NAMES            Install specified skills only
+  --list, -l             List available skills
+  --cleanup-pending      Clean false-positive pending entries
+  --update-source        Stash source checkout local changes and run git pull --ff-only
+  --addon-source PATH|URL
+                          Add local addon repo or git URL source
+  --addon-tag TAG        Checkout branch/tag for git URL addon sources
+  --addon-skip           Disable addon installation
+  --list-addons          List addon manifest targets
+  --skip-source-health   Skip source health gate
+  --sync-commands        Sync workspace commands
+  --check-commands       Check workspace commands only
+  gateway ARGS...        Run the context gateway installer once with ARGS
+  --help, -h             Show this help
+"""
+
+
+def command_named(name: str) -> "cli.Command":
+    return next(command for command in cli.COMMANDS if name in command.names)
+
+
+def selecting_argv(command: "cli.Command") -> list[str]:
+    """Arguments that select `command`: a skill name for install, else its first name."""
+    if command is cli.INSTALL:
+        return ["task-router"]
+    return [command.names[0], "detach"] if command.names[0] == "gateway" else [command.names[0]]
 
 
 class CliCase(unittest.TestCase):
@@ -28,6 +83,7 @@ class CliCase(unittest.TestCase):
         self.home = root / "home"
         self.home.mkdir()
         self.source = make_source(root / "src")
+        self.enterContext(use_source(self.source))
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_INSTALL_REPORT_CHILD", "GHOST_ALICE_INSTALL_LOG_FILE",
@@ -147,15 +203,70 @@ class OptionTests(CliCase):
                       self.expect_exit(1, cli.normalize_official_addon_shortcuts, cli.parse_options(["--addon", "other"])))
 
     def test_auto_detect_matrix(self):
-        # install.sh:255-269; test_installer_default_auto.py:187-201
-        for argv, expected in ((["task-router"], True), ([], True), (["--status"], False), (["--help"], False),
-                               (["--uninstall"], False), (["--bogus"], False), (["--list"], False), (["--sync-commands"], False),
-                               (["gateway", "detach", "--root", "/x"], False)):
-            with self.subTest(argv=argv):
-                self.assertEqual(cli.auto_detect_requested(cli.parse_options(argv)), expected)
-        for flag in (["--platform", "claude"], ["--prompt-platform"], ["--cleanup-pending"], ["--list-addons"], ["--update-source"]):
+        # Install without a platform is auto mode; every table command runs once, never per platform.
+        for command in cli.COMMANDS:
+            with self.subTest(command=command.usage):
+                expected = command is cli.INSTALL
+                self.assertEqual(cli.auto_detect_requested(cli.parse_options(selecting_argv(command))), expected)
+        for argv in ([], ["task-router"], ["task-router", "merge-companion"]):
+            self.assertTrue(cli.auto_detect_requested(cli.parse_options(argv)), argv)
+        for argv in (["--bogus"], ["-Offboard"], ["-x", "task-router"], ["gateway", "detach", "--root", "/x"]):
+            self.assertFalse(cli.auto_detect_requested(cli.parse_options(argv)), argv)
+        for flag in (["--platform", "claude"], ["--prompt-platform"]):
             with self.subTest(flag=flag):
                 self.assertFalse(cli.auto_detect_requested(cli.parse_options([*flag, "task-router"])))
+
+    def test_find_command_reads_the_table(self):
+        for command in cli.COMMANDS:
+            for name in command.names:
+                with self.subTest(name=name):
+                    self.assertIs(cli.find_command(cli.parse_options([name])), command)
+        self.assertIs(cli.find_command(cli.parse_options([])), cli.INSTALL)
+        self.assertIs(cli.find_command(cli.parse_options(["task-router", "--bogus"])), cli.INSTALL)
+        # A token that starts with "-" and names no command is never a skill name.
+        for argv in (["--bogus"], ["-Offboard"], ["-x"], ["--addon", "autopilot", "--uninstall"]):
+            self.assertIsNone(cli.find_command(cli.parse_options(argv)), argv)
+        # A flag command is selected wherever it appears and before an args[0] command; flags follow table order.
+        self.assertIs(cli.find_command(cli.parse_options(["--status", "--list-addons"])),
+                      command_named("--list-addons"))
+        self.assertIs(cli.find_command(cli.parse_options(["--update-source", "--cleanup-pending"])),
+                      command_named("--cleanup-pending"))
+        self.assertTrue(cli.args_request_uninstall(["x", "--remove"]))
+
+    def test_command_knowledge_has_one_owner(self):
+        # Contradiction 21: dispatch, auto mode and help read the table; no second list of command names remains.
+        for name in ("COMMAND_FLAGS", "COMMAND_WORDS", "UNINSTALL_FLAGS", "HELP_TEXT", "_locked"):
+            self.assertFalse(hasattr(cli, name), name)
+        names = {name for command in cli.COMMANDS for name in command.names}
+        for reader in (cli.dispatch, cli.find_command, cli.auto_detect_requested, cli.plain_full_uninstall_requested,
+                       cli.args_request_uninstall, cli.print_help, cli.run_command):
+            with self.subTest(reader=reader.__name__):
+                source = inspect.getsource(reader)
+                self.assertEqual([name for name in names if f'"{name}"' in source or f"'{name}'" in source], [])
+        self.assertEqual(cli.COMMANDS, tuple(row for row in cli.COMMAND_LINE if isinstance(row, cli.Command)))
+        self.assertEqual(len({name for command in cli.COMMANDS for name in command.names}),
+                         sum(len(command.names) for command in cli.COMMANDS))
+
+    def test_table_columns(self):
+        rows = {command.usage: (command.lock, command.platform, command.flag, command.before_lock is not None)
+                for command in cli.COMMANDS}
+        self.assertEqual(rows, {
+            "--status, -s": (None, True, None, False),
+            "--doctor": (None, True, None, False),
+            "--repair": ("repair", True, None, False),
+            "--uninstall, -u": ("uninstall", True, None, False),
+            "SKILL_NAMES": ("install", True, None, True),
+            "--list, -l": (None, False, None, False),
+            "--cleanup-pending": ("cleanup-pending", True, "cleanup_pending", False),
+            "--update-source": (None, False, "update_source", False),
+            "--list-addons": (None, True, "list_addons", False),
+            "--sync-commands": (None, True, None, False),
+            "--check-commands": (None, True, None, False),
+            "gateway ARGS...": ("gateway", False, None, False),
+            "--help, -h": (None, False, None, False),
+        })
+        self.assertEqual(cli.INSTALL.names, ())
+        self.assertEqual(cli.UNINSTALL.names, ("--uninstall", "--remove", "-u"))
 
     def test_plain_full_uninstall(self):
         # install.sh:271-278
@@ -165,35 +276,33 @@ class OptionTests(CliCase):
         self.assertFalse(cli.plain_full_uninstall_requested(cli.parse_options(["--platform", "claude", "--uninstall"])))
         self.assertFalse(cli.plain_full_uninstall_requested(cli.parse_options(["--prompt-platform", "--uninstall"])))
 
+    def test_help_and_hints_name_the_reported_install_command(self):
+        # The usage lines name the command the shell reported, with the comment column kept.
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
+            _, out = self.captured(cli.print_help)
+        lines = HELP.splitlines(keepends=True)
+        for index in range(1, 5):
+            usage, comment = lines[index].split("#", 1)
+            lines[index] = f"  {usage.strip().replace('bash install.sh', '.' + chr(92) + 'install.cmd'):<45}#{comment}"
+        self.assertEqual(out, "".join(lines))
+        self.assertIn("  .\\install.cmd --addon autopilot              # Install official", out)
+
     def test_help_text(self):
-        # install.sh:508-545
+        # install.sh:508-545; every row comes from the table, in table order under its section.
         _, out = self.captured(cli.print_help)
-        for line in (
-            "Usage:",
-            "  bash install.sh                              # Install to detected AI tools",
-            "  bash install.sh --addon autopilot            # Install official autopilot addon to detected AI tools",
-            "  bash install.sh --platform claude            # Install only to Claude Code",
-            "  bash install.sh --platform codex             # Install to Codex",
-            "Common commands:",
-            "  --platform, -p PLAT    Choose claude | codex",
-            "  --visibility strict|dynamic|minimal",
-            "                          Set user-facing governance message visibility profile",
-            "  --doctor               Run install diagnostics",
-            "  --repair               Re-provision missing managed targets (never overwrites user-owned slots)",
-            "Removal commands:",
-            "  --uninstall, -u        Full uninstall: remove managed hooks, bootstrap, support state, and install targets",
-            "Advanced/operator commands:",
-            "  --update-source        Stash source checkout local changes and run git pull --ff-only",
-            "  --addon-tag TAG        Checkout branch/tag for git URL addon sources",
-            "  --help, -h             Show this help",
-        ):
-            self.assertIn(line + "\n", out)
+        self.assertEqual(out, HELP)
+        for command in cli.COMMANDS:
+            with self.subTest(command=command.usage):
+                section = out.index(f"{command.section}:\n")
+                following = [out.index(f"{other}:\n") for other in cli.HELP_SECTIONS if out.index(f"{other}:\n") > section]
+                self.assertLess(section, out.index(f"  {command.usage}"))
+                self.assertLess(out.index(f"  {command.usage}"), min(following, default=len(out)))
 
 
 class DispatchTests(CliCase):
     def setUp(self):
         super().setUp()
-        self.stub("installer.selection.list_skills")
+        self.stub("installer.selection.list_skills", 0)
         self.stub("installer.diagnostics.check_status", 0)
         self.stub("installer.diagnostics.run_doctor", 3)
         self.stub("installer.lifecycle.run_repair", 0)
@@ -205,6 +314,7 @@ class DispatchTests(CliCase):
         self.stub("installer.addons.prepare_sources")
         self.stub("installer.auto.run_install_children", 0)
         self.stub("installer.auto.run_uninstall_children", 0)
+        self.stub("installer.cli.prepare_install")
         self.stub("installer.cli.run_install", 0)
         self.stub("installer.lock.acquire", self.home / "lock")
         self.stub("installer.lock.release")
@@ -271,14 +381,67 @@ class DispatchTests(CliCase):
     def test_install_paths(self):
         rc, _ = self.dispatch(["--platform", "claude"])
         self.assertEqual(rc, 0)
+        self.assertEqual([n for n in self.names() if n in ("prepare_install", "acquire", "run_install", "release")],
+                         ["prepare_install", "acquire", "run_install", "release"])
         _, args, _ = next(c for c in self.calls if c[0] == "run_install")
-        self.assertEqual(args[1], [])
+        self.assertEqual(args[0].options.args, [])
         self.assertEqual(args[0].platform, "claude")
         self.calls.clear()
         self.dispatch(["--platform", "codex", "task-router", "merge-companion"])
         _, args, _ = next(c for c in self.calls if c[0] == "run_install")
-        self.assertEqual(args[1], ["task-router", "merge-companion"])
+        self.assertEqual(args[0].options.args, ["task-router", "merge-companion"])
         self.assertEqual(args[0].skills_dir, self.home / ".agents" / "skills")
+
+    def test_every_table_command_is_reachable_from_dispatch(self):
+        # Without a platform, install fans out (auto mode) and a lone uninstall fans out (full cleanup);
+        # every other selection runs its table command once.
+        fan_out = {cli.INSTALL: "run_install_children", cli.UNINSTALL: "run_uninstall_children"}
+        for command in cli.COMMANDS:
+            for argv in (["--platform", "codex", *selecting_argv(command)], selecting_argv(command)):
+                with self.subTest(argv=argv), mock.patch("installer.cli.run_command", return_value=0) as run:
+                    self.calls.clear()
+                    rc, _ = self.dispatch(argv)
+                    self.assertEqual(rc, 0)
+                    if command in fan_out and "--platform" not in argv:
+                        run.assert_not_called()
+                        self.assertIn(fan_out[command], self.names())
+                        continue
+                    run.assert_called_once()
+                    self.assertIs(run.call_args.args[0], command)
+
+    def test_run_command_holds_the_table_lock_around_the_handler(self):
+        ctx = make_context(self.home, "codex")
+        for command in cli.COMMANDS:
+            with self.subTest(command=command.usage):
+                self.calls.clear()
+                handler = mock.Mock(side_effect=lambda c: self.calls.append(("handler", (c,), {})) or 7)
+                before = mock.Mock(side_effect=lambda c: self.calls.append(("before_lock", (c,), {})))
+                probe = dataclasses.replace(command, run=handler,
+                                            before_lock=before if command.before_lock is not None else None)
+                self.assertEqual(cli.run_command(probe, ctx), 7)
+                expected = ["before_lock"] if command.before_lock is not None else []
+                expected += ["acquire", "handler", "release"] if command.lock else ["handler"]
+                self.assertEqual(self.names(), expected)
+                if command.lock:
+                    self.assertEqual(self.calls[self.names().index("acquire")][1], (command.lock, "codex"))
+
+    def test_only_platform_commands_prompt_and_prepare_addon_sources(self):
+        with mock.patch("installer.cli.sys.stdin") as stdin:
+            stdin.isatty.return_value = False
+            for command in cli.COMMANDS:
+                if command is cli.INSTALL:
+                    continue
+                argv = ["--prompt-platform", "--addon-source", "/a", *selecting_argv(command)]
+                with self.subTest(argv=argv):
+                    self.calls.clear()
+                    rc, out = self.dispatch(argv)
+                    prompted = "[ERROR] --prompt-platform requires an interactive terminal." in out
+                    self.assertEqual(prompted, command.platform, out)
+                    if not command.platform:
+                        self.assertNotIn("prepare_sources", self.names())
+        self.calls.clear()
+        self.dispatch(["--platform", "claude", "--addon-source", "/a", "--status"])
+        self.assertLess(self.names().index("prepare_sources"), self.names().index("check_status"))
 
     def test_auto_and_fan_out(self):
         rc, _ = self.dispatch(["task-router", "--addon-source", "/a"])
@@ -302,6 +465,18 @@ class DispatchTests(CliCase):
         self.assertEqual(rc, 1)
         self.assertIn("[ERROR] Unknown option: --bogus", out)
         self.assertIn("See bash install.sh --help", out)
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
+            _, out = self.dispatch(["--bogus"])
+        self.assertIn("See .\\install.cmd --help", out)
+        # An unknown "-" token (a PowerShell-style name install.ps1 passes on) is an unknown option, before any prompt.
+        for argv in (["-Offboard"], ["--prompt-platform", "-Repair"], ["--prompt-platform", "--bogus"]):
+            with self.subTest(argv=argv):
+                self.calls.clear()
+                rc, out = self.dispatch(argv)
+                self.assertEqual(rc, 1)
+                self.assertIn(f"[ERROR] Unknown option: {argv[-1]}", out)
+                self.assertNotIn("interactive terminal", out)
+                self.assertNotIn("run_install_children", self.names())
         rc, out = self.dispatch(["--platform", "claude", "--prompt-platform", "--status"])
         self.assertEqual(rc, 0)
         self.assertIn("[WARN] --prompt-platform ignored because --platform is already specified.", out)
@@ -368,8 +543,8 @@ class InstallOrderTests(CliCase):
 
     def test_claude_link_mode_order(self):
         # S1–S19 with placement S12 as install_shared then link_or_copy per target
-        ctx = make_context(self.source, self.home, "claude", args=["task-router", "alpha"])
-        rc, out = self.captured(cli.run_install, ctx, ["task-router", "alpha"])
+        ctx = make_context(self.home, "claude", args=["task-router", "alpha"])
+        rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
         self.assertEqual(rc, 0)
         self.assertEqual(self.order(), list(self.STEPS))
         placement = [n for n, _, _ in self.calls if n in ("install_shared", "link_or_copy", "copy_targets_batch")]
@@ -382,8 +557,8 @@ class InstallOrderTests(CliCase):
         self.assertIn("[OK] [5/5] Verification: install state recorded", out) if report.state().report_child else None
 
     def test_codex_copy_mode_uses_one_batch(self):
-        ctx = make_context(self.source, self.home, "codex", args=["task-router"])
-        rc, _ = self.captured(cli.run_install, ctx, ["task-router", "alpha"])
+        ctx = make_context(self.home, "codex", args=["task-router", "alpha"])
+        rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
         self.assertEqual(rc, 0)
         placement = [n for n, _, _ in self.calls if n in ("install_shared", "link_or_copy", "copy_targets_batch")]
         self.assertEqual(placement, ["copy_targets_batch"])
@@ -396,9 +571,9 @@ class InstallOrderTests(CliCase):
 
     def test_stale_source_stops_before_selection_and_releases_the_lock(self):
         self.patches.enter_context(mock.patch("installer.source.check_source_health", return_value=False))
-        ctx = make_context(self.source, self.home, "claude")
+        ctx = make_context(self.home, "claude")
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(InstallerExit) as stop:
-            cli.run_install(ctx, [])
+            cli.run_command(cli.INSTALL, ctx)
         self.assertEqual(stop.exception.code, 1)
         names = [n for n, _, _ in self.calls]
         self.assertNotIn("collect_targets", names)
@@ -406,8 +581,8 @@ class InstallOrderTests(CliCase):
 
     def test_failed_step_stops_the_install(self):
         self.patches.enter_context(mock.patch("installer.hosts.install_hooks", return_value=False))
-        ctx = make_context(self.source, self.home, "claude")
-        out = self.expect_exit(1, cli.run_install, ctx, [])
+        ctx = make_context(self.home, "claude")
+        out = self.expect_exit(1, cli.run_command, cli.INSTALL, ctx)
         self.assertIn("[ERROR] Hook install failed. Aborting skill install", out)
         names = [n for n, _, _ in self.calls]
         self.assertNotIn("ensure_claude_bootstrap", names)
@@ -443,8 +618,8 @@ class InstallOrderTests(CliCase):
             with self.subTest(platform=platform, step=target.rsplit(".", 1)[-1]):
                 self.calls.clear()
                 with mock.patch(target, return_value=failure) as failing:
-                    ctx = make_context(self.source, self.home, platform)
-                    out = self.expect_exit(code, cli.run_install, ctx, ["task-router", "alpha"])
+                    ctx = make_context(self.home, platform, args=["task-router", "alpha"])
+                    out = self.expect_exit(code, cli.run_command, cli.INSTALL, ctx)
                 failing.assert_called()
                 if message:
                     self.assertIn(message, out)
@@ -453,9 +628,24 @@ class InstallOrderTests(CliCase):
                 self.assertNotIn("write_event", names)
                 self.assertEqual(names[-1], "release")
 
+    def test_update_hint_names_the_reported_install_command(self):
+        quiet(self.home, verbose=True)
+        for platform, command, expected in (
+                ("claude", None, "&& bash install.sh --update-source\n"),
+                ("codex", ".\\install.cmd", "&& .\\install.cmd --update-source, then re-run .\\install.cmd\n")):
+            with self.subTest(platform=platform):
+                env = {"GHOST_ALICE_INSTALL_COMMAND": command} if command else {}
+                with mock.patch.dict(os.environ, env):
+                    if not command:
+                        os.environ.pop("GHOST_ALICE_INSTALL_COMMAND", None)
+                    ctx = make_context(self.home, platform, args=["task-router"])
+                    rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+                self.assertEqual(rc, 0)
+                self.assertIn(f"[INFO] To update skills safely: cd {self.source} {expected}", out)
+
     def test_default_skills_are_all_skills(self):
-        ctx = make_context(self.source, self.home, "claude")
-        self.captured(cli.run_install, ctx, [])
+        ctx = make_context(self.home, "claude")
+        self.captured(cli.run_command, cli.INSTALL, ctx)
         _, args, _ = next(c for c in self.calls if c[0] == "collect_targets")
         self.assertEqual(args[1], list(ALL_SKILLS))
 

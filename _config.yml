@@ -28,7 +28,6 @@ exclude:
   - "*.psd1"
   - "_shared/"
   - "scripts/"
-  - "installer_lib/"
   - "installer_update/"
   - "hooks/"
   - "platforms/"

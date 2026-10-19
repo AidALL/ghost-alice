@@ -31,7 +31,7 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | Path | Role |
 | --- | --- |
 | [install.sh](https://github.com/AidALL/ghost-alice/blob/main/install.sh) | macOS·Linux·WSL·Git Bash 설치 진입점 |
-| [install.ps1](https://github.com/AidALL/ghost-alice/blob/main/install.ps1) | Windows PowerShell 설치 진입점 |
+| [install.ps1](https://github.com/AidALL/ghost-alice/blob/main/install.ps1) | PowerShell 7.6 이상용 Windows 설치 진입점 |
 | [install.cmd](https://github.com/AidALL/ghost-alice/blob/main/install.cmd) | Windows CMD에서 인수를 전달하는 실행 파일 |
 | [platforms/codex/](https://github.com/AidALL/ghost-alice/tree/main/platforms/codex) | Codex 부트스트랩의 원본 |
 | [hooks/](https://github.com/AidALL/ghost-alice/tree/main/hooks) | 저장소 훅 관련 파일 |

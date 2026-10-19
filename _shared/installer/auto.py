@@ -14,22 +14,20 @@ import time
 from typing import TYPE_CHECKING
 
 from installer import addons, report, runner, selection
-from installer.runner import REPO_ROOT
 
 if TYPE_CHECKING:
     from installer.cli import Context
 
-CLI_PATH = REPO_ROOT / "_shared" / "installer" / "cli.py"
 PROGRESS_SUFFIX = "common targets synced on all platforms"
 
 
 def platform_target_keys(ctx: "Context", platform: str, skills: list[str]) -> list[str]:
     """`support:_shared`, `skill:<name>` for core targets and addon targets of one platform (`targets.sh:150-179`)."""
     keys: list[str] = []
-    if (Path(ctx.source_root) / "_shared").is_dir():
+    if (runner.REPO_ROOT / "_shared").is_dir():
         keys.append("support:_shared")
     for skill in skills:
-        for target in selection.expand_skill_targets(ctx.source_root, skill):
+        for target in selection.expand_skill_targets(skill):
             keys.append(f"skill:{target.name}")
     if not ctx.options.addon_skip and ctx.addon_sources:
         platform_ctx = dataclasses.replace(ctx, platform=platform)
@@ -53,7 +51,7 @@ def child_command(ctx: "Context", platform: str, *, uninstall: bool = False) -> 
     """`python cli.py --platform P [--skip-source-health] [--visibility V] [--verbose]
     [--addon-source S]... [--addon-tag T]... [--addon-skip] ARGS...`; tags are
     dropped after the parent prepared git sources (`install.sh:315-333, 385`)."""
-    argv = [sys.executable, str(CLI_PATH), "--platform", platform]
+    argv = [sys.executable, str(runner.REPO_ROOT / "_shared" / "installer" / "cli.py"), "--platform", platform]
     if uninstall:
         return argv + ["--uninstall"]
     options = ctx.options

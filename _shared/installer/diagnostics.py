@@ -45,8 +45,8 @@ def run_install_doctor(ctx: "Context", mode: str, skills_dir: Path) -> int:
 
     skills_dir = Path(skills_dir)
     ghost = locations.home() / ".ghost-alice"
-    args = ["--platform", ctx.platform, "--repo-root", str(source.resolve_source(ctx.source_root).root),
-            "--encoding-root", str(ctx.source_root), "--encoding-root", str(skills_dir),
+    args = ["--platform", ctx.platform, "--repo-root", str(source.resolve_source().root),
+            "--encoding-root", str(runner.REPO_ROOT), "--encoding-root", str(skills_dir),
             "--ghost-alice-root", str(ghost),
             "--install-state-manifest", str(ghost / "install-state" / f"{ctx.platform}.json"),
             "--runtime-shared", str(locations.runtime_shared_dir()), "--skills-root", str(skills_dir)]
@@ -62,10 +62,10 @@ def run_install_doctor(ctx: "Context", mode: str, skills_dir: Path) -> int:
         args.extend(["--hook-config", str(claude_home / "settings.json"),
                      "--global-rule", "claude-bootstrap", str(claude_home / "CLAUDE.md"),
                      hosts.CLAUDE_BOOTSTRAP_MARKER, hosts.CLAUDE_MANAGED_BLOCK_BEGIN, hosts.CLAUDE_MANAGED_BLOCK_END])
-    if (Path(ctx.source_root) / "_shared").is_dir():
+    if (runner.REPO_ROOT / "_shared").is_dir():
         args.extend(["--target", "_shared", str(skills_dir / "_shared")])
     for skill in selection.ALL_SKILLS:
-        for target in selection.expand_skill_targets(ctx.source_root, skill):
+        for target in selection.expand_skill_targets(skill):
             args.extend(["--target", target.name, str(skills_dir / target.name)])
     report.emit("")
     report.info("Running installer doctor diagnostics...")
@@ -81,7 +81,7 @@ def check_status(ctx: "Context") -> int:
     report.emit("")
     print_target_status("_shared", skills_dir / "_shared")
     for skill in selection.ALL_SKILLS:
-        targets = selection.expand_skill_targets(ctx.source_root, skill)
+        targets = selection.expand_skill_targets(skill)
         if not targets:
             report.emit(f"  {_mark('○', _RED)} {skill}  (source missing)")
             continue

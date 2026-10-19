@@ -25,16 +25,16 @@ HOOK_ACTION_LABEL = "session-intent + prompt + web-search + tool-checkpoint + co
 GLOBAL_RULE_BLOCKS = "_shared/global_rule_blocks.py"
 
 
-def codex_bootstrap_source(source_root: Path) -> Path:
-    return Path(source_root) / "platforms" / "codex" / "AGENTS.md"
+def codex_bootstrap_source() -> Path:
+    return runner.REPO_ROOT / "platforms" / "codex" / "AGENTS.md"
 
 
-def codex_loader_source(source_root: Path) -> Path:
-    return Path(source_root) / "platforms" / "codex" / "bootstrap.md"
+def codex_loader_source() -> Path:
+    return runner.REPO_ROOT / "platforms" / "codex" / "bootstrap.md"
 
 
-def claude_bootstrap_source(source_root: Path) -> Path:
-    return Path(source_root) / "platforms" / "claude" / "CLAUDE.md"
+def claude_bootstrap_source() -> Path:
+    return runner.REPO_ROOT / "platforms" / "claude" / "CLAUDE.md"
 
 
 def codex_hooks_supported(platform: str) -> bool:
@@ -52,11 +52,11 @@ def install_hooks(ctx: "Context", action: str, platform: str) -> bool:
     if not codex_hooks_supported(platform):
         report.info("Codex hooks are unavailable in this runtime; skipping.")
         return True
-    hook_py = Path(ctx.source_root) / "_shared" / "install_hooks.py"
+    hook_py = runner.REPO_ROOT / "_shared" / "install_hooks.py"
     if not hook_py.is_file():
         report.error(f"install_hooks.py not found: {hook_py}")
         return False
-    args = ["--core-source-root", str(ctx.source_root), "--platform", platform,
+    args = ["--core-source-root", str(runner.REPO_ROOT), "--platform", platform,
             "--hook-shared-dir", str(locations.runtime_shared_dir()), "--skills-dir", str(ctx.skills_dir)]
     if action == "install":
         args.extend(["--visibility", ctx.options.visibility or "dynamic"])
@@ -93,7 +93,7 @@ def ensure_claude_bootstrap(ctx: "Context") -> bool:
     claude_home = locations.claude_home()
     rules = claude_home / "CLAUDE.md"
     claude_home.mkdir(parents=True, exist_ok=True)
-    return _merge_block(["claude-merge", "--source", str(claude_bootstrap_source(ctx.source_root)),
+    return _merge_block(["claude-merge", "--source", str(claude_bootstrap_source()),
                          "--dest", str(rules), "--proposed", f"{rules}.ghost-alice-proposed"],
                         "Claude CLAUDE.md block merge failed; aborting install",
                         "Claude CLAUDE.md is user-owned; wrote proposed file instead",
@@ -105,8 +105,8 @@ def ensure_codex_bootstrap(ctx: "Context") -> bool:
     codex_home = locations.codex_home()
     agents = codex_home / "AGENTS.md"
     codex_home.mkdir(parents=True, exist_ok=True)
-    return _merge_block(["codex-merge", "--source", str(codex_bootstrap_source(ctx.source_root)),
-                         "--loader", str(codex_loader_source(ctx.source_root)),
+    return _merge_block(["codex-merge", "--source", str(codex_bootstrap_source()),
+                         "--loader", str(codex_loader_source()),
                          "--dest", str(agents), "--proposed", f"{agents}.ghost-alice-proposed"],
                         "Codex AGENTS.md block merge failed; aborting install",
                         "Codex AGENTS.md is user-owned; wrote proposed file instead",
@@ -143,7 +143,7 @@ def remove_claude_bootstrap(ctx: "Context", require_change: bool = False) -> boo
 def remove_claude_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
     from installer import selection
 
-    if selection.has_managed_installs(ctx.source_root, skills_root):
+    if selection.has_managed_installs(skills_root):
         return False
     return remove_claude_bootstrap(ctx, True)
 
@@ -151,7 +151,7 @@ def remove_claude_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool
 def remove_codex_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
     from installer import selection
 
-    if selection.has_managed_installs(ctx.source_root, skills_root):
+    if selection.has_managed_installs(skills_root):
         return False
     codex_home = locations.codex_home()
     agents = codex_home / "AGENTS.md"
@@ -164,9 +164,9 @@ def remove_codex_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
 
 def sync_commands(ctx: "Context", mode: str = "sync", target: str = "all") -> int:
     """`commands_sync.py <catalog> <checkout .claude/commands> <mode> <target>`; a missing catalog is a warning (`install.sh:5-26`)."""
-    catalog = Path(ctx.source_root) / "skill-catalog" / "skills.json"
+    catalog = runner.REPO_ROOT / "skill-catalog" / "skills.json"
     if not catalog.is_file():
         report.warn(f"skills.json not found: {catalog}")
         return 1
-    claude_dir = Path(ctx.source_root) / ".claude" / "commands"
+    claude_dir = runner.REPO_ROOT / ".claude" / "commands"
     return runner.run_tool("_shared/commands_sync.py", str(catalog), str(claude_dir), mode, target).returncode

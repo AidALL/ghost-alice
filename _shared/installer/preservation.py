@@ -19,18 +19,18 @@ ENCODING_GUARD = "_shared/encoding_guard.py"
 def _targets(ctx: "Context", skills: list[str]):
     from installer import selection
 
-    return selection.iter_install_targets(ctx.source_root, skills, ctx.addon_targets)
+    return selection.iter_install_targets(skills, ctx.addon_targets)
 
 
 def encoding_guard(ctx: "Context", skills: list[str]) -> bool:
-    """`encoding_guard.py --repo-root <source>`, each addon source, then the
+    """`encoding_guard.py --repo-root <checkout>`, each addon source, then the
     skills dir excluding `_shared` and the install targets (`install.sh:225-271`)."""
-    guard = Path(ctx.source_root) / ENCODING_GUARD
+    guard = runner.REPO_ROOT / ENCODING_GUARD
     if not guard.is_file():
         report.error(f"encoding guard not found; aborting install: {guard}")
         return False
-    if not runner.run_tool(ENCODING_GUARD, "--repo-root", str(ctx.source_root)).ok:
-        report.error(f"encoding guard failed; aborting install: {ctx.source_root}")
+    if not runner.run_tool(ENCODING_GUARD, "--repo-root", str(runner.REPO_ROOT)).ok:
+        report.error(f"encoding guard failed; aborting install: {runner.REPO_ROOT}")
         return False
     for target in ctx.addon_targets:
         if not runner.run_tool(ENCODING_GUARD, "--repo-root", str(target.path)).ok:
@@ -53,7 +53,7 @@ def encoding_guard(ctx: "Context", skills: list[str]) -> bool:
 def is_clean_managed_target(ctx: "Context", name: str, path: Path) -> bool:
     """`installer_assets_cli.py classify-clean`: the occupied slot is a clean Ghost-ALICE managed target (`install.sh:287-296`)."""
     return runner.run_tool("_shared/installer_assets_cli.py", "classify-clean", "--asset-id", name,
-                           "--path", str(path), "--repo-root", str(ctx.source_root), capture=True).ok
+                           "--path", str(path), "--repo-root", str(runner.REPO_ROOT), capture=True).ok
 
 
 _is_clean_managed_target = is_clean_managed_target
@@ -89,7 +89,7 @@ def preflight(ctx: "Context", skills: list[str]) -> bool:
                 return False
         return True
     replaced: list[str] = []
-    if (Path(ctx.source_root) / "_shared").is_dir():
+    if (runner.REPO_ROOT / "_shared").is_dir():
         replaced.extend(["--target", "_shared"])
     for target in targets:
         replaced.extend(["--target", target.name])
@@ -107,4 +107,4 @@ def cleanup_pending(ctx: "Context") -> int:
     pending = locations.pending_root(ctx.platform)
     return runner.run_tool("merge-companion/scripts/cleanup_false_positive_legacy.py", "--platform", ctx.platform,
                            "--pending", str(pending), "--manifest", str(pending / "manifest.json"),
-                           "--repo-root", str(ctx.source_root), "--apply").returncode
+                           "--repo-root", str(runner.REPO_ROOT), "--apply").returncode

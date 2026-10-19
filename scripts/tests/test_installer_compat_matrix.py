@@ -111,6 +111,10 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         self.assertIn("PSScriptAnalyzer optional", matrix)
         self.assertIn("Windows native Codex hook smoke", matrix)
         self.assertIn(".\\install.cmd --platform codex", matrix)
+        # PowerShell 7.6 LTS is the baseline; Windows PowerShell 5.1 gets the requirement and the install command.
+        self.assertIn("PowerShell 7.6 or newer is required", matrix)
+        self.assertIn("winget install --id Microsoft.PowerShell --exact", matrix)
+        self.assertNotIn("PowerShell 7.4 LTS cleanup", matrix)
 
     def test_matrix_document_covers_ghost_alice_fresh_clone_policy(self) -> None:
         matrix = MATRIX_DOC.read_text(encoding="utf-8")

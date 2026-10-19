@@ -63,6 +63,13 @@ class TestPendingMergeLayeredGate(unittest.TestCase):
         self.assertIn("pending-merge/session-start layered gate", r.stdout)
         self.assertNotIn(LEGACY_OPAQUE_GATE_LABEL, r.stdout)
 
+    def test_install_tail_layer_reads_the_installer_cli_only(self):
+        # The thin shells print no install tail; `_shared/installer/cli.py` owns it.
+        tail = [check for check in validator.CHECKS if check.layer == "pending-merge-install-tail"]
+        self.assertEqual({check.file for check in tail}, {REPO_ROOT / "_shared" / "installer" / "cli.py"})
+        self.assertEqual([check for check in validator.CHECKS if check.file.name in ("install.sh", "install.ps1")], [])
+        self.assertNotIn("installer_lib", Path(validator.__file__).read_text(encoding="utf-8"))
+
     def test_evaluator_artifact_contract_names_required_shapes(self):
         contract = REPO_ROOT / "docs" / "policies" / "evaluator-artifact-contract.md"
 

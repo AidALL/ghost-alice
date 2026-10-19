@@ -458,7 +458,7 @@ def test_installer_cleanup_calls_retirement_with_explicit_owned_ghost_root(tmp_p
     env.update(HOME=str(tmp_path/'home'), CLAUDE_CONFIG_DIR=str(claude), GHOST_ALICE_GHOST_ROOT=str(ghost),
         PATH=str(Path(sys.executable).parent)+os.pathsep+os.environ['PATH'])
     from installer import cli as installer_cli, selection
-    ctx = installer_cli.Context(options=installer_cli.Options(platform=platform), source_root=SHARED.parent,
+    ctx = installer_cli.Context(options=installer_cli.Options(platform=platform),
         platform=platform, skills_dir=target.parent)
     # The installer's own deprecated list is empty here: only the retirement discovery runs.
     with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(selection, 'DEPRECATED_INSTALLED_SKILLS', ()):

@@ -149,27 +149,23 @@ def test_valid_destination_representations_do_not_select_normal_default(tmp_path
     assert not (tmp_path/'owned').exists()
 
 
-@pytest.mark.parametrize('value',('', 'owned-destination.json',None))
-def test_powershell_destination_option_rejects_before_effects_when_available(tmp_path,value):
+@pytest.mark.parametrize('args',(('-DestinationFile','owned-destination.json'),('-DestinationFile',''),
+    ('-DestinationFile:owned-destination.json',),('--destination-file','owned-destination.json')))
+def test_powershell_destination_option_rejects_before_effects_when_available(tmp_path,args):
+    # install.ps1 maps the PowerShell name to --destination-file; the cli rejects it before any effect.
     import shutil,subprocess
-    powershell=shutil.which('pwsh') or shutil.which('powershell')
-    if not powershell:pytest.skip('PowerShell runtime unavailable; source-control-flow verification only')
-    source=(Path(install_hooks.__file__).resolve().parents[1]/'install.ps1').read_text(encoding='utf-8-sig')
-    barrier='# Best-effort UTF-8 console output'
-    assert source.count(barrier)==1
-    # Execute the actual public parameter binding and rejection in a copied
-    # entrypoint. The sentinel blocks every normal effect if rejection regresses.
-    guarded=tmp_path/'guarded-install.ps1'
-    guarded.write_text(source.replace(barrier,"throw 'normal-effect-sentinel'\n"+barrier,1),encoding='utf-8-sig')
-    options='@{}' if value is None else "@{DestinationFile='"+value.replace("'","''")+"'}"
-    quoted=str(guarded).replace("'","''")
-    command="$fixtureOptions="+options+"; try { & '"+quoted+"' @fixtureOptions; exit 97 } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 71 }"
-    result=subprocess.run([powershell,'-NoLogo','-NoProfile','-NonInteractive','-Command',command],
-        cwd=tmp_path,text=True,capture_output=True)
-    assert result.returncode==71,result.stdout+result.stderr
-    expected='normal-effect-sentinel' if value is None else 'PowerShell source integration is unsupported'
-    assert expected in result.stderr,result.stdout+result.stderr
-    assert list(tmp_path.iterdir())==[guarded]
+    pwsh=shutil.which('pwsh')
+    if not pwsh:pytest.skip('PowerShell 7.6+ unavailable; the cli rejection is covered by test_installer_cli')
+    script=Path(install_hooks.__file__).resolve().parents[1]/'install.ps1'
+    home=tmp_path/'home';home.mkdir()
+    env={**os.environ,'HOME':str(home),'USERPROFILE':str(home)}
+    result=subprocess.run([pwsh,'-NoLogo','-NoProfile','-NonInteractive','-File',str(script),*args],
+        cwd=tmp_path,env=env,text=True,capture_output=True)
+    assert result.returncode==2,result.stdout+result.stderr
+    assert 'isolated destinations require the Python hook installer' in result.stderr,result.stdout+result.stderr
+    # pwsh keeps its own data, cache and config under HOME; nothing else may appear there or in the cwd.
+    from installer_testing import installer_home_effects
+    assert installer_home_effects(home)==[] and list(tmp_path.iterdir())==[home]
 
 
 @pytest.mark.parametrize('mode',('normal','isolated'))

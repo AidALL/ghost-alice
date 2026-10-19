@@ -189,14 +189,14 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         from installer.runner import InstallerExit
         environment = dict(self.environment, FAULT_CASE=fault,
             PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
-        ctx = cli.Context(options=cli.Options(platform='codex'), source_root=source, platform='codex',
+        ctx = cli.Context(options=cli.Options(platform='codex'), platform='codex',
             skills_dir=self.shared.parent)
         with mock.patch.dict(os.environ, environment, clear=True), \
                 mock.patch.object(runner, 'REPO_ROOT', source), \
                 mock.patch.object(selection, 'expand_skill_targets',
-                    lambda root, name: [selection.Target(name, Path('fixture'), None)]), \
-                mock.patch.object(selection, 'validate_requested_skills', lambda root, names: None), \
-                mock.patch.object(selection, 'has_managed_installs', lambda root, skills_dir: remaining), \
+                    lambda name: [selection.Target(name, Path('fixture'), None)]), \
+                mock.patch.object(selection, 'validate_requested_skills', lambda names: None), \
+                mock.patch.object(selection, 'has_managed_installs', lambda skills_dir: remaining), \
                 mock.patch.object(addons, 'resume_pending_uninstalls', lambda ctx: None), \
                 mock.patch.object(hosts, 'remove_codex_bootstrap_if_unused', lambda ctx, skills_dir: False), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):

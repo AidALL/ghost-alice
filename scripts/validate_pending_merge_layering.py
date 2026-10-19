@@ -118,22 +118,8 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-install-tail",
-        description="install.ps1 tail contains localized User/Tech backup-review guidance",
-        file=REPO / "install.ps1",
-        pattern=r"User:.*Please\s+review\s+backed-up\s+changes",
-        multiline=True,
-    ),
-    LayerCheck(
-        layer="pending-merge-install-tail",
         description="the installer cli tail does not contain old Korean control copy",
         file=REPO / "_shared" / "installer" / "cli.py",
-        pattern=r"review\s+whether\s+unprocessed\s+pending\s+merges\s+remain\s+after\s+skill\s+updates",
-        must_exist=False,
-    ),
-    LayerCheck(
-        layer="pending-merge-install-tail",
-        description="install.ps1 tail does not contain old Korean control copy",
-        file=REPO / "install.ps1",
         pattern=r"review\s+whether\s+unprocessed\s+pending\s+merges\s+remain\s+after\s+skill\s+updates",
         must_exist=False,
     ),
@@ -217,13 +203,6 @@ def check_layer(c: LayerCheck) -> tuple[bool, str]:
     if not c.file.exists():
         return False, f"{c.layer}: file missing. {c.file}"
     text = c.file.read_text(encoding="utf-8")
-    if c.file.name in ("install.sh", "install.ps1"):
-        # Scan installer entrypoints and installer_lib modules together for pending-merge layers.
-        ext = ".sh" if c.file.name == "install.sh" else ".ps1"
-        lib_dir = c.file.parent / "installer_lib"
-        if lib_dir.is_dir():
-            for lib in sorted(lib_dir.glob(f"*{ext}")):
-                text += "\n" + lib.read_text(encoding="utf-8")
     flags = re.MULTILINE | re.DOTALL if c.multiline else re.MULTILINE
     found = re.search(c.pattern, text, flags) is not None
     if c.must_exist and not found:

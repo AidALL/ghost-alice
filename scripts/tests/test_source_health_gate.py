@@ -274,34 +274,6 @@ class SourceHealthGateTest(unittest.TestCase):
             ps1,
         )
 
-    def test_install_ps1_declares_safe_source_update_entrypoint(self) -> None:
-        body = installer_ps1_source()
-        source_update_body = _extract_powershell_function(body, "Update-SourceCheckout")
-
-        self.assertIn("[switch]$UpdateSource", body)
-        self.assertIn("installer_source_update.py", source_update_body)
-        helper = (ROOT / "_shared/installer_source_update.py").read_text(encoding="utf-8")
-        self.assertIn("'stash', 'push', '-u'", helper)
-        self.assertIn("pull --ff-only", helper)
-        self.assertIn("Source local changes saved in git stash", helper)
-        self.assertIn("if ($UpdateSource)", body)
-        self.assertLess(body.index("if ($UpdateSource)"), body.index("Initialize-GitHooks"))
-
-    def test_install_ps1_declares_source_health_gate(self) -> None:
-        body = installer_ps1_source()
-        install_body = _extract_powershell_function(body, "Invoke-Install")
-        source_health_body = _extract_powershell_function(body, "Test-SourceHealth")
-
-        self.assertNotIn("AllowDirtySource", body)
-        self.assertIn("[switch]$SkipSourceHealth", body)
-        self.assertIn("function Test-SourceHealth", body)
-        self.assertNotIn("AllowDirtySource", source_health_body)
-        self.assertIn("rev-list --left-right --count", source_health_body)
-        self.assertIn("continuing because local commits may be intentional", source_health_body)
-        self.assertIn("pending-merges", source_health_body)
-        self.assertNotIn("throw \"Source tree has tracked local changes\"", source_health_body)
-        self.assertLess(install_body.index("Test-SourceHealth"), install_body.index("Install-Shared -SkillsRoot $SkillsDir"))
-
     def test_install_sh_omits_legacy_repo_migration(self) -> None:
         body = installer_bash_source()
 
@@ -360,10 +332,6 @@ class HarnessAuditSourceHealthTest(unittest.TestCase):
             "ALL_SKILLS = (\n" + "".join(f'    "{name}",\n' for name in skills) + ")\n",
             encoding="utf-8",
         )
-        (repo / "install.ps1").write_text(
-            "$AllSkills = @(\n" + "".join(f'    "{name}"\n' for name in skills) + ")\n",
-            encoding="utf-8-sig",
-        )
 
     def test_install_list_and_catalog_mismatch_is_detected(self) -> None:
         from validate_skills import Issue, validate_install_list_sync
@@ -380,6 +348,21 @@ class HarnessAuditSourceHealthTest(unittest.TestCase):
         messages = [issue.message for issue in issues]
         self.assertTrue(any("skill-b" in message and "selection.py" in message for message in messages))
         self.assertTrue(any("unknown-skill" in message and "catalog" in message for message in messages))
+
+    def test_install_list_is_read_from_the_installer_package_only(self) -> None:
+        # install.ps1 runs the Python installer; a skill list left in it is not an installer list.
+        from validate_skills import Issue, validate_install_list_sync
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            self.make_skill(repo, "skill-a")
+            self.write_installers(repo, ["skill-a"])
+            (repo / "install.ps1").write_text('$AllSkills = @(\n    "stale-skill"\n)\n', encoding="utf-8-sig")
+
+            issues: list[Issue] = []
+            validate_install_list_sync(repo, issues)
+
+        self.assertEqual([issue.message for issue in issues], [])
 
     def test_duplicate_description_token_collision_warns(self) -> None:
         from validate_skills import Issue, validate_description_collisions
