@@ -459,6 +459,29 @@ class InstallRecordReportTests(HostCase):
                 self.assertEqual(rc, 0)
                 self.assertIn(f"[WARN] Install record comparison failed for {runtime}: ", out)
 
+    def test_targets_without_a_baseline_are_counted_and_never_reported_as_matching(self):
+        ctx = self.context("claude")
+        linked = ctx.skills_dir / "alpha"
+        linked.symlink_to(self.source / "alpha")
+        self.write_record({
+            str(linked): self.entry("link", ["claude"], link_target=str(self.source / "alpha")),
+            str(ctx.skills_dir / "two"): self.entry("copy", ["claude"], baseline="unknown"),
+            str(ctx.skills_dir / "one"): self.entry("copy", ["claude"], baseline="unknown"),
+        })
+        for name, rc, out in self.run_both(ctx):
+            with self.subTest(command=name):
+                self.assertEqual(rc, 0)
+                self.assertIn("[INFO] Not compared, no baseline in the install record: 2 targets", out)
+                self.assertIn("[OK] Compared targets match the install record: 1 target", out)
+                self.assertNotIn("Installed targets match the install record", out)
+        self.write_record({str(ctx.skills_dir / name): self.entry("copy", ["claude"], baseline="unknown")
+                           for name in ("one", "two")} | {
+            str(linked): self.entry("link", ["claude"], baseline="unknown")})
+        for name, rc, out in self.run_both(ctx):
+            with self.subTest(command=name, compared="none"):
+                self.assertIn("[INFO] Not compared, no baseline in the install record: 3 targets", out)
+                self.assertNotIn("match the install record", out)
+
     def test_an_unreadable_install_record_is_reported_and_changes_no_result(self):
         record = self.ghost / "installed-payload.json"
         self.ghost.mkdir(parents=True)

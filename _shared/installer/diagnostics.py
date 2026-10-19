@@ -84,7 +84,8 @@ def _names(label: str, names: list[str], limit: int = 3) -> str:
 
 def report_install_record(ctx: "Context") -> None:
     """One summary line for this platform's targets in the install record, then one line per target
-    that differs from it; targets without a baseline are counted, not compared. Read-only."""
+    that differs from it. Targets without a baseline are counted, not compared, and a match is
+    reported only for the targets that were compared. Read-only."""
     root = locations.record_root()
     record_path = installed_payload.path(root)
     try:
@@ -103,10 +104,12 @@ def report_install_record(ctx: "Context") -> None:
     report.info(f"Install record ({record_path}): {len(entries)} {ctx.platform} targets (link {modes.count('link')}, "
                 f"copy {modes.count('copy')}; baseline recorded {baselines.count('recorded')}, migrated "
                 f"{baselines.count('migrated')}, unknown {baselines.count('unknown')}); last publish {last}")
-    differing = 0
+    differing = compared = unknown = 0
     for dest, entry in entries.items():
         if entry.get("baseline") == "unknown":
+            unknown += 1
             continue
+        compared += 1
         try:
             diff = content_digest.compare(entry, Path(dest))
         except OSError as exc:
@@ -120,7 +123,13 @@ def report_install_record(ctx: "Context") -> None:
         if details:
             differing += 1
             report.warn(f"Differs from the install record: {dest} ({details})")
-    if not differing:
+    if unknown:
+        report.info(f"Not compared, no baseline in the install record: {report.count_label(unknown, 'target', 'targets')}")
+    if differing or not compared:
+        return
+    if unknown:
+        report.ok(f"Compared targets match the install record: {report.count_label(compared, 'target', 'targets')}")
+    else:
         report.ok("Installed targets match the install record")
 
 
