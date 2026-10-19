@@ -103,12 +103,12 @@ class Command(HelpRow):
 
 COMMON, REMOVAL, ADVANCED = "Common commands", "Removal commands", "Advanced/operator commands"
 HELP_SECTIONS = (COMMON, REMOVAL, ADVANCED)
+# The usage examples: arguments after the install command, and the comment.
 HELP_USAGE = (
-    "Usage:",
-    "  bash install.sh                              # Install to detected AI tools",
-    "  bash install.sh --addon autopilot            # Install official autopilot addon to detected AI tools",
-    "  bash install.sh --platform claude            # Install only to Claude Code",
-    "  bash install.sh --platform codex             # Install to Codex",
+    ("", "Install to detected AI tools"),
+    (" --addon autopilot", "Install official autopilot addon to detected AI tools"),
+    (" --platform claude", "Install only to Claude Code"),
+    (" --platform codex", "Install to Codex"),
 )
 
 # The handlers are lambdas, so they call the owning module's function as it is at run time.
@@ -312,9 +312,11 @@ def prompt_platform() -> str:
 
 
 def print_help() -> int:
-    """The `--help` text: the usage lines, then each section's rows in table order (`install.sh:507-546`)."""
-    for line in HELP_USAGE:
-        report.emit(line)
+    """The `--help` text: the usage lines with the reported install command, then
+    each section's rows in table order (`install.sh:507-546`)."""
+    report.emit("Usage:")
+    for arguments, comment in HELP_USAGE:
+        report.emit(f"  {report.install_command() + arguments:<45}# {comment}")
     for section in HELP_SECTIONS:
         report.emit("")
         report.emit(f"{section}:")
@@ -469,10 +471,10 @@ def run_install(ctx: Context) -> int:
         report.emit("")
         report.info(f"Install path: {skills_dir}")
         if ctx.platform == "codex" and copy_only:
-            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && bash install.sh --update-source, "
-                        "then re-run bash install.sh")
+            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && {report.install_command()} --update-source, "
+                        f"then re-run {report.install_command()}")
         else:
-            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && bash install.sh --update-source")
+            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && {report.install_command()} --update-source")
         if installed > 0 and not copy_only:
             report.info("With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.")
     # S13 runtime, S14 hooks, S15 managed blocks, S16 commands (contradiction 9: blocks after the runtime and hooks)
@@ -548,7 +550,7 @@ def dispatch(options: Options) -> int:
     command = find_command(options)
     if command is None:
         report.error(f"Unknown option: {options.args[0]}")
-        report.emit("See bash install.sh --help")
+        report.emit(f"See {report.install_command()} --help")
         return 1
     if plain_full_uninstall_requested(options):
         detected = locations.detect_uninstall_platforms()

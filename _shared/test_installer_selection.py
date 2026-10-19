@@ -94,6 +94,11 @@ class TargetTests(SelectionCase):
         self.assertEqual(stop.exception.code, 1)
         self.assertIn("[ERROR] Skill not found: nope", out.getvalue())
         self.assertIn("[ERROR] Run bash install.sh --list to see available skills.", out.getvalue())
+        out = io.StringIO()
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}), \
+                contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit):
+            selection.validate_requested_skills(["nope"])
+        self.assertIn("[ERROR] Run .\\install.cmd --list to see available skills.", out.getvalue())
 
     def test_has_managed_installs(self):
         # targets.sh:296-320: core names are checked under the skills root even when the source lacks them

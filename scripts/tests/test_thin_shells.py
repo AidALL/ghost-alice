@@ -131,7 +131,8 @@ class ThinInstallPs1Tests(unittest.TestCase):
     def test_sets_utf8_console_and_python_io_after_the_guard(self):
         for line in ("$Utf8NoBom = [System.Text.UTF8Encoding]::new($false)", "$OutputEncoding = $Utf8NoBom",
                      "[Console]::OutputEncoding = $Utf8NoBom", "[Console]::InputEncoding = $Utf8NoBom",
-                     '$env:PYTHONUTF8 = "1"', '$env:PYTHONIOENCODING = "utf-8"'):
+                     '$env:PYTHONUTF8 = "1"', '$env:PYTHONIOENCODING = "utf-8"',
+                     '$env:GHOST_ALICE_INSTALL_COMMAND = ".\\install.cmd"'):
             self.assertIn(line, self.text)
             self.assertLess(self.text.index("Assert-PowerShellBaseline -Version"), self.text.index(line), msg=line)
             self.assertLess(self.text.index(line), self.text.index("$python = Initialize-PythonRuntimeForInstall"), msg=line)
@@ -263,12 +264,13 @@ class ThinInstallPs1RuntimeTests(unittest.TestCase):
         self.assertIn("[ERROR] Python 3.11+ is required.", result.stderr)
         self.assertNotIn("Usage:", result.stdout)
 
-    def test_help_comes_from_the_cli(self):
+    def test_help_comes_from_the_cli_and_names_the_windows_command(self):
         for flag in ("--help", "-Help"):
             with self.subTest(flag=flag), tempfile.TemporaryDirectory() as home:
                 result = self.run_ps1(flag, env={**os.environ, "HOME": home, "GHOST_ALICE_INSTALL_PROGRESS": "off"})
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn("  bash install.sh                              # Install to detected AI tools", result.stdout)
+                self.assertIn("  .\\install.cmd" + " " * 32 + "# Install to detected AI tools", result.stdout)
+                self.assertNotIn("bash install.sh", result.stdout)
                 self.assertIn("  --repair               Re-provision missing managed targets", result.stdout)
 
     def test_install_through_powershell_names(self):

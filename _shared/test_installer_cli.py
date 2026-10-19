@@ -276,6 +276,17 @@ class OptionTests(CliCase):
         self.assertFalse(cli.plain_full_uninstall_requested(cli.parse_options(["--platform", "claude", "--uninstall"])))
         self.assertFalse(cli.plain_full_uninstall_requested(cli.parse_options(["--prompt-platform", "--uninstall"])))
 
+    def test_help_and_hints_name_the_reported_install_command(self):
+        # The usage lines name the command the shell reported, with the comment column kept.
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
+            _, out = self.captured(cli.print_help)
+        lines = HELP.splitlines(keepends=True)
+        for index in range(1, 5):
+            usage, comment = lines[index].split("#", 1)
+            lines[index] = f"  {usage.strip().replace('bash install.sh', '.' + chr(92) + 'install.cmd'):<45}#{comment}"
+        self.assertEqual(out, "".join(lines))
+        self.assertIn("  .\\install.cmd --addon autopilot              # Install official", out)
+
     def test_help_text(self):
         # install.sh:508-545; every row comes from the table, in table order under its section.
         _, out = self.captured(cli.print_help)
@@ -454,6 +465,9 @@ class DispatchTests(CliCase):
         self.assertEqual(rc, 1)
         self.assertIn("[ERROR] Unknown option: --bogus", out)
         self.assertIn("See bash install.sh --help", out)
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
+            _, out = self.dispatch(["--bogus"])
+        self.assertIn("See .\\install.cmd --help", out)
         # An unknown "-" token (a PowerShell-style name install.ps1 passes on) is an unknown option, before any prompt.
         for argv in (["-Offboard"], ["--prompt-platform", "-Repair"], ["--prompt-platform", "--bogus"]):
             with self.subTest(argv=argv):
@@ -613,6 +627,21 @@ class InstallOrderTests(CliCase):
                 self.assertNotIn(never_called, names)
                 self.assertNotIn("write_event", names)
                 self.assertEqual(names[-1], "release")
+
+    def test_update_hint_names_the_reported_install_command(self):
+        quiet(self.home, verbose=True)
+        for platform, command, expected in (
+                ("claude", None, "&& bash install.sh --update-source\n"),
+                ("codex", ".\\install.cmd", "&& .\\install.cmd --update-source, then re-run .\\install.cmd\n")):
+            with self.subTest(platform=platform):
+                env = {"GHOST_ALICE_INSTALL_COMMAND": command} if command else {}
+                with mock.patch.dict(os.environ, env):
+                    if not command:
+                        os.environ.pop("GHOST_ALICE_INSTALL_COMMAND", None)
+                    ctx = make_context(self.home, platform, args=["task-router"])
+                    rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
+                self.assertEqual(rc, 0)
+                self.assertIn(f"[INFO] To update skills safely: cd {self.source} {expected}", out)
 
     def test_default_skills_are_all_skills(self):
         ctx = make_context(self.home, "claude")

@@ -118,6 +118,9 @@ class SourceHealthTests(SourceCase):
         self.assertIn("Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout "
                       "before installing. If this local source is intentional, rerun with --skip-source-health.", out)
         self.assertIn("To preserve source-local changes while updating, run bash install.sh --update-source.", out)
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
+            _, out = self.check(clone)
+        self.assertIn("To preserve source-local changes while updating, run .\\install.cmd --update-source.", out)
         self.assertIn("If an old checkout is already blocked by local changes during git pull, use the bootstrap "
                       "one-command update in docs/getting-started/troubleshooting.md.", out)
 

@@ -85,11 +85,11 @@ def iter_install_targets(skills: list[str], addon_targets: list[Target] = ()) ->
 
 
 def validate_requested_skills(skills: list[str]) -> None:
-    """`Skill not found: X` + `Run bash install.sh --list to see available skills.` and exit 1 (`targets.sh:263-273`)."""
+    """`Skill not found: X` + `Run <install command> --list to see available skills.` and exit 1 (`targets.sh:263-273`)."""
     for skill in skills:
         if not expand_skill_targets(skill):
             report.error(f"Skill not found: {skill}")
-            report.error("Run bash install.sh --list to see available skills.")
+            report.error(f"Run {report.install_command()} --list to see available skills.")
             raise InstallerExit(1)
 
 

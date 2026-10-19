@@ -43,6 +43,8 @@ try { [Console]::OutputEncoding = $Utf8NoBom } catch { $null = $_ }
 try { [Console]::InputEncoding = $Utf8NoBom } catch { $null = $_ }
 $env:PYTHONUTF8 = "1"
 $env:PYTHONIOENCODING = "utf-8"
+# The installer names this command in its help and hints.
+$env:GHOST_ALICE_INSTALL_COMMAND = ".\install.cmd"
 
 # ── Messages for the Python runtime step only ─────────────
 function Write-Info { param([string]$Message) Write-Host ("[INFO] " + $Message) -ForegroundColor Cyan }

@@ -88,6 +88,16 @@ def sink() -> IO[str] | None:
     return _state.sink
 
 
+DEFAULT_INSTALL_COMMAND = "bash install.sh"
+
+
+def install_command() -> str:
+    """The command the user runs to start the installer, as the help and the hints
+    name it: `$GHOST_ALICE_INSTALL_COMMAND` when the shell reports one
+    (`install.ps1` reports `.\\install.cmd`), else `bash install.sh`."""
+    return os.environ.get("GHOST_ALICE_INSTALL_COMMAND") or DEFAULT_INSTALL_COMMAND
+
+
 def emit(text: str, *, newline: bool = True) -> None:
     """Write raw text to the sink (stdout when no sink)."""
     stream = _state.sink if _state.sink is not None else sys.stdout

@@ -98,7 +98,7 @@ def check_source_health(*, skip: bool) -> bool:
                 report.error("Source branch is behind its upstream; refusing to install from stale source.")
                 report.error("Run git fetch origin, inspect git status, then fast-forward or otherwise reconcile this checkout "
                              "before installing. If this local source is intentional, rerun with --skip-source-health.")
-                report.error("To preserve source-local changes while updating, run bash install.sh --update-source.")
+                report.error(f"To preserve source-local changes while updating, run {report.install_command()} --update-source.")
                 report.error("If an old checkout is already blocked by local changes during git pull, use the bootstrap "
                              "one-command update in docs/getting-started/troubleshooting.md.")
                 return False
