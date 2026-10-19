@@ -276,7 +276,9 @@ A full install deploys:
 - Claude Code permission allowlist
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` global bootstrap
 - Codex `~/.codex/AGENTS.md` loader and managed `~/.codex/ghost-alice-governance.md` common contract
-- support state for install-state, pending merges, install rollbacks, and uninstall reports
+- the install record `~/.ghost-alice/installed-payload.json`: one file for both hosts that names every install location, its source and the fingerprints of copied files, written in the same step as each placement
+- `~/.ghost-alice/rollbacks/<txid>/`: the files one placement replaced, the install record as it was before, and the placement's journal; the next locked installer command restores a placement that stopped halfway, and the newest 20 finished folders are kept
+- support state for install-state, pending merges, and uninstall reports
 
 The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving adjacent user text. If the destination is a markerless user-owned file, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
 
