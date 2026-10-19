@@ -26,9 +26,17 @@ INSTALLER_MODULES = (
     "uninstall_cleanup", "retired_assets", "install_doctor", "context_gateway_install", "context_gateway_plan",
     "context_gateway_inventory", "context_gateway_transaction", "context_gateway_platform",
     "context_gateway_model", "hash_utils", "addon_skill_permissions", "commands_sync", "encoding_guard",
-    "install_lock", "pending_manifest_writer", "installer_assets_cli", "agent_visibility_cli",
+    "pending_manifest_writer", "installer_assets_cli", "agent_visibility_cli",
     "installer", "installer_testing",
 )
+# Shared modules belong to neither layer: the installer, the runtime and the skills may all import them, so a
+# shared module imports only the standard library and the shared modules this table names for it.
+SHARED_MODULES = {
+    "hook_definitions": set(),
+    "install_lock": set(),
+    "content_digest": set(),
+    "installed_payload": {"content_digest", "install_lock"},
+}
 # The installer package (`_shared/installer/*.py`) is the installer layer too; it runs
 # the entry points above as child processes and imports none of the runtime.
 INSTALLER_PACKAGE_FILES = tuple(sorted((SHARED / "installer").glob("*.py")))
@@ -67,9 +75,14 @@ class LayerRuleTests(unittest.TestCase):
         self.assertEqual(names, expected)
         self.assertEqual(sorted((names - {"__init__"}) & set(sys.stdlib_module_names)), [])
 
-    def test_definitions_module_depends_on_the_standard_library_only(self):
-        imported = {target for target, _ in _imported_modules(SHARED / "hook_definitions.py")}
-        self.assertFalse(imported & (set(RUNTIME_MODULES) | set(INSTALLER_MODULES)), imported)
+    def test_shared_modules_import_only_the_standard_library_and_their_named_shared_modules(self):
+        for name, allowed in SHARED_MODULES.items():
+            with self.subTest(module=name):
+                imported = {target for target, _ in _imported_modules(SHARED / f"{name}.py")}
+                self.assertEqual(imported - set(sys.stdlib_module_names) - {"__future__"}, allowed)
+
+    def test_no_module_is_both_shared_and_in_a_layer(self):
+        self.assertEqual(set(SHARED_MODULES) & (set(RUNTIME_MODULES) | set(INSTALLER_MODULES)), set())
 
 
 class HookNameTests(unittest.TestCase):

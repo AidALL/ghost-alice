@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import context_gateway_platform as platform  # noqa: E402
@@ -68,6 +69,25 @@ class OperationLockTests(unittest.TestCase):
         with platform.operation_lock(self.home):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["owner"], "context-gateway")
         self.assertFalse(path.exists())
+
+    def test_the_install_lock_module_decides_who_holds_the_lock(self):
+        # One judgment for the gateway and the install record: `install_lock.held_by_process_tree`.
+        path = _write_lock(self.home, pid=424242, owner="installer:install:claude:424242")
+        with mock.patch("install_lock.held_by_process_tree", return_value=True) as held:
+            with platform.operation_lock(self.home):
+                pass
+        held.assert_called_once_with(path)
+        self.assertTrue(path.exists())
+
+    def test_an_unreadable_lock_blocks_with_the_lock_modules_reason(self):
+        path = self.home / ".ghost-alice" / "install.lock"
+        path.parent.mkdir(parents=True)
+        path.write_text("{not json", encoding="utf-8")
+        with self.assertRaises(GatewayBlocked) as blocked:
+            with platform.operation_lock(self.home):
+                pass
+        self.assertIn("unreadable", str(blocked.exception))
+        self.assertEqual(path.read_text(encoding="utf-8"), "{not json")
 
 
 if __name__ == "__main__":

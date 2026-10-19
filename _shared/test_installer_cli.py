@@ -8,6 +8,7 @@ import contextlib
 import dataclasses
 import inspect
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -17,10 +18,10 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from installer import cli, report  # noqa: E402
-from installer.runner import InstallerExit  # noqa: E402
+from installer.runner import InstallerExit, ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Collected, Target  # noqa: E402
 from installer.source import HookPathChange  # noqa: E402
-from installer_testing import make_context, make_source, quiet, use_source  # noqa: E402
+from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
 
 
 HELP = """Usage:
@@ -490,8 +491,35 @@ class DispatchTests(CliCase):
         self.assertIn("Usage:\n", out)
 
 
+class UnfinishedPublishTests(CliCase):
+    def test_a_publish_that_cannot_be_restored_stops_every_locked_command_with_exit_1(self):
+        folder = self.home / ".ghost-alice" / "rollbacks" / "20261020T000000Z-1-aaaaaaaa"
+        folder.mkdir(parents=True)
+        (folder / "journal.json").write_text(json.dumps({"schema_version": 1, "phase": "prepare"}), encoding="utf-8")
+        self.stub("installer.cli.prepare_install")
+        for target in ("installer.cli.run_install", "installer.lifecycle.uninstall", "installer.lifecycle.run_repair",
+                       "installer.preservation.cleanup_pending"):
+            self.stub(target, 0)
+        runner = FakeRunner()
+        runner.respond_to("install_transaction.py", ToolResult(1), arg="recover")
+        locked = [command for command in cli.COMMANDS if command.lock]
+        self.assertEqual(sorted(command.lock for command in locked),
+                         ["cleanup-pending", "gateway", "install", "repair", "uninstall"])
+        for command in locked:
+            with self.subTest(lock=command.lock):
+                self.calls.clear()
+                ctx = make_context(self.home, "claude", args=selecting_argv(command))
+                with runner.patch():
+                    out = self.expect_exit(1, cli.run_command, command, ctx)
+                self.assertIn(f"review {folder}", out)
+                self.assertEqual([name for name, _, _ in self.calls if name != "prepare_install"], [])
+                self.assertEqual(runner.tool_calls("context_gateway_install.py"), [])
+                self.assertFalse((self.home / ".ghost-alice" / "install.lock").exists())
+
+
 class InstallOrderTests(CliCase):
-    STEPS = ("install_prerequisites", "setup_git_hooks", "acquire", "check_source_health", "collect_targets",
+    STEPS = ("install_prerequisites", "setup_git_hooks", "acquire", "migrate_record", "check_source_health",
+             "collect_targets",
              "cleanup_deprecated_installed_skills", "encoding_guard", "preflight", "resume_pending_uninstalls",
              "check_addon_collisions", "sync_runtime_shared", "install_hooks", "ensure_bootstrap", "sync_commands",
              "verify_after_copy", "write_ownership_markers", "snapshot_after_install", "migrate_state_once",
@@ -505,6 +533,7 @@ class InstallOrderTests(CliCase):
         self.stub("installer.source.setup_git_hooks", HookPathChange(False, True, "hooks"))
         self.stub("installer.lock.acquire", self.home / "lock")
         self.stub("installer.lock.release")
+        self.stub("installer.transaction.migrate_record")
         self.stub("installer.source.check_source_health", True)
         self.stub("installer.selection.collect_targets", side_effect=self.collect)
         self.stub("installer.preservation.encoding_guard", True)
@@ -577,7 +606,20 @@ class InstallOrderTests(CliCase):
         self.assertEqual(stop.exception.code, 1)
         names = [n for n, _, _ in self.calls]
         self.assertNotIn("collect_targets", names)
+        self.assertLess(names.index("migrate_record"), names.index("check_source_health"))
         self.assertEqual(names[-1], "release")
+
+    def test_the_earlier_records_are_still_written_after_placement(self):
+        # The install record is written at publish; the four earlier records keep their own steps until their
+        # readers move to the install record.
+        ctx = make_context(self.home, "codex", args=["task-router"])
+        rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
+        self.assertEqual(rc, 0)
+        names = [n for n, _, _ in self.calls]
+        for step in ("write_ownership_markers", "snapshot_after_install", "write_sidecars",
+                     "write_install_state_manifest"):
+            self.assertIn(step, names)
+            self.assertLess(names.index("copy_targets_batch"), names.index(step))
 
     def test_failed_step_stops_the_install(self):
         self.patches.enter_context(mock.patch("installer.hosts.install_hooks", return_value=False))
