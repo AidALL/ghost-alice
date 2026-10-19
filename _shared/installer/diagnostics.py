@@ -2,7 +2,9 @@
 
 Port of `installer_lib/uninstall.sh:142-267`. Doctor no longer resumes an
 interrupted addon uninstall: it reports the leftover marker, and the next
-install or uninstall command resumes the removal.
+install or uninstall command resumes the removal. Both commands report the
+install record and how the installed targets differ from it; the record does
+not change their result.
 """
 
 from __future__ import annotations
@@ -11,6 +13,8 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import content_digest
+import installed_payload
 from installer import hosts, locations, report, runner, source
 
 if TYPE_CHECKING:
@@ -72,6 +76,49 @@ def run_install_doctor(ctx: "Context", mode: str, skills_dir: Path) -> int:
     return runner.run_tool("_shared/install_doctor.py", *args).returncode
 
 
+def _names(label: str, names: list[str], limit: int = 3) -> str:
+    shown = ", ".join(names[:limit])
+    more = f" +{len(names) - limit} more" if len(names) > limit else ""
+    return f"{label} {shown}{more}"
+
+
+def report_install_record(ctx: "Context") -> None:
+    """One summary line for this platform's targets in the install record, then one line per target
+    that differs from it; targets without a baseline are counted, not compared. Read-only."""
+    root = locations.record_root()
+    record_path = installed_payload.path(root)
+    try:
+        record = installed_payload.read(root)
+    except installed_payload.RecordError as exc:
+        report.warn(f"Install record unreadable ({record_path}): {exc}")
+        return
+    if record is None:
+        report.info(f"Install record: none yet; the next install writes {record_path}")
+        return
+    entries = {dest: entry for dest, entry in sorted(record.get("targets", {}).items())
+               if isinstance(entry, dict) and ctx.platform in (entry.get("used_by") or [])}
+    modes = [entry.get("mode") for entry in entries.values()]
+    baselines = [entry.get("baseline") for entry in entries.values()]
+    last = (record.get("last_transaction") or {}).get("id") or "none"
+    report.info(f"Install record ({record_path}): {len(entries)} {ctx.platform} targets (link {modes.count('link')}, "
+                f"copy {modes.count('copy')}; baseline recorded {baselines.count('recorded')}, migrated "
+                f"{baselines.count('migrated')}, unknown {baselines.count('unknown')}); last publish {last}")
+    differing = 0
+    for dest, entry in entries.items():
+        if entry.get("baseline") == "unknown":
+            continue
+        diff = content_digest.compare(entry, Path(dest))
+        if diff["link_target_differs"]:
+            details = "link target differs"
+        else:
+            details = "; ".join(_names(label, diff[label]) for label in ("missing", "changed", "extra") if diff[label])
+        if details:
+            differing += 1
+            report.warn(f"Differs from the install record: {dest} ({details})")
+    if not differing:
+        report.ok("Installed targets match the install record")
+
+
 def check_status(ctx: "Context") -> int:
     """Target listing, doctor in status mode, hook status (`uninstall.sh:220-246`)."""
     from installer import selection
@@ -91,6 +138,7 @@ def check_status(ctx: "Context") -> int:
         report.emit(f"  {skill} (family)")
         for target in targets:
             print_target_status(target.name, skills_dir / target.name, "    ")
+    report_install_record(ctx)
     run_install_doctor(ctx, "status", skills_dir)
     return 0 if hosts.install_hooks(ctx, "status", ctx.platform) else 1
 
@@ -99,6 +147,7 @@ def run_doctor(ctx: "Context") -> int:
     """Leftover `.removing` markers → warning and rc 1; then doctor strict and hook status (`uninstall.sh:248-267`, without the resume)."""
     skills_dir = Path(ctx.skills_dir)
     report.emit(f"Installer doctor ({skills_dir}):")
+    report_install_record(ctx)
     rc = 0
     addons_dir = locations.home() / ".ghost-alice" / "addons" / ctx.platform
     if addons_dir.is_dir() and any(addons_dir.glob("*.json.removing")):

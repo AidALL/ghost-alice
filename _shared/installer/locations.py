@@ -66,11 +66,6 @@ def events_log(platform: str) -> Path:
     return home() / ".ghost-alice" / "install-state" / f"{platform}-events.jsonl"
 
 
-def rollback_root() -> Path:
-    """`~/.ghost-alice/install-rollbacks`."""
-    return home() / ".ghost-alice" / "install-rollbacks"
-
-
 def pending_root(platform: str) -> Path:
     """`~/.ghost-alice/pending-merges/<platform>`."""
     return home() / ".ghost-alice" / "pending-merges" / platform
@@ -96,9 +91,16 @@ def install_log_root() -> Path:
     return home() / ".ghost-alice" / "install"
 
 
+def record_root() -> Path:
+    """`~/.ghost-alice` under HOME: the folder of the install lock, the install record
+    (`installed-payload.json`) and the publish rollbacks (`rollbacks/<txid>/`). It does not
+    follow `GHOST_ALICE_GHOST_ROOT`, so the record stays next to the lock its writers hold."""
+    return home() / ".ghost-alice"
+
+
 def install_lock_path() -> Path:
     """`~/.ghost-alice/install.lock`."""
-    return home() / ".ghost-alice" / "install.lock"
+    return record_root() / "install.lock"
 
 
 def addon_source_cache_root() -> Path:

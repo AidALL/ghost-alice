@@ -62,7 +62,9 @@ class PathTests(LocationCase):
         self.assertEqual(locations.ghost_root(), ghost)
         self.assertEqual(locations.install_state_path("codex"), ghost / "install-state" / "codex.json")
         self.assertEqual(locations.events_log("claude"), ghost / "install-state" / "claude-events.jsonl")
-        self.assertEqual(locations.rollback_root(), ghost / "install-rollbacks")
+        self.assertEqual(locations.record_root(), ghost)
+        # A publish keeps what it replaced in rollbacks/<txid>/ under the record root, not in install-rollbacks.
+        self.assertFalse(hasattr(locations, "rollback_root"))
         self.assertEqual(locations.pending_root("claude"), ghost / "pending-merges" / "claude")
         self.assertEqual(locations.addons_dir("codex"), ghost / "addons" / "codex")
         self.assertEqual(locations.resources_dir("codex"), ghost / "resources" / "codex")
@@ -74,6 +76,9 @@ class PathTests(LocationCase):
                                           "GHOST_ALICE_ADDON_SOURCE_CACHE_DIR": str(self.home / "cache")}):
             self.assertEqual(locations.ghost_root(), self.home / "g")
             self.assertEqual(locations.addon_source_cache_root(), self.home / "cache")
+            # The install lock, the install record and the publish rollbacks stay together under HOME.
+            self.assertEqual(locations.record_root(), ghost)
+            self.assertEqual(locations.install_lock_path(), ghost / "install.lock")
 
     def test_copy_preference(self):
         # platform.sh:43-57

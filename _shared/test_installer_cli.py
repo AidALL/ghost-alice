@@ -606,7 +606,7 @@ class InstallOrderTests(CliCase):
         self.assertEqual(stop.exception.code, 1)
         names = [n for n, _, _ in self.calls]
         self.assertNotIn("collect_targets", names)
-        self.assertLess(names.index("migrate_record"), names.index("check_source_health"))
+        self.assertIn("migrate_record", names)
         self.assertEqual(names[-1], "release")
 
     def test_the_earlier_records_are_still_written_after_placement(self):

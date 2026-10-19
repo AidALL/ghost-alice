@@ -1,6 +1,8 @@
 """install_transaction publish and recover: files and the install record change in one step, a journal says how far a publish got, and an unfinished publish is restored."""
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -155,6 +157,19 @@ class PublishTests(PublishCase):
         self.assertEqual(Path(target["rollback"]).parent, self.ghost / "rollbacks" / txid)
         self.assertEqual(target["before"], {"files": content_digest.tree(Path(target["rollback"]))})
         self.assertEqual(target["candidate"], {"files": content_digest.tree(dest)})
+
+    def test_a_record_this_installer_cannot_read_stays_as_it_is_and_the_files_still_publish(self):
+        # A newer or damaged record is never overwritten; the install goes on and says why the record did not change.
+        record = installed_payload.path(self.ghost)
+        record.write_text(json.dumps({"schema_version": 2, "targets": {}}), encoding="utf-8")
+        dest = self.claude / "alpha"
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            txid = install_transaction.publish(self.request("claude", self.target("alpha", dest, "link")))
+        self.assertEqual(os.readlink(dest), str(self.src / "alpha"))
+        self.assertEqual(json.loads(record.read_text(encoding="utf-8")), {"schema_version": 2, "targets": {}})
+        self.assertIn("[WARN] Install record left unchanged:", stderr.getvalue())
+        self.assertEqual(self.journal(txid)["phase"], "done")
 
     def test_only_the_newest_finished_rollback_folders_are_kept(self):
         rollbacks = self.ghost / "rollbacks"

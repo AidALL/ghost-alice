@@ -148,6 +148,8 @@ def run_repair(ctx: "Context") -> int:
     managed targets stay untouched (`install.sh:655-726`)."""
     report.emit("")
     report.info("Installer repair: re-provisioning missing managed targets...")
+    # Repair publishes like install, so the first command that writes the install record migrates first.
+    transaction.migrate_record(ctx)
     copy_only = locations.prefers_copy_install(ctx.platform)
     skills_dir = Path(ctx.skills_dir)
     repaired = kept = 0
@@ -167,10 +169,10 @@ def run_repair(ctx: "Context") -> int:
         dest = skills_dir / target.name
         if not dest.exists() and not dest.is_symlink():
             if copy_only:
-                if not transaction.copy_target(ctx, target.path, dest):
+                if not transaction.copy_target(ctx, target, dest):
                     return 1
             else:
-                code = transaction.link_or_copy(ctx, target.path, dest)
+                code = transaction.link_or_copy(ctx, target, dest)
                 if code != 0:
                     return code
             report.ok(f"repair: re-provisioned {target.name}")

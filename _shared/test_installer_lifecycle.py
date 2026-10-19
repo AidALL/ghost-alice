@@ -212,6 +212,21 @@ class FullUninstallTests(LifecycleCase):
 
 
 class RepairTests(LifecycleCase):
+    def setUp(self):
+        super().setUp()
+        self.stub("installer.transaction.migrate_record")
+
+    def test_repair_migrates_earlier_records_before_its_first_publish(self):
+        # Repair publishes like install, so the first command that writes the install record migrates first.
+        self.stub("installer.transaction.install_shared", 0)
+        self.stub("installer.transaction.link_or_copy", 0)
+        self.stub("installer.addons.repair_missing", True)
+        (self.source / "task-router").mkdir()
+        (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
+        rc, _ = self.captured(lifecycle.run_repair, self.ctx)
+        self.assertEqual(rc, 0)
+        self.assertEqual(self.calls[:3], ["migrate_record", "install_shared", "link_or_copy"])
+
     def test_repair_reprovisions_missing_and_keeps_occupied_targets(self):
         # install.sh:677-726
         (self.source / "task-router").mkdir()
