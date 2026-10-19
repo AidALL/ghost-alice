@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import re
 import shutil
 import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REPORT_PS1 = REPO_ROOT / "installer_lib" / "report.ps1"
-REPORT_SH = REPO_ROOT / "installer_lib" / "report.sh"
+
+sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer import report  # noqa: E402
 
 
 def _find_test_bash() -> str | None:
@@ -102,37 +107,17 @@ class CommonTargetProgressLineUsesSemanticLength(unittest.TestCase):
         self.assertEqual("".join(rendered).rstrip(), expected)
 
 
-class BashCommonTargetProgressLineUsesSemanticLength(unittest.TestCase):
+class PythonCommonTargetProgressLineUsesSemanticLength(unittest.TestCase):
     def test_live_updates_reuse_the_semantic_formatter(self) -> None:
-        source = REPORT_SH.read_text(encoding="utf-8")
+        suffix = "a deliberately longer progress suffix"
+        with mock.patch.object(report, "common_target_progress_line", return_value="LINE") as formatter, \
+                contextlib.redirect_stdout(io.StringIO()):
+            report.auto_update_common_target_progress_line(1, 2, suffix)
+        formatter.assert_called_once_with(1, 2, suffix)
 
-        self.assertNotIn("report_live_common_target_progress_line()", source)
-        self.assertNotIn("report_live_common_target_suffix()", source)
-        self.assertIn(
-            'report_common_target_progress_line "$@"',
-            source,
-        )
+    def test_formatter_preserves_the_full_suffix(self) -> None:
+        line = report.common_target_progress_line(26, 26, "common targets synced on all platforms")
 
-    def test_formatter_preserves_the_full_suffix_runtime(self) -> None:
-        bash_exe = _find_test_bash()
-        if not bash_exe:
-            self.skipTest("No non-WSL bash executable available for report.sh runtime test")
-
-        script = (
-            f"source '{REPORT_SH.as_posix()}'; "
-            "report_common_target_progress_line 26 26 "
-            "'common targets synced on all platforms'"
-        )
-        result = subprocess.run(
-            [bash_exe, "-lc", script],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-
-        self.assertEqual(result.returncode, 0, result.stderr)
-        line = result.stdout
         self.assertIn("Common targets", line)
         self.assertIn("[26/26]", line)
         self.assertTrue(line.endswith("common targets synced on all platforms"), line)

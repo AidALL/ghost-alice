@@ -27,7 +27,11 @@ INSTALLER_MODULES = (
     "context_gateway_inventory", "context_gateway_transaction", "context_gateway_platform",
     "context_gateway_model", "hash_utils", "addon_skill_permissions", "commands_sync", "encoding_guard",
     "install_lock", "pending_manifest_writer", "installer_assets_cli", "agent_visibility_cli",
+    "installer", "installer_testing",
 )
+# The installer package (`_shared/installer/*.py`) is the installer layer too; it runs
+# the entry points above as child processes and imports none of the runtime.
+INSTALLER_PACKAGE_FILES = tuple(sorted((SHARED / "installer").glob("*.py")))
 
 
 def _imported_modules(path: Path) -> list[tuple[str, int]]:
@@ -48,9 +52,20 @@ class LayerRuleTests(unittest.TestCase):
         self.assertEqual(violations, [])
 
     def test_installer_modules_do_not_import_runtime_modules(self):
-        violations = [f"{name}:{line} -> {target}" for name in INSTALLER_MODULES if (SHARED / f"{name}.py").is_file()
-                      for target, line in _imported_modules(SHARED / f"{name}.py") if target in RUNTIME_MODULES]
+        files = [SHARED / f"{name}.py" for name in INSTALLER_MODULES if (SHARED / f"{name}.py").is_file()]
+        files.extend(INSTALLER_PACKAGE_FILES)
+        violations = [f"{path.relative_to(SHARED)}:{line} -> {target}" for path in files
+                      for target, line in _imported_modules(path) if target in RUNTIME_MODULES]
         self.assertEqual(violations, [])
+
+    def test_installer_package_has_every_expected_module_and_shadows_no_standard_library_name(self):
+        # `python _shared/installer/cli.py` puts the package directory first on sys.path, so a module named like
+        # a standard-library module (an earlier `inspect.py`) would replace it for every import in that process.
+        names = {path.stem for path in INSTALLER_PACKAGE_FILES}
+        expected = {"__init__", "addons", "auto", "cli", "config", "diagnostics", "hosts", "lifecycle", "locations",
+                    "lock", "prerequisites", "preservation", "report", "runner", "selection", "source", "transaction"}
+        self.assertEqual(names, expected)
+        self.assertEqual(sorted((names - {"__init__"}) & set(sys.stdlib_module_names)), [])
 
     def test_definitions_module_depends_on_the_standard_library_only(self):
         imported = {target for target, _ in _imported_modules(SHARED / "hook_definitions.py")}

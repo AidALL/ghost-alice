@@ -22,29 +22,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _installer_source import installer_bash_source, installer_ps1_source
 
 
-def _extract_bash_function(source: str, name: str) -> str:
-    lines = source.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines):
-        if line.startswith(f"{name}() {{"):
-            start = idx
-            break
-
-    if start is None:
-        raise AssertionError(f"Function not found: {name}")
-
-    body = []
-    depth = 0
-    for line in lines[start:]:
-        body.append(line)
-        depth += line.count("{")
-        depth -= line.count("}")
-        if depth == 0:
-            return "".join(body)
-
-    raise AssertionError(f"Function did not terminate: {name}")
-
-
 def _extract_powershell_function(source: str, name: str) -> str:
     lines = source.splitlines(keepends=True)
     start = None
@@ -155,241 +132,6 @@ class SourceHealthGateTest(unittest.TestCase):
         (repo / "tracked.txt").write_text(content, encoding="utf-8")
         _git(repo, "add", "tracked.txt")
         _git(repo, "commit", "-m", message)
-
-    def _run_bash_source_health(self, repo: Path) -> subprocess.CompletedProcess[str]:
-        if not self.bash:
-            self.skipTest("No non-WSL bash executable available for install.sh source health test")
-        if not self.git:
-            self.skipTest("git executable is required for source health tests")
-
-        source = installer_bash_source()
-        function_bundle = _extract_bash_function(source, "check_source_health")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            runner = Path(temp_dir) / "runner.sh"
-            runner.write_text(
-                textwrap.dedent(
-                    f"""\
-                    #!/usr/bin/env bash
-                    set -u
-
-                    SKIP_SOURCE_HEALTH=0
-                    SCRIPT_DIR="{repo.as_posix()}"
-
-                    t() {{
-                      if [ "$#" -ge 2 ]; then
-                        printf "%s" "$2"
-                      elif [ "$#" -ge 1 ]; then
-                        printf "%s" "$1"
-                      fi
-                    }}
-                    info() {{ printf "INFO:%s\\n" "$*" >&2; }}
-                    warn() {{ printf "WARN:%s\\n" "$*" >&2; }}
-                    error() {{ printf "ERROR:%s\\n" "$*" >&2; }}
-
-                    {function_bundle}
-
-                    cd "{repo.as_posix()}"
-                    check_source_health
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            return subprocess.run(
-                [self.bash, str(runner)],
-                capture_output=True,
-                text=True,
-            )
-
-    def _run_bash_source_update(self, repo: Path) -> subprocess.CompletedProcess[str]:
-        if not self.bash:
-            self.skipTest("No non-WSL bash executable available for install.sh source update test")
-        if not self.git:
-            self.skipTest("git executable is required for source update tests")
-
-        source = installer_bash_source()
-        function_bundle = _extract_bash_function(source, "update_source_checkout")
-        function_bundle = function_bundle.replace('${SCRIPT_DIR}/_shared/installer_source_update.py',
-            str(ROOT / '_shared' / 'installer_source_update.py'))
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            runner = Path(temp_dir) / "runner.sh"
-            runner.write_text(
-                textwrap.dedent(
-                    f"""\
-                    #!/usr/bin/env bash
-                    set -u
-
-                    SCRIPT_DIR="{repo.as_posix()}"
-
-                    t() {{
-                      if [ "$#" -ge 2 ]; then
-                        printf "%s" "$2"
-                      elif [ "$#" -ge 1 ]; then
-                        printf "%s" "$1"
-                      fi
-                    }}
-                    info() {{ printf "INFO:%s\\n" "$*" >&2; }}
-                    warn() {{ printf "WARN:%s\\n" "$*" >&2; }}
-                    error() {{ printf "ERROR:%s\\n" "$*" >&2; }}
-                    ok() {{ printf "OK:%s\\n" "$*" >&2; }}
-
-                    _find_python_runtime() {{ printf '%s' '{sys.executable}'; }}
-                    {function_bundle}
-
-                    cd "{repo.as_posix()}"
-                    update_source_checkout
-                    """
-                ),
-                encoding="utf-8",
-            )
-
-            return subprocess.run(
-                [self.bash, str(runner)],
-                capture_output=True,
-                text=True,
-            )
-
-    def test_install_sh_source_health_passes_clean_repo(self) -> None:
-        repo = self._make_repo()
-
-        result = self._run_bash_source_health(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-
-    def test_install_sh_source_health_reports_branch_head_and_no_upstream(self) -> None:
-        repo = self._make_repo()
-        _git(repo, "checkout", "-b", "feature/source-health")
-
-        result = self._run_bash_source_health(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("Source health: branch=feature/source-health", result.stderr)
-        self.assertRegex(result.stderr, r"head=[0-9a-f]{7,}")
-        self.assertIn("upstream=none", result.stderr)
-
-    def test_install_sh_source_health_reports_detached_head(self) -> None:
-        repo = self._make_repo()
-        _git(repo, "checkout", "--detach")
-
-        result = self._run_bash_source_health(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("Source health: branch=DETACHED", result.stderr)
-        self.assertIn("upstream=none", result.stderr)
-
-    def test_install_sh_source_health_warns_on_tracked_dirty_repo_by_default(self) -> None:
-        repo = self._make_repo()
-        (repo / "tracked.txt").write_text("changed\n", encoding="utf-8")
-
-        result = self._run_bash_source_health(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("tracked local changes", result.stderr)
-        self.assertIn("continuing", result.stderr)
-        self.assertIn("pending-merges", result.stderr)
-
-    def test_install_sh_source_health_allows_untracked_files(self) -> None:
-        repo = self._make_repo()
-        (repo / "untracked.txt").write_text("local note\n", encoding="utf-8")
-
-        result = self._run_bash_source_health(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("untracked", result.stderr)
-
-    def test_install_sh_source_health_warns_on_diverged_upstream_with_local_commits(self) -> None:
-        repo, remote = self._make_repo_with_upstream()
-        self._add_commit(repo, "local change", "local\n")
-
-        other = remote.parent / "other"
-        subprocess.run(
-            ["git", "clone", str(remote), str(other)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        _git(other, "config", "user.email", "tests@example.invalid")
-        _git(other, "config", "user.name", "Tests")
-        self._add_commit(other, "upstream change", "upstream\n")
-        _git(other, "push", "origin", "HEAD")
-        _git(repo, "fetch", "origin")
-
-        result = self._run_bash_source_health(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("diverged from its upstream", result.stderr)
-        self.assertIn("continuing because local commits may be intentional", result.stderr)
-
-    def test_install_sh_source_health_blocks_behind_upstream(self) -> None:
-        repo, remote = self._make_repo_with_upstream()
-
-        other = remote.parent / "other"
-        subprocess.run(
-            ["git", "clone", str(remote), str(other)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        _git(other, "config", "user.email", "tests@example.invalid")
-        _git(other, "config", "user.name", "Tests")
-        self._add_commit(other, "upstream change", "upstream\n")
-        _git(other, "push", "origin", "HEAD")
-        _git(repo, "fetch", "origin")
-
-        result = self._run_bash_source_health(repo)
-
-        self.assertNotEqual(result.returncode, 0, msg=result.stderr)
-        self.assertIn("behind its upstream", result.stderr)
-        self.assertIn("git fetch", result.stderr)
-
-    def test_install_sh_update_source_stashes_dirty_checkout_before_fast_forward(self) -> None:
-        repo, remote = self._make_repo_with_upstream()
-
-        other = remote.parent / "other"
-        subprocess.run(
-            ["git", "clone", str(remote), str(other)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        _git(other, "config", "user.email", "tests@example.invalid")
-        _git(other, "config", "user.name", "Tests")
-        self._add_commit(other, "upstream change", "upstream\n")
-        _git(other, "push", "origin", "HEAD")
-
-        (repo / "tracked.txt").write_text("local dirty edit\n", encoding="utf-8")
-        (repo / "local-note.txt").write_text("keep me\n", encoding="utf-8")
-
-        result = self._run_bash_source_update(repo)
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        self.assertEqual((repo / "tracked.txt").read_text(encoding="utf-8"), "upstream\n")
-        self.assertFalse((repo / "local-note.txt").exists())
-        stash_list = subprocess.run(
-            ["git", "-C", str(repo), "stash", "list"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout
-        self.assertIn("ghost-alice source update backup", stash_list)
-        self.assertIn("Source local changes saved in git stash", result.stderr)
-        self.assertIn("stash show -p", result.stderr)
-        self.assertEqual(
-            subprocess.run(
-                ["git", "-C", str(repo), "rev-parse", "HEAD"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout,
-            subprocess.run(
-                ["git", "-C", str(repo), "rev-parse", "origin/main"],
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout,
-        )
 
     def test_bootstrap_source_update_rescues_dirty_old_checkout_without_local_install_sh(self) -> None:
         if not self.bash:
@@ -545,15 +287,6 @@ class SourceHealthGateTest(unittest.TestCase):
         self.assertIn("if ($UpdateSource)", body)
         self.assertLess(body.index("if ($UpdateSource)"), body.index("Initialize-GitHooks"))
 
-    def test_install_sh_calls_source_health_before_copying_targets(self) -> None:
-        source = installer_bash_source()
-        install_body = _extract_bash_function(source, "install")
-
-        self.assertNotIn("ALLOW_DIRTY_SOURCE", source)
-        self.assertNotIn("--allow-dirty-source", source)
-
-        self.assertLess(install_body.index("check_source_health"), install_body.index("install_shared"))
-
     def test_install_ps1_declares_source_health_gate(self) -> None:
         body = installer_ps1_source()
         install_body = _extract_powershell_function(body, "Invoke-Install")
@@ -621,8 +354,10 @@ class HarnessAuditSourceHealthTest(unittest.TestCase):
         )
 
     def write_installers(self, repo: Path, skills: list[str]) -> None:
-        (repo / "install.sh").write_text(
-            "ALL_SKILLS=(\n" + "".join(f"  {name}\n" for name in skills) + ")\n",
+        selection = repo / "_shared" / "installer" / "selection.py"
+        selection.parent.mkdir(parents=True, exist_ok=True)
+        selection.write_text(
+            "ALL_SKILLS = (\n" + "".join(f'    "{name}",\n' for name in skills) + ")\n",
             encoding="utf-8",
         )
         (repo / "install.ps1").write_text(
@@ -643,7 +378,7 @@ class HarnessAuditSourceHealthTest(unittest.TestCase):
             validate_install_list_sync(repo, issues)
 
         messages = [issue.message for issue in issues]
-        self.assertTrue(any("skill-b" in message and "install.sh" in message for message in messages))
+        self.assertTrue(any("skill-b" in message and "selection.py" in message for message in messages))
         self.assertTrue(any("unknown-skill" in message and "catalog" in message for message in messages))
 
     def test_duplicate_description_token_collision_warns(self) -> None:

@@ -15,6 +15,9 @@
 #   bash install.sh --addon autopilot  # Install the official autopilot addon
 #   bash install.sh --addon-source ./ghost-alice-addons --list-addons
 #   bash install.sh --status     # Check current install status
+#
+# This shell only finds (or installs) Python 3.11+ and runs the installer.
+# _shared/installer/cli.py owns the options, the commands and the install order.
 
 if [ -z "${BASH_VERSION:-}" ]; then
   if command -v bash >/dev/null 2>&1; then
@@ -26,537 +29,190 @@ fi
 
 set -euo pipefail
 
-# Full source integration is not an isolated action. Reject before logging/locks.
-for _destination_arg in "$@"; do
-  case "$_destination_arg" in
-    --destination-file|--destination-file=*|--isolated)
-      printf '%s\n' "[ERROR] isolated destinations require the Python hook installer; shell source integration is unsupported" >&2
-      exit 2 ;;
-  esac
-done
-unset _destination_arg
-
-# ── Force UTF-8 locale ────────────────────────────────────
-# Ensures output is not garbled on macOS/Linux/WSL.
-# If UTF-8 locale is already set, leave it; otherwise find and apply an available UTF-8 locale.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# Source installer_lib modules. Function definitions live in installer_lib/*.sh and
-# are sourced here (before any top-level call) so install.sh stays a thin entrypoint.
-for _lib in "${SCRIPT_DIR}"/installer_lib/*.sh; do [ -f "$_lib" ] && source "$_lib"; done; unset _lib
-ensure_utf8_locale
-export PYTHONUTF8=1
-export PYTHONIOENCODING=utf-8
-PLATFORM="claude"
-PLATFORM_EXPLICIT=0
-PROMPT_PLATFORM=0
-AUTO_DETECT=0
-SKIP_SOURCE_HEALTH=0
-UPDATE_SOURCE=0
-CLEANUP_PENDING=0
-ADDON_SKIP=0
-LIST_ADDONS=0
-AGENT_VISIBILITY=""
-VERBOSE=0
-INSTALL_REPORT_CHILD="${GHOST_ALICE_INSTALL_REPORT_CHILD:-0}"
-INSTALL_REPORT_LOG_FILE="${GHOST_ALICE_INSTALL_LOG_FILE:-}"
-INSTALL_REPORT_EVENT_FILE="${GHOST_ALICE_INSTALL_EVENT_FILE:-}"
-INSTALL_LOCK_PATH=""
-INSTALL_LOCK_HELD=0
-SOURCE_REPO_HOOK_CHANGED=0
-SOURCE_REPO_HOOK_BEFORE_PRESENT=0
-SOURCE_REPO_HOOK_BEFORE=""
-SOURCE_REPO_HOOK_AFTER="hooks"
-ADDON_SOURCES=()
-ADDON_TAGS=()
-ADDON_SOURCE_PREPARED=0
-INSTALL_ADDON_TARGETS=()
 
-SKILLS_DIR="$(resolve_claude_home)/skills"
-
-ALL_SKILLS=(
-  adversarial-verification
-  boundary-contract
-  coding-convention
-  skill-evolution
-  agent-security-scan
-  merge-companion
-  necessity-gate
-  session-intent-analyzer
-  compact-handoff
-  task-router
-)
-
-DEPRECATED_INSTALLED_SKILLS=(
-  harness-security-scan
-  session-intent-guard
-)
-
-# ── Colors when the terminal supports them ─────────────────
+# ── Messages for the Python runtime step only ─────────────
 if [ -t 1 ]; then
   GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 else
   GREEN=''; RED=''; YELLOW=''; CYAN=''; NC=''
 fi
+info()  { printf "${CYAN}[INFO]${NC} %s\n" "$1"; }
+ok()    { printf "${GREEN}[OK]${NC} %s\n" "$1"; }
+warn()  { printf "${YELLOW}[WARN]${NC} %s\n" "$1"; }
+error() { printf "${RED}[ERROR]${NC} %s\n" "$1" >&2; }
 
-# Installer messages are English-only.
-
-CODEX_BOOTSTRAP_MARKER="# Ghost-ALICE Codex Bootstrap"
-CODEX_MANAGED_BLOCK_BEGIN="<!-- Ghost-ALICE managed block begin: codex-bootstrap -->"
-CODEX_MANAGED_BLOCK_END="<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
-CODEX_BOOTSTRAP_SOURCE="${SCRIPT_DIR}/platforms/codex/AGENTS.md"
-CLAUDE_BOOTSTRAP_MARKER="# Ghost-ALICE Claude Bootstrap"
-CLAUDE_MANAGED_BLOCK_BEGIN="<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
-CLAUDE_MANAGED_BLOCK_END="<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
-CLAUDE_BOOTSTRAP_SOURCE="${SCRIPT_DIR}/platforms/claude/CLAUDE.md"
-SESSION_GATE_CONTRACT_SOURCE="${SCRIPT_DIR}/skill-catalog/session-gates.json"
-
-assert_session_gate_contract
-
-# ── Argument parsing ───────────────────────────────────────
-ARGS=()
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --platform|-p)
-      if [[ $# -lt 2 ]]; then
-        error "$(t '--platform requires a value (claude|codex)' '--platform requires a value (claude|codex)')"
-        exit 1
-      fi
-      PLATFORM="$2"
-      PLATFORM_EXPLICIT=1
-      AUTO_DETECT=0
-      if [[ "$PLATFORM" != "claude" && "$PLATFORM" != "codex" ]]; then
-        error "$(t "Unknown platform: $PLATFORM (must be claude or codex)" "Unknown platform: $PLATFORM (must be claude or codex)")"
-        exit 1
-      fi
-      shift 2
-      ;;
-    --prompt-platform)
-      PROMPT_PLATFORM=1
-      AUTO_DETECT=0
-      shift
-      ;;
-    --auto|-a)
-      # Accepted no-op option; plain install detects platforms automatically.
-      shift
-      ;;
-    --skip-source-health)
-      SKIP_SOURCE_HEALTH=1
-      shift
-      ;;
-    --update-source)
-      UPDATE_SOURCE=1
-      AUTO_DETECT=0
-      shift
-      ;;
-    --cleanup-pending)
-      CLEANUP_PENDING=1
-      shift
-      ;;
-    --addon-source)
-      if [[ $# -lt 2 ]]; then
-        error "$(t '--addon-source requires a value' '--addon-source requires a value')"
-        exit 1
-      fi
-      ADDON_SOURCES+=("$2")
-      shift 2
-      ;;
-    --addon-tag)
-      if [[ $# -lt 2 ]]; then
-        error "$(t '--addon-tag requires a value' '--addon-tag requires a value')"
-        exit 1
-      fi
-      ADDON_TAGS+=("$2")
-      shift 2
-      ;;
-    --addon-skip)
-      ADDON_SKIP=1
-      shift
-      ;;
-    --list-addons)
-      LIST_ADDONS=1
-      shift
-      ;;
-    --verbose|-v)
-      VERBOSE=1
-      shift
-      ;;
-    --visibility|--agent-visibility)
-      flag_name="$1"
-      if [[ $# -lt 2 ]]; then
-        error "$(t "${flag_name} requires a value (strict|dynamic|minimal)" "${flag_name} requires a value (strict|dynamic|minimal)")"
-        exit 1
-      fi
-      AGENT_VISIBILITY="$2"
-      if [[ "$AGENT_VISIBILITY" != "strict" && "$AGENT_VISIBILITY" != "dynamic" && "$AGENT_VISIBILITY" != "minimal" ]]; then
-        error "$(t "Unknown agent visibility profile: $AGENT_VISIBILITY (must be strict, dynamic, or minimal)" "Unknown agent visibility profile: $AGENT_VISIBILITY (must be strict, dynamic, or minimal)")"
-        exit 1
-      fi
-      shift 2
-      ;;
-    *)
-      ARGS+=("$1")
-      shift
-      ;;
+# ── Force UTF-8 locale ────────────────────────────────────
+# If a UTF-8 locale is already set, leave it; otherwise apply an available one.
+ensure_utf8_locale() {
+  local current="${LC_ALL:-${LANG:-}}"
+  case "$current" in
+    *UTF-8*|*utf8*|*utf-8*) return 0 ;;
   esac
-done
-
-official_addon_source() {
-  local name="$1"
-  case "$name" in
-    autopilot|autopilot-mode)
-      printf '%s\n' "${GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE:-https://github.com/AidALL/ghost-alice-autopilot.git}"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  local loc
+  if command -v locale >/dev/null 2>&1; then
+    for loc in C.UTF-8 en_US.UTF-8 ko_KR.UTF-8 en_GB.UTF-8; do
+      if locale -a 2>/dev/null | grep -qix "$loc"; then
+        export LC_ALL="$loc" LANG="$loc"
+        return 0
+      fi
+    done
+  fi
+  # Last fallback. There is no effect on shell output even without a locale DB.
+  export LC_ALL="C.UTF-8" LANG="C.UTF-8"
 }
 
-args_request_uninstall() {
-  local arg
-  for arg in ${ARGS[@]+"${ARGS[@]}"}; do
-    case "$arg" in
-      --uninstall|--remove|-u)
-        return 0
-        ;;
-    esac
+# ── Python 3.11+ runtime ──────────────────────────────────
+_is_working_python() {
+  local cmd="$1"
+  case "$cmd" in
+    */*) [ -x "$cmd" ] || return 1 ;;
+    *) command -v "$cmd" >/dev/null 2>&1 || return 1 ;;
+  esac
+  "$cmd" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' >/dev/null 2>&1 || return 1
+}
+
+_python_version_key() {
+  local cmd="$1"
+  "$cmd" -c 'import sys; print(f"{sys.version_info.major:03d}.{sys.version_info.minor:03d}.{sys.version_info.micro:03d}")' 2>/dev/null || return 1
+}
+
+_find_python_runtime() {
+  local cmd
+  for cmd in python3 python; do
+    if _is_working_python "$cmd"; then
+      printf '%s\n' "$cmd"
+      return 0
+    fi
   done
+
+  local search_dirs=()
+  local path_dir candidate key best_key="" best_cmd=""
+  local old_ifs="$IFS"
+  IFS=:
+  for path_dir in $PATH; do
+    [ -n "$path_dir" ] || path_dir="."
+    [ -d "$path_dir" ] || continue
+    search_dirs+=("$path_dir")
+  done
+  IFS="$old_ifs"
+
+  if [ "${GHOST_ALICE_TEST_SKIP_COMMON_PYTHON_PATHS:-0}" != "1" ]; then
+    search_dirs+=("/opt/homebrew/bin" "/usr/local/bin" "/usr/bin" "/bin")
+  fi
+
+  for path_dir in "${search_dirs[@]}"; do
+    [ -n "$path_dir" ] || continue
+    [ -d "$path_dir" ] || continue
+    for candidate in "$path_dir"/python3.[0-9]* "$path_dir"/python3 "$path_dir"/python; do
+      [ -e "$candidate" ] || continue
+      [ -x "$candidate" ] || continue
+      if _is_working_python "$candidate"; then
+        key="$(_python_version_key "$candidate" || true)"
+        if [ -n "$key" ] && { [ -z "$best_key" ] || [ "$key" \> "$best_key" ]; }; then
+          best_key="$key"
+          best_cmd="$candidate"
+        fi
+      fi
+    done
+  done
+
+  if [ -n "$best_cmd" ]; then
+    printf '%s\n' "$best_cmd"
+    return 0
+  fi
+
   return 1
 }
 
-normalize_official_addon_shortcuts() {
-  args_request_uninstall && return 0
-  local normalized=()
-  local i=0
-  local addon_name addon_source
-  while [ "$i" -lt "${#ARGS[@]}" ]; do
-    if [ "${ARGS[$i]}" = "--addon" ]; then
-      i=$((i + 1))
-      if [ "$i" -ge "${#ARGS[@]}" ]; then
-        error "$(t '--addon requires a value (autopilot)' '--addon requires a value (autopilot)')"
-        return 1
-      fi
-      addon_name="${ARGS[$i]}"
-      addon_source="$(official_addon_source "$addon_name")" || {
-        error "$(t "Unknown official addon: ${addon_name} (supported: autopilot)" "Unknown official addon: ${addon_name} (supported: autopilot)")"
-        return 1
-      }
-      ADDON_SOURCES+=("$addon_source")
-    else
-      normalized+=("${ARGS[$i]}")
-    fi
-    i=$((i + 1))
-  done
-  ARGS=(${normalized[@]+"${normalized[@]}"})
+_run_as_root_or_sudo() {
+  if [ "$(id -u 2>/dev/null || printf '1')" = "0" ]; then
+    "$@"
+  elif command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+  else
+    "$@"
+  fi
 }
 
-normalize_official_addon_shortcuts || exit 1
+_try_install_python_runtime() {
+  info "Python 3.11+ not found; trying to install Python automatically."
 
-# Default install: when no platform is specified, install to all detected tools. Plain full uninstall also detects platform homes and install-state manifests for full cleanup. Read-only, diagnostics, and partial removal commands keep the single-platform default (claude).
-if [ "$PLATFORM_EXPLICIT" -eq 0 ] && [ "$PROMPT_PLATFORM" -eq 0 ] && [ "$CLEANUP_PENDING" -eq 0 ] && [ "$LIST_ADDONS" -eq 0 ] && [ "$UPDATE_SOURCE" -eq 0 ]; then
-  case "${ARGS[0]:-}" in
-    ""|--help|-h|--list|-l|--status|-s|--doctor|--uninstall|--remove|-u|--sync-commands|--check-commands|--*)
-      ;;
-    *)
-      AUTO_DETECT=1
-      ;;
-  esac
-  case "${ARGS[0]:-}" in
-    "")
-      AUTO_DETECT=1
-      ;;
-  esac
-fi
-
-plain_full_uninstall_args=0
-case "${ARGS[0]:-}" in
-  --uninstall|--remove|-u)
-    [ "${#ARGS[@]}" -eq 1 ] && plain_full_uninstall_args=1
-    ;;
-esac
-
-if [ "$plain_full_uninstall_args" -eq 1 ] && [ "$PLATFORM_EXPLICIT" -eq 0 ] && [ "$PROMPT_PLATFORM" -eq 0 ]; then
-  detected=()
-  while IFS= read -r plat; do
-    [ -n "$plat" ] && detected+=("$plat")
-  done < <(detect_uninstall_platforms)
-  if [ ${#detected[@]} -eq 0 ]; then
-    warn "$(t 'No install targets detected. Need a platform home or ~/.ghost-alice/install-state/<platform>.json.' 'No install targets detected. Need a platform home or ~/.ghost-alice/install-state/<platform>.json.')"
-    exit 0
+  if command -v brew >/dev/null 2>&1; then
+    info "brew install python3"
+    brew install python3
+    return $?
   fi
-  rc=0
-  platform_index=0
-  info "$(t "Detected uninstall targets: ${detected[*]}" "Detected uninstall targets: ${detected[*]}")"
-  for plat in "${detected[@]}"; do
-    platform_index=$((platform_index + 1))
-    echo ""
-    info "$(t "[uninstall] (${platform_index}/${#detected[@]}) Starting ${plat} full cleanup" "[uninstall] (${platform_index}/${#detected[@]}) Starting ${plat} full cleanup")"
-    if ! bash "${BASH_SOURCE[0]}" --platform "$plat" --uninstall; then
-      rc=1
+  if command -v apt-get >/dev/null 2>&1; then
+    info "apt-get install -y python3"
+    _run_as_root_or_sudo apt-get update && _run_as_root_or_sudo apt-get install -y python3
+    return $?
+  fi
+  if command -v dnf >/dev/null 2>&1; then
+    info "dnf install -y python3"
+    _run_as_root_or_sudo dnf install -y python3
+    return $?
+  fi
+  if command -v yum >/dev/null 2>&1; then
+    info "yum install -y python3"
+    _run_as_root_or_sudo yum install -y python3
+    return $?
+  fi
+  if command -v pacman >/dev/null 2>&1; then
+    info "pacman -Sy --noconfirm python"
+    _run_as_root_or_sudo pacman -Sy --noconfirm python
+    return $?
+  fi
+  if command -v winget.exe >/dev/null 2>&1; then
+    info "winget.exe install --id Python.Python.3 --exact"
+    winget.exe install --id Python.Python.3 --exact --accept-package-agreements --accept-source-agreements
+    return $?
+  fi
+
+  warn "No supported Python installer was found."
+  return 1
+}
+
+_ensure_python_runtime_for_install() {
+  local py
+  py="$(_find_python_runtime || true)"
+  if [ -n "$py" ]; then
+    return 0
+  fi
+
+  if _try_install_python_runtime; then
+    py="$(_find_python_runtime || true)"
+    if [ -n "$py" ]; then
+      ok "Python is ready"
+      return 0
     fi
-  done
-  exit "$rc"
-fi
-
-if [ "$UPDATE_SOURCE" -eq 1 ]; then
-  update_source_checkout
-  exit $?
-fi
-# Detect ~/.claude and ~/.codex, then install separately for each selected platform. Log shape: [auto] (${platform_index}/${#detected[@]}) <platform>
-if [ "$AUTO_DETECT" -eq 1 ]; then
-  detected=()
-  while IFS= read -r plat; do
-    [ -n "$plat" ] && detected+=("$plat")
-  done < <(detect_present_platforms)
-  if [ ${#detected[@]} -eq 0 ]; then
-    warn "$(t 'No AI platform home directories detected. At least one of ~/.claude, ~/.codex is required.' 'No AI platform home directories detected. At least one of ~/.claude, ~/.codex is required.')"
-    exit 0
-  fi
-  source_health_args=()
-  [ "$SKIP_SOURCE_HEALTH" -eq 1 ] && source_health_args+=(--skip-source-health)
-  agent_visibility_args=()
-  [ -n "$AGENT_VISIBILITY" ] && agent_visibility_args+=(--visibility "$AGENT_VISIBILITY")
-  verbose_args=()
-  [ "$VERBOSE" -eq 1 ] && verbose_args+=(--verbose)
-  if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
-    prepare_addon_sources || exit 1
-    # Prepared addon git sources are forwarded to child installs as local cache paths; the tag has already been applied by the parent checkout.
-    ADDON_TAGS=()
-  fi
-  addon_args=()
-  for source in ${ADDON_SOURCES[@]+"${ADDON_SOURCES[@]}"}; do
-    addon_args+=(--addon-source "$source")
-  done
-  for tag in ${ADDON_TAGS[@]+"${ADDON_TAGS[@]}"}; do
-    addon_args+=(--addon-tag "$tag")
-  done
-  [ "$ADDON_SKIP" -eq 1 ] && addon_args+=(--addon-skip)
-
-  if ! install_compact_output_enabled; then
-    rc=0
-    platform_index=0
-    info "$(t "Detected platforms: ${detected[*]}" "Detected platforms: ${detected[*]}")"
-    info "$(t "Auto install will process ${#detected[@]} detected platform target(s) in sequence; each has a separate install path (not a duplicate install)." "Auto install will process ${#detected[@]} detected platform target(s) in sequence; each has a separate install path (not a duplicate install).")"
-    for plat in "${detected[@]}"; do
-      platform_index=$((platform_index + 1))
-      echo ""
-      info "$(t "[auto] (${platform_index}/${#detected[@]}) Starting install for ${plat}" "[auto] (${platform_index}/${#detected[@]}) Starting install for ${plat}")"
-      if bash "${BASH_SOURCE[0]}" --platform "$plat" "${source_health_args[@]+"${source_health_args[@]}"}" "${agent_visibility_args[@]+"${agent_visibility_args[@]}"}" "${verbose_args[@]+"${verbose_args[@]}"}" "${addon_args[@]+"${addon_args[@]}"}" "${ARGS[@]+"${ARGS[@]}"}"; then
-        :
-      else
-        child_rc=$?
-        rc=1
-        warn "$(t "[auto] Install failed for ${plat} (exit code $child_rc)" "[auto] Install failed for ${plat} (exit code $child_rc)")"
-      fi
-    done
-    echo ""
-    if [ "$rc" -eq 0 ]; then
-      ok "$(t "[auto] Install complete for all ${#detected[@]} detected install target(s)" "[auto] Install complete for all ${#detected[@]} detected install target(s)")"
-    else
-      error "$(t '[auto] Some platform installs failed. Check the log above.' '[auto] Some platform installs failed. Check the log above.')"
-    fi
-    exit "$rc"
   fi
 
-  install_log_init
-  auto_event_file="${INSTALL_REPORT_LOG_FILE%.log}.events.jsonl"
-  : >"$auto_event_file"
-  rc=0
-  auto_synced_targets=0
-  auto_skills=(${ARGS[@]+"${ARGS[@]}"})
-  if [ "${#auto_skills[@]}" -eq 0 ]; then
-    auto_skills=("${ALL_SKILLS[@]}")
-  fi
-  auto_platform_count="${#detected[@]}"
-  auto_common_targets="$(count_auto_common_targets "${detected[@]}" -- "${auto_skills[@]}")" || exit 1
-  auto_displayed_targets=0
-  auto_platform_label="$(join_by ', ' "${detected[@]}")"
-  auto_visibility="$(resolve_effective_visibility)"
-  if live_counter_enabled; then
-    report_print_auto_start "$auto_platform_label" "$auto_common_targets" "$auto_visibility"
-  fi
-  platform_index=0
-  for plat in "${detected[@]}"; do
-    platform_index=$((platform_index + 1))
-    printf '\n[auto] (%s/%s) Starting install for %s (separate install path; not a duplicate install)\n' "$platform_index" "${#detected[@]}" "$plat" >>"$INSTALL_REPORT_LOG_FILE"
-    GHOST_ALICE_INSTALL_REPORT_CHILD=1 \
-      GHOST_ALICE_INSTALL_LOG_FILE="$INSTALL_REPORT_LOG_FILE" \
-      GHOST_ALICE_INSTALL_EVENT_FILE="$auto_event_file" \
-      bash "${BASH_SOURCE[0]}" --platform "$plat" "${source_health_args[@]+"${source_health_args[@]}"}" "${agent_visibility_args[@]+"${agent_visibility_args[@]}"}" "${verbose_args[@]+"${verbose_args[@]}"}" "${addon_args[@]+"${addon_args[@]}"}" "${ARGS[@]+"${ARGS[@]}"}" >>"$INSTALL_REPORT_LOG_FILE" 2>&1 &
-    child_pid=$!
-    if live_counter_enabled; then
-      while jobs -pr | grep -q "^${child_pid}$"; do
-        auto_synced_targets="$(report_read_weighted_common_target_progress "$auto_event_file" "$auto_platform_count" "$auto_common_targets")"
-        report_auto_animate_common_target_progress_line \
-          "$auto_displayed_targets" \
-          "$auto_synced_targets" \
-          "$auto_common_targets" \
-          "common targets synced on all platforms"
-        auto_displayed_targets="$auto_synced_targets"
-        sleep 0.1
-      done
-    fi
-    if wait "$child_pid"; then
-      :
-    else
-      child_rc=$?
-      rc=1
-      live_counter_enabled && printf '\n'
-      warn "$(t "[auto] Install failed for ${plat} (exit code $child_rc)" "[auto] Install failed for ${plat} (exit code $child_rc)")"
-    fi
-    if live_counter_enabled; then
-      auto_synced_targets="$(report_read_weighted_common_target_progress "$auto_event_file" "$auto_platform_count" "$auto_common_targets")"
-      report_auto_animate_common_target_progress_line \
-        "$auto_displayed_targets" \
-        "$auto_synced_targets" \
-        "$auto_common_targets" \
-        "common targets synced on all platforms"
-      auto_displayed_targets="$auto_synced_targets"
-    fi
-  done
-  auto_synced_targets="$(report_read_all_common_target_progress "$auto_event_file" "$auto_platform_count")"
-  if [ "$rc" -eq 0 ]; then
-    if live_counter_enabled; then
-      report_auto_animate_common_target_progress_line \
-        "$auto_displayed_targets" \
-        "$auto_synced_targets" \
-        "$auto_common_targets" \
-        "common targets synced on all platforms"
-      [ "$auto_synced_targets" -gt "$auto_common_targets" ] && auto_synced_targets="$auto_common_targets"
-      auto_displayed_targets="$auto_synced_targets"
-      report_auto_update_common_target_progress_line \
-        "$auto_displayed_targets" \
-        "$auto_common_targets" \
-        "common targets synced on all platforms"
-      printf '\n'
-      report_print_tail "$auto_platform_label" "$auto_visibility"
-    else
-      report_print_auto_full "$auto_platform_label" "$auto_common_targets" "$auto_visibility" "$auto_synced_targets"
-    fi
-  else
-    live_counter_enabled && printf '\n'
-    error "$(t '[auto] Some platform installs failed. Check the log above.' '[auto] Some platform installs failed. Check the log above.')"
-    error "$(t "Details log: ${INSTALL_REPORT_LOG_FILE}" "Details log: ${INSTALL_REPORT_LOG_FILE}")"
-    while IFS= read -r failure_line; do
-      [ -n "$failure_line" ] || continue
-      error "[auto] ${failure_line}"
-    done < <(install_report_failure_excerpt "$INSTALL_REPORT_LOG_FILE")
-  fi
-  exit $rc
-fi
+  _python_required_notice
+  return 1
+}
 
-if [ "$PROMPT_PLATFORM" -eq 1 ] && [ "$PLATFORM_EXPLICIT" -eq 0 ]; then
-  prompt_platform
-elif [ "$PROMPT_PLATFORM" -eq 1 ] && [ "$PLATFORM_EXPLICIT" -eq 1 ]; then
-  warn "$(t '--prompt-platform ignored because --platform is already specified.' '--prompt-platform ignored because --platform is already specified.')"
-fi
+_python_required_notice() {
+  echo ""
+  error "Python 3.11+ is required."
+  error "The installer tried automatic setup but could not find a working Python 3.11+ runtime."
+  echo ""
+  echo "  Install Python:"
+  echo "    macOS:   brew install python3"
+  echo "    Ubuntu:  sudo apt install python3"
+  echo "    Windows: winget install --id Python.Python.3 --exact"
+  echo ""
+  echo "  Then re-run: ./install.sh"
+  echo ""
+}
 
-# Platform-specific skill directory setup.
-if [ "$PLATFORM" = "codex" ]; then
-  SKILLS_DIR="$(resolve_codex_skills_dir)"
-fi
+# ── Run the installer ─────────────────────────────────────
+ensure_utf8_locale
+export PYTHONUTF8=1
+export PYTHONIOENCODING=utf-8
 
-if [ "$CLEANUP_PENDING" -eq 1 ]; then
-  cleanup_pending_false_positives
-  exit $?
+if ! _ensure_python_runtime_for_install; then
+  exit 1
 fi
-
-if [ "$ADDON_SKIP" != "1" ] && [ "${#ADDON_SOURCES[@]}" -gt 0 ]; then
-  prepare_addon_sources || exit 1
-fi
-
-if [ "$LIST_ADDONS" -eq 1 ]; then
-  list_addons
-  exit $?
-fi
-
-# ── Main ───────────────────────────────────────────────────
-case "${ARGS[0]:-}" in
-  --list|-l)
-    list_skills
-    ;;
-  --status|-s)
-    check_status
-    ;;
-  --doctor)
-    run_doctor
-    ;;
-  --repair)
-    _ensure_python_runtime_for_install || exit 1
-    run_repair
-    ;;
-  "")
-    _ensure_python_runtime_for_install || exit 1
-    install_prerequisites
-    setup_git_hooks
-    _acquire_install_lock
-    trap _release_install_lock EXIT
-    install "${ARGS[@]+"${ARGS[@]}"}"
-    _release_install_lock
-    trap - EXIT
-    ;;
-  --uninstall|--remove|-u)
-    uninstall "${ARGS[@]:1}"
-    ;;
-  --sync-commands)
-    sync_commands "sync" "$PLATFORM"
-    ;;
-  --check-commands)
-    sync_commands "check" "$PLATFORM"
-    ;;
-  --help|-h)
-    echo "Usage:"
-    echo "  bash install.sh                              # $(t 'Install to detected AI tools' 'Install to detected AI tools')"
-    echo "  bash install.sh --addon autopilot            # $(t 'Install official autopilot addon to detected AI tools' 'Install official autopilot addon to detected AI tools')"
-    echo "  bash install.sh --platform claude            # $(t 'Install only to Claude Code' 'Install only to Claude Code')"
-    echo "  bash install.sh --platform codex             # $(t 'Install to Codex' 'Install to Codex')"
-    echo ""
-    echo "$(t 'Common commands:' 'Common commands:')"
-    echo "  --platform, -p PLAT    $(t 'Choose claude | codex' 'Choose claude | codex')"
-    echo "  --prompt-platform      $(t 'Ask which AI tool to install' 'Ask which AI tool to install')"
-    echo "  --status, -s           $(t 'Show install status' 'Show install status')"
-    echo "  --visibility strict|dynamic|minimal"
-    echo "                          $(t 'Set user-facing governance message visibility profile' 'Set user-facing governance message visibility profile')"
-    echo "  --agent-visibility strict|dynamic|minimal"
-    echo "                          $(t 'Alias for --visibility' 'Alias for --visibility')"
-    echo "  --doctor               $(t 'Run install diagnostics' 'Run install diagnostics')"
-    echo "  --repair               $(t 'Re-provision missing managed targets (never overwrites user-owned slots)' 'Re-provision missing managed targets (never overwrites user-owned slots)')"
-    echo "  --verbose, -v          $(t 'Show per-target install details' 'Show per-target install details')"
-    echo "  --addon autopilot     $(t 'Install official autopilot addon; --platform is optional' 'Install official autopilot addon; --platform is optional')"
-    echo ""
-    echo "$(t 'Removal commands:' 'Removal commands:')"
-    echo "  --uninstall, -u        $(t 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets' 'Full uninstall: remove managed hooks, bootstrap, support state, and install targets')"
-    echo "  --platform PLAT --uninstall SKILL_NAMES"
-    echo "                          $(t 'Remove selected skills from one platform' 'Remove selected skills from one platform')"
-    echo ""
-    echo "$(t 'Advanced/operator commands:' 'Advanced/operator commands:')"
-    echo "  SKILL_NAMES            $(t 'Install specified skills only' 'Install specified skills only')"
-    echo "  --list, -l             $(t 'List available skills' 'List available skills')"
-    echo "  --cleanup-pending      $(t 'Clean false-positive pending entries' 'Clean false-positive pending entries')"
-    echo "  --update-source        $(t 'Stash source checkout local changes and run git pull --ff-only' 'Stash source checkout local changes and run git pull --ff-only')"
-    echo "  --addon-source PATH|URL"
-    echo "                          $(t 'Add local addon repo or git URL source' 'Add local addon repo or git URL source')"
-    echo "  --addon-tag TAG        $(t 'Checkout branch/tag for git URL addon sources' 'Checkout branch/tag for git URL addon sources')"
-    echo "  --addon-skip           $(t 'Disable addon installation' 'Disable addon installation')"
-    echo "  --list-addons          $(t 'List addon manifest targets' 'List addon manifest targets')"
-    echo "  --skip-source-health   $(t 'Skip source health gate' 'Skip source health gate')"
-    echo "  --sync-commands        $(t 'Sync workspace commands' 'Sync workspace commands')"
-    echo "  --check-commands       $(t 'Check workspace commands only' 'Check workspace commands only')"
-    echo "  --help, -h             $(t 'Show this help' 'Show this help')"
-    ;;
-  --*)
-    error "$(t "Unknown option: ${ARGS[0]}" "Unknown option: ${ARGS[0]}")"
-    echo "$(t 'See bash install.sh --help' 'See bash install.sh --help')"
-    exit 1
-    ;;
-  *)
-    _ensure_python_runtime_for_install || exit 1
-    install_prerequisites
-    setup_git_hooks
-    _acquire_install_lock
-    trap _release_install_lock EXIT
-    install "${ARGS[@]+"${ARGS[@]}"}"
-    _release_install_lock
-    trap - EXIT
-    ;;
-esac
+py="$(_find_python_runtime)"
+exec "$py" "${SCRIPT_DIR}/_shared/installer/cli.py" "$@"

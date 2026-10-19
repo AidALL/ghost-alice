@@ -21,7 +21,7 @@ if str(SHARED) not in sys.path:
 from installer_assets import write_ownership_marker
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_ps1_source
 
 
 def _load_install_lock():
@@ -46,27 +46,6 @@ def _load_install_transaction():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _extract_bash_function(source: str, name: str) -> str:
-    lines = source.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines):
-        if line.startswith(f"{name}() {{"):
-            start = idx
-            break
-    if start is None:
-        raise AssertionError(f"Function not found: {name}")
-
-    body = []
-    depth = 0
-    for line in lines[start:]:
-        body.append(line)
-        depth += line.count("{")
-        depth -= line.count("}")
-        if depth == 0:
-            return "".join(body)
-    raise AssertionError(f"Function did not terminate: {name}")
 
 
 def _extract_powershell_function(source: str, name: str) -> str:
@@ -233,16 +212,6 @@ class InstallTransactionTest(unittest.TestCase):
             finally:
                 lock.release_lock(lock_path)
 
-    def test_install_sh_snapshot_failure_is_blocking(self) -> None:
-        source = installer_bash_source()
-        snapshot_fn = _extract_bash_function(source, "_run_snapshot_after_install")
-
-        self.assertIn("aborting because merge-companion snapshot cannot run", snapshot_fn)
-        self.assertIn("snapshot capture failed; aborting install", snapshot_fn)
-        self.assertIn("return 1", snapshot_fn)
-        self.assertNotIn("skipping merge-companion snapshot", snapshot_fn)
-        self.assertNotIn("snapshot capture failed (continuing)", snapshot_fn)
-
     def test_install_ps1_snapshot_failure_is_blocking(self) -> None:
         source = installer_ps1_source()
         snapshot_fn = _extract_powershell_function(source, "Invoke-SnapshotAfterInstall")
@@ -254,13 +223,7 @@ class InstallTransactionTest(unittest.TestCase):
         self.assertNotIn("continuing", snapshot_fn)
 
     def test_installers_wrap_install_with_lock_and_release(self) -> None:
-        sh = installer_bash_source()
-        self.assertIn("_acquire_install_lock", sh)
-        self.assertIn("_release_install_lock", sh)
-        self.assertIn("install_lock.py\" acquire", sh)
-        self.assertIn("install_lock.py\" release", sh)
-        self.assertIn("trap _release_install_lock EXIT", sh)
-
+        # The bash side of this contract now lives in _shared/test_installer_cli.py (lock around every command).
         ps1 = installer_ps1_source()
         self.assertIn("function Invoke-WithInstallLock", ps1)
         self.assertIn("function Enter-InstallLock", ps1)
@@ -669,12 +632,7 @@ class InstallTransactionTest(unittest.TestCase):
             )
 
     def test_installers_use_staged_copy_replace_for_copy_installs(self) -> None:
-        sh = installer_bash_source()
-        self.assertIn("_install_copy_target", sh)
-        self.assertIn("install_transaction.py\" copy-replace", sh)
-        self.assertNotIn('cp -r "$src" "$dest"', sh)
-        self.assertNotIn('cp -r "$shared_src" "$shared_dest"', sh)
-
+        # The bash side of this contract now lives in _shared/test_installer_transaction.py.
         ps1 = installer_ps1_source()
         self.assertIn("function Invoke-StagedCopyReplace", ps1)
         self.assertIn('"copy-replace"', ps1)
@@ -683,24 +641,14 @@ class InstallTransactionTest(unittest.TestCase):
         self.assertNotIn("Copy-Item -Path $sharedSrc -Destination $sharedDest -Recurse -Force", ps1)
 
     def test_installers_pass_event_log_to_staged_copy_replace(self) -> None:
-        sh = installer_bash_source()
-        copy_fn = _extract_bash_function(sh, "_install_copy_target")
-        self.assertIn("--event-log", copy_fn)
-        self.assertIn('${HOME}/.ghost-alice/install-state/${PLATFORM}-events.jsonl', copy_fn)
-
+        # The bash side of this contract now lives in _shared/test_installer_transaction.py.
         ps1 = installer_ps1_source()
         copy_fn_ps1 = _extract_powershell_function(ps1, "Invoke-StagedCopyReplace")
         self.assertIn("--event-log", copy_fn_ps1)
         self.assertIn('$Platform-events.jsonl', copy_fn_ps1)
 
     def test_installers_use_batch_copy_transaction_for_copy_only_installs(self) -> None:
-        sh = installer_bash_source()
-        self.assertIn("_install_copy_targets", sh)
-        self.assertIn("copy-replace-many", sh)
-        install_fn = _extract_bash_function(sh, "install")
-        self.assertIn("copy_target_args", install_fn)
-        self.assertIn("_install_copy_targets", install_fn)
-
+        # The bash side of this contract now lives in _shared/test_installer_cli.py (one copy batch for codex).
         ps1 = installer_ps1_source()
         self.assertIn("function Invoke-StagedCopyReplaceMany", ps1)
         self.assertIn('"copy-replace-many"', ps1)
@@ -877,11 +825,12 @@ class InstallTransactionTest(unittest.TestCase):
             self.assertTrue(backup.exists())
 
     def test_installers_expose_false_positive_pending_cleanup_command(self) -> None:
-        sh = installer_bash_source()
-        self.assertIn("--cleanup-pending", sh)
-        self.assertIn("cleanup_pending_false_positives", sh)
-        self.assertIn("cleanup_false_positive_legacy.py", sh)
-        self.assertIn("--apply", sh)
+        cli_py = (REPO_ROOT / "_shared" / "installer" / "cli.py").read_text(encoding="utf-8")
+        preservation_py = (REPO_ROOT / "_shared" / "installer" / "preservation.py").read_text(encoding="utf-8")
+        self.assertIn("--cleanup-pending", cli_py)
+        self.assertIn("def cleanup_pending", preservation_py)
+        self.assertIn("cleanup_false_positive_legacy.py", preservation_py)
+        self.assertIn("--apply", preservation_py)
 
         ps1 = installer_ps1_source()
         self.assertIn("-CleanupPending", ps1)
@@ -933,14 +882,6 @@ class StagedSymlinkReplaceTests(unittest.TestCase):
             transaction.staged_symlink_replace(source, dest, rollback_root=root / "rollbacks")
 
             self.assert_directory_link_points_to(dest, source)
-
-
-class SymlinkInstallWiringTests(unittest.TestCase):
-    def test_install_sh_symlink_branch_uses_staged_replace_not_unbacked_rm(self) -> None:
-        sh = installer_bash_source()
-        self.assertIn('install_transaction.py" symlink-replace', sh)
-        install_fn = _extract_bash_function(sh, "install")
-        self.assertNotIn('rm -rf "$dest"', install_fn)
 
 
 if __name__ == "__main__":

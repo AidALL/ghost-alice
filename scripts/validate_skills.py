@@ -398,14 +398,15 @@ def _strip_install_token(line: str) -> str | None:
     return token
 
 
-def _parse_bash_install_skills(path: Path) -> set[str]:
+def _parse_python_install_skills(path: Path) -> set[str]:
+    """The `ALL_SKILLS = (` ... `)` tuple of `_shared/installer/selection.py`."""
     if not path.is_file():
         return set()
     names: set[str] = set()
     collecting = False
     for line in path.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
-        if stripped.startswith("ALL_SKILLS=("):
+        if stripped.startswith("ALL_SKILLS = ("):
             collecting = True
             continue
         if not collecting:
@@ -441,7 +442,7 @@ def _parse_powershell_install_skills(path: Path) -> set[str]:
 def validate_install_list_sync(repo_root: Path, issues: list[Issue]) -> None:
     install_roots = set(discover_install_roots(repo_root))
     installers = {
-        "install.sh": _parse_bash_install_skills(repo_root / "install.sh"),
+        "_shared/installer/selection.py": _parse_python_install_skills(repo_root / "_shared" / "installer" / "selection.py"),
         "install.ps1": _parse_powershell_install_skills(repo_root / "install.ps1"),
     }
     for filename, names in installers.items():

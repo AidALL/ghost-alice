@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -299,19 +299,16 @@ class GlobalRuleBlockTest(unittest.TestCase):
         self.assertIn("## io-trace Transparency Rule", body)
 
     def test_installers_route_global_rule_files_through_block_helper(self) -> None:
-        sh = installer_bash_source()
-        self.assertIn("global_rule_blocks.py", sh)
-        self.assertIn("claude-merge", sh)
-        self.assertIn("claude-remove", sh)
-        self.assertIn("ensure_claude_bootstrap", sh)
-        self.assertIn("remove_claude_bootstrap_if_unused", sh)
-        self.assertIn('claude) run_logged_if_compact ensure_claude_bootstrap ;;', sh)
-        self.assertNotIn("remove_claude_bootstrap || return 1", sh)
-        self.assertIn("codex-merge", sh)
-        self.assertIn("codex-remove", sh)
-        self.assertNotIn('get_codex_bootstrap_content > "$agents_path"', sh)
-        self.assertNotIn("get_codex_bootstrap_content()", sh)
-        self.assertNotIn("--hookless-fallback", sh)
+        hosts_py = (REPO_ROOT / "_shared" / "installer" / "hosts.py").read_text(encoding="utf-8")
+        self.assertIn("global_rule_blocks.py", hosts_py)
+        self.assertIn("claude-merge", hosts_py)
+        self.assertIn("claude-remove", hosts_py)
+        self.assertIn("def ensure_claude_bootstrap", hosts_py)
+        self.assertIn("def remove_claude_bootstrap_if_unused", hosts_py)
+        self.assertIn("codex-merge", hosts_py)
+        self.assertIn("codex-remove", hosts_py)
+        self.assertNotIn("get_codex_bootstrap_content", hosts_py)
+        self.assertNotIn("--hookless-fallback", hosts_py)
 
         ps1 = installer_ps1_source()
         self.assertIn("global_rule_blocks.py", ps1)

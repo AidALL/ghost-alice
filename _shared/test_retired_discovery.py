@@ -9,6 +9,7 @@ import subprocess
 import sys
 import hashlib
 import os
+from unittest import mock
 import pytest
 from retired_assets import retire_skill, retire_command
 from install_destination import InstallDestination, use
@@ -439,7 +440,7 @@ def test_exact_source_link_entry_respects_owned_parent_guard(tmp_path):
 
 
 @pytest.mark.parametrize('platform', ('codex', 'claude'))
-def test_installer_cleanup_calls_retirement_with_explicit_owned_ghost_root(tmp_path, platform):
+def test_installer_cleanup_calls_retirement_with_explicit_owned_ghost_root(tmp_path, platform, capfd):
     target = tmp_path/'skills/jailbreak-detector'
     target.mkdir(parents=True)
     content = '# Managed source fixture\n'
@@ -454,14 +455,17 @@ def test_installer_cleanup_calls_retirement_with_explicit_owned_ghost_root(tmp_p
     wrapper.write_text(original)
     unknown = commands/'local-skill.md'; unknown.write_text('User-owned command')
     env = {key:value for key,value in os.environ.items() if not key.startswith('GHOST_ALICE_')}
-    env.update(SCRIPT_DIR=str(SHARED.parent), PLATFORM=platform, HOME=str(tmp_path/'home'),
-        CLAUDE_CONFIG_DIR=str(claude), GHOST_ALICE_GHOST_ROOT=str(ghost),
+    env.update(HOME=str(tmp_path/'home'), CLAUDE_CONFIG_DIR=str(claude), GHOST_ALICE_GHOST_ROOT=str(ghost),
         PATH=str(Path(sys.executable).parent)+os.pathsep+os.environ['PATH'])
-    command = 'source "$SCRIPT_DIR/installer_lib/platform.sh"\nsource "$SCRIPT_DIR/installer_lib/python_runtime.sh"\nsource "$SCRIPT_DIR/installer_lib/targets.sh"\nDEPRECATED_INSTALLED_SKILLS=()\ncleanup_deprecated_installed_skills "$1"'
-    result = subprocess.run(['/bin/bash','-c',command,'retirement-source-fixture',str(target.parent)],
-        env=env, text=True, capture_output=True)
-    assert result.returncode == 0, result.stdout+result.stderr
-    assert result.stderr == ''
+    from installer import cli as installer_cli, selection
+    ctx = installer_cli.Context(options=installer_cli.Options(platform=platform), source_root=SHARED.parent,
+        platform=platform, skills_dir=target.parent)
+    # The installer's own deprecated list is empty here: only the retirement discovery runs.
+    with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(selection, 'DEPRECATED_INSTALLED_SKILLS', ()):
+        completed = selection.cleanup_deprecated_installed_skills(ctx, target.parent)
+    out, err = capfd.readouterr()
+    assert completed, out+err
+    assert err == ''
     assert not target.exists()
     backup = next((ghost/'deprecated-skill-backups').glob('*/jailbreak-detector'))
     assert (backup/'SKILL.md').read_text() == content

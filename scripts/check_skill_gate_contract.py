@@ -60,10 +60,10 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                  'platforms\\codex\\AGENTS.md',
                  'session-intent + prompt + web-search + tool-checkpoint + completion '
                  '+ session-start + io-trace'],
- 'install.sh': ['session-gates.json',
-                'platforms/codex/AGENTS.md',
-                'session-intent + prompt + web-search + tool-checkpoint + completion '
-                '+ session-start + io-trace'],
+ '_shared/installer/source.py': ['session-gates.json'],
+ '_shared/installer/hosts.py': ['"platforms" / "codex" / "AGENTS.md"',
+                                'session-intent + prompt + web-search + tool-checkpoint + completion '
+                                '+ session-start + io-trace'],
  '_shared/global_rule_blocks.py': ['CODEX_SPEC',
                                    'render_codex_bootstrap',
                                    'apply_codex_bootstrap',

@@ -31,27 +31,44 @@ Language: [🇺🇸 English](../../reference/installer-architecture.md) | 🇰�
 
 | Layer | Main files | Responsibility |
 | --- | --- | --- |
-| Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | 셸 진입점이 플랫폼별 옵션을 해석하고 인코딩과 실행 환경을 준비한 뒤 Python 설치 절차를 호출합니다 |
-| Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | 설치 조정 코드가 플랫폼과 대상을 선택하고 스킬과 훅을 설치합니다. 설치 상태를 기록하고 로컬 수정을 보호하며 결과를 보고합니다 |
+| Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | `install.sh`는 UTF-8 로케일을 설정하고 Python 3.11 이상을 찾거나 설치한 뒤, 사용자의 인수를 그대로 `_shared/installer/cli.py`에 넘깁니다. `install.ps1`은 얇은 판이 나올 때까지 PowerShell 설치기를 그대로 담습니다 |
+| Installer package | `_shared/installer/` (`cli`, `auto`, `selection`, `addons`, `preservation`, `transaction`, `hosts`, `diagnostics`, `lifecycle`, `source`, `prerequisites`, `lock`, `report`, `locations`, `config`, `runner`) | 옵션을 해석하고 명령을 고르며 플랫폼과 대상을 정합니다. 설치 단계 순서를 지키고 설치 잠금을 쥐며 보고서를 출력합니다. 파일 변경은 모두 아래 진입점을 거칩니다 |
+| Installer entry points | `_shared/install_hooks.py`, `_shared/install_transaction.py`, `_shared/install_state_writer.py`, `_shared/addon_installer.py`, `_shared/uninstall_cleanup.py`, `_shared/install_doctor.py`와 패키지가 자식 프로세스로 실행하는 다른 `_shared/*.py` 도구 | 스킬과 훅을 설치하고 설치 상태를 기록합니다. 로컬 수정을 보호하고 관리 대상을 제거하며 설치를 진단합니다 |
 | Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | 설치된 스킬, 플랫폼 훅 설정, Claude·Codex 전역 부트스트랩 지침, 설치 상태 매니페스트, 훅 기능 복원 메타데이터, 병합 대기 자료와 제거 결과를 보관합니다 |
 
 설치기는 설치 파일과 훅을 갱신하면서 사용자가 수정한 파일을 보호하고 자신의 변경을 기록합니다. `status`, `doctor`, 업데이트와 제거 절차는 이 기록을 읽어 실제 설치 상태와 복원 가능한 변경을 판단합니다.
 
 설치된 훅 런타임은 같은 런타임 루트 아래에 `_shared` 모듈과 `session-intent-analyzer/scripts/session_intent_ledger.py`를 함께 포함합니다. 네이티브 훅과 Ghost-ALICE Autopilot은 이 설치본에서 원장 API와 관련 모듈을 불러옵니다. 소스 체크아웃은 설치 입력을 지정하며, 소스 편집만으로 설치된 훅의 실행 모듈이 바뀌지 않습니다. 원장 데이터베이스 경로와 네이티브 세션 식별자는 별도의 실행 입력입니다.
 
-`_shared/hook_definitions.py`는 설치기와 훅 런타임이 함께 읽는 이름을 소유합니다. 훅 ID와 호스트 이벤트 이름, `ghost_alice_context` 제공자 이름, 권한 어댑터 허용 목록이 여기에 있습니다. 이 모듈은 표준 라이브러리만 가져옵니다. 훅 런타임(`hook_profile_gate.py`, `session_intent_analyzer_hook.py`)과 설치기(`install_hooks.py`, `addon_installer.py`, `context_gateway_*` 모듈)가 이 모듈을 가져옵니다. 런타임 모듈은 설치기 모듈을 가져오지 않고, 설치기 모듈은 런타임 모듈을 가져오지 않습니다. `_shared.test_hook_definitions`가 두 규칙을 검사합니다.
+`_shared/hook_definitions.py`는 설치기와 훅 런타임이 함께 읽는 이름을 소유합니다. 훅 ID와 호스트 이벤트 이름, `ghost_alice_context` 제공자 이름, 권한 어댑터 허용 목록이 여기에 있습니다. 이 모듈은 표준 라이브러리만 가져옵니다. 훅 런타임(`hook_profile_gate.py`, `session_intent_analyzer_hook.py`)과 설치기(`install_hooks.py`, `addon_installer.py`, `context_gateway_*` 모듈, `installer` 패키지)가 이 모듈을 가져옵니다. 런타임 모듈은 설치기 모듈을 가져오지 않고, 설치기 모듈은 런타임 모듈을 가져오지 않습니다. `_shared.test_hook_definitions`가 두 규칙을 검사하고, `installer` 패키지의 모듈 이름이 표준 라이브러리 모듈 이름과 겹치지 않는지도 검사합니다.
 
 ## Install Flow
 
 | 전달 주체 | 입력으로 넘기는 내용 | 다음 단계에서 사용하는 결과 |
 | --- | --- | --- |
-| 사용자 명령 → 셸 진입점 | 설치·갱신·제거 옵션, 플랫폼 선택, 선택적 애드온 출처. | 해석한 옵션과 사용 가능한 Python 실행 환경. |
-| 진입점 → 설치 조정 코드 | 옵션, 소스 체크아웃, 선택 플랫폼. | 선택한 스킬 패키지와 정확한 설치 대상. |
+| 사용자 명령 → 셸 진입점 | 입력한 명령줄 그대로. | 사용 가능한 Python 3.11 이상 실행 환경과, 바뀌지 않은 인수. |
+| 진입점 → `installer.cli` | 인수와 셸이 놓인 소스 체크아웃. | 해석한 옵션, 선택한 명령, 설치라면 플랫폼·스킬 디렉터리·적용 가시성. |
+| `installer.cli` → `installer.selection`·`installer.addons` | 요청한 스킬 이름과 애드온 출처. | 정확한 설치 대상(핵심 스킬, `_shared`, 애드온 대상)과 대상 수. |
 | 조정 코드 → 플랫폼 배포 | 소스 파일과 대상 경로. | 설치한 스킬·도우미와 보존한 로컬 수정. |
 | 배포 → 훅·부트스트랩 동기화 | 관리 파일 내용, 플랫폼 경로, 등록 명령. | 갱신한 관리 규칙 블록과 훅 등록. |
 | 설치기 → 설치 상태 기록기 → 상태 출력 | 실제 변경 대상·해시·복원 정보. | Status·doctor·제거에서 읽을 플랫폼 매니페스트와 설치 보고서. |
 
-Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달하고 실제 설치는 `install.ps1`이 담당합니다. Unix 계열 환경에서는 `install.sh`가 셸 진입점을 담당하며 필요할 때 Bash로 다시 실행합니다.
+Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달하고 실제 설치는 `install.ps1`이 담당합니다. Unix 계열 환경에서는 `install.sh`가 셸 진입점을 담당하며 필요할 때 Bash로 다시 실행합니다. `--help`와 `--list`를 포함한 모든 명령은 Python에서 실행됩니다. 셸은 설치기 문구의 사본을 갖지 않습니다.
+
+### 설치 단계 순서
+
+`installer.cli.run_install`은 설치를 다음 순서로 진행합니다. `_shared/test_installer_cli.py`가 이 순서를 고정합니다.
+
+1. 선행 도구(`git`, `node`)와 소스 체크아웃의 git hook 경로.
+2. 설치 잠금(`~/.ghost-alice/install.lock`). 명령이 끝날 때까지 쥡니다.
+3. 소스 상태 확인, 그다음 대상 수집(핵심 스킬, `_shared`, 애드온 대상).
+4. deprecated 설치 스킬을 발견 경로 밖으로 옮긴 뒤, 인코딩 검사, 그다음 로컬 수정을 격리하거나 기록하는 사전 점검.
+5. 중단된 애드온 제거를 재개합니다. 애드온 충돌은 설치를 멈춥니다.
+6. 배치: `_shared`와 모든 대상을 링크(Claude Code)로, 또는 하나의 복사 배치(Codex)로 `install_transaction.py`를 통해 놓습니다.
+7. 런타임 `_shared` 동기화, 훅 설치, 관리 규칙 블록, 명령 래퍼.
+8. 검증, 소유 표지, merge-companion 스냅숏, 애드온 사이드카, 설치 상태 매니페스트, 설치 이벤트.
+
+제거, 복구(`--repair`), `--cleanup-pending`, `gateway` 전달 명령도 잠금 아래에서 실행됩니다. 게이트웨이를 조정하는 자식 도구는 자신을 호출한 설치기 프로세스의 잠금을 그대로 씁니다. 잠금 파일이 그 프로세스 ID를 기록하며, 무관한 소유자는 도구를 막습니다.
 
 ## Gateway Lifecycle
 
@@ -91,10 +108,12 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 
 | Change type | Start here | Then verify with |
 | --- | --- | --- |
-| Shell flag or platform bootstrap | `install.sh`, `install.ps1`, `install.cmd` | shell parser tests, runtime detection tests, compatibility matrix groups |
+| Python runtime detection or locale setup | `install.sh`, `install.ps1`, `install.cmd` | `scripts/tests/test_thin_shells.py`, `scripts/tests/test_install_runtime_detection.py`, compatibility matrix groups |
+| Installer option, command dispatch or install order | `_shared/installer/cli.py`, `_shared/installer/auto.py` | `_shared/test_installer_cli.py`, `_shared/test_installer_auto.py`, `_shared/test_*_shell.py` end-to-end tests |
+| Installer wording or the install report | `_shared/installer/report.py` | `_shared/test_installer_report.py`, `scripts/tests/test_installer_default_auto.py` |
 | Hook payload or hook status wording | `_shared/install_hooks.py` | `_shared.test_install_hooks`, `scripts/check_skill_gate_contract.py` |
 | Hook id, host event name or privileged adapter allowlist | `_shared/hook_definitions.py` | `_shared.test_hook_definitions` |
-| Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `installer_lib/` | install-state schema tests and uninstall tests |
+| Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `_shared/installer/lifecycle.py`, `_shared/installer/transaction.py` | `_shared/test_installer_lifecycle.py`, `_shared/test_installer_transaction.py`, install-state schema tests and uninstall tests |
 | Public docs or command surface | `README.md`, `docs/`, `docs/index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
 | Platform compatibility rule | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list` and policy가 지정한 focused group |
 

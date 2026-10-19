@@ -1,19 +1,12 @@
+"""The install report names only the hooks every platform installs (`installer.report.hook_suite_label`)."""
 from __future__ import annotations
 
-import subprocess
-import unittest
 from pathlib import Path
+import sys
+import unittest
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-REPORT_SH = REPO_ROOT / "installer_lib" / "report.sh"
-
-
-def suite_label(platform_label: str) -> str:
-    result = subprocess.run(
-        ["bash", "-c", f'source "{REPORT_SH}"; hook_suite_label "$1"', "_", platform_label],
-        capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL,
-    )
-    return result.stdout.strip()
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
+from installer.report import hook_suite_label as suite_label  # noqa: E402
 
 
 class ReportHookSuiteLabelTests(unittest.TestCase):

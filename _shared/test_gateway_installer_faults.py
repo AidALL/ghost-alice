@@ -4,18 +4,20 @@ The candidate gateway is a real loopback process. Only the launchctl executable
 and explicitly selected failure boundaries are simulated. No user's native
 service, configuration, credentials or installed files enter these fixtures.
 """
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import shutil
 import signal
-import shlex
 import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 import context_gateway_model as model
 
@@ -174,44 +176,44 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertTrue((self.state / 'installation.json').exists())
         self.assertEqual(stat.S_IMODE((self.codex / 'config.toml').stat().st_mode), original[self.codex / 'config.toml'][1])
 
-    def selected_removal_script(self, names, *, remaining=True):
-        bash = shutil.which('bash')
-        if not bash:
-            self.skipTest('bash is required for selected removal integration')
+    def selected_removal(self, names, *, remaining=True, fault=''):
+        """Run the installer's selected removal (`--uninstall --force <names>`) for codex against the
+        fixture source and the native-service simulator; return its exit code."""
         source = self.root / 'installer-source'
         helper = source / '_shared/context_gateway_install.py'
         helper.parent.mkdir(parents=True, exist_ok=True)
         helper.write_text('import sys\nsys.path.insert(0, ' + repr(str(ROOT / '_shared')) + ')\n'
             'import context_gateway_install as gateway\ngateway.sys.platform="darwin"\n'
             'raise SystemExit(gateway.main())\n')
-        script = '\n'.join([
-            'source ' + shlex.quote(str(ROOT / 'installer_lib/targets.sh')),
-            'source ' + shlex.quote(str(ROOT / 'installer_lib/uninstall.sh')),
-            'SCRIPT_DIR=' + shlex.quote(str(source)),
-            'PLATFORM=codex', 'SKILLS_DIR=' + shlex.quote(str(self.shared.parent)),
-            '_find_python_runtime() { printf "%s\\n" ' + shlex.quote(sys.executable) + '; }',
-            'ok() { :; }', 'info() { :; }', 't() { printf "%s" "$1"; }',
-            'expand_skill_targets() { printf "%s|fixture\\n" "$1"; }',
-            'validate_requested_skills() { :; }', '_resume_pending_addon_uninstalls() { :; }',
-            'has_managed_installs() { return ' + ('0' if remaining else '1') + '; }',
-            'remove_codex_bootstrap_if_unused() { return 1; }',
-            'uninstall --force ' + ' '.join(map(shlex.quote, names)),
-        ])
-        return bash, script
+        from installer import addons, cli, hosts, lifecycle, runner, selection
+        from installer.runner import InstallerExit
+        environment = dict(self.environment, FAULT_CASE=fault,
+            PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
+        ctx = cli.Context(options=cli.Options(platform='codex'), source_root=source, platform='codex',
+            skills_dir=self.shared.parent)
+        with mock.patch.dict(os.environ, environment, clear=True), \
+                mock.patch.object(runner, 'REPO_ROOT', source), \
+                mock.patch.object(selection, 'expand_skill_targets',
+                    lambda root, name: [selection.Target(name, Path('fixture'), None)]), \
+                mock.patch.object(selection, 'validate_requested_skills', lambda root, names: None), \
+                mock.patch.object(selection, 'has_managed_installs', lambda root, skills_dir: remaining), \
+                mock.patch.object(addons, 'resume_pending_uninstalls', lambda ctx: None), \
+                mock.patch.object(hosts, 'remove_codex_bootstrap_if_unused', lambda ctx, skills_dir: False), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            try:
+                return lifecycle.uninstall(ctx, ['--force', *names])
+            except InstallerExit as stop:
+                return stop.code
 
     def test_selected_skill_removal_guards_companion_before_deleting_it(self):
         self.seed()
         target = self.shared.parent / 'session-intent-analyzer'
         independent = self.shared.parent / 'writing-plans'
         independent.mkdir()
-        bash, script = self.selected_removal_script(['writing-plans', 'session-intent-analyzer'])
         for fault, expected in [('stop-error', 3), ('', 0)]:
             with self.subTest(fault=fault):
-                environment = dict(self.environment, FAULT_CASE=fault,
-                    PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
-                result = subprocess.run([bash, '-c', script], env=environment,
-                    capture_output=True, text=True, timeout=30)
-                self.assertEqual(result.returncode, expected, result.stderr + result.stdout)
+                code = self.selected_removal(['writing-plans', 'session-intent-analyzer'], fault=fault)
+                self.assertEqual(code, expected)
                 self.assertEqual(target.exists(), bool(fault))
                 self.assertEqual(independent.exists(), bool(fault))
                 self.assertEqual(json.loads((self.root / 'native.json').read_text())['active'], bool(fault))
@@ -220,12 +222,8 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.seed()
         independent = self.shared.parent / 'writing-plans'
         independent.mkdir()
-        bash, script = self.selected_removal_script(['writing-plans'], remaining=False)
-        environment = dict(self.environment, FAULT_CASE='stop-error',
-            PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
-        result = subprocess.run([bash, '-c', script], env=environment,
-            capture_output=True, text=True, timeout=30)
-        self.assertEqual(result.returncode, 3, result.stderr + result.stdout)
+        code = self.selected_removal(['writing-plans'], remaining=False, fault='stop-error')
+        self.assertEqual(code, 3)
         self.assertTrue(self.shared.is_dir())
         self.assertTrue(json.loads((self.root / 'native.json').read_text())['active'])
 

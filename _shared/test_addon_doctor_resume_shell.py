@@ -1,5 +1,5 @@
-"""Shell e2e: doctor resumes pending addon uninstall and reports non-ok while
-a removal marker remains unresolved.
+"""Shell e2e: doctor reports a pending addon uninstall marker without resuming it,
+and stays non-ok while a removal marker remains; the next install resumes the removal.
 
 Run: python3 -m pytest _shared/test_addon_doctor_resume_shell.py -q
 """
@@ -54,20 +54,28 @@ class DoctorResumeTest(unittest.TestCase):
             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, check=False)
 
-    def test_doctor_resumes_clean_pending_marker(self):
+    def test_doctor_reports_a_clean_pending_marker_and_the_next_install_resumes_it(self):
         with tempfile.TemporaryDirectory() as home:
             env = self._env(home)
-            self._run(env, "--platform", "claude", "--addon-source", str(FIXTURE),
-                      "--skip-source-health", "task-router")
+            install = self._run(env, "--platform", "claude", "--addon-source", str(FIXTURE),
+                                "--skip-source-health", "task-router")
+            self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             sidecar = Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
             marker = sidecar.with_name("noop.json.removing")
             marker.write_text('{"addon_id":"noop","stage":"removing","targets":["noop"]}',
                               encoding="utf-8")
             doctor = self._run(env, "--platform", "claude", "--doctor")
-            # A clean (hash-matching) pending uninstall is completed by doctor: marker cleared, sidecar removed.
-            self.assertFalse(marker.exists(), msg="doctor did not resume the pending marker: "
-                             + doctor.stderr + doctor.stdout)
+            # Doctor is read-only: it reports the leftover marker and leaves the addon in place.
+            self.assertNotEqual(doctor.returncode, 0, msg=doctor.stderr + doctor.stdout)
+            self.assertIn(".removing", doctor.stderr + doctor.stdout)
+            self.assertTrue(marker.exists())
+            self.assertTrue(sidecar.exists())
+            # The next install resumes the clean (hash-matching) removal before it installs anything.
+            reinstall = self._run(env, "--platform", "claude", "--skip-source-health", "task-router")
+            self.assertEqual(reinstall.returncode, 0, msg=reinstall.stderr + reinstall.stdout)
+            self.assertFalse(marker.exists())
             self.assertFalse(sidecar.exists())
+            self.assertFalse(os.path.lexists(Path(home) / ".claude" / "skills" / "noop"))
 
     def test_doctor_nonzero_when_residual_marker_cannot_resume(self):
         with tempfile.TemporaryDirectory() as home:
@@ -77,7 +85,7 @@ class DoctorResumeTest(unittest.TestCase):
             skill = Path(home) / ".claude" / "skills" / "noop"
             sidecar = Path(home) / ".ghost-alice" / "addons" / "claude" / "noop.json"
             marker = sidecar.with_name("noop.json.removing")
-            # Drift the target so resume preserves it (manual-review) -> marker stays.
+            # Drift the target so a resume would preserve it (manual-review) -> marker stays.
             other = Path(home) / "user-noop"
             other.mkdir()
             (other / "SKILL.md").write_text("user", encoding="utf-8")
