@@ -107,7 +107,12 @@ def report_install_record(ctx: "Context") -> None:
     for dest, entry in entries.items():
         if entry.get("baseline") == "unknown":
             continue
-        diff = content_digest.compare(entry, Path(dest))
+        try:
+            diff = content_digest.compare(entry, Path(dest))
+        except OSError as exc:
+            differing += 1
+            report.warn(f"Install record comparison failed for {dest}: {exc}")
+            continue
         if diff["link_target_differs"]:
             details = "link target differs"
         else:

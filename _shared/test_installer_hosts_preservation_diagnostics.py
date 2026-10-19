@@ -440,6 +440,25 @@ class InstallRecordReportTests(HostCase):
                 self.assertIn("last publish none", out)
                 self.assertIn("[OK] Installed targets match the install record", out)
 
+    @unittest.skipIf(not hasattr(os, "geteuid") or os.geteuid() == 0, "needs a file this user cannot read")
+    def test_a_target_that_cannot_be_read_is_reported_and_the_command_goes_on(self):
+        ctx = self.context("claude")
+        runtime = self.ghost / "runtime" / "current" / "_shared"
+        runtime.mkdir(parents=True)
+        secret = runtime / "a.py"
+        secret.write_text("a", encoding="utf-8")
+        self.write_record({str(runtime): self.entry("copy", ["claude"], kind="runtime",
+                                                    files=content_digest.tree(runtime))})
+        secret.chmod(0)
+        try:
+            results = list(self.run_both(ctx))
+        finally:
+            secret.chmod(0o644)
+        for name, rc, out in results:
+            with self.subTest(command=name):
+                self.assertEqual(rc, 0)
+                self.assertIn(f"[WARN] Install record comparison failed for {runtime}: ", out)
+
     def test_an_unreadable_install_record_is_reported_and_changes_no_result(self):
         record = self.ghost / "installed-payload.json"
         self.ghost.mkdir(parents=True)
