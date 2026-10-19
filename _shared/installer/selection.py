@@ -203,8 +203,8 @@ def skill_description(skill_md: Path) -> str:
     return ""
 
 
-def list_skills(source_root: Path) -> None:
-    """`Available skills:` listing with families and sub-skills (`uninstall.sh:81-108`)."""
+def list_skills(source_root: Path) -> int:
+    """`Available skills:` listing with families and sub-skills (`uninstall.sh:81-108`); exit code 0."""
     report.emit("Available skills:")
     report.emit("")
     for skill in ALL_SKILLS:
@@ -218,3 +218,4 @@ def list_skills(source_root: Path) -> None:
         report.emit(f"  {skill} (family, {len(targets)} sub-skills)")
         for target in targets:
             report.emit(f"    └ {target.name:<26} {skill_description(target.path / 'SKILL.md')}")
+    return 0
