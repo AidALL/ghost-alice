@@ -284,6 +284,53 @@ class PlacementTests(TransactionCase):
         self.assertEqual(transaction.cleanup_shared_if_unused(ctx, ctx.skills_dir), 1)
 
 
+class GatewayReportTests(TransactionCase):
+    """After the runtime publish, the install says whether a context gateway is registered and running. Read-only."""
+
+    def register(self, files=3, source="/src/checkout"):
+        receipt = self.ghost / "context-gateway" / "installation.json"
+        receipt.parent.mkdir(parents=True)
+        receipt.write_text(json.dumps({"schema_version": "context-gateway-installation.v1", "source_root": source,
+                                       "files": {f"/f{i}": "sha256:0" for i in range(files)}}), encoding="utf-8")
+        (self.ghost / "context-gateway-binding.json").write_text(json.dumps({
+            "schema_version": "context-gateway-binding.v1", "installation_path": str(receipt),
+            "installation_digest": "sha256:0"}), encoding="utf-8")
+        return receipt
+
+    def test_no_binding_prints_nothing(self):
+        with self.runner.patch():
+            _, out = self.captured(transaction.report_gateway, self.context("claude"))
+        self.assertEqual(out, "")
+        self.assertEqual(self.runner.calls, [])
+
+    def test_a_registered_running_gateway_is_one_info_line(self):
+        self.register()
+        self.runner.respond(lambda script, args: script == "command" and args[:2] == ["launchctl", "print"], ToolResult(0))
+        with self.runner.patch():
+            _, out = self.captured(transaction.report_gateway, self.context("codex"))
+        self.assertIn("[INFO] Context gateway: registered from /src/checkout, 3 files, service running", out)
+        self.assertEqual(self.runner.commands()[0][:2], ["launchctl", "print"])
+        self.assertTrue(self.runner.commands()[0][2].endswith("/org.ghost-alice.context-gateway"))
+
+    def test_a_stopped_service_is_a_warning(self):
+        self.register(files=1)
+        self.runner.respond(lambda script, args: script == "command", ToolResult(113))
+        with self.runner.patch():
+            _, out = self.captured(transaction.report_gateway, self.context("codex"))
+        self.assertIn("[WARN] Context gateway: registered from /src/checkout, 1 file, service not running", out)
+
+    def test_an_unreadable_receipt_is_a_warning_and_the_install_goes_on(self):
+        receipt = self.register()
+        receipt.write_text("{broken", encoding="utf-8")
+        with self.runner.patch():
+            _, out = self.captured(transaction.report_gateway, self.context("claude"))
+        self.assertIn(f"[WARN] Context gateway: registered, but its receipt cannot be read: {receipt}", out)
+        (self.ghost / "context-gateway-binding.json").write_text("[]", encoding="utf-8")
+        with self.runner.patch():
+            _, out = self.captured(transaction.report_gateway, self.context("claude"))
+        self.assertIn("[WARN] Context gateway: registered, but its binding cannot be read", out)
+
+
 class RecordMigrationTests(TransactionCase):
     """The first install over an earlier installer's records creates the install record from them once."""
 

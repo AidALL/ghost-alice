@@ -521,7 +521,8 @@ class InstallOrderTests(CliCase):
     STEPS = ("install_prerequisites", "setup_git_hooks", "acquire", "migrate_record", "check_source_health",
              "collect_targets",
              "cleanup_deprecated_installed_skills", "encoding_guard", "preflight", "resume_pending_uninstalls",
-             "check_addon_collisions", "sync_runtime_shared", "install_hooks", "ensure_bootstrap", "sync_commands",
+             "check_addon_collisions", "sync_runtime_shared", "report_gateway", "install_hooks", "ensure_bootstrap",
+             "sync_commands",
              "verify_after_copy", "write_ownership_markers", "snapshot_after_install", "migrate_state_once",
              "write_sidecars", "write_install_state_manifest", "write_event", "release")
 
@@ -546,6 +547,7 @@ class InstallOrderTests(CliCase):
         self.stub("installer.transaction.copy_targets_batch", True)
         self.stub("installer.transaction.record_current_links")
         self.stub("installer.transaction.sync_runtime_shared", True)
+        self.stub("installer.transaction.report_gateway")
         self.stub("installer.hosts.install_hooks", True)
         self.stub("installer.hosts.ensure_claude_bootstrap", True)
         self.stub("installer.hosts.ensure_codex_bootstrap", True)
@@ -661,7 +663,7 @@ class InstallOrderTests(CliCase):
              "sync_runtime_shared"),
             ("codex", "installer.transaction.copy_targets_batch", False, 1, None, "sync_runtime_shared"),
             ("claude", "installer.transaction.sync_runtime_shared", False, 1,
-             "[ERROR] Runtime shared core sync failed. Aborting hook install", "install_hooks"),
+             "[ERROR] Runtime shared core sync failed. Aborting hook install", "report_gateway"),
             ("claude", "installer.hosts.install_hooks", False, 1, "[ERROR] Hook install failed. Aborting skill install",
              "ensure_claude_bootstrap"),
             ("claude", "installer.hosts.ensure_claude_bootstrap", False, 1, None, "sync_commands"),

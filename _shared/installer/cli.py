@@ -490,6 +490,7 @@ def run_install(ctx: Context) -> int:
         report.error("Runtime shared core sync failed. Aborting hook install")
         _details_log()
         raise InstallerExit(1)
+    report.run_logged(transaction.report_gateway, ctx)
     if not report.run_logged(hosts.install_hooks, ctx, "install", ctx.platform):
         report.error("Hook install failed. Aborting skill install")
         _details_log()

@@ -123,6 +123,24 @@ class InstallRecordShellTest(unittest.TestCase):
         self.assertEqual({entry["baseline"] for entry in targets.values()}, {"recorded"})
         self.assert_matches_the_disk(targets)
 
+    def test_the_last_host_removal_takes_the_record_and_the_publish_rollbacks(self):
+        (self.home / ".claude").mkdir()
+        (self.home / ".codex").mkdir()
+        self.run_installer("--skip-source-health")
+        record = installed_payload.path(self.ghost)
+        rollbacks = install_transaction.rollbacks_root(self.ghost)
+        self.run_installer("--platform", "claude", "--uninstall")
+        # Codex is still installed: the shared record and rollbacks stay for it.
+        self.assertTrue(record.exists())
+        self.assertTrue(rollbacks.is_dir())
+        self.assertTrue((self.ghost / "install-state" / "codex.json").is_file())
+        self.run_installer("--platform", "codex", "--uninstall")
+        self.assertFalse(record.exists())
+        self.assertFalse(rollbacks.exists())
+        archived = list((self.ghost / "uninstall-backup" / "codex" / "support-state").glob("publish-rollbacks-*"))
+        self.assertEqual(len(archived), 1)
+        self.assertTrue(any(archived[0].rglob("journal.json")))
+
     def test_the_first_install_over_earlier_records_creates_the_record_from_them(self):
         (self.home / ".codex").mkdir()
         self.run_installer("--platform", "codex", "--skip-source-health")
