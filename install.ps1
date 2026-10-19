@@ -144,35 +144,34 @@ function Initialize-PythonRuntimeForInstall {
 }
 
 # ── Arguments ─────────────────────────────────────────────
-# The parameter names of the earlier install.ps1, written PowerShell style, become the
-# cli flags; -Skills disappears and its skill names follow as they are. Every other
-# argument, the cli's own --flags included, passes through unchanged and in order.
-$PowerShellParameterFlags = @{
-    "-Skills"           = ""
-    "-Platform"         = "--platform"
-    "-PromptPlatform"   = "--prompt-platform"
-    "-Auto"             = "--auto"
-    "-List"             = "--list"
-    "-Status"           = "--status"
-    "-Doctor"           = "--doctor"
-    "-Uninstall"        = "--uninstall"
-    "-Force"            = "--force"
-    "-CleanupPending"   = "--cleanup-pending"
-    "-Addon"            = "--addon"
-    "-AddonSource"      = "--addon-source"
-    "-AddonTag"         = "--addon-tag"
-    "-AddonSkip"        = "--addon-skip"
-    "-ListAddons"       = "--list-addons"
-    "-AgentVisibility"  = "--visibility"
-    "-Visibility"       = "--visibility"
-    "-UpdateSource"     = "--update-source"
-    "-SkipSourceHealth" = "--skip-source-health"
-    "-DestinationFile"  = "--destination-file"
-    "-Help"             = "--help"
-}
-
 function ConvertTo-InstallerArgument {
     param([object[]]$Arguments)
+    # The parameter names of the earlier install.ps1, written PowerShell style, become the
+    # cli flags; -Skills disappears and its skill names follow as they are. Every other
+    # argument, the cli's own --flags included, passes through unchanged and in order.
+    $PowerShellParameterFlags = @{
+        "-Skills"           = ""
+        "-Platform"         = "--platform"
+        "-PromptPlatform"   = "--prompt-platform"
+        "-Auto"             = "--auto"
+        "-List"             = "--list"
+        "-Status"           = "--status"
+        "-Doctor"           = "--doctor"
+        "-Uninstall"        = "--uninstall"
+        "-Force"            = "--force"
+        "-CleanupPending"   = "--cleanup-pending"
+        "-Addon"            = "--addon"
+        "-AddonSource"      = "--addon-source"
+        "-AddonTag"         = "--addon-tag"
+        "-AddonSkip"        = "--addon-skip"
+        "-ListAddons"       = "--list-addons"
+        "-AgentVisibility"  = "--visibility"
+        "-Visibility"       = "--visibility"
+        "-UpdateSource"     = "--update-source"
+        "-SkipSourceHealth" = "--skip-source-health"
+        "-DestinationFile"  = "--destination-file"
+        "-Help"             = "--help"
+    }
     $converted = @()
     foreach ($argument in $Arguments) {
         $text = [string]$argument
@@ -183,7 +182,7 @@ function ConvertTo-InstallerArgument {
         }
         $converted += $text
     }
-    return , $converted
+    return ,$converted
 }
 
 # ── Run the installer ─────────────────────────────────────
