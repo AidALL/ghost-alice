@@ -321,6 +321,7 @@ def print_help() -> int:
         for row in COMMAND_LINE:
             if row.section != section:
                 continue
+            # The usage column is 23 wide; a longer usage stands alone and its text follows on the next line.
             if len(row.usage) <= 21:
                 report.emit(f"  {row.usage:<23}{row.text}")
             else:
@@ -429,8 +430,8 @@ def prepare_install(ctx: Context) -> None:
 
 
 def run_install(ctx: Context) -> int:
-    """S4–S19 for the skills in `args` (every skill when none), under the install
-    lock (`docs/reference/installer-architecture.md`)."""
+    """S4–S18 for the skills in `args` (every skill when none), under the install
+    lock that `run_command` takes and releases (`docs/reference/installer-architecture.md`)."""
     options = ctx.options
     skills = list(options.args) or list(selection.ALL_SKILLS)
     skills_dir = Path(ctx.skills_dir)
