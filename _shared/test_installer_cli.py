@@ -415,28 +415,37 @@ class InstallOrderTests(CliCase):
         self.assertEqual(names[-1], "release")
 
     def test_every_required_step_failure_stops_the_install_and_releases_the_lock(self):
-        # Every step the bash installer aborted on (installer_lib/install.sh:880-1139) still aborts the install,
-        # the step after it never runs, and the lock is released last.
+        # Every step the bash installer aborted on (installer_lib/install.sh:880-1139) still aborts the install:
+        # the failing step itself ran, the step after it never runs, no install event is written, and the lock is
+        # released last. Placement failures carry their own codes: install_shared propagates the transaction's
+        # code, a failed link or copy exits 1.
         cases = (
-            ("installer.selection.cleanup_deprecated_installed_skills", None, "encoding_guard"),
-            ("installer.preservation.encoding_guard", "[ERROR] encoding guard failed", "preflight"),
-            ("installer.preservation.preflight", None, "resume_pending_uninstalls"),
-            ("installer.transaction.sync_runtime_shared",
+            ("claude", "installer.selection.cleanup_deprecated_installed_skills", False, 1, None, "encoding_guard"),
+            ("claude", "installer.preservation.encoding_guard", False, 1, "[ERROR] encoding guard failed", "preflight"),
+            ("claude", "installer.preservation.preflight", False, 1, None, "resume_pending_uninstalls"),
+            ("claude", "installer.transaction.install_shared", 3, 3, None, "link_or_copy"),
+            ("claude", "installer.transaction.link_or_copy", 2, 1, "[ERROR] Managed target replacement failed",
+             "sync_runtime_shared"),
+            ("codex", "installer.transaction.copy_targets_batch", False, 1, None, "sync_runtime_shared"),
+            ("claude", "installer.transaction.sync_runtime_shared", False, 1,
              "[ERROR] Runtime shared core sync failed. Aborting hook install", "install_hooks"),
-            ("installer.hosts.install_hooks", "[ERROR] Hook install failed. Aborting skill install", "ensure_claude_bootstrap"),
-            ("installer.hosts.ensure_claude_bootstrap", None, "sync_commands"),
-            ("installer.transaction.verify_after_copy", None, "write_ownership_markers"),
-            ("installer.transaction.write_ownership_markers", None, "snapshot_after_install"),
-            ("installer.transaction.snapshot_after_install", None, "migrate_state_once"),
-            ("installer.addons.write_sidecars", None, "write_install_state_manifest"),
-            ("installer.transaction.write_install_state_manifest", None, "write_event"),
+            ("claude", "installer.hosts.install_hooks", False, 1, "[ERROR] Hook install failed. Aborting skill install",
+             "ensure_claude_bootstrap"),
+            ("claude", "installer.hosts.ensure_claude_bootstrap", False, 1, None, "sync_commands"),
+            ("codex", "installer.hosts.ensure_codex_bootstrap", False, 1, None, "sync_commands"),
+            ("claude", "installer.transaction.verify_after_copy", False, 1, None, "write_ownership_markers"),
+            ("claude", "installer.transaction.write_ownership_markers", False, 1, None, "snapshot_after_install"),
+            ("claude", "installer.transaction.snapshot_after_install", False, 1, None, "migrate_state_once"),
+            ("claude", "installer.addons.write_sidecars", False, 1, None, "write_install_state_manifest"),
+            ("claude", "installer.transaction.write_install_state_manifest", False, 1, None, "write_event"),
         )
-        for target, message, never_called in cases:
-            with self.subTest(step=target.rsplit(".", 1)[-1]):
+        for platform, target, failure, code, message, never_called in cases:
+            with self.subTest(platform=platform, step=target.rsplit(".", 1)[-1]):
                 self.calls.clear()
-                with mock.patch(target, return_value=False):
-                    ctx = make_context(self.source, self.home, "claude")
-                    out = self.expect_exit(1, cli.run_install, ctx, [])
+                with mock.patch(target, return_value=failure) as failing:
+                    ctx = make_context(self.source, self.home, platform)
+                    out = self.expect_exit(code, cli.run_install, ctx, ["task-router", "alpha"])
+                failing.assert_called()
                 if message:
                     self.assertIn(message, out)
                 names = [n for n, _, _ in self.calls]
