@@ -414,6 +414,36 @@ class InstallOrderTests(CliCase):
         self.assertNotIn("verify_after_copy", names)
         self.assertEqual(names[-1], "release")
 
+    def test_every_required_step_failure_stops_the_install_and_releases_the_lock(self):
+        # Every step the bash installer aborted on (installer_lib/install.sh:880-1139) still aborts the install,
+        # the step after it never runs, and the lock is released last.
+        cases = (
+            ("installer.selection.cleanup_deprecated_installed_skills", None, "encoding_guard"),
+            ("installer.preservation.encoding_guard", "[ERROR] encoding guard failed", "preflight"),
+            ("installer.preservation.preflight", None, "resume_pending_uninstalls"),
+            ("installer.transaction.sync_runtime_shared",
+             "[ERROR] Runtime shared core sync failed. Aborting hook install", "install_hooks"),
+            ("installer.hosts.install_hooks", "[ERROR] Hook install failed. Aborting skill install", "ensure_claude_bootstrap"),
+            ("installer.hosts.ensure_claude_bootstrap", None, "sync_commands"),
+            ("installer.transaction.verify_after_copy", None, "write_ownership_markers"),
+            ("installer.transaction.write_ownership_markers", None, "snapshot_after_install"),
+            ("installer.transaction.snapshot_after_install", None, "migrate_state_once"),
+            ("installer.addons.write_sidecars", None, "write_install_state_manifest"),
+            ("installer.transaction.write_install_state_manifest", None, "write_event"),
+        )
+        for target, message, never_called in cases:
+            with self.subTest(step=target.rsplit(".", 1)[-1]):
+                self.calls.clear()
+                with mock.patch(target, return_value=False):
+                    ctx = make_context(self.source, self.home, "claude")
+                    out = self.expect_exit(1, cli.run_install, ctx, [])
+                if message:
+                    self.assertIn(message, out)
+                names = [n for n, _, _ in self.calls]
+                self.assertNotIn(never_called, names)
+                self.assertNotIn("write_event", names)
+                self.assertEqual(names[-1], "release")
+
     def test_default_skills_are_all_skills(self):
         ctx = make_context(self.source, self.home, "claude")
         self.captured(cli.run_install, ctx, [])
