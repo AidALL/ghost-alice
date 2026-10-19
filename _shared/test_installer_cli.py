@@ -20,7 +20,7 @@ from installer import cli, report  # noqa: E402
 from installer.runner import InstallerExit  # noqa: E402
 from installer.selection import ALL_SKILLS, Collected, Target  # noqa: E402
 from installer.source import HookPathChange  # noqa: E402
-from installer_testing import make_context, make_source, quiet  # noqa: E402
+from installer_testing import make_context, make_source, quiet, use_source  # noqa: E402
 
 
 HELP = """Usage:
@@ -83,6 +83,7 @@ class CliCase(unittest.TestCase):
         self.home = root / "home"
         self.home.mkdir()
         self.source = make_source(root / "src")
+        self.enterContext(use_source(self.source))
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_INSTALL_REPORT_CHILD", "GHOST_ALICE_INSTALL_LOG_FILE",
@@ -398,7 +399,7 @@ class DispatchTests(CliCase):
                     self.assertIs(run.call_args.args[0], command)
 
     def test_run_command_holds_the_table_lock_around_the_handler(self):
-        ctx = make_context(self.source, self.home, "codex")
+        ctx = make_context(self.home, "codex")
         for command in cli.COMMANDS:
             with self.subTest(command=command.usage):
                 self.calls.clear()
@@ -528,7 +529,7 @@ class InstallOrderTests(CliCase):
 
     def test_claude_link_mode_order(self):
         # S1–S19 with placement S12 as install_shared then link_or_copy per target
-        ctx = make_context(self.source, self.home, "claude", args=["task-router", "alpha"])
+        ctx = make_context(self.home, "claude", args=["task-router", "alpha"])
         rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
         self.assertEqual(rc, 0)
         self.assertEqual(self.order(), list(self.STEPS))
@@ -542,7 +543,7 @@ class InstallOrderTests(CliCase):
         self.assertIn("[OK] [5/5] Verification: install state recorded", out) if report.state().report_child else None
 
     def test_codex_copy_mode_uses_one_batch(self):
-        ctx = make_context(self.source, self.home, "codex", args=["task-router", "alpha"])
+        ctx = make_context(self.home, "codex", args=["task-router", "alpha"])
         rc, _ = self.captured(cli.run_command, cli.INSTALL, ctx)
         self.assertEqual(rc, 0)
         placement = [n for n, _, _ in self.calls if n in ("install_shared", "link_or_copy", "copy_targets_batch")]
@@ -556,7 +557,7 @@ class InstallOrderTests(CliCase):
 
     def test_stale_source_stops_before_selection_and_releases_the_lock(self):
         self.patches.enter_context(mock.patch("installer.source.check_source_health", return_value=False))
-        ctx = make_context(self.source, self.home, "claude")
+        ctx = make_context(self.home, "claude")
         with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(InstallerExit) as stop:
             cli.run_command(cli.INSTALL, ctx)
         self.assertEqual(stop.exception.code, 1)
@@ -566,7 +567,7 @@ class InstallOrderTests(CliCase):
 
     def test_failed_step_stops_the_install(self):
         self.patches.enter_context(mock.patch("installer.hosts.install_hooks", return_value=False))
-        ctx = make_context(self.source, self.home, "claude")
+        ctx = make_context(self.home, "claude")
         out = self.expect_exit(1, cli.run_command, cli.INSTALL, ctx)
         self.assertIn("[ERROR] Hook install failed. Aborting skill install", out)
         names = [n for n, _, _ in self.calls]
@@ -603,7 +604,7 @@ class InstallOrderTests(CliCase):
             with self.subTest(platform=platform, step=target.rsplit(".", 1)[-1]):
                 self.calls.clear()
                 with mock.patch(target, return_value=failure) as failing:
-                    ctx = make_context(self.source, self.home, platform, args=["task-router", "alpha"])
+                    ctx = make_context(self.home, platform, args=["task-router", "alpha"])
                     out = self.expect_exit(code, cli.run_command, cli.INSTALL, ctx)
                 failing.assert_called()
                 if message:
@@ -614,7 +615,7 @@ class InstallOrderTests(CliCase):
                 self.assertEqual(names[-1], "release")
 
     def test_default_skills_are_all_skills(self):
-        ctx = make_context(self.source, self.home, "claude")
+        ctx = make_context(self.home, "claude")
         self.captured(cli.run_command, cli.INSTALL, ctx)
         _, args, _ = next(c for c in self.calls if c[0] == "collect_targets")
         self.assertEqual(args[1], list(ALL_SKILLS))

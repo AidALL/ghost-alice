@@ -1,4 +1,4 @@
-"""Shared fixtures for the `installer` tests: a fake source checkout, a Context and a recording runner."""
+"""Shared fixtures for the `installer` tests: a fake source checkout, its `REPO_ROOT` patch, a Context and a recording runner."""
 from __future__ import annotations
 
 from contextlib import ExitStack
@@ -31,11 +31,16 @@ def make_source(root: Path) -> Path:
     return root
 
 
-def make_context(source: Path, home: Path, platform: str = "claude", **options) -> cli.Context:
+def use_source(root: Path):
+    """Run the installer from the fixture checkout `root`: patch `installer.runner.REPO_ROOT`,
+    the one name of the checkout the installer runs from."""
+    return mock.patch("installer.runner.REPO_ROOT", Path(root))
+
+
+def make_context(home: Path, platform: str = "claude", **options) -> cli.Context:
     opts = cli.Options(platform=platform, **options)
     skills_dir = home / ".claude" / "skills" if platform == "claude" else home / ".agents" / "skills"
-    return cli.Context(options=opts, source_root=source, platform=platform, skills_dir=skills_dir,
-                       addon_sources=list(opts.addon_sources))
+    return cli.Context(options=opts, platform=platform, skills_dir=skills_dir, addon_sources=list(opts.addon_sources))
 
 
 class FakeRunner:

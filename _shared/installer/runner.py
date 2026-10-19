@@ -18,7 +18,9 @@ from typing import Mapping, Sequence
 
 from installer import report
 
-# `_shared/installer/runner.py` → the checkout root two levels up.
+# The checkout this installer runs from, two levels above `_shared/installer/runner.py`: the one
+# name for it. Every installer module reads `runner.REPO_ROOT` when it runs, so one patch of this
+# name moves the whole installer to another checkout.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

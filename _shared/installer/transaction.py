@@ -47,7 +47,7 @@ class SyncCounts:
 def _targets(ctx: "Context", skills: list[str]) -> "list[Target]":
     from installer import selection
 
-    return selection.iter_install_targets(ctx.source_root, skills, ctx.addon_targets)
+    return selection.iter_install_targets(skills, ctx.addon_targets)
 
 
 def copy_target(ctx: "Context", source_path: Path, dest: Path) -> bool:
@@ -100,7 +100,7 @@ def link_or_copy(ctx: "Context", source_path: Path, dest: Path) -> int:
 def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool) -> int:
     """`_shared` placement: copy in copy mode, skip when already linked to the
     source, else link-or-copy (`targets.sh:248-261`)."""
-    shared_src = Path(ctx.source_root) / "_shared"
+    shared_src = runner.REPO_ROOT / "_shared"
     shared_dest = Path(skills_dir) / "_shared"
     if not shared_src.is_dir():
         return 0
@@ -113,8 +113,8 @@ def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool) -> int:
 
 
 def sync_runtime_shared(ctx: "Context") -> bool:
-    """Copy `<source>/_shared` to the runtime shared dir (`install.sh:95-103`)."""
-    shared_src = Path(ctx.source_root) / "_shared"
+    """Copy `<checkout>/_shared` to the runtime shared dir (`install.sh:95-103`)."""
+    shared_src = runner.REPO_ROOT / "_shared"
     if not shared_src.is_dir():
         return True
     if not copy_target(ctx, shared_src, locations.runtime_shared_dir()):
@@ -166,7 +166,7 @@ def cleanup_shared_if_unused(ctx: "Context", skills_root: Path) -> int:
     from installer import selection
 
     skills_root = Path(skills_root)
-    if selection.has_managed_installs(ctx.source_root, skills_root):
+    if selection.has_managed_installs(skills_root):
         return 1
     shared = skills_root / "_shared"
     if shared.is_symlink() or shared.is_dir():
@@ -182,7 +182,7 @@ def cleanup_shared_if_unused(ctx: "Context", skills_root: Path) -> int:
 def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str]) -> bool:
     """`merge-companion/scripts/install_verifier.py --platform --state-root --target NAME SRC DEST MODE ...` (`install.sh:428-470`)."""
     skills_dir = Path(skills_dir)
-    shared_src = Path(ctx.source_root) / "_shared"
+    shared_src = runner.REPO_ROOT / "_shared"
     args = ["--platform", ctx.platform, "--state-root", str(locations.install_state_path(ctx.platform).parent)]
     targets: list[str] = []
     if shared_src.is_dir():
@@ -202,7 +202,7 @@ def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, skills:
 def write_ownership_markers(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str]) -> bool:
     """`installer_assets_cli.py --platform --source-repo --source-commit --target ... --addon-target ...` (`install.sh:487-536`)."""
     skills_dir = Path(skills_dir)
-    info = source.resolve_source(ctx.source_root)
+    info = source.resolve_source()
     targets: list[str] = []
     shared_dest = skills_dir / "_shared"
     if shared_dest.exists() or shared_dest.is_symlink():
@@ -259,9 +259,9 @@ def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bo
     except OSError:
         report.error(f"Could not create install-state directory; aborting install: {state_path.parent}")
         return False
-    info = source.resolve_source(ctx.source_root)
+    info = source.resolve_source()
     targets: list[str] = []
-    shared_src = Path(ctx.source_root) / "_shared"
+    shared_src = runner.REPO_ROOT / "_shared"
     if shared_src.exists():
         targets.extend(["_shared", str(shared_src), str(skills_dir / "_shared"),
                         detect_install_mode(skills_dir / "_shared", copy_only)])

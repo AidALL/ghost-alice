@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer import source  # noqa: E402
+from installer_testing import use_source  # noqa: E402
 
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
@@ -61,7 +62,8 @@ class SourceCase(unittest.TestCase):
     def check(self, repo: Path, *, skip: bool = False) -> tuple[bool, str]:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            result = source.check_source_health(repo, skip=skip)
+            with use_source(repo):
+                result = source.check_source_health(skip=skip)
         return result, out.getvalue()
 
 
@@ -163,31 +165,33 @@ class GitHooksTests(SourceCase):
     def test_setup_git_hooks_sets_and_records_the_path(self):
         # source_health.sh:91-116
         repo = init_repo(self.root / "repo")
+        self.enterContext(use_source(repo))
         hook = repo / "hooks" / "post-merge"
         hook.parent.mkdir()
         hook.write_text("#!/bin/sh\n", encoding="utf-8")
         hook.chmod(0o644)
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            change = source.setup_git_hooks(repo)
+            change = source.setup_git_hooks()
         self.assertEqual(change, source.HookPathChange(changed=True, before_present=False, before="", after="hooks"))
         self.assertEqual(git(repo, "config", "--local", "core.hooksPath"), "hooks")
         self.assertIn("[INFO] Git hook path → hooks (post-merge auto-refresh enabled)", out.getvalue())
         self.assertTrue(hook.stat().st_mode & stat.S_IXUSR)
         with contextlib.redirect_stdout(io.StringIO()):
-            again = source.setup_git_hooks(repo)
+            again = source.setup_git_hooks()
         self.assertFalse(again.changed)
         git(repo, "config", "--local", "core.hooksPath", "elsewhere")
         with contextlib.redirect_stdout(io.StringIO()):
-            replaced = source.setup_git_hooks(repo)
+            replaced = source.setup_git_hooks()
         self.assertEqual(replaced, source.HookPathChange(changed=True, before_present=True, before="elsewhere", after="hooks"))
 
     def test_setup_git_hooks_outside_git_warns(self):
         plain = self.root / "plain"
         plain.mkdir()
+        self.enterContext(use_source(plain))
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            change = source.setup_git_hooks(plain)
+            change = source.setup_git_hooks()
         self.assertFalse(change.changed)
         self.assertIn("[WARN] Failed to set Git hook path. Post-merge hook may not fire", out.getvalue())
 
@@ -196,39 +200,46 @@ class SourceIdentityTests(SourceCase):
     def test_resolve_source_in_a_repo(self):
         # installer_lib/install.sh:538-551
         repo = init_repo(self.root / "repo")
-        info = source.resolve_source(repo / "_shared" if (repo / "_shared").exists() else repo)
+        (repo / "sub").mkdir()
+        with use_source(repo / "sub"):
+            info = source.resolve_source()
         self.assertEqual(info.root, repo.resolve())
         self.assertEqual(info.branch, "main")
         self.assertEqual(info.head, git(repo, "rev-parse", "HEAD"))
         self.assertEqual(info.dirty, "clean")
         (repo / "x.txt").write_text("x", encoding="utf-8")
-        self.assertEqual(source.resolve_source(repo).dirty, "dirty")
+        with use_source(repo):
+            self.assertEqual(source.resolve_source().dirty, "dirty")
         git(repo, "checkout", "-q", "--detach")
-        self.assertEqual(source.resolve_source(repo).branch, "DETACHED")
+        with use_source(repo):
+            self.assertEqual(source.resolve_source().branch, "DETACHED")
 
     def test_resolve_source_outside_git(self):
         plain = self.root / "plain"
         plain.mkdir()
-        info = source.resolve_source(plain)
+        with use_source(plain):
+            info = source.resolve_source()
         self.assertEqual(info, source.SourceInfo(root=plain, branch="DETACHED", head="unknown", dirty="unknown"))
 
     def test_update_source_calls_the_updater(self):
         # source_health.sh:81-89
         with mock.patch("installer.runner.run_tool", return_value=runner.ToolResult(returncode=3)) as run_tool:
-            self.assertEqual(source.update_source(self.root), 3)
+            with use_source(self.root):
+                self.assertEqual(source.update_source(), 3)
         run_tool.assert_called_once_with("_shared/installer_source_update.py", "--source-dir", str(self.root))
 
     def test_session_gate_contract_must_exist(self):
         # bootstrap.sh:5-10
         root = self.root / "src"
         (root / "skill-catalog").mkdir(parents=True)
+        self.enterContext(use_source(root))
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit) as stop:
-            source.assert_session_gate_contract(root)
+            source.assert_session_gate_contract()
         self.assertEqual(stop.exception.code, 1)
         self.assertIn(f"[ERROR] Session gate contract file missing: {root / 'skill-catalog' / 'session-gates.json'}", out.getvalue())
         (root / "skill-catalog" / "session-gates.json").write_text("{}", encoding="utf-8")
-        source.assert_session_gate_contract(root)
+        source.assert_session_gate_contract()
 
 
 if __name__ == "__main__":

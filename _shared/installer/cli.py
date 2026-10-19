@@ -27,7 +27,7 @@ from typing import Callable  # noqa: E402
 
 from installer import (addons, auto, config, diagnostics, hosts, lifecycle, locations, lock, prerequisites,  # noqa: E402
                        preservation, report, runner, selection, source, transaction)
-from installer.runner import REPO_ROOT, InstallerExit  # noqa: E402
+from installer.runner import InstallerExit  # noqa: E402
 
 ISOLATED_REJECTION = "isolated destinations require the Python hook installer; shell source integration is unsupported"
 VISIBILITY_FLAGS = ("--visibility", "--agent-visibility")
@@ -54,10 +54,10 @@ class Options:
 
 @dataclass
 class Context:
-    """What the shell kept in globals for one command."""
+    """What the shell kept in globals for one command. The checkout the installer
+    runs from is `runner.REPO_ROOT`, never a field here."""
 
     options: Options
-    source_root: Path = REPO_ROOT
     platform: str = "claude"
     skills_dir: Path | None = None
     addon_sources: list[str] = field(default_factory=list)
@@ -135,11 +135,11 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     HelpRow(REMOVAL, "--platform PLAT --uninstall SKILL_NAMES", "Remove selected skills from one platform"),
     INSTALL,
     Command(ADVANCED, "--list, -l", "List available skills", names=("--list", "-l"),
-            run=lambda ctx: selection.list_skills(ctx.source_root), platform=False),
+            run=lambda ctx: selection.list_skills(), platform=False),
     Command(ADVANCED, "--cleanup-pending", "Clean false-positive pending entries", names=("--cleanup-pending",),
             run=lambda ctx: preservation.cleanup_pending(ctx), flag="cleanup_pending", lock="cleanup-pending"),
     Command(ADVANCED, "--update-source", "Stash source checkout local changes and run git pull --ff-only",
-            names=("--update-source",), run=lambda ctx: source.update_source(REPO_ROOT), flag="update_source",
+            names=("--update-source",), run=lambda ctx: source.update_source(), flag="update_source",
             platform=False),
     HelpRow(ADVANCED, "--addon-source PATH|URL", "Add local addon repo or git URL source"),
     HelpRow(ADVANCED, "--addon-tag TAG", "Checkout branch/tag for git URL addon sources"),
@@ -331,7 +331,7 @@ def print_help() -> int:
 
 def build_context(options: Options) -> Context:
     """Platform, skills dir, prepared addon sources and the effective visibility for one command."""
-    return Context(options=options, source_root=REPO_ROOT, platform=options.platform,
+    return Context(options=options, platform=options.platform,
                    skills_dir=locations.skills_dir(options.platform), addon_sources=list(options.addon_sources),
                    visibility=config.resolve_effective_visibility(options.visibility))
 
@@ -345,7 +345,7 @@ def _details_log() -> None:
 def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool) -> tuple[transaction.SyncCounts, int, int]:
     """S12: `_shared` and every target, as links (claude) or one copy batch (codex) (`install.sh:910-1058`)."""
     skills_dir = Path(ctx.skills_dir)
-    shared_src = Path(ctx.source_root) / "_shared"
+    shared_src = runner.REPO_ROOT / "_shared"
     shared_dest = skills_dir / "_shared"
     counts = transaction.SyncCounts()
     batch = transaction.CopyBatch()
@@ -425,7 +425,7 @@ def _place_targets(ctx: Context, collected: selection.Collected, copy_only: bool
 def prepare_install(ctx: Context) -> None:
     """S1 prerequisites and S2 the git hook path, before the install lock."""
     prerequisites.install_prerequisites()
-    ctx.hook_change = source.setup_git_hooks(ctx.source_root)
+    ctx.hook_change = source.setup_git_hooks()
 
 
 def run_install(ctx: Context) -> int:
@@ -436,7 +436,7 @@ def run_install(ctx: Context) -> int:
     skills_dir = Path(ctx.skills_dir)
     visibility = ctx.visibility
     # S4 source, S5 selection (contradiction 9: the source check comes first)
-    if not report.run_logged(source.check_source_health, ctx.source_root, skip=options.skip_source_health):
+    if not report.run_logged(source.check_source_health, skip=options.skip_source_health):
         raise InstallerExit(1)
     collected = selection.collect_targets(ctx, skills)
     skills_dir.mkdir(parents=True, exist_ok=True)
@@ -468,10 +468,10 @@ def run_install(ctx: Context) -> int:
         report.emit("")
         report.info(f"Install path: {skills_dir}")
         if ctx.platform == "codex" and copy_only:
-            report.info(f"To update skills safely: cd {ctx.source_root} && bash install.sh --update-source, "
+            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && bash install.sh --update-source, "
                         "then re-run bash install.sh")
         else:
-            report.info(f"To update skills safely: cd {ctx.source_root} && bash install.sh --update-source")
+            report.info(f"To update skills safely: cd {runner.REPO_ROOT} && bash install.sh --update-source")
         if installed > 0 and not copy_only:
             report.info("With symlink install, safe source updates refresh linked skills after the checkout fast-forwards.")
     # S13 runtime, S14 hooks, S15 managed blocks, S16 commands (contradiction 9: blocks after the runtime and hooks)
@@ -584,7 +584,7 @@ def main(argv: list[str] | None = None) -> int:
         options = parse_options(argv)
         report.configure(verbose=options.verbose,
                          report_child=os.environ.get("GHOST_ALICE_INSTALL_REPORT_CHILD") == "1")
-        source.assert_session_gate_contract(REPO_ROOT)
+        source.assert_session_gate_contract()
         return dispatch(options)
     except InstallerExit as stop:
         return stop.code

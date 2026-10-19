@@ -15,11 +15,10 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from installer import auto, cli, report  # noqa: E402
-from installer.runner import REPO_ROOT, ToolResult  # noqa: E402
+from installer.runner import ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Target  # noqa: E402
-from installer_testing import FakeRunner, make_context, make_source, quiet  # noqa: E402
+from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
 
-CLI = str(REPO_ROOT / "_shared" / "installer" / "cli.py")
 
 
 class FakeProcess:
@@ -51,6 +50,8 @@ class AutoCase(unittest.TestCase):
         self.home = root / "home"
         self.home.mkdir()
         self.source = make_source(root / "src")
+        self.enterContext(use_source(self.source))
+        self.cli = str(self.source / "_shared" / "installer" / "cli.py")
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_INSTALL_LOG_FILE", "GHOST_ALICE_INSTALL_EVENT_FILE",
@@ -66,7 +67,7 @@ class AutoCase(unittest.TestCase):
         self.temp.cleanup()
 
     def context(self, **options):
-        return make_context(self.source, self.home, "claude", **options)
+        return make_context(self.home, "claude", **options)
 
     def fake_popen(self, argv, *, env=None, stdout=None):
         argv = [str(a) for a in argv]
@@ -111,16 +112,16 @@ class ChildCommandTests(AutoCase):
         ctx.addon_sources = ["/cache/a", "/cache/b"]
         ctx.addon_sources_prepared = True
         self.assertEqual(auto.child_command(ctx, "codex"),
-                         [sys.executable, CLI, "--platform", "codex", "--skip-source-health", "--visibility", "strict",
+                         [sys.executable, self.cli, "--platform", "codex", "--skip-source-health", "--visibility", "strict",
                           "--verbose", "--addon-source", "/cache/a", "--addon-source", "/cache/b", "--addon-skip", "task-router"])
         plain = self.context(addon_sources=["https://x/y.git"], addon_tags=["v1"])
         self.assertEqual(auto.child_command(plain, "claude"),
-                         [sys.executable, CLI, "--platform", "claude", "--addon-source", "https://x/y.git", "--addon-tag", "v1"])
+                         [sys.executable, self.cli, "--platform", "claude", "--addon-source", "https://x/y.git", "--addon-tag", "v1"])
 
     def test_uninstall_child(self):
         # install.sh:294
         self.assertEqual(auto.child_command(self.context(skip_source_health=True), "codex", uninstall=True),
-                         [sys.executable, CLI, "--platform", "codex", "--uninstall"])
+                         [sys.executable, self.cli, "--platform", "codex", "--uninstall"])
 
 
 class VerboseAutoTests(AutoCase):
@@ -142,7 +143,7 @@ class VerboseAutoTests(AutoCase):
         self.assertIn("[INFO] [auto] (2/2) Starting install for codex", text)
         self.assertIn("[ERROR] [auto] Some platform installs failed. Check the log above.", text)
         self.assertEqual([c[c.index("--platform") + 1] for c in self.runner.commands()], ["claude", "codex"])
-        self.assertTrue(all(c[:2] == [sys.executable, CLI] for c in self.runner.commands()))
+        self.assertTrue(all(c[:2] == [sys.executable, self.cli] for c in self.runner.commands()))
         self.assertEqual(self.runner.commands()[1][-1], "task-router")
         self.runner = FakeRunner()
         out = io.StringIO()
@@ -170,7 +171,7 @@ class CompactAutoTests(AutoCase):
         self.assertTrue(event_file.is_file())
         self.assertEqual(len(self.children), 2)
         for argv, env in self.children:
-            self.assertEqual(argv[:2], [sys.executable, CLI])
+            self.assertEqual(argv[:2], [sys.executable, self.cli])
             self.assertEqual(env["GHOST_ALICE_INSTALL_REPORT_CHILD"], "1")
             self.assertEqual(env["GHOST_ALICE_INSTALL_LOG_FILE"], str(log))
             self.assertEqual(env["GHOST_ALICE_INSTALL_EVENT_FILE"], str(event_file))
@@ -219,8 +220,8 @@ class UninstallChildrenTests(AutoCase):
         self.assertIn("[INFO] Detected uninstall targets: claude codex", out.getvalue())
         self.assertIn("[INFO] [uninstall] (1/2) Starting claude full cleanup", out.getvalue())
         self.assertIn("[INFO] [uninstall] (2/2) Starting codex full cleanup", out.getvalue())
-        self.assertEqual(self.runner.commands(), [[sys.executable, CLI, "--platform", "claude", "--uninstall"],
-                                                  [sys.executable, CLI, "--platform", "codex", "--uninstall"]])
+        self.assertEqual(self.runner.commands(), [[sys.executable, self.cli, "--platform", "claude", "--uninstall"],
+                                                  [sys.executable, self.cli, "--platform", "codex", "--uninstall"]])
 
 
 if __name__ == "__main__":

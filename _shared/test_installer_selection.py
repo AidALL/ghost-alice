@@ -20,6 +20,7 @@ from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer import selection  # noqa: E402
 from installer.selection import Target  # noqa: E402
+from installer_testing import use_source  # noqa: E402
 
 
 def make_source(root: Path) -> Path:
@@ -43,6 +44,7 @@ class SelectionCase(unittest.TestCase):
         self.home = self.root / "home"
         self.home.mkdir()
         self.source = make_source(self.root / "src")
+        self.enterContext(use_source(self.source))
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_GHOST_ROOT"):
@@ -56,7 +58,7 @@ class SelectionCase(unittest.TestCase):
     def context(self, platform: str = "claude", **options) -> cli.Context:
         opts = cli.Options(platform=platform, **options)
         skills_dir = self.home / ".claude" / "skills" if platform == "claude" else self.home / ".agents" / "skills"
-        return cli.Context(options=opts, source_root=self.source, platform=platform, skills_dir=skills_dir,
+        return cli.Context(options=opts, platform=platform, skills_dir=skills_dir,
                            addon_sources=list(opts.addon_sources))
 
 
@@ -71,24 +73,24 @@ class TargetTests(SelectionCase):
 
     def test_expand_single_family_and_missing(self):
         # targets.sh:5-26
-        self.assertEqual(selection.expand_skill_targets(self.source, "alpha"), [Target("alpha", self.source / "alpha")])
-        self.assertEqual(selection.expand_skill_targets(self.source, "fam"),
+        self.assertEqual(selection.expand_skill_targets("alpha"), [Target("alpha", self.source / "alpha")])
+        self.assertEqual(selection.expand_skill_targets("fam"),
                          [Target("one", self.source / "fam" / "one"), Target("two", self.source / "fam" / "two")])
-        self.assertEqual(selection.expand_skill_targets(self.source, "missing"), [])
+        self.assertEqual(selection.expand_skill_targets("missing"), [])
 
     def test_iter_install_targets_keeps_order_and_appends_addons(self):
         # targets.sh:230-246
         addon = Target("noop", self.root / "addon" / "noop", addon_id="noop")
-        targets = selection.iter_install_targets(self.source, ["fam", "alpha"], [addon])
+        targets = selection.iter_install_targets(["fam", "alpha"], [addon])
         self.assertEqual([t.name for t in targets], ["one", "two", "alpha", "noop"])
         self.assertEqual(targets[-1].addon_id, "noop")
 
     def test_validate_requested_skills(self):
         # targets.sh:263-273
-        selection.validate_requested_skills(self.source, ["alpha", "fam"])
+        selection.validate_requested_skills(["alpha", "fam"])
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit) as stop:
-            selection.validate_requested_skills(self.source, ["alpha", "nope"])
+            selection.validate_requested_skills(["alpha", "nope"])
         self.assertEqual(stop.exception.code, 1)
         self.assertIn("[ERROR] Skill not found: nope", out.getvalue())
         self.assertIn("[ERROR] Run bash install.sh --list to see available skills.", out.getvalue())
@@ -97,15 +99,15 @@ class TargetTests(SelectionCase):
         # targets.sh:296-320: core names are checked under the skills root even when the source lacks them
         skills_root = self.home / ".claude" / "skills"
         skills_root.mkdir(parents=True)
-        self.assertFalse(selection.has_managed_installs(self.source, skills_root))
+        self.assertFalse(selection.has_managed_installs(skills_root))
         (skills_root / "task-router").mkdir()
-        self.assertTrue(selection.has_managed_installs(self.source, skills_root))
+        self.assertTrue(selection.has_managed_installs(skills_root))
         (skills_root / "task-router").rmdir()
         (self.source / "coding-convention" / "writing-plans").mkdir(parents=True)
         (self.source / "coding-convention" / "writing-plans" / "SKILL.md").write_text("x", encoding="utf-8")
         (skills_root / "writing-plans").symlink_to(self.source / "coding-convention" / "writing-plans")
-        self.assertTrue(selection.has_managed_installs(self.source, skills_root))
-        self.assertFalse(selection.has_managed_installs(self.source, self.home / "nowhere"))
+        self.assertTrue(selection.has_managed_installs(skills_root))
+        self.assertFalse(selection.has_managed_installs(self.home / "nowhere"))
 
 
 class CleanupTests(SelectionCase):
@@ -241,7 +243,7 @@ class ListingTests(SelectionCase):
         (self.source / "coding-convention" / "writing-plans" / "SKILL.md").write_text("description: Plans.\n", encoding="utf-8")
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            selection.list_skills(self.source)
+            selection.list_skills()
         text = out.getvalue()
         self.assertTrue(text.startswith("Available skills:\n\n"))
         self.assertIn("  task-router                  Routes work.\n", text)

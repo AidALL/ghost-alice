@@ -109,7 +109,7 @@ def _core_skill_args(ctx: "Context") -> list[str]:
     args: list[str] = []
     for skill in selection.ALL_SKILLS:
         args.extend(["--core-skill", skill])
-        for target in selection.expand_skill_targets(ctx.source_root, skill):
+        for target in selection.expand_skill_targets(skill):
             args.extend(["--core-skill", target.name])
     return args
 
@@ -270,7 +270,7 @@ def promote_bare_installed_addon_ids(ctx: "Context", names: list[str]) -> tuple[
     addon_ids: list[str] = []
     kept: list[str] = []
     for name in names:
-        if not selection.expand_skill_targets(ctx.source_root, name) and installed_addon_id(name, addons_dir):
+        if not selection.expand_skill_targets(name) and installed_addon_id(name, addons_dir):
             if name not in addon_ids:
                 addon_ids.append(name)
         else:

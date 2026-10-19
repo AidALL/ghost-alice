@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from installer import diagnostics, hosts, preservation  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer.selection import ALL_SKILLS, Target  # noqa: E402
-from installer_testing import FakeRunner, make_context, make_source, quiet  # noqa: E402
+from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
 
 
 class HostCase(unittest.TestCase):
@@ -28,6 +28,7 @@ class HostCase(unittest.TestCase):
         self.home = root / "home"
         self.home.mkdir()
         self.source = make_source(root / "src")
+        self.enterContext(use_source(self.source))
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_RUNTIME_SHARED_DIR", "GHOST_ALICE_GHOST_ROOT"):
@@ -41,7 +42,7 @@ class HostCase(unittest.TestCase):
         self.temp.cleanup()
 
     def context(self, platform="claude", **options):
-        ctx = make_context(self.source, self.home, platform, **options)
+        ctx = make_context(self.home, platform, **options)
         ctx.skills_dir.mkdir(parents=True, exist_ok=True)
         return ctx
 

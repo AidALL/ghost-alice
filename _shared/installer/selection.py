@@ -62,10 +62,11 @@ class Collected:
         return self.skill_target_total + self.support_target_total
 
 
-def expand_skill_targets(source_root: Path, skill: str) -> list[Target]:
-    """A skill with `SKILL.md` is one target; a family dir yields one target per
-    direct sub-directory with `SKILL.md`; a missing dir yields none (`targets.sh:5-26`)."""
-    root = Path(source_root) / skill
+def expand_skill_targets(skill: str) -> list[Target]:
+    """A skill with `SKILL.md` in the checkout is one target; a family dir yields
+    one target per direct sub-directory with `SKILL.md`; a missing dir yields
+    none (`targets.sh:5-26`)."""
+    root = runner.REPO_ROOT / skill
     if not root.is_dir():
         return []
     if (root / "SKILL.md").is_file():
@@ -74,19 +75,19 @@ def expand_skill_targets(source_root: Path, skill: str) -> list[Target]:
             if sub.is_dir() and not sub.name.startswith(".") and (sub / "SKILL.md").is_file()]
 
 
-def iter_install_targets(source_root: Path, skills: list[str], addon_targets: list[Target] = ()) -> list[Target]:
+def iter_install_targets(skills: list[str], addon_targets: list[Target] = ()) -> list[Target]:
     """Expanded core targets in skill order, then the addon targets (`targets.sh:230-246`)."""
     targets: list[Target] = []
     for skill in skills:
-        targets.extend(expand_skill_targets(source_root, skill))
+        targets.extend(expand_skill_targets(skill))
     targets.extend(addon_targets)
     return targets
 
 
-def validate_requested_skills(source_root: Path, skills: list[str]) -> None:
+def validate_requested_skills(skills: list[str]) -> None:
     """`Skill not found: X` + `Run bash install.sh --list to see available skills.` and exit 1 (`targets.sh:263-273`)."""
     for skill in skills:
-        if not expand_skill_targets(source_root, skill):
+        if not expand_skill_targets(skill):
             report.error(f"Skill not found: {skill}")
             report.error("Run bash install.sh --list to see available skills.")
             raise InstallerExit(1)
@@ -96,10 +97,10 @@ def _present(path: Path) -> bool:
     return path.is_symlink() or path.is_dir()
 
 
-def has_managed_installs(source_root: Path, skills_root: Path) -> bool:
+def has_managed_installs(skills_root: Path) -> bool:
     """True when any core skill (or family sub-skill) exists as a link or dir under `skills_root` (`targets.sh:296-320`)."""
     for skill in ALL_SKILLS:
-        targets = expand_skill_targets(source_root, skill)
+        targets = expand_skill_targets(skill)
         if not targets:
             if _present(Path(skills_root) / skill):
                 return True
@@ -137,7 +138,7 @@ def cleanup_deprecated_installed_skills(ctx: "Context", skills_root: Path) -> bo
             return False
         report.warn(f"Deprecated installed skill moved out of discovery path: {skill} -> {quarantine}")
     result = runner.run_tool("_shared/retired_assets.py",
-                             "--skills-root", str(skills_root), "--source-root", str(ctx.source_root),
+                             "--skills-root", str(skills_root), "--source-root", str(runner.REPO_ROOT),
                              "--ghost-root", str(locations.ghost_root()), "--platform", ctx.platform,
                              "--commands-root", str(locations.claude_commands_dir()), no_bytecode=True)
     return result.ok
@@ -146,13 +147,13 @@ def cleanup_deprecated_installed_skills(ctx: "Context", skills_root: Path) -> bo
 def collect_targets(ctx: "Context", skills: list[str]) -> Collected:
     """Validate the requested skills, read the addon targets, expand everything
     and count (`installer_lib/install.sh:849-878`). Support total is 1 when
-    `<source>/_shared` exists."""
-    validate_requested_skills(ctx.source_root, skills)
+    `<checkout>/_shared` exists."""
+    validate_requested_skills(skills)
     addon_targets = list(addons.collect_addon_targets(ctx))
     ctx.addon_targets = addon_targets
-    skill_targets = iter_install_targets(ctx.source_root, skills)
+    skill_targets = iter_install_targets(skills)
     all_targets = [*skill_targets, *addon_targets]
-    support_total = 1 if (Path(ctx.source_root) / "_shared").is_dir() else 0
+    support_total = 1 if (runner.REPO_ROOT / "_shared").is_dir() else 0
     return Collected(skill_targets=skill_targets, addon_targets=addon_targets,
                      skill_target_total=len(all_targets), support_target_total=support_total)
 
@@ -172,7 +173,7 @@ def check_addon_collisions(ctx: "Context") -> None:
                  "--resources-dir", str(locations.resources_dir(ctx.platform))])
     for skill in ALL_SKILLS:
         args.extend(["--core-skill", skill])
-        for target in expand_skill_targets(ctx.source_root, skill):
+        for target in expand_skill_targets(skill):
             args.extend(["--core-skill", target.name])
     result = runner.run_tool("_shared/addon_installer.py", *args)
     if result.returncode == 2:
@@ -203,12 +204,12 @@ def skill_description(skill_md: Path) -> str:
     return ""
 
 
-def list_skills(source_root: Path) -> int:
+def list_skills() -> int:
     """`Available skills:` listing with families and sub-skills (`uninstall.sh:81-108`); exit code 0."""
     report.emit("Available skills:")
     report.emit("")
     for skill in ALL_SKILLS:
-        targets = expand_skill_targets(source_root, skill)
+        targets = expand_skill_targets(skill)
         if not targets:
             report.emit(f"  {skill:<28} (source missing)")
             continue
