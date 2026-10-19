@@ -31,6 +31,15 @@ def make_source(root: Path) -> Path:
     return root
 
 
+# PowerShell keeps its own data, cache and config under HOME (XDG locations on Linux and macOS).
+POWERSHELL_HOME_STATE = (".local", ".cache", ".config")
+
+
+def installer_home_effects(home: Path) -> list[str]:
+    """Entries under `home` other than PowerShell's own startup state: what an installer run left there."""
+    return sorted(p.name for p in Path(home).iterdir() if p.name not in POWERSHELL_HOME_STATE)
+
+
 def use_source(root: Path):
     """Run the installer from the fixture checkout `root`: patch `installer.runner.REPO_ROOT`,
     the one name of the checkout the installer runs from."""

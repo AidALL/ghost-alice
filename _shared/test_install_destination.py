@@ -163,7 +163,9 @@ def test_powershell_destination_option_rejects_before_effects_when_available(tmp
         cwd=tmp_path,env=env,text=True,capture_output=True)
     assert result.returncode==2,result.stdout+result.stderr
     assert 'isolated destinations require the Python hook installer' in result.stderr,result.stdout+result.stderr
-    assert list(home.iterdir())==[] and list(tmp_path.iterdir())==[home]
+    # pwsh keeps its own data, cache and config under HOME; nothing else may appear there or in the cwd.
+    from installer_testing import installer_home_effects
+    assert installer_home_effects(home)==[] and list(tmp_path.iterdir())==[home]
 
 
 @pytest.mark.parametrize('mode',('normal','isolated'))

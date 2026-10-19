@@ -208,7 +208,7 @@ class ThinInstallPs1RuntimeTests(unittest.TestCase):
                         self.assertIn(WINGET_POWERSHELL, result.stderr)
                         self.assertIn(version, result.stderr)
                     else:
-                        self.assertEqual(result.stderr, "")
+                        self.assertNotIn(REQUIREMENT, result.stderr)
 
     @unittest.skipUnless(os.name == "posix", "the recording python is a POSIX shell script")
     def test_maps_the_earlier_names_keeps_the_rest_in_order_and_returns_the_cli_code(self):

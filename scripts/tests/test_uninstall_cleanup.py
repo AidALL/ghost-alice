@@ -17,6 +17,7 @@ from _installer_source import installer_bash_source, installer_ps1_source
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 import uninstall_cleanup as cleanup
+from installer_testing import installer_home_effects  # noqa: E402
 
 UNINSTALL_CLEANUP = REPO_ROOT / "_shared" / "uninstall_cleanup.py"
 INSTALL_SH = REPO_ROOT / "install.sh"
@@ -1103,7 +1104,8 @@ class UninstallCleanupTest(unittest.TestCase):
 
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
                 self.assertIn(f"Unknown option: {args[0]}", result.stdout + result.stderr)
-                self.assertEqual(list(Path(temp_dir).iterdir()), [])
+                # pwsh writes its own state under HOME; the installer wrote nothing.
+                self.assertEqual(installer_home_effects(Path(temp_dir)), [])
 
     def test_bash_uninstall_without_skill_args_runs_full_confirm_cleanup(self) -> None:
         bash = _find_test_bash()
