@@ -1025,7 +1025,8 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual(item["shared_platforms"], ["claude"])
 
     def test_public_uninstall_surface_has_no_removed_entrypoints(self) -> None:
-        sh = installer_bash_source()
+        sh = "\n".join((REPO_ROOT / "_shared" / "installer" / name).read_text(encoding="utf-8")
+                       for name in ("cli.py", "lifecycle.py"))
         ps1 = installer_ps1_source()
         readme = README.read_text(encoding="utf-8")
         legacy_doc = REPO_ROOT / "docs" / f"{REMOVED_DOC_STEM}.md"

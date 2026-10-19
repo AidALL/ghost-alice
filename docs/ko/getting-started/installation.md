@@ -210,7 +210,7 @@ Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynami
 
 ### Python Contract
 
-설치기는 Python 3.11 이상을 요구합니다. 해당 버전이 없으면 가능한 환경에서 자동 준비를 시도합니다.
+설치기는 `--help`와 `--list`를 포함한 모든 명령에 Python 3.11 이상을 요구합니다. `install.sh`는 Python을 찾거나 준비한 뒤 인수를 그대로 `_shared/installer/cli.py`에 넘깁니다. 해당 버전이 없으면 가능한 환경에서 자동 준비를 시도합니다.
 
 선택적인 macOS 네이티브 컨텍스트 gateway에는 `compression.zstd`를 제공하는 Python 3.14 이상이 필요합니다. 해당 설치기는 구성 파일, launch agent, Codex provider를 변경하기 전에 이 기능을 확인합니다. Core 설치기와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`이 심볼릭 링크이면 gateway 설치와 해당 구성 요소 제거는 서비스를 변경하기 전에 중단하고 링크와 원본을 보존합니다. Gateway 설치는 launch agent, 구성 요소, 공유 의존 파일, 상태와 소유권 파일 자체가 심볼릭 링크이면 서비스를 변경하기 전에 거부하여 링크와 원본을 보존합니다. 갱신은 변경 전에 이전 설치 바인딩을 확인하여 사용자가 편집한 provider 블록과 launch agent를 보존합니다. 구성 요소 교체에는 인증된 설치 영수증의 파일 해시만 사용합니다. 폐기한 별도 `installed-files.json`은 읽거나 생성하지 않으며 설치나 갱신이 성공하면 삭제합니다. Provider 표시나 launch agent가 없어도 기존 gateway 상태에는 인증된 등록과 변경되지 않은 상태 증거가 필요합니다. 소유권이 없으면 설치는 상태 디렉터리를 보존하고 중단합니다. 새 설치에는 빈 대상 디렉터리를 사용하거나 보존된 설치 바인딩을 검토하세요. 첫 설치가 실패하고 후보 서비스의 중지가 확인되면 해당 시도가 새로 만든 상태 자료를 되돌려 다음 설치를 진행할 수 있습니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 복구 자료를 보존하고 검토를 요청합니다.
 

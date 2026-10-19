@@ -111,8 +111,8 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-install-tail",
-        description="install.sh tail contains localized User/Tech backup-review guidance",
-        file=REPO / "install.sh",
+        description="the installer cli tail contains localized User/Tech backup-review guidance",
+        file=REPO / "_shared" / "installer" / "cli.py",
         pattern=r"User:.*Please\s+review\s+backed-up\s+changes",
         multiline=True,
     ),
@@ -125,8 +125,8 @@ CHECKS: list[LayerCheck] = [
     ),
     LayerCheck(
         layer="pending-merge-install-tail",
-        description="install.sh tail does not contain old Korean control copy",
-        file=REPO / "install.sh",
+        description="the installer cli tail does not contain old Korean control copy",
+        file=REPO / "_shared" / "installer" / "cli.py",
         pattern=r"review\s+whether\s+unprocessed\s+pending\s+merges\s+remain\s+after\s+skill\s+updates",
         must_exist=False,
     ),

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -208,20 +208,14 @@ class InstallerAssetInventoryTest(unittest.TestCase):
         self.assertEqual(copied_result.ownership, "ghost-alice-managed")
 
     def test_installers_call_ownership_marker_writer_before_snapshot(self) -> None:
-        install_sh = installer_bash_source()
+        transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
         install_ps1 = installer_ps1_source()
 
-        sh_call = '_write_ownership_markers_after_install "$SKILLS_DIR" "$copy_only" "${skills[@]}"'
         ps1_call = "Invoke-WriteOwnershipMarker -TargetPlatform $Platform"
-        sh_snapshot_call = "run_logged_if_compact _run_snapshot_after_install"
         ps1_snapshot_call = "Invoke-SnapshotAfterInstall -TargetPlatform $Platform"
 
-        self.assertIn(sh_call, install_sh)
-        self.assertIn("installer_assets_cli.py", install_sh)
-        self.assertLess(
-            install_sh.index(sh_call),
-            install_sh.index(sh_snapshot_call),
-        )
+        # The Python order (markers before the snapshot) is fixed by _shared/test_installer_cli.py.
+        self.assertIn("installer_assets_cli.py", transaction_py)
 
         self.assertIn(ps1_call, install_ps1)
         self.assertIn("installer_assets_cli.py", install_ps1)

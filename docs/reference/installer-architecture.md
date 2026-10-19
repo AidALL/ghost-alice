@@ -31,27 +31,44 @@ The installer has three layers.
 
 | Layer | Main files | Responsibility |
 | --- | --- | --- |
-| Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | Parse platform-specific flags, normalize encoding/runtime setup, and enter the Python-backed installer path |
-| Installer orchestration | `_shared/install_hooks.py`, `installer_lib/`, `_shared/install_transaction.py`, `_shared/install_state_writer.py` | Resolve platforms and targets, install skills and hooks, record install state, protect local edits, and report status |
+| Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | `install.sh` sets a UTF-8 locale, finds or installs Python 3.11+ and runs `_shared/installer/cli.py` with the user's arguments unchanged; `install.ps1` still carries the PowerShell installer until its thin version lands |
+| Installer package | `_shared/installer/` (`cli`, `auto`, `selection`, `addons`, `preservation`, `transaction`, `hosts`, `diagnostics`, `lifecycle`, `source`, `prerequisites`, `lock`, `report`, `locations`, `config`, `runner`) | Parse options, pick the command, resolve platforms and targets, keep the install step order, hold the install lock and print the report; every file change goes through the entry points below |
+| Installer entry points | `_shared/install_hooks.py`, `_shared/install_transaction.py`, `_shared/install_state_writer.py`, `_shared/addon_installer.py`, `_shared/uninstall_cleanup.py`, `_shared/install_doctor.py` and the other `_shared/*.py` tools the package runs as child processes | Install skills and hooks, record install state, protect local edits, remove managed targets and diagnose an installation |
 | Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | Hold installed skills, platform hook config, Claude and Codex global bootstrap instructions, install-state manifests, hook feature rollback metadata, pending merges, and uninstall reports |
 
 The installer updates assets and hooks while protecting user edits and recording its own changes. Status, doctor, update and uninstall commands consume those records to identify the actual installed state and changes they can safely restore.
 
 The hook runtime contains both `_shared` modules and `session-intent-analyzer/scripts/session_intent_ledger.py` under the same runtime root. Native hooks and Ghost-ALICE Autopilot resolve the ledger API and its sibling helpers from that deployment. The source checkout identifies installation inputs; editing that checkout does not select execution libraries for an installed hook. The ledger database path and native session identity remain separate runtime inputs.
 
-`_shared/hook_definitions.py` owns the names that the installer and the hook runtime read together: hook ids and host event names, the `ghost_alice_context` provider name, and the privileged adapter allowlist. It imports only the standard library. The hook runtime (`hook_profile_gate.py`, `session_intent_analyzer_hook.py`) and the installer (`install_hooks.py`, `addon_installer.py` and the `context_gateway_*` modules) import it; a runtime module imports no installer module, and an installer module imports no runtime module. `_shared.test_hook_definitions` checks both rules.
+`_shared/hook_definitions.py` owns the names that the installer and the hook runtime read together: hook ids and host event names, the `ghost_alice_context` provider name, and the privileged adapter allowlist. It imports only the standard library. The hook runtime (`hook_profile_gate.py`, `session_intent_analyzer_hook.py`) and the installer (`install_hooks.py`, `addon_installer.py`, the `context_gateway_*` modules and the `installer` package) import it; a runtime module imports no installer module, and an installer module imports no runtime module. `_shared.test_hook_definitions` checks both rules, and that no `installer` package module shadows a standard-library module name.
 
 ## Install Flow
 
 | Sender → receiver | Input passed | Result used by the next step |
 | --- | --- | --- |
-| User command → shell entrypoint | Install/update/removal flags, platform choice and optional addon source. | Parsed options and a usable Python runtime. |
-| Entrypoint → installer orchestration | Parsed options, source checkout and selected platforms. | Selected skill packages and exact installation targets. |
+| User command → shell entrypoint | The command line as typed. | A usable Python 3.11+ runtime and the arguments, unchanged. |
+| Entrypoint → `installer.cli` | The arguments and the source checkout the shell lives in. | Parsed options, the selected command and, for an install, the platform, its skills directory and the effective visibility. |
+| `installer.cli` → `installer.selection` and `installer.addons` | Requested skill names and addon sources. | Exact installation targets (core skills, `_shared`, addon targets) and the target count. |
 | Orchestration → platform deployment | Source assets and target paths. | Installed skills/helpers and preserved local edits. |
 | Deployment → hook/bootstrap synchronization | Managed payloads, platform paths and registration commands. | Updated managed rule blocks and hook registrations. |
 | Installer → install-state writer → status output | Actual changed targets, hashes and rollback information. | Per-platform manifest and an install report for status, doctor and uninstall. |
 
-`install.cmd` is only a Windows wrapper. The substantive Windows path is `install.ps1`. On Unix-like environments, `install.sh` owns the shell entry path and re-enters Bash when needed.
+`install.cmd` is only a Windows wrapper. The substantive Windows path is `install.ps1`. On Unix-like environments, `install.sh` owns the shell entry path and re-enters Bash when needed. Every command, `--help` and `--list` included, runs in Python: the shell keeps no copy of the installer's text.
+
+### Install step order
+
+`installer.cli.run_install` runs an install in this order; `_shared/test_installer_cli.py` fixes it.
+
+1. Prerequisites (`git`, `node`) and the source checkout's git hook path.
+2. The install lock (`~/.ghost-alice/install.lock`), held until the command ends.
+3. Source health, then target collection (core skills, `_shared`, addon targets).
+4. Deprecated installed skills leave the discovery path; then the encoding guard; then the preflight that quarantines or records local edits.
+5. Pending addon uninstalls resume; an addon collision stops the install.
+6. Placement: `_shared` and every target as links (Claude Code) or as one copy batch (Codex) through `install_transaction.py`.
+7. Runtime `_shared` sync, hook installation, the managed rule block and the command wrappers.
+8. Verification, ownership markers, the merge-companion snapshot, addon sidecars, the install-state manifest and the install event.
+
+Uninstall, repair, `--cleanup-pending` and the `gateway` passthrough also run under the lock. A child tool that coordinates the gateway reuses the lock of the installer process that called it: the lock records that process id, and an unrelated holder blocks the tool.
 
 ## Gateway Lifecycle
 
@@ -91,10 +108,12 @@ This is why update and uninstall are part of the installer architecture, not sep
 
 | Change type | Start here | Then verify with |
 | --- | --- | --- |
-| Shell flag or platform bootstrap | `install.sh`, `install.ps1`, `install.cmd` | shell parser tests, runtime detection tests, compatibility matrix groups |
+| Python runtime detection or locale setup | `install.sh`, `install.ps1`, `install.cmd` | `scripts/tests/test_thin_shells.py`, `scripts/tests/test_install_runtime_detection.py`, compatibility matrix groups |
+| Installer option, command dispatch or install order | `_shared/installer/cli.py`, `_shared/installer/auto.py` | `_shared/test_installer_cli.py`, `_shared/test_installer_auto.py`, the `_shared/test_*_shell.py` end-to-end tests |
+| Installer wording or the install report | `_shared/installer/report.py` | `_shared/test_installer_report.py`, `scripts/tests/test_installer_default_auto.py` |
 | Hook payload or hook status wording | `_shared/install_hooks.py` | `_shared.test_install_hooks`, `scripts/check_skill_gate_contract.py` |
 | Hook id, host event name or privileged adapter allowlist | `_shared/hook_definitions.py` | `_shared.test_hook_definitions` |
-| Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `installer_lib/` | install-state schema tests and uninstall tests |
+| Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `_shared/installer/lifecycle.py`, `_shared/installer/transaction.py` | `_shared/test_installer_lifecycle.py`, `_shared/test_installer_transaction.py`, install-state schema tests and uninstall tests |
 | Public docs or command surface | `README.md`, `docs/`, `docs/index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
 | Platform compatibility rule | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list` and the focused group named by the policy |
 

@@ -28,7 +28,9 @@ STALE_PATTERNS = [
 
 # Exact retired asset names are required cleanup selectors. The installer and its tests use those identifiers to identify managed assets for removal; exempt only those specific technical occurrences.
 ALLOWED_TERM_OCCURRENCES = {
-    "install.sh": {LEGACY_TERM + "-security-scan"},
+    # The installer names the retired skill so that it can move it out of the discovery path.
+    "_shared/installer/selection.py": {LEGACY_TERM + "-security-scan"},
+    "_shared/test_installer_selection.py": {LEGACY_TERM + "-security-scan"},
     "install.ps1": {LEGACY_TERM + "-security-scan"},
     "scripts/tests/test_installer_default_auto.py": {LEGACY_TERM + "-security-scan"},
 }

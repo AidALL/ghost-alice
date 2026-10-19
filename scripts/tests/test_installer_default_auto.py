@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -130,76 +130,7 @@ def _printable_live_progress_lines(output: str) -> list[str]:
     return lines
 
 
-def _bash_if_block(source: str, guard: str) -> str:
-    """Select a complete executable if block, independently of prose labels."""
-    lines = source.splitlines(keepends=True)
-    starts = [index for index, line in enumerate(lines) if line.strip() == guard]
-    if len(starts) != 1:
-        raise AssertionError(f"expected one executable guard: {guard}")
-    depth = 0
-    for index in range(starts[0], len(lines)):
-        stripped = lines[index].strip()
-        if re.match(r"if\s", stripped):
-            depth += 1
-        elif re.fullmatch(r"fi;?", stripped):
-            depth -= 1
-            if depth == 0:
-                return "".join(lines[starts[0] : index + 1])
-    raise AssertionError(f"unterminated executable guard: {guard}")
-
-
-def _run_bash_branch(script: str, *arguments: str) -> subprocess.CompletedProcess[str]:
-    """Execute production branch text with disposable, non-installing fixtures."""
-    bash = _find_test_bash()
-    if not bash:
-        raise unittest.SkipTest("bash executable is required for installer branch tests")
-    with tempfile.TemporaryDirectory() as temp_dir:
-        root = Path(temp_dir)
-        home = root / "home"
-        home.mkdir()
-        path = root / "branch.sh"
-        path.write_text("set -euo pipefail\n" + script, encoding="utf-8")
-        env = {key: value for key, value in os.environ.items()
-               if not key.startswith(("GHOST_ALICE_", "CODEX_", "CLAUDE_", "NODE_REPL_"))}
-        env.update(HOME=home.as_posix(), USERPROFILE=home.as_posix())
-        return subprocess.run([bash, str(path), *arguments], cwd=root, env=env,
-                              capture_output=True, text=True, encoding="utf-8", errors="replace")
-
-
 class InstallerDefaultAutoTest(unittest.TestCase):
-    def test_install_sh_defaults_plain_install_to_auto_detect(self) -> None:
-        install_sh = INSTALL_SH.read_text(encoding="utf-8")
-
-        self.assertIn("AUTO_DETECT=0", install_sh)
-        self.assertIn("AUTO_DETECT=1", install_sh)
-        self.assertIn('[ "$CLEANUP_PENDING" -eq 0 ]', install_sh)
-        self.assertIn('"")\n      AUTO_DETECT=1', install_sh)
-        self.assertIn('if [ "$AUTO_DETECT" -eq 1 ]; then', install_sh)
-        self.assertIn("bash install.sh                              #", install_sh)
-        self.assertIn("Install to detected AI tools", install_sh)
-        self.assertNotIn("bash install.sh --auto                       #", install_sh)
-        self.assertNotIn("AUTO_DETECT_REQUESTED", install_sh)
-        self.assertNotIn("--auto and --platform", install_sh)
-        self.assertNotIn("--auto and --prompt-platform", install_sh)
-
-        default_branch = _bash_if_block(install_sh,
-            'if [ "$PLATFORM_EXPLICIT" -eq 0 ] && [ "$PROMPT_PLATFORM" -eq 0 ] && [ "$CLEANUP_PENDING" -eq 0 ] && [ "$LIST_ADDONS" -eq 0 ] && [ "$UPDATE_SOURCE" -eq 0 ]; then')
-        for arguments, excluded_flag, expected in (
-            ((), None, "1"), (("task-router",), None, "1"),
-            (("--status",), None, "0"), (("--help",), None, "0"),
-            (("--uninstall",), None, "0"),
-            *(((), flag, "0") for flag in
-              ("PLATFORM_EXPLICIT", "PROMPT_PLATFORM", "CLEANUP_PENDING", "LIST_ADDONS", "UPDATE_SOURCE")),
-        ):
-            with self.subTest(arguments=arguments, excluded_flag=excluded_flag):
-                flags = {name: int(name == excluded_flag) for name in
-                         ("PLATFORM_EXPLICIT", "PROMPT_PLATFORM", "CLEANUP_PENDING", "LIST_ADDONS", "UPDATE_SOURCE")}
-                script = "AUTO_DETECT=0\nARGS=(\"$@\")\n"
-                script += "\n".join(f"{name}={value}" for name, value in flags.items()) + "\n"
-                result = _run_bash_branch(script + default_branch + '\nprintf "%s" "$AUTO_DETECT"\n', *arguments)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout, expected)
-
     def test_install_ps1_defaults_plain_install_to_auto_detect(self) -> None:
         install_ps1 = installer_ps1_source()
 
@@ -213,15 +144,15 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertNotIn("-Auto and -PromptPlatform", install_ps1)
 
     def test_auto_install_messages_explain_distinct_platform_targets(self) -> None:
-        install_sh = INSTALL_SH.read_text(encoding="utf-8")
+        auto_py = (REPO_ROOT / "_shared" / "installer" / "auto.py").read_text(encoding="utf-8")
         install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
 
-        for body in (install_sh, install_ps1):
+        for body in (auto_py, install_ps1):
             with self.subTest(installer=body[:20]):
                 self.assertIn("separate install path", body)
                 self.assertIn("not a duplicate install", body)
 
-        self.assertIn("[auto] (${platform_index}/${#detected[@]})", install_sh)
+        self.assertIn("[auto] ({index}/{total})", auto_py)
         self.assertIn("[auto] ({0}/{1})", install_ps1)
 
     def test_install_ps1_auto_report_uses_common_target_progress(self) -> None:
@@ -252,29 +183,8 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertNotIn("*>> $script:InstallReportLogFile", auto_branch)
 
     def test_auto_progress_uses_one_semantic_common_target_formatter(self) -> None:
-        install_sh = installer_bash_source()
+        # The bash side of this contract now lives in _shared/test_installer_auto.py and test_installer_report.py.
         install_ps1 = installer_ps1_source()
-
-        self.assertIn('report_progress_bar "$done_count" "$total_count" 30', install_sh)
-        self.assertIn("count_auto_common_targets", install_sh)
-        self.assertIn("report_read_weighted_common_target_progress", install_sh)
-        self.assertIn("report_auto_animate_common_target_progress_line", install_sh)
-        self.assertIn("report_common_target_progress_line", install_sh)
-        self.assertNotIn("report_live_common_target_progress_line", install_sh)
-        self.assertNotIn("report_live_common_target_suffix", install_sh)
-        self.assertNotIn('"${plat} ${platform_index}/${auto_platform_count}"', install_sh)
-        auto_branch = _bash_if_block(INSTALL_SH.read_text(encoding="utf-8"),
-                                    'if [ "$AUTO_DETECT" -eq 1 ]; then')
-        self.assertIn("report_auto_animate_common_target_progress_line", auto_branch)
-        self.assertIn("report_auto_update_common_target_progress_line", auto_branch)
-        self.assertLess(
-            auto_branch.index("prepare_addon_sources || exit 1"),
-            auto_branch.index("addon_args=()"),
-        )
-        self.assertNotIn("report_auto_progress_cursor_up_rows", install_sh)
-        self.assertNotIn("report_print_tail_pending", install_sh)
-        self.assertNotIn("report_print_tail_overwrite", install_sh)
-        self.assertNotIn("common targets synced for ${plat}", install_sh)
 
         self.assertIn("[int]$Width = 30", install_ps1)
         self.assertIn('"For {0} [{1}/{2}]" -f $plat, $index, $detected.Count', install_ps1)
@@ -282,50 +192,6 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         self.assertNotIn("common targets synced for", install_ps1)
         self.assertNotIn('"-Uninstall:$Uninstall"', install_ps1)
         self.assertNotIn('"-SkipSourceHealth:$SkipSourceHealth"', install_ps1)
-
-    def test_install_sh_auto_failure_message_preserves_child_exit_code(self) -> None:
-        install_sh = INSTALL_SH.read_text(encoding="utf-8")
-        auto_loop = _bash_if_block(install_sh, 'if [ "$AUTO_DETECT" -eq 1 ]; then')
-
-        self.assertIn("child_rc=$?", auto_loop)
-        self.assertIn("exit code $child_rc", auto_loop)
-        self.assertNotIn('if ! bash "${BASH_SOURCE[0]}"', auto_loop)
-
-        for compact in (0, 1):
-            with self.subTest(compact=compact):
-                fixture = f"""
-AUTO_DETECT=1; SKIP_SOURCE_HEALTH=0; AGENT_VISIBILITY=""; VERBOSE=0; ADDON_SKIP=0
-ADDON_SOURCES=(); ADDON_TAGS=(); ARGS=(); ALL_SKILLS=(task-router)
-INSTALL_REPORT_LOG_FILE="$HOME/auto.log"
-detect_present_platforms() {{ printf 'claude\\ncodex\\n'; }}
-t() {{ printf '%s\\n' "$1"; }}
-info() {{ printf '%s\\n' "$*"; }}
-warn() {{ printf '%s\\n' "$*"; }}
-ok() {{ printf '%s\\n' "$*"; }}
-error() {{ printf '%s\\n' "$*"; }}
-install_compact_output_enabled() {{ [ {compact} -eq 1 ]; }}
-install_log_init() {{ : >"$INSTALL_REPORT_LOG_FILE"; }}
-count_auto_common_targets() {{ printf '1\\n'; }}
-join_by() {{ printf 'claude, codex\\n'; }}
-resolve_effective_visibility() {{ printf 'dynamic\\n'; }}
-live_counter_enabled() {{ return 1; }}
-report_read_all_common_target_progress() {{ printf '0\\n'; }}
-install_report_failure_excerpt() {{ cat "$1"; }}
-# Replace only the child command: run the actual parent loop without installing.
-bash() {{ printf 'CHILD|%s\\n' "$*"; [ "$3" != claude ] || return 37; }}
-"""
-                def assert_child_failure(branch: str) -> None:
-                    result = _run_bash_branch(fixture + branch)
-                    output = result.stdout + result.stderr
-                    self.assertEqual(result.returncode, 1, output)
-                    self.assertIn("Install failed for claude (exit code 37)", output)
-                    self.assertIn("--platform codex", output)
-
-                assert_child_failure(auto_loop)
-                # A real failure must remain visible even if a future edit
-                # accidentally records zero instead of the failed child code.
-                with self.assertRaisesRegex(AssertionError, "exit code 37"):
-                    assert_child_failure(auto_loop.replace("child_rc=$?", "child_rc=0"))
 
     def test_readme_primary_usage_has_no_auto_flag(self) -> None:
         readme = README.read_text(encoding="utf-8")
@@ -344,12 +210,9 @@ bash() {{ printf 'CHILD|%s\\n' "$*"; [ "$3" != claude ] || return 37; }}
         self.assertNotIn("AllowDirtySource", install_ps1)
 
     def test_plain_uninstall_defaults_to_detected_full_cleanup(self) -> None:
-        install_sh = INSTALL_SH.read_text(encoding="utf-8")
+        # The bash side of this contract now lives in _shared/test_installer_cli.py (plain full uninstall).
         install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
 
-        self.assertIn("detect_uninstall_platforms", install_sh)
-        self.assertIn('case "${ARGS[0]:-}" in', install_sh)
-        self.assertIn("plain_full_uninstall_args", install_sh)
         self.assertIn("Get-DetectedUninstallPlatforms", install_ps1)
         self.assertIn("$PlainFullUninstall", install_ps1)
         self.assertIn("-Uninstall", install_ps1)
@@ -431,19 +294,6 @@ bash() {{ printf 'CHILD|%s\\n' "$*"; [ "$3" != claude ] || return 37; }}
             self.assertTrue(live_lines, msg=output)
             self.assertLess(output.index(initial_line), output.rindex(final_line))
             self.assertIn("  [5/5] Verification        ok", output)
-
-    def test_install_sh_auto_failure_closes_progress_line_and_surfaces_excerpt_source(self) -> None:
-        install_sh = INSTALL_SH.read_text(encoding="utf-8")
-        compact_auto_branch = install_sh[
-            install_sh.index("install_log_init") : install_sh.index('if [ "$PROMPT_PLATFORM" -eq 1 ]')
-        ]
-
-        self.assertIn("live_counter_enabled && printf '\\n'\n      warn", compact_auto_branch)
-        self.assertIn("install_report_failure_excerpt", compact_auto_branch)
-        self.assertLess(
-            compact_auto_branch.index("live_counter_enabled && printf '\\n'\n      warn"),
-            compact_auto_branch.index('warn "$(t "[auto] Install failed for ${plat}'),
-        )
 
     def test_install_sh_auto_addon_report_counts_addon_common_target(self) -> None:
         bash = _find_test_bash()
@@ -948,45 +798,6 @@ bash() {{ printf 'CHILD|%s\\n' "$*"; [ "$3" != claude ] || return 37; }}
             self.assertIn("  Visibility Level: [minimal]", result.stdout)
             saved = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(saved["agent_visibility"]["profile"], "minimal")
-
-    def test_report_sh_resolve_effective_visibility_priority(self) -> None:
-        bash = _find_test_bash()
-        if not bash:
-            self.skipTest("bash executable is required for report.sh helper test")
-
-        script = r"""
-set -euo pipefail
-SCRIPT_DIR="$PWD"
-source installer_lib/python_runtime.sh
-source installer_lib/report.sh
-mkdir -p "$HOME/.ghost-alice"
-printf '{"schema_version":"ghost-alice-config.v1","agent_visibility":{"profile":"minimal"},"strict_session_log":{"mode":"always"}}\n' > "$HOME/.ghost-alice/config.json"
-AGENT_VISIBILITY=""
-printf 'existing=%s\n' "$(resolve_effective_visibility)"
-AGENT_VISIBILITY="strict"
-printf 'flag=%s\n' "$(resolve_effective_visibility)"
-rm "$HOME/.ghost-alice/config.json"
-AGENT_VISIBILITY=""
-printf 'default=%s\n' "$(resolve_effective_visibility)"
-"""
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env = os.environ.copy()
-            env["HOME"] = temp_dir
-            result = subprocess.run(
-                [bash, "-c", script],
-                cwd=REPO_ROOT,
-                env=env,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-        self.assertIn("existing=dynamic", result.stdout)
-        self.assertIn("flag=strict", result.stdout)
-        self.assertIn("default=dynamic", result.stdout)
 
     def test_report_ps1_resolve_effective_visibility_priority(self) -> None:
         pwsh = shutil.which("pwsh")

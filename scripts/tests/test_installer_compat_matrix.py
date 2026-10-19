@@ -236,29 +236,6 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         self.assertNotIn("BASH_SOURCE", result.stderr + result.stdout)
         self.assertIn("Available skills:", result.stdout)
 
-    def test_install_sh_auto_detect_guards_empty_source_health_args_for_bash32(self) -> None:
-        install_sh = (REPO_ROOT / "install.sh").read_text(encoding="utf-8")
-        auto_calls = [
-            line
-            for line in install_sh.splitlines()
-            if 'bash "${BASH_SOURCE[0]}" --platform "$plat"' in line
-            and "source_health_args" in line
-        ]
-        uninstall_calls = [
-            line
-            for line in install_sh.splitlines()
-            if 'bash "${BASH_SOURCE[0]}" --platform "$plat"' in line
-            and "--uninstall" in line
-        ]
-
-        self.assertEqual(auto_calls, [
-            '      if bash "${BASH_SOURCE[0]}" --platform "$plat" "${source_health_args[@]+"${source_health_args[@]}"}" "${agent_visibility_args[@]+"${agent_visibility_args[@]}"}" "${verbose_args[@]+"${verbose_args[@]}"}" "${addon_args[@]+"${addon_args[@]}"}" "${ARGS[@]+"${ARGS[@]}"}"; then',
-            '      bash "${BASH_SOURCE[0]}" --platform "$plat" "${source_health_args[@]+"${source_health_args[@]}"}" "${agent_visibility_args[@]+"${agent_visibility_args[@]}"}" "${verbose_args[@]+"${verbose_args[@]}"}" "${addon_args[@]+"${addon_args[@]}"}" "${ARGS[@]+"${ARGS[@]}"}" >>"$INSTALL_REPORT_LOG_FILE" 2>&1 &',
-        ])
-        self.assertEqual(uninstall_calls, [
-            '    if ! bash "${BASH_SOURCE[0]}" --platform "$plat" --uninstall; then'
-        ])
-
     def test_skill_validation_workflow_runs_installer_compatibility_suite(self) -> None:
         workflow = SKILL_VALIDATION_WORKFLOW.read_text(encoding="utf-8")
 

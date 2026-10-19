@@ -549,13 +549,13 @@ class AddonInstallerTest(unittest.TestCase):
             self.assertEqual(state_noop.get("owner"), "addon")
 
     def test_install_entrypoints_expose_addon_options(self) -> None:
-        install_sh = REPO_ROOT.joinpath("install.sh").read_text(encoding="utf-8")
+        installer_cli = REPO_ROOT.joinpath("_shared", "installer", "cli.py").read_text(encoding="utf-8")
         install_ps1 = REPO_ROOT.joinpath("install.ps1").read_text(encoding="utf-8-sig")
 
-        self.assertIn("--addon-source", install_sh)
-        self.assertIn("--addon autopilot", install_sh)
-        self.assertIn("--addon-skip", install_sh)
-        self.assertIn("--list-addons", install_sh)
+        self.assertIn("--addon-source", installer_cli)
+        self.assertIn("--addon autopilot", installer_cli)
+        self.assertIn("--addon-skip", installer_cli)
+        self.assertIn("--list-addons", installer_cli)
         self.assertIn("[string[]]$Addon", install_ps1)
         self.assertIn("[string[]]$AddonSource", install_ps1)
         self.assertIn("[switch]$AddonSkip", install_ps1)

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -19,27 +19,6 @@ CODEX_BLOCK_END = "<!-- Ghost-ALICE managed block end: codex-bootstrap -->"
 CLAUDE_MARKER = "# Ghost-ALICE Claude Bootstrap"
 CLAUDE_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
 CLAUDE_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
-
-
-def _extract_bash_function(source: str, name: str) -> str:
-    lines = source.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines):
-        if line.startswith(f"{name}() {{"):
-            start = idx
-            break
-    if start is None:
-        raise AssertionError(f"Function not found: {name}")
-
-    body = []
-    depth = 0
-    for line in lines[start:]:
-        body.append(line)
-        depth += line.count("{")
-        depth -= line.count("}")
-        if depth == 0:
-            return "".join(body)
-    raise AssertionError(f"Function did not terminate: {name}")
 
 
 def _extract_powershell_function(source: str, name: str) -> str:
@@ -715,37 +694,7 @@ class InstallStatusContractTest(unittest.TestCase):
             self.assertIn("user-owned markerless-existing-rule-file", result.stdout)
 
     def test_installers_wire_status_and_doctor_to_common_cli(self) -> None:
-        sh = installer_bash_source()
-        self.assertIn("_run_install_doctor", sh)
-        self.assertIn("--doctor", sh)
-        self.assertIn("install_doctor.py", sh)
-        self.assertIn("--global-rule", sh)
-        self.assertIn("CLAUDE_MANAGED_BLOCK_BEGIN", sh)
-        self.assertIn("CODEX_MANAGED_BLOCK_BEGIN", sh)
-        self.assertIn('_run_install_doctor "status"', _extract_bash_function(sh, "check_status"))
-        self.assertIn('_run_install_hooks "status" "$PLATFORM"', _extract_bash_function(sh, "check_status"))
-        sh_doctor = _extract_bash_function(sh, "_run_install_doctor")
-        self.assertIn('--global-rule "claude-bootstrap"', sh_doctor)
-        self.assertIn('--encoding-root "$SCRIPT_DIR"', sh_doctor)
-        self.assertIn('--encoding-root "$skills_dir"', sh_doctor)
-        self.assertIn("--install-state-manifest", sh_doctor)
-        bash_supported = _extract_bash_function(sh, "codex_hooks_supported")
-        self.assertIn("return 0", bash_supported)
-        self.assertNotIn("is_windows_like_runtime", bash_supported)
-        bash_hooks = _extract_bash_function(sh, "_run_install_hooks")
-        self.assertIn('codex_hooks_supported "$platform"', bash_hooks)
-        self.assertIn("Codex hooks are unavailable in this runtime", bash_hooks)
-        self.assertNotIn("disabled on Windows", bash_hooks)
-        self.assertIn('--hook-shared-dir "$(resolve_ghost_alice_runtime_shared_dir)"', bash_hooks)
-        self.assertIn('--runtime-shared "$(resolve_ghost_alice_runtime_shared_dir)"', sh_doctor)
-        self.assertIn('--hook-config "$(resolve_codex_home)/hooks.json"', sh_doctor)
-        self.assertIn("--visibility", sh)
-        self.assertIn("--agent-visibility", sh)
-        self.assertIn('local visibility="${AGENT_VISIBILITY:-}"', bash_hooks)
-        self.assertIn('if [ "$action" = "install" ] && [ -z "$visibility" ]; then', bash_hooks)
-        self.assertIn('visibility="dynamic"', bash_hooks)
-        self.assertIn('args+=(--visibility "$visibility")', bash_hooks)
-
+        # The bash side of this contract now lives in _shared/test_installer_hosts_preservation_diagnostics.py.
         ps1 = installer_ps1_source()
         self.assertIn("[switch]$Doctor", ps1)
         self.assertIn("function Invoke-InstallDoctor", ps1)
@@ -782,15 +731,7 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn('"--visibility", $visibility', powershell_hooks)
 
     def test_status_and_doctor_forward_selected_addon_sources_to_hook_status(self) -> None:
-        bash_hooks = _extract_bash_function(installer_bash_source(), "_run_install_hooks")
-        self.assertIn('if [ "$action" != "uninstall" ]; then', bash_hooks)
-        self.assertIn('args+=(--addon-source "$_addon_src")', bash_hooks)
-
-        bash_status = _extract_bash_function(installer_bash_source(), "check_status")
-        bash_doctor = _extract_bash_function(installer_bash_source(), "run_doctor")
-        self.assertIn('_run_install_hooks "status" "$PLATFORM"', bash_status)
-        self.assertIn('_run_install_hooks "status" "$PLATFORM"', bash_doctor)
-
+        # The bash side of this contract now lives in _shared/test_installer_hosts_preservation_diagnostics.py.
         powershell_hooks = _extract_powershell_function(
             installer_ps1_source(),
             "Invoke-InstallHooks",
@@ -811,18 +752,14 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn(expected_call, powershell_doctor)
 
     def test_installers_write_empty_pending_merge_manifest_after_snapshot(self) -> None:
-        sh = installer_bash_source()
-        bash_writer = _extract_bash_function(sh, "_write_empty_pending_manifest_if_missing")
-        # The Bash function delegates empty-manifest serialization to the _shared writer.
-        self.assertIn("pending_manifest_writer.py", bash_writer)
+        transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
+        # The installer delegates empty-manifest serialization to the _shared writer.
+        self.assertIn("pending_manifest_writer.py", transaction_py)
+        self.assertIn("def write_empty_pending_manifest_if_missing", transaction_py)
         writer_py = PENDING_MANIFEST_WRITER.read_text(encoding="utf-8")
         self.assertIn('"version": 1', writer_py)
         self.assertIn('"platform": platform', writer_py)
         self.assertIn('"entries": []', writer_py)
-        self.assertIn(
-            '_write_empty_pending_manifest_if_missing "$platform_dir" "${pending_root}/manifest.json"',
-            _extract_bash_function(sh, "_run_snapshot_after_install"),
-        )
 
         ps1 = installer_ps1_source()
         ps_writer = _extract_powershell_function(ps1, "Write-EmptyPendingManifestIfMissing")

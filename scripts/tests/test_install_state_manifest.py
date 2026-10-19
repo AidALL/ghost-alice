@@ -7,33 +7,12 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_STATE_SCHEMA = REPO_ROOT / "installer_update" / "install_state_schema.md"
 INSTALL_STATE_WRITER = REPO_ROOT / "_shared" / "install_state_writer.py"
-
-
-def _extract_bash_function(source: str, name: str) -> str:
-    lines = source.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines):
-        if line.startswith(f"{name}() {{"):
-            start = idx
-            break
-    if start is None:
-        raise AssertionError(f"Function not found: {name}")
-
-    body = []
-    depth = 0
-    for line in lines[start:]:
-        body.append(line)
-        depth += line.count("{")
-        depth -= line.count("}")
-        if depth == 0:
-            return "".join(body)
-    raise AssertionError(f"Function did not terminate: {name}")
 
 
 def _extract_powershell_function(source: str, name: str) -> str:
@@ -81,7 +60,8 @@ class InstallStateManifestTest(unittest.TestCase):
             self.assertIn(field, body)
 
     def test_installers_distinguish_copy_fallback_manifest_mode(self) -> None:
-        self.assertIn("copy-fallback", installer_bash_source())
+        transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
+        self.assertIn("copy-fallback", transaction_py)
         self.assertIn("copy-fallback", installer_ps1_source())
 
     def test_install_ps1_declares_install_state_manifest_writer(self) -> None:
@@ -94,15 +74,6 @@ class InstallStateManifestTest(unittest.TestCase):
         self.assertIn("managed_markers", body)
         self.assertIn("target_tree_hash", body)
         self.assertIn("Write-InstallStateManifest -TargetPlatform $Platform", body)
-
-    def test_install_state_manifest_failure_is_blocking_in_bash_installer(self) -> None:
-        body = installer_bash_source()
-        writer = _extract_bash_function(body, "write_install_state_manifest")
-
-        self.assertIn("return 1", writer)
-        self.assertIn("Install-state manifest write failed; aborting install", writer)
-        self.assertIn('write_install_state_manifest "$SKILLS_DIR" "$copy_only" "${skills[@]}" || exit 1', body)
-        self.assertNotIn("Install-state manifest was not written", writer)
 
     def test_install_state_manifest_failure_is_blocking_in_powershell_installer(self) -> None:
         body = installer_ps1_source()
@@ -128,10 +99,9 @@ class InstallStateManifestTest(unittest.TestCase):
         self.assertIn("system_env_changes = @(Get-SystemEnvChangesForInstallState)", writer)
         self.assertIn("source_repo_hook_path", body)
 
-    def test_install_sh_writer_records_system_env_changes_field(self) -> None:
-        body = installer_bash_source()
-        writer = _extract_bash_function(body, "write_install_state_manifest")
-        self.assertIn("GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED", writer)
+    def test_installer_writer_records_system_env_changes_field(self) -> None:
+        transaction_py = (REPO_ROOT / "_shared" / "installer" / "transaction.py").read_text(encoding="utf-8")
+        self.assertIn("GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED", transaction_py)
         # source_repo_hook_path is computed by the Python installer module
         writer_py = INSTALL_STATE_WRITER.read_text(encoding="utf-8")
         self.assertIn("source_repo_hook_path", writer_py)

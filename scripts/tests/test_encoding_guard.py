@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _installer_source import installer_bash_source, installer_ps1_source
+from _installer_source import installer_ps1_source
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -23,27 +23,6 @@ def _load_guard():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
-
-
-def _extract_bash_function(source: str, name: str) -> str:
-    lines = source.splitlines(keepends=True)
-    start = None
-    for idx, line in enumerate(lines):
-        if line.startswith(f"{name}() {{"):
-            start = idx
-            break
-    if start is None:
-        raise AssertionError(f"Function not found: {name}")
-
-    body = []
-    depth = 0
-    for line in lines[start:]:
-        body.append(line)
-        depth += line.count("{")
-        depth -= line.count("}")
-        if depth == 0:
-            return "".join(body)
-    raise AssertionError(f"Function did not terminate: {name}")
 
 
 def _extract_powershell_function(source: str, name: str) -> str:
@@ -182,17 +161,9 @@ class EncodingGuardTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
 
     def test_installers_run_encoding_guard_before_merge_preflight(self) -> None:
-        sh = installer_bash_source()
+        # The bash order (source health, encoding guard, preflight) is fixed by _shared/test_installer_cli.py.
         ps1 = installer_ps1_source()
-        install_sh = _extract_bash_function(sh, "install")
         install_ps1 = _extract_powershell_function(ps1, "Invoke-Install")
-
-        self.assertIn("_run_encoding_guard_before_install", sh)
-        self.assertLess(install_sh.index("check_source_health"), install_sh.index("_run_encoding_guard_before_install"))
-        self.assertLess(
-            install_sh.index("_run_encoding_guard_before_install"),
-            install_sh.index("_run_preflight_before_install"),
-        )
 
         self.assertIn("function Invoke-EncodingGuardBeforeInstall", ps1)
         self.assertLess(install_ps1.index("Test-SourceHealth"), install_ps1.index("Invoke-EncodingGuardBeforeInstall"))
