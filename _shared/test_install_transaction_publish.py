@@ -285,6 +285,14 @@ class FailureTests(PublishCase):
             install_transaction.recover(self.ghost, txid)
         self.assertEqual(self.journal(txid)["phase"], "prepare")
 
+    def test_a_journal_that_cannot_be_written_stops_the_publish_before_any_change(self):
+        shutil.rmtree(self.ghost / "rollbacks")
+        (self.ghost / "rollbacks").write_text("not a folder", encoding="utf-8")
+        with self.assertRaisesRegex(install_transaction.InstallTransactionError, "journal"):
+            install_transaction.publish(self.batch())
+        self.assertEqual(self.snapshot(*self.dests), self.before_files)
+        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), self.before_record)
+
     def test_an_unreadable_journal_counts_as_unfinished(self):
         broken = self.ghost / "rollbacks" / "20990101T000000Z-1-ffffffff"
         broken.mkdir(parents=True)

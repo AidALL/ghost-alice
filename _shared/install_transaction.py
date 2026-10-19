@@ -666,6 +666,11 @@ def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str
     that fails leaves the journal unfinished and names its folder.
     """
     request = _validated_request(request)
+    try:
+        journal = Journal.begin(request)
+    except OSError as exc:
+        raise InstallTransactionError(f"publish journal cannot be written under "
+                                      f"{rollbacks_root(request['ghost_root'])}: {exc}") from exc
     progress = request.get("progress") or {}
     statuses = [target.get("status") for target in request["targets"]]
     callback = None
@@ -680,7 +685,6 @@ def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str
     if progress.get("event_file"):
         events = [{"platform": request["host"], "target_id": target["name"], "target_kind": target["kind"],
                    "status": target["status"]} for target in request["targets"]]
-    journal = Journal.begin(request)
     batch = PublishBatch(request, journal, rollback_keep=rollback_keep, progress_callback=callback,
                          progress_events=events)
     try:
