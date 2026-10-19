@@ -30,6 +30,8 @@ ISOLATED_REJECTION = "isolated destinations require the Python hook installer; s
 UNINSTALL_FLAGS = ("--uninstall", "--remove", "-u")
 COMMAND_FLAGS = ("--help", "-h", "--list", "-l", "--status", "-s", "--doctor", *UNINSTALL_FLAGS,
                  "--sync-commands", "--check-commands")
+# Commands given as a bare word; `gateway` runs the gateway installer once, never per detected platform.
+COMMAND_WORDS = ("gateway",)
 VISIBILITY_FLAGS = ("--visibility", "--agent-visibility")
 
 
@@ -187,7 +189,7 @@ def auto_detect_requested(options: Options) -> bool:
     first = options.args[0] if options.args else ""
     if first == "":
         return True
-    if first in COMMAND_FLAGS or first.startswith("--"):
+    if first in COMMAND_FLAGS or first in COMMAND_WORDS or first.startswith("--"):
         return False
     return True
 

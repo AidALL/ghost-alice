@@ -153,7 +153,10 @@ def run_repair(ctx: "Context") -> int:
     repaired = kept = 0
     shared = skills_dir / "_shared"
     if not shared.exists():
-        transaction.install_shared(ctx, skills_dir, copy_only)
+        code = transaction.install_shared(ctx, skills_dir, copy_only)
+        if code != 0:
+            report.error("repair: _shared could not be re-provisioned")
+            return code
         repaired += 1
     elif preservation.is_clean_managed_target(ctx, "_shared", shared):
         pass

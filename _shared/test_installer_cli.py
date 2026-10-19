@@ -149,7 +149,8 @@ class OptionTests(CliCase):
     def test_auto_detect_matrix(self):
         # install.sh:255-269; test_installer_default_auto.py:187-201
         for argv, expected in ((["task-router"], True), ([], True), (["--status"], False), (["--help"], False),
-                               (["--uninstall"], False), (["--bogus"], False), (["--list"], False), (["--sync-commands"], False)):
+                               (["--uninstall"], False), (["--bogus"], False), (["--list"], False), (["--sync-commands"], False),
+                               (["gateway", "detach", "--root", "/x"], False)):
             with self.subTest(argv=argv):
                 self.assertEqual(cli.auto_detect_requested(cli.parse_options(argv)), expected)
         for flag in (["--platform", "claude"], ["--prompt-platform"], ["--cleanup-pending"], ["--list-addons"], ["--update-source"]):
@@ -257,6 +258,15 @@ class DispatchTests(CliCase):
                     self.assertEqual(args, ("_shared/context_gateway_install.py", "detach", "--root", "/x"))
                 if expected == "uninstall":
                     self.assertEqual(args[1], ["task-router"])
+
+    def test_gateway_without_platform_runs_the_passthrough_once(self):
+        # A state-changing gateway operation must not fan out to every detected platform.
+        rc, _ = self.dispatch(["gateway", "detach", "--root", "/x"])
+        self.assertEqual(rc, 5)
+        self.assertEqual(self.names().count("run_tool"), 1)
+        self.assertNotIn("run_install_children", self.names())
+        _, args, _ = next(c for c in self.calls if c[0] == "run_tool")
+        self.assertEqual(args, ("_shared/context_gateway_install.py", "detach", "--root", "/x"))
 
     def test_install_paths(self):
         rc, _ = self.dispatch(["--platform", "claude"])

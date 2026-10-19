@@ -252,6 +252,18 @@ class RepairTests(LifecycleCase):
         self.assertNotIn("link_or_copy", self.calls)
         self.assertIn("[OK] Repair complete: 2 re-provisioned, 0 left untouched", out)
 
+    def test_repair_propagates_a_shared_placement_failure(self):
+        # A missing `_shared` that cannot be re-provisioned is a failed repair, not a repaired target.
+        self.stub("installer.transaction.install_shared", 3)
+        self.stub("installer.transaction.link_or_copy", 0)
+        self.stub("installer.addons.repair_missing", True)
+        rc, out = self.captured(lifecycle.run_repair, self.ctx)
+        self.assertEqual(rc, 3)
+        self.assertEqual(self.calls.count("install_shared"), 1)
+        self.assertIn("[ERROR] repair: _shared could not be re-provisioned", out)
+        self.assertNotIn("Repair complete", out)
+        self.assertNotIn("repair_missing", self.calls)
+
     def test_repair_failures(self):
         (self.ctx.skills_dir / "_shared").mkdir()
         self.stub("installer.transaction.install_shared", 0)
