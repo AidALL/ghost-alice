@@ -33,7 +33,12 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def participants(ghost_root: Path | str, *, effects=None, platform: str = sys.platform) -> list:
+def _host(platform: str | None) -> str:
+    """The host platform, read when the judgment runs (the tests patch `sys.platform`)."""
+    return sys.platform if platform is None else platform
+
+
+def participants(ghost_root: Path | str, *, effects=None, platform: str | None = None) -> list:
     """The participants of a publish: the gateway participant when the install record has a `service`
     section, none otherwise (a missing or unreadable record names no service)."""
     try:
@@ -43,7 +48,7 @@ def participants(ghost_root: Path | str, *, effects=None, platform: str = sys.pl
     service = (record or {}).get("service")
     if not isinstance(service, dict):
         return []
-    return [GatewayParticipant(ghost_root, service, effects=effects, platform=platform)]
+    return [GatewayParticipant(ghost_root, service, effects=effects, platform=_host(platform))]
 
 
 def affects(service: dict, locations, *, remove_codex: bool = False) -> bool:
@@ -64,11 +69,11 @@ def affects(service: dict, locations, *, remove_codex: bool = False) -> bool:
 class GatewayParticipant:
     """Stops the registered service around a publish that touches its code, and starts it again."""
 
-    def __init__(self, ghost_root: Path | str, service: dict, *, effects=None, platform: str = sys.platform):
+    def __init__(self, ghost_root: Path | str, service: dict, *, effects=None, platform: str | None = None):
         self.ghost_root, self.service = Path(ghost_root), dict(service)
         self.effects = gateway._effects() if effects is None else effects
-        self.platform = platform
-        self.domain = gateway_platform.service_domain(platform)
+        self.platform = _host(platform)
+        self.domain = gateway_platform.service_domain(self.platform)
         self.agent = Path(service["launch_agent"])
         self.affected = self.was_running = self.stopped = self.started = False
 
@@ -149,7 +154,7 @@ class GatewayParticipant:
 
 
 def removal(ghost_root: Path | str, removing, *, remove_codex: bool = False, confirm: bool = True, effects=None,
-            platform: str = sys.platform) -> dict:
+            platform: str | None = None) -> dict:
     """Judge a removal of `removing` and detach the registered service when it is touched.
 
     Returns the gateway item of the removal report: `missing` (no service), `unchanged` (independent),
@@ -158,6 +163,7 @@ def removal(ghost_root: Path | str, removing, *, remove_codex: bool = False, con
     """
     ghost_root = Path(ghost_root)
     io = gateway._effects() if effects is None else effects
+    platform = _host(platform)
     removing = [Path(path) for path in removing]
     try:
         record = installed_payload.read(ghost_root)
@@ -199,7 +205,7 @@ def _unregistered(io, removing, platform) -> dict:
     return dict(kind="context-gateway", action="unchanged", reason="independent-unregistered-gateway-runtime")
 
 
-def guard(ghost_root: Path | str, removing, *, effects=None, platform: str = sys.platform) -> int:
+def guard(ghost_root: Path | str, removing, *, effects=None, platform: str | None = None) -> int:
     """`removal` as an exit code for the selected removal: 0 to go on, else the cause's code with its
     diagnostic on stderr."""
     try:
