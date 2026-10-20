@@ -1,12 +1,13 @@
 """Place the selected targets through publish requests, and write the earlier records after placement.
 
 Port of `installer_lib/install.sh:75-223, 411-610, 640-653` and
-`installer_lib/targets.sh:248-261, 275-338`. Every placement writes one publish
-request and runs `install_transaction.py publish --request <file>`, which places
-the targets and writes their install record entries in the same step; this module
-decides what each request names. The markers, the snapshot, the sidecars and the
-install-state are still written after placement until their readers move to the
-install record.
+`installer_lib/targets.sh:248-261, 275-338`. Every placement builds one publish
+request and calls `install_transaction.publish` in this process with the
+participants the install record names (the gateway participant when a gateway is
+registered); the publish places the targets and writes their install record
+entries in the same step. This module decides what each request names. The
+markers, the snapshot, the sidecars and the install-state are still written after
+placement until their readers move to the install record.
 """
 
 from __future__ import annotations
@@ -16,17 +17,22 @@ import json
 import os
 from pathlib import Path
 import shutil
-import tempfile
+import sys
 from typing import TYPE_CHECKING
 
 import install_transaction
 import installed_payload
-from installer import locations, report, runner, source
+from installer import gateway_participant, locations, report, runner, source
+from installer.runner import ToolResult
 
 if TYPE_CHECKING:
     from installer.cli import Context
     from installer.selection import Target
     from installer.source import HookPathChange
+
+# The runtime companion scripts the context gateway runs beside the runtime `_shared`, relative to the
+# checkout and to the runtime root; the runtime publish carries them with `_shared`.
+RUNTIME_COMPANIONS = ("session-intent-analyzer/scripts/session_intent_ledger.py",)
 
 
 @dataclass
@@ -81,12 +87,13 @@ def _request_target(ctx: "Context", name: str, source_path: Path, dest: Path, *,
     return target
 
 
-def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -> runner.ToolResult:
-    """Write one publish request for `targets` and run `install_transaction.py publish --request <file>`.
+def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -> ToolResult:
+    """Build one publish request for `targets` and call `install_transaction.publish` in this process
+    with the participants the install record names.
 
     The request names the host, the record root, the failure event log, the installer
-    and source sections and the targets; the file is transport only and is removed
-    once the child returns.
+    and source sections and the targets. A refused publish prints its cause on stderr
+    (the structured gateway cause when it has one) and returns its exit code.
     """
     checkout = record_source(ctx)
     request = {"schema_version": install_transaction.REQUEST_SCHEMA_VERSION, "host": ctx.platform,
@@ -95,16 +102,17 @@ def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -
                "source": dict(checkout), "targets": targets}
     if progress:
         request["progress"] = progress
-    descriptor, name = tempfile.mkstemp(prefix="ghost-alice-publish-", suffix=".json")
+    participants = gateway_participant.participants(locations.record_root())
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(request, handle, ensure_ascii=False)
-        return runner.run_tool("_shared/install_transaction.py", "publish", "--request", name)
-    finally:
-        try:
-            os.unlink(name)
-        except FileNotFoundError:
-            pass
+        install_transaction.publish(request, participants)
+    except install_transaction.InstallTransactionError as exc:
+        if hasattr(exc, "code"):
+            print(json.dumps(dict(status=exc.outcome, error_code=exc.code, phase=exc.phase, detail=str(exc))),
+                  file=sys.stderr)
+        else:
+            print(str(exc), file=sys.stderr)
+        return ToolResult(getattr(exc, "exit_code", 1))
+    return ToolResult(0)
 
 
 def copy_target(ctx: "Context", target: "Target", dest: Path, kind: str = "skill") -> bool:
@@ -182,11 +190,19 @@ def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool) -> int:
 
 
 def sync_runtime_shared(ctx: "Context") -> bool:
-    """Copy `<checkout>/_shared` to the runtime shared dir (`install.sh:95-103`)."""
+    """Publish `<checkout>/_shared` and the runtime companions under the runtime root in one request
+    (`install.sh:95-103`); one publish, so a registered gateway stops and starts once."""
     shared = _shared_target()
     if not shared.path.is_dir():
         return True
-    if not copy_target(ctx, shared, locations.runtime_shared_dir(), "runtime"):
+    runtime_root = locations.runtime_root()
+    targets = [_request_target(ctx, shared.name, shared.path, runtime_root / "_shared", kind="runtime", mode="copy")]
+    for relative in RUNTIME_COMPANIONS:
+        companion = runner.REPO_ROOT / relative
+        if companion.is_file():
+            targets.append(_request_target(ctx, relative, companion, runtime_root / relative, kind="runtime", mode="copy"))
+    if not publish(ctx, targets).ok:
+        report.error(f"Staged copy replace failed: {runtime_root / '_shared'}")
         return False
     report.detail_ok("runtime _shared -> copied")
     return True
@@ -203,28 +219,21 @@ def _gateway_service_running() -> bool:
 
 def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
     """One line about the context gateway after the runtime publish, read-only, and the same line
-    returned as `(summary, running)` for the report tail: None without a binding; INFO with the
-    receipt's source and file count while the service runs, WARN when it does not or when the binding
-    or receipt cannot be read. The publish coordination already stopped and restarted the service for
-    a changed module; this line only tells the user what it found."""
-    binding_path = locations.record_root() / "context-gateway-binding.json"
-    if not binding_path.is_file():
+    returned as `(summary, running)` for the report tail: None when the install record has no
+    `service` section; INFO with the service's runtime root while the service runs, WARN when it does
+    not or when the record cannot be read. The gateway participant already stopped and started the
+    service around the runtime publish; this line only tells the user what the record says."""
+    root = locations.record_root()
+    try:
+        record = installed_payload.read(root)
+    except installed_payload.RecordError:
+        summary = f"Context gateway: the install record cannot be read: {installed_payload.path(root)}"
+        report.warn(summary)
+        return summary, False
+    service = (record or {}).get("service")
+    if not isinstance(service, dict):
         return None
-    try:
-        binding = json.loads(binding_path.read_text(encoding="utf-8"))
-        receipt_path = Path(binding["installation_path"])
-    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
-        summary = f"Context gateway: registered, but its binding cannot be read: {binding_path}"
-        report.warn(summary)
-        return summary, False
-    try:
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        source_root, files = receipt["source_root"], len(receipt["files"])
-    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
-        summary = f"Context gateway: registered, but its receipt cannot be read: {receipt_path}"
-        report.warn(summary)
-        return summary, False
-    summary = f"Context gateway: registered from {source_root}, {report.count_label(files, 'file', 'files')}"
+    summary = f"Context gateway: registered, runtime {service.get('runtime_root')}"
     if _gateway_service_running():
         summary += ", service running"
         report.info(summary)
@@ -236,16 +245,26 @@ def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
 
 def migrate_record(ctx: "Context") -> None:
     """Create the install record once from an earlier installer's records (`installed_payload.migrate`)
-    for every host; a migration that cannot finish is reported and the command goes on."""
+    for every host, then the gateway's `service` section once from its installation receipt
+    (`installed_payload.migrate_service`); a migration that cannot finish is reported and the command
+    goes on."""
+    root = locations.record_root()
     try:
-        summary = installed_payload.migrate(locations.record_root(), locations.PLATFORMS,
-                                            installer_commit=record_source(ctx)["commit"])
+        summary = installed_payload.migrate(root, locations.PLATFORMS, installer_commit=record_source(ctx)["commit"])
     except (installed_payload.RecordError, installed_payload.NotLockHolder, OSError) as exc:
         report.warn(f"Install record migration skipped: {exc}")
+    else:
+        if summary is not None:
+            report.info(f"Install record created from earlier install records: {summary['targets']} targets "
+                        f"(migrated {summary['migrated']}, unknown {summary['unknown']})")
+    try:
+        service = installed_payload.migrate_service(root)
+    except (installed_payload.RecordError, installed_payload.NotLockHolder, OSError) as exc:
+        report.warn(f"Gateway record migration skipped: {exc}")
         return
-    if summary is not None:
-        report.info(f"Install record created from earlier install records: {summary['targets']} targets "
-                    f"(migrated {summary['migrated']}, unknown {summary['unknown']})")
+    if service is not None:
+        report.info(f"Gateway record created from its installation receipt: {service['label']} "
+                    f"(companion targets added {service['companions']})")
 
 
 def detect_install_mode(dest: Path, copy_only: bool) -> str:
@@ -276,14 +295,12 @@ def remove_installed_target(label: str, target: Path) -> bool:
 
 
 def guard_gateway_removal(ctx: "Context", targets: list[Path]) -> int:
-    """`context_gateway_install.py detach --root ... --confirm`; 0 with no targets (`targets.sh:275-282`)."""
+    """The gateway participant's judgment of removing `targets`, in this process: 0 to go on (the
+    service was independent or is detached), else the cause's exit code; 0 with no targets
+    (`targets.sh:275-282`)."""
     if not targets:
         return 0
-    args = ["detach"]
-    for target in targets:
-        args.extend(["--root", str(target)])
-    args.append("--confirm")
-    return runner.run_tool("_shared/context_gateway_install.py", *args).returncode
+    return gateway_participant.guard(locations.record_root(), [Path(target) for target in targets])
 
 
 def cleanup_shared_if_unused(ctx: "Context", skills_root: Path) -> int:

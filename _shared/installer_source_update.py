@@ -1,4 +1,8 @@
-"""Managed Git update as a reversible participant in installer coordination."""
+"""Managed Git update: fetch, fast-forward the checkout and restore it when the update fails.
+
+The checkout is not the context gateway's code (the installer publishes a copy of `_shared` to the
+runtime), so the update does not stop or start the service.
+"""
 from __future__ import annotations
 
 import argparse
@@ -10,15 +14,12 @@ import sys
 import tarfile
 import tempfile
 
-from context_gateway_install import coordinate_payload_replacement
-
 
 class SourceUpdate:
     def __init__(self, root):
         self.root, self.stash, self.attempted = Path(root), None, False
         self.temporary = tempfile.TemporaryDirectory(prefix='ghost-alice-source-stage-')
         self.stage_root = Path(self.temporary.name)
-        self.renewed_paths = ()
 
     def git(self, *args, raw=False):
         result = subprocess.run(['git', '-C', str(self.root), *args], capture_output=True)
@@ -41,22 +42,9 @@ class SourceUpdate:
                      ('diff', '--no-renames', '--name-only', '-z', 'HEAD'), ('ls-files', '--others', '--exclude-standard', '-z')):
             changed.update(p for p in self.git(*args, raw=True).decode().split('\0') if p)
         self.changed_paths = tuple(self.root / p for p in sorted(changed))
-        self.renewed_paths = tuple(path.resolve() for path in self.changed_paths)
         archive = self.git('archive', '--format=tar', self.target, raw=True)
         with tarfile.open(fileobj=io.BytesIO(archive)) as stream:
             stream.extractall(self.stage_root, filter='data')
-
-    @property
-    def mappings(self):
-        return ((self.stage_root, self.root),)
-
-    @property
-    def destinations(self):
-        return self.changed_paths
-
-    @property
-    def recovery_reference(self):
-        return str(self.root) + ' at ' + self.before_head
 
     def publish(self):
         if self.git('rev-parse', 'HEAD') != self.before_head or self.git('status', '--porcelain=v1', '--untracked-files=all') != self.before_status:
@@ -103,17 +91,13 @@ def main(argv=None):
     operation = SourceUpdate(args.source_dir)
     try:
         operation.prepare()
-        if operation.destinations:
-            coordinate_payload_replacement(operation)
-        else:
-            operation.run_unmanaged()
+        operation.run_unmanaged()
         print('Source checkout updated. Now rerun the installer: bash install.sh', file=sys.stderr)
         return 0
     except (ValueError, OSError, RuntimeError) as exc:
-        print(json.dumps(dict(status=getattr(exc, 'outcome', 'blocked'),
-            error_code=getattr(exc, 'code', 'GATEWAY_PRECONDITION'),
-            phase=getattr(exc, 'phase', 'source-update'), detail=str(exc))), file=sys.stderr)
-        return getattr(exc, 'exit_code', 2)
+        print(json.dumps(dict(status='blocked', error_code='SOURCE_UPDATE', phase='source-update', detail=str(exc))),
+              file=sys.stderr)
+        return 2
     finally:
         operation.cleanup()
 

@@ -12,6 +12,7 @@ import time
 import urllib.request
 import uuid
 
+import installed_payload
 from context_gateway_model import Artifact, GatewayBlocked, LABEL, ServiceObservation
 
 
@@ -119,12 +120,18 @@ def ready(state):
         time.sleep(0.1)
 
 
+def record_service(home, section):
+    """Write the install record's `service` section (None deletes it); the record writer checks the lock."""
+    installed_payload.update(Path(home) / '.ghost-alice', {'service': section})
+
+
 class Platform:
     snapshot = staticmethod(snapshot)
     observe = staticmethod(observe)
 
-    def __init__(self, *, write=write, state=service_state, stop=stop, start=start, ready=ready):
+    def __init__(self, *, write=write, state=service_state, stop=stop, start=start, ready=ready, record=None):
         self.write, self.state, self.stop, self.start, self.ready = write, state, stop, start, ready
+        self.record = record if record is not None else (lambda section: record_service(Path.home(), section))
 
     @staticmethod
     def children(path):

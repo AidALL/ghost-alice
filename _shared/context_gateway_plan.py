@@ -8,8 +8,8 @@ import plistlib
 import re
 import tomllib
 
-from context_gateway_model import (COMPANIONS, Decision, GatewayBlocked, LABEL, MODULES, Mutation,
-    Plan, Preparation, RETIRED_MODULES, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest, encoded)
+from context_gateway_model import (COMPANIONS, GatewayBlocked, LABEL, MODULES, Mutation, Plan, Preparation,
+    TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest, encoded)
 from hook_definitions import PROVIDER
 
 
@@ -84,6 +84,20 @@ def component_baselines(receipt):
     return files
 
 
+def provider_blocks(text):
+    """The two managed provider blocks of a Codex `config.toml` as they stand in `text`, markers included;
+    empty when a block is missing or lacks its closing marker. The record's `config_block_digest` is the
+    digest of this text."""
+    found = []
+    for begin, end in ((TOP_BEGIN, TOP_END), (TABLE_BEGIN, TABLE_END)):
+        found.extend(re.findall(re.escape(begin) + r'\n.*?\n' + re.escape(end) + r'\n', text, flags=re.S))
+    return ''.join(found)
+
+
+def _block_digest(text):
+    return digest(provider_blocks(text).encode())
+
+
 def validate_install(request, inventory):
     state_dir, config = request.state_dir, request.codex / 'config.toml'
     regular(inventory.file(config), codex=True)
@@ -152,7 +166,10 @@ def validate_install(request, inventory):
     return receipt, prior, tuple(payload.values())
 
 
-def install_plan(request, inventory, validated, *, port, scope, interpreter, stamp, observed_at, domain):
+def install_plan(request, inventory, validated, *, port, scope, interpreter, stamp, observed_at, domain,
+                 service=None, record=False):
+    """The service files, the module payload and the receipt of one registration. With `record`, the
+    commit phase also writes the install record's `service` section (`service` is the section as it was)."""
     receipt, prior, payload = validated
     config, state_dir = request.codex / 'config.toml', request.state_dir
     state_path, receipt_path = state_dir / 'state.json', state_dir / 'installation.json'
@@ -165,7 +182,8 @@ def install_plan(request, inventory, validated, *, port, scope, interpreter, sta
     if request.strict_log is not None:
         state['strict_log_root'] = str(request.strict_log)
     service_log = state_dir / 'service.log'
-    plist = dict(Label=LABEL, ProgramArguments=[interpreter, '-B', str(request.shared[-1] / 'context_gateway.py'),
+    program = request.shared[-1] / 'context_gateway.py'
+    plist = dict(Label=LABEL, ProgramArguments=[interpreter, '-B', str(program),
         '--config', str(state_path)], RunAtLoad=True, StandardOutPath=str(service_log),
         StandardErrorPath=str(service_log), WorkingDirectory=str(state_dir))
     state_raw, agent_raw = encoded(state), plistlib.dumps(plist)
@@ -200,134 +218,38 @@ def install_plan(request, inventory, validated, *, port, scope, interpreter, sta
     for path in (state_dir / 'usage.jsonl', service_log):
         if not inventory.file(path).exists:
             preparation.append(Preparation(path, b'', True))
+    section = dict(label=LABEL, runtime_root=str(request.shared[-1].parent), program=str(program),
+        launch_agent=str(request.agent), launch_agent_digest=digest(agent_raw),
+        state_path=str(state_path), state_digest=digest(state_raw),
+        config_path=str(config), config_block_digest=_block_digest(rendered.decode()), config_backup=str(backup),
+        registered_at=service['registered_at'] if service else observed_at, restarted_at=observed_at,
+        listener_ready=True)
     return Plan('install', domain, state_dir, request.agent, guards, staged, committed, retired,
-                tuple(preparation), prior, state, result, archive)
+                tuple(preparation), prior, state, result, archive,
+                record_change=record, record_before=service, record_after=section)
 
 
-def _dependencies(inventory, agent, definition, state_path, state):
-    argv = definition.get('ProgramArguments')
-    if (definition.get('Label') != LABEL or not isinstance(argv, list) or len(argv) != 5
-            or any(not isinstance(a, str) for a in argv) or argv[1] != '-B'
-            or argv[3] != '--config' or argv[4] != str(state_path)
-            or not _absolute(argv[0]) or not _absolute(argv[2]) or Path(argv[2]).name != 'context_gateway.py'):
-        raise GatewayBlocked('Gateway service arguments do not establish its dependencies')
-    valid_state(state)
-    runtime = Path(argv[2]).parent
-    dependencies = [agent, Path(argv[0]), runtime, state_path]
-    dependencies.extend(runtime.parent / r for r in COMPANIONS)
-    dependencies.extend(Path(state[k]) for k in ('ledger_root', 'codex_dir', 'usage_log', 'claude_dir', 'strict_log_root') if k in state)
-    for key in ('WorkingDirectory', 'StandardOutPath', 'StandardErrorPath'):
-        if key in definition:
-            if not _absolute(definition[key]):
-                raise GatewayBlocked('Gateway service paths do not establish its dependencies')
-            dependencies.append(Path(definition[key]))
-    return tuple(dependencies)
-
-
-def removal_plan(request, inventory, *, domain):
-    missing = dict(kind='context-gateway', action='missing', reason='gateway-not-selected')
-    registration = inventory.file(request.registration)
-    if not registration.exists:
-        if inventory.service is None:
-            raise GatewayBlocked('Gateway discovery binding is missing; retain Core and review the existing provider/service installation')
-        observed = inventory.service
-        if observed.presence == 'absent':
-            return Decision(result=missing)
-        if observed.presence != 'present' or observed.agent is None:
-            raise GatewayBlocked('Gateway native discovery is inconclusive; retain Core for review',
-                code='GATEWAY_SERVICE_UNCONFIRMED', exit_code=3)
-        definition = document(inventory.file(observed.agent), plist=True)
-        argv = definition.get('ProgramArguments')
-        if not isinstance(argv, list) or len(argv) != 5 or not _absolute(argv[4]):
-            raise GatewayBlocked('Unregistered service arguments are unavailable; retain Core')
-        state_path = Path(argv[4])
-        state = document(inventory.file(state_path))
-        allowed_state = {'schema_version', 'port', 'scope', 'ledger_root', 'codex_dir', 'usage_log', 'claude_dir', 'strict_log_root'}
-        allowed_agent = {'Label', 'ProgramArguments', 'RunAtLoad', 'StandardOutPath', 'StandardErrorPath', 'WorkingDirectory'}
-        if set(state) - allowed_state or set(definition) - allowed_agent:
-            raise GatewayBlocked('Unregistered service has unknown dependency settings; retain Core')
-        dependencies = _dependencies(inventory, observed.agent, definition, state_path, state)
-        if any(affected(p, request.removing, inventory, overlap=True) for p in dependencies):
-            raise GatewayBlocked('An active gateway uses the selected Core payload but lacks its discovery binding; retain Core for review')
-        return Decision(result=dict(kind='context-gateway', action='unchanged', reason='independent-unregistered-gateway-runtime'))
-    receipt_path, receipt = authenticated(inventory, request.registration)
-    if affected(receipt_path.parent, request.removing, inventory) or affected(request.registration, request.removing, inventory):
-        raise GatewayBlocked('Gateway state/logs/recovery material is inside the selected Core removal root; retain Core for review')
-    config, agent, state_path = (Path(receipt[k]) for k in ('config_path', 'launch_agent', 'state_path'))
-    regular(inventory.file(config), codex=True)
-    state_item, agent_item = inventory.file(state_path), inventory.file(agent)
-    regular(state_item); regular(agent_item)
-    if (state_item.raw is None or agent_item.raw is None or digest(state_item.raw) != receipt.get('state_digest')
-            or digest(agent_item.raw) != receipt.get('launch_agent_digest')):
-        raise GatewayBlocked('Gateway service or state changed; preserve owned coordinates for review')
-    state, definition = document(state_item), document(agent_item, plist=True)
-    dependencies = _dependencies(inventory, agent, definition, state_path, state)
-    if (definition['ProgramArguments'][2] != str(Path(receipt['runtime_shared_dir']) / 'context_gateway.py')
-            or state['ledger_root'] != receipt['ledger_root'] or Path(state['codex_dir']) / 'config.toml' != config):
-        raise GatewayBlocked('Gateway service, configuration and Core dependency binding do not agree')
-    if not request.remove_codex and not any(affected(p, request.removing, inventory, overlap=True) for p in dependencies):
-        return Decision(result=dict(kind='context-gateway', action='unchanged', reason='independent-gateway-runtime'))
+def detach_plan(request, inventory, service, *, domain):
+    """Stop the registered service, remove the provider blocks and the launch agent, delete the record's
+    `service` section; the state directory stays. The service files must be as the section records them."""
     if request.platform != 'darwin':
         raise GatewayBlocked('Gateway service detachment requires its macOS launchctl owner')
-    original = inventory.file(config)
+    config, agent, state_path = (Path(service[k]) for k in ('config_path', 'launch_agent', 'state_path'))
+    original, agent_item, state_item = inventory.file(config), inventory.file(agent), inventory.file(state_path)
+    regular(original, codex=True)
+    regular(state_item)
+    regular(agent_item)
+    if (state_item.raw is None or agent_item.raw is None or digest(state_item.raw) != service['state_digest']
+            or digest(agent_item.raw) != service['launch_agent_digest']):
+        raise GatewayBlocked('Gateway service or state changed; preserve owned coordinates for review')
+    state = valid_state(document(state_item))
     cleaned = _owned_provider_removal(original.raw.decode(), state).encode() if original.raw is not None else None
     item = dict(kind='context-gateway', action='would-detach', reason='owned-context-gateway',
-                path=str(receipt_path), config_path=str(config), launch_agent=str(agent))
-    guards = [inventory.file(p) for p in (config, agent, request.registration, receipt_path, state_path)]
-    for path, expected in component_baselines(receipt).items():
-        artifact = inventory.file(Path(path))
-        regular(artifact)
-        if artifact.raw is None or digest(artifact.raw) != expected:
-            raise GatewayBlocked('A gateway runtime component changed; retain Core for review: ' + path)
-        guards.append(artifact)
+                config_path=str(config), launch_agent=str(agent))
     staged = (Mutation(original, cleaned, original.mode or 0o600),) if original.exists else ()
-    committed = (Mutation(agent_item, None), Mutation(registration, None))
-    return Decision(plan=Plan('detach', domain, receipt_path.parent, agent, tuple(guards), staged,
-        committed, (), (), state, None, item))
-
-
-def replacement_plan(request, inventory, candidates, *, domain, updated_at):
-    decision = removal_plan(request, inventory, domain=domain)
-    if decision.plan is None:
-        return decision
-    prior = decision.plan
-    receipt_path, receipt = authenticated(inventory, request.registration)
-    # A generic Core update may replace payloads, not gateway state/config or
-    # registration. Those changes require the explicit installation operation.
-    protected = [request.registration, receipt_path, prior.agent, prior.state_dir,
-                 Path(receipt['config_path'])]
-    if any(affected(p, request.removing, inventory, overlap=True) for p in protected):
-        raise GatewayBlocked('General payload replacement overlaps gateway control/state; use the explicit gateway installation operation')
-    updated = dict(component_baselines(receipt))
-    guards = {a.path: a for a in prior.guards}
-    roots = receipt.get('shared_dirs', [receipt['runtime_shared_dir']])
-    retired = {str(Path(root) / name) for root in (roots if isinstance(roots, list) else ())
-               if _absolute(root) for name in RETIRED_MODULES}
-    for path, candidate in candidates.items():
-        regular(candidate)
-        if candidate.kind != 'file':
-            if str(path) not in retired or str(path) not in updated:
-                raise GatewayBlocked('Candidate payload removes a required gateway dependency: ' + str(path))
-            # removal_plan already required the owned copy to match its baseline;
-            # publishing the payload moves it aside, so the receipt stops owning it.
-            del updated[str(path)]
-            continue
-        current = inventory.file(path)
-        regular(current)
-        if str(path) not in updated and current.exists and current.raw != candidate.raw:
-            raise GatewayBlocked('Candidate payload would adopt a differing unowned gateway component: ' + str(path))
-        updated[str(path)] = digest(candidate.raw)
-        guards[path] = current
-    if not candidates:
-        raise GatewayBlocked('Affected replacement lacks a complete staged gateway dependency inventory')
-    receipt = dict(receipt, files=updated, updated_at=updated_at)
-    receipt_raw = encoded(receipt)
-    binding = encoded(dict(schema_version='context-gateway-binding.v1', installation_path=str(receipt_path),
-        installation_digest=digest(receipt_raw)))
-    committed = (Mutation(inventory.file(receipt_path), receipt_raw), Mutation(inventory.file(request.registration), binding))
-    return Decision(plan=Plan('replace', domain, prior.state_dir, prior.agent, tuple(guards.values()),
-        (), committed, (), (), prior.prior_state, prior.prior_state,
-        dict(status='updated', service=LABEL, listener_ready=True)))
+    committed = (Mutation(agent_item, None),)
+    return Plan('detach', domain, state_path.parent, agent, (original, agent_item, state_item), staged,
+                committed, (), (), state, None, item, record_change=True, record_before=service, record_after=None)
 
 
 def remove_provider(text):
