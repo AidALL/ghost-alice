@@ -4,7 +4,7 @@ The candidate gateway is a real loopback process. Only the launchctl executable
 and explicitly selected failure boundaries are simulated. No user's native
 service, configuration, credentials or installed files enter these fixtures.
 The install record names the runtime the gateway runs from; the registration
-records the service in it, and the removal judges from it.
+command copies no module.
 """
 import contextlib
 import io
@@ -24,12 +24,12 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import content_digest  # noqa: E402
 import context_gateway_install as gateway  # noqa: E402
-import context_gateway_model as model  # noqa: E402
 import install_lock  # noqa: E402
 import installed_payload  # noqa: E402
 from context_gateway_model import GatewayBlocked  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
+COMPANION = 'session-intent-analyzer/scripts/session_intent_ledger.py'
 
 NATIVE = r'''
 import json, os, pathlib, plistlib, signal, socket, subprocess, sys, time
@@ -65,8 +65,6 @@ if operation == 'bootout':
             if probe.connect_ex(('127.0.0.1', state['port'])):
                 break
         time.sleep(.01)
-    if mode == 'concurrent-runtime':
-        pathlib.Path(state['runtime']).write_bytes(b'concurrent user runtime edit')
     sys.exit(5 if mode == 'stop-after-kill-error' else 0)
 if operation == 'bootstrap':
     state['boots'] += 1
@@ -94,14 +92,12 @@ sys.path.insert(0, sys.argv.pop(1))
 import context_gateway_install as gateway
 gateway.sys.platform = 'darwin'
 mode = os.environ.get('FAULT_CASE', '')
-real_write, real_ready = gateway._write, gateway._ready
-if mode in ('config-write-error', 'receipt-write-error', 'binding-write-error', 'recovery-write-error'):
-    names = {'config-write-error': 'config.toml', 'receipt-write-error': 'installation.json',
-             'binding-write-error': 'context-gateway-binding.json', 'recovery-write-error': 'config.toml'}
+real_write, real_ready, real_record = gateway._write, gateway._ready, gateway._record
+if mode in ('config-write-error', 'recovery-write-error'):
     hit = [False]
     def write(path, raw, permissions=0o600):
         real_write(path, raw, permissions)
-        if path.name == names[mode] and (not hit[0] or mode == 'recovery-write-error'):
+        if path.name == 'config.toml' and (not hit[0] or mode == 'recovery-write-error'):
             hit[0] = True
             raise OSError('injected error after atomic replacement')
     gateway._write = write
@@ -126,14 +122,17 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.addCleanup(self.stop_private_processes)
-        self.home, self.shared, self.codex, self.ledger, self.state = [self.root / n for n in
-            ('home', 'installed/_shared', 'home/.codex', 'ledger', 'gateway-state')]
+        self.home, self.runtime, self.codex, self.ledger, self.state = [self.root / n for n in
+            ('home', 'home/.ghost-alice/runtime/current', 'home/.codex', 'ledger', 'gateway-state')]
+        self.shared = self.runtime / '_shared'
         self.ghost = self.home / '.ghost-alice'
         self.agent = self.root / 'agent.plist'
         for path in (self.home, self.codex, self.ledger, self.root / 'bin'):
             path.mkdir(parents=True, exist_ok=True)
         shutil.copytree(ROOT / '_shared', self.shared,
                         ignore=shutil.ignore_patterns('__pycache__', 'test_*.py', '.pytest_cache'))
+        (self.runtime / COMPANION).parent.mkdir(parents=True)
+        shutil.copy2(ROOT / COMPANION, self.runtime / COMPANION)
         self.write_record()
         sqlite3.connect(self.ledger / 'ghost-state.sqlite3').close()
         (self.codex / 'config.toml').write_text('model="native"\n')
@@ -143,8 +142,8 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         shim.chmod(0o700)
         self.environment = dict(os.environ, HOME=str(self.home), PATH=str(shim.parent),
             FAKE_NATIVE_ROOT=str(self.root), FAULT_CASE='', PYTHONDONTWRITEBYTECODE='1')
-        self.arguments = ['--source-root', str(ROOT), '--shared-dir', str(self.shared), '--codex-dir', str(self.codex),
-            '--ledger-root', str(self.ledger), '--state-dir', str(self.state), '--launch-agent', str(self.agent)]
+        self.arguments = ['--codex-dir', str(self.codex), '--ledger-root', str(self.ledger),
+            '--state-dir', str(self.state), '--launch-agent', str(self.agent)]
 
     def write_record(self, patches=None):
         """The install record the installer's runtime publish would have written, under this process's lock."""
@@ -152,10 +151,13 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         install_lock.acquire_lock(lock, owner='installer:test:codex:test')
         try:
             if patches is None:
-                patches = {'targets': {str(self.shared): dict(
-                    name='_shared', kind='runtime', mode='copy', provider='core', source=str(ROOT / '_shared'),
-                    source_commit='test', used_by=['codex'], files=content_digest.tree(self.shared),
-                    installed_at='2026-10-20T00:00:00+00:00', baseline='recorded')}}
+                entry = dict(kind='runtime', mode='copy', provider='core', source=str(ROOT / '_shared'),
+                             source_commit='test', used_by=['codex'], installed_at='2026-10-20T00:00:00+00:00',
+                             baseline='recorded')
+                patches = {'targets': {
+                    str(self.shared): dict(entry, name='_shared', files=content_digest.tree(self.shared)),
+                    str(self.runtime / COMPANION): dict(entry, name=COMPANION,
+                                                        files=content_digest.tree(self.runtime / COMPANION))}}
             installed_payload.update(self.ghost, patches)
         finally:
             install_lock.release_lock(lock)
@@ -189,29 +191,21 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         return (installed_payload.read(self.ghost) or {}).get('service')
 
     def snapshot_owned(self):
-        paths = [self.shared / n for n in model.MODULES]
-        paths.extend([self.codex / 'config.toml', self.agent, self.state / 'state.json',
-                      self.state / 'installation.json', self.home / '.ghost-alice/context-gateway-binding.json',
-                      installed_payload.path(self.ghost)])
+        paths = [self.codex / 'config.toml', self.agent, self.state / 'state.json', installed_payload.path(self.ghost)]
         return {p: (p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in paths}
 
-    def test_registration_records_the_service_in_the_install_record(self):
-        self.seed()
-        service = self.service()
-        self.assertEqual((service['runtime_root'], service['program']),
-                         (str(self.shared.parent), str(self.shared / 'context_gateway.py')))
-        self.assertEqual((service['launch_agent'], service['state_path'], service['config_path']),
-                         (str(self.agent), str(self.state / 'state.json'), str(self.codex / 'config.toml')))
-        self.assertEqual(service['launch_agent_digest'], model.digest(self.agent.read_bytes()))
-        self.assertTrue(service['listener_ready'])
-        self.assertTrue((self.state / 'installation.json').is_file())
+    def runtime_files(self):
+        return {p: (p.read_bytes(), p.stat().st_ino) for p in self.runtime.rglob('*') if p.is_file()}
 
-    def test_registration_without_a_record_writes_none(self):
-        installed_payload.path(self.ghost).unlink()
-        result, body = self.run_cli()
-        self.assertEqual((result.returncode, body['status']), (0, 'installed'))
-        self.assertFalse(installed_payload.path(self.ghost).exists())
-        self.assertTrue((self.state / 'installation.json').is_file())
+    def test_registration_copies_no_module_and_records_the_service(self):
+        before = self.runtime_files()
+        self.seed()
+        self.assertEqual(self.runtime_files(), before)
+        service = self.service()
+        self.assertEqual((service['runtime_root'], service['program']), (str(self.runtime), str(self.shared / 'context_gateway.py')))
+        self.assertTrue(service['listener_ready'])
+        self.assertFalse((self.state / 'installation.json').exists())
+        self.assertFalse((self.ghost / 'context-gateway-binding.json').exists())
 
     def test_real_candidate_refresh_and_removal_keep_the_native_configuration_contract(self):
         original = self.seed()
@@ -224,7 +218,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual((result.returncode, body['action']), (0, 'detached'))
         self.assertEqual((self.codex / 'config.toml').read_text(), 'model="native"\n')
         self.assertFalse(self.agent.exists())
-        self.assertTrue((self.state / 'installation.json').exists())
+        self.assertTrue((self.state / 'state.json').exists())
         self.assertIsNone(self.service())
         self.assertEqual(stat.S_IMODE((self.codex / 'config.toml').stat().st_mode), original[self.codex / 'config.toml'][1])
 
@@ -235,7 +229,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         from installer.runner import InstallerExit
         environment = dict(self.environment, FAULT_CASE=fault,
             PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
-        ctx = cli.Context(options=cli.Options(platform='codex'), platform='codex', skills_dir=self.shared.parent)
+        ctx = cli.Context(options=cli.Options(platform='codex'), platform='codex', skills_dir=self.runtime)
         with mock.patch.dict(os.environ, environment, clear=True), \
                 mock.patch.object(gateway.sys, 'platform', 'darwin'), \
                 mock.patch.object(selection, 'expand_skill_targets',
@@ -253,8 +247,8 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
 
     def test_selected_skill_removal_guards_companion_before_deleting_it(self):
         self.seed()
-        target = self.shared.parent / 'session-intent-analyzer'
-        independent = self.shared.parent / 'writing-plans'
+        target = self.runtime / 'session-intent-analyzer'
+        independent = self.runtime / 'writing-plans'
         independent.mkdir()
         for fault, expected in [('stop-error', 3), ('', 0)]:
             with self.subTest(fault=fault):
@@ -267,7 +261,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
 
     def test_unconfirmed_shared_cleanup_is_not_reported_as_success(self):
         self.seed()
-        independent = self.shared.parent / 'writing-plans'
+        independent = self.runtime / 'writing-plans'
         independent.mkdir()
         code = self.selected_removal(['writing-plans'], remaining=False, fault='stop-error')
         self.assertEqual(code, 3)
@@ -324,7 +318,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
     def test_partial_start_writes_and_readiness_errors_restore_and_exit_4(self):
         self.seed()
         for fault in ('bootstrap-error', 'partial-bootstrap-error', 'readiness-error', 'config-write-error',
-                      'receipt-write-error', 'binding-write-error', 'record-write-error'):
+                      'record-write-error'):
             with self.subTest(fault=fault):
                 # Native fault counts select the first candidate after the seed.
                 native_path = self.root / 'native.json'
@@ -335,13 +329,6 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
                 self.assertEqual((result.returncode, body['error_code']), (4, 'GATEWAY_OPERATION_RESTORED'), result.stderr)
                 self.assertEqual(self.snapshot_owned(), original)
                 self.assertTrue(json.loads(native_path.read_text())['active'])
-
-    def test_concurrent_runtime_is_preserved_without_restarting_it(self):
-        self.seed()
-        result, body = self.run_cli(fault='concurrent-runtime')
-        self.assertEqual((result.returncode, body['error_code']), (5, 'GATEWAY_RECOVERY_UNCONFIRMED'))
-        self.assertEqual((self.shared / 'context_gateway.py').read_bytes(), b'concurrent user runtime edit')
-        self.assertFalse(json.loads((self.root / 'native.json').read_text())['active'])
 
     def test_uncertain_candidate_shutdown_preserves_candidate_and_exits_5(self):
         self.seed()
@@ -384,15 +371,25 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual((self.root / 'native.json').read_bytes(), native)
         self.assertTrue(self.agent.exists())
 
-    def test_changed_receipt_blocks_before_any_service_stop_and_exits_2(self):
+    def test_changed_launch_agent_blocks_before_any_service_stop_and_exits_2(self):
         self.seed()
-        receipt = self.state / 'installation.json'
-        receipt.write_bytes(receipt.read_bytes() + b'\n')
+        self.agent.write_bytes(self.agent.read_bytes() + b'\n')
         original, native = self.snapshot_owned(), (self.root / 'native.json').read_bytes()
         result, body = self.run_cli()
         self.assertEqual((result.returncode, body['error_code']), (2, 'GATEWAY_PRECONDITION'))
         self.assertEqual(self.snapshot_owned(), original)
         self.assertEqual((self.root / 'native.json').read_bytes(), native)
+
+    def test_registration_without_a_runtime_target_exits_2(self):
+        self.write_record({'targets': {}})
+        record = json.loads(installed_payload.path(self.ghost).read_text())
+        record['targets'] = {}
+        installed_payload.path(self.ghost).write_text(json.dumps(record))
+        result, body = self.run_cli()
+        self.assertEqual((result.returncode, body['error_code']), (2, 'GATEWAY_PRECONDITION'))
+        self.assertIn('Install Core first', body['detail'])
+        self.assertFalse(self.agent.exists())
+        self.assertFalse((self.root / 'native.json').exists())
 
 
 if __name__ == '__main__':
