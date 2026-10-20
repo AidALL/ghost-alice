@@ -426,6 +426,50 @@ class ContextGatewayInstallTests(unittest.TestCase):
         self.assertFalse(nested.exists())
         self.assertEqual(self.snapshot(), original)
 
+    def test_a_state_dir_that_links_into_the_runtime_root_is_rejected_before_any_change(self):
+        # The registration writes through a link, so the containment check follows it; the link itself stays.
+        for shape in ('linked-state-dir', 'linked-ancestor'):
+            with self.subTest(shape=shape):
+                args, original = self.installation_fixture(service=False)
+                inside = self.reg.runtime_root / 'gateway-state'
+                if shape == 'linked-state-dir':
+                    inside.mkdir()
+                    link = self.reg.root / 'linked-state'
+                    link.symlink_to(inside, target_is_directory=True)
+                    state_dir = link
+                else:
+                    link = self.reg.root / 'linked-runtime'
+                    link.symlink_to(self.reg.runtime_root, target_is_directory=True)
+                    state_dir = link / 'gateway-state'
+                original = self.snapshot()
+                with self.assertRaisesRegex(ValueError, 'outside the Core runtime'):
+                    self.mocked_install((*args[:2], state_dir, args[3]))
+                self.assertEqual(self.snapshot(), original)
+                self.assertTrue(link.is_symlink())
+                self.assertEqual(list(inside.iterdir()) if inside.exists() else [], [])
+                self.assertFalse(self.reg.agent.exists())
+
+    def test_the_registration_runs_the_runtime_the_latest_publish_wrote(self):
+        # A moved runtime (GHOST_ALICE_RUNTIME_SHARED_DIR) leaves the earlier runtime target in the record; the
+        # registration follows the latest publish, whatever the record's key order.
+        import content_digest
+        for name, stamp, latest in (('.a-earlier-runtime', '2026-10-19T00:00:00+00:00', False),
+                                    ('zz-later-runtime', '2026-10-21T00:00:00+00:00', True)):
+            with self.subTest(other=name):
+                args, _ = self.installation_fixture(service=False)
+                other = self.reg.root / name
+                (other / '_shared').mkdir(parents=True)
+                (other / '_shared' / 'context_gateway.py').write_text('other runtime\n', encoding='utf-8')
+                installed_payload.update(self.reg.ghost, {'targets': {str(other / '_shared'): {
+                    'name': '_shared', 'kind': 'runtime', 'mode': 'copy', 'provider': 'core',
+                    'source': '/src/_shared', 'source_commit': 'c0ffee', 'used_by': ['claude', 'codex'],
+                    'files': content_digest.tree(other / '_shared'), 'installed_at': stamp, 'baseline': 'recorded'}}})
+                self.assertEqual(self.mocked_install(args)['status'], 'installed')
+                runtime = other if latest else self.reg.runtime_root
+                plist = plistlib.loads(self.reg.agent.read_bytes())
+                self.assertEqual(plist['ProgramArguments'][2], str(runtime / '_shared' / 'context_gateway.py'))
+                self.assertEqual(self.service()['runtime_root'], str(runtime))
+
     def test_the_optional_claude_dir_and_strict_log_root_enter_the_state_file(self):
         args, _ = self.installation_fixture()
         self.mocked_install(args)
