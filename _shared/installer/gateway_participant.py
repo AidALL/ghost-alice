@@ -24,6 +24,7 @@ import context_gateway_install as gateway
 import context_gateway_platform as gateway_platform
 import installed_payload
 from context_gateway_model import GatewayBlocked, GatewayFailure, GatewayServiceError, ServiceObservation
+from installer import locations
 from installer.participant import PublishContext
 
 SERVICE_FILE_KEYS = ("launch_agent", "state_path", "config_path")
@@ -38,32 +39,62 @@ def _host(platform: str | None) -> str:
     return sys.platform if platform is None else platform
 
 
-def participants(ghost_root: Path | str, *, effects=None, platform: str | None = None) -> list:
+def participants(ghost_root: Path | str, *, effects=None, platform: str | None = None,
+                 runtime_root: Path | None = None) -> list:
     """The participants of a publish: the gateway participant when the install record has a `service`
-    section, none otherwise (a missing or unreadable record names no service)."""
+    section, none when the record (or the section) is absent, and a participant that holds a runtime
+    publish when the record cannot be read (whether a gateway runs from the runtime is unknown then)."""
     try:
         record = installed_payload.read(ghost_root)
-    except installed_payload.RecordError:
-        return []
+    except installed_payload.RecordError as exc:
+        return [UnreadableRecordParticipant(str(exc), locations.runtime_root() if runtime_root is None else runtime_root)]
     service = (record or {}).get("service")
     if not isinstance(service, dict):
         return []
     return [GatewayParticipant(ghost_root, service, effects=effects, platform=_host(platform))]
 
 
-def affects(service: dict, locations, *, remove_codex: bool = False) -> bool:
-    """Whether changing or removing `locations` touches the registered service's code or files."""
-    if remove_codex:
-        return True
-    runtime_root = Path(service["runtime_root"])
-    files = {Path(service[key]) for key in SERVICE_FILE_KEYS}
+def _touches(root: Path, locations) -> bool:
+    """Whether a location equals `root`, lies under it or holds it."""
     for location in locations:
         location = Path(location)
-        if location == runtime_root or runtime_root in location.parents or location in runtime_root.parents:
-            return True
-        if location in files:
+        if location == root or root in location.parents or location in root.parents:
             return True
     return False
+
+
+def affects(service: dict, locations, *, remove_codex: bool = False) -> bool:
+    """Whether changing or removing `locations` touches the registered service's code or files: a location
+    equal to, under or above `runtime_root`, or one that is or holds a service file."""
+    if remove_codex:
+        return True
+    if _touches(Path(service["runtime_root"]), locations):
+        return True
+    locations = [Path(location) for location in locations]
+    return any(file == location or location in file.parents
+               for file in (Path(service[key]) for key in SERVICE_FILE_KEYS) for location in locations)
+
+
+class UnreadableRecordParticipant:
+    """Stands in for the gateway participant while the install record cannot be read: a publish that touches
+    the runtime is held until the record is reviewed; a publish elsewhere goes on."""
+
+    def __init__(self, reason: str, runtime_root: Path):
+        self.reason, self.runtime_root = reason, Path(runtime_root)
+
+    def before_publish(self, ctx: PublishContext) -> None:
+        if _touches(self.runtime_root, ctx.destinations):
+            raise GatewayBlocked(f"The install record cannot be read ({self.reason}); whether a gateway runs from "
+                                 f"{self.runtime_root} is unknown, so its publish waits for the record to be reviewed")
+
+    def after_publish(self, ctx: PublishContext) -> None:
+        return None
+
+    def before_restore(self, ctx: PublishContext) -> None:
+        return None
+
+    def after_restore(self, ctx: PublishContext) -> None:
+        return None
 
 
 class GatewayParticipant:

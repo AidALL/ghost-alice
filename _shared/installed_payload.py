@@ -405,11 +405,20 @@ def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: s
 
 
 def _receipt(binding_path: Path) -> dict:
-    """The installed gateway receipt the binding names; RecordError when it is unavailable or not installed."""
+    """The installed gateway receipt the binding names and committed; RecordError when the binding is not a
+    version 1 binding, the receipt's bytes are not the ones the binding fingerprinted, or the receipt is
+    unavailable or not installed."""
     binding = _load_json(binding_path)
-    if not isinstance(binding, dict) or not _absolute(binding.get("installation_path")):
-        raise RecordError(f"{binding_path} does not name the gateway installation receipt")
+    if (not isinstance(binding, dict) or set(binding) != {"schema_version", "installation_path", "installation_digest"}
+            or binding["schema_version"] != "context-gateway-binding.v1" or not _absolute(binding["installation_path"])
+            or not isinstance(binding["installation_digest"], str)):
+        raise RecordError(f"{binding_path} is not a version 1 gateway binding that names the installation receipt")
     receipt_path = Path(binding["installation_path"])
+    try:
+        if content_digest.file_digest(receipt_path) != binding["installation_digest"]:
+            raise RecordError(f"the gateway installation receipt changed after its binding: {receipt_path}")
+    except OSError as exc:
+        raise RecordError(f"the gateway installation receipt cannot be read: {receipt_path} ({exc})") from exc
     receipt = _load_json(receipt_path)
     if not isinstance(receipt, dict):
         raise RecordError(f"the gateway installation receipt cannot be read: {receipt_path}")
