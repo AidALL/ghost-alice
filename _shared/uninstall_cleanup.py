@@ -1066,9 +1066,9 @@ def _summary(items: list[dict[str, Any]]) -> dict[str, int]:
 def build_report(args: argparse.Namespace) -> dict[str, Any]:
     manifest, manifest_error = _load_manifest(args.install_state_manifest)
     items: list[dict[str, Any]] = []
-    from context_gateway_install import detach_for_uninstall
-    # Gateway dependencies follow the same ownership/shared-platform plan as
-    # deletion. A raw manifest row does not establish that its target can go.
+    from installer import gateway_participant
+    # The gateway judgment takes the roots this removal deletes, under the same ownership/shared-platform
+    # plan as the deletion. A raw manifest row does not establish that its target can go.
     preview = argparse.Namespace(**dict(vars(args), confirm=False))
     planned = _support_artifact_items(preview)
     for target in (manifest or {}).get('targets', []):
@@ -1080,8 +1080,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
                       if item.get('action') in {'would-remove', 'would-quarantine-remove'} and item.get('path')]
     blocked = False
     try:
-        gateway = detach_for_uninstall(user_home=_user_home(), remove_codex=args.platform == 'codex',
-            removing_paths=removing_paths, confirm=args.confirm, codex_dir=_codex_home())
+        gateway = gateway_participant.removal(_ghost_alice_root(), removing_paths,
+            remove_codex=args.platform == 'codex', confirm=args.confirm)
     except (ValueError, OSError, RuntimeError) as exc:
         gateway = dict(kind='context-gateway', action='manual-review', reason='gateway-detach-unresolved', detail=str(exc))
         blocked = True

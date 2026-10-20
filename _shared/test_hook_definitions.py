@@ -27,8 +27,12 @@ INSTALLER_MODULES = (
     "context_gateway_inventory", "context_gateway_transaction", "context_gateway_platform",
     "context_gateway_model", "hash_utils", "addon_skill_permissions", "commands_sync", "encoding_guard",
     "pending_manifest_writer", "installer_assets_cli", "agent_visibility_cli",
-    "installer", "installer_testing",
+    "installer", "installer_testing", "gateway_testing",
 )
+# The gateway modules the installer package may touch only through its one adapter, `gateway_participant`
+# (the service participant). `install_transaction` knows only the participant interface.
+GATEWAY_MODULES = ("context_gateway_install", "context_gateway_plan", "context_gateway_inventory",
+                   "context_gateway_transaction", "context_gateway_platform", "context_gateway_model")
 # Shared modules belong to neither layer: the installer, the runtime and the skills may all import them, so a
 # shared module imports only the standard library and the shared modules this table names for it.
 SHARED_MODULES = {
@@ -70,10 +74,25 @@ class LayerRuleTests(unittest.TestCase):
         # `python _shared/installer/cli.py` puts the package directory first on sys.path, so a module named like
         # a standard-library module (an earlier `inspect.py`) would replace it for every import in that process.
         names = {path.stem for path in INSTALLER_PACKAGE_FILES}
-        expected = {"__init__", "addons", "auto", "cli", "config", "diagnostics", "hosts", "lifecycle", "locations",
-                    "lock", "prerequisites", "preservation", "report", "runner", "selection", "source", "transaction"}
+        expected = {"__init__", "addons", "auto", "cli", "config", "diagnostics", "gateway_participant", "hosts",
+                    "lifecycle", "locations", "lock", "participant", "prerequisites", "preservation", "report",
+                    "runner", "selection", "source", "transaction"}
         self.assertEqual(names, expected)
         self.assertEqual(sorted((names - {"__init__"}) & set(sys.stdlib_module_names)), [])
+
+    def test_only_the_gateway_participant_imports_the_gateway_modules_in_the_installer_package(self):
+        importers = sorted({path.stem for path in INSTALLER_PACKAGE_FILES
+                            for target, _ in _imported_modules(path) if target in GATEWAY_MODULES})
+        self.assertEqual(importers, ["gateway_participant"])
+
+    def test_install_transaction_imports_no_gateway_module(self):
+        imported = {target for target, _ in _imported_modules(SHARED / "install_transaction.py")}
+        self.assertEqual(imported & set(GATEWAY_MODULES), set())
+        self.assertIn("installer", imported)
+
+    def test_the_participant_interface_imports_only_the_standard_library(self):
+        imported = {target for target, _ in _imported_modules(SHARED / "installer" / "participant.py")}
+        self.assertEqual(imported - set(sys.stdlib_module_names) - {"__future__"}, set())
 
     def test_shared_modules_import_only_the_standard_library_and_their_named_shared_modules(self):
         for name, allowed in SHARED_MODULES.items():

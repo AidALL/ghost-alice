@@ -122,10 +122,10 @@ class PublishTests(PublishCase):
     def test_a_request_of_current_links_only_replaces_nothing(self):
         current = self.claude / "alpha"
         current.symlink_to(self.src / "alpha", target_is_directory=True)
-        with mock.patch("context_gateway_install.coordinate_payload_replacement") as coordinate:
-            txid = install_transaction.publish(self.request("claude", self.target("alpha", current, "link",
-                                                                                    status="current")))
-        coordinate.assert_not_called()
+        participant = mock.Mock(spec=["before_publish", "after_publish", "before_restore", "after_restore"])
+        txid = install_transaction.publish(self.request("claude", self.target("alpha", current, "link",
+                                                                                status="current")), [participant])
+        self.assertEqual(participant.mock_calls, [])
         self.assertEqual(self.record()["targets"][str(current)]["link_target"], str(self.src / "alpha"))
         self.assertEqual(sorted(p.name for p in (self.ghost / "rollbacks" / txid).iterdir()), ["journal.json"])
 
@@ -279,13 +279,15 @@ class FailureTests(PublishCase):
                 install_transaction.publish(self.batch())
         self.assert_restored(self.only_txid(exclude=(first,)))
 
-    def test_a_gateway_refusal_keeps_its_exit_code_and_changes_nothing(self):
+    def test_a_participant_refusal_keeps_its_exit_code_and_changes_nothing(self):
         first = self.only_txid()
         refusal = GatewayServiceError("Gateway service stop is unconfirmed", phase="stop")
-        with mock.patch("context_gateway_install.coordinate_payload_replacement", side_effect=refusal):
-            with self.assertRaises(install_transaction.InstallTransactionError) as failed:
-                install_transaction.publish(self.batch())
+        participant = mock.Mock(spec=["before_publish", "after_publish", "before_restore", "after_restore"])
+        participant.before_publish.side_effect = refusal
+        with self.assertRaises(install_transaction.InstallTransactionError) as failed:
+            install_transaction.publish(self.batch(), [participant])
         self.assertEqual((failed.exception.exit_code, failed.exception.code), (3, "GATEWAY_SERVICE_UNCONFIRMED"))
+        participant.after_publish.assert_not_called()
         self.assert_restored(self.only_txid(exclude=(first,)))
 
     def test_a_crash_leaves_an_unfinished_journal_that_recover_restores(self):
@@ -389,30 +391,31 @@ class CommandLineTests(PublishCase):
         path.write_text(json.dumps(request), encoding="utf-8")
         return path
 
-    def test_publish_reads_the_request_file_and_keeps_the_gateway_exit_code(self):
-        dest = self.claude / "alpha"
+    def test_publish_is_not_a_command_line_and_refuses_another_installers_lock(self):
+        # Publishing happens in the installer's process with its participants; the command line keeps recover.
         result = self.run_tool("publish", "--request", str(self.write_request(
-            self.request("claude", self.target("alpha", dest, "link")))))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.record()["targets"][str(dest)]["link_target"], str(self.src / "alpha"))
-        # Another live installer's lock: the gateway coordination refuses with its own code and nothing changes.
+            self.request("claude", self.target("alpha", self.claude / "alpha", "link")))))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("invalid choice", result.stderr)
+        self.assertFalse((self.claude / "alpha").exists())
+        # Another live installer's lock: the publish refuses before anything changes.
         (self.ghost / "install.lock").write_text(json.dumps({"owner": "other", "pid": 424242}), encoding="utf-8")
-        before = installed_payload.path(self.ghost).read_bytes()
-        result = self.run_tool("publish", "--request", str(self.write_request(
-            self.request("claude", self.target("beta", self.claude / "beta", "link")))))
-        self.assertEqual(result.returncode, 2, result.stderr)
-        self.assertEqual(json.loads(result.stderr)["error_code"], "GATEWAY_PRECONDITION")
+        with self.assertRaisesRegex(install_transaction.InstallTransactionError, "install lock"):
+            install_transaction.publish(self.request("claude", self.target("beta", self.claude / "beta", "link")))
         self.assertFalse((self.claude / "beta").exists())
-        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), before)
+        self.assertIsNone(self.record())
+        self.assertFalse((self.ghost / "rollbacks").exists())
 
     def test_publish_prints_the_progress_counter_and_writes_target_events(self):
         events = self.home / "run.events.jsonl"
         request = self.request("codex", self.target("alpha", self.codex / "alpha", "copy", status="new"),
                                self.target("_shared", self.codex / "_shared", "copy", kind="support", status="updated"),
                                progress={"label": "  [2/5] Skill sync", "event_file": str(events)})
-        result = self.run_tool("publish", "--request", str(self.write_request(request)))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("  [2/5] Skill sync [0] [Current], [1] [updated], [1] [newly added]", result.stdout)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            install_transaction.publish(request)
+        self.assertIn("  [2/5] Skill sync [0] [Current], [1] [updated], [1] [newly added]", stdout.getvalue())
+        self.assertTrue(stdout.getvalue().endswith("\n"))
         self.assertEqual([json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()], [
             {"type": "target-result", "platform": "codex", "target_id": "alpha", "target_kind": "skill",
              "status": "new"},

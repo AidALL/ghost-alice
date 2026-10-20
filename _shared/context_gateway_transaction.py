@@ -53,7 +53,7 @@ class _Journal:
         finally:
             self.after[mutation.before.path] = self.io.snapshot(mutation.before.path)
 
-    def restore(self, *, renewed_paths=()):
+    def restore(self):
         # Validate every attempted change before restoring any artifact.
         for mutation in self.written:
             path = mutation.before.path
@@ -74,11 +74,10 @@ class _Journal:
             else:
                 self.io.write(before.path, before.raw, before.mode)
         # An unmodified guard is as important as a file restored by this run.
-        # In particular, never restart a concurrently edited prior runtime.
+        # In particular, never restart a service whose files changed concurrently.
         touched = {m.before.path for m in self.written}
         for guard in self.plan.guards:
-            identity = guard.path not in touched and guard.path not in renewed_paths and guard.resolved not in renewed_paths
-            assert_current(self.io, guard, identity=identity)
+            assert_current(self.io, guard, identity=guard.path not in touched)
 
     def clean_first_install(self):
         owned = set(self.directories) | {
@@ -132,8 +131,10 @@ def preview(plan, *, was_running):
     if plan.candidate is not None:
         steps.extend([dict(phase='bootstrap', domain=plan.domain, agent=str(plan.agent)),
                       dict(phase='readiness', listener='loopback')])
-    steps.extend([dict(phase='commit', files=mutations(plan.committed)),
-                  dict(phase='retire', files=mutations(plan.retired))])
+    commit = dict(phase='commit', files=mutations(plan.committed))
+    if plan.record_change:
+        commit['record'] = dict(section='service', action='delete' if plan.record_after is None else 'write')
+    steps.extend([commit, dict(phase='retire', files=mutations(plan.retired))])
     touched = {m.before.path for m in (*plan.staged, *plan.committed, *plan.retired)}
     preserved = {str(a.path) for a in plan.guards if a.path not in touched}
     if plan.operation == 'detach':
@@ -155,7 +156,7 @@ def preview(plan, *, was_running):
             recovery_unconfirmed='preserve-current-artifacts-and-block-dependent-work'))
 
 
-def execute(plan, io, *, confirm=True, participant=None):
+def execute(plan, io, *, confirm=True):
     for guard in plan.guards:
         assert_current(io, guard)
     try:
@@ -167,7 +168,7 @@ def execute(plan, io, *, confirm=True, participant=None):
     if not confirm:
         return preview(plan, was_running=was_running)
     journal = _Journal(io, plan)
-    stopped, attempted_start, external_attempted, phase = False, False, False, 'prepare'
+    stopped, attempted_start, recorded, phase = False, False, False, 'prepare'
     try:
         if plan.operation == 'install':
             journal.mkdir(plan.state_dir, 0o700)
@@ -183,9 +184,6 @@ def execute(plan, io, *, confirm=True, participant=None):
         phase = 'stage'
         for guard in plan.guards:
             assert_current(io, guard)
-        if participant is not None:
-            external_attempted = True
-            participant.publish()
         for mutation in plan.staged:
             journal.apply(mutation)
         if plan.candidate is not None:
@@ -197,6 +195,10 @@ def execute(plan, io, *, confirm=True, participant=None):
         phase = 'commit'
         for mutation in plan.committed:
             journal.apply(mutation)
+        if plan.record_change:
+            # The record writer is atomic: a raise leaves the record as it was, so only a returned write is restored.
+            io.record(plan.record_after)
+            recorded = True
         phase = 'retire'
         for mutation in plan.retired:
             journal.apply(mutation)
@@ -210,9 +212,9 @@ def execute(plan, io, *, confirm=True, participant=None):
                     io.stop(plan.domain)
                 if _state(io, plan.domain, plan) != 'absent':
                     raise RuntimeError('Candidate stop is unconfirmed')
-            if external_attempted:
-                participant.restore()
-            journal.restore(renewed_paths=getattr(participant, 'renewed_paths', ()) if external_attempted else ())
+            if recorded:
+                io.record(plan.record_before)
+            journal.restore()
             if was_running and stopped:
                 io.start(plan.domain, plan.agent)
                 if not io.ready(plan.prior_state):
@@ -220,7 +222,7 @@ def execute(plan, io, *, confirm=True, participant=None):
             if plan.operation == 'install' and plan.prior_state is None:
                 journal.clean_first_install()
         except Exception as recovery:
-            reference = plan.archive or getattr(participant, 'recovery_reference', 'current artifacts')
+            reference = plan.archive or 'current artifacts'
             raise GatewayFailure(f'{failure}; recovery failed ({recovery}); preserved recovery: {reference}',
                                  phase=phase) from failure
         detail = ('Gateway detachment failed; prior configuration/service retained' if plan.operation == 'detach'

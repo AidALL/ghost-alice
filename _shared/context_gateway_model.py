@@ -17,8 +17,6 @@ MODULES = ('context_lifecycle.py', 'context_gateway.py', 'context_gateway_instal
            'context_gateway_transaction.py', 'context_gateway_platform.py',
            'response_context_use.py', 'claude_context_adapter.py', 'source_lookup.py', 'native_transcript.py',
            'text_lines.py', 'hook_definitions.py')
-# Modules that earlier installations own and the current payload no longer ships.
-RETIRED_MODULES = ('codex_intake_view.py',)
 COMPANIONS = ('session-intent-analyzer/scripts/session_intent_ledger.py',)
 
 
@@ -80,6 +78,7 @@ class ServiceObservation:
 
 @dataclass(frozen=True)
 class Request:
+    """One registration (`install`) or unregistration (`detach`) of the gateway service."""
     operation: str
     home: Path
     platform: str
@@ -91,8 +90,6 @@ class Request:
     agent: Path | None = None
     claude: Path | None = None
     strict_log: Path | None = None
-    removing: tuple[Path, ...] = ()
-    remove_codex: bool = False
     dependency_bases: Mapping[str, str] = field(default_factory=dict)
 
     @property
@@ -106,7 +103,6 @@ class Inventory:
     resolved: Mapping[Path, Path]
     prerequisites: frozenset[Path] = frozenset()
     state_entries: tuple[Path, ...] = ()
-    service: ServiceObservation | None = None
 
     def file(self, path):
         return self.files[Path(path)]
@@ -128,6 +124,11 @@ class Preparation:
 
 @dataclass(frozen=True)
 class Plan:
+    """The ordered effects of one operation.
+
+    `record_change` says the commit phase writes the install record's `service` section:
+    `record_after` (None deletes it), and a restore puts `record_before` back.
+    """
     operation: str
     domain: str
     state_dir: Path
@@ -141,12 +142,9 @@ class Plan:
     candidate: Mapping | None
     result: Mapping
     archive: Path | None = None
-
-
-@dataclass(frozen=True)
-class Decision:
-    result: Mapping | None = None
-    plan: Plan | None = None
+    record_change: bool = False
+    record_before: Mapping | None = None
+    record_after: Mapping | None = None
 
 
 class Effects(Protocol):
@@ -156,8 +154,10 @@ class Effects(Protocol):
     start: Callable[[str, Path], None]
     ready: Callable[[Mapping], bool]
     write: Callable[[Path, bytes, int], None]
+    record: Callable[[Mapping | None], None]
 
     def snapshot(self, path: Path, *, content: bool = True) -> Artifact: ...
+    def observe(self, domain: str) -> ServiceObservation: ...
     def mkdir(self, path: Path, mode: int = 0o777) -> None: ...
     def children(self, path: Path) -> tuple[Path, ...]: ...
     def unlink(self, path: Path) -> None: ...

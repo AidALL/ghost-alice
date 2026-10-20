@@ -33,6 +33,8 @@ import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
 from installer import selection  # noqa: E402
 
+COMPANION = "session-intent-analyzer/scripts/session_intent_ledger.py"
+
 
 def _target_names() -> list[str]:
     """`_shared` and every core skill target the checkout installs on one host."""
@@ -57,6 +59,7 @@ class InstallRecordShellTest(unittest.TestCase):
         self.claude = self.home / ".claude" / "skills"
         self.codex = self.home / ".agents" / "skills"
         self.runtime = self.ghost / "runtime" / "current" / "_shared"
+        self.companion = self.ghost / "runtime" / "current" / COMPANION
 
     def tearDown(self):
         self.temp.cleanup()
@@ -89,7 +92,7 @@ class InstallRecordShellTest(unittest.TestCase):
         names = _target_names()
         expected = {**{(self.claude / name).as_posix(): ["claude"] for name in names},
                     **{(self.codex / name).as_posix(): ["codex"] for name in names},
-                    self.runtime.as_posix(): ["claude", "codex"]}
+                    self.runtime.as_posix(): ["claude", "codex"], self.companion.as_posix(): ["claude", "codex"]}
         targets = record["targets"]
         self.assertEqual({dest: entry["used_by"] for dest, entry in targets.items()}, expected)
         for dest, entry in targets.items():
@@ -97,6 +100,11 @@ class InstallRecordShellTest(unittest.TestCase):
                 host_mode = "link" if dest.startswith(self.claude.as_posix()) else "copy"
                 self.assertEqual((entry["mode"], entry["baseline"], entry["provider"]), (host_mode, "recorded", "core"))
         self.assertEqual(targets[self.runtime.as_posix()]["kind"], "runtime")
+        # The service's companion script is published with the runtime, by the same publish.
+        companion = targets[self.companion.as_posix()]
+        self.assertEqual((companion["kind"], companion["name"]), ("runtime", COMPANION))
+        self.assertEqual(companion["source"], str(REPO_ROOT / COMPANION))
+        self.assertEqual(companion["files"], {".": content_digest.file_digest(self.companion)})
         self.assertEqual(targets[(self.codex / "_shared").as_posix()]["kind"], "support")
         self.assert_matches_the_disk(targets)
         head = _head()
@@ -104,9 +112,15 @@ class InstallRecordShellTest(unittest.TestCase):
         self.assertEqual((record["source"]["root"], record["source"]["commit"]), (str(REPO_ROOT), head))
         journal = Path(record["last_transaction"]["rollback_dir"]) / "journal.json"
         self.assertIn('"phase": "done"', journal.read_text(encoding="utf-8"))
+        self.assertEqual([t["dest"] for t in json.loads(journal.read_text(encoding="utf-8"))["targets"]],
+                         [str(self.runtime), str(self.companion)])
         self.assertEqual(install_transaction.unfinished(self.ghost), [])
+        # No gateway is registered in a temporary home: the record has no service section and the
+        # installer writes no gateway receipt or binding.
+        self.assertNotIn("service", record)
+        self.assertFalse((self.ghost / "context-gateway-binding.json").exists())
         status = self.run_installer("--platform", "claude", "--status")
-        self.assertIn(f"{len(names) + 1} claude targets (link {len(names)}, copy 1", status)
+        self.assertIn(f"{len(names) + 2} claude targets (link {len(names)}, copy 2", status)
         self.assertIn("[OK] Installed targets match the install record", status)
 
     def test_links_already_in_place_are_recorded_without_being_replaced(self):
@@ -118,7 +132,8 @@ class InstallRecordShellTest(unittest.TestCase):
         links = {name: os.lstat(self.claude / name).st_ino for name in _target_names()}
         self.run_installer("--platform", "claude", "--skip-source-health")
         targets = self.record()["targets"]
-        self.assertEqual(set(targets), {(self.claude / name).as_posix() for name in links} | {self.runtime.as_posix()})
+        self.assertEqual(set(targets), {(self.claude / name).as_posix() for name in links}
+                         | {self.runtime.as_posix(), self.companion.as_posix()})
         self.assertEqual({name: os.lstat(self.claude / name).st_ino for name in links}, links)
         self.assertEqual({entry["baseline"] for entry in targets.values()}, {"recorded"})
         self.assert_matches_the_disk(targets)
@@ -152,7 +167,7 @@ class InstallRecordShellTest(unittest.TestCase):
                       f"(migrated {len(names)}, unknown 0)", out)
         targets = self.record()["targets"]
         republished = {(self.codex / "_shared").as_posix(), (self.codex / "task-router").as_posix(),
-                       self.runtime.as_posix()}
+                       self.runtime.as_posix(), self.companion.as_posix()}
         self.assertEqual(set(targets), {(self.codex / name).as_posix() for name in names} | republished)
         for dest, entry in targets.items():
             with self.subTest(dest=dest):

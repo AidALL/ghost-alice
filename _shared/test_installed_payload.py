@@ -380,5 +380,235 @@ class MigrationTests(RecordCase):
         self.assertFalse(self.record.exists())
 
 
+def _service(**overrides) -> dict:
+    section = {"label": "org.ghost-alice.context-gateway", "runtime_root": "/home/u/.ghost-alice/runtime/current",
+               "program": "/home/u/.ghost-alice/runtime/current/_shared/context_gateway.py",
+               "launch_agent": "/home/u/Library/LaunchAgents/org.ghost-alice.context-gateway.plist",
+               "launch_agent_digest": "sha256:" + "a" * 64,
+               "state_path": "/home/u/.ghost-alice/context-gateway/state.json", "state_digest": "sha256:" + "b" * 64,
+               "config_path": "/home/u/.codex/config.toml", "config_block_digest": "sha256:" + "c" * 64,
+               "config_backup": "/home/u/.ghost-alice/context-gateway/backups/x-config.toml",
+               "registered_at": "2026-10-20T00:00:00+00:00", "restarted_at": "2026-10-20T01:00:00+00:00",
+               "listener_ready": True}
+    section.update(overrides)
+    return section
+
+
+class ServiceSectionTests(RecordCase):
+    """The `service` section: the registered gateway's code root, its three service files and their fingerprints."""
+
+    def test_service_is_a_record_section_written_and_validated_by_update(self):
+        self.hold_lock()
+        self.assertIn("service", installed_payload.SECTIONS)
+        installed_payload.update(self.ghost, {"targets": {"/a": _entry()}})
+        written = installed_payload.update(self.ghost, {"service": _service()})
+        self.assertEqual(written["service"], _service())
+        record = installed_payload.read(self.ghost)
+        self.assertEqual(record["service"], _service())
+        self.assertEqual(record["targets"], {"/a": _entry()})
+
+    def test_a_service_section_missing_a_key_or_with_a_wrong_value_is_refused(self):
+        self.hold_lock()
+        for key in installed_payload.SERVICE_KEYS:
+            with self.subTest(missing=key):
+                section = _service()
+                del section[key]
+                with self.assertRaises(installed_payload.RecordError):
+                    installed_payload.update(self.ghost, {"service": section})
+        for key, value in (("runtime_root", "relative/path"), ("launch_agent_digest", "sha256:short"),
+                           ("listener_ready", "yes"), ("label", ""), ("program", "/outside/context_gateway.py")):
+            with self.subTest(key=key):
+                with self.assertRaises(installed_payload.RecordError):
+                    installed_payload.update(self.ghost, {"service": _service(**{key: value})})
+        self.assertFalse(self.record.exists())
+
+    def test_digests_that_are_not_recorded_yet_and_a_restart_that_did_not_happen_are_none(self):
+        self.hold_lock()
+        section = _service(config_block_digest=None, config_backup=None, restarted_at=None, listener_ready=False)
+        installed_payload.update(self.ghost, {"service": section})
+        self.assertEqual(installed_payload.read(self.ghost)["service"], section)
+
+    def test_service_none_deletes_the_section(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"targets": {"/a": _entry()}, "service": _service()})
+        installed_payload.update(self.ghost, {"service": None})
+        record = installed_payload.read(self.ghost)
+        self.assertNotIn("service", record)
+        self.assertEqual(record["targets"], {"/a": _entry()})
+        installed_payload.update(self.ghost, {"service": None})
+        self.assertNotIn("service", installed_payload.read(self.ghost))
+
+    def test_only_the_service_section_may_be_none(self):
+        self.hold_lock()
+        with self.assertRaises(installed_payload.RecordError):
+            installed_payload.update(self.ghost, {"source": None})
+
+
+class ServiceMigrationTests(RecordCase):
+    """`migrate_service` builds the `service` section once from the gateway's installation receipt and binding."""
+
+    def setUp(self):
+        super().setUp()
+        self.runtime_root = self.ghost / "runtime" / "current"
+        self.shared = self.runtime_root / "_shared"
+        self.companion = self.runtime_root / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
+        self.codex_shared = self.home / ".agents" / "skills" / "_shared"
+        self.state_dir = self.ghost / "context-gateway"
+        self.agent = self.home / "Library" / "LaunchAgents" / "org.ghost-alice.context-gateway.plist"
+        self.config = self.home / ".codex" / "config.toml"
+        self.receipt = self.state_dir / "installation.json"
+        self.binding = self.ghost / "context-gateway-binding.json"
+        self.state_dir.mkdir(parents=True)
+        self.companion_digest = "sha256:" + _hex(b"companion bytes")
+        receipt = {"schema_version": "context-gateway-installation.v1", "status": "installed",
+                   "observed_at": "2026-10-14T10:00:00+00:00", "source_root": "/src/checkout",
+                   "files": {str(self.shared / "context_gateway.py"): "sha256:" + _hex(b"gateway"),
+                             str(self.codex_shared / "context_gateway.py"): "sha256:" + _hex(b"gateway"),
+                             str(self.companion): self.companion_digest},
+                   "provider": "ghost_alice_context", "service": "org.ghost-alice.context-gateway",
+                   "launch_agent": str(self.agent), "config_path": str(self.config),
+                   "runtime_shared_dir": str(self.shared), "shared_dirs": [str(self.shared), str(self.codex_shared)],
+                   "ledger_root": str(self.home / "ledger"), "state_path": str(self.state_dir / "state.json"),
+                   "state_digest": "sha256:" + _hex(b"state"), "launch_agent_digest": "sha256:" + _hex(b"agent"),
+                   "config_backup": str(self.state_dir / "backups" / "20261014T100000000000Z-config.toml"),
+                   "installed_config_digest": "sha256:" + _hex(b"config"), "listener_ready": True,
+                   "existing_native_process_adoption": "unverified"}
+        self.receipt.write_text(json.dumps(receipt), encoding="utf-8")
+        self.binding.write_text(json.dumps({"schema_version": "context-gateway-binding.v1",
+                                            "installation_path": str(self.receipt),
+                                            "installation_digest": "sha256:" + _hex(self.receipt.read_bytes())}),
+                                encoding="utf-8")
+        self.runtime_entry = _entry(name="_shared", kind="runtime", mode="copy", used_by=["claude", "codex"],
+                                    source="/src/checkout/_shared", source_commit="abc123",
+                                    files={"context_gateway.py": "sha256:" + _hex(b"gateway")})
+        del self.runtime_entry["link_target"]
+
+    def expected_service(self) -> dict:
+        return {"label": "org.ghost-alice.context-gateway", "runtime_root": str(self.runtime_root),
+                "program": str(self.shared / "context_gateway.py"), "launch_agent": str(self.agent),
+                "launch_agent_digest": "sha256:" + _hex(b"agent"), "state_path": str(self.state_dir / "state.json"),
+                "state_digest": "sha256:" + _hex(b"state"), "config_path": str(self.config),
+                "config_block_digest": None,
+                "config_backup": str(self.state_dir / "backups" / "20261014T100000000000Z-config.toml"),
+                "registered_at": "2026-10-14T10:00:00+00:00", "restarted_at": None, "listener_ready": True}
+
+    def old_files(self) -> dict[Path, bytes]:
+        return {path: path.read_bytes() for path in (self.receipt, self.binding)}
+
+    def test_the_receipt_becomes_the_service_section_once_and_stays_as_it_is(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"targets": {str(self.shared): self.runtime_entry}})
+        before = self.old_files()
+        summary = installed_payload.migrate_service(self.ghost)
+        self.assertEqual(summary, {"label": "org.ghost-alice.context-gateway", "companions": 1})
+        record = installed_payload.read(self.ghost)
+        self.assertEqual(record["service"], self.expected_service())
+        self.assertEqual(self.old_files(), before)
+        written = self.record.read_bytes()
+        self.assertIsNone(installed_payload.migrate_service(self.ghost))
+        self.assertEqual(self.record.read_bytes(), written)
+
+    def test_the_companion_the_receipt_lists_becomes_a_runtime_target(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"targets": {str(self.shared): self.runtime_entry}})
+        installed_payload.migrate_service(self.ghost)
+        targets = installed_payload.read(self.ghost)["targets"]
+        self.assertEqual(targets[str(self.companion)], {
+            "name": "session-intent-analyzer/scripts/session_intent_ledger.py", "kind": "runtime", "mode": "copy",
+            "provider": "core", "source": "/src/checkout/session-intent-analyzer/scripts/session_intent_ledger.py",
+            "source_commit": "unknown", "used_by": ["claude", "codex"], "files": {".": self.companion_digest},
+            "installed_at": "2026-10-14T10:00:00+00:00", "baseline": "migrated"})
+        # The Codex copy the receipt also lists is a Codex install target, not a runtime target.
+        self.assertEqual(sorted(targets), sorted([str(self.shared), str(self.companion)]))
+        self.assertEqual(targets[str(self.shared)], self.runtime_entry)
+
+    def test_a_companion_already_recorded_by_a_publish_is_kept(self):
+        self.hold_lock()
+        recorded = dict(self.runtime_entry, name="session-intent-analyzer/scripts/session_intent_ledger.py",
+                        files={".": "sha256:" + _hex(b"published later")})
+        installed_payload.update(self.ghost, {"targets": {str(self.shared): self.runtime_entry,
+                                                          str(self.companion): recorded}})
+        summary = installed_payload.migrate_service(self.ghost)
+        self.assertEqual(summary["companions"], 0)
+        self.assertEqual(installed_payload.read(self.ghost)["targets"][str(self.companion)], recorded)
+
+    def test_without_a_runtime_target_the_companion_is_not_added(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"targets": {"/a": _entry()}})
+        summary = installed_payload.migrate_service(self.ghost)
+        self.assertEqual(summary["companions"], 0)
+        record = installed_payload.read(self.ghost)
+        self.assertEqual(record["service"], self.expected_service())
+        self.assertNotIn(str(self.companion), record["targets"])
+
+    def test_without_a_binding_nothing_is_written(self):
+        self.hold_lock()
+        self.binding.unlink()
+        self.assertIsNone(installed_payload.migrate_service(self.ghost))
+        self.assertFalse(self.record.exists())
+
+    def test_a_record_that_already_has_a_service_section_is_left_alone(self):
+        self.hold_lock()
+        installed_payload.update(self.ghost, {"service": _service()})
+        written = self.record.read_bytes()
+        self.assertIsNone(installed_payload.migrate_service(self.ghost))
+        self.assertEqual(self.record.read_bytes(), written)
+
+    def test_an_unavailable_receipt_is_reported_and_nothing_is_written(self):
+        self.hold_lock()
+        receipt = json.loads(self.receipt.read_text(encoding="utf-8"))
+        for change in ("missing", "unreadable", "removed", "other-schema", "relative-path"):
+            with self.subTest(change=change):
+                if change == "missing":
+                    self.receipt.unlink()
+                elif change == "unreadable":
+                    self.receipt.write_text("{broken", encoding="utf-8")
+                elif change == "removed":
+                    self.receipt.write_text(json.dumps(dict(receipt, status="removed")), encoding="utf-8")
+                elif change == "other-schema":
+                    self.receipt.write_text(json.dumps(dict(receipt, schema_version="v9")), encoding="utf-8")
+                else:
+                    self.receipt.write_text(json.dumps(dict(receipt, launch_agent="relative.plist")), encoding="utf-8")
+                with self.assertRaises(installed_payload.RecordError):
+                    installed_payload.migrate_service(self.ghost)
+                self.assertFalse(self.record.exists())
+        self.binding.write_text("[]", encoding="utf-8")
+        with self.assertRaises(installed_payload.RecordError):
+            installed_payload.migrate_service(self.ghost)
+
+    def test_a_receipt_that_changed_after_its_binding_is_not_adopted(self):
+        # The binding carries the digest of the receipt it committed; a receipt edited afterwards, even to a
+        # valid-looking one, does not become the service section.
+        self.hold_lock()
+        receipt = json.loads(self.receipt.read_text(encoding="utf-8"))
+        binding = json.loads(self.binding.read_text(encoding="utf-8"))
+        for change in ("edited-receipt", "binding-digest", "binding-schema", "binding-extra-key"):
+            with self.subTest(change=change):
+                self.receipt.write_text(json.dumps(receipt), encoding="utf-8")
+                self.binding.write_text(json.dumps(binding), encoding="utf-8")
+                if change == "edited-receipt":
+                    self.receipt.write_text(json.dumps(dict(receipt, launch_agent=str(self.home / "other.plist"))),
+                                            encoding="utf-8")
+                elif change == "binding-digest":
+                    self.binding.write_text(json.dumps(dict(binding, installation_digest="sha256:" + "0" * 64)),
+                                            encoding="utf-8")
+                elif change == "binding-schema":
+                    self.binding.write_text(json.dumps(dict(binding, schema_version="context-gateway-binding.v2")),
+                                            encoding="utf-8")
+                else:
+                    self.binding.write_text(json.dumps(dict(binding, extra="x")), encoding="utf-8")
+                with self.assertRaisesRegex(installed_payload.RecordError, "binding|receipt"):
+                    installed_payload.migrate_service(self.ghost)
+                self.assertFalse(self.record.exists())
+        self.receipt.write_text(json.dumps(receipt), encoding="utf-8")
+        self.binding.write_text(json.dumps(binding), encoding="utf-8")
+        self.assertIsNotNone(installed_payload.migrate_service(self.ghost))
+
+    def test_the_service_migration_writes_only_under_the_install_lock(self):
+        with self.assertRaises(installed_payload.NotLockHolder):
+            installed_payload.migrate_service(self.ghost)
+        self.assertFalse(self.record.exists())
+
+
 if __name__ == "__main__":
     unittest.main()

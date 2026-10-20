@@ -47,6 +47,9 @@ def parse_uninstall_args(args: list[str]) -> UninstallRequest:
 def uninstall(ctx: "Context", args: list[str]) -> int:
     """The combined addon + skill removal flow (`uninstall.sh:283-438`)."""
     request = parse_uninstall_args(args)
+    # The removal judges the gateway from the install record: an installation that only an earlier
+    # installer wrote gets its record, and its gateway's service section, before the first judgment.
+    transaction.migrate_record(ctx)
     addons_dir = locations.addons_dir(ctx.platform)
     promoted, skills = addons.promote_bare_installed_addon_ids(ctx, request.skills)
     addon_ids = list(request.addon_ids)

@@ -50,6 +50,12 @@ def runtime_shared_dir() -> Path:
     return Path(value) if value else home() / ".ghost-alice" / "runtime" / "current" / "_shared"
 
 
+def runtime_root() -> Path:
+    """The folder of the runtime shared dir (`~/.ghost-alice/runtime/current`): the runtime `_shared` and the
+    companion scripts the context gateway runs from are published under it."""
+    return runtime_shared_dir().parent
+
+
 def ghost_root() -> Path:
     """`$GHOST_ALICE_GHOST_ROOT` or `~/.ghost-alice` (`targets.sh:373`)."""
     value = os.environ.get("GHOST_ALICE_GHOST_ROOT")

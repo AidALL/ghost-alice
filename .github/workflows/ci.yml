@@ -25,7 +25,7 @@ jobs:
       - name: Test native gateway and compressed streams
         env:
           PYTHONPATH: _shared
-        run: python3 -m unittest -v test_context_gateway test_context_gateway_install test_context_gateway_uninstall test_gateway_payload_update test_gateway_installer_faults
+        run: python3 -m unittest -v test_context_gateway test_context_gateway_install test_context_gateway_uninstall test_gateway_judgment test_gateway_participant test_installer_participant test_gateway_installer_faults
 
   validation:
     name: Public validation

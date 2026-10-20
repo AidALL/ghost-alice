@@ -10,12 +10,19 @@
   `link_target` (a link) or `files` (a copy: relative path -> `content_digest`),
   `installed_at` and `baseline` (`recorded` by a publish, `migrated` from an
   earlier installer's records, `unknown` when those records had no fingerprint).
+- `service` (optional): the registered context gateway: `label`, `runtime_root`
+  (the folder of the runtime `_shared` the service runs from), `program`, the three
+  service files `launch_agent`, `state_path` and `config_path` with their
+  fingerprints (`launch_agent_digest`, `state_digest`, `config_block_digest` of the
+  provider blocks, None until a registration recorded it), `config_backup`,
+  `registered_at`, `restarted_at` and `listener_ready`.
 
 `update` is the one writer of record sections and `restore` puts back a copy a
 publish saved; both write through a temporary file and a rename, and refuse unless
 this process or the process that started it holds the install lock. `migrate`
-builds the record once from the records an earlier installer wrote and never
-changes those records.
+builds the record once from the records an earlier installer wrote and
+`migrate_service` the `service` section once from the gateway's installation
+receipt; neither changes those records.
 
 Dependencies: Python standard library, `content_digest`, `install_lock`.
 """
@@ -26,6 +33,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 from typing import Mapping, Sequence
 import uuid
 
@@ -35,10 +43,17 @@ import install_lock
 SCHEMA_VERSION = 1
 FILENAME = "installed-payload.json"
 LOCK_FILENAME = "install.lock"
-SECTIONS = ("installer", "source", "last_transaction", "targets")
+SECTIONS = ("installer", "source", "last_transaction", "targets", "service")
 KINDS = ("skill", "support", "runtime", "command", "resource")
 MODES = ("link", "copy")
 BASELINES = ("recorded", "migrated", "unknown")
+SERVICE_KEYS = ("label", "runtime_root", "program", "launch_agent", "launch_agent_digest", "state_path",
+                "state_digest", "config_path", "config_block_digest", "config_backup", "registered_at",
+                "restarted_at", "listener_ready")
+_DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
+# The gateway's own installation receipt and binding, read once by `migrate_service`.
+BINDING_FILENAME = "context-gateway-binding.json"
+_RECEIPT_SCHEMA = "context-gateway-installation.v1"
 
 # How an earlier installer named the install mode of a target.
 _EARLIER_MODES = {"symlink": "link", "junction": "link", "copy": "copy", "copy-fallback": "copy"}
@@ -121,12 +136,43 @@ def _check_entry(key: str, entry: object) -> dict:
     return dict(entry)
 
 
-def update(ghost_root: Path | str, patches: Mapping[str, Mapping]) -> dict:
+def _absolute(value: object) -> bool:
+    return isinstance(value, str) and Path(value).is_absolute()
+
+
+def _check_service(section: object) -> dict:
+    if not isinstance(section, Mapping):
+        raise RecordError("section service is not an object")
+    missing = [key for key in SERVICE_KEYS if key not in section]
+    unknown = sorted(set(section) - set(SERVICE_KEYS))
+    if missing or unknown:
+        raise RecordError(f"service needs exactly the keys {SERVICE_KEYS}; missing {missing}, unknown {unknown}")
+    if any(not isinstance(section[key], str) or not section[key] for key in ("label", "registered_at")):
+        raise RecordError("service label and registered_at must be nonempty strings")
+    if any(not _absolute(section[key]) for key in ("runtime_root", "program", "launch_agent", "state_path", "config_path")):
+        raise RecordError("service runtime_root, program, launch_agent, state_path and config_path must be absolute paths")
+    if Path(section["runtime_root"]) not in Path(section["program"]).parents:
+        raise RecordError("service program must be under runtime_root")
+    if any(not isinstance(section[key], str) or not _DIGEST.fullmatch(section[key])
+           for key in ("launch_agent_digest", "state_digest")):
+        raise RecordError("service launch_agent_digest and state_digest must be sha256 digests")
+    block = section["config_block_digest"]
+    if block is not None and (not isinstance(block, str) or not _DIGEST.fullmatch(block)):
+        raise RecordError("service config_block_digest must be a sha256 digest or None")
+    if any(section[key] is not None and not isinstance(section[key], str) for key in ("config_backup", "restarted_at")):
+        raise RecordError("service config_backup and restarted_at must be strings or None")
+    if not isinstance(section["listener_ready"], bool):
+        raise RecordError("service listener_ready must be a boolean")
+    return dict(section)
+
+
+def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None]) -> dict:
     """Write the given sections in one replacement of the record and return the record.
 
     `targets` changes only the entries it names, and an entry keeps every host its
-    path already had in `used_by`; `installer`, `source` and `last_transaction`
-    replace their section. Sections that are not given stay as they are.
+    path already had in `used_by`; `installer`, `source`, `last_transaction` and
+    `service` replace their section, and `service` None deletes it. Sections that
+    are not given stay as they are.
     """
     _require_lock(ghost_root)
     unknown = sorted(set(patches) - set(SECTIONS))
@@ -135,6 +181,12 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping]) -> dict:
     record = read(ghost_root) or {"schema_version": SCHEMA_VERSION, "targets": {}}
     targets = record.setdefault("targets", {})
     for section, patch in patches.items():
+        if section == "service":
+            if patch is None:
+                record.pop("service", None)
+            else:
+                record["service"] = _check_service(patch)
+            continue
         if not isinstance(patch, Mapping):
             raise RecordError(f"section {section} is not an object")
         if section != "targets":
@@ -347,3 +399,97 @@ def migrate(ghost_root: Path | str, hosts: Sequence[str], *, installer_commit: s
     update(root, patches)
     baselines = [entry["baseline"] for entry in entries.values()]
     return {"targets": len(entries), "migrated": baselines.count("migrated"), "unknown": baselines.count("unknown")}
+
+
+# One-time migration of the registered gateway from its installation receipt.
+
+
+def _receipt(binding_path: Path) -> dict:
+    """The installed gateway receipt the binding names and committed; RecordError when the binding is not a
+    version 1 binding, the receipt's bytes are not the ones the binding fingerprinted, or the receipt is
+    unavailable or not installed."""
+    binding = _load_json(binding_path)
+    if (not isinstance(binding, dict) or set(binding) != {"schema_version", "installation_path", "installation_digest"}
+            or binding["schema_version"] != "context-gateway-binding.v1" or not _absolute(binding["installation_path"])
+            or not isinstance(binding["installation_digest"], str)):
+        raise RecordError(f"{binding_path} is not a version 1 gateway binding that names the installation receipt")
+    receipt_path = Path(binding["installation_path"])
+    try:
+        if content_digest.file_digest(receipt_path) != binding["installation_digest"]:
+            raise RecordError(f"the gateway installation receipt changed after its binding: {receipt_path}")
+    except OSError as exc:
+        raise RecordError(f"the gateway installation receipt cannot be read: {receipt_path} ({exc})") from exc
+    receipt = _load_json(receipt_path)
+    if not isinstance(receipt, dict):
+        raise RecordError(f"the gateway installation receipt cannot be read: {receipt_path}")
+    if receipt.get("schema_version") != _RECEIPT_SCHEMA or receipt.get("status") != "installed":
+        raise RecordError(f"the gateway installation receipt is not an installed {_RECEIPT_SCHEMA} receipt: {receipt_path}")
+    if any(not _absolute(receipt.get(key)) for key in ("launch_agent", "state_path", "config_path", "runtime_shared_dir")):
+        raise RecordError(f"the gateway installation receipt lacks absolute service file paths: {receipt_path}")
+    if any(not isinstance(receipt.get(key), str) or not _DIGEST.fullmatch(receipt[key])
+           for key in ("launch_agent_digest", "state_digest")):
+        raise RecordError(f"the gateway installation receipt lacks the service file digests: {receipt_path}")
+    if not isinstance(receipt.get("service"), str) or not receipt["service"] or not isinstance(receipt.get("observed_at"), str):
+        raise RecordError(f"the gateway installation receipt lacks its service label or time: {receipt_path}")
+    return receipt
+
+
+def _companions(receipt: dict, targets: dict, runtime_shared: Path) -> dict[str, dict]:
+    """The runtime companion files the receipt fingerprinted (under the runtime root, outside `_shared`)
+    that the record does not name yet, as runtime targets of the hosts the runtime `_shared` serves."""
+    runtime_entry = targets.get(_posix(str(runtime_shared)))
+    if not isinstance(runtime_entry, dict) or runtime_entry.get("kind") != "runtime":
+        return {}
+    runtime_root = runtime_shared.parent
+    source_root = receipt.get("source_root") if _absolute(receipt.get("source_root")) else None
+    found: dict[str, dict] = {}
+    for path, value in (receipt.get("files") or {}).items():
+        if not _absolute(path) or not isinstance(value, str) or not _DIGEST.fullmatch(value):
+            continue
+        file = Path(path)
+        if runtime_root not in file.parents or file == runtime_shared or runtime_shared in file.parents:
+            continue
+        key = _posix(str(file))
+        if key in targets:
+            continue
+        relative = file.relative_to(runtime_root).as_posix()
+        found[key] = {"name": relative, "kind": "runtime", "mode": "copy", "provider": "core",
+                      "source": str(Path(source_root) / relative) if source_root else "", "source_commit": "unknown",
+                      "used_by": list(runtime_entry.get("used_by") or []), "files": {".": value},
+                      "installed_at": receipt["observed_at"], "baseline": "migrated"}
+    return found
+
+
+def migrate_service(ghost_root: Path | str) -> dict | None:
+    """Create the `service` section once from the gateway's installation receipt; None when the record already
+    has one or no binding file names a receipt.
+
+    The receipt's service label, three service files, their two digests, config backup and time become the
+    section; `config_block_digest` stays None until a registration records it, `restarted_at` None. Every
+    runtime companion file the receipt fingerprinted becomes a `migrated` runtime target of the hosts the
+    runtime `_shared` serves. The receipt and the binding stay as they are. Returns `{label, companions}`.
+    A receipt that is unavailable or not installed raises RecordError.
+    """
+    root = Path(ghost_root)
+    binding_path = root / BINDING_FILENAME
+    if not binding_path.is_file():
+        return None
+    record = read(root) or {}
+    if isinstance(record.get("service"), dict):
+        return None
+    receipt = _receipt(binding_path)
+    runtime_shared = Path(receipt["runtime_shared_dir"])
+    section = {"label": receipt["service"], "runtime_root": str(runtime_shared.parent),
+               "program": str(runtime_shared / "context_gateway.py"),
+               "launch_agent": receipt["launch_agent"], "launch_agent_digest": receipt["launch_agent_digest"],
+               "state_path": receipt["state_path"], "state_digest": receipt["state_digest"],
+               "config_path": receipt["config_path"], "config_block_digest": None,
+               "config_backup": receipt["config_backup"] if isinstance(receipt.get("config_backup"), str) else None,
+               "registered_at": receipt["observed_at"], "restarted_at": None,
+               "listener_ready": receipt.get("listener_ready") is True}
+    companions = _companions(receipt, record.get("targets", {}), runtime_shared)
+    patches: dict[str, Mapping] = {"service": section}
+    if companions:
+        patches["targets"] = companions
+    update(root, patches)
+    return {"label": section["label"], "companions": len(companions)}

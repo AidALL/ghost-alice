@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Transactional installer filesystem operations.
 
-`publish --request <file>` places the targets one request names and writes their
-install record entries in the same step. The original each target replaces moves
-into `~/.ghost-alice/rollbacks/<txid>/`, whose `journal.json` says what the publish
-replaces and how far it got (`prepare`, then `done` or `restored`). Any failure
-restores the files and the record. `recover --txid` restores a publish that stopped
-before its journal said `done`, and `unfinished` lists those publishes.
+`publish(request, participants)` places the targets one request names and writes
+their install record entries in the same step. The original each target replaces
+moves into `~/.ghost-alice/rollbacks/<txid>/`, whose `journal.json` says what the
+publish replaces and how far it got (`prepare`, then `done` or `restored`). The
+participants are called before and after the publish and, when it fails, before
+and after the restore; this module knows only their interface
+(`installer.participant`). Any failure restores the files and the record with the
+cause's exit code. `recover --txid` restores a publish that stopped before its
+journal said `done`, and `unfinished` lists those publishes.
 """
 
 from __future__ import annotations
@@ -23,10 +26,12 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Sequence
+from typing import Sequence
 
 import content_digest
+import install_lock
 import installed_payload
+from installer.participant import PublishContext
 
 EXCLUDED_COPY_DIR_NAMES = {
     "__pycache__",
@@ -409,8 +414,7 @@ def _replace(targets, *, rollback_root=None, event_log=None, rollback_keep=DEFAU
         progress_callback=progress_callback, progress_event_file=progress_event_file, progress_events=progress_events)
     try:
         batch.stage()
-        from context_gateway_install import coordinate_payload_replacement
-        coordinate_payload_replacement(batch)
+        batch.run_unmanaged()
         batch.finalize()
     except Exception as exc:
         wrapped = _wrapped_failure(exc, batch)
@@ -664,14 +668,29 @@ def _validated_request(request) -> dict:
     return request
 
 
-def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str:
+def _require_lock(ghost_root) -> None:
+    lock = Path(ghost_root) / installed_payload.LOCK_FILENAME
+    try:
+        held = install_lock.held_by_process_tree(lock)
+    except install_lock.InstallLockError as exc:
+        raise InstallTransactionError(f"publish runs only under the install lock: {exc}") from exc
+    if not held:
+        raise InstallTransactionError(f"publish runs only under the install lock of this process or its parent: {lock}")
+
+
+def publish(request: dict, participants: Sequence = (), *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str:
     """Publish the request's targets and their install record entries; return the transaction id.
 
-    A failure anywhere restores every file and the record, says `restored` in the
-    journal and raises InstallTransactionError with the cause's exit code. A restore
-    that fails leaves the journal unfinished and names its folder.
+    When the request replaces targets, every participant's `before_publish` runs after
+    the staging and before any install location changes, and `after_publish` once the
+    files and the record are published. A failure anywhere restores every file and the
+    record (around the restore, `before_restore` and `after_restore`), says `restored`
+    in the journal and raises InstallTransactionError with the cause's exit code; a
+    restore step that fails with its own code raises with that code. A restore that
+    fails leaves the journal unfinished and names its folder.
     """
     request = _validated_request(request)
+    _require_lock(request["ghost_root"])
     current = [target for target in request["targets"] if _links_to_its_source(target)]
     replaced = [target for target in request["targets"] if not _links_to_its_source(target)]
     try:
@@ -679,6 +698,8 @@ def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str
     except OSError as exc:
         raise InstallTransactionError(f"publish journal cannot be written under "
                                       f"{rollbacks_root(request['ghost_root'])}: {exc}") from exc
+    context = PublishContext(ghost_root=Path(request["ghost_root"]), host=request["host"], txid=journal.txid,
+                             destinations=tuple(Path(target["dest"]) for target in replaced))
     progress = request.get("progress") or {}
     statuses = [target.get("status") for target in replaced]
     callback = None
@@ -695,21 +716,27 @@ def publish(request: dict, *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str
                    "status": target["status"]} for target in replaced]
     batch = PublishBatch(request, replaced, current, journal, rollback_keep=rollback_keep,
                          progress_callback=callback, progress_events=events)
+    # Only current links change no file, so the participants have nothing to do.
+    attending = list(participants) if replaced else []
     try:
         batch.stage()
-        if batch.prepared:
-            from context_gateway_install import coordinate_payload_replacement
-            coordinate_payload_replacement(batch)
-        else:
-            # Only current links: no file changes, so nothing for the gateway to coordinate.
-            batch.publish()
+        for participant in attending:
+            participant.before_publish(context)
+        batch.publish()
+        for participant in attending:
+            participant.after_publish(context)
         batch.finalize()
     except Exception as exc:
         wrapped = _wrapped_failure(exc, batch)
         try:
+            for participant in attending:
+                participant.before_restore(context)
             batch.restore()
+            for participant in attending:
+                participant.after_restore(context)
         except Exception as recovery:
-            wrapped = _wrapped_failure(exc, batch, f"{wrapped}; restore failed ({recovery}); review {journal.folder}")
+            cause = recovery if hasattr(recovery, "exit_code") else exc
+            wrapped = _wrapped_failure(cause, batch, f"{wrapped}; restore failed ({recovery}); review {journal.folder}")
         event_log = request.get("event_log")
         _write_failure_event(Path(event_log) if event_log else None, source=batch.source, dest=batch.dest,
                              phase=wrapped.phase, error=str(wrapped))
@@ -834,10 +861,6 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
         default=[],
     )
 
-    publish_parser = subparsers.add_parser("publish", help="Publish the targets of a request file with their record.")
-    publish_parser.add_argument("--request", required=True, type=Path)
-    publish_parser.add_argument("--rollback-keep", type=int, default=DEFAULT_ROLLBACK_KEEP)
-
     recover_parser = subparsers.add_parser("recover", help="Restore an unfinished publish from its journal.")
     recover_parser.add_argument("--txid", required=True)
     recover_parser.add_argument("--ghost-root", type=Path, default=None)
@@ -945,12 +968,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             if args.progress_label:
                 sys.stdout.write("\n")
-        elif args.command == "publish":
-            try:
-                request = json.loads(args.request.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError, ValueError) as exc:
-                raise InstallTransactionError(f"publish request {args.request} cannot be read: {exc}") from exc
-            publish(request, rollback_keep=args.rollback_keep)
         elif args.command == "recover":
             for line in recover(args.ghost_root or Path.home() / ".ghost-alice", args.txid):
                 print(line)
