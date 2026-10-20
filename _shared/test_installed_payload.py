@@ -444,6 +444,35 @@ class ServiceSectionTests(RecordCase):
             installed_payload.update(self.ghost, {"source": None})
 
 
+class LatestTargetTests(unittest.TestCase):
+    """`latest_target`: the target of a kind and name that the latest publish wrote."""
+
+    def runtime(self, installed_at):
+        entry = _entry(name="_shared", kind="runtime", mode="copy", installed_at=installed_at, files={})
+        del entry["link_target"]
+        return entry
+
+    def test_the_latest_publish_wins_whatever_the_key_order(self):
+        for first, last, expected in (("2026-10-19T00:00:00+00:00", "2026-10-20T00:00:00+00:00", "/z/_shared"),
+                                      ("2026-10-20T00:00:00+00:00", "2026-10-19T00:00:00+00:00", "/a/_shared")):
+            with self.subTest(first=first):
+                record = {"targets": {"/a/_shared": self.runtime(first), "/z/_shared": self.runtime(last),
+                                      "/m/alpha": _entry(installed_at="2026-10-22T00:00:00+00:00")}}
+                key, entry = installed_payload.latest_target(record, kind="runtime", name="_shared")
+                self.assertEqual(key, expected)
+                self.assertIs(entry, record["targets"][expected])
+
+    def test_a_time_without_an_offset_counts_as_utc_and_a_value_that_is_not_a_time_as_the_earliest(self):
+        record = {"targets": {"/a/_shared": self.runtime("2026-10-20T09:00:00+09:00"),
+                              "/b/_shared": self.runtime("2026-10-20T01:00:00"),
+                              "/c/_shared": self.runtime("not a time")}}
+        self.assertEqual(installed_payload.latest_target(record, kind="runtime", name="_shared")[0], "/b/_shared")
+
+    def test_no_matching_target_is_none(self):
+        self.assertIsNone(installed_payload.latest_target({"targets": {"/a": _entry()}}, kind="runtime", name="_shared"))
+        self.assertIsNone(installed_payload.latest_target({}, kind="runtime", name="_shared"))
+
+
 class ServiceMigrationTests(RecordCase):
     """`migrate_service` builds the `service` section once from the gateway's installation receipt and binding."""
 

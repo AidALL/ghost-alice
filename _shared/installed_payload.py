@@ -222,6 +222,15 @@ def restore(ghost_root: Path | str, saved: Path | str | None) -> None:
         _write(file, wanted)
 
 
+def latest_target(record: Mapping, *, kind: str, name: str) -> tuple[str, dict] | None:
+    """`(install location, entry)` of the target of `kind` named `name` that the latest publish wrote; None
+    without one. A location an earlier publish used stays in the record when the location moves, so the
+    latest `installed_at` says which one is current."""
+    matching = [(key, entry) for key, entry in (record.get("targets") or {}).items()
+                if isinstance(entry, dict) and entry.get("kind") == kind and entry.get("name") == name]
+    return max(matching, key=lambda item: _installed_at(item[1])) if matching else None
+
+
 # One-time migration from the records an earlier installer wrote.
 
 
@@ -340,7 +349,7 @@ def _merge(existing: dict, new: dict) -> dict:
 
 
 def _installed_at(state: dict) -> datetime:
-    """When an install-state was written: a time without an offset counts as UTC,
+    """When an install-state or a record entry was written: a time without an offset counts as UTC,
     and a value that is not a time counts as the earliest."""
     try:
         moment = datetime.fromisoformat(str(state.get("installed_at")))

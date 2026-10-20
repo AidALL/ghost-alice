@@ -214,7 +214,7 @@ Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynami
 
 설치기는 `--help`와 `--list`를 포함한 모든 명령에 Python 3.11 이상을 요구합니다. `install.sh`는 Python을 찾거나 준비한 뒤 인수를 그대로 `_shared/installer/cli.py`에 넘깁니다. 해당 버전이 없으면 가능한 환경에서 자동 준비를 시도합니다.
 
-선택적인 macOS 네이티브 컨텍스트 gateway에는 `compression.zstd`를 제공하는 Python 3.14 이상이 필요합니다. 해당 설치기는 구성 파일, launch agent, Codex provider를 변경하기 전에 이 기능을 확인합니다. Core 설치기와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`이 심볼릭 링크이면 gateway 설치와 해당 구성 요소 제거는 서비스를 변경하기 전에 중단하고 링크와 원본을 보존합니다. Gateway 설치는 launch agent, 구성 요소, 공유 의존 파일, 상태와 소유권 파일 자체가 심볼릭 링크이면 서비스를 변경하기 전에 거부하여 링크와 원본을 보존합니다. 갱신은 변경 전에 이전 설치 바인딩을 확인하여 사용자가 편집한 provider 블록과 launch agent를 보존합니다. 구성 요소 교체에는 인증된 설치 영수증의 파일 해시만 사용합니다. 폐기한 별도 `installed-files.json`은 읽거나 생성하지 않으며 설치나 갱신이 성공하면 삭제합니다. Provider 표시나 launch agent가 없어도 기존 gateway 상태에는 인증된 등록과 변경되지 않은 상태 증거가 필요합니다. 소유권이 없으면 설치는 상태 디렉터리를 보존하고 중단합니다. 새 설치에는 빈 대상 디렉터리를 사용하거나 보존된 설치 바인딩을 검토하세요. 첫 설치가 실패하고 후보 서비스의 중지가 확인되면 해당 시도가 새로 만든 상태 자료를 되돌려 다음 설치를 진행할 수 있습니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 복구 자료를 보존하고 검토를 요청합니다.
+선택적인 macOS 네이티브 컨텍스트 gateway에는 `compression.zstd`를 제공하는 Python 3.14 이상이 필요합니다. 등록 명령 `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 먼저 이 기능을 확인한 뒤 launch agent, `state.json`, Codex provider 블록을 작성하고 설치 기록에 서비스를 기록합니다. 등록 명령은 모듈을 복사하지 않습니다. 서비스는 설치기가 게시한 런타임 `_shared`를 실행하므로 Core를 먼저 설치합니다. Core 설치기와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`, launch agent, 상태 파일이 심볼릭 링크이면 등록과 분리는 서비스를 변경하기 전에 종료하고 링크와 원본을 보존합니다. 갱신은 서비스 파일 세 개가 설치 기록과 같은 동안 리스너의 포트와 scope를 유지합니다. 설치기 밖에서 바뀐 파일이 있으면 명령은 아무것도 바꾸기 전에 종료하고, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록은 보존합니다. 첫 등록이 실패하고 후보 서비스의 중지가 확인되면 해당 시도가 새로 작성한 상태 자료와 기록 항목을 되돌려 다음 등록을 진행할 수 있습니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 복구 자료를 보존하고 검토를 요청합니다. 등록 뒤에는 `bash install.sh`만으로 설치본을 갱신합니다. `bash install.sh gateway detach --confirm`은 서비스 등록을 해제하고 상태 디렉터리를 남깁니다.
 
 - macOS: Homebrew가 있으면 `brew install python3`
 - Linux / WSL: `apt-get`, `dnf`, `yum`, `pacman` 같은 패키지 관리자
@@ -280,7 +280,7 @@ Claude 설치기는 매니페스트가 선택한 애드온의 `Skill(...)` 권�
 - `~/.ghost-alice/rollbacks/<txid>/`: 배치 한 번이 교체한 원래 파일, 배치 전의 설치 기록, 배치의 저널을 보관합니다. 다음 잠금 명령이 중간에 중지된 배치를 복원하며, 완료된 폴더는 최근 20개를 유지합니다
 - 설치 상태, 미결 병합과 제거 보고서의 지원 상태
 
-선택 컨텍스트 게이트웨이를 등록한 설치본에서는 런타임 `_shared` 배치가 게이트웨이 조정을 거칩니다. 조정은 서비스를 중지하고, 바뀐 모듈을 게시하고, 서비스를 재시작하고, 설치 영수증을 갱신합니다. Codex의 `_shared` 복사본(`~/.agents/skills/_shared`)은 조정을 거치지 않습니다. 조정은 그 폴더를 게이트웨이 의존 경로로 보지 않으므로, 게이트웨이 모듈이 바뀐 뒤 Codex 설치가 그 폴더를 교체하면 런타임 배치가 `A gateway runtime component changed`로 멈춥니다. 그 폴더를 공유 폴더로 등록한 게이트웨이에서는 원본의 게이트웨이 모듈이 바뀌었을 때 `bash install.sh` 전에 게이트웨이 갱신 명령을 먼저 실행합니다. 설치기는 영수증의 원본, 파일 수, 서비스 실행 여부를 `Context gateway:` 한 줄로 출력합니다.
+선택 컨텍스트 게이트웨이를 등록한 설치본에서는 설치 기록의 `service` 섹션이 서비스의 코드 뿌리 `~/.ghost-alice/runtime/current`와 서비스 파일 세 개를 지정합니다. 런타임 배치(`_shared`와 동반 스크립트 `session-intent-analyzer/scripts/session_intent_ledger.py`)는 파일 교체 전에 서비스를 중지하고 교체 뒤에 시작합니다. Codex 복사본 `~/.agents/skills/_shared`와 Claude 링크는 설치 대상이지 서비스의 코드가 아니므로 그 배치는 서비스 효과를 호출하지 않습니다. 갱신은 `bash install.sh` 한 번이며 게이트웨이 갱신 명령을 먼저 실행하지 않습니다. 설치기는 서비스의 런타임 뿌리와 서비스 실행 여부를 `Context gateway:` 한 줄로 출력합니다. 이전 설치기가 등록한 설치본은 첫 설치, 복구 또는 제거 때 게이트웨이 설치 영수증에서 `service` 섹션을 한 번 작성합니다.
 
 설치기는 전역 규칙 파일에서 표시된 Ghost-ALICE 블록만 관리합니다. 그 블록을 갱신하면서 주변 사용자 문구는 보존합니다. 대상이 표시 없는 사용자 파일이면 원본 대신 `<rule-file>.ghost-alice-proposed` 제안 파일을 작성하며, status와 doctor는 이를 설치된 전역 규칙으로 취급하지 않습니다.
 

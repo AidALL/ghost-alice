@@ -1,9 +1,11 @@
 """Compose gateway inventory, planning and transaction effects behind the public CLI.
 
-`install` registers or refreshes the gateway service and, when the install record exists, writes the
-record's `service` section with the service files it wrote. `detach` unregisters the service the record
-names. Registration requires Python 3.14+ with compression.zstd; detachment runs on Python 3.11+. Both
-take the installer's lock when no installer holds it.
+`install` registers or refreshes the gateway service: it reads the runtime target from the install
+record, writes the launch agent, `state.json` and the Codex provider blocks, starts the service, confirms
+readiness and writes the record's `service` section. It copies no module: the service runs from the
+runtime the installer publishes. `detach` unregisters the service the record names. Registration
+requires Python 3.14+ with compression.zstd; detachment runs on Python 3.11+. Both take the installer's
+lock when no installer holds it.
 """
 from __future__ import annotations
 
@@ -23,8 +25,8 @@ import context_gateway_plan as planning
 import context_gateway_platform as platform
 import installed_payload
 # The tests read the provider rendering, the markers and the native modules through this module.
-from context_gateway_model import (COMPANIONS, GatewayBlocked, GatewayFailure, GatewayServiceError,  # noqa: F401
-    LABEL, MODULES, Request, TABLE_BEGIN, TABLE_END, TOP_BEGIN, TOP_END, digest as _digest)
+from context_gateway_model import (GatewayBlocked, GatewayFailure, GatewayServiceError, LABEL, Request, TABLE_BEGIN,  # noqa: F401
+    TABLE_END, TOP_BEGIN, TOP_END)
 from context_gateway_plan import render_provider, remove_provider  # noqa: F401
 from context_gateway_transaction import execute
 from hook_definitions import PROVIDER  # noqa: F401
@@ -63,35 +65,37 @@ def _require_gateway_runtime():
         raise RuntimeError('The optional context gateway requires a working Python 3.14 compression.zstd codec') from exc
 
 
-def _record_section(home):
-    """`(record exists, its service section or None)`; a record this installer cannot read counts as none."""
+def _read_record(home):
     try:
-        record = installed_payload.read(Path(home) / '.ghost-alice')
-    except installed_payload.RecordError:
-        return False, None
-    if record is None:
-        return False, None
-    service = record.get('service')
-    return True, service if isinstance(service, dict) else None
+        return installed_payload.read(Path(home) / '.ghost-alice') or {}
+    except installed_payload.RecordError as exc:
+        raise GatewayBlocked('The install record cannot be read: ' + str(exc)) from exc
 
 
-def install(source_root, shared_dirs, codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *,
-            strict_log_root=None, dependency_bases=None, confirm=True):
+def _runtime_root(record):
+    """The folder of the runtime `_shared` target the latest publish wrote: where the service's code is."""
+    found = installed_payload.latest_target(record, kind='runtime', name='_shared')
+    if found is None:
+        raise GatewayBlocked('Install Core first: the install record has no runtime target for the gateway to run from')
+    return Path(found[0]).parent
+
+
+def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *, strict_log_root=None, confirm=True):
     _require_gateway_runtime()
-    supplied = [source_root, codex_dir, ledger_root, state_dir, launch_agent, *shared_dirs]
+    supplied = [codex_dir, ledger_root, state_dir, launch_agent]
     supplied.extend(p for p in (claude_dir, strict_log_root) if p is not None)
-    if sys.platform != 'darwin' or not shared_dirs or any(not Path(p).is_absolute() for p in supplied):
+    if sys.platform != 'darwin' or any(not Path(p).is_absolute() for p in supplied):
         raise GatewayBlocked('macOS and explicit absolute installation coordinates are required')
-    request = Request('install', Path.home(), sys.platform, Path(source_root), tuple(map(Path, shared_dirs)),
-        Path(codex_dir), Path(ledger_root), Path(state_dir), Path(launch_agent),
-        Path(claude_dir) if claude_dir is not None else None,
-        Path(strict_log_root) if strict_log_root is not None else None,
-        dependency_bases={} if dependency_bases is None else dependency_bases)
+    home = Path.home()
     io = _effects()
-    with platform.operation_lock(request.home):
+    with platform.operation_lock(home):
+        record = _read_record(home)
+        service = record.get('service') if isinstance(record.get('service'), dict) else None
+        request = Request('install', home, sys.platform, _runtime_root(record), Path(codex_dir), Path(ledger_root),
+            Path(state_dir), Path(launch_agent), Path(claude_dir) if claude_dir is not None else None,
+            Path(strict_log_root) if strict_log_root is not None else None)
         observed = inventory.installation(request, io)
-        validated = planning.validate_install(request, observed)
-        prior = validated[1]
+        prior = planning.validate_install(request, observed, service)
         if prior is None:
             with socket.socket() as listener:
                 listener.bind(('127.0.0.1', 0))
@@ -99,11 +103,10 @@ def install(source_root, shared_dirs, codex_dir, ledger_root, state_dir, launch_
             scope = uuid.uuid4().hex
         else:
             port, scope = prior['port'], prior['scope']
-        recorded, service = _record_section(request.home)
         now = datetime.now(timezone.utc)
-        plan = planning.install_plan(request, observed, validated, port=port, scope=scope,
-            interpreter=sys.executable, stamp=now.strftime('%Y%m%dT%H%M%S%fZ'), observed_at=now.isoformat(),
-            domain=platform.service_domain(request.platform), service=service, record=recorded)
+        plan = planning.install_plan(request, observed, prior, service, port=port, scope=scope,
+            interpreter=sys.executable, stamp=now.strftime('%Y%m%dT%H%M%S%fZ'), now=now.isoformat(),
+            domain=platform.service_domain(request.platform))
         return execute(plan, io, confirm=confirm)
 
 
@@ -113,10 +116,7 @@ def detach(*, confirm=False, home=None, io=None, host_platform=None):
     io = _effects() if io is None else io
     host_platform = sys.platform if host_platform is None else host_platform
     with platform.operation_lock(home):
-        try:
-            record = installed_payload.read(home / '.ghost-alice') or {}
-        except installed_payload.RecordError as exc:
-            raise GatewayBlocked('The install record cannot be read: ' + str(exc)) from exc
+        record = _read_record(home)
         service = record.get('service')
         if not isinstance(service, dict):
             return dict(kind='context-gateway', action='missing', reason='gateway-not-registered')
@@ -156,22 +156,17 @@ def main(argv=None):
         print(json.dumps(result))
         return 0
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source-root', required=True, type=Path)
-    parser.add_argument('--shared-dir', required=True, action='append', type=Path)
     parser.add_argument('--codex-dir', required=True, type=Path)
     parser.add_argument('--claude-dir', type=Path)
     parser.add_argument('--strict-log-root', type=Path)
     parser.add_argument('--ledger-root', required=True, type=Path)
     parser.add_argument('--state-dir', required=True, type=Path)
     parser.add_argument('--launch-agent', required=True, type=Path)
-    parser.add_argument('--dependency-bases-json', type=Path)
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args(argv)
     try:
-        result = install(args.source_root, args.shared_dir, args.codex_dir, args.ledger_root,
-            args.state_dir, args.launch_agent, claude_dir=args.claude_dir, strict_log_root=args.strict_log_root,
-            dependency_bases=json.loads(args.dependency_bases_json.read_text()) if args.dependency_bases_json else None,
-            confirm=not args.dry_run)
+        result = install(args.codex_dir, args.ledger_root, args.state_dir, args.launch_agent,
+            claude_dir=args.claude_dir, strict_log_root=args.strict_log_root, confirm=not args.dry_run)
     except (GatewayBlocked, GatewayServiceError, GatewayFailure) as exc:
         _print_failure(exc)
         return exc.exit_code
@@ -181,9 +176,7 @@ def main(argv=None):
     if result['status'] == 'dry-run':
         print(json.dumps(result))
     else:
-        print(json.dumps(dict(status=result['status'], service=result['service'],
-            listener_ready=result['listener_ready'], installed_files=len(result['files']),
-            existing_native_process_adoption=result['existing_native_process_adoption'])))
+        print(json.dumps(dict(status=result['status'], service=result['service'], listener_ready=result['listener_ready'])))
     return 0
 
 

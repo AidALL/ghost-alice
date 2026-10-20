@@ -12,12 +12,6 @@ TOP_BEGIN = '# Ghost-ALICE managed context selection begin'
 TOP_END = '# Ghost-ALICE managed context selection end'
 TABLE_BEGIN = '# Ghost-ALICE managed context provider begin'
 TABLE_END = '# Ghost-ALICE managed context provider end'
-MODULES = ('context_lifecycle.py', 'context_gateway.py', 'context_gateway_install.py', 'context_lifecycle.md',
-           'context_gateway_model.py', 'context_gateway_inventory.py', 'context_gateway_plan.py',
-           'context_gateway_transaction.py', 'context_gateway_platform.py',
-           'response_context_use.py', 'claude_context_adapter.py', 'source_lookup.py', 'native_transcript.py',
-           'text_lines.py', 'hook_definitions.py')
-COMPANIONS = ('session-intent-analyzer/scripts/session_intent_ledger.py',)
 
 
 def digest(raw):
@@ -78,31 +72,43 @@ class ServiceObservation:
 
 @dataclass(frozen=True)
 class Request:
-    """One registration (`install`) or unregistration (`detach`) of the gateway service."""
+    """One registration (`install`) or unregistration (`detach`) of the gateway service.
+
+    `runtime_root` is the folder the install record names for the runtime `_shared` the service runs
+    from; the registration writes nothing under it.
+    """
     operation: str
     home: Path
     platform: str
-    source: Path | None = None
-    shared: tuple[Path, ...] = ()
+    runtime_root: Path | None = None
     codex: Path | None = None
     ledger: Path | None = None
     state_dir: Path | None = None
     agent: Path | None = None
     claude: Path | None = None
     strict_log: Path | None = None
-    dependency_bases: Mapping[str, str] = field(default_factory=dict)
 
     @property
-    def registration(self):
-        return self.home / '.ghost-alice/context-gateway-binding.json'
+    def program(self):
+        return self.runtime_root / '_shared' / 'context_gateway.py'
+
+    @property
+    def config(self):
+        return self.codex / 'config.toml'
+
+    @property
+    def state_path(self):
+        return self.state_dir / 'state.json'
 
 
 @dataclass(frozen=True)
 class Inventory:
+    """What one operation read: the files, the present prerequisites, the state directory's entries and the
+    paths links resolve to (`resolved`), for the checks that follow links."""
     files: Mapping[Path, Artifact]
-    resolved: Mapping[Path, Path]
     prerequisites: frozenset[Path] = frozenset()
     state_entries: tuple[Path, ...] = ()
+    resolved: Mapping[Path, Path] = field(default_factory=dict)
 
     def file(self, path):
         return self.files[Path(path)]
