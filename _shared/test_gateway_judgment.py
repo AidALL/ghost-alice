@@ -75,6 +75,9 @@ class JudgmentTests(unittest.TestCase):
         for key in ("launch_agent", "state_path", "config_path"):
             with self.subTest(key=key):
                 self.assertTrue(gateway_participant.affects(SERVICE, [Path(SERVICE[key])]))
+                # A removal root that holds a service file removes it too.
+                self.assertTrue(gateway_participant.affects(SERVICE, [Path(SERVICE[key]).parent]))
+        self.assertFalse(gateway_participant.affects(SERVICE, [HOME / ".ghost-alice" / "context-gateway-other"]))
 
     def test_the_codex_full_removal_touches_the_service(self):
         self.assertTrue(gateway_participant.affects(SERVICE, [HOME / ".agents" / "skills" / "alpha"], remove_codex=True))
@@ -197,11 +200,32 @@ class ParticipantSelectionTests(unittest.TestCase):
             self.assertEqual([type(p).__name__ for p in chosen], ["GatewayParticipant"])
             installed_payload.update(reg.ghost, {"service": None})
             self.assertEqual(gateway_participant.participants(reg.ghost), [])
-            installed_payload.path(reg.ghost).write_text(json.dumps({"schema_version": 2, "targets": {}}),
-                                                         encoding="utf-8")
-            self.assertEqual(gateway_participant.participants(reg.ghost), [])
             installed_payload.path(reg.ghost).unlink()
             self.assertEqual(gateway_participant.participants(reg.ghost), [])
+
+    def test_an_unreadable_record_holds_a_runtime_publish_and_lets_the_others_go_on(self):
+        # Whether a gateway runs from the runtime is unknown without the record: the runtime publish waits
+        # for the record to be reviewed, a skill or Codex copy publish does not depend on it.
+        from installer.participant import PublishContext
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            reg = gateway_testing.registered_home(self, root)
+            record = installed_payload.path(reg.ghost)
+            for broken in (json.dumps({"schema_version": 2, "targets": {}}), "{broken"):
+                with self.subTest(record=broken[:12]):
+                    record.write_text(broken, encoding="utf-8")
+                    [chosen] = gateway_participant.participants(reg.ghost, runtime_root=reg.runtime_root)
+                    runtime = PublishContext(ghost_root=reg.ghost, host="claude", txid="t",
+                                             destinations=(reg.shared, reg.companion))
+                    with self.assertRaises(GatewayBlocked) as held:
+                        chosen.before_publish(runtime)
+                    self.assertEqual(held.exception.exit_code, 2)
+                    self.assertIn(str(record), str(held.exception))
+                    skills = PublishContext(ghost_root=reg.ghost, host="codex", txid="t",
+                                            destinations=(root / ".agents" / "skills" / "_shared",))
+                    for point in ("before_publish", "after_publish", "before_restore", "after_restore"):
+                        self.assertIsNone(getattr(chosen, point)(skills))
+                    self.assertIsNone(chosen.after_restore(runtime))
 
 
 if __name__ == "__main__":

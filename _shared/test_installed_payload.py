@@ -576,6 +576,34 @@ class ServiceMigrationTests(RecordCase):
         with self.assertRaises(installed_payload.RecordError):
             installed_payload.migrate_service(self.ghost)
 
+    def test_a_receipt_that_changed_after_its_binding_is_not_adopted(self):
+        # The binding carries the digest of the receipt it committed; a receipt edited afterwards, even to a
+        # valid-looking one, does not become the service section.
+        self.hold_lock()
+        receipt = json.loads(self.receipt.read_text(encoding="utf-8"))
+        binding = json.loads(self.binding.read_text(encoding="utf-8"))
+        for change in ("edited-receipt", "binding-digest", "binding-schema", "binding-extra-key"):
+            with self.subTest(change=change):
+                self.receipt.write_text(json.dumps(receipt), encoding="utf-8")
+                self.binding.write_text(json.dumps(binding), encoding="utf-8")
+                if change == "edited-receipt":
+                    self.receipt.write_text(json.dumps(dict(receipt, launch_agent=str(self.home / "other.plist"))),
+                                            encoding="utf-8")
+                elif change == "binding-digest":
+                    self.binding.write_text(json.dumps(dict(binding, installation_digest="sha256:" + "0" * 64)),
+                                            encoding="utf-8")
+                elif change == "binding-schema":
+                    self.binding.write_text(json.dumps(dict(binding, schema_version="context-gateway-binding.v2")),
+                                            encoding="utf-8")
+                else:
+                    self.binding.write_text(json.dumps(dict(binding, extra="x")), encoding="utf-8")
+                with self.assertRaisesRegex(installed_payload.RecordError, "binding|receipt"):
+                    installed_payload.migrate_service(self.ghost)
+                self.assertFalse(self.record.exists())
+        self.receipt.write_text(json.dumps(receipt), encoding="utf-8")
+        self.binding.write_text(json.dumps(binding), encoding="utf-8")
+        self.assertIsNotNone(installed_payload.migrate_service(self.ghost))
+
     def test_the_service_migration_writes_only_under_the_install_lock(self):
         with self.assertRaises(installed_payload.NotLockHolder):
             installed_payload.migrate_service(self.ghost)
