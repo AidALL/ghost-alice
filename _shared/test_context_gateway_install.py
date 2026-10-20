@@ -865,5 +865,84 @@ class ContextGatewayInstallTests(unittest.TestCase):
             self.assertEqual(reads[args[0] / '_shared' / name], 1)
 
 
+class RecordSectionTests(ContextGatewayInstallTests):
+    """A registration keeps the install record's `service` section current: the section names the runtime the
+    service runs from and the three service files with their fingerprints, written in the same phase as the
+    receipt. Without a record nothing is recorded; the first install migrates the receipt later."""
+
+    def runtime_record(self, args):
+        import content_digest
+        import gateway_testing
+        import installed_payload
+        root, shared = args[0].parent, args[1][0]
+        gateway_testing.hold_lock(self, root)
+        installed_payload.update(root / '.ghost-alice', {'targets': {str(shared): {
+            'name': '_shared', 'kind': 'runtime', 'mode': 'copy', 'provider': 'core', 'source': str(args[0] / '_shared'),
+            'source_commit': 'c0ffee', 'used_by': ['codex'], 'files': content_digest.tree(shared),
+            'installed_at': '2026-10-20T00:00:00+00:00', 'baseline': 'recorded'}}})
+        return root / '.ghost-alice'
+
+    def test_a_registration_writes_the_records_service_section_when_a_record_exists(self):
+        import gateway_testing
+        import installed_payload
+        from context_gateway_model import LABEL, digest
+        args, _ = self.installation_fixture()
+        ghost = self.runtime_record(args)
+        self.assertEqual(self.mocked_install(args)['status'], 'installed')
+        section = installed_payload.read(ghost)['service']
+        self.assertEqual((section['label'], section['runtime_root'], section['program']),
+                         (LABEL, str(args[1][0].parent), str(args[1][0] / 'context_gateway.py')))
+        self.assertEqual((section['launch_agent'], section['state_path'], section['config_path']),
+                         (str(args[5]), str(args[4] / 'state.json'), str(args[2] / 'config.toml')))
+        self.assertEqual(section['launch_agent_digest'], digest(args[5].read_bytes()))
+        self.assertEqual(section['state_digest'], digest((args[4] / 'state.json').read_bytes()))
+        self.assertEqual(section['config_block_digest'], digest(gateway_testing.provider_blocks(
+            (args[2] / 'config.toml').read_text(encoding='utf-8')).encode('utf-8')))
+        self.assertTrue(Path(section['config_backup']).is_file())
+        self.assertEqual(section['registered_at'], section['restarted_at'])
+        self.assertTrue(section['listener_ready'])
+        # A refresh keeps the registration time and records the new restart.
+        first = dict(section)
+        self.assertEqual(self.mocked_install(args)['status'], 'installed')
+        section = installed_payload.read(ghost)['service']
+        self.assertEqual(section['registered_at'], first['registered_at'])
+        self.assertNotEqual(section['restarted_at'], first['restarted_at'])
+
+    def test_without_a_record_the_registration_records_nothing(self):
+        import installed_payload
+        args, _ = self.installation_fixture()
+        self.assertEqual(self.mocked_install(args)['status'], 'installed')
+        self.assertFalse(installed_payload.path(args[0].parent / '.ghost-alice').exists())
+
+    def test_a_failed_record_write_restores_the_receipt_and_the_prior_service(self):
+        import installed_payload
+        args, original = self.installation_fixture()
+        ghost = self.runtime_record(args)
+        before = installed_payload.path(ghost).read_bytes()
+        active = [True]
+        with patch.object(install.sys, 'platform', 'darwin'), \
+             patch.object(install, '_service_state', side_effect=lambda _: 'running' if active[0] else 'absent'), \
+             patch.object(install, '_stop_service', side_effect=lambda _: active.__setitem__(0, False)), \
+             patch.object(install, '_start_service', side_effect=lambda *_: active.__setitem__(0, True)), \
+             patch.object(install, '_ready', return_value=True), \
+             patch.object(install, '_record', side_effect=OSError('record is unwritable')):
+            with self.assertRaises(RuntimeError) as failed:
+                install.install(*args)
+        self.assertEqual(failed.exception.exit_code, 4)
+        self.assertTrue(active[0])
+        self.assertEqual({p: p.read_bytes() for p in original}, original)
+        self.assertEqual(installed_payload.path(ghost).read_bytes(), before)
+
+    def test_a_dry_run_records_nothing(self):
+        import installed_payload
+        args, _ = self.installation_fixture()
+        ghost = self.runtime_record(args)
+        before = installed_payload.path(ghost).read_bytes()
+        result = self.mocked_install(args, confirm=False)
+        self.assertEqual(result['status'], 'dry-run')
+        self.assertEqual(result['plan']['steps'][-2]['record'], dict(section='service', action='write'))
+        self.assertEqual(installed_payload.path(ghost).read_bytes(), before)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -1,28 +1,47 @@
-"""Gateway detachment precedes every dependent Core cleanup mutation."""
+"""Gateway detachment precedes every dependent Core cleanup mutation.
+
+The full uninstall asks the gateway participant's judgment with the removal roots it computed: a registered
+service whose runtime (or a service file) is among them, or a Codex full removal, is detached first; a
+removal that leaves the service's code alone proceeds without touching it. Without a `service` section the
+judgment asks launchd and holds only for a loaded service whose program is inside a removal root. The
+`detach` command unregisters the service the record names.
+"""
 import argparse
+import contextlib
+import io
 import json
 from pathlib import Path
+import plistlib
+import sys
+import tempfile
+import tomllib
 import unittest
 from unittest.mock import patch
 
-import context_gateway_install as gateway
-import uninstall_cleanup as cleanup
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import context_gateway_install as gateway  # noqa: E402
+import gateway_testing  # noqa: E402
+import installed_payload  # noqa: E402
+import uninstall_cleanup as cleanup  # noqa: E402
+from context_gateway_model import GatewayBlocked, LABEL  # noqa: E402
+from hook_definitions import PROVIDER  # noqa: E402
 
 
-class GatewayUninstallTests(unittest.TestCase):
+class RegisteredHomeCase(unittest.TestCase):
+    """A home whose install record names a registered gateway; the native service is a flag."""
+
     def setUp(self):
-        from test_context_gateway_install import ContextGatewayInstallTests
-        fixture = ContextGatewayInstallTests()
-        self.addCleanup(fixture.doCleanups)
-        self.args, _ = fixture.installation_fixture()
-        fixture.mocked_install(self.args)
-        self.root = self.args[0].parent
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        home = patch.object(gateway.Path, 'home', return_value=self.root)
+        home.start(); self.addCleanup(home.stop)
+        self.reg = gateway_testing.registered_home(self, self.root)
         self.active = True
         self.stops = 0
-        self.targets = []
         self.patchers = [
             patch.object(cleanup, '_user_home', return_value=self.root),
-            patch.object(cleanup, '_codex_home', return_value=self.args[2]),
+            patch.object(cleanup, '_codex_home', return_value=self.reg.codex),
             patch.object(gateway.sys, 'platform', 'darwin'),
             patch.object(gateway, '_service_state', side_effect=lambda _: 'running' if self.active else 'absent'),
             patch.object(gateway, '_stop_service', side_effect=self.stop),
@@ -36,17 +55,29 @@ class GatewayUninstallTests(unittest.TestCase):
         self.active = False
         self.stops += 1
 
+    def unregister(self):
+        """The record without its service section: the gateway is not registered in the record."""
+        installed_payload.update(self.reg.ghost, {"service": None})
+
+
+class GatewayUninstallTests(RegisteredHomeCase):
+    def setUp(self):
+        super().setUp()
+        self.targets = []
+
     def report(self, *, platform='codex', confirm=True, target=None):
         manifest = self.root / '.ghost-alice/install-state' / (platform + '.json')
         manifest.parent.mkdir(parents=True, exist_ok=True)
-        target = self.args[1][-1] if target is None else target
+        target = self.reg.shared if target is None else target
         manifest.write_text(json.dumps(dict(platform=platform, targets=[dict(target_name='_shared', dest_path=str(target))])))
         args = argparse.Namespace(platform=platform, confirm=confirm, install_state_manifest=manifest)
+
         def remove(*_args, **_kwargs):
             if not _kwargs.get('confirm'):
                 return dict(action='would-remove', path=str(target))
-            self.targets.append(dict(active=self.active, config=(self.args[2] / 'config.toml').read_text()))
+            self.targets.append(dict(active=self.active, config=self.reg.config.read_text()))
             return dict(action='unchanged')
+
         with patch.object(cleanup, '_hook_item', return_value=dict(action='unchanged')) as hooks, \
              patch.object(cleanup, '_global_rule_items', return_value=[]), \
              patch.object(cleanup, '_target_item', side_effect=remove), \
@@ -54,17 +85,20 @@ class GatewayUninstallTests(unittest.TestCase):
             result = cleanup.build_report(args)
         return result, hooks.call_count
 
-    def test_custom_gateway_detaches_before_core_targets_and_preserves_adjacent_edits(self):
-        config = self.args[2] / 'config.toml'
+    def test_the_codex_full_removal_detaches_before_core_targets_and_preserves_adjacent_edits(self):
+        config = self.reg.config
         config.write_text(config.read_text() + '\n[features]\nhooks=true\n')
+        installed_payload.update(self.reg.ghost, {"service": gateway_testing.service_section(self.reg)})
         result, _ = self.report()
         self.assertFalse(self.targets[0]['active'])
         self.assertNotIn('model_provider = "ghost_alice_context"', self.targets[0]['config'])
         self.assertIn('[features]\nhooks=true', config.read_text())
-        self.assertFalse(self.args[5].exists())
-        self.assertFalse((self.root / '.ghost-alice/context-gateway-binding.json').exists())
-        self.assertTrue((self.args[4] / 'installation.json').is_file())
-        self.assertTrue(any(item.get('kind') == 'context-gateway' for item in result['items']))
+        self.assertFalse(self.reg.agent.exists())
+        self.assertIsNone(self.reg.service())
+        self.assertTrue(self.reg.state_path.is_file())
+        self.assertTrue((self.reg.state_dir / 'usage.jsonl').is_file())
+        item = next(item for item in result['items'] if item.get('kind') == 'context-gateway')
+        self.assertEqual(item['action'], 'detached')
 
     def test_uncertain_service_stop_aborts_all_dependent_core_mutations(self):
         with patch.object(gateway, '_stop_service', side_effect=RuntimeError('stop unconfirmed')):
@@ -72,8 +106,9 @@ class GatewayUninstallTests(unittest.TestCase):
         self.assertEqual(self.targets, [])
         self.assertEqual(hooks, 0)
         self.assertEqual(result['items'][0]['action'], 'manual-review')
-        self.assertTrue(self.args[5].exists())
-        self.assertIn('ghost_alice_context', (self.args[2] / 'config.toml').read_text())
+        self.assertTrue(self.reg.agent.exists())
+        self.assertIn('ghost_alice_context', self.reg.config.read_text())
+        self.assertIsNotNone(self.reg.service())
 
     def test_stop_after_actual_bootout_is_reported_uncertain_without_file_deletion(self):
         def uncertain(domain):
@@ -83,8 +118,8 @@ class GatewayUninstallTests(unittest.TestCase):
             result, hooks = self.report()
         self.assertEqual((hooks, self.targets), (0, []))
         self.assertIn('stop/absence is unconfirmed', result['items'][0]['detail'])
-        self.assertTrue(self.args[5].exists())
-        self.assertIn('ghost_alice_context', (self.args[2] / 'config.toml').read_text())
+        self.assertTrue(self.reg.agent.exists())
+        self.assertIn('ghost_alice_context', self.reg.config.read_text())
 
     def test_failed_second_absence_observation_restores_certified_stopped_service(self):
         with patch.object(gateway, '_service_state', side_effect=['running', RuntimeError('observation failed')]):
@@ -92,9 +127,10 @@ class GatewayUninstallTests(unittest.TestCase):
         self.assertEqual((hooks, self.targets), (0, []))
         self.assertTrue(self.active)
         self.assertIn('prior configuration/service retained', result['items'][0]['detail'])
+        self.assertIsNotNone(self.reg.service())
 
     def test_user_modified_provider_blocks_are_preserved_and_block_removal(self):
-        config = self.args[2] / 'config.toml'
+        config = self.reg.config
         changed = config.read_text().replace('wire_api = "responses"', 'wire_api = "user-choice"')
         config.write_text(changed)
         result, hooks = self.report()
@@ -106,49 +142,62 @@ class GatewayUninstallTests(unittest.TestCase):
     def test_independent_claude_platform_removal_preserves_codex_gateway(self):
         state = self.root / '.ghost-alice/install-state/codex.json'
         state.parent.mkdir(parents=True, exist_ok=True); state.write_text('{}')
-        self.report(platform='claude', target=self.root / 'independent-claude-shared')
+        result, _ = self.report(platform='claude', target=self.root / '.claude/skills/_shared')
         self.assertTrue(self.active)
         self.assertEqual(self.stops, 0)
-        self.assertTrue(self.args[5].exists())
+        self.assertTrue(self.reg.agent.exists())
+        self.assertEqual(len(self.targets), 1)
+        item = next(item for item in result['items'] if item.get('kind') == 'context-gateway')
+        self.assertEqual((item['action'], item['reason']), ('unchanged', 'independent-gateway-runtime'))
 
-    def test_dry_run_keeps_provider_service_and_discovery_record(self):
-        self.report(confirm=False)
+    def test_dry_run_keeps_provider_service_and_record(self):
+        result, _ = self.report(confirm=False)
         self.assertEqual(self.stops, 0)
-        self.assertTrue(self.args[5].exists())
-        self.assertIn('ghost_alice_context', (self.args[2] / 'config.toml').read_text())
+        self.assertTrue(self.reg.agent.exists())
+        self.assertIn('ghost_alice_context', self.reg.config.read_text())
+        self.assertIsNotNone(self.reg.service())
+        item = next(item for item in result['items'] if item.get('kind') == 'context-gateway')
+        self.assertEqual(item['action'], 'would-detach')
 
     def test_failed_config_write_restores_service_and_blocks_core_cleanup(self):
-        config = self.args[2] / 'config.toml'
+        config = self.reg.config
         original = config.read_bytes()
         with patch.object(gateway, '_write', side_effect=OSError('config is unwritable')):
             result, hooks = self.report()
         self.assertEqual((hooks, self.targets), (0, []))
         self.assertEqual(config.read_bytes(), original)
         self.assertTrue(self.active, 'the unchanged provider must retain its running service')
-        self.assertTrue(self.args[5].exists())
+        self.assertTrue(self.reg.agent.exists())
+        self.assertIsNotNone(self.reg.service())
         self.assertEqual(result['items'][0]['action'], 'manual-review')
 
-    def test_claude_removal_of_actual_gateway_runtime_detaches_first(self):
+    def test_claude_removal_of_the_runtime_detaches_first(self):
         state = self.root / '.ghost-alice/install-state/codex.json'
         state.parent.mkdir(parents=True, exist_ok=True); state.write_text('{}')
         self.report(platform='claude')
         self.assertEqual(self.stops, 1)
         self.assertFalse(self.targets[0]['active'])
 
-    def test_missing_binding_with_active_provider_blocks_core_cleanup(self):
-        (self.root / '.ghost-alice/context-gateway-binding.json').unlink()
-        result, hooks = self.report()
+    def test_a_loaded_service_without_a_record_entry_holds_when_its_program_is_removed(self):
+        import subprocess
+        self.unregister()
+        observed = subprocess.CompletedProcess([], 0, f'path = {self.reg.agent}\n'.encode(), b'')
+        with patch.object(gateway.subprocess, 'run', return_value=observed):
+            result, hooks = self.report()
         self.assertEqual((hooks, self.targets), (0, []))
-        self.assertIn('discovery binding is missing', result['items'][0]['detail'])
+        self.assertEqual(result['items'][0]['action'], 'manual-review')
+        self.assertIn('install record', result['items'][0]['detail'])
         self.assertEqual(self.stops, 0)
+        self.assertTrue(result['blocked'])
 
     def test_changed_launch_agent_is_preserved_before_any_detachment(self):
-        self.args[5].write_bytes(b'user changed launch agent')
+        self.reg.agent.write_bytes(b'user changed launch agent')
         result, hooks = self.report()
         self.assertEqual((hooks, self.targets), (0, []))
         self.assertEqual(self.stops, 0)
-        self.assertEqual(self.args[5].read_bytes(), b'user changed launch agent')
+        self.assertEqual(self.reg.agent.read_bytes(), b'user changed launch agent')
         self.assertEqual(result['items'][0]['action'], 'manual-review')
+        self.assertIsNotNone(self.reg.service())
 
     def test_symlinked_codex_config_is_rejected_before_detach_side_effects(self):
         self._assert_symlink_config_rejected(dangling=False)
@@ -157,8 +206,8 @@ class GatewayUninstallTests(unittest.TestCase):
         self._assert_symlink_config_rejected(dangling=True)
 
     def _assert_symlink_config_rejected(self, *, dangling):
-        config = self.args[2] / 'config.toml'
-        target = self.args[2] / 'user-managed.toml'
+        config = self.reg.config
+        target = self.reg.codex / 'user-managed.toml'
         config.rename(target)
         if dangling:
             target.unlink()
@@ -170,14 +219,12 @@ class GatewayUninstallTests(unittest.TestCase):
         link_before = (config.readlink(), link.st_ino, link.st_mode, link.st_mtime_ns)
         target_before = ((target.read_bytes(), target.stat().st_ino, target.stat().st_mode,
                           target.stat().st_mtime_ns) if target.exists() else None)
-        artifacts = [self.args[5], self.args[4] / 'state.json', self.args[4] / 'installation.json',
-                     self.root / '.ghost-alice/context-gateway-binding.json']
+        artifacts = [self.reg.agent, self.reg.state_path, installed_payload.path(self.reg.ghost)]
         originals = {path: path.read_bytes() for path in artifacts}
         with patch.object(gateway, '_service_state', return_value='absent') as service, \
              patch.object(gateway, '_write', wraps=gateway._write) as write:
             with self.assertRaisesRegex(ValueError, '[Ss]ymlinked Codex config'):
-                gateway.detach_for_uninstall(user_home=self.root, remove_codex=True,
-                    removing_paths=self.args[1], confirm=True, codex_dir=self.args[2])
+                gateway.detach(confirm=True)
         service.assert_not_called()
         write.assert_not_called()
         self.assertEqual(self.stops, 0)
@@ -190,8 +237,8 @@ class GatewayUninstallTests(unittest.TestCase):
 
     def test_unregistered_service_is_scoped_to_its_actual_runtime(self):
         import subprocess
-        (self.root / '.ghost-alice/context-gateway-binding.json').unlink()
-        observed = subprocess.CompletedProcess([], 0, f'path = {self.args[5]}\n'.encode(), b'')
+        self.unregister()
+        observed = subprocess.CompletedProcess([], 0, f'path = {self.reg.agent}\n'.encode(), b'')
         with patch.object(cleanup, '_codex_home', return_value=self.root / 'unrelated-codex'), \
              patch.object(gateway.subprocess, 'run', return_value=observed):
             self.report(platform='claude', target=self.root / 'unrelated-runtime')
@@ -204,7 +251,7 @@ class GatewayUninstallTests(unittest.TestCase):
 
     def test_unregistered_service_discovery_requires_confirmed_absence_or_dependency_proof(self):
         import subprocess
-        (self.root / '.ghost-alice/context-gateway-binding.json').unlink()
+        self.unregister()
         for code, output in ((1, b'permission denied'), (0, b''), (0, b'changed native output'),
                              (0, b'path = relative.plist\n')):
             with self.subTest(code=code, output=output):
@@ -222,11 +269,11 @@ class GatewayUninstallTests(unittest.TestCase):
             self.report(platform='claude')
         self.assertEqual(len(self.targets), 1)
 
-    def test_unregistered_dotfile_config_link_uses_provider_content_and_native_discovery(self):
+    def test_unregistered_dotfile_config_link_is_judged_by_native_discovery_alone(self):
         import subprocess
-        (self.root / '.ghost-alice/context-gateway-binding.json').unlink()
-        self.args[5].unlink()
-        config = self.args[2] / 'config.toml'
+        self.unregister()
+        self.reg.agent.unlink()
+        config = self.reg.config
         config.unlink()
         target = self.root / 'dotfiles/config.toml'
         target.parent.mkdir()
@@ -234,9 +281,8 @@ class GatewayUninstallTests(unittest.TestCase):
             config.symlink_to(target)
         except OSError as exc:
             self.skipTest(f'symlink creation unavailable: {exc}')
-        for text, code, blocked in [('model="native"\n', 77, True),
-                                    ('model="native"\n', 113, False),
-                                    ('model_provider="ghost_alice_context"\n', 113, True)]:
+        for text, code, blocked in [('model="native"\n', 77, True), ('model="native"\n', 113, False),
+                                    ('model_provider="ghost_alice_context"\n', 113, False)]:
             with self.subTest(text=text, native_exit=code):
                 target.write_text(text)
                 self.targets.clear()
@@ -245,35 +291,27 @@ class GatewayUninstallTests(unittest.TestCase):
                     result, hooks = self.report()
                 self.assertEqual(bool(result.get('blocked')), blocked, result)
                 self.assertEqual(hooks, 0 if blocked else 1)
-                self.assertEqual(native.call_count, 0 if 'ghost_alice_context' in text else 1)
+                self.assertEqual(native.call_count, 1)
                 self.assertTrue(config.is_symlink())
                 self.assertEqual(target.read_text(), text)
 
-    def test_unregistered_service_ledger_dependency_and_unknown_arguments_block_cleanup(self):
+    def test_unregistered_service_with_unknown_arguments_blocks_cleanup(self):
         import subprocess
-        import plistlib
-        (self.root / '.ghost-alice/context-gateway-binding.json').unlink()
-        observed = subprocess.CompletedProcess([], 0, f'path = {self.args[5]}\n'.encode(), b'')
-        original = self.args[5].read_bytes()
-        for malformed in (False, True):
-            with self.subTest(malformed=malformed):
-                self.targets.clear()
-                plist = plistlib.loads(original)
-                if malformed:
-                    plist['ProgramArguments'] = []
-                self.args[5].write_bytes(plistlib.dumps(plist))
-                target = self.root / 'unrelated-runtime' if malformed else self.args[3]
-                with patch.object(cleanup, '_codex_home', return_value=self.root / 'unrelated-codex'), \
-                     patch.object(gateway.subprocess, 'run', return_value=observed):
-                    result, hooks = self.report(platform='claude', target=target)
-                self.assertEqual((self.targets, hooks, self.stops), ([], 0, 0))
-                self.assertEqual(result['items'][0]['action'], 'manual-review')
+        self.unregister()
+        observed = subprocess.CompletedProcess([], 0, f'path = {self.reg.agent}\n'.encode(), b'')
+        plist = plistlib.loads(self.reg.agent.read_bytes())
+        plist['ProgramArguments'] = []
+        self.reg.agent.write_bytes(plistlib.dumps(plist))
+        with patch.object(cleanup, '_codex_home', return_value=self.root / 'unrelated-codex'), \
+             patch.object(gateway.subprocess, 'run', return_value=observed):
+            result, hooks = self.report(platform='claude', target=self.root / 'unrelated-runtime')
+        self.assertEqual((self.targets, hooks, self.stops), ([], 0, 0))
+        self.assertEqual(result['items'][0]['action'], 'manual-review')
 
-    def test_linked_service_state_and_ownership_files_block_affected_cleanup(self):
-        for name in ('state.json', 'installation.json', 'registration', 'agent'):
+    def test_linked_service_files_block_affected_cleanup(self):
+        for name in ('state', 'agent'):
             with self.subTest(name=name):
-                target = (self.root / '.ghost-alice/context-gateway-binding.json' if name == 'registration'
-                          else self.args[5] if name == 'agent' else self.args[4] / name)
+                target = self.reg.state_path if name == 'state' else self.reg.agent
                 raw = target.read_bytes()
                 destination = self.root / ('linked-user-' + name)
                 destination.write_bytes(raw)
@@ -289,52 +327,13 @@ class GatewayUninstallTests(unittest.TestCase):
                 self.assertEqual(destination.read_bytes(), raw)
                 target.unlink(); target.write_bytes(raw)
 
-    def test_existing_nested_recovery_blocks_real_runtime_sweep(self):
-        import shutil
-        from test_context_gateway_install import ContextGatewayInstallTests
-        nested = self.root / '.ghost-alice/runtime/gateway-state'
-        shutil.copytree(self.args[4], nested)
-        (nested / 'usage.jsonl').write_text('original usage evidence')
-        # Retarget the authenticated historical fixture to its unsafe location.
-        # Current installation must not adopt orphaned state to create it.
-        receipt_path = nested / 'installation.json'
-        receipt = json.loads(receipt_path.read_bytes())
-        receipt['state_path'] = str(nested / 'state.json')
-        receipt_path.write_text(json.dumps(receipt))
-        registration = self.root / '.ghost-alice/context-gateway-binding.json'
-        binding = json.loads(registration.read_bytes())
-        binding.update(installation_path=str(receipt_path), installation_digest=gateway._digest(receipt_path.read_bytes()))
-        registration.write_text(json.dumps(binding))
-        config = self.args[2] / 'config.toml'
-        config.write_text(gateway.remove_provider(config.read_text()))
-        fixture = ContextGatewayInstallTests(); self.addCleanup(fixture.doCleanups)
-        # Represent a previously supported unsafe placement, then exercise the
-        # current remover with its actual support-artifact runtime sweep.
-        with patch.object(gateway.planning, 'affected', return_value=False):
-            fixture.mocked_install((*self.args[:4], nested, self.args[5]))
-        manifest = self.root / '.ghost-alice/install-state/codex.json'
-        manifest.parent.mkdir(parents=True, exist_ok=True)
-        manifest.write_text('{"platform":"codex","targets":[]}')
-        args = argparse.Namespace(platform='codex', confirm=True, install_state_manifest=manifest)
-        with patch.object(cleanup, '_hook_item') as hooks:
-            result = cleanup.build_report(args)
-        self.assertTrue(result['blocked'])
-        hooks.assert_not_called()
-        self.assertEqual((nested / 'usage.jsonl').read_text(), 'original usage evidence')
-        self.assertTrue((nested / 'installation.json').is_file())
-        self.assertEqual(self.stops, 0)
-
-    def test_shared_target_preserved_for_codex_does_not_detach_its_gateway(self):
-        from test_context_gateway_install import ContextGatewayInstallTests
-        target = self.root / '.claude/skills/shared-core'
-        runtime = target / '_shared'
-        runtime.mkdir(parents=True)
-        (runtime / 'completion_assessment.py').write_text('installed Core')
-        self.args[1][:] = [runtime]
-        ContextGatewayInstallTests().mocked_install(self.args)
+    def test_a_target_preserved_for_codex_is_not_a_removal_root_and_leaves_the_gateway_alone(self):
+        shared = self.root / '.claude/skills/_shared'
+        shared.mkdir(parents=True)
+        (shared / 'completion_assessment.py').write_text('installed Core')
         manifests = self.root / '.ghost-alice/install-state'
         manifests.mkdir(parents=True, exist_ok=True)
-        body = dict(targets=[dict(target_name='_shared', dest_path=str(target))])
+        body = dict(targets=[dict(target_name='_shared', dest_path=str(shared))])
         for platform in ('codex', 'claude'):
             (manifests / (platform + '.json')).write_text(json.dumps(dict(body, platform=platform)))
         args = argparse.Namespace(platform='claude', confirm=True, install_state_manifest=manifests / 'claude.json')
@@ -345,8 +344,70 @@ class GatewayUninstallTests(unittest.TestCase):
             result = cleanup.build_report(args)
         self.assertEqual(self.stops, 0)
         self.assertTrue(self.active)
-        self.assertTrue(runtime.exists())
+        self.assertTrue(shared.exists())
         self.assertTrue(any(item.get('reason') == 'shared-with-other-platform' for item in result['items']))
+        gateway_item = next(item for item in result['items'] if item.get('kind') == 'context-gateway')
+        self.assertEqual(gateway_item['action'], 'unchanged')
+        self.assertIsNotNone(self.reg.service())
+
+
+class DetachCommandTests(RegisteredHomeCase):
+    """`context_gateway_install.py detach`: the explicit unregistration of the recorded service."""
+
+    def test_detach_unregisters_the_service_and_keeps_its_state_dir(self):
+        config = self.reg.config
+        config.write_text(config.read_text(encoding='utf-8') + '\n[features]\nhooks=true\n', encoding='utf-8')
+        installed_payload.update(self.reg.ghost, {"service": gateway_testing.service_section(self.reg)})
+        result = gateway.detach(confirm=True)
+        self.assertEqual(result['action'], 'detached')
+        self.assertEqual(self.stops, 1)
+        self.assertFalse(self.active)
+        self.assertFalse(self.reg.agent.exists())
+        self.assertNotIn(PROVIDER, config.read_text(encoding='utf-8'))
+        self.assertEqual(tomllib.loads(config.read_text(encoding='utf-8')), {'model': 'native', 'features': {'hooks': True}})
+        self.assertIsNone(self.reg.service())
+        self.assertTrue(self.reg.state_path.is_file())
+        self.assertTrue((self.reg.state_dir / 'usage.jsonl').is_file())
+
+    def test_detach_without_a_registered_service_changes_nothing(self):
+        self.unregister()
+        before = {p: p.read_bytes() for p in (self.reg.agent, self.reg.config, installed_payload.path(self.reg.ghost))}
+        with patch.object(gateway, '_service_state') as service:
+            result = gateway.detach(confirm=True)
+        service.assert_not_called()
+        self.assertEqual((result['action'], result['reason']), ('missing', 'gateway-not-registered'))
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+    def test_detach_preview_changes_nothing(self):
+        before = {p: p.read_bytes() for p in (self.reg.agent, self.reg.config, installed_payload.path(self.reg.ghost))}
+        result = gateway.detach(confirm=False)
+        self.assertEqual((result['status'], result['action']), ('dry-run', 'would-detach'))
+        self.assertEqual([step['phase'] for step in result['plan']['steps']],
+                         ['prepare', 'stop', 'verify-absence', 'stage', 'commit', 'retire'])
+        self.assertIn(str(self.reg.state_dir), result['plan']['preserved'])
+        self.assertEqual(result['plan']['steps'][-2]['record'], dict(section='service', action='delete'))
+        self.assertEqual(self.stops, 0)
+        self.assertEqual({p: p.read_bytes() for p in before}, before)
+
+    def test_detach_cli(self):
+        stdout = io.StringIO()
+        with patch.object(gateway, 'detach', return_value=dict(action='detached')) as run, \
+             contextlib.redirect_stdout(stdout):
+            self.assertEqual(gateway.main(['detach', '--confirm']), 0)
+        self.assertEqual(run.call_args.kwargs, dict(confirm=True))
+        self.assertEqual(json.loads(stdout.getvalue()), dict(action='detached'))
+        with patch.object(gateway, 'detach', return_value=dict(action='missing')) as run, \
+             contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(gateway.main(['detach', '--user-home', str(self.root)]), 0)
+        self.assertEqual(run.call_args.kwargs, dict(confirm=False, home=self.root))
+        with patch.object(gateway, 'detach', side_effect=GatewayBlocked('changed')), \
+             contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(gateway.main(['detach', '--confirm']), 2)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as stop:
+            gateway.main(['detach', '--root', '/x'])
+        self.assertEqual(stop.exception.code, 2)
+        self.assertIn('unrecognized arguments', stderr.getvalue())
 
 
 if __name__ == '__main__':

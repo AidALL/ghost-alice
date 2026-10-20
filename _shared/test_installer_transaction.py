@@ -1,4 +1,5 @@
-"""installer.transaction: placement through install_transaction.py and the records written after placement.
+"""installer.transaction: placement through install_transaction.publish in this process, with the gateway
+participant the record names, and the records written after placement.
 
 Expected arguments and texts come from installer_lib/install.sh:75-223, 411-610, 640-653 and installer_lib/targets.sh:248-338.
 """
@@ -15,12 +16,16 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gateway_testing  # noqa: E402
+import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
 from installer import report, transaction  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer.selection import Target  # noqa: E402
 from installer.source import HookPathChange, SourceInfo  # noqa: E402
 from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
+
+COMPANION = "session-intent-analyzer/scripts/session_intent_ledger.py"
 
 
 class TransactionCase(unittest.TestCase):
@@ -57,7 +62,8 @@ class TransactionCase(unittest.TestCase):
 
 
 class PlacementTests(TransactionCase):
-    """The five placement calls each write one publish request and run `install_transaction.py publish --request`."""
+    """The placement calls each build one publish request and call `install_transaction.publish` in this
+    process with the participants the install record names."""
 
     def setUp(self):
         super().setUp()
@@ -65,17 +71,22 @@ class PlacementTests(TransactionCase):
         self.resolve = self.enterContext(mock.patch("installer.source.resolve_source", return_value=self.info))
         self.enterContext(mock.patch("installer.source.configured_hooks_path", return_value="hooks"))
         self.requests: list[dict] = []
-        self.request_files: list[Path] = []
+        self.participants: list[list] = []
         self.codes: list[int] = []
-        self.runner.respond(lambda script, args: script.endswith("install_transaction.py"), self.publish)
+        self.chosen = [object()]
+        self.enterContext(mock.patch("install_transaction.publish", side_effect=self.publish))
+        self.enterContext(mock.patch("installer.gateway_participant.participants", return_value=self.chosen))
 
-    def publish(self, script, args, kwargs):
-        self.assertEqual(args[:2], ["publish", "--request"])
-        self.assertEqual(len(args), 3)
-        path = Path(args[2])
-        self.request_files.append(path)
-        self.requests.append(json.loads(path.read_text(encoding="utf-8")))
-        return ToolResult(self.codes.pop(0) if self.codes else 0)
+    def publish(self, request, participants=(), **kwargs):
+        self.requests.append(json.loads(json.dumps(request)))
+        self.participants.append(list(participants))
+        code = self.codes.pop(0) if self.codes else 0
+        if code:
+            failure = install_transaction.InstallTransactionError("publish refused")
+            if code != 1:
+                failure.code, failure.exit_code, failure.outcome, failure.phase = "GATEWAY_PRECONDITION", code, "blocked", "stop"
+            raise failure
+        return "20261020T000000000000Z-1-aaaaaaaa"
 
     def expected_request(self, host, *targets, **extra):
         return {"schema_version": 1, "host": host, "ghost_root": str(self.ghost),
@@ -92,7 +103,7 @@ class PlacementTests(TransactionCase):
             target["status"] = status
         return target
 
-    def test_copy_target_publishes_one_copy(self):
+    def test_copy_target_publishes_one_copy_with_the_records_participants(self):
         # install.sh:75-93
         ctx = self.context("codex")
         dest = ctx.skills_dir / "alpha"
@@ -101,13 +112,31 @@ class PlacementTests(TransactionCase):
         self.assertTrue(ok)
         self.assertEqual(self.requests, [self.expected_request(
             "codex", self.expected_target("alpha", self.source / "alpha", dest, "copy"))])
-        # The request file is transport only: the installer removes it once the child returns.
-        self.assertFalse(self.request_files[0].exists())
+        self.assertEqual(self.participants, [self.chosen])
+        # No child process publishes: the participants are objects of this process.
+        self.assertEqual(self.runner.tool_calls("install_transaction.py"), [])
         self.codes.append(1)
         with self.runner.patch():
             ok, out = self.captured(transaction.copy_target, ctx, Target("alpha", self.source / "alpha"), dest)
         self.assertFalse(ok)
         self.assertIn(f"[ERROR] Staged copy replace failed: {dest}", out)
+
+    def test_a_refused_publish_prints_its_cause_and_keeps_its_exit_code(self):
+        ctx = self.context("codex")
+        dest = ctx.skills_dir / "alpha"
+        self.codes.append(3)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = transaction.publish(ctx, [self.expected_target("alpha", self.source / "alpha", dest, "copy")])
+        self.assertEqual((result.ok, result.returncode), (False, 3))
+        self.assertEqual(json.loads(stderr.getvalue()), {"status": "blocked", "error_code": "GATEWAY_PRECONDITION",
+                                                         "phase": "stop", "detail": "publish refused"})
+        self.codes.append(1)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            result = transaction.publish(ctx, [self.expected_target("alpha", self.source / "alpha", dest, "copy")])
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(stderr.getvalue().strip(), "publish refused")
 
     def test_copy_targets_batch_publishes_every_target_in_one_request(self):
         # install.sh:105-223, 1018-1039
@@ -161,7 +190,7 @@ class PlacementTests(TransactionCase):
             with self.subTest(code=code):
                 self.requests.clear()
                 self.codes.append(code)
-                with self.runner.patch():
+                with self.runner.patch(), contextlib.redirect_stderr(io.StringIO()):
                     self.assertEqual(transaction.link_or_copy(ctx, target, dest), code)
                 self.assertEqual([r["targets"][0]["mode"] for r in self.requests], ["link"])
 
@@ -174,33 +203,42 @@ class PlacementTests(TransactionCase):
             "_shared", self.source / "_shared", ctx.skills_dir / "_shared", "copy", kind="support")])
         link_ctx = self.context("claude")
         (link_ctx.skills_dir / "_shared").symlink_to(self.source / "_shared")
-        linked = FakeRunner()
-        with linked.patch():
-            rc, out = self.captured(transaction.install_shared, link_ctx, link_ctx.skills_dir, False)
+        self.requests.clear()
+        rc, out = self.captured(transaction.install_shared, link_ctx, link_ctx.skills_dir, False)
         self.assertEqual(rc, 0)
-        self.assertEqual(linked.calls, [])
+        self.assertEqual(self.requests, [])
         self.assertIn("[WARN] _shared. Already installed (skipped)", out)
         (link_ctx.skills_dir / "_shared").unlink()
         (link_ctx.skills_dir / "_shared").symlink_to(self.home / "elsewhere")
-        self.requests.clear()
         with self.runner.patch():
             self.assertEqual(transaction.install_shared(link_ctx, link_ctx.skills_dir, False), 0)
         self.assertEqual(self.requests[0]["targets"], [self.expected_target(
             "_shared", self.source / "_shared", link_ctx.skills_dir / "_shared", "link", kind="support")])
 
-    def test_sync_runtime_shared(self):
+    def test_sync_runtime_shared_publishes_the_shared_dir_and_the_companion_in_one_request(self):
         # install.sh:95-103
         ctx = self.context("claude")
-        runtime = self.ghost / "runtime" / "current" / "_shared"
-        with self.runner.patch():
-            self.assertTrue(transaction.sync_runtime_shared(ctx))
-        self.assertEqual(self.requests[0]["targets"], [self.expected_target(
-            "_shared", self.source / "_shared", runtime, "copy", kind="runtime")])
-        self.codes.append(2)
+        companion = self.source / COMPANION
+        companion.parent.mkdir(parents=True)
+        companion.write_text("ledger", encoding="utf-8")
+        runtime = self.ghost / "runtime" / "current"
         with self.runner.patch():
             ok, out = self.captured(transaction.sync_runtime_shared, ctx)
+        self.assertTrue(ok)
+        self.assertEqual(self.requests[0]["targets"], [
+            self.expected_target("_shared", self.source / "_shared", runtime / "_shared", "copy", kind="runtime"),
+            self.expected_target(COMPANION, companion, runtime / COMPANION, "copy", kind="runtime")])
+        self.codes.append(2)
+        with self.runner.patch(), contextlib.redirect_stderr(io.StringIO()):
+            ok, out = self.captured(transaction.sync_runtime_shared, ctx)
         self.assertFalse(ok)
-        self.assertIn(f"[ERROR] Staged copy replace failed: {runtime}", out)
+        self.assertIn(f"[ERROR] Staged copy replace failed: {runtime / '_shared'}", out)
+
+    def test_a_checkout_without_the_companion_publishes_the_shared_dir_alone(self):
+        ctx = self.context("claude")
+        with self.runner.patch():
+            self.assertTrue(transaction.sync_runtime_shared(ctx))
+        self.assertEqual([t["name"] for t in self.requests[0]["targets"]], ["_shared"])
 
     def test_links_already_pointing_at_their_source_are_recorded_in_one_request(self):
         ctx = self.context("claude")
@@ -230,13 +268,14 @@ class PlacementTests(TransactionCase):
         self.assertEqual(self.resolve.call_count, 1)
         self.assertEqual(len(self.requests), 2)
 
-    def test_placement_never_calls_the_earlier_replacement_commands(self):
+    def test_placement_runs_no_child_tool(self):
         ctx = self.context("codex")
         with self.runner.patch():
             transaction.install_shared(ctx, ctx.skills_dir, True)
             transaction.sync_runtime_shared(ctx)
             transaction.link_or_copy(ctx, Target("alpha", self.source / "alpha"), ctx.skills_dir / "alpha")
-        self.assertEqual({args[0] for args in self.runner.tool_calls("install_transaction.py")}, {"publish"})
+        self.assertEqual(self.runner.calls, [])
+        self.assertEqual(len(self.requests), 3)
 
     def test_detect_install_mode_and_removal(self):
         # install.sh:411-426; targets.sh:284-294
@@ -261,23 +300,22 @@ class PlacementTests(TransactionCase):
         # targets.sh:275-282, 322-338
         ctx = self.context("claude")
         self.assertEqual(transaction.guard_gateway_removal(ctx, []), 0)
-        with self.runner.patch():
+        with mock.patch("installer.gateway_participant.guard", return_value=0) as guard:
             self.assertEqual(transaction.guard_gateway_removal(ctx, [self.home / "a", self.home / "b"]), 0)
-        self.assertEqual(self.runner.tool_calls("context_gateway_install.py")[0],
-                         ["detach", "--root", str(self.home / "a"), "--root", str(self.home / "b"), "--confirm"])
+        guard.assert_called_once_with(self.ghost, [self.home / "a", self.home / "b"])
+        self.assertEqual(self.runner.calls, [])
         shared = ctx.skills_dir / "_shared"
         shared.symlink_to(self.source / "_shared")
         (ctx.skills_dir / "task-router").mkdir()
         self.assertEqual(transaction.cleanup_shared_if_unused(ctx, ctx.skills_dir), 1)
         self.assertTrue(shared.is_symlink())
         (ctx.skills_dir / "task-router").rmdir()
-        refused = FakeRunner()
-        refused.respond_to("context_gateway_install.py", ToolResult(2))
-        with refused.patch():
+        with mock.patch("installer.gateway_participant.guard", return_value=2):
             self.assertEqual(transaction.cleanup_shared_if_unused(ctx, ctx.skills_dir), 2)
         self.assertTrue(shared.is_symlink())
-        with self.runner.patch():
+        with mock.patch("installer.gateway_participant.guard", return_value=0) as guard:
             rc, out = self.captured(transaction.cleanup_shared_if_unused, ctx, ctx.skills_dir)
+        guard.assert_called_once_with(self.ghost, [shared])
         self.assertEqual(rc, 0)
         self.assertFalse(shared.is_symlink())
         self.assertIn("[OK] _shared removed", out)
@@ -287,56 +325,57 @@ class PlacementTests(TransactionCase):
 class GatewayReportTests(TransactionCase):
     """After the runtime publish, the install says whether a context gateway is registered and running. Read-only."""
 
-    def register(self, files=3, source="/src/checkout"):
-        receipt = self.ghost / "context-gateway" / "installation.json"
-        receipt.parent.mkdir(parents=True)
-        receipt.write_text(json.dumps({"schema_version": "context-gateway-installation.v1", "source_root": source,
-                                       "files": {f"/f{i}": "sha256:0" for i in range(files)}}), encoding="utf-8")
-        (self.ghost / "context-gateway-binding.json").write_text(json.dumps({
-            "schema_version": "context-gateway-binding.v1", "installation_path": str(receipt),
-            "installation_digest": "sha256:0"}), encoding="utf-8")
-        return receipt
+    def register(self):
+        reg = gateway_testing.registered_home(self, self.home)
+        return reg
 
-    def test_no_binding_prints_nothing(self):
+    def test_no_service_section_prints_nothing(self):
         with self.runner.patch():
             observed, out = self.captured(transaction.report_gateway, self.context("claude"))
         self.assertEqual(out, "")
         self.assertIsNone(observed)
         self.assertEqual(self.runner.calls, [])
+        # A receipt and a binding alone are not a registration the installer reports.
+        (self.ghost / "context-gateway").mkdir(parents=True)
+        (self.ghost / "context-gateway" / "installation.json").write_text("{}", encoding="utf-8")
+        (self.ghost / "context-gateway-binding.json").write_text("{}", encoding="utf-8")
+        with self.runner.patch():
+            observed, out = self.captured(transaction.report_gateway, self.context("claude"))
+        self.assertEqual((observed, out), (None, ""))
 
     def test_a_registered_running_gateway_is_one_info_line(self):
-        self.register()
+        reg = self.register()
         self.runner.respond(lambda script, args: script == "command" and args[:2] == ["launchctl", "print"], ToolResult(0))
         with self.runner.patch():
             observed, out = self.captured(transaction.report_gateway, self.context("codex"))
-        self.assertIn("[INFO] Context gateway: registered from /src/checkout, 3 files, service running", out)
-        self.assertEqual(observed, ("Context gateway: registered from /src/checkout, 3 files, service running", True))
+        line = f"Context gateway: registered, runtime {reg.runtime_root}, service running"
+        self.assertIn(f"[INFO] {line}", out)
+        self.assertEqual(observed, (line, True))
         self.assertEqual(self.runner.commands()[0][:2], ["launchctl", "print"])
         self.assertTrue(self.runner.commands()[0][2].endswith("/org.ghost-alice.context-gateway"))
 
     def test_a_stopped_service_is_a_warning(self):
-        self.register(files=1)
+        reg = self.register()
         self.runner.respond(lambda script, args: script == "command", ToolResult(113))
         with self.runner.patch():
             observed, out = self.captured(transaction.report_gateway, self.context("codex"))
-        self.assertIn("[WARN] Context gateway: registered from /src/checkout, 1 file, service not running", out)
-        self.assertEqual(observed, ("Context gateway: registered from /src/checkout, 1 file, service not running", False))
+        line = f"Context gateway: registered, runtime {reg.runtime_root}, service not running"
+        self.assertIn(f"[WARN] {line}", out)
+        self.assertEqual(observed, (line, False))
 
-    def test_an_unreadable_receipt_is_a_warning_and_the_install_goes_on(self):
-        receipt = self.register()
-        receipt.write_text("{broken", encoding="utf-8")
+    def test_an_unreadable_record_is_a_warning_and_the_install_goes_on(self):
+        record = installed_payload.path(self.ghost)
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("{broken", encoding="utf-8")
         with self.runner.patch():
             observed, out = self.captured(transaction.report_gateway, self.context("claude"))
-        self.assertIn(f"[WARN] Context gateway: registered, but its receipt cannot be read: {receipt}", out)
-        self.assertEqual(observed, (f"Context gateway: registered, but its receipt cannot be read: {receipt}", False))
-        (self.ghost / "context-gateway-binding.json").write_text("[]", encoding="utf-8")
-        with self.runner.patch():
-            _, out = self.captured(transaction.report_gateway, self.context("claude"))
-        self.assertIn("[WARN] Context gateway: registered, but its binding cannot be read", out)
+        self.assertIn(f"[WARN] Context gateway: the install record cannot be read: {record}", out)
+        self.assertEqual(observed[1], False)
 
 
 class RecordMigrationTests(TransactionCase):
-    """The first install over an earlier installer's records creates the install record from them once."""
+    """The first install over an earlier installer's records creates the install record from them once, then
+    the gateway's service section from its receipt."""
 
     def setUp(self):
         super().setUp()
@@ -346,21 +385,38 @@ class RecordMigrationTests(TransactionCase):
 
     def test_migration_reads_every_host_and_reports_what_it_created(self):
         ctx = self.context("claude")
-        with mock.patch("installed_payload.migrate", return_value={"targets": 8, "migrated": 5, "unknown": 3}) as migrate:
+        with mock.patch("installed_payload.migrate", return_value={"targets": 8, "migrated": 5, "unknown": 3}) as migrate, \
+             mock.patch("installed_payload.migrate_service", return_value=None):
             _, out = self.captured(transaction.migrate_record, ctx)
         migrate.assert_called_once_with(self.ghost, ("claude", "codex"), installer_commit="abc123def")
         self.assertIn("[INFO] Install record created from earlier install records: 8 targets (migrated 5, unknown 3)",
                       out)
 
+    def test_the_service_section_is_migrated_after_the_targets_and_reported(self):
+        ctx = self.context("claude")
+        order = []
+        with mock.patch("installed_payload.migrate", side_effect=lambda *a, **k: order.append("targets")), \
+             mock.patch("installed_payload.migrate_service",
+                        side_effect=lambda root: order.append("service") or
+                        {"label": "org.ghost-alice.context-gateway", "companions": 1}) as migrate_service:
+            _, out = self.captured(transaction.migrate_record, ctx)
+        migrate_service.assert_called_once_with(self.ghost)
+        self.assertEqual(order, ["targets", "service"])
+        self.assertIn("[INFO] Gateway record created from its installation receipt: org.ghost-alice.context-gateway "
+                      "(companion targets added 1)", out)
+
     def test_nothing_to_migrate_prints_nothing(self):
-        with mock.patch("installed_payload.migrate", return_value=None):
+        with mock.patch("installed_payload.migrate", return_value=None), \
+             mock.patch("installed_payload.migrate_service", return_value=None):
             _, out = self.captured(transaction.migrate_record, self.context("codex"))
         self.assertEqual(out, "")
 
     def test_a_migration_that_cannot_finish_is_reported_and_the_install_goes_on(self):
-        with mock.patch("installed_payload.migrate", side_effect=installed_payload.RecordError("bad snapshot")):
+        with mock.patch("installed_payload.migrate", side_effect=installed_payload.RecordError("bad snapshot")), \
+             mock.patch("installed_payload.migrate_service", side_effect=installed_payload.RecordError("no receipt")):
             _, out = self.captured(transaction.migrate_record, self.context("codex"))
         self.assertIn("[WARN] Install record migration skipped: bad snapshot", out)
+        self.assertIn("[WARN] Gateway record migration skipped: no receipt", out)
 
 
 class RecordTests(TransactionCase):

@@ -3,6 +3,8 @@
 The candidate gateway is a real loopback process. Only the launchctl executable
 and explicitly selected failure boundaries are simulated. No user's native
 service, configuration, credentials or installed files enter these fixtures.
+The install record names the runtime the gateway runs from; the registration
+records the service in it, and the removal judges from it.
 """
 import contextlib
 import io
@@ -19,7 +21,13 @@ import tempfile
 import unittest
 from unittest import mock
 
-import context_gateway_model as model
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import content_digest  # noqa: E402
+import context_gateway_install as gateway  # noqa: E402
+import context_gateway_model as model  # noqa: E402
+import install_lock  # noqa: E402
+import installed_payload  # noqa: E402
+from context_gateway_model import GatewayBlocked  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -97,6 +105,10 @@ if mode in ('config-write-error', 'receipt-write-error', 'binding-write-error', 
             hit[0] = True
             raise OSError('injected error after atomic replacement')
     gateway._write = write
+if mode == 'record-write-error':
+    def record(section):
+        raise OSError('injected record write failure')
+    gateway._record = record
 if mode in ('readiness-error', 'candidate-stop-error', 'unowned-state-content'):
     calls = [0]
     def ready(state):
@@ -116,11 +128,13 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.addCleanup(self.stop_private_processes)
         self.home, self.shared, self.codex, self.ledger, self.state = [self.root / n for n in
             ('home', 'installed/_shared', 'home/.codex', 'ledger', 'gateway-state')]
+        self.ghost = self.home / '.ghost-alice'
         self.agent = self.root / 'agent.plist'
         for path in (self.home, self.codex, self.ledger, self.root / 'bin'):
             path.mkdir(parents=True, exist_ok=True)
         shutil.copytree(ROOT / '_shared', self.shared,
                         ignore=shutil.ignore_patterns('__pycache__', 'test_*.py', '.pytest_cache'))
+        self.write_record()
         sqlite3.connect(self.ledger / 'ghost-state.sqlite3').close()
         (self.codex / 'config.toml').write_text('model="native"\n')
         (self.codex / 'config.toml').chmod(0o640)
@@ -131,6 +145,20 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
             FAKE_NATIVE_ROOT=str(self.root), FAULT_CASE='', PYTHONDONTWRITEBYTECODE='1')
         self.arguments = ['--source-root', str(ROOT), '--shared-dir', str(self.shared), '--codex-dir', str(self.codex),
             '--ledger-root', str(self.ledger), '--state-dir', str(self.state), '--launch-agent', str(self.agent)]
+
+    def write_record(self, patches=None):
+        """The install record the installer's runtime publish would have written, under this process's lock."""
+        lock = self.ghost / 'install.lock'
+        install_lock.acquire_lock(lock, owner='installer:test:codex:test')
+        try:
+            if patches is None:
+                patches = {'targets': {str(self.shared): dict(
+                    name='_shared', kind='runtime', mode='copy', provider='core', source=str(ROOT / '_shared'),
+                    source_commit='test', used_by=['codex'], files=content_digest.tree(self.shared),
+                    installed_at='2026-10-20T00:00:00+00:00', baseline='recorded')}}
+            installed_payload.update(self.ghost, patches)
+        finally:
+            install_lock.release_lock(lock)
 
     def stop_private_processes(self):
         path = self.root / 'native.json'
@@ -154,13 +182,36 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         result, body = self.run_cli()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(body['status'], 'installed')
+        self.assertIsNotNone(self.service())
         return self.snapshot_owned()
+
+    def service(self):
+        return (installed_payload.read(self.ghost) or {}).get('service')
 
     def snapshot_owned(self):
         paths = [self.shared / n for n in model.MODULES]
         paths.extend([self.codex / 'config.toml', self.agent, self.state / 'state.json',
-                      self.state / 'installation.json', self.home / '.ghost-alice/context-gateway-binding.json'])
+                      self.state / 'installation.json', self.home / '.ghost-alice/context-gateway-binding.json',
+                      installed_payload.path(self.ghost)])
         return {p: (p.read_bytes(), stat.S_IMODE(p.stat().st_mode)) for p in paths}
+
+    def test_registration_records_the_service_in_the_install_record(self):
+        self.seed()
+        service = self.service()
+        self.assertEqual((service['runtime_root'], service['program']),
+                         (str(self.shared.parent), str(self.shared / 'context_gateway.py')))
+        self.assertEqual((service['launch_agent'], service['state_path'], service['config_path']),
+                         (str(self.agent), str(self.state / 'state.json'), str(self.codex / 'config.toml')))
+        self.assertEqual(service['launch_agent_digest'], model.digest(self.agent.read_bytes()))
+        self.assertTrue(service['listener_ready'])
+        self.assertTrue((self.state / 'installation.json').is_file())
+
+    def test_registration_without_a_record_writes_none(self):
+        installed_payload.path(self.ghost).unlink()
+        result, body = self.run_cli()
+        self.assertEqual((result.returncode, body['status']), (0, 'installed'))
+        self.assertFalse(installed_payload.path(self.ghost).exists())
+        self.assertTrue((self.state / 'installation.json').is_file())
 
     def test_real_candidate_refresh_and_removal_keep_the_native_configuration_contract(self):
         original = self.seed()
@@ -169,35 +220,30 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         current = json.loads((self.state / 'state.json').read_bytes())
         self.assertEqual((current['port'], current['scope']), (state['port'], state['scope']))
-        result, body = self.run_cli(arguments=['detach', '--user-home', str(self.home), '--root', str(self.shared), '--confirm'])
+        result, body = self.run_cli(arguments=['detach', '--user-home', str(self.home), '--confirm'])
         self.assertEqual((result.returncode, body['action']), (0, 'detached'))
         self.assertEqual((self.codex / 'config.toml').read_text(), 'model="native"\n')
         self.assertFalse(self.agent.exists())
         self.assertTrue((self.state / 'installation.json').exists())
+        self.assertIsNone(self.service())
         self.assertEqual(stat.S_IMODE((self.codex / 'config.toml').stat().st_mode), original[self.codex / 'config.toml'][1])
 
     def selected_removal(self, names, *, remaining=True, fault=''):
         """Run the installer's selected removal (`--uninstall --force <names>`) for codex against the
-        fixture source and the native-service simulator; return its exit code."""
-        source = self.root / 'installer-source'
-        helper = source / '_shared/context_gateway_install.py'
-        helper.parent.mkdir(parents=True, exist_ok=True)
-        helper.write_text('import sys\nsys.path.insert(0, ' + repr(str(ROOT / '_shared')) + ')\n'
-            'import context_gateway_install as gateway\ngateway.sys.platform="darwin"\n'
-            'raise SystemExit(gateway.main())\n')
-        from installer import addons, cli, hosts, lifecycle, runner, selection
+        fixture runtime and the native-service simulator; return its exit code."""
+        from installer import addons, cli, hosts, lifecycle, selection, transaction
         from installer.runner import InstallerExit
         environment = dict(self.environment, FAULT_CASE=fault,
             PATH=self.environment['PATH'] + os.pathsep + os.environ.get('PATH', ''))
-        ctx = cli.Context(options=cli.Options(platform='codex'), platform='codex',
-            skills_dir=self.shared.parent)
+        ctx = cli.Context(options=cli.Options(platform='codex'), platform='codex', skills_dir=self.shared.parent)
         with mock.patch.dict(os.environ, environment, clear=True), \
-                mock.patch.object(runner, 'REPO_ROOT', source), \
+                mock.patch.object(gateway.sys, 'platform', 'darwin'), \
                 mock.patch.object(selection, 'expand_skill_targets',
                     lambda name: [selection.Target(name, Path('fixture'), None)]), \
                 mock.patch.object(selection, 'validate_requested_skills', lambda names: None), \
                 mock.patch.object(selection, 'has_managed_installs', lambda skills_dir: remaining), \
                 mock.patch.object(addons, 'resume_pending_uninstalls', lambda ctx: None), \
+                mock.patch.object(transaction, 'migrate_record', lambda ctx: None), \
                 mock.patch.object(hosts, 'remove_codex_bootstrap_if_unused', lambda ctx, skills_dir: False), \
                 contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
             try:
@@ -217,6 +263,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
                 self.assertEqual(target.exists(), bool(fault))
                 self.assertEqual(independent.exists(), bool(fault))
                 self.assertEqual(json.loads((self.root / 'native.json').read_text())['active'], bool(fault))
+                self.assertEqual(self.service() is not None, bool(fault))
 
     def test_unconfirmed_shared_cleanup_is_not_reported_as_success(self):
         self.seed()
@@ -229,6 +276,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
 
     def test_dry_run_prints_a_plan_and_exits_without_applying_it(self):
         original = (self.codex / 'config.toml').read_bytes()
+        record = installed_payload.path(self.ghost).read_bytes()
         result, body = self.run_cli(arguments=[*self.arguments, '--dry-run'])
         self.assertEqual((result.returncode, body['status']), (0, 'dry-run'))
         self.assertTrue(body['changes'])
@@ -243,12 +291,12 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertFalse(self.state.exists())
         self.assertFalse(self.agent.exists())
         self.assertEqual((self.codex / 'config.toml').read_bytes(), original)
+        self.assertEqual(installed_payload.path(self.ghost).read_bytes(), record)
         self.assertFalse((self.root / 'native.json').exists())
 
     def test_detach_preview_returns_service_file_preservation_and_recovery_plan(self):
         original = self.seed()
-        result, body = self.run_cli(arguments=['detach', '--user-home', str(self.home),
-            '--root', str(self.shared)])
+        result, body = self.run_cli(arguments=['detach', '--user-home', str(self.home)])
         self.assertEqual((result.returncode, body['status'], body['action']), (0, 'dry-run', 'would-detach'))
         plan = body['plan']
         self.assertEqual(plan['service_before'], 'running')
@@ -276,7 +324,7 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
     def test_partial_start_writes_and_readiness_errors_restore_and_exit_4(self):
         self.seed()
         for fault in ('bootstrap-error', 'partial-bootstrap-error', 'readiness-error', 'config-write-error',
-                      'receipt-write-error', 'binding-write-error'):
+                      'receipt-write-error', 'binding-write-error', 'record-write-error'):
             with self.subTest(fault=fault):
                 # Native fault counts select the first candidate after the seed.
                 native_path = self.root / 'native.json'
@@ -313,18 +361,28 @@ class GatewayInstallerSubprocessTests(unittest.TestCase):
         self.assertEqual((result.returncode, body['error_code']), (5, 'GATEWAY_RECOVERY_UNCONFIRMED'))
         self.assertFalse(json.loads((self.root / 'native.json').read_text())['active'])
 
-    def test_unregistered_service_is_preserved_and_ledger_removal_is_blocked(self):
+    def test_a_loaded_service_without_a_record_entry_is_preserved_and_its_program_removal_is_held(self):
+        from installer import gateway_participant
         self.seed()
-        (self.home / '.ghost-alice/context-gateway-binding.json').unlink()
-        arguments = ['detach', '--user-home', str(self.home), '--codex-dir', str(self.root / 'independent-codex'), '--confirm']
+        self.write_record({'service': None})
         native = (self.root / 'native.json').read_bytes()
-        result, _ = self.run_cli(arguments=[*arguments, '--root', str(self.root / 'independent-claude')])
-        self.assertEqual(result.returncode, 0, result.stderr)
-        result, body = self.run_cli(arguments=[*arguments, '--root', str(self.ledger)])
-        self.assertEqual((result.returncode, body['error_code']), (2, 'GATEWAY_PRECONDITION'))
-        result, body = self.run_cli(arguments=[*arguments, '--root', str(self.ledger)], fault='discovery-error')
-        self.assertEqual((result.returncode, body['error_code']), (3, 'GATEWAY_SERVICE_UNCONFIRMED'))
+
+        def removal(removing, fault=''):
+            environment = dict(self.environment, FAULT_CASE=fault)
+            with mock.patch.dict(os.environ, environment, clear=True), \
+                    mock.patch.object(gateway.sys, 'platform', 'darwin'):
+                return gateway_participant.removal(self.ghost, removing, remove_codex=False, confirm=True)
+
+        result = removal([self.root / 'independent-claude'])
+        self.assertEqual(result['action'], 'unchanged')
+        with self.assertRaises(GatewayBlocked) as held:
+            removal([self.shared])
+        self.assertEqual((held.exception.exit_code, held.exception.code), (3, 'GATEWAY_SERVICE_UNCONFIRMED'))
+        with self.assertRaises(GatewayBlocked) as held:
+            removal([self.root / 'independent-claude'], fault='discovery-error')
+        self.assertEqual((held.exception.exit_code, held.exception.code), (3, 'GATEWAY_SERVICE_UNCONFIRMED'))
         self.assertEqual((self.root / 'native.json').read_bytes(), native)
+        self.assertTrue(self.agent.exists())
 
     def test_changed_receipt_blocks_before_any_service_stop_and_exits_2(self):
         self.seed()
