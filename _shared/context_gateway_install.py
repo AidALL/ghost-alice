@@ -73,11 +73,11 @@ def _read_record(home):
 
 
 def _runtime_root(record):
-    """The folder of the record's runtime `_shared` target: where the service's code is."""
-    for key, entry in record.get('targets', {}).items():
-        if isinstance(entry, dict) and entry.get('kind') == 'runtime' and entry.get('name') == '_shared':
-            return Path(key).parent
-    raise GatewayBlocked('Install Core first: the install record has no runtime target for the gateway to run from')
+    """The folder of the runtime `_shared` target the latest publish wrote: where the service's code is."""
+    found = installed_payload.latest_target(record, kind='runtime', name='_shared')
+    if found is None:
+        raise GatewayBlocked('Install Core first: the install record has no runtime target for the gateway to run from')
+    return Path(found[0]).parent
 
 
 def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *, strict_log_root=None, confirm=True):

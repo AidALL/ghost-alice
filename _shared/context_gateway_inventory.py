@@ -31,8 +31,10 @@ def installation(request, io):
         c.file(request.state_dir / name, content=False)
     c.file(request.program, content=False)
     prerequisites = {request.ledger / 'ghost-state.sqlite3'}
+    # The registration writes through links, so its containment check also compares the resolved paths.
+    resolved = {path: path.resolve() for path in (request.state_dir, request.runtime_root)}
     return c.finish(prerequisites=frozenset(p for p in prerequisites if p.is_file()),
-                    state_entries=io.children(request.state_dir))
+                    state_entries=io.children(request.state_dir), resolved=MappingProxyType(resolved))
 
 
 def registration(service, io):

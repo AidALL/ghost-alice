@@ -65,6 +65,14 @@ def _block_digest(text):
     return digest(provider_blocks(text).encode())
 
 
+def _inside(path, root, inventory):
+    """Whether `path` is `root` or lies under it, as written or after following links."""
+    for candidate, parent in ((path, root), (inventory.resolved[path], inventory.resolved[root])):
+        if candidate == parent or parent in candidate.parents:
+            return True
+    return False
+
+
 def _markers(text):
     return any(marker in text for marker in (TOP_BEGIN, TOP_END, TABLE_BEGIN, TABLE_END))
 
@@ -84,7 +92,7 @@ def validate_install(request, inventory, service):
         regular(inventory.file(path))
     if request.ledger / 'ghost-state.sqlite3' not in inventory.prerequisites:
         raise GatewayBlocked('The selected existing Core ledger is required')
-    if request.state_dir == request.runtime_root or request.runtime_root in request.state_dir.parents:
+    if _inside(request.state_dir, request.runtime_root, inventory):
         raise GatewayBlocked('Gateway state/logs/recovery material must be outside the Core runtime: ' + str(request.runtime_root))
     if inventory.file(request.program).kind != 'file':
         raise GatewayBlocked('Install Core first: the runtime program is missing: ' + str(request.program))

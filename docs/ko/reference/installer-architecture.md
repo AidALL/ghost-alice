@@ -123,7 +123,7 @@ flowchart TB
 
 게이트웨이 등록·갱신·분리는 `_shared/context_gateway_*`의 여섯 모듈이 담당합니다. `model`은 요청·관측값·계획·결과와 실행 인터페이스의 자료형을 정의하며 AI 모델을 호출하지 않습니다. `inventory`는 전달받은 플랫폼 어댑터로 서비스 파일을 조회합니다. `plan`은 서비스 파일을 설치 기록의 `service` 섹션과 비교하여 I/O 없이 순서가 정해진 계획을 작성합니다. `transaction`은 계획을 실행하고, commit 단계에서 기록의 `service` 섹션을 작성하며, 역순 복구를 담당합니다. `platform`은 개별 파일·기록·네이티브 서비스 작업을 수행합니다. `install`은 `gateway` 명령 뒤에서 이 모듈들을 연결합니다. `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 서비스를 등록하거나 갱신하고, `bash install.sh gateway detach --confirm`은 등록을 해제하며, `--dry-run`은 검증한 계획을 출력하고 적용 없이 종료합니다.
 
-등록 명령은 설치 기록에서 런타임 대상을 조회하고 서비스 파일 세 개만 작성합니다. launch agent, `state.json`, Codex `config.toml`의 provider 블록입니다. 모듈을 복사하지 않습니다. 서비스는 설치기가 게시한 런타임 `_shared`와 동반 스크립트를 실행하며, 어느 바이트인지는 기록의 `targets`가 말합니다. 그래서 Core를 먼저 설치합니다. `service` 섹션이 없으면 명령은 새 리스너를 등록하며, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록이 있으면 거부합니다. 섹션이 있으면 서비스 파일 세 개가 섹션의 기록과 같을 때 같은 포트와 scope로 갱신하고, 어느 하나가 설치기 밖에서 바뀌었으면 아무것도 바꾸기 전에 종료합니다(종료 코드 2). 사용자가 그 파일을 검토한 뒤 명령을 다시 실행합니다.
+등록 명령은 설치 기록에서 가장 최근 게시가 작성한 런타임 대상을 조회하고 서비스 파일 세 개만 작성합니다. launch agent, `state.json`, Codex `config.toml`의 provider 블록입니다. 모듈을 복사하지 않습니다. 서비스는 설치기가 게시한 런타임 `_shared`와 동반 스크립트를 실행하며, 어느 바이트인지는 기록의 `targets`가 말합니다. 그래서 Core를 먼저 설치합니다. 상태 디렉터리는 링크를 따라간 경로로도 그 런타임 밖에 있어야 합니다. `service` 섹션이 없으면 명령은 새 리스너를 등록하며, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록이 있으면 거부합니다. 섹션이 있으면 서비스 파일 세 개가 섹션의 기록과 같을 때 같은 포트와 scope로 갱신하고, 어느 하나가 설치기 밖에서 바뀌었으면 아무것도 바꾸기 전에 종료합니다(종료 코드 2). 사용자가 그 파일을 검토한 뒤 명령을 다시 실행합니다.
 
 ```mermaid
 flowchart LR

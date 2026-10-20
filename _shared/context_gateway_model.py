@@ -1,7 +1,7 @@
 """Installer values and effects contract; no filesystem or native operations."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
@@ -103,9 +103,12 @@ class Request:
 
 @dataclass(frozen=True)
 class Inventory:
+    """What one operation read: the files, the present prerequisites, the state directory's entries and the
+    paths links resolve to (`resolved`), for the checks that follow links."""
     files: Mapping[Path, Artifact]
     prerequisites: frozenset[Path] = frozenset()
     state_entries: tuple[Path, ...] = ()
+    resolved: Mapping[Path, Path] = field(default_factory=dict)
 
     def file(self, path):
         return self.files[Path(path)]
