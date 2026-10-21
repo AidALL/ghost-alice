@@ -493,12 +493,98 @@ class EntryCallerTests(unittest.TestCase):
                 self.assertTrue(state_retention.POLICIES[name].pending)
 
 
+GATEWAY_AGENT = "org.ghost-alice.context-gateway.plist"
+
+
+def _gateway_beside(home: Path) -> dict[str, str]:
+    """The `service` paths of a gateway registered with its state folder in `home`'s Ghost-ALICE folder."""
+    return {"state_path": str(home / ".ghost-alice" / "context-gateway" / "state.json"),
+            "launch_agent": str(home / "Library" / "LaunchAgents" / GATEWAY_AGENT)}
+
+
+def _roots_in(home: Path, **service) -> dict[str, Path]:
+    """`default_roots` as a process whose environment names only `home` resolves it."""
+    with mock.patch.dict(os.environ, {"HOME": str(home)}, clear=True):
+        return state_retention.default_roots(**service)
+
+
+class DefaultRootsTests(unittest.TestCase):
+    """`default_roots` takes every root from the code that owns it and assembles none."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.record = self.root / "record"
+        self.record.mkdir()
+
+    def roots(self) -> dict[str, Path]:
+        from installer import locations
+        skills = {"claude": self.root / "claude-skills", "codex": self.root / "codex-skills"}
+        with mock.patch.object(locations, "record_root", return_value=self.record), \
+                mock.patch.object(locations, "claude_home", return_value=self.root / "claude"), \
+                mock.patch.object(locations, "codex_home", return_value=self.root / "codex"), \
+                mock.patch.object(locations, "skills_dir", side_effect=skills.__getitem__), \
+                mock.patch.object(state_retention.install_destination, "ghost_root", return_value=self.root / "ghost"):
+            return state_retention.default_roots()
+
+    def test_the_roots_come_from_the_installer_locations_and_the_install_destination(self):
+        self.assertEqual(self.roots(), {
+            "ghost": self.root / "ghost", "record": self.record, "claude": self.root / "claude",
+            "codex": self.root / "codex", "claude_skills": self.root / "claude-skills",
+            "codex_skills": self.root / "codex-skills"})
+
+    def test_the_gateway_roots_come_from_the_registration_in_the_install_record(self):
+        service = {"state_path": str(self.root / "gateway-state" / "state.json"),
+                   "launch_agent": str(self.root / "agents" / GATEWAY_AGENT)}
+        (self.record / "installed-payload.json").write_text(
+            json.dumps({"schema_version": 1, "targets": {}, "service": service}), encoding="utf-8")
+        roots = self.roots()
+        self.assertEqual((roots["gateway"], roots["launch_agents"]), (self.root / "gateway-state", self.root / "agents"))
+
+    def test_an_installation_without_a_registered_gateway_has_no_gateway_roots(self):
+        roots = self.roots()
+        self.assertNotIn("gateway", roots)
+        self.assertIsNone(state_retention.entry_for(self.record / "context-gateway" / "usage.jsonl", roots))
+        self.assertEqual(state_retention.entry_for(self.root / "ghost" / "io-trace.jsonl", roots), "io-trace")
+
+
+class RareWriterPathTests(unittest.TestCase):
+    """The writers the empty-home scenario never runs write where their entries say, also when the Ghost-ALICE
+    state root is configured apart from the home."""
+
+    def test_the_rare_writers_write_under_their_entries(self):
+        from installer import locations
+        import live_agent_smoke
+        for overrides in ({}, {"GHOST_ALICE_GHOST_ROOT": "/state/ghost-alice"}):
+            with self.subTest(overrides=overrides), \
+                    mock.patch.dict(os.environ, {"HOME": "/home/user", **overrides}, clear=True):
+                roots = state_retention.default_roots()
+                command = locations.claude_commands_dir() / "retired.md"
+                cases = {
+                    locations.events_log("codex"): "install-state-events",
+                    locations.deprecated_skill_backup_root() / "20261022T000000Z-old-skill" / "SKILL.md":
+                        "retired-assets",
+                    # retired_assets backs a retired command up beside the commands folder.
+                    command.parent.parent / "retired-command-backups" / "20261022T000000Z" / "retired.md":
+                        "retired-assets",
+                    locations.pending_root("codex") / "20261022T000000Z-task-router-SKILL.md.bak":
+                        "pending-merge-copies",
+                    locations.pending_root("codex") / "legacy-targets" / "task-router" / "SKILL.md":
+                        "pending-merge-copies",
+                    locations.addon_source_cache_root() / "0123abcd" / "README.md": "addon-source-cache",
+                    live_agent_smoke._default_log_root() / "20261022T000000Z" / "result.json": "live-smoke",
+                }
+                for path, name in cases.items():
+                    self.assertEqual(state_retention.entry_for(path, roots), name, str(path))
+
+
 class InvariantMatchTests(unittest.TestCase):
     """`entry_for` names the table entry a created path belongs to; the invariant test fails on None."""
 
     def setUp(self) -> None:
         self.home = Path("/home/user")
-        self.roots = state_retention.default_roots(self.home, env={})
+        self.roots = _roots_in(self.home, service=_gateway_beside(self.home))
 
     def test_created_files_map_to_their_entries(self):
         cases = {

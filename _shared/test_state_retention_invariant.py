@@ -19,6 +19,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import urllib.request
 import uuid
 
@@ -62,7 +63,12 @@ class RetentionInvariantTest(unittest.TestCase):
         for key in ("SYSTEMROOT", "PYTHONUSERBASE"):
             if key in os.environ:
                 self.env[key] = os.environ[key]
-        self.roots = state_retention.default_roots(self.home, env={})
+        # The in-process gateway of forward_one_request writes where a registration beside this home would; a
+        # real registration would make the uninstall stop the account's gateway service.
+        service = {"state_path": str(self.home / ".ghost-alice" / "context-gateway" / "state.json"),
+                   "launch_agent": str(self.home / "Library" / "LaunchAgents" / "org.ghost-alice.context-gateway.plist")}
+        with mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=True):
+            self.roots = state_retention.default_roots(service=service)
 
     def run_installer(self, *args: str) -> None:
         result = subprocess.run(["bash", "install.sh", *args], cwd=self.checkout, env=self.env, capture_output=True,
@@ -123,8 +129,7 @@ class RetentionInvariantTest(unittest.TestCase):
     def created(self) -> list[tuple[Path, bool]]:
         """Every file, link and empty folder under the state root and the host folders; links are not followed."""
         found = []
-        for name in ("ghost", "record", "claude", "codex", "agents", "launch_agents"):
-            top = self.roots[name]
+        for top in self.roots.values():
             if not top.is_dir():
                 continue
             for folder, directories, files in os.walk(top):
