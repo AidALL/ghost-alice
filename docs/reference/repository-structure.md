@@ -11,6 +11,7 @@ This document is the repository map. The README stays a concise public entry poi
 - [Core Governance And Runtime Gates](#core-governance-and-runtime-gates)
 - [Official Docs And Policies](#official-docs-and-policies)
 - [Installed Runtime State](#installed-runtime-state)
+- [Runtime State Retention](#runtime-state-retention)
 - [Documentation Responsibility](#documentation-responsibility)
 
 
@@ -80,6 +81,23 @@ These paths live outside the repository under the user's home directory.
 | `~/.claude/skills/` | Claude Code skill install target |
 
 The platform installation supplies common governance for every project. The Codex managed loader names `~/.codex/ghost-alice-governance.md`; Claude's managed global `CLAUDE.md` contains the common contract. Project instruction files supply project-specific constraints. The [installation guide](../getting-started/installation.md#common-governance-and-project-instructions) describes the source, installation and model handoffs. Runtime session state is authoritative in `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root; JSON pointers and snapshots are compatibility/export material. Read state through `session_intent_ledger.py --read-state` with the receipt root, platform and session identity.
+
+## Runtime State Retention
+
+`_shared/state_retention.py` holds one table of the files and folders a Core installation creates under `~/.ghost-alice` and the host folders, with the rule that keeps each one bounded. The writer of a file applies the rule when it writes, so the code that creates a file also removes what the rule no longer keeps. A removal that fails never stops the writer: it adds one line to `~/.ghost-alice/state-retention-failures.jsonl`, which keeps its last 500 lines, and `--doctor` reports it on the `state-retention` line. A test installs into an empty home, runs every registered hook, forwards a gateway request and uninstalls; it fails when a created file or folder matches no entry of the table.
+
+| Path | Rule | Applied by |
+| --- | --- | --- |
+| `~/.ghost-alice/session-logs/<host>/<session>/` | Session folders whose hook log is older than 14 days are removed in every host folder, oldest first, at most 50 per call | The first hook log row of a new session |
+| `~/.ghost-alice/io-trace.jsonl` | Past 10,000 lines, the last 5,000 stay | Each io-trace row |
+| `~/.ghost-alice/governance-events.jsonl` | Past 5 MB it becomes the one previous file `governance-events.jsonl.1` | Each governance event |
+| `~/.ghost-alice/install/` | The last 30 install runs, each a log and its event trace | The installer, before it opens a new log |
+| `~/.ghost-alice/install-state/<host>-events.jsonl` | Past 5 MB it becomes the one previous file | Each publish failure or retirement event |
+| `~/.ghost-alice/rollbacks/` | The newest 20 finished publishes; an unfinished publish stays until it is restored | Each publish |
+| `~/.ghost-alice/uninstall-reports/` | The newest 30 reports | The uninstall, before it writes a report |
+| `settings.json.bak*` and `hooks.json.bak*` in the host folders | The newest 3 | Each hook settings write |
+
+A file far past its limit keeps only its newest part, up to the limit, as the previous file. Install records, host settings, installed skills and the runtime are overwritten in place. The program never removes the uninstall backups under `~/.ghost-alice/uninstall-backup/<host>/support-state/`, pending merge copies or retirement backups, because they can hold the user's changes.
 
 ## Documentation Responsibility
 

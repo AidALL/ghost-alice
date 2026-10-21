@@ -11,6 +11,7 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 - [Core Governance And Runtime Gates](#core-governance-and-runtime-gates)
 - [Official Docs And Policies](#official-docs-and-policies)
 - [Installed Runtime State](#installed-runtime-state)
+- [Runtime State Retention](#runtime-state-retention)
 - [Documentation Responsibility](#documentation-responsibility)
 
 
@@ -81,6 +82,23 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | `~/.claude/skills/` | Claude Code용 스킬 설치 위치 |
 
 플랫폼 설치본은 모든 프로젝트에 공통 거버넌스를 제공합니다. Codex의 관리 로더는 `~/.codex/ghost-alice-governance.md`를 지정하며, Claude의 관리되는 전역 `CLAUDE.md`는 공통 계약을 담습니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 제공합니다. [설치 안내](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)는 소스·설치본·응답 모델 사이의 전달을 설명합니다. 세션 실행 상태의 기준은 영수증의 저장소 루트에 있는 `.tmp/session-intent/ghost-state.sqlite3`입니다. JSON 포인터와 스냅샷은 호환성·내보내기 자료입니다. 상태를 읽는 구성 요소는 영수증의 root·platform·session identity를 `session_intent_ledger.py --read-state`에 전달하여 해당 세션의 상태를 받습니다.
+
+## Runtime State Retention
+
+`_shared/state_retention.py`는 Core 설치가 `~/.ghost-alice`와 호스트 폴더 아래에 작성하는 파일과 폴더의 표 하나와, 각 항목이 커지지 않게 하는 규칙을 가집니다. 파일을 작성하는 코드가 작성할 때 그 규칙을 적용하므로, 파일을 만든 코드가 규칙이 더 남기지 않는 것을 삭제합니다. 삭제가 실패해도 작성하는 코드는 멈추지 않습니다. 실패는 `~/.ghost-alice/state-retention-failures.jsonl`에 한 줄로 기록되고, 이 파일은 마지막 500줄만 남깁니다. `--doctor`는 이 기록을 `state-retention` 줄로 보고합니다. 테스트 하나가 빈 홈에 설치하고, 등록된 훅을 모두 호출하고, 게이트웨이 요청 하나를 전달하고, 제거합니다. 작성된 파일이나 폴더가 표의 어느 항목과도 맞지 않으면 테스트가 실패합니다.
+
+| Path | Rule | Applied by |
+| --- | --- | --- |
+| `~/.ghost-alice/session-logs/<host>/<session>/` | 모든 호스트 폴더에서 훅 로그가 14일 넘게 갱신되지 않은 세션 폴더를 오래된 순으로 한 번에 50개까지 삭제 | 새 세션의 첫 훅 로그 행 |
+| `~/.ghost-alice/io-trace.jsonl` | 10,000줄을 넘으면 마지막 5,000줄만 남김 | io-trace 행마다 |
+| `~/.ghost-alice/governance-events.jsonl` | 5MB를 넘으면 지난 파일 `governance-events.jsonl.1` 하나로 옮김 | governance 이벤트마다 |
+| `~/.ghost-alice/install/` | 최근 설치 실행 30회분, 실행마다 로그 하나와 이벤트 기록 하나 | 인스톨러, 새 로그를 열기 전 |
+| `~/.ghost-alice/install-state/<host>-events.jsonl` | 5MB를 넘으면 지난 파일 하나로 옮김 | 게시 실패나 은퇴 이벤트마다 |
+| `~/.ghost-alice/rollbacks/` | 끝난 게시 중 최근 20개. 끝나지 않은 게시는 복원될 때까지 남김 | 게시마다 |
+| `~/.ghost-alice/uninstall-reports/` | 최근 보고서 30개 | 제거 명령, 새 보고서를 작성하기 전 |
+| 호스트 폴더의 `settings.json.bak*`, `hooks.json.bak*` | 최근 3개 | 훅 설정을 작성할 때마다 |
+
+한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본, 병합 대기 사본, 은퇴 백업에는 사용자 변경분이 들어 있을 수 있으므로 프로그램이 삭제하지 않습니다.
 
 ## Documentation Responsibility
 
