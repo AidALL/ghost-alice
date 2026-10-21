@@ -1023,6 +1023,39 @@ class NodeRuntimeRunPathTest(unittest.TestCase):
         self.assertIn("node-runtime: invalid (runtime-config:config", unreadable_output)
 
 
+class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
+    """Doctor reads the retention failure record that `state_retention` writes."""
+
+    def _record(self, *rows: dict) -> None:
+        self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
+        (self.ghost_alice_root / "state-retention-failures.jsonl").write_text(
+            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    def test_without_failures_the_retention_line_is_ok(self):
+        status, detail = install_doctor._retention_failure_status(self.ghost_alice_root)
+        self.assertEqual((status, detail), (install_doctor.STATUS_OK, "ok"))
+        _, output = self._run("claude", strict=False)
+        self.assertIn("state-retention: ok", output)
+
+    def test_recorded_failures_are_a_warning_with_the_count_and_the_last_one(self):
+        self._record({"ts": "2026-10-21T00:00:00Z", "policy": "session-logs", "path": "/a", "error_type": "OSError",
+                      "error": "busy"},
+                     {"ts": "2026-10-22T01:02:03Z", "policy": "gateway-usage", "path": "/b",
+                      "error_type": "PermissionError", "error": "denied"})
+        status, detail = install_doctor._retention_failure_status(self.ghost_alice_root)
+        self.assertEqual(status, install_doctor.STATUS_WARNING)
+        self.assertEqual(detail, "warning 2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError")
+        _, output = self._run("claude", strict=False)
+        self.assertIn("state-retention: warning 2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError",
+                      output)
+
+    def test_an_unreadable_record_is_a_warning(self):
+        self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
+        (self.ghost_alice_root / "state-retention-failures.jsonl").write_bytes(b"\xff\xfe not json\n")
+        status, detail = install_doctor._retention_failure_status(self.ghost_alice_root)
+        self.assertEqual((status, detail), (install_doctor.STATUS_WARNING, "warning record unreadable"))
+
+
 class RuntimeCoreAuditTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()

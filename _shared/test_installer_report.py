@@ -138,6 +138,30 @@ class LogTests(ReportCase):
         self.assertEqual(os.environ.get("GHOST_ALICE_INSTALL_LOG_FILE"), str(path))
         self.assertEqual(report.log_init(), path)
 
+    def test_log_init_keeps_the_last_thirty_runs_before_it_opens_a_new_log(self):
+        # A run is its .log and its .events.jsonl.
+        root = self.home / ".ghost-alice" / "install"
+        root.mkdir(parents=True)
+        stamps = [f"2026-10-{day:02d}-{hour:02d}0000" for day in range(1, 17) for hour in (9, 21)]
+        for stamp in stamps:
+            (root / f"{stamp}.log").write_text("log\n", encoding="utf-8")
+            (root / f"{stamp}.events.jsonl").write_text("", encoding="utf-8")
+        path = report.log_init()
+        kept = sorted({name.name.split(".", 1)[0] for name in root.iterdir()})
+        self.assertEqual(kept, stamps[2:])
+        self.assertFalse(path.exists())
+
+    def test_a_child_with_an_inherited_log_removes_nothing(self):
+        root = self.home / ".ghost-alice" / "install"
+        root.mkdir(parents=True)
+        for day in range(1, 33):
+            (root / f"2026-10-{day:02d}-120000.log").write_text("log\n", encoding="utf-8")
+        inherited = root / "2026-10-32-120000.log"
+        report.configure(verbose=False, report_child=True, tty=False, progress_env="auto", home=self.home,
+                         log_file=inherited)
+        self.assertEqual(report.log_init(), inherited)
+        self.assertEqual(len(list(root.iterdir())), 32)
+
     def test_run_logged_appends_step_output_to_the_log_in_compact_mode(self):
         # report.sh:103-110
         def step(word):

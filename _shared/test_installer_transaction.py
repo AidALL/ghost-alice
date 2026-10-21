@@ -497,6 +497,21 @@ class RecordMigrationTests(TransactionCase):
             _, out = self.captured(transaction.migrate_record, self.context("codex"))
         self.assertEqual(out, "")
 
+    def test_the_migration_step_removes_the_two_old_rollback_folders_once(self):
+        # An earlier installer kept replaced copies there; nothing writes them now.
+        legacy = [self.ghost / "install-rollbacks", self.home / ".claude" / "skills" / ".ghost-alice-install-rollbacks"]
+        for folder in legacy:
+            (folder / "rollback-alpha-20261001T000000Z-1-abcd" / "SKILL.md").parent.mkdir(parents=True)
+            (folder / "rollback-alpha-20261001T000000Z-1-abcd" / "SKILL.md").write_text("old\n", encoding="utf-8")
+        with mock.patch("installed_payload.migrate", return_value=None), \
+             mock.patch("installed_payload.migrate_service", return_value=None):
+            _, out = self.captured(transaction.migrate_record, self.context("claude"))
+            _, again = self.captured(transaction.migrate_record, self.context("codex"))
+        for folder in legacy:
+            self.assertFalse(folder.exists())
+            self.assertIn(f"[INFO] Removed the earlier installer's rollback folder {folder}", out)
+        self.assertEqual(again, "")
+
     def test_a_migration_that_cannot_finish_is_reported_and_the_install_goes_on(self):
         with mock.patch("installed_payload.migrate", side_effect=installed_payload.RecordError("bad snapshot")), \
              mock.patch("installed_payload.migrate_service", side_effect=installed_payload.RecordError("no receipt")):

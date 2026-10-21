@@ -477,3 +477,16 @@ def test_installer_cleanup_calls_retirement_with_explicit_owned_ghost_root(tmp_p
         assert saved.read_text() == original
     else:
         assert wrapper.read_text() == original
+
+
+def test_retirement_events_offer_the_event_log_to_its_retention_entry(tmp_path, monkeypatch):
+    # install-state/<host>-events.jsonl keeps one previous file past 5MB (state_retention tests).
+    import retired_assets
+    import state_retention
+    event = tmp_path/'install-state'/'claude-events.jsonl'
+    monkeypatch.setenv('GHOST_ALICE_GHOST_ROOT', str(tmp_path))
+    calls = []
+    monkeypatch.setattr(state_retention, 'apply', lambda *args, **kwargs: calls.append(args))
+    retired_assets._audit(event, {'outcome': 'retired'}, 'retire')
+    assert calls == [('install-state-events', event)]
+    assert json.loads(event.read_text(encoding='utf-8'))['phase'] == 'retire'

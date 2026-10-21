@@ -7,8 +7,10 @@ import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import strict_session_log
@@ -174,6 +176,49 @@ class TestStrictSessionLogPath(unittest.TestCase):
         self.assertEqual(row["surface_item"]["work_impact"], "routine-noise")
         self.assertEqual(row["surface_item"]["model_surface"], "omitted")
         self.assertEqual(row["model_surface_output"], "")
+
+
+class TestSessionLogRetention(unittest.TestCase):
+    """The first row of a new session removes session folders whose log is older than 14 days."""
+
+    def setUp(self) -> None:
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        self.home = Path(temp_dir.name)
+        environment = mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.home / ".ghost-alice")})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def old_session(self, platform: str, session_id: str, days: int) -> Path:
+        path = strict_session_log.append_event(self.home, platform, session_id, {"hook_id": "prompt"})
+        moment = time.time() - days * 86400
+        for item in (path, path.parent):
+            os.utime(item, (moment, moment))
+        return path.parent
+
+    def test_first_row_of_a_new_session_removes_old_folders_of_every_host(self):
+        old_codex = self.old_session("codex", "old-codex", 20)
+        old_unknown = self.old_session("unknown", "old-unknown", 40)
+        recent = self.old_session("claude", "recent", 2)
+        path = strict_session_log.append_event(self.home, "claude", "new", {"hook_id": "prompt"})
+        self.assertFalse(old_codex.exists())
+        self.assertFalse(old_unknown.exists())
+        self.assertTrue(recent.exists())
+        self.assertTrue(path.exists())
+
+    def test_a_later_row_of_an_existing_session_removes_nothing(self):
+        strict_session_log.append_event(self.home, "claude", "running", {"hook_id": "prompt"})
+        old = self.old_session("codex", "old-codex", 20)
+        strict_session_log.append_event(self.home, "claude", "running", {"hook_id": "stop"})
+        self.assertTrue(old.exists())
+
+    def test_a_removal_failure_keeps_the_row_and_is_recorded(self):
+        self.old_session("codex", "old-codex", 20)
+        with mock.patch("state_retention._remove", side_effect=PermissionError("denied")):
+            path = strict_session_log.append_event(self.home, "claude", "new", {"hook_id": "prompt"})
+        self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 1)
+        failures = (self.home / ".ghost-alice" / "state-retention-failures.jsonl").read_text(encoding="utf-8")
+        self.assertIn('"policy": "session-logs"', failures)
 
 
 if __name__ == "__main__":
