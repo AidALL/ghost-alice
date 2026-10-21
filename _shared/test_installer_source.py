@@ -1,4 +1,4 @@
-"""installer.source: source health, git hook path, source identity, --update-source.
+"""installer.source: source health, git hook path, source identity, the install source check, --update-source.
 
 Expected texts come from installer_lib/source_health.sh and installer_lib/install.sh:538-551.
 """
@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 from pathlib import Path
 import shutil
@@ -17,10 +18,11 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import installed_payload  # noqa: E402
 from installer import report  # noqa: E402
 from installer import runner  # noqa: E402
 from installer import source  # noqa: E402
-from installer_testing import use_source  # noqa: E402
+from installer_testing import make_context, use_source  # noqa: E402
 
 GIT_ENV = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"}
@@ -243,6 +245,161 @@ class SourceIdentityTests(SourceCase):
         self.assertIn(f"[ERROR] Session gate contract file missing: {root / 'skill-catalog' / 'session-gates.json'}", out.getvalue())
         (root / "skill-catalog" / "session-gates.json").write_text("{}", encoding="utf-8")
         source.assert_session_gate_contract()
+
+
+STOP_HINT = ("Rerun this command from the install source, or add --adopt-source to install from this checkout "
+             "and record it as the install source.")
+
+
+class InstallSourceTests(SourceCase):
+    """The install record names the checkout the installation came from (`source.root`). Before an install or a
+    repair changes anything, the installer compares that folder with the checkout it runs from, both with links
+    followed: no record or no source goes on, the same folder goes on, another folder asks at a terminal and
+    stops elsewhere."""
+
+    def setUp(self):
+        super().setUp()
+        self.here = init_repo(self.root / "here")
+        self.enterContext(use_source(self.here))
+        self.other = init_repo(self.root / "other")
+        self.home = self.root / "home"
+        self.record = installed_payload.path(self.home / ".ghost-alice")
+        self.ctx = make_context(self.home, "codex")
+
+    def write_record(self, source_root: Path | None, **extra) -> None:
+        record = {"schema_version": 1, "targets": {}, **extra}
+        if source_root is not None:
+            record["source"] = {"root": str(source_root), "commit": "c0ffee", "dirty": "clean", "hooks_path": "hooks"}
+        self.record.parent.mkdir(parents=True, exist_ok=True)
+        self.record.write_text(json.dumps(record), encoding="utf-8")
+
+    def run_check(self, ctx=None, *, interactive=False, answer=None):
+        ctx = self.ctx if ctx is None else ctx
+        out = io.StringIO()
+        replies = mock.Mock(side_effect=answer if isinstance(answer, BaseException) else [answer])
+        with contextlib.redirect_stdout(out), mock.patch("installer.source.interactive", return_value=interactive), \
+                mock.patch("builtins.input", replies):
+            try:
+                source.check_install_source(ctx)
+            except runner.InstallerExit as stop:
+                return stop.code, out.getvalue(), replies
+        return 0, out.getvalue(), replies
+
+    def test_without_a_record_the_first_install_goes_on(self):
+        self.assertEqual(source.match_install_source().state, "unrecorded")
+        self.assertEqual(self.run_check()[:2], (0, ""))
+        # A record that names no source (written before any publish) is the same as no record.
+        self.write_record(None)
+        self.assertEqual(source.match_install_source().state, "unrecorded")
+        self.assertEqual(self.run_check()[:2], (0, ""))
+
+    def test_the_recorded_checkout_goes_on_with_links_followed(self):
+        link = self.root / "link-to-here"
+        link.symlink_to(self.here, target_is_directory=True)
+        self.write_record(link)
+        match = source.match_install_source()
+        self.assertEqual((match.state, match.here, match.recorded), ("same", self.here.resolve(), link))
+        self.assertEqual(self.run_check()[:2], (0, ""))
+        # The installer's own location is compared with its links followed too.
+        self.write_record(self.here)
+        with use_source(link):
+            self.assertEqual(source.match_install_source().state, "same")
+
+    def test_another_checkout_stops_a_non_interactive_command_with_exit_2_and_the_command_to_run(self):
+        self.write_record(self.other)
+        before = self.record.read_bytes()
+        match = source.match_install_source()
+        self.assertEqual((match.state, match.recorded), ("other", self.other))
+        code, out, replies = self.run_check()
+        self.assertEqual(code, 2)
+        self.assertIn("[ERROR] This checkout is not the install source the install record names.", out)
+        self.assertIn(f"[ERROR]   Install source: {self.other}\n", out)
+        self.assertIn(f"[ERROR]   This checkout:  {self.here.resolve()}\n", out)
+        self.assertIn(f"[ERROR] {STOP_HINT}", out)
+        replies.assert_not_called()
+        self.assertEqual(self.record.read_bytes(), before)
+        self.assertFalse(self.ctx.options.adopt_source)
+
+    def test_a_recorded_checkout_that_no_longer_exists_is_replaced_without_a_question(self):
+        # A fresh clone at another path after the old one was removed: nothing else can be the install source.
+        gone = self.root / "removed-clone"
+        self.write_record(gone)
+        for interactive in (False, True):
+            with self.subTest(interactive=interactive):
+                ctx = make_context(self.home, "codex")
+                code, out, replies = self.run_check(ctx, interactive=interactive, answer="n")
+                self.assertEqual(code, 0)
+                self.assertEqual(out, f"[INFO] Install source: {gone} no longer exists; this checkout replaces it\n")
+                replies.assert_not_called()
+                # The decision travels with the command, so the auto mode's children do not judge it again.
+                self.assertTrue(ctx.options.adopt_source)
+
+    def test_adopt_source_installs_from_another_checkout(self):
+        self.write_record(self.other)
+        ctx = make_context(self.home, "codex", adopt_source=True)
+        code, out, replies = self.run_check(ctx)
+        self.assertEqual(code, 0)
+        self.assertIn(f"[INFO] Install source: this checkout replaces {self.other}", out)
+        replies.assert_not_called()
+        self.assertTrue(ctx.options.adopt_source)
+
+    def test_a_terminal_asks_and_the_answer_decides(self):
+        self.write_record(self.other)
+        code, out, replies = self.run_check(interactive=True, answer="y")
+        self.assertEqual(code, 0)
+        self.assertEqual(replies.call_args.args, ("Replace the install source with this checkout? [y/N]: ",))
+        self.assertIn(f"[WARN]   Install source: {self.other}\n", out)
+        self.assertIn(f"[WARN]   This checkout:  {self.here.resolve()}\n", out)
+        self.assertIn(f"[INFO] Install source: this checkout replaces {self.other}", out)
+        # The answer travels with the command, so the auto mode's children do not ask again.
+        self.assertTrue(self.ctx.options.adopt_source)
+        for answer in ("", "n", "no", "maybe", EOFError()):
+            with self.subTest(answer=answer):
+                ctx = make_context(self.home, "codex")
+                code, out, _ = self.run_check(ctx, interactive=True, answer=answer)
+                self.assertEqual(code, 2)
+                self.assertIn(f"[ERROR] {STOP_HINT}", out)
+                self.assertFalse(ctx.options.adopt_source)
+
+    def test_a_publish_that_stopped_halfway_does_not_decide_the_source(self):
+        # The check runs before the lock, so before the lock restores unfinished publishes: it reads the record the
+        # restore will put back (the copy the oldest unfinished publish saved), not the half-written one.
+        self.write_record(self.here)
+        older = self.home / ".ghost-alice" / "rollbacks" / "20261021T000000000000Z-1-aaaaaaaa"
+        newer = self.home / ".ghost-alice" / "rollbacks" / "20261021T000001000000Z-1-bbbbbbbb"
+        for folder in (older, newer):
+            folder.mkdir(parents=True)
+            shutil.copyfile(self.record, folder / installed_payload.FILENAME)
+            (folder / "journal.json").write_text(json.dumps({
+                "schema_version": 1, "phase": "prepare", "record_copy": installed_payload.FILENAME, "targets": []}),
+                encoding="utf-8")
+        self.write_record(self.other)
+        self.assertEqual(source.match_install_source().state, "same")
+        self.assertEqual(self.run_check()[:2], (0, ""))
+        # The oldest unfinished publish found no record: after the restore there is none, so nothing is compared.
+        (older / installed_payload.FILENAME).unlink()
+        (older / "journal.json").write_text(json.dumps({"schema_version": 1, "phase": "prepare", "record_copy": None,
+                                                        "targets": []}), encoding="utf-8")
+        self.assertEqual(source.match_install_source().state, "unrecorded")
+        # A journal that cannot be read leaves the record unknown; the lock's restore reports that journal.
+        (older / "journal.json").write_text("{broken", encoding="utf-8")
+        self.assertEqual(source.match_install_source().state, "unreadable")
+
+    def test_an_unreadable_record_skips_the_check_with_a_warning(self):
+        # The comparison cannot be made; the command goes on as it did before the check existed.
+        self.record.parent.mkdir(parents=True, exist_ok=True)
+        self.record.write_text("{broken", encoding="utf-8")
+        self.assertEqual(source.match_install_source().state, "unreadable")
+        code, out, _ = self.run_check()
+        self.assertEqual(code, 0)
+        self.assertIn(f"[WARN] Install source check skipped: {self.record} is not JSON", out)
+
+    def test_interactive_needs_a_terminal_on_both_ends(self):
+        for stdin_tty, stdout_tty, expected in ((True, True, True), (True, False, False), (False, True, False)):
+            with self.subTest(stdin=stdin_tty, stdout=stdout_tty), \
+                    mock.patch("installer.source.sys.stdin") as stdin, mock.patch("installer.source.sys.stdout") as stdout:
+                stdin.isatty.return_value, stdout.isatty.return_value = stdin_tty, stdout_tty
+                self.assertEqual(source.interactive(), expected)
 
 
 if __name__ == "__main__":

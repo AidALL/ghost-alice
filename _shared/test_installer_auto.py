@@ -110,12 +110,14 @@ class ChildCommandTests(AutoCase):
     def test_install_child_forwards_options(self):
         # install.sh:315-333, 385
         ctx = self.context(skip_source_health=True, visibility="strict", verbose=True, addon_skip=True,
-                           addon_sources=["/a", "/b"], addon_tags=["v1"], args=["task-router"])
+                           addon_sources=["/a", "/b"], addon_tags=["v1"], args=["task-router"], adopt_source=True)
         ctx.addon_sources = ["/cache/a", "/cache/b"]
         ctx.addon_sources_prepared = True
+        # The parent checked the install source once; a child carries its decision instead of asking again.
         self.assertEqual(auto.child_command(ctx, "codex"),
-                         [sys.executable, self.cli, "--platform", "codex", "--skip-source-health", "--visibility", "strict",
-                          "--verbose", "--addon-source", "/cache/a", "--addon-source", "/cache/b", "--addon-skip", "task-router"])
+                         [sys.executable, self.cli, "--platform", "codex", "--skip-source-health", "--adopt-source",
+                          "--visibility", "strict", "--verbose", "--addon-source", "/cache/a", "--addon-source",
+                          "/cache/b", "--addon-skip", "task-router"])
         plain = self.context(addon_sources=["https://x/y.git"], addon_tags=["v1"])
         self.assertEqual(auto.child_command(plain, "claude"),
                          [sys.executable, self.cli, "--platform", "claude", "--addon-source", "https://x/y.git", "--addon-tag", "v1"])

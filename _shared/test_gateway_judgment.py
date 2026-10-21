@@ -172,6 +172,50 @@ class RemovalDecisionTests(unittest.TestCase):
         observe.assert_not_called()
         self.assertEqual(result["action"], "missing")
 
+    def test_the_removal_reads_launchd_through_the_one_observation_function(self):
+        # The install report asks the same function; neither keeps its own copy of the launchd parsing.
+        reg = gateway_testing.registered_home(self, self.root, service=False)
+        quiet = gateway_testing.FakeEffects(self.root, running=False)
+        loaded = gateway_participant.LoadedService("loaded", program=reg.program)
+        with mock.patch.object(gateway_participant, "loaded_service", return_value=loaded) as observation:
+            with self.assertRaises(GatewayBlocked) as held:
+                self.removal(reg, [reg.ghost / "runtime"], effects=quiet)
+        observation.assert_called_once_with(effects=quiet, platform="darwin")
+        self.assertEqual(held.exception.exit_code, 3)
+        for state, expected in (("inconclusive", 3), ("unreadable", 2)):
+            with self.subTest(state=state), \
+                    mock.patch.object(gateway_participant, "loaded_service",
+                                      return_value=gateway_participant.LoadedService(state, detail="d")):
+                with self.assertRaises(GatewayBlocked) as held:
+                    self.removal(reg, [reg.ghost / "runtime"], effects=quiet)
+                self.assertEqual(held.exception.exit_code, expected)
+
+    def test_the_observation_names_the_loaded_program_or_says_why_it_cannot(self):
+        reg = gateway_testing.registered_home(self, self.root, service=False)
+        agent = self.root / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": [
+            sys.executable, "-B", str(reg.program), "--config", str(reg.state_path)]}))
+        loaded = gateway_participant.loaded_service(
+            effects=gateway_testing.FakeEffects(self.root, running=True, agent=agent), platform="darwin")
+        self.assertEqual((loaded.state, loaded.program), ("loaded", reg.program))
+        self.assertTrue(loaded.runs_under(reg.runtime_root))
+        self.assertTrue(loaded.runs_under(reg.program))
+        self.assertFalse(loaded.runs_under(self.root / ".agents" / "skills"))
+        self.assertEqual(gateway_participant.loaded_service(
+            effects=gateway_testing.FakeEffects(self.root, running=False), platform="darwin").state, "absent")
+        self.assertEqual(gateway_participant.loaded_service(
+            effects=gateway_testing.FakeEffects(self.root, running=True, agent=None), platform="darwin").state,
+            "inconclusive")
+        agent.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": ["python3", "relative.py"]}))
+        unreadable = gateway_participant.loaded_service(
+            effects=gateway_testing.FakeEffects(self.root, running=True, agent=agent), platform="darwin")
+        self.assertEqual(unreadable.state, "unreadable")
+        self.assertFalse(unreadable.runs_under(reg.runtime_root))
+        observed = gateway_testing.FakeEffects(self.root, running=True, agent=agent)
+        with mock.patch.object(observed, "observe", side_effect=AssertionError("launchd asked")):
+            self.assertEqual(gateway_participant.loaded_service(effects=observed, platform="linux").state, "absent")
+
     def test_an_unreadable_record_blocks_the_judgment(self):
         reg = gateway_testing.registered_home(self, self.root)
         installed_payload.path(reg.ghost).write_text("{broken", encoding="utf-8")

@@ -295,7 +295,7 @@ class SourceHealthGateTest(unittest.TestCase):
         self.assertNotIn("--repo-rename-migration-only", hook)
         self.assertNotIn("LOCAL_CHECKOUT_RENAMED_TO=", hook)
         self.assertNotIn("repo rename migration", hook)
-        self.assertIn("Codex copy-mode install detected", hook)
+        self.assertIn('bash "$REPO_ROOT/install.sh" --post-merge', hook)
 
     def test_install_ps1_omits_legacy_repo_migration(self) -> None:
         body = INSTALL_PS1.read_text(encoding="utf-8-sig")

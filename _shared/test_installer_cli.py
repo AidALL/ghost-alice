@@ -53,12 +53,14 @@ Advanced/operator commands:
   --list, -l             List available skills
   --cleanup-pending      Clean false-positive pending entries
   --update-source        Stash source checkout local changes and run git pull --ff-only
+  --post-merge           Run by the git post-merge hook: install when this checkout is the install source
   --addon-source PATH|URL
                           Add local addon repo or git URL source
   --addon-tag TAG        Checkout branch/tag for git URL addon sources
   --addon-skip           Disable addon installation
   --list-addons          List addon manifest targets
   --skip-source-health   Skip source health gate
+  --adopt-source         Install from this checkout and record it as the install source
   --sync-commands        Sync workspace commands
   --check-commands       Check workspace commands only
   gateway ARGS...        Run the context gateway installer once with ARGS
@@ -134,10 +136,11 @@ class OptionTests(CliCase):
         options = cli.parse_options(["--platform", "codex", "--skip-source-health", "--update-source", "--cleanup-pending",
                                      "--addon-source", "/a", "--addon-source", "/b", "--addon-tag", "v1", "--addon-skip",
                                      "--list-addons", "--verbose", "--visibility", "strict", "task-router", "--auto",
-                                     "--status", "-a", "--bogus"])
+                                     "--status", "-a", "--bogus", "--adopt-source"])
         self.assertEqual(options.platform, "codex")
         self.assertTrue(options.platform_explicit)
         self.assertTrue(options.skip_source_health and options.update_source and options.cleanup_pending)
+        self.assertTrue(options.adopt_source)
         self.assertEqual(options.addon_sources, ["/a", "/b"])
         self.assertEqual(options.addon_tags, ["v1"])
         self.assertTrue(options.addon_skip and options.list_addons and options.verbose)
@@ -249,22 +252,24 @@ class OptionTests(CliCase):
                          sum(len(command.names) for command in cli.COMMANDS))
 
     def test_table_columns(self):
-        rows = {command.usage: (command.lock, command.platform, command.flag, command.before_lock is not None)
+        rows = {command.usage: (command.lock, command.platform, command.flag, command.before_lock is not None,
+                                command.checks_source)
                 for command in cli.COMMANDS}
         self.assertEqual(rows, {
-            "--status, -s": (None, True, None, False),
-            "--doctor": (None, True, None, False),
-            "--repair": ("repair", True, None, False),
-            "--uninstall, -u": ("uninstall", True, None, False),
-            "SKILL_NAMES": ("install", True, None, True),
-            "--list, -l": (None, False, None, False),
-            "--cleanup-pending": ("cleanup-pending", True, "cleanup_pending", False),
-            "--update-source": (None, False, "update_source", False),
-            "--list-addons": (None, True, "list_addons", False),
-            "--sync-commands": (None, True, None, False),
-            "--check-commands": (None, True, None, False),
-            "gateway ARGS...": ("gateway", False, None, False),
-            "--help, -h": (None, False, None, False),
+            "--status, -s": (None, True, None, False, False),
+            "--doctor": (None, True, None, False, False),
+            "--repair": ("repair", True, None, False, True),
+            "--uninstall, -u": ("uninstall", True, None, False, False),
+            "SKILL_NAMES": ("install", True, None, True, True),
+            "--list, -l": (None, False, None, False, False),
+            "--cleanup-pending": ("cleanup-pending", True, "cleanup_pending", False, False),
+            "--update-source": (None, False, "update_source", False, False),
+            "--post-merge": (None, False, None, False, False),
+            "--list-addons": (None, True, "list_addons", False, False),
+            "--sync-commands": (None, True, None, False, False),
+            "--check-commands": (None, True, None, False, False),
+            "gateway ARGS...": ("gateway", False, None, False, False),
+            "--help, -h": (None, False, None, False, False),
         })
         self.assertEqual(cli.INSTALL.names, ())
         self.assertEqual(cli.UNINSTALL.names, ("--uninstall", "--remove", "-u"))
@@ -300,7 +305,9 @@ class OptionTests(CliCase):
                 self.assertLess(out.index(f"  {command.usage}"), min(following, default=len(out)))
 
 
-class DispatchTests(CliCase):
+class DispatchCase(CliCase):
+    """`cli.main` with every command handler and the install machinery stubbed."""
+
     def setUp(self):
         super().setUp()
         self.stub("installer.selection.list_skills", 0)
@@ -327,6 +334,8 @@ class DispatchTests(CliCase):
                 mock.patch("installer.locations.detect_uninstall_platforms", return_value=list(present)):
             return self.captured(cli.main, argv)
 
+
+class DispatchTests(DispatchCase):
     def test_command_table(self):
         # install.sh:473-562
         for argv, expected, rc in (
@@ -489,6 +498,158 @@ class DispatchTests(CliCase):
         rc, out = self.dispatch(["--platform", "claude", "--help"])
         self.assertEqual(rc, 0)
         self.assertIn("Usage:\n", out)
+
+
+class SourceCheckTests(DispatchCase):
+    """Install (auto mode and one platform) and repair compare the install record's `source.root` with the
+    checkout the installer runs from before anything changes: before addon sources are prepared, before the
+    prerequisites and the git hook path, before the lock (which restores unfinished publishes)."""
+
+    def setUp(self):
+        super().setUp()
+        self.other = self.home.parent / "other-checkout"
+        self.other.mkdir()
+        record = self.home / ".ghost-alice" / "installed-payload.json"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        self.record = record
+
+    def record_source(self, root: Path) -> None:
+        self.record.write_text(json.dumps({"schema_version": 1, "targets": {}, "source": {
+            "root": str(root), "commit": "c0ffee", "dirty": "clean", "hooks_path": "hooks"}}), encoding="utf-8")
+
+    CHANGES = ("prepare_sources", "prepare_install", "acquire", "run_install", "run_repair", "run_install_children")
+
+    def test_another_checkout_stops_install_and_repair_before_anything_changes(self):
+        self.record_source(self.other)
+        for argv in (["--platform", "codex"], ["--platform", "claude", "task-router"], [],
+                     ["--addon-source", "/a"], ["--platform", "codex", "--addon-source", "/a"],
+                     ["--platform", "claude", "--repair"]):
+            with self.subTest(argv=argv):
+                self.calls.clear()
+                rc, out = self.dispatch(argv)
+                self.assertEqual(rc, 2, out)
+                self.assertIn("[ERROR] This checkout is not the install source the install record names.", out)
+                self.assertEqual([name for name in self.names() if name in self.CHANGES], [])
+
+    def test_the_check_comes_first_and_the_auto_mode_parent_checks_once(self):
+        self.record_source(self.source)
+        order = []
+        check = mock.patch("installer.source.check_install_source", create=True,
+                           side_effect=lambda ctx: order.append("check_install_source"))
+        self.patches.enter_context(check)
+        for argv, first_change in ((["--platform", "codex", "--addon-source", "/a"], "prepare_sources"),
+                                   (["--platform", "claude"], "prepare_install"),
+                                   (["--platform", "claude", "--repair"], "acquire"),
+                                   (["--addon-source", "/a"], "prepare_sources"),
+                                   ([], "run_install_children")):
+            with self.subTest(argv=argv):
+                self.calls.clear()
+                order.clear()
+                rc, _ = self.dispatch(argv)
+                self.assertEqual(rc, 0)
+                self.assertEqual(order, ["check_install_source"])
+                self.assertIn(first_change, self.names())
+
+    def test_the_same_checkout_and_adopt_source_go_on(self):
+        self.record_source(self.source)
+        rc, out = self.dispatch(["--platform", "codex"])
+        self.assertEqual(rc, 0)
+        self.assertIn("run_install", self.names())
+        self.assertNotIn("install source", out.lower())
+        self.record_source(self.other)
+        self.calls.clear()
+        rc, out = self.dispatch(["--platform", "codex", "--adopt-source"])
+        self.assertEqual(rc, 0)
+        self.assertIn("run_install", self.names())
+        self.assertIn(f"[INFO] Install source: this checkout replaces {self.other}", out)
+
+    def test_commands_that_install_nothing_are_not_checked(self):
+        self.record_source(self.other)
+        for argv, handler in ((["--platform", "claude", "--status"], "check_status"),
+                              (["--platform", "claude", "--doctor"], "run_doctor"),
+                              (["--platform", "codex", "--uninstall", "task-router"], "uninstall"),
+                              (["--update-source"], "update_source"),
+                              (["--platform", "claude", "--cleanup-pending"], "cleanup_pending"),
+                              (["gateway", "detach"], "run_tool"),
+                              (["--list"], "list_skills")):
+            with self.subTest(argv=argv):
+                self.calls.clear()
+                _, out = self.dispatch(argv)
+                self.assertIn(handler, self.names())
+                self.assertNotIn("install source", out.lower())
+
+
+class PostMergeTests(DispatchCase):
+    """`--post-merge`, which the git post-merge hook runs after a merge: in the checkout the install record names
+    as the install source the install goes on in auto mode, for every detected host; anywhere else one line says
+    so and nothing is installed. The install source check's own function judges, and the install lock (taken by
+    the install, not by this step) judges whether another install runs."""
+
+    def setUp(self):
+        super().setUp()
+        self.record = self.home / ".ghost-alice" / "installed-payload.json"
+        self.record.parent.mkdir(parents=True, exist_ok=True)
+        self.other = self.home.parent / "other-checkout"
+        self.other.mkdir()
+
+    def record_source(self, root: Path) -> None:
+        self.record.write_text(json.dumps({"schema_version": 1, "targets": {}, "source": {
+            "root": str(root), "commit": "c0ffee", "dirty": "clean", "hooks_path": "hooks"}}), encoding="utf-8")
+
+    INSTALLS = ("prepare_sources", "prepare_install", "acquire", "run_install", "run_repair", "run_install_children")
+
+    def test_the_install_source_goes_on_with_the_auto_mode_install(self):
+        self.record_source(self.source)
+        rc, out = self.dispatch(["--post-merge"])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("run_install_children", self.names())
+        _, args, _ = next(call for call in self.calls if call[0] == "run_install_children")
+        self.assertFalse(args[0].options.platform_explicit)
+        self.assertEqual(args[1], ["claude", "codex"])
+        # The step itself takes no lock: each platform's install takes it, and refuses while another install holds it.
+        self.assertNotIn("acquire", self.names())
+
+    def test_another_checkout_reports_one_line_and_installs_nothing(self):
+        # A recorded source that no longer exists is replaced only by an install the user runs, never by a merge.
+        for recorded in (self.other, self.home.parent / "removed-clone"):
+            with self.subTest(recorded=recorded.name):
+                self.calls.clear()
+                self.record_source(recorded)
+                rc, out = self.dispatch(["--post-merge"])
+                self.assertEqual(rc, 0)
+                self.assertEqual(out, f"[INFO] Post-merge: this checkout is not the install source ({recorded}); "
+                                      "nothing was installed.\n")
+                self.assertEqual([name for name in self.names() if name in self.INSTALLS], [])
+
+    def test_without_a_readable_record_nothing_is_installed(self):
+        rc, out = self.dispatch(["--post-merge"])
+        self.assertEqual((rc, out), (0, "[INFO] Post-merge: no install record names an install source; "
+                                        "nothing was installed.\n"))
+        self.record.write_text("{broken", encoding="utf-8")
+        rc, out = self.dispatch(["--post-merge"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(out.startswith(f"[WARN] Post-merge: the install record cannot be read ({self.record} is not JSON"))
+        self.assertTrue(out.endswith("); nothing was installed.\n"))
+        self.assertEqual([name for name in self.names() if name in self.INSTALLS], [])
+
+    def test_the_install_source_check_function_judges(self):
+        # The record names another folder, but the one judgment says this is the install source: the step and the
+        # install's own check both follow it, so the hook keeps no copy of the comparison.
+        from installer.source import SourceMatch
+        self.record_source(self.other)
+        same = SourceMatch("same", self.source.resolve(), self.source)
+        with mock.patch("installer.source.match_install_source", return_value=same) as judged:
+            rc, _ = self.dispatch(["--post-merge"])
+        self.assertEqual(rc, 0)
+        self.assertGreaterEqual(judged.call_count, 2)
+        self.assertIn("run_install_children", self.names())
+
+    def test_a_refused_install_keeps_its_exit_code_for_the_hook(self):
+        self.record_source(self.source)
+        refused = self.patches.enter_context(mock.patch("installer.auto.run_install_children", return_value=1))
+        rc, _ = self.dispatch(["--post-merge"])
+        refused.assert_called_once()
+        self.assertEqual(rc, 1)
 
 
 class UnfinishedPublishTests(CliCase):
