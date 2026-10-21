@@ -1024,15 +1024,31 @@ class NodeRuntimeRunPathTest(unittest.TestCase):
 
 
 class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
-    """Doctor reads the retention failure record that `state_retention` writes."""
+    """Doctor reads the retention failure record that `state_retention` writes, at the path it writes it."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        environment = mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.ghost_alice_root)})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.record = self.ghost_alice_root / "state-retention-failures.jsonl"
 
     def _record(self, *rows: dict) -> None:
         self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
-        (self.ghost_alice_root / "state-retention-failures.jsonl").write_text(
-            "".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+        self.record.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+
+    def test_doctor_reads_the_record_where_retention_writes_it(self):
+        # A Ghost-ALICE root other than ~/.ghost-alice moves the record for both the writer and doctor.
+        import state_retention
+        elsewhere = self.root / "elsewhere"
+        with mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(elsewhere)}):
+            state_retention.apply("no-such-entry", self.root)
+            _, output = self._run("claude", strict=False)
+        self.assertTrue((elsewhere / "state-retention-failures.jsonl").exists())
+        self.assertIn("state-retention: warning 1 failures", output)
 
     def test_without_failures_the_retention_line_is_ok(self):
-        status, detail = install_doctor._retention_failure_status(self.ghost_alice_root)
+        status, detail = install_doctor._retention_failure_status(self.record)
         self.assertEqual((status, detail), (install_doctor.STATUS_OK, "ok"))
         _, output = self._run("claude", strict=False)
         self.assertIn("state-retention: ok", output)
@@ -1042,7 +1058,7 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
                       "error": "busy"},
                      {"ts": "2026-10-22T01:02:03Z", "policy": "gateway-usage", "path": "/b",
                       "error_type": "PermissionError", "error": "denied"})
-        status, detail = install_doctor._retention_failure_status(self.ghost_alice_root)
+        status, detail = install_doctor._retention_failure_status(self.record)
         self.assertEqual(status, install_doctor.STATUS_WARNING)
         self.assertEqual(detail, "warning 2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError")
         _, output = self._run("claude", strict=False)
@@ -1051,8 +1067,8 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
 
     def test_an_unreadable_record_is_a_warning(self):
         self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
-        (self.ghost_alice_root / "state-retention-failures.jsonl").write_bytes(b"\xff\xfe not json\n")
-        status, detail = install_doctor._retention_failure_status(self.ghost_alice_root)
+        self.record.write_bytes(b"\xff\xfe not json\n")
+        status, detail = install_doctor._retention_failure_status(self.record)
         self.assertEqual((status, detail), (install_doctor.STATUS_WARNING, "warning record unreadable"))
 
 

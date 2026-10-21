@@ -463,6 +463,10 @@ class UninstallCleanupTest(unittest.TestCase):
             reports = glob(str(temp_report_root / "codex-confirm-*.json"))
             self.assertEqual(len(reports), 1, msg=result.stdout)
 
+    def test_the_ghost_alice_root_comes_from_the_installer_locations(self) -> None:
+        with mock.patch.object(cleanup.locations, "record_root", return_value=Path("/configured/.ghost-alice")):
+            self.assertEqual(cleanup._ghost_alice_root(), Path("/configured/.ghost-alice"))
+
     def test_a_new_default_report_keeps_the_last_thirty_reports_before_it(self) -> None:
         # The reports folder keeps 30 reports; the backup copies stay for the user.
         with tempfile.TemporaryDirectory() as temp_dir:

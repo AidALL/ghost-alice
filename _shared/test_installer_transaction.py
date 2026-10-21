@@ -512,6 +512,20 @@ class RecordMigrationTests(TransactionCase):
             self.assertIn(f"[INFO] Removed the earlier installer's rollback folder {folder}", out)
         self.assertEqual(again, "")
 
+    def test_an_old_rollback_folder_that_cannot_be_removed_is_reported_and_recorded(self):
+        folder = self.ghost / "install-rollbacks"
+        folder.mkdir(parents=True)
+        with mock.patch("installed_payload.migrate", return_value=None), \
+             mock.patch("installed_payload.migrate_service", return_value=None), \
+             mock.patch.object(transaction, "_remove_path", side_effect=PermissionError(13, "Permission denied")), \
+             mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.ghost)}):
+            _, out = self.captured(transaction.migrate_record, self.context("claude"))
+        self.assertIn(f"[WARN] The earlier installer's rollback folder {folder} could not be removed", out)
+        rows = [json.loads(line) for line in
+                (self.ghost / "state-retention-failures.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(row["policy"], row["error_type"]) for row in rows],
+                         [("earlier-rollback-folders", "PermissionError")])
+
     def test_a_migration_that_cannot_finish_is_reported_and_the_install_goes_on(self):
         with mock.patch("installed_payload.migrate", side_effect=installed_payload.RecordError("bad snapshot")), \
              mock.patch("installed_payload.migrate_service", side_effect=installed_payload.RecordError("no receipt")):

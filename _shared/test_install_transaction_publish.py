@@ -262,6 +262,21 @@ class StagingAndRetentionTests(PublishCase):
         other.mkdir(parents=True)
         install_transaction.publish(self.request("codex", self.target("alpha", self.codex / "alpha", "copy")))
         self.assertTrue(other.is_dir())
+        self.assertFalse((self.ghost / "state-retention-failures.jsonl").exists())
+
+    def test_a_staging_folder_that_cannot_be_removed_is_recorded(self):
+        real_rmdir = Path.rmdir
+
+        def rmdir(path):
+            if path.name == ".ghost-alice-install-staging":
+                raise PermissionError(13, "Permission denied")
+            return real_rmdir(path)
+
+        with mock.patch.object(Path, "rmdir", rmdir):
+            install_transaction.publish(self.request("codex", self.target("alpha", self.codex / "alpha", "copy")))
+        rows = [json.loads(line) for line in
+                (self.ghost / "state-retention-failures.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(row["policy"], row["error_type"]) for row in rows], [("install-staging", "PermissionError")])
 
     def test_the_prune_helpers_live_in_the_retention_table(self):
         for name in ("_prune_transactions", "_prune_rollback_root"):

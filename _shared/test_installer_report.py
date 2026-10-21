@@ -151,6 +151,13 @@ class LogTests(ReportCase):
         self.assertEqual(kept, stamps[2:])
         self.assertFalse(path.exists())
 
+    def test_the_install_log_folder_comes_from_the_installer_locations(self):
+        folder = self.home / "configured-install-logs"
+        with mock.patch.object(report.locations, "install_log_root", return_value=folder) as root:
+            path = report.log_init()
+        root.assert_called_once_with(self.home)
+        self.assertEqual(path.parent, folder)
+
     def test_a_child_with_an_inherited_log_removes_nothing(self):
         root = self.home / ".ghost-alice" / "install"
         root.mkdir(parents=True)

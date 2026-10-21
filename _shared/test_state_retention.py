@@ -334,6 +334,40 @@ class AppendTests(RetentionTestCase):
         thread.join(10)
         self.assertEqual(locked, [path.stat().st_ino])
 
+    @unittest.skipIf(state_retention.fcntl is None, "this platform has no flock")
+    def test_a_lock_held_too_long_appends_the_line_without_rotation_and_records_it(self):
+        # A writer that stops while holding the lock must not stop the hooks behind it.
+        path = self.root / "governance-events.jsonl"
+        path.write_bytes(b"x" * 100 + b"\n")
+        policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
+        done = threading.Event()
+
+        def writer():
+            state_retention.append("governance-events", path, '{"late": true}\n')
+            done.set()
+
+        with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy}), \
+                mock.patch.object(state_retention, "LOCK_WAIT_S", 0.2), state_retention._exclusive(path):
+            thread = threading.Thread(target=writer)
+            thread.start()
+            finished = done.wait(5)
+        thread.join(10)
+        self.assertTrue(finished, "append waited past its lock limit")
+        self.assertTrue(path.read_bytes().endswith(b'{"late": true}\n'))
+        self.assertFalse(path.with_name("governance-events.jsonl.1").exists())
+        [failure] = self.failures()
+        self.assertEqual((failure["policy"], failure["error_type"]), ("governance-events", "LockTimeout"))
+
+    @unittest.skipIf(state_retention.fcntl is None, "this platform has no flock")
+    def test_a_failure_record_held_too_long_still_gets_the_line(self):
+        record = self.ghost / "state-retention-failures.jsonl"
+        record.parent.mkdir(parents=True)
+        record.write_text("", encoding="utf-8")
+        with mock.patch.object(state_retention, "LOCK_WAIT_S", 0.2), state_retention._exclusive(record):
+            state_retention.apply("no-such-entry", self.root)
+        [failure] = self.failures()
+        self.assertEqual(failure["error_type"], "UnknownPolicy")
+
     def test_append_writes_the_text_and_applies_the_entry(self):
         path = self.root / "io-trace.jsonl"
         with mock.patch.object(state_retention, "apply", wraps=state_retention.apply) as apply:
@@ -399,12 +433,64 @@ class FailureTests(RetentionTestCase):
         [failure] = self.failures()
         self.assertEqual(failure["error_type"], "ValueError")
 
+    def test_the_failure_record_lives_under_the_install_destination_root(self):
+        self.assertEqual(state_retention.failure_record_path(), self.ghost / "state-retention-failures.jsonl")
+
+    def test_a_failure_outside_the_table_is_recorded_under_its_name(self):
+        state_retention.record_failure("install-staging", self.root / "stage", PermissionError(13, "denied"))
+        [failure] = self.failures()
+        self.assertEqual((failure["policy"], failure["error_type"]), ("install-staging", "PermissionError"))
+
     def test_the_failure_record_keeps_its_last_five_hundred_lines(self):
         for index in range(505):
             state_retention.apply(f"missing-{index}", self.root)
         failures = self.failures()
         self.assertEqual(len(failures), 500)
         self.assertEqual(failures[-1]["policy"], "missing-504")
+
+
+def _entry_callers() -> set[str]:
+    """Entry names that production code passes to `state_retention.apply` or `append`, plus the entries
+    `state_retention` applies itself."""
+    import ast
+    shared = Path(__file__).resolve().parent
+    names: set[str] = set()
+    for source in shared.rglob("*.py"):
+        if source.name.startswith("test_") or source.name.endswith("_testing.py"):
+            continue
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in ("apply", "append") and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "state_retention" and node.args
+                    and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+                names.add(node.args[0].value)
+            if (source.name == "state_retention.py" and isinstance(node, ast.Subscript)
+                    and isinstance(node.value, ast.Name) and node.value.id == "POLICIES"
+                    and isinstance(node.slice, ast.Constant)):
+                names.add(node.slice.value)
+    return names
+
+
+class EntryCallerTests(unittest.TestCase):
+    """An entry that removes something has a writer that applies it, or names the change that adds that writer;
+    a gap never passes silently."""
+
+    def test_every_removing_entry_has_a_caller_or_names_the_change_that_adds_one(self):
+        callers = _entry_callers()
+        for name, policy in state_retention.POLICIES.items():
+            if policy.method in ("overwrite", "user-kept"):
+                continue
+            with self.subTest(name=name):
+                if policy.pending:
+                    self.assertNotIn(name, callers, f"{name} has a caller now; remove its pending note")
+                else:
+                    self.assertIn(name, callers, f"no writer applies {name}")
+
+    def test_the_gateway_entries_wait_for_the_gateway_change(self):
+        for name in ("gateway-usage", "gateway-service-log", "gateway-config-backups"):
+            with self.subTest(name=name):
+                self.assertTrue(state_retention.POLICIES[name].pending)
 
 
 class InvariantMatchTests(unittest.TestCase):
