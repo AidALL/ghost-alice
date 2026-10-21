@@ -583,7 +583,8 @@ class RecordTests(TransactionCase):
         # install.sh:571-610
         ctx = self.context("claude")
         (ctx.skills_dir / "_shared").symlink_to(self.source / "_shared")
-        change = HookPathChange(changed=True, before_present=True, before="old-hooks")
+        hooks = (self.source / "hooks").as_posix()
+        change = HookPathChange(changed=True, recorded=True, before_present=True, before="old-hooks", after=hooks)
         with self.runner.patch():
             ok, out = self.captured(transaction.write_install_state_manifest, ctx, ctx.skills_dir, False, ["alpha"], change)
         self.assertTrue(ok)
@@ -593,18 +594,30 @@ class RecordTests(TransactionCase):
         self.assertEqual(args[:6], ["claude", str(self.source), "main", "abc123def", "clean", str(state)])
         self.assertEqual(args[6:10], ["_shared", str(self.source / "_shared"), str(ctx.skills_dir / "_shared"), "symlink"])
         self.assertEqual(args[10:14], ["alpha", str(self.source / "alpha"), str(ctx.skills_dir / "alpha"), "missing"])
-        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED": "1",
+        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "1",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": "old-hooks",
-                                         "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": "hooks"})
-        plain = FakeRunner()
-        with plain.patch():
-            transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, [], None)
-        _, _, kwargs = next(c for c in plain.calls if c[0].endswith("install_state_writer.py"))
-        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED": "0",
+                                         "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": hooks,
+                                         "GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT": ""})
+        # A reinstall that found its own value in place records it again, with the earlier write's time and
+        # previous value, so the full uninstall of whichever host goes last still knows what to restore.
+        carried = HookPathChange(changed=False, recorded=True, before_present=False, before="", after=hooks,
+                                 applied_at="2026-10-01T00:00:00Z")
+        again = FakeRunner()
+        with again.patch():
+            transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, [], carried)
+        _, _, kwargs = next(c for c in again.calls if c[0].endswith("install_state_writer.py"))
+        self.assertEqual(kwargs["env"], {"GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "0",
                                          "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": "",
-                                         "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": "hooks"})
+                                         "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": hooks,
+                                         "GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT": "2026-10-01T00:00:00Z"})
+        for unknown in (None, HookPathChange(changed=False, recorded=False, after=hooks)):
+            plain = FakeRunner()
+            with plain.patch():
+                transaction.write_install_state_manifest(ctx, ctx.skills_dir, False, [], unknown)
+            _, _, kwargs = next(c for c in plain.calls if c[0].endswith("install_state_writer.py"))
+            self.assertEqual(kwargs["env"]["GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED"], "0")
         failing = FakeRunner()
         failing.respond_to("install_state_writer.py", ToolResult(1))
         with failing.patch():

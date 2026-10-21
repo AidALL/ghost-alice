@@ -53,7 +53,9 @@ Advanced/operator commands:
   --list, -l             List available skills
   --cleanup-pending      Clean false-positive pending entries
   --update-source        Stash source checkout local changes and run git pull --ff-only
-  --post-merge           Run by the git post-merge hook: install when this checkout is the install source
+  --post-merge           Run by the git post-merge hook: install when the merged checkout is the install source
+  --merged-checkout PATH
+                          With --post-merge: the checkout the merge ran in (default: this checkout)
   --addon-source PATH|URL
                           Add local addon repo or git URL source
   --addon-tag TAG        Checkout branch/tag for git URL addon sources
@@ -136,11 +138,12 @@ class OptionTests(CliCase):
         options = cli.parse_options(["--platform", "codex", "--skip-source-health", "--update-source", "--cleanup-pending",
                                      "--addon-source", "/a", "--addon-source", "/b", "--addon-tag", "v1", "--addon-skip",
                                      "--list-addons", "--verbose", "--visibility", "strict", "task-router", "--auto",
-                                     "--status", "-a", "--bogus", "--adopt-source"])
+                                     "--status", "-a", "--bogus", "--adopt-source", "--merged-checkout", "/m"])
         self.assertEqual(options.platform, "codex")
         self.assertTrue(options.platform_explicit)
         self.assertTrue(options.skip_source_health and options.update_source and options.cleanup_pending)
         self.assertTrue(options.adopt_source)
+        self.assertEqual(options.merged_checkout, "/m")
         self.assertEqual(options.addon_sources, ["/a", "/b"])
         self.assertEqual(options.addon_tags, ["v1"])
         self.assertTrue(options.addon_skip and options.list_addons and options.verbose)
@@ -157,6 +160,7 @@ class OptionTests(CliCase):
             (["--platform", "windows"], "Unknown platform: windows (must be claude or codex)"),
             (["--addon-source"], "--addon-source requires a value"),
             (["--addon-tag"], "--addon-tag requires a value"),
+            (["--post-merge", "--merged-checkout"], "--merged-checkout requires a value"),
             (["--visibility"], "--visibility requires a value (strict|dynamic|minimal)"),
             (["--agent-visibility"], "--agent-visibility requires a value (strict|dynamic|minimal)"),
             (["--visibility", "loud"], "Unknown agent visibility profile: loud (must be strict, dynamic, or minimal)"),
@@ -630,10 +634,11 @@ class SourceCheckTests(DispatchCase):
 
 
 class PostMergeTests(DispatchCase):
-    """`--post-merge`, which the git post-merge hook runs after a merge: in the checkout the install record names
-    as the install source the install goes on in auto mode, for every detected host; anywhere else one line says
-    so and nothing is installed. The install source check's own function judges, and the install lock (taken by
-    the install, not by this step) judges whether another install runs."""
+    """`--post-merge --merged-checkout PATH`, which the install source's git post-merge hook runs after a merge in
+    any worktree: when the merged checkout is the checkout the install record names as the install source, the
+    install goes on in auto mode, for every detected host; for any other checkout one line says so and nothing is
+    installed. The install source check's own function judges, and the install lock (taken by the install, not by
+    this step) judges whether another install runs."""
 
     def setUp(self):
         super().setUp()
@@ -667,9 +672,22 @@ class PostMergeTests(DispatchCase):
                 self.record_source(recorded)
                 rc, out = self.dispatch(["--post-merge"])
                 self.assertEqual(rc, 0)
-                self.assertEqual(out, f"[INFO] Post-merge: this checkout is not the install source ({recorded}); "
-                                      "nothing was installed.\n")
+                self.assertEqual(out, f"[INFO] Post-merge: the merged checkout {self.source.resolve()} is not the "
+                                      f"install source ({recorded}); nothing was installed.\n")
                 self.assertEqual([name for name in self.names() if name in self.INSTALLS], [])
+
+    def test_the_merged_checkout_is_judged_not_the_checkout_the_installer_runs_from(self):
+        # The hook file and the installer belong to the install source; the merge ran in another worktree.
+        self.record_source(self.source)
+        rc, out = self.dispatch(["--post-merge", "--merged-checkout", str(self.other)])
+        self.assertEqual(rc, 0)
+        self.assertEqual(out, f"[INFO] Post-merge: the merged checkout {self.other.resolve()} is not the install "
+                              f"source ({self.source}); nothing was installed.\n")
+        self.assertEqual([name for name in self.names() if name in self.INSTALLS], [])
+        # A merge in the install source itself goes on with the auto-mode install.
+        rc, out = self.dispatch(["--post-merge", "--merged-checkout", str(self.source)])
+        self.assertEqual(rc, 0, out)
+        self.assertIn("run_install_children", self.names())
 
     def test_without_a_readable_record_nothing_is_installed(self):
         rc, out = self.dispatch(["--post-merge"])
@@ -742,7 +760,7 @@ class InstallOrderTests(CliCase):
         (self.source / "task-router").mkdir()
         (self.source / "task-router" / "SKILL.md").write_text("x", encoding="utf-8")
         self.stub("installer.prerequisites.install_prerequisites", True)
-        self.stub("installer.source.setup_git_hooks", HookPathChange(False, True, "hooks"))
+        self.stub("installer.source.setup_git_hooks", HookPathChange(changed=False, recorded=False))
         self.stub("installer.lock.acquire", self.home / "lock")
         self.stub("installer.lock.release")
         self.stub("installer.transaction.migrate_record")

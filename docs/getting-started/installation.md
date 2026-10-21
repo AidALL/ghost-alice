@@ -191,7 +191,7 @@ cd C:\path\to\new-checkout
 .\install.cmd --adopt-source
 ```
 
-After a merge or pull in the install source, the git post-merge hook goes on with the install for every detected host. In another checkout, such as a git worktree of the same repository, the hook prints one line and installs nothing. Only an install you run replaces the install source; a merge never does, and a merge never fails because of the hook.
+The installer sets the repository's git hook path (`core.hooksPath`, which every worktree of the repository shares) to the install source's `hooks` folder. After a merge or pull in the install source, its post-merge hook goes on with the install for every detected host. A merge or pull in another worktree of the same repository runs the same hook from the install source, never that worktree's own hook file; the hook prints one line and installs nothing. A worktree's own hook setting (`git config --worktree core.hooksPath`) still comes first. Only an install you run replaces the install source; a merge never does, and a merge never fails because of the hook. The full uninstall of the last host puts back the hook path from before the install, unless the path changed since.
 
 ## Common Commands
 

@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
-# post-merge: after a successful merge or pull, run the merged checkout's installer step `--post-merge`.
+# post-merge: after a successful merge or pull in any worktree, run the installer step `--post-merge` of the checkout
+# that holds this file and name the checkout the merge ran in.
 #
-# The installer decides with the judgment of its install source check: in the checkout the install
-# record (~/.ghost-alice/installed-payload.json) names as the install source it goes on with the install
-# for every detected host, under the install lock; in any other checkout, such as a worktree that
-# inherits core.hooksPath, it prints one line and installs nothing. While another install holds the
-# lock, the install refuses and this hook reports the exit code in one line.
+# The installer writes the repository's shared core.hooksPath as the install source's hooks folder by absolute path,
+# so git runs this file from the install source whichever worktree merged, and never a hook file of another checkout;
+# a worktree's own setting (git config --worktree) still comes first. The installer step compares the merged checkout
+# with the install source the install record (~/.ghost-alice/installed-payload.json) names: the install source goes
+# on with the install for every detected host, under the install lock; any other checkout gets one line and nothing
+# is installed. While another install holds the lock, the install refuses and this hook reports the exit code in one
+# line.
+#
+# Git exports variables such as GIT_DIR for the worktree that merged. The hook clears them before it calls the
+# installer, so the installer's git commands read the checkout they name.
 #
 # A merge never fails because of this hook: no `set -e`, and it always exits 0.
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-[ -f "$REPO_ROOT/install.sh" ] || exit 0
+MERGED_CHECKOUT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+HOOK_CHECKOUT="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd -P)" || exit 0
+[ -f "$HOOK_CHECKOUT/install.sh" ] || exit 0
+unset $(git rev-parse --local-env-vars 2>/dev/null)
 
-bash "$REPO_ROOT/install.sh" --post-merge
+bash "$HOOK_CHECKOUT/install.sh" --post-merge --merged-checkout "$MERGED_CHECKOUT"
 status=$?
 if [ "$status" -ne 0 ]; then
     echo "[ghost-alice post-merge] The installer exited $status; the merge itself succeeded."

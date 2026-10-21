@@ -191,7 +191,7 @@ cd C:\path\to\new-checkout
 .\install.cmd --adopt-source
 ```
 
-설치 원본에서 merge나 pull을 하면 git post-merge 훅이 감지한 모든 호스트에 설치를 이어서 실행합니다. 같은 저장소의 git worktree 같은 다른 체크아웃에서는 훅이 한 줄만 출력하고 설치하지 않습니다. 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며 merge는 교체하지 않습니다. 훅 때문에 merge가 실패하지도 않습니다.
+설치기는 저장소의 git 훅 경로(`core.hooksPath`, 저장소의 모든 worktree가 함께 조회하는 설정)를 설치 원본의 `hooks` 폴더로 작성합니다. 설치 원본에서 merge나 pull을 하면 설치 원본의 post-merge 훅이 감지한 모든 호스트에 설치를 이어서 실행합니다. 같은 저장소의 다른 worktree에서 merge나 pull을 하면 git은 그 worktree의 훅 파일이 아니라 설치 원본의 같은 훅을 실행하고, 훅은 한 줄만 출력하고 설치하지 않습니다. worktree 자신의 훅 설정(`git config --worktree core.hooksPath`)이 있으면 git은 그 설정을 먼저 조회합니다. 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며 merge는 교체하지 않습니다. 훅 때문에 merge가 실패하지도 않습니다. 마지막 호스트의 전체 제거는 설치 전의 훅 경로를 다시 작성하며, 설치 뒤에 바뀐 값은 그대로 둡니다.
 
 ## Common Commands
 

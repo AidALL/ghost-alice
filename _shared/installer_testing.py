@@ -1,13 +1,23 @@
-"""Shared fixtures for the `installer` tests: a fake source checkout, its `REPO_ROOT` patch, a Context and a recording runner."""
+"""Shared fixtures for the `installer` tests: a fake source checkout, its `REPO_ROOT` patch, a Context, a recording
+runner, and a copy of this checkout in its own repository for a test that runs the real installer."""
 from __future__ import annotations
 
+import atexit
 from contextlib import ExitStack
+import os
 from pathlib import Path
+import shutil
+import tempfile
 from typing import Callable
+import unittest
 from unittest import mock
 
+from git_hook_paths import git, hook_paths
 from installer import cli, report
 from installer.runner import ToolResult
+
+CHECKOUT = Path(__file__).resolve().parents[1]
+_copy_template: Path | None = None
 
 
 def make_source(root: Path) -> Path:
@@ -98,3 +108,55 @@ class FakeRunner:
 def quiet(home: Path, **kwargs) -> None:
     report.configure(verbose=kwargs.pop("verbose", False), report_child=kwargs.pop("report_child", False),
                      tty=False, progress_env="off", home=home, **kwargs)
+
+
+def _template() -> Path:
+    """This checkout's working tree as git sees it (tracked and untracked files that are not ignored), committed once
+    in a new repository; made once per test process and removed when the process ends."""
+    global _copy_template
+    if _copy_template is None:
+        root = Path(tempfile.mkdtemp(prefix="ghost-alice-checkout-"))
+        atexit.register(shutil.rmtree, root, True)
+        template = root / "ghost-alice"
+        template.mkdir()
+        listing = git("-C", str(CHECKOUT), "ls-files", "-z", "--cached", "--others", "--exclude-standard", check=True)
+        for name in filter(None, listing.stdout.split("\0")):
+            source, copy = CHECKOUT / name, template / name
+            if not (source.is_symlink() or source.is_file()):
+                continue
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_symlink():
+                copy.symlink_to(os.readlink(source))
+            else:
+                shutil.copy2(source, copy)
+        # No background maintenance: it writes into .git while a test removes the copy.
+        settings = ("-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false",
+                    "-c", "user.name=Ghost-ALICE tests", "-c", "user.email=tests@example.invalid")
+        for args in (("init", "-q", "-b", "main"), ("config", "maintenance.auto", "false"), ("config", "gc.auto", "0"),
+                     ("add", "-A"), ("commit", "-q", "-m", "Checkout copy for tests")):
+            git("-C", str(template), *settings, *args, check=True)
+        _copy_template = template
+    return _copy_template
+
+
+def checkout_copy(test: unittest.TestCase) -> Path:
+    """A copy of this checkout in its own repository, for a test that runs the real installer from it; removed when
+    the test ends.
+
+    The install writes the git hook path of the repository it runs from and the full uninstall restores it, so a test
+    that installs from this checkout would change the developer's repository and every worktree that inherits its
+    configuration. The copy holds the working tree as it is now, committed once on `main`. When the test ends, it
+    fails if the `core.hooksPath` values of this checkout changed (`git_hook_paths.hook_paths`)."""
+    before = hook_paths(CHECKOUT)
+    parent = Path(tempfile.mkdtemp(prefix="ghost-alice-source-"))
+    test.addCleanup(shutil.rmtree, parent, True)
+    copy = parent / "ghost-alice"
+    shutil.copytree(_template(), copy, symlinks=True)
+
+    def hook_paths_unchanged() -> None:
+        after = hook_paths(CHECKOUT)
+        if after != before:
+            raise AssertionError(f"The test changed core.hooksPath of {CHECKOUT}: {before} -> {after}")
+
+    test.addCleanup(hook_paths_unchanged)
+    return copy.resolve()

@@ -22,6 +22,9 @@ from pathlib import Path
 from _shared.test_addon_installer import _find_test_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT / "_shared") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer_testing import checkout_copy  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -159,10 +162,12 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 "GHOST_ALICE_INSTALL_PROGRESS": "off",
             })
 
+            source = checkout_copy(self)
+
             def run(*args: str) -> subprocess.CompletedProcess[str]:
                 return subprocess.run(
-                    [bash, str(REPO_ROOT / "install.sh"), *args],
-                    cwd=REPO_ROOT,
+                    [bash, str(source / "install.sh"), *args],
+                    cwd=source,
                     env=env,
                     capture_output=True,
                     text=True,
@@ -265,10 +270,12 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 "GHOST_ALICE_INSTALL_PROGRESS": "off",
             })
 
+            source = checkout_copy(self)
+
             def run(*args: str) -> subprocess.CompletedProcess[str]:
                 return subprocess.run(
-                    [zsh, str(REPO_ROOT / "install.sh"), *args],
-                    cwd=REPO_ROOT,
+                    [zsh, str(source / "install.sh"), *args],
+                    cwd=source,
                     env=env,
                     capture_output=True,
                     text=True,
@@ -345,17 +352,18 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 "GHOST_ALICE_INSTALL_PROGRESS": "off",
             })
 
+            source = checkout_copy(self)
             install = subprocess.run(
                 [
                     bash,
-                    str(REPO_ROOT / "install.sh"),
+                    str(source / "install.sh"),
                     "--platform", "claude",
                     "--addon-source", remote_url,
                     "--addon-tag", "missing-branch",
                     "--skip-source-health",
                     "task-router",
                 ],
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -392,17 +400,18 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 "GHOST_ALICE_INSTALL_PROGRESS": "off",
             })
 
+            source = checkout_copy(self)
             install = subprocess.run(
                 [
                     bash,
-                    str(REPO_ROOT / "install.sh"),
+                    str(source / "install.sh"),
                     "--platform", "claude",
                     "--addon-source", str(addon),
                     "--addon-tag", "p6-privileged-adapter",
                     "--skip-source-health",
                     "task-router",
                 ],
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,

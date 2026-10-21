@@ -416,7 +416,8 @@ def write_empty_pending_manifest_if_missing(ctx: "Context", platform_dir: str, m
 def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str],
                                  hook_change: "HookPathChange | None") -> bool:
     """`install_state_writer.py <platform> <root> <branch> <head> <dirty> <state> NAME SRC DEST MODE ...`
-    with the `GHOST_ALICE_SOURCE_REPO_HOOK_*` environment (`install.sh:571-610`)."""
+    with the `GHOST_ALICE_SOURCE_REPO_HOOK_*` environment (`install.sh:571-610`): the shared git hook path this
+    install owns and the value the full uninstall restores, whenever the install knows that value (`hook_change`)."""
     skills_dir = Path(skills_dir)
     state_path = locations.install_state_path(ctx.platform)
     try:
@@ -433,12 +434,13 @@ def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bo
     for target in _targets(ctx, skills):
         dest = skills_dir / target.name
         targets.extend([target.name, str(target.path), str(dest), detect_install_mode(dest, copy_only)])
-    changed = bool(hook_change and hook_change.changed)
+    recorded = hook_change if hook_change is not None and hook_change.recorded else None
     env = {
-        "GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED": "1" if changed else "0",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "1" if hook_change and hook_change.before_present else "0",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": hook_change.before if hook_change else "",
-        "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": hook_change.after if hook_change else source.HOOKS_DIR,
+        "GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1" if recorded else "0",
+        "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT": "1" if recorded and recorded.before_present else "0",
+        "GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE": recorded.before if recorded else "",
+        "GHOST_ALICE_SOURCE_REPO_HOOK_AFTER": recorded.after if recorded else "",
+        "GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT": (recorded.applied_at or "") if recorded else "",
     }
     result = runner.run_tool("_shared/install_state_writer.py", ctx.platform, str(info.root), info.branch, info.head,
                              info.dirty, str(state_path), *targets, env=env)

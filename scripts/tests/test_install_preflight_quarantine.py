@@ -11,10 +11,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "merge-companion" / "scripts"))
 from installer_assets import write_ownership_marker
 from file_walker import walk_user_files
+from installer_testing import checkout_copy
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
 
 
 def _find_test_bash() -> str | None:
@@ -113,10 +113,11 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
 
-            cmd = [executable, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
+            source = checkout_copy(self)
+            cmd = [executable, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
             first = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -133,7 +134,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
 
             second = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -161,10 +162,11 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
 
-            cmd = [bash_exe, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
+            source = checkout_copy(self)
+            cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
             first = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -180,7 +182,7 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
 
             second = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -207,11 +209,12 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
-            cmd = [bash_exe, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
+            source = checkout_copy(self)
+            cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
 
             result = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -249,11 +252,12 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
-            cmd = [bash_exe, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
+            source = checkout_copy(self)
+            cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
 
             result = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -282,11 +286,12 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
-            cmd = [bash_exe, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
+            source = checkout_copy(self)
+            cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
 
             result = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -314,11 +319,12 @@ class InstallPreflightQuarantineTest(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
-            cmd = [bash_exe, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "task-router"]
+            source = checkout_copy(self)
+            cmd = [bash_exe, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "task-router"]
 
             result = subprocess.run(
                 cmd,
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,

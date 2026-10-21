@@ -17,7 +17,7 @@ from _installer_source import installer_bash_source, installer_ps1_source
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 import uninstall_cleanup as cleanup
-from installer_testing import installer_home_effects  # noqa: E402
+from installer_testing import checkout_copy, installer_home_effects  # noqa: E402
 
 UNINSTALL_CLEANUP = REPO_ROOT / "_shared" / "uninstall_cleanup.py"
 INSTALL_SH = REPO_ROOT / "install.sh"
@@ -730,17 +730,43 @@ class UninstallCleanupTest(unittest.TestCase):
             kinds = [item["kind"] for item in data["items"]]
             self.assertLess(kinds.index("hook-config"), kinds.index("install-target"))
 
-    def test_confirm_restores_source_repo_hook_path_when_manifest_records_it(self) -> None:
+    def _hook_path_repo(self, root: Path, value: str | None) -> tuple[str, Path]:
         git = shutil.which("git")
         if not git:
-            self.skipTest("git executable is required for source repo hook rollback test")
+            self.skipTest("git executable is required for source repo hook path tests")
+        repo = root / "repo"
+        repo.mkdir()
+        subprocess.run([git, "init"], cwd=repo, check=True, capture_output=True, text=True)
+        if value is not None:
+            subprocess.run([git, "config", "--local", "core.hooksPath", value], cwd=repo, check=True)
+        return git, repo
 
+    @staticmethod
+    def _hook_path(git: str, repo: Path) -> str | None:
+        current = subprocess.run([git, "config", "--local", "--get", "core.hooksPath"], cwd=repo,
+                                 capture_output=True, text=True)
+        return current.stdout.strip() if current.returncode == 0 else None
+
+    @staticmethod
+    def _hook_change(repo: Path, *, before: str | None) -> dict:
+        return {
+            "kind": "source_repo_hook_path",
+            "repo_root": repo.as_posix(),
+            "before_present": before is not None,
+            "before": before,
+            "after": (repo / "hooks").as_posix(),
+            "applied_at": "2026-10-21T00:00:00Z",
+        }
+
+    def _source_hook_item(self, report: Path) -> dict:
+        data = json.loads(report.read_text(encoding="utf-8"))
+        return next(item for item in data["items"] if item.get("kind") == "source-repo-hook-config")
+
+    def test_confirm_leaves_a_source_repo_hook_path_no_change_record_names(self) -> None:
+        # A value of `hooks` alone does not say this install wrote it: another installation or the user may have.
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            repo = root / "repo"
-            repo.mkdir()
-            subprocess.run([git, "init"], cwd=repo, check=True, capture_output=True, text=True)
-            subprocess.run([git, "config", "--local", "core.hooksPath", "hooks"], cwd=repo, check=True)
+            git, repo = self._hook_path_repo(root, "hooks")
             managed = _write_managed_skill(root, "task-router")
             manifest = _write_manifest(
                 root,
@@ -752,61 +778,131 @@ class UninstallCleanupTest(unittest.TestCase):
             result = self.run_cleanup(root, manifest, report, confirm=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            current = subprocess.run(
-                [git, "config", "--local", "--get", "core.hooksPath"],
-                cwd=repo,
-                capture_output=True,
-                text=True,
+            self.assertEqual(self._hook_path(git, repo), "hooks")
+            source_hook = self._source_hook_item(report)
+            self.assertEqual((source_hook["action"], source_hook["reason"]),
+                             ("unchanged", "source-repo-hook-path-unrecorded"))
+
+    def test_confirm_unsets_the_hook_path_the_install_wrote_over_no_value(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo = self._hook_path_repo(root, None)
+            subprocess.run([git, "config", "--local", "core.hooksPath", (repo / "hooks").as_posix()], cwd=repo,
+                           check=True)
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                source_root=repo,
+                system_env_changes=[self._hook_change(repo, before=None)],
             )
-            self.assertNotEqual(current.returncode, 0)
-            data = json.loads(report.read_text(encoding="utf-8"))
-            source_hook = next(item for item in data["items"] if item.get("kind") == "source-repo-hook-config")
-            self.assertEqual(source_hook["action"], "removed-source-repo-hook-path")
+            report = root / "uninstall-report.json"
+
+            dry = self.run_cleanup(root, manifest, report)
+            self.assertEqual(dry.returncode, 0, msg=dry.stderr + dry.stdout)
+            self.assertEqual(self._source_hook_item(report)["action"], "would-remove-source-repo-hook-path")
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertIsNone(self._hook_path(git, repo))
+            self.assertEqual(self._source_hook_item(report)["action"], "removed-source-repo-hook-path")
 
     def test_confirm_restores_previous_source_repo_hook_path_from_change_record(self) -> None:
-        git = shutil.which("git")
-        if not git:
-            self.skipTest("git executable is required for source repo hook rollback test")
-
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
-            repo = root / "repo"
-            repo.mkdir()
-            subprocess.run([git, "init"], cwd=repo, check=True, capture_output=True, text=True)
-            subprocess.run([git, "config", "--local", "core.hooksPath", "hooks"], cwd=repo, check=True)
+            git, repo = self._hook_path_repo(root, None)
+            subprocess.run([git, "config", "--local", "core.hooksPath", (repo / "hooks").as_posix()], cwd=repo,
+                           check=True)
             managed = _write_managed_skill(root, "task-router")
             manifest = _write_manifest(
                 root,
                 [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
                 source_root=repo,
-                system_env_changes=[
-                    {
-                        "kind": "source_repo_hook_path",
-                        "repo_root": repo.as_posix(),
-                        "before_present": True,
-                        "before": "custom-hooks",
-                        "after": "hooks",
-                        "applied_at": "2026-05-16T00:00:00Z",
-                    }
-                ],
+                system_env_changes=[self._hook_change(repo, before="custom-hooks")],
             )
             report = root / "uninstall-report.json"
 
             result = self.run_cleanup(root, manifest, report, confirm=True)
 
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
-            current = subprocess.run(
-                [git, "config", "--local", "--get", "core.hooksPath"],
-                cwd=repo,
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(current.returncode, 0)
-            self.assertEqual(current.stdout.strip(), "custom-hooks")
-            data = json.loads(report.read_text(encoding="utf-8"))
-            source_hook = next(item for item in data["items"] if item.get("kind") == "source-repo-hook-config")
+            self.assertEqual(self._hook_path(git, repo), "custom-hooks")
+            source_hook = self._source_hook_item(report)
             self.assertEqual(source_hook["action"], "restored-source-repo-hook-path")
             self.assertEqual(source_hook["restored_to"], "custom-hooks")
+
+    def test_confirm_leaves_a_hook_path_that_changed_after_the_install(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo = self._hook_path_repo(root, "user-hooks")
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                source_root=repo,
+                system_env_changes=[self._hook_change(repo, before=None)],
+            )
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), "user-hooks")
+            self.assertEqual(self._source_hook_item(report)["action"], "unchanged")
+
+    def test_a_removal_that_is_not_the_last_host_leaves_the_hook_path(self) -> None:
+        # Every host installs from the one install source, so the post-merge hook serves the hosts that remain.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            git, repo = self._hook_path_repo(root, None)
+            hooks = (repo / "hooks").as_posix()
+            subprocess.run([git, "config", "--local", "core.hooksPath", hooks], cwd=repo, check=True)
+            managed = _write_managed_skill(root, "task-router")
+            manifest = _write_manifest(
+                root,
+                [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                source_root=repo,
+                system_env_changes=[self._hook_change(repo, before=None)],
+            )
+            (manifest.parent / "claude.json").write_text(json.dumps({"schema_version": 1, "platform": "claude"}),
+                                                         encoding="utf-8")
+            report = root / "uninstall-report.json"
+
+            result = self.run_cleanup(root, manifest, report, confirm=True)
+
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            self.assertEqual(self._hook_path(git, repo), hooks)
+            source_hook = self._source_hook_item(report)
+            self.assertEqual((source_hook["action"], source_hook["reason"], source_hook["shared_platforms"]),
+                             ("unchanged", "source-repo-hook-path-in-use-by-other-platform", ["claude"]))
+
+    def test_the_record_of_the_hook_path_write_goes_with_the_last_host(self) -> None:
+        # The install writes one record of its hook path write for the whole installation, next to the hosts'
+        # install-state manifests; a host's removal keeps it while another host remains.
+        for other_host in (True, False):
+            with self.subTest(other_host=other_host), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                managed = _write_managed_skill(root, "task-router")
+                manifest = _write_manifest(
+                    root,
+                    [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                )
+                record = manifest.parent / "source-repo-hook-path.json"
+                record.write_text(json.dumps({"kind": "source_repo_hook_path", "repo_root": (root / "repo").as_posix(),
+                                              "before_present": False, "before": None,
+                                              "after": (root / "repo" / "hooks").as_posix(),
+                                              "applied_at": "2026-10-21T00:00:00Z"}), encoding="utf-8")
+                if other_host:
+                    (manifest.parent / "claude.json").write_text(
+                        json.dumps({"schema_version": 1, "platform": "claude"}), encoding="utf-8")
+                report = root / "uninstall-report.json"
+
+                result = self.run_cleanup(root, manifest, report, confirm=True)
+
+                self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+                self.assertEqual(record.exists(), other_host)
+                data = json.loads(report.read_text(encoding="utf-8"))
+                item = next(item for item in data["items"] if item.get("target_name") == "source-repo-hook-path-record")
+                self.assertEqual(item["action"], "manual-review" if other_host else "removed")
 
     def test_confirm_restores_codex_hooks_feature_flag_from_change_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1146,9 +1242,10 @@ class UninstallCleanupTest(unittest.TestCase):
             env["HOME"] = str(root)
             env["GHOST_ALICE_LANG"] = "en"
 
+            source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(INSTALL_SH), "--platform", "codex", "--uninstall"],
-                cwd=REPO_ROOT,
+                [bash, str(source / "install.sh"), "--platform", "codex", "--uninstall"],
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -1180,9 +1277,10 @@ class UninstallCleanupTest(unittest.TestCase):
             env["HOME"] = str(root)
             env["GHOST_ALICE_LANG"] = "en"
 
+            source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(INSTALL_SH), "--uninstall"],
-                cwd=REPO_ROOT,
+                [bash, str(source / "install.sh"), "--uninstall"],
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,

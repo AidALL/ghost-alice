@@ -15,6 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from _shared.git_hook_paths import hook_paths
 from _shared.project_runtime import project_runtime
 
 
@@ -157,41 +158,57 @@ def _list_groups() -> None:
         print(f"{group.name}: {' '.join(group.command)}")
 
 
+def _run_group(runtime, group: TestGroup) -> int:
+    """One group's command, and for shared-all the owned function tests after it; the first failing exit code."""
+    result = runtime.run(
+        group.command,
+        cwd=REPO_ROOT,
+        runner=subprocess.run,
+        check=False,
+    )
+    if result.returncode != 0:
+        print(f"FAILED {group.name}: exit {result.returncode}", file=sys.stderr)
+        return result.returncode
+    if group.name == "shared-all":
+        print("Shared function tests: install destination and retired stage/discovery", flush=True)
+        result = runtime.run(
+            _py(
+                "-m", "pytest", "-q",
+                "_shared/test_install_destination.py",
+                "_shared/test_retired_detector_stage.py",
+                "_shared/test_retired_discovery.py",
+                "--basetemp", str(runtime.temp_dir / "shared-pytest"),
+                "-p", "no:cacheprovider",
+            ),
+            cwd=REPO_ROOT,
+            runner=subprocess.run,
+            check=False,
+        )
+        if result.returncode != 0:
+            print(f"FAILED {group.name} function tests: exit {result.returncode}", file=sys.stderr)
+            return result.returncode
+    return 0
+
+
 def run(groups: Sequence[TestGroup]) -> int:
     runtime_rc = _check_python_runtime()
     if runtime_rc:
         return runtime_rc
 
+    # The installer writes the git hook path of the repository it runs from: a test that installs from this checkout
+    # instead of a copy changes the configuration every worktree of the repository shares.
+    before = hook_paths(REPO_ROOT)
     with project_runtime(REPO_ROOT, "installer-compat-tests") as runtime:
         for group in groups:
             print(f"== {group.name}: {group.description}", flush=True)
-            result = runtime.run(
-                group.command,
-                cwd=REPO_ROOT,
-                runner=subprocess.run,
-                check=False,
-            )
-            if result.returncode != 0:
-                print(f"FAILED {group.name}: exit {result.returncode}", file=sys.stderr)
-                return result.returncode
-            if group.name == "shared-all":
-                print("Shared function tests: install destination and retired stage/discovery", flush=True)
-                result = runtime.run(
-                    _py(
-                        "-m", "pytest", "-q",
-                        "_shared/test_install_destination.py",
-                        "_shared/test_retired_detector_stage.py",
-                        "_shared/test_retired_discovery.py",
-                        "--basetemp", str(runtime.temp_dir / "shared-pytest"),
-                        "-p", "no:cacheprovider",
-                    ),
-                    cwd=REPO_ROOT,
-                    runner=subprocess.run,
-                    check=False,
-                )
-                if result.returncode != 0:
-                    print(f"FAILED {group.name} function tests: exit {result.returncode}", file=sys.stderr)
-                    return result.returncode
+            code = _run_group(runtime, group)
+            after = hook_paths(REPO_ROOT)
+            if after != before:
+                print(f"FAILED {group.name}: the tests changed core.hooksPath of {REPO_ROOT}: {before} -> {after}",
+                      file=sys.stderr)
+                return code or 1
+            if code != 0:
+                return code
     return 0
 
 

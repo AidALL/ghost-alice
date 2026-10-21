@@ -20,6 +20,7 @@ from _shared.test_addon_installer import _find_test_bash
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer_testing import checkout_copy  # noqa: E402
 
 from installer_assets import OWNERSHIP_GHOST_ALICE_MANAGED, classify_skill_root  # noqa: E402
 
@@ -47,10 +48,11 @@ class CodexCopyModeMarkerTest(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = home
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+            source = checkout_copy(self)
             install = subprocess.run(
-                [bash, str(REPO_ROOT / "install.sh"), "--platform", "codex",
+                [bash, str(source / "install.sh"), "--platform", "codex",
                  "--addon-source", str(FIXTURE), "--skip-source-health", "task-router"],
-                cwd=REPO_ROOT, env=env, capture_output=True, text=True,
+                cwd=source, env=env, capture_output=True, text=True,
                 encoding="utf-8", errors="replace", timeout=180, check=False)
             self.assertEqual(install.returncode, 0, msg=install.stderr + install.stdout)
 

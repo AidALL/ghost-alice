@@ -32,6 +32,7 @@ import install_lock  # noqa: E402
 import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
 from installer import selection  # noqa: E402
+from installer_testing import checkout_copy  # noqa: E402
 
 COMPANION = "session-intent-analyzer/scripts/session_intent_ledger.py"
 
@@ -41,11 +42,6 @@ def _target_names() -> list[str]:
     return ["_shared", *[target.name for skill in selection.ALL_SKILLS for target in selection.expand_skill_targets(skill)]]
 
 
-def _head() -> str:
-    return subprocess.run(["git", "-C", str(REPO_ROOT), "rev-parse", "HEAD"], capture_output=True, text=True,
-                          check=True).stdout.strip()
-
-
 class InstallRecordShellTest(unittest.TestCase):
     def setUp(self):
         self.bash = _find_test_bash()
@@ -53,6 +49,7 @@ class InstallRecordShellTest(unittest.TestCase):
             self.skipTest("bash required")
         if sys.version_info < (3, 11):
             self.skipTest("python 3.11+ required")
+        self.source = checkout_copy(self)
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name)
         self.ghost = self.home / ".ghost-alice"
@@ -67,11 +64,15 @@ class InstallRecordShellTest(unittest.TestCase):
     def run_installer(self, *args):
         env = {key: value for key, value in os.environ.items() if key not in ("CLAUDE_CONFIG_DIR", "CODEX_HOME")}
         env.update(HOME=str(self.home), GHOST_ALICE_INSTALL_PROGRESS="off")
-        result = subprocess.run([self.bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT, env=env,
+        result = subprocess.run([self.bash, str(self.source / "install.sh"), *args], cwd=self.source, env=env,
                                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
                                 check=False)
         self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
         return result.stdout + result.stderr
+
+    def head(self) -> str:
+        return subprocess.run(["git", "-C", str(self.source), "rev-parse", "HEAD"], capture_output=True, text=True,
+                              check=True).stdout.strip()
 
     def record(self) -> dict:
         record = installed_payload.read(self.ghost)
@@ -103,13 +104,13 @@ class InstallRecordShellTest(unittest.TestCase):
         # The service's companion script is published with the runtime, by the same publish.
         companion = targets[self.companion.as_posix()]
         self.assertEqual((companion["kind"], companion["name"]), ("runtime", COMPANION))
-        self.assertEqual(companion["source"], str(REPO_ROOT / COMPANION))
+        self.assertEqual(companion["source"], str(self.source / COMPANION))
         self.assertEqual(companion["files"], {".": content_digest.file_digest(self.companion)})
         self.assertEqual(targets[(self.codex / "_shared").as_posix()]["kind"], "support")
         self.assert_matches_the_disk(targets)
-        head = _head()
+        head = self.head()
         self.assertEqual(record["installer"], {"commit": head, "schema_version": 1})
-        self.assertEqual((record["source"]["root"], record["source"]["commit"]), (str(REPO_ROOT), head))
+        self.assertEqual((record["source"]["root"], record["source"]["commit"]), (str(self.source), head))
         journal = Path(record["last_transaction"]["rollback_dir"]) / "journal.json"
         self.assertIn('"phase": "done"', journal.read_text(encoding="utf-8"))
         self.assertEqual([t["dest"] for t in json.loads(journal.read_text(encoding="utf-8"))["targets"]],

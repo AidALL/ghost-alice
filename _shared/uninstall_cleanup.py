@@ -176,7 +176,7 @@ def _source_repo_hook_item_from_change(change: dict[str, Any], *, confirm: bool)
         return None
 
     repo_root = Path(raw_repo_root).expanduser()
-    after = str(change.get("after") or "hooks")
+    after = str(change.get("after") or "")
     before = change.get("before")
     before_present = bool(change.get("before_present"))
     item: dict[str, Any] = {
@@ -264,18 +264,46 @@ def _source_repo_hook_item_from_change(change: dict[str, Any], *, confirm: bool)
     return item
 
 
-def _source_repo_hook_items(manifest: dict[str, Any], *, confirm: bool) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for change in manifest.get("system_env_changes", []):
-        if isinstance(change, dict) and change.get("kind") == "source_repo_hook_path":
-            item = _source_repo_hook_item_from_change(change, confirm=confirm)
-            if item is not None:
-                items.append(item)
-    if items:
-        return items
+def _source_repo_hook_items(
+    manifest: dict[str, Any], *, confirm: bool, other_platforms: list[str]
+) -> list[dict[str, Any]]:
+    """The source repository's shared `core.hooksPath`, restored only by the full removal of the last host.
 
-    legacy = _legacy_source_repo_hook_item(manifest, confirm=confirm)
-    return [legacy] if legacy is not None else []
+    Every host installs from the one install source, so while another host's install-state remains the hook path
+    stays for it. The last host restores the value the install-state records from before Ghost-ALICE wrote one,
+    when the value is still the one the install wrote. Without a record of the change the value stays: a value alone
+    does not say that this install wrote it.
+    """
+    changes = [change for change in manifest.get("system_env_changes", [])
+               if isinstance(change, dict) and change.get("kind") == "source_repo_hook_path"]
+    repo_root = _manifest_repo_root(manifest)
+    if not changes:
+        if repo_root is None:
+            return []
+        return [{
+            "kind": "source-repo-hook-config",
+            "target_name": "source-repo-core-hooks-path",
+            "path": repo_root.as_posix(),
+            "action": "unchanged",
+            "reason": "source-repo-hook-path-unrecorded",
+        }]
+    items: list[dict[str, Any]] = []
+    for change in changes:
+        if other_platforms:
+            items.append({
+                "kind": "source-repo-hook-config",
+                "target_name": "source-repo-core-hooks-path",
+                "path": str(change.get("repo_root") or ""),
+                "expected_current": change.get("after"),
+                "action": "unchanged",
+                "reason": "source-repo-hook-path-in-use-by-other-platform",
+                "shared_platforms": other_platforms,
+            })
+            continue
+        item = _source_repo_hook_item_from_change(change, confirm=confirm)
+        if item is not None:
+            items.append(item)
+    return items
 
 
 def _find_toml_section_bounds(lines: list[str], section_name: str) -> tuple[int | None, int]:
@@ -585,62 +613,6 @@ def _codex_project_trust_items(manifest: dict[str, Any], *, confirm: bool) -> li
     return items
 
 
-def _legacy_source_repo_hook_item(manifest: dict[str, Any], *, confirm: bool) -> dict[str, Any] | None:
-    repo_root = _manifest_repo_root(manifest)
-    if repo_root is None:
-        return None
-
-    item: dict[str, Any] = {
-        "kind": "source-repo-hook-config",
-        "target_name": "source-repo-core-hooks-path",
-        "path": repo_root.as_posix(),
-    }
-    try:
-        current = subprocess.run(
-            ["git", "-C", str(repo_root), "config", "--local", "--get", "core.hooksPath"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            check=False,
-        )
-    except FileNotFoundError:
-        item.update(action="manual-review", reason="git-not-found")
-        return item
-
-    if current.returncode != 0:
-        item.update(action="unchanged", reason="source-repo-hook-path-absent")
-        return item
-
-    hook_path = current.stdout.strip()
-    item["before"] = hook_path
-    if hook_path != "hooks":
-        item.update(action="unchanged", reason="non-ghost-alice-hook-path")
-        return item
-
-    if not confirm:
-        item.update(action="would-remove-source-repo-hook-path", reason="ghost-alice-post-merge-hook-path")
-        return item
-
-    removed = subprocess.run(
-        ["git", "-C", str(repo_root), "config", "--local", "--unset", "core.hooksPath"],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
-    )
-    if removed.returncode == 0:
-        item.update(action="removed-source-repo-hook-path", reason="ghost-alice-post-merge-hook-path")
-    else:
-        item.update(
-            action="manual-review",
-            reason="source-repo-hook-path-unset-failed",
-            stderr=removed.stderr.strip(),
-        )
-    return item
-
-
 def _apply_remove_action(item: dict[str, Any], path: Path, *, confirm: bool, reason: str) -> dict[str, Any]:
     if confirm:
         _remove_path(path)
@@ -931,6 +903,13 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             confirm=args.confirm,
             shared_platforms=others,
         ),
+        # The record of the installation's git hook path write, which the hosts' install-state entries also carry.
+        _support_artifact_item(
+            "source-repo-hook-path-record",
+            install_state_dir / "source-repo-hook-path.json",
+            confirm=args.confirm,
+            shared_platforms=others,
+        ),
         _support_artifact_item(
             "addon-sidecars",
             _ghost_alice_root() / "addons" / args.platform,
@@ -1103,7 +1082,9 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             }
         )
     else:
-        items.extend(_source_repo_hook_items(manifest, confirm=args.confirm))
+        items.extend(_source_repo_hook_items(
+            manifest, confirm=args.confirm,
+            other_platforms=_other_platform_install_states(args.install_state_manifest, args.platform)))
         items.extend(_codex_hook_feature_items(manifest, confirm=args.confirm))
         items.extend(_codex_project_trust_items(manifest, confirm=args.confirm))
         for target in manifest.get("targets", []):

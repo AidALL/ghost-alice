@@ -21,6 +21,9 @@ from _shared.test_addon_installer import _find_test_bash
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RICH = REPO_ROOT / "_shared" / "tests" / "fixtures" / "rich-addon"
+if str(REPO_ROOT / "_shared") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer_testing import checkout_copy  # noqa: E402
 
 
 def _python_311() -> bool:
@@ -48,9 +51,11 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             env["HOME"] = home
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
+            source = checkout_copy(self)
+
             def run(*args):
                 return subprocess.run(
-                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(source / "install.sh"), *args], cwd=source,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 
@@ -109,9 +114,11 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             env["HOME"] = home
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
+            source = checkout_copy(self)
+
             def run(*args):
                 return subprocess.run(
-                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(source / "install.sh"), *args], cwd=source,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 
@@ -138,9 +145,11 @@ class CommandResourceLifecycleTest(unittest.TestCase):
             env["HOME"] = home
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
+            source = checkout_copy(self)
+
             def run(*args):
                 return subprocess.run(
-                    [bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+                    [bash, str(source / "install.sh"), *args], cwd=source,
                     env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
                     timeout=180, check=False)
 

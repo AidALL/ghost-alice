@@ -63,7 +63,7 @@ Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달합니다. `i
 설치 명령은 다음 순서로 진행합니다. `installer.cli.dispatch`가 1단계를, `installer.cli.prepare_install`이 2단계를 실행하고, `installer.cli.run_command`가 잠금을 잡은 뒤, `installer.cli.run_install`이 나머지를 실행합니다. `_shared/test_installer_cli.py`가 이 순서를 고정합니다.
 
 1. 설치 원본 확인. 아무것도 바꾸기 전에 실행합니다. `installer.source.match_install_source`가 설치 기록의 `source.root`와 설치기가 실행되는 체크아웃을 링크를 따라간 경로로 비교합니다. 이 함수가 어느 체크아웃이 설치 원본인지 판정하는 유일한 함수입니다. `installer.source.check_install_source`는 그 결과로 진행하거나 종료합니다. 기록이 없거나, 기록에 원본이 없거나, 기록의 체크아웃이면 진행합니다. 두 번째 clone이나 git worktree 같은 다른 체크아웃은 `--adopt-source`가 있으면 진행합니다. 기록된 체크아웃이 더는 없으면(다른 경로에 다시 clone한 경우) 묻지 않고 진행합니다. 그 밖의 경우 설치기는 두 폴더를 출력하고, 터미널에서는 이 체크아웃으로 설치 원본을 교체할지 묻습니다(기본값 아니오). 터미널이 아니면 종료 코드 2로 종료하고 실행할 명령을 안내합니다. 자동 모드는 부모 프로세스가 한 번만 확인하고, 교체 결정을 `--adopt-source`로 자식 프로세스에 전달합니다. 기록을 읽을 수 없으면 경고를 출력하고 확인을 건너뜁니다. 명령의 첫 게시가 새 원본을 기록합니다. 애드온 소스는 이 단계 뒤에 준비합니다. `--repair`도 이 단계를 먼저 실행하지만 설치 원본을 교체하지 않습니다. 다른 체크아웃에서 실행하면 종료 코드 2로 종료하고, 설치본을 옮기는 설치 명령을 안내합니다. 명령은 잠금(3단계)을 잡은 뒤 한 번 더 비교합니다. 그래서 이 명령이 잠금을 기다리는 동안 다른 설치기가 원본을 바꿨다면, 바뀐 상태로 다시 판정합니다.
-2. 선행 도구(`git`, `node`)와 소스 체크아웃의 git hook 경로.
+2. 선행 도구(`git`, `node`)와 git 훅 경로. 설치기는 저장소의 공용 `core.hooksPath`를 설치 원본 `hooks` 폴더의 절대 경로로 작성합니다([post-merge 훅](#post-merge-훅)).
 3. 설치 잠금(`~/.ghost-alice/install.lock`). 명령이 끝날 때까지 쥡니다. 설치기는 잠금을 생성한 직후, 저널이 `done`도 `restored`도 아닌 게시를 모두 복원합니다.
 4. 설치 기록 이관. `~/.ghost-alice/installed-payload.json`이 없고 이전 설치기의 install-state가 있을 때만 실행합니다. 그다음 소스 상태 확인, 그다음 대상 수집(핵심 스킬, `_shared`, 애드온 대상).
 5. deprecated 설치 스킬을 발견 경로 밖으로 옮긴 뒤, 인코딩 검사, 그다음 로컬 수정을 격리하거나 기록하는 사전 점검.
@@ -76,7 +76,11 @@ Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달합니다. `i
 
 ### post-merge 훅
 
-git hook 단계(2단계)가 저장소의 `core.hooksPath`를 `hooks`로 설정하므로, 저장소의 모든 worktree가 merge나 pull에 성공한 뒤 `hooks/post-merge`를 실행합니다. 훅은 merge한 체크아웃의 `bash install.sh --post-merge`를 호출하고, `installer.cli.run_post_merge`는 설치 원본 확인의 판정 함수 `installer.source.match_install_source`를 호출합니다. 설치 기록이 설치 원본으로 지정한 체크아웃이면 이 단계는 감지한 모든 호스트에 자동 모드 설치를 이어서 실행합니다. 이 단계는 잠금을 잡지 않습니다. 호스트마다의 설치가 잠금을 잡으며, 다른 설치가 잠금을 쥐고 있으면 설치는 아무것도 바꾸지 않고 종료하고 훅은 그 종료 코드를 한 줄로 보고합니다. 다른 체크아웃이거나, 기록이 없거나, 기록을 읽을 수 없으면 이 단계는 한 줄만 출력하고 설치하지 않습니다. 기록된 체크아웃이 더는 없을 때 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며, merge는 교체하지 않습니다. 훅은 항상 종료 코드 0으로 종료하므로 훅 때문에 merge가 실패하지 않습니다.
+git 훅 단계(2단계)는 저장소의 `core.hooksPath`를 `git config --local`로 작성하며, 값은 설치 원본 `hooks` 폴더의 절대 경로입니다. 저장소의 모든 worktree가 이 설정을 함께 조회합니다. 그래서 어느 worktree에서 merge나 pull에 성공하든 git은 설치 원본의 `hooks/post-merge`를 실행하고, 다른 체크아웃의 같은 이름 파일은 실행하지 않습니다. worktree 자신의 설정(`git config --worktree`)이 있으면 git은 그 설정을 먼저 조회합니다. `installer.source.setup_git_hooks`는 작성한 값과, Ghost-ALICE가 값을 작성하기 전의 값을 반환합니다. 호스트마다의 install-state가 두 값을 기록하고(`system_env_changes`, kind `source_repo_hook_path`), 설치 기록은 작성한 값을 `source.hooks_path`에 기록합니다. 설치기는 이전 설치기가 작성한 상대 경로 `hooks`를 이전 값 없음으로 기록합니다. 다만 같은 저장소의 체크아웃에서 그 설치기의 install-state가 바꾸기 전 값을 기록했으면, 설치기는 그 값을 이전 값으로 기록합니다. 재설치가 자기 값을 발견하면, 설치기는 설치본이 그 값에 기록한 이전 값을 이어서 기록합니다. 이 단계는 git 설정을 작성하는 같은 단계에서 두 값을 `~/.ghost-alice/install-state/source-repo-hook-path.json`에도 작성합니다. 그래서 install-state를 작성하기 전에 멈춘 설치도 다음 설치에 이전 값을 남깁니다. 어떤 기록도 지정하지 않은 값을 발견하면 설치기는 이전 값을 모르므로 install-state에 항목을 작성하지 않습니다.
+
+훅은 git이 merge한 worktree를 위해 전달한 `GIT_DIR` 같은 변수를 삭제한 뒤, 설치 원본의 `bash install.sh --post-merge --merged-checkout <merge한 worktree>`를 호출합니다. `installer.cli.run_post_merge`는 merge한 체크아웃을 전달해 설치 원본 확인의 판정 함수 `installer.source.match_install_source`를 호출합니다. merge한 체크아웃이 설치 기록이 설치 원본으로 지정한 체크아웃이면, 이 단계는 감지한 모든 호스트에 자동 모드 설치를 이어서 실행합니다. 이 단계는 잠금을 잡지 않습니다. 호스트마다의 설치가 잠금을 잡으며, 다른 설치가 잠금을 쥐고 있으면 설치는 아무것도 바꾸지 않고 종료하고 훅은 그 종료 코드를 한 줄로 보고합니다. 다른 체크아웃이거나, 기록이 없거나, 기록을 읽을 수 없으면 이 단계는 한 줄만 출력하고 설치하지 않습니다. 기록된 체크아웃이 더는 없을 때 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며, merge는 교체하지 않습니다. 훅은 항상 종료 코드 0으로 종료하므로 훅 때문에 merge가 실패하지 않습니다.
+
+마지막 호스트의 전체 제거가 훅 경로를 복원합니다. 저장소의 값이 install-state가 작성한 값으로 기록한 값과 같으면, `_shared/uninstall_cleanup.py`가 기록된 이전 값을 다시 작성하고, 이전 값이 없으면 설정을 삭제합니다. 다른 호스트의 install-state가 남아 있으면 제거는 그 호스트를 위해 훅 경로와 `source-repo-hook-path.json`을 그대로 두고, 마지막 호스트의 제거가 그 기록을 삭제합니다. 어느 install-state도 작성했다고 기록하지 않은 값과, 설치 뒤에 바뀐 값은 제거가 그대로 둡니다.
 
 ## Install Record
 
