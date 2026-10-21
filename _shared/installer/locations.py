@@ -62,9 +62,14 @@ def ghost_root() -> Path:
     return Path(value) if value else home() / ".ghost-alice"
 
 
+def install_state_dir() -> Path:
+    """`~/.ghost-alice/install-state`: the hosts' install-state manifests and the records next to them."""
+    return home() / ".ghost-alice" / "install-state"
+
+
 def install_state_path(platform: str) -> Path:
     """`~/.ghost-alice/install-state/<platform>.json`."""
-    return home() / ".ghost-alice" / "install-state" / f"{platform}.json"
+    return install_state_dir() / f"{platform}.json"
 
 
 def events_log(platform: str) -> Path:

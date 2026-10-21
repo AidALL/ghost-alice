@@ -903,6 +903,13 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             confirm=args.confirm,
             shared_platforms=others,
         ),
+        # The record of the installation's git hook path write, which the hosts' install-state entries also carry.
+        _support_artifact_item(
+            "source-repo-hook-path-record",
+            install_state_dir / "source-repo-hook-path.json",
+            confirm=args.confirm,
+            shared_platforms=others,
+        ),
         _support_artifact_item(
             "addon-sidecars",
             _ghost_alice_root() / "addons" / args.platform,
