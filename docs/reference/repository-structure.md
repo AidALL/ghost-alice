@@ -84,7 +84,7 @@ The platform installation supplies common governance for every project. The Code
 
 ## Runtime State Retention
 
-`_shared/state_retention.py` holds one table of the files and folders a Core installation creates under `~/.ghost-alice` and the host folders, with the rule that keeps each one bounded. The writer of a file applies the rule when it writes, so the code that creates a file also removes what the rule no longer keeps. A removal that fails never stops the writer: it adds one line to `~/.ghost-alice/state-retention-failures.jsonl`, which keeps its last 500 lines, and `--doctor` reports it on the `state-retention` line. A test installs into an empty home, runs every registered hook, forwards a gateway request and uninstalls; it fails when a created file or folder matches no entry of the table.
+`_shared/state_retention.py` holds one table of the files and folders a Core installation creates under `~/.ghost-alice` and the host folders, with the rule that keeps each one bounded. The writer of a file applies the rule when it writes, so the code that creates a file also removes what the rule no longer keeps. Logs that several processes append to, such as `io-trace.jsonl` and `governance-events.jsonl`, append and apply their rule under one lock on the log, so no writer rotates on a size it read before another writer rotated. A removal that fails never stops the writer: it adds one line to `~/.ghost-alice/state-retention-failures.jsonl`, which keeps its last 500 lines, and `--doctor` reports it on the `state-retention` line. A test installs into an empty home, runs every registered hook, forwards a gateway request and uninstalls; it fails when a created file or folder matches no entry of the table.
 
 | Path | Rule | Applied by |
 | --- | --- | --- |
