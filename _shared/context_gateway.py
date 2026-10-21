@@ -1,7 +1,11 @@
 """Loopback native-request gateway with Core-authenticated input selection.
 
 Native credentials and server answer bytes pass through unchanged. Logs contain
-structure, hashes and server usage, never conversation or credential bodies.
+structure, hashes and server usage, never conversation or credential bodies: a
+request field is recorded as its item count, byte total and counts by type and
+role. `response-end` says how the response ended (`completed`, `client-closed`,
+`upstream-closed`). The usage log and the service log keep the retention table's
+limits (`state_retention`).
 Dependencies: Python 3.11+; zstd requests require Python 3.14 compression.zstd.
 """
 import argparse
@@ -12,6 +16,7 @@ import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import sys
 import threading
 import urllib.error
 import urllib.parse
@@ -19,12 +24,16 @@ import urllib.request
 import uuid
 import zlib
 
+import state_retention
+
 HOP = {'host', 'connection', 'transfer-encoding', 'content-length', 'proxy-connection', 'keep-alive'}
 INTERNAL_HEADERS = {'x-ghost-context-scope', 'x-ghost-context-session'}
 ORIGINS = {'codex': 'https://chatgpt.com/backend-api/codex', 'anthropic': 'https://api.anthropic.com'}
 PLATFORMS = {'codex': 'codex', 'anthropic': 'claude'}
 SELECTION_ENDPOINTS = {'codex': {'responses'}, 'anthropic': {'v1/messages', 'v1/messages/count_tokens'}}
 REDIRECT_REFUSED = 'the model server sent a redirect outside its origin; it was not followed'
+# A client that closed its connection makes the next write to it fail with one of these.
+CLIENT_CLOSED = (BrokenPipeError, ConnectionResetError)
 
 
 def _url_origin(url):
@@ -73,14 +82,18 @@ def digest(value):
     return hashlib.sha256(value).hexdigest()
 
 
-def item_shape(item):
-    raw = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
-    shape = {'sha256': digest(raw), 'bytes': len(raw)}
-    if isinstance(item, dict):
-        for key in ('type', 'role', 'call_id', 'name'):
-            if isinstance(item.get(key), str):
-                shape[key] = item[key]
-    return shape
+def field_shape(value):
+    """Item count, byte total and counts by type and role of one request field; a value that is not a list
+    is one item."""
+    items = value if isinstance(value, list) else [value]
+    types, roles, size = {}, {}, 0
+    for item in items:
+        size += len(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode())
+        if isinstance(item, dict):
+            for key, counts in (('type', types), ('role', roles)):
+                if isinstance(item.get(key), str):
+                    counts[item[key]] = counts.get(item[key], 0) + 1
+    return {'items': len(items), 'bytes': size, 'types': types, 'roles': roles}
 
 
 def decode_body(raw, encoding):
@@ -142,15 +155,30 @@ class UsageSnapshots:
             return None
         self.usage = _merge_usage(self.usage, usage)
         observed = dict(server_id=self.server_id, server_event=event.get('type'), model=self.model,
-                        raw_usage=copy.deepcopy(usage), usage=copy.deepcopy(self.usage))
+                        usage=_recorded_usage(self.usage))
         context = event.get('context_management', container.get('context_management'))
         if self.provider == 'anthropic' and isinstance(context, dict):
             observed['context_management'] = copy.deepcopy(context)
         return observed
 
 
+def _recorded_usage(usage):
+    """The usage snapshot as recorded: a native attribution table keeps only its item count."""
+    recorded = copy.deepcopy(usage)
+    attribution = recorded.get('attribution')
+    if isinstance(attribution, dict):
+        items = attribution.get('items')
+        recorded['attribution'] = {'item_count': len(items) if isinstance(items, (dict, list)) else 0}
+    return recorded
+
+
 def forward_stream(upstream, sink, provider, on_usage):
-    """Copy original response bytes while observing native usage separately."""
+    """Copy original response bytes while observing native usage separately.
+
+    Reading the upstream and writing the client are wrapped apart: a failed read ends the copy with
+    `upstream-closed`, a client that closed its connection ends it with `client-closed`, and any other error
+    is raised. The details name the result and, when the copy stopped early, the error type.
+    """
     parser = UsageSnapshots(provider)
     pending = b''
     response_hash = hashlib.sha256()
@@ -169,13 +197,22 @@ def forward_stream(upstream, sink, provider, on_usage):
             observable = False
     if decoder_factory is not None:
         decoder = decoder_factory()
+    result, error_type = 'completed', None
     while True:
-        chunk = upstream.read1(65536)
+        try:
+            chunk = upstream.read1(65536)
+        except Exception as error:  # the upstream side ended the response
+            result, error_type = 'upstream-closed', type(error).__name__
+            break
         if not chunk:
             break
         response_hash.update(chunk)
-        sink.write(chunk)
-        sink.flush()
+        try:
+            sink.write(chunk)
+            sink.flush()
+        except CLIENT_CLOSED as error:
+            result, error_type = 'client-closed', type(error).__name__
+            break
         if not observable:
             continue
         try:
@@ -208,8 +245,11 @@ def forward_stream(upstream, sink, provider, on_usage):
                 on_usage(observed)
     if decoder is not None and not decoder.eof:
         observable = False
-    return dict(wire_sha256=response_hash.hexdigest(), sse_events_observed=events,
-                usage_stream_observable=observable, response_content_encoding=encoding)
+    details = dict(result=result, wire_sha256=response_hash.hexdigest(), sse_events_observed=events,
+                   usage_stream_observable=observable, response_content_encoding=encoding)
+    if error_type is not None:
+        details['error_type'] = error_type
+    return details
 
 
 def request_shape(raw, encoding):
@@ -220,8 +260,7 @@ def request_shape(raw, encoding):
         result = {'fields': list(body), 'model': body.get('model'), 'units': {}}
         for field in ('input', 'messages', 'system', 'tools'):
             if field in body:
-                value = body[field]
-                result['units'][field] = [item_shape(i) for i in value] if isinstance(value, list) else [item_shape(value)]
+                result['units'][field] = field_shape(body[field])
         return result
     except (ValueError, ImportError, OSError):
         return {'shape_unavailable': 'content-not-decoded'}
@@ -253,8 +292,10 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
 
     def record(value):
         value['observed_at'] = datetime.now(timezone.utc).isoformat()
-        with lock, Path(output).open('a') as stream:
-            stream.write(json.dumps(value, ensure_ascii=False) + '\n')
+        with lock:
+            with Path(output).open('a') as stream:
+                stream.write(json.dumps(value, ensure_ascii=False) + '\n')
+            state_retention.apply('gateway-usage', output)
 
     class Observer(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
@@ -270,14 +311,17 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                 body = json.dumps({'type': 'error', 'error': {'type': 'api_error', 'message': message}}
                                   if provider == 'anthropic' else
                                   {'error': {'message': message, 'type': 'ghost_alice_gateway_error'}}).encode()
-            self.send_response(status)
-            if body:
-                self.send_header('Content-Type', 'application/json')
-            self.send_header('Content-Length', str(len(body)))
-            self.send_header('Connection', 'close')
-            self.end_headers()
-            self.wfile.write(body)
             self.close_connection = True
+            try:
+                self.send_response(status)
+                if body:
+                    self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.send_header('Connection', 'close')
+                self.end_headers()
+                self.wfile.write(body)
+            except CLIENT_CLOSED:
+                pass  # The request's event is recorded; a client that left needs no answer.
 
         def read_body(self):
             if self.headers.get('Transfer-Encoding', '').lower() == 'chunked':
@@ -396,22 +440,31 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                             'provider': provider, 'status': 502})
                     self.reject(502, provider, REDIRECT_REFUSED)
                     return
-                self.send_response(upstream.status)
-                for key, value in upstream.headers.items():
-                    if key.lower() not in HOP:
-                        if redirect_response and key.lower() in ('location', 'uri'):
-                            # The native client sees an HTTP loopback base.
-                            # Relay the absolute URL already validated against
-                            # the upstream base, preserving its HTTPS origin.
-                            value = urllib.parse.urljoin(upstream.geturl(), value.strip())
-                        self.send_header(key, value)
-                self.send_header('Connection', 'close')
-                self.end_headers()
                 self.close_connection = True
+                try:
+                    self.send_response(upstream.status)
+                    for key, value in upstream.headers.items():
+                        if key.lower() not in HOP:
+                            if redirect_response and key.lower() in ('location', 'uri'):
+                                # The native client sees an HTTP loopback base.
+                                # Relay the absolute URL already validated against
+                                # the upstream base, preserving its HTTPS origin.
+                                value = urllib.parse.urljoin(upstream.geturl(), value.strip())
+                            self.send_header(key, value)
+                    self.send_header('Connection', 'close')
+                    self.end_headers()
+                except CLIENT_CLOSED as error:
+                    record({'event': 'response-end', 'request_id': request_id, 'provider': provider,
+                            'status': upstream.status, 'result': 'client-closed',
+                            'error_type': type(error).__name__})
+                    return
                 details = forward_stream(upstream, self.wfile, provider, lambda usage: record(
                     dict(event='server-usage', request_id=request_id, provider=provider, **usage)))
                 record({'event': 'response-end', 'request_id': request_id, 'provider': provider,
                         'status': upstream.status, **details})
+                if details['result'] == 'upstream-closed':
+                    print(f"context gateway: upstream-closed request {request_id} ({details['error_type']})",
+                          file=sys.stderr, flush=True)
 
         do_GET = handle_request
         do_POST = handle_request
@@ -434,6 +487,9 @@ def main(argv=None):
     if 'claude_dir' in config and (not isinstance(config['claude_dir'], str)
                                   or not Path(config['claude_dir']).is_absolute()):
         raise ValueError('An explicit absolute Claude native home is required')
+    # launchd opens the service log beside the usage log for the service's output before it starts the program;
+    # the program keeps it within its limit before it serves.
+    state_retention.apply('gateway-service-log', Path(config['usage_log']).with_name('service.log'))
     from context_lifecycle import select_request, prepare_native_request
     selectors = {'codex': lambda request, _session: select_request(request, config['ledger_root'], config['codex_dir'])}
     origins = {'codex': ORIGINS['codex']}
