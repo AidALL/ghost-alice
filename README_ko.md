@@ -72,6 +72,7 @@ Ghost-ALICE Autopilot은 명시적으로 승인된 작업을 해당 세션의 �
 - Codex를 포함한 모든 플랫폼에서 `_shared/agent_visibility_cli.py`를 통해 같은 프로필 값을 확인하고 변경하실 수 있습니다. Codex에는 `/visibility` 명령이 없습니다.
 - 설치 시 기본값은 `dynamic`입니다. 초기 프로필은 `bash install.sh --visibility dynamic` 또는 `.\install.cmd --visibility dynamic`으로 설정하실 수 있습니다. `--agent-visibility`도 호환성을 위한 별칭으로 유지됩니다.
 - 표시 수준은 사용자에게 보이는 작업 관리 메시지만 바꿉니다. 훅 실행, 엄격한 감사 로그, 작업 영향 분류인 Work-Impact Projection은 축소하지 않습니다.
+- Core가 입력 출처를 확인하지 못했을 때 나오는 Ghost-ALICE 입력 경고는 어느 프로필에서나 같은 세션·같은 원인으로 한 번 표시됩니다. 프로필은 그 경고를 싣는 훅 출력만 바꿉니다. [문제 해결](docs/ko/getting-started/troubleshooting.md#intake-warning-and-doctor-lists)을 참고해 주세요.
 
 전체 제거가 필요하시면 다음 명령을 사용해 주세요.
 

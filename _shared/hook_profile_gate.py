@@ -14,7 +14,6 @@ import os
 import re
 import shlex
 import shutil
-import sqlite3
 import subprocess
 import sys
 import tomllib
@@ -957,15 +956,30 @@ def _native_intake_notice(env, hook_payload):
         from native_completion import _ledger
         notice = _ledger(env).claim_native_input_notice(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
                                                         platform='claude', session_id=session)
-    except (ImportError, OSError, ValueError, RuntimeError, sqlite3.Error):
-        return None  # The wait stays recorded; a later hook can still deliver its notice.
+    except Exception:  # noqa: BLE001 - the inner hook's output goes out; the wait stays recorded for a later hook
+        return None
     if not notice:
         return None
     reason = notice['cause'].split(':', 1)[0]
-    return (f"Ghost-ALICE intake: intent and route recording is paused in this session because "
-            f"{NATIVE_WAIT_REASONS.get(reason, 'an input origin is unconfirmed')} ({reason}). "
-            "It resumes at your next typed input. Later waits with this cause are only recorded; "
+    return (f"Ghost-ALICE intake: records that need a confirmed input (intent, route and completion) are paused "
+            f"in this session because {NATIVE_WAIT_REASONS.get(reason, 'an input origin is unconfirmed')} "
+            f"({reason}). They resume at your next typed input. Later waits with this cause are only recorded; "
             "`bash install.sh --doctor` lists them.")
+
+
+def _record_native_intake_failure(env, hook_payload, error):
+    """Record a failed reconcile in the ledger, else in this run's session hook log row; the hook continues."""
+    failure = dict(phase='reconcile', error=type(error).__name__, detail=str(error)[:200], recorded='ledger')
+    try:
+        session = bound_session_identity('claude', hook_payload, env)
+        if session is None:
+            raise ValueError('no bound native session')
+        from native_completion import _ledger
+        _ledger(env).record_native_intake_failure(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
+                                                  platform='claude', session_id=session, error=error)
+    except Exception:  # noqa: BLE001 - the hook log row keeps the record when the ledger cannot
+        failure['recorded'] = 'hook-log'
+    return failure
 
 
 def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=None) -> int:
@@ -1040,12 +1054,13 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
             env["GHOST_ALICE_COMPLETION_SCHEMA"] = "autopilot-completion-receipt.v2"
         elif hook_id.startswith("adapter-"):
             raise HookCommandRejected("adapter missing registered transport descriptor", hook_payload=hook_payload)
+    native_intake_failure = None
     if binding is not None:
         try:
             _reconcile_native_intake(env, hook_payload)
-        except (ImportError, OSError, ValueError, RuntimeError) as error:
-            raise HookCommandRejected(f'native intake reconciliation failed: {error}',
-                                      hook_payload=hook_payload) from error
+        except Exception as error:  # noqa: BLE001 - Ghost-ALICE's own step fails without stopping the hook (P5)
+            # Pending inputs still refuse dependent writes, so the inner hook gains no authority.
+            native_intake_failure = _record_native_intake_failure(env, hook_payload, error)
     child_env = dict(env)
     # subprocess.run encodes the pipe as UTF-8 below; Python children must decode the same bytes independently of the Windows console code page.
     child_env["PYTHONIOENCODING"] = "utf-8"
@@ -1102,6 +1117,8 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     )
     if registration_refresh is not None:
         item['adapter_registration'] = registration_refresh
+    if native_intake_failure is not None:
+        item['native_intake_failure'] = native_intake_failure
     model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
     native_stdout = _native_protocol_output(host_stdout, platform=platform, event=event)
     user_stdout, user_stderr = _render_user_surface(item, native_stdout, result.stderr)

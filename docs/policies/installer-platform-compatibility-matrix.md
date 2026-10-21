@@ -56,7 +56,7 @@ Every user input is a `task-router` target. Simple questions, opinions, status c
 
 ### session-intent-analyzer
 
-The installer registers session-intent-analyzer as the single UserPromptSubmit intake owner and as the SessionStart session-receipt hook. Codex commits directly; Claude stages native correlation for trusted PreToolUse/Stop reconciliation. The installed wrapper must return the exact canonical human input or retain pending state; task notifications preserve the last human route. The [intake procedure](../../session-intent-analyzer/SKILL.md) and [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) own identity, compressed deltas, storage and compatibility exports.
+The installer registers session-intent-analyzer as the single UserPromptSubmit intake owner and as the SessionStart session-receipt hook. Codex commits directly; Claude stages native correlation for trusted PreToolUse/Stop reconciliation. The installed wrapper resolves staged inputs in order: human input, including input typed while Claude works, becomes the canonical input; an SDK-started turn or an app event delivered while Claude works becomes non-human context; task notifications and subagent hand-backs preserve the last human route. A later located human input supersedes an unknown or unlocated one. Without one the input stays pending, dependent writes stay refused, and the wrapper records the wait and warns once per session and cause. A failed reconcile is recorded, and the inner hook still runs. The [intake procedure](../../session-intent-analyzer/SKILL.md) and [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) own identity, compressed deltas, storage and compatibility exports.
 
 ### pending merge precheck
 

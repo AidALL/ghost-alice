@@ -19,6 +19,7 @@ This document is a fast recovery playbook for cases where a user cannot pull the
 - [6. Operating Principles](#6-operating-principles)
 - [Privileged Adapter Registration Mismatch](#privileged-adapter-registration-mismatch)
 - [Native Hook Trust And Reload](#native-hook-trust-and-reload)
+- [Intake Warning And Doctor Lists](#intake-warning-and-doctor-lists)
 
 ## Git Update Recovery
 
@@ -170,3 +171,11 @@ Check installation, native trust and running-host adoption separately. The insta
 3. Observe the next actual input, routing and Ghost-ALICE Autopilot callback in that session. Installed files, a separate diagnostic process and a successful publication request do not establish what the active host invoked.
 
 Keep strict audit enabled. Restore the affected registration or trust binding without disabling the guard or replaying completed business checks. A remaining recording failure is reported separately from the supported business result.
+
+## Intake Warning And Doctor Lists
+
+Claude Code can show `Ghost-ALICE intake: records that need a confirmed input (intent, route and completion) are paused in this session because ...`. Core could not confirm the origin of the session's latest input, for example a message another session sent or an input whose transcript row it could not find, and the session waits for your next typed input. Your work continues, but Core records no intent, route or completion until then. The warning appears once per session and cause; later waits with the same cause are only recorded.
+
+1. Send your next input in that session as usual. Core confirms it and resumes recording.
+2. Run `bash install.sh --doctor` (Windows: `.\install.cmd --doctor`). `native-intake-waits` lists the sessions that still wait, with the cause. `native-intake-failures` lists the sessions where Core's intake step failed; the hook continued past each failure.
+3. If a session still waits after your own typed input, or `native-intake-failures` keeps growing, share those doctor lines with the maintainer. Do not edit the ledger by hand.

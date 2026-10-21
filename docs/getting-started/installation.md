@@ -145,6 +145,8 @@ bash install.sh --status
 
 The healthy target is `overall: ok`.
 
+Doctor also prints two informational Core lines that do not change `overall`. `native-intake-waits` lists Claude sessions whose latest input origin Core could not confirm; each waits for the user's next typed input. `native-intake-failures` lists sessions where Core's intake step failed; the hook continued, and the line shows the error type, the count and the last time. See [the intake warning](troubleshooting.md#intake-warning-and-doctor-lists).
+
 ## Update
 
 Update the local clone through the installer so source-local edits are stashed before a fast-forward.
@@ -213,6 +215,8 @@ The installer sets the repository's git hook path (`core.hooksPath`, which every
 ### Agent Visibility Profile
 
 The default profile is `dynamic`. The profile controls how much governance surface is shown to the user; it does not disable hooks, strict-grade logs, or Work-Impact Projection.
+
+The Ghost-ALICE intake warning, which says that records needing a confirmed input are paused, appears once per session and cause under every profile. A profile can turn a hook's empty result into a plain-text line; that hook cannot carry the warning, so the warning appears with the next PreToolUse or Stop.
 
 | Profile | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |

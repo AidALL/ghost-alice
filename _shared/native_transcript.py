@@ -387,6 +387,18 @@ def _input_text(entry):
     return content if isinstance(content, str) else None
 
 
+def _text_digest(text):
+    """Digest of text as the hook staged it, or None when UTF-8 cannot encode it.
+
+    Staging digests the hook prompt's UTF-8 bytes, so text with an unpaired
+    surrogate can equal no staged input; it is left out instead of failing.
+    """
+    try:
+        return 'sha256:' + hashlib.sha256(text.encode()).hexdigest()
+    except UnicodeEncodeError:
+        return None
+
+
 def matches_input_text(content, binding):
     """Correlate a hook prompt with a full text or one unique complete block.
 
@@ -401,7 +413,7 @@ def matches_input_text(content, binding):
         return False
     def exact(text):
         return (isinstance(text, str) and len(text) == binding['input_char_count']
-                and 'sha256:' + hashlib.sha256(text.encode()).hexdigest() == binding['input_digest'])
+                and _text_digest(text) == binding['input_digest'])
     if isinstance(content, str):
         return exact(content)
     if (not isinstance(content, list) or any(not isinstance(block, dict)
@@ -470,8 +482,9 @@ class _TranscriptSnapshot:
                 if not isinstance(entry, dict) or entry.get('type') not in ('user', 'attachment'):
                     continue
                 for text in set(_candidate_texts(_row_content(entry))):
-                    key = (len(text), 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
-                    self._index.setdefault(key, []).append((row_start, end))
+                    text_digest = _text_digest(text)
+                    if text_digest is not None:
+                        self._index.setdefault((len(text), text_digest), []).append((row_start, end))
         return [row for row in self._index.get((char_count, digest), []) if row[0] >= start]
 
 

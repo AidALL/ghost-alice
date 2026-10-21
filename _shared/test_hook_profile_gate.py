@@ -10,6 +10,7 @@ import json
 import os
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -168,6 +169,85 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             recorded = [event['event'] for event in ledger.read_session_events(**coords)
                         if event['event'] in ('native-input-waiting', 'native-input-notice')]
             self.assertEqual(recorded, ['native-input-waiting', 'native-input-notice'])
+
+    @staticmethod
+    def _wrapper_fixture(directory, session):
+        import install_destination
+        root = Path(directory)
+        destination = install_destination.InstallDestination(mode='normal', owned_root=str(root),
+            platform_dir=str(root / '.claude'), skills_dir=str(root / 'skills'),
+            ghost_root=str(root / '.ghost-alice'), ledger_root=str(root / 'intent'),
+            project_root=str(root), core_source_root=str(Path(__file__).resolve().parents[1]))
+        transcript = root / (session + '.jsonl')
+        transcript.write_text('')
+        return destination, transcript
+
+    @staticmethod
+    def _run_wrapper(directory, destination, transcript, session, event, child_stdout='{}\n'):
+        """One bound Claude hook run with a stubbed inner hook; returns (exit code, inner calls, stdout)."""
+        command = base64.urlsafe_b64encode(shlex.join([sys.executable, '-c', 'print(1)']).encode()).decode()
+        stdout = io.StringIO()
+        child = mock.Mock(return_value=subprocess.CompletedProcess([], 0, child_stdout, ''))
+        with (mock.patch.dict(os.environ, {'HOME': directory}, clear=True),
+              mock.patch.object(hook_profile_gate, '_read_stdin', return_value=json.dumps(
+                  dict(session_id=session, hook_event_name=event, transcript_path=str(transcript)))),
+              mock.patch.object(hook_profile_gate.subprocess, 'run', child),
+              mock.patch.object(sys, 'stdout', stdout)):
+            code = hook_profile_gate._run('tool-checkpoint' if event == 'PreToolUse' else 'completion',
+                                          command, platform='claude', binding=destination.binding())
+        return code, child.call_count, stdout.getvalue()
+
+    def test_claude_wrapper_records_a_failed_reconcile_and_still_runs_the_inner_hook(self):
+        import session_intent_ledger as ledger
+        errors = (sqlite3.OperationalError('database is locked'), ValueError('native transcript cursors are invalid'),
+                  UnicodeEncodeError('utf-8', 'x\ud800', 1, 2, 'surrogates not allowed'), KeyError('pending'))
+        with tempfile.TemporaryDirectory() as directory:
+            session = 'failed-reconcile'
+            destination, transcript = self._wrapper_fixture(directory, session)
+            coords = dict(root=Path(directory) / 'intent', platform='claude', session_id=session)
+            ledger.stage_native_input(**coords, raw_input='Typed request', prompt_id=None,
+                                      transcript_path=str(transcript))
+            for error in errors:
+                with self.subTest(error=type(error).__name__), \
+                        mock.patch.object(hook_profile_gate, '_reconcile_native_intake', side_effect=error):
+                    self.assertEqual(self._run_wrapper(directory, destination, transcript, session, 'PreToolUse'),
+                                     (0, 1, '{}\n'))
+            failure = ledger.read_session_state(**coords)['native_intake_failure']
+            self.assertEqual((failure['count'], failure['error']), (len(errors), 'KeyError'))
+            self.assertEqual(len([event for event in ledger.read_session_events(**coords)
+                                  if event['event'] == 'native-intake-failed']), len(errors))
+
+    def test_claude_wrapper_keeps_the_failure_in_the_hook_log_when_the_ledger_cannot_record_it(self):
+        broken = mock.Mock()
+        broken.record_native_intake_failure.side_effect = sqlite3.DatabaseError('database disk image is malformed')
+        broken.claim_native_input_notice.return_value = None
+        with tempfile.TemporaryDirectory() as directory:
+            session = 'unrecorded-failure'
+            destination, transcript = self._wrapper_fixture(directory, session)
+            with (mock.patch.object(hook_profile_gate, '_reconcile_native_intake',
+                                    side_effect=sqlite3.OperationalError('database is locked')),
+                  mock.patch('native_completion._ledger', return_value=broken)):
+                code, calls, _ = self._run_wrapper(directory, destination, transcript, session, 'Stop', '')
+            rows = [json.loads(line) for line in
+                    _strict_log_path(directory, 'claude', session).read_text(encoding='utf-8').splitlines()]
+        self.assertEqual((code, calls), (0, 1))
+        failure = rows[-1]['surface_item']['native_intake_failure']
+        self.assertEqual((failure['recorded'], failure['error']), ('hook-log', 'OperationalError'))
+
+    def test_claude_wrapper_emits_the_inner_output_when_the_notice_check_fails(self):
+        failing = mock.Mock()
+        failing.claim_native_input_notice.side_effect = KeyError('native_input_waiting')
+        decision = {'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'ask',
+                                           'permissionDecisionReason': 'inner decision'}}
+        with tempfile.TemporaryDirectory() as directory:
+            session = 'notice-failure'
+            destination, transcript = self._wrapper_fixture(directory, session)
+            with (mock.patch.object(hook_profile_gate, '_reconcile_native_intake'),
+                  mock.patch('native_completion._ledger', return_value=failing)):
+                code, calls, output = self._run_wrapper(directory, destination, transcript, session, 'PreToolUse',
+                                                        json.dumps(decision) + '\n')
+        self.assertEqual((code, calls), (0, 1))
+        self.assertEqual(json.loads(output), decision)
 
     def test_rejection_audit_uses_known_platform_without_platform_environment(self):
         with tempfile.TemporaryDirectory() as temporary:

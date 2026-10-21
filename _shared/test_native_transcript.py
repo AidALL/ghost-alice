@@ -1,4 +1,5 @@
 """Native transcript reader: Stop answer text and host input markers. Python standard library."""
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -117,6 +118,15 @@ class NativeInputActorTests(unittest.TestCase):
                                  prompt='<task-notification>done</task-notification>'))
         self.assertEqual(native_input_actor(user), 'notification')
         self.assertEqual(native_input_actor(attachment), 'notification')
+
+    def test_text_that_utf8_cannot_encode_never_matches_and_never_raises(self):
+        text = 'Typed request.'
+        binding = dict(input_char_count=len(text), input_digest='sha256:' + hashlib.sha256(text.encode()).hexdigest())
+        broken = 'Typed \ud800equest.'  # Same length, so only the encoding can reject it.
+        self.assertEqual(len(broken), len(text))
+        self.assertFalse(native_transcript.matches_input_text(broken, binding))
+        self.assertTrue(native_transcript.matches_input_text(
+            [dict(type='text', text=broken), dict(type='text', text=text)], binding))
 
     def test_unknown_shape_key_names_markers_without_message_text(self):
         first = dict(typed_human('first secret text'), turnOrigin='scheduled', origin=None)

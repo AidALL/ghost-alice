@@ -1507,27 +1507,40 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
         return state
 
 
+def _due_native_notice(state):
+    """(wait, pending, notified causes) when the current wait's cause was not yet shown in this session."""
+    if state is None:
+        return None
+    waiting, pending = _native_input_waiting(state), _pending_native_inputs(state)
+    if not waiting or not pending or pending[0]['transport_observation_id'] != waiting.get('transport_observation_id'):
+        return None
+    notified = state.get('native_input_notified_causes', [])
+    notified = [cause for cause in notified if isinstance(cause, str)] if isinstance(notified, list) else []
+    return None if waiting.get('cause') in notified else (waiting, pending, notified)
+
+
 def claim_native_input_notice(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
                               transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
     """Claim the current wait's notice once per session and cause.
 
     Only a caller that displays the notice claims it; reconcile_native_inputs
-    records every wait whoever calls it. The result holds host-neutral values.
+    records every wait whoever calls it. A read settles the usual case, no wait
+    or a cause already shown, without the write lock; the write transaction
+    checks again because another hook may have claimed it in between. The
+    result holds host-neutral values.
     """
     validate_identity(platform, session_id)
     if transaction is None and not storage_is_initialized(root):
         return None
+    with _read_connection(root, transaction) as connection:
+        if connection is None or _due_native_notice(_stored_state(connection, platform, session_id)) is None:
+            return None
     with _transaction(root, transaction) as connection:
         state = _stored_state(connection, platform, session_id)
-        if state is None:
+        due = _due_native_notice(state)
+        if due is None:
             return None
-        waiting, pending = _native_input_waiting(state), _pending_native_inputs(state)
-        if not waiting or not pending or pending[0]['transport_observation_id'] != waiting.get('transport_observation_id'):
-            return None
-        notified = state.get('native_input_notified_causes', [])
-        notified = [cause for cause in notified if isinstance(cause, str)] if isinstance(notified, list) else []
-        if waiting.get('cause') in notified:
-            return None
+        waiting, pending, notified = due
         state['native_input_notified_causes'] = [*notified, waiting['cause']][-NOTIFIED_CAUSE_LIMIT:]
         _commit(connection, state, dict(ts=utc_now(), event='native-input-notice', platform=platform,
             session_id=session_id, transport_observation_id=waiting['transport_observation_id'],
@@ -1535,23 +1548,63 @@ def claim_native_input_notice(*, root: Path = DEFAULT_ROOT, platform: str, sessi
         return dict(cause=waiting['cause'], since=waiting.get('since', ''), pending_count=len(pending))
 
 
-def list_native_input_waits(root: Path, platform: str | None = None) -> list[dict[str, Any]]:
-    """Sessions whose native inputs wait for a human input, read from their failure records."""
+def record_native_intake_failure(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+                                 error: BaseException, transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
+    """Record one failed native intake step for this session; the hook that caught it continues.
+
+    The session keeps one failure entry with a count and its first and last
+    times; each occurrence also appends a native-intake-failed event.
+    """
+    validate_identity(platform, session_id)
+    now = utc_now()
+    name = type(error).__name__
+    detail = str(error)[:200].encode('ascii', 'backslashreplace').decode('ascii')
+    paths = session_paths(root, platform, session_id)
+    with _transaction(root, transaction) as connection:
+        state = _load_state_for_update(connection, paths, platform, session_id)
+        previous = state.get('native_intake_failure')
+        previous = previous if isinstance(previous, dict) else {}
+        count = previous['count'] if type(previous.get('count')) is int and previous['count'] > 0 else 0
+        first = previous.get('first_at') if count and isinstance(previous.get('first_at'), str) else now
+        state['native_intake_failure'] = dict(error=name, detail=detail, count=count + 1, first_at=first, last_at=now)
+        _commit(connection, state, dict(ts=now, event='native-intake-failed', platform=platform,
+            session_id=session_id, error=name, detail=detail, input_event_id=state['latest_input_event_id']))
+        return state['native_intake_failure']
+
+
+def _session_states(root: Path, platform: str | None):
+    """(platform, session_id, state) of every stored session, read-only."""
     with _read_connection(root) as connection:
         if connection is None:
             return []
         query = 'SELECT platform, session_id, state_json FROM sessions'
         rows = (connection.execute(query + ' WHERE platform=?', (platform,)) if platform
                 else connection.execute(query)).fetchall()
+    return [(owner, session, state) for owner, session, raw in rows
+            if isinstance(state := json.loads(raw), dict)]
+
+
+def list_native_input_waits(root: Path, platform: str | None = None) -> list[dict[str, Any]]:
+    """Sessions whose native inputs wait for a human input, read from their failure records."""
     waits = []
-    for owner, session, raw in rows:
-        state = json.loads(raw)
-        waiting = state.get('native_input_waiting') if isinstance(state, dict) else None
-        pending = state.get('pending_native_inputs') if isinstance(state, dict) else None
+    for owner, session, state in _session_states(root, platform):
+        waiting, pending = state.get('native_input_waiting'), state.get('pending_native_inputs')
         if isinstance(waiting, dict) and isinstance(waiting.get('cause'), str) and isinstance(pending, list) and pending:
             waits.append(dict(platform=owner, session_id=session, cause=waiting['cause'],
                               since=waiting.get('since', ''), pending_count=len(pending)))
     return sorted(waits, key=lambda wait: (str(wait['since']), wait['session_id']))
+
+
+def list_native_intake_failures(root: Path, platform: str | None = None) -> list[dict[str, Any]]:
+    """Sessions with a recorded native intake failure, the latest first; a later success keeps the record."""
+    failures = []
+    for owner, session, state in _session_states(root, platform):
+        failure = state.get('native_intake_failure')
+        if isinstance(failure, dict) and isinstance(failure.get('error'), str):
+            failures.append(dict(platform=owner, session_id=session, error=failure['error'],
+                                 detail=failure.get('detail', ''), count=failure.get('count', 1),
+                                 first_at=failure.get('first_at', ''), last_at=failure.get('last_at', '')))
+    return sorted(failures, key=lambda failure: (str(failure['last_at']), failure['session_id']), reverse=True)
 
 
 def _context_input_binding(connection, root, state, event_id):
@@ -2173,6 +2226,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--export-to", help="write a portable projection to a separate root")
     parser.add_argument("--list-native-waits", action="store_true",
                         help="list this platform's sessions whose native input waits, from their failure records")
+    parser.add_argument("--list-native-failures", action="store_true",
+                        help="list this platform's sessions with a recorded native intake failure")
     return parser
 
 
@@ -2184,11 +2239,13 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(delta, dict):
             raise SystemExit("--delta-json must decode to an object")
     root = Path(args.root)
-    if args.list_native_waits:
+    if args.list_native_waits or args.list_native_failures:
         if (args.input is not None or delta is not None or args.migrate or args.session_id or args.snapshot
-                or args.read_intent or args.read_state or args.read_events or args.export_to):
-            raise SystemExit("--list-native-waits is a root-wide read; it takes no session, read or mutation flag")
-        print(json.dumps(list_native_input_waits(root, args.platform), ensure_ascii=False))
+                or args.read_intent or args.read_state or args.read_events or args.export_to
+                or (args.list_native_waits and args.list_native_failures)):
+            raise SystemExit("a native intake listing is one root-wide read; it takes no session, other read or mutation flag")
+        listing = list_native_input_waits if args.list_native_waits else list_native_intake_failures
+        print(json.dumps(listing(root, args.platform), ensure_ascii=False))
         return 0
     read_only = (args.snapshot or args.read_intent or args.read_state or args.read_events or args.export_to) and args.input is None and delta is None and not args.migrate
     if args.pointer and not args.read_state:
