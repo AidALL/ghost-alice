@@ -67,6 +67,7 @@ class Context:
     visibility: str = "dynamic"
     hook_change: object | None = None
     record_source: dict | None = None
+    source_match: object | None = None
 
     @property
     def verbose(self) -> bool:
@@ -94,7 +95,9 @@ class Command(HelpRow):
     the lock. `platform` False: the command needs no platform, so
     `--prompt-platform` does not ask and the addon sources are not prepared.
     `checks_source`: `dispatch` compares the install record's source with this
-    checkout (`source.check_install_source`) before anything else changes.
+    checkout (`source.check_install_source`) before anything else changes, and
+    `run_command` compares again under the lock. `adopts_source`: the command
+    may replace the install source; without it only the recorded checkout runs it.
     """
 
     names: tuple[str, ...]
@@ -104,6 +107,7 @@ class Command(HelpRow):
     platform: bool = True
     before_lock: Callable[["Context"], None] | None = None
     checks_source: bool = False
+    adopts_source: bool = False
 
 
 COMMON, REMOVAL, ADVANCED = "Common commands", "Removal commands", "Advanced/operator commands"
@@ -123,7 +127,7 @@ UNINSTALL = Command(REMOVAL, "--uninstall, -u",
                     run=lambda ctx: lifecycle.uninstall(ctx, ctx.options.args[1:]), lock="uninstall")
 INSTALL = Command(ADVANCED, "SKILL_NAMES", "Install specified skills only", names=(),
                   run=lambda ctx: run_install(ctx), lock="install", before_lock=lambda ctx: prepare_install(ctx),
-                  checks_source=True)
+                  checks_source=True, adopts_source=True)
 COMMAND_LINE: tuple[HelpRow, ...] = (
     HelpRow(COMMON, "--platform, -p PLAT", "Choose claude | codex"),
     HelpRow(COMMON, "--prompt-platform", "Ask which AI tool to install"),
@@ -571,13 +575,16 @@ def run_post_merge(ctx: Context) -> int:
 
 
 def run_command(command: Command, ctx: Context) -> int:
-    """`before_lock`, then `run` under the command's install lock when it names one; the exit code of `run`."""
+    """`before_lock`, then `run` under the command's install lock when it names one; the exit code of `run`.
+    A command that `checks_source` compares the install source again once it holds the lock."""
     if command.before_lock is not None:
         command.before_lock(ctx)
     if command.lock is None:
         return command.run(ctx)
     lock_path = lock.acquire(command.lock, ctx.platform)
     try:
+        if command.checks_source:
+            source.recheck_install_source(ctx, can_adopt=command.adopts_source)
         return command.run(ctx)
     finally:
         lock.release(lock_path)
@@ -609,7 +616,7 @@ def dispatch(options: Options) -> int:
             return 0
         ctx = build_context(options)
         if command.checks_source:
-            source.check_install_source(ctx)
+            source.check_install_source(ctx, can_adopt=command.adopts_source)
         if not options.addon_skip and ctx.addon_sources:
             addons.prepare_sources(ctx)
         return auto.run_install_children(ctx, detected)
@@ -620,7 +627,7 @@ def dispatch(options: Options) -> int:
             options.platform = prompt_platform()
     ctx = build_context(options)
     if command.checks_source:
-        source.check_install_source(ctx)
+        source.check_install_source(ctx, can_adopt=command.adopts_source)
     if command.platform and not options.addon_skip and ctx.addon_sources:
         addons.prepare_sources(ctx)
     return run_command(command, ctx)

@@ -28,6 +28,8 @@ if TYPE_CHECKING:
 HOOKS_DIR = "hooks"
 ADOPT_HINT = ("Rerun this command from the install source, or add --adopt-source to install from this checkout "
               "and record it as the install source.")
+REPAIR_HINT = ("Repair runs only from the install source; run the install from this checkout with --adopt-source to "
+               "move the installation here.")
 
 
 @dataclass(frozen=True)
@@ -179,23 +181,36 @@ def interactive() -> bool:
         return False
 
 
-def check_install_source(ctx: "Context") -> None:
+def _name_both(say, match: SourceMatch) -> None:
+    say("This checkout is not the install source the install record names.")
+    say(f"  Install source: {match.recorded}")
+    say(f"  This checkout:  {match.here}")
+
+
+def check_install_source(ctx: "Context", *, can_adopt: bool = True, match: SourceMatch | None = None) -> None:
     """Go on, or stop with exit 2, before an install or a repair changes anything.
 
     No record, or a record without a source, goes on (the first install), and so does the recorded checkout;
-    an unreadable record skips the comparison with a warning. Another checkout goes on with `--adopt-source`,
-    and without a question when the recorded checkout no longer exists (a fresh clone at another path).
-    Otherwise the installer names both folders; at a terminal it asks whether this checkout replaces the
-    install source (no by default), elsewhere it stops with the command to run. A replacement is kept in the
-    options, so the auto mode's children carry it instead of judging again. The command's first publish
-    records this checkout as the source.
+    an unreadable record skips the comparison with a warning. Another checkout stops a command that cannot
+    replace the install source (`can_adopt` False: repair), which names the install that moves it. An install
+    goes on from another checkout with `--adopt-source`, and without a question when the recorded checkout no
+    longer exists (a fresh clone at another path). Otherwise the installer names both folders; at a terminal
+    it asks whether this checkout replaces the install source (no by default), elsewhere it stops with the
+    command to run. A replacement is kept in the options, so the auto mode's children carry it instead of
+    judging again; the answer is kept for `recheck_install_source`. The command's first publish records this
+    checkout as the source.
     """
-    match = match_install_source()
+    match = match_install_source() if match is None else match
+    ctx.source_match = match
     if match.state == "unreadable":
         report.warn(f"Install source check skipped: {match.detail}")
         return
     if match.state != "other":
         return
+    if not can_adopt:
+        _name_both(report.error, match)
+        report.error(REPAIR_HINT)
+        raise InstallerExit(2)
     if ctx.options.adopt_source:
         report.info(f"Install source: this checkout replaces {match.recorded}")
         return
@@ -204,10 +219,7 @@ def check_install_source(ctx: "Context") -> None:
         report.info(f"Install source: {match.recorded} no longer exists; this checkout replaces it")
         return
     asking = interactive()
-    say = report.warn if asking else report.error
-    say("This checkout is not the install source the install record names.")
-    say(f"  Install source: {match.recorded}")
-    say(f"  This checkout:  {match.here}")
+    _name_both(report.warn if asking else report.error, match)
     if asking:
         try:
             answer = input("Replace the install source with this checkout? [y/N]: ")
@@ -219,6 +231,16 @@ def check_install_source(ctx: "Context") -> None:
             return
     report.error(ADOPT_HINT)
     raise InstallerExit(2)
+
+
+def recheck_install_source(ctx: "Context", *, can_adopt: bool) -> None:
+    """Compare again under the install lock: another installer may have changed the install source while this
+    command waited for the lock. The answer the check before the lock gave goes on without a second message;
+    any other answer is judged as `check_install_source` judges it."""
+    match = match_install_source()
+    if match == ctx.source_match:
+        return
+    check_install_source(ctx, can_adopt=can_adopt, match=match)
 
 
 def update_source() -> int:
