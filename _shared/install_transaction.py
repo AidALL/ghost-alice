@@ -205,12 +205,10 @@ def _write_failure_event(
         "error": error,
     }
     try:
-        event_log.parent.mkdir(parents=True, exist_ok=True)
-        with event_log.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-    except OSError:
+        state_retention.append("install-state-events", event_log,
+                               json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    except (OSError, ValueError):
         return
-    state_retention.apply("install-state-events", event_log)
 
 
 def _write_target_progress_event(

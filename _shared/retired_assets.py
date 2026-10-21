@@ -41,11 +41,7 @@ def _pending(entry, root, platform, source_root):
 
 
 def _audit(event, result, phase):
-    assert_mutation_path(event)
-    event.parent.mkdir(parents=True, exist_ok=True)
-    with event.open('a', encoding='utf-8') as stream:
-        stream.write(json.dumps(dict(result, phase=phase, ts=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')), sort_keys=True)+'\n')
-    state_retention.apply('install-state-events', event)
+    state_retention.append('install-state-events', event, json.dumps(dict(result, phase=phase, ts=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')), sort_keys=True)+'\n')
 
 
 def _restore_no_replace(source, destination):

@@ -2,15 +2,18 @@
 
 `POLICIES` names every file and folder a Core installation creates under the Ghost-ALICE state root and the host
 folders, and how each stays bounded. A writer calls `apply(name, path)` at its own moment for an entry that removes
-something: size rotation, keep the newest N, age or line count. Overwritten files and material kept for the user are
-named only. `apply` never raises: a failure is one line in `state-retention-failures.jsonl` under the Ghost-ALICE
-state root, which keeps its last 500 lines and which doctor reads. `entry_for` names the entry a created path belongs
-to, so a test can require every created path to have one.
+something: size rotation, keep the newest N, age or line count. A log that several processes append to is written
+through `append(name, path, text)`, which appends and applies the entry under one lock on the log, so no writer
+rotates with a size it read before another writer rotated. Overwritten files and material kept for the user are named
+only. `apply` never raises: a failure is one line in `state-retention-failures.jsonl` under the Ghost-ALICE state
+root, which keeps its last 500 lines and which doctor reads. `entry_for` names the entry a created path belongs to, so
+a test can require every created path to have one.
 
-Dependencies: Python 3.11+ standard library.
+Dependencies: Python 3.11+ standard library. Without `fcntl` (Windows), appends go on without the lock.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import fnmatch
 import json
@@ -24,6 +27,11 @@ import uuid
 
 import install_destination
 from text_lines import committed_length, split_lines
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
 
 MB = 1024 * 1024
 DAY = 86400
@@ -203,6 +211,46 @@ def apply(name: str, path: Path | str, *, protect: Iterable[Path | str] = (),
         return ()
 
 
+def append(name: str, path: Path | str, text: str) -> None:
+    """Append `text` to the log `path` and apply the entry `name`, both under the log's lock. Writing the text can
+    raise like any write; the entry's failures are recorded and never raised."""
+    path = Path(path)
+    install_destination.assert_mutation_path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _exclusive(path):
+        with path.open("a", encoding="utf-8") as stream:
+            stream.write(text)
+        apply(name, path)
+
+
+@contextmanager
+def _exclusive(path: Path):
+    """An exclusive flock on the file at `path`, created when missing; yields the locked file's stat, or None
+    without `fcntl`. A writer that waited while another rotated the file locks the file now at `path`."""
+    if fcntl is None:
+        yield None
+        return
+    while True:
+        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            held = os.fstat(descriptor)
+            try:
+                current = os.stat(path)
+            except FileNotFoundError:
+                current = None
+        except BaseException:
+            os.close(descriptor)
+            raise
+        if current is not None and os.path.samestat(held, current):
+            break
+        os.close(descriptor)  # the file was rotated while this writer waited
+    try:
+        yield held
+    finally:
+        os.close(descriptor)
+
+
 def _size_rotation(path: Path, policy: Policy) -> tuple[Path, ...]:
     try:
         size = path.stat().st_size
@@ -338,6 +386,8 @@ def _remove_each(name: str, entries: Iterable[Path]) -> list[Path]:
             install_destination.assert_mutation_path(entry)
             _remove(entry)
             removed.append(entry)
+        except FileNotFoundError:
+            continue  # another writer removed it first
         except (OSError, ValueError) as error:
             _record_failure(name, entry, type(error).__name__, str(error))
     return removed
@@ -388,8 +438,9 @@ def _record_failure(name: str, path: Path, error_type: str, detail: str) -> None
         record.parent.mkdir(parents=True, exist_ok=True)
         row = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "policy": name, "path": str(path),
                "error_type": error_type, "error": detail[:500]}
-        with record.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-        _line_count(record, POLICIES["retention-failures"])
+        with _exclusive(record):
+            with record.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+            _line_count(record, POLICIES["retention-failures"])
     except Exception:
         pass
