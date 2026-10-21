@@ -713,8 +713,9 @@ class ServerUsageParserTests(unittest.TestCase):
         self.assertEqual(start['server_id'], 'msg-fixture')
         self.assertEqual(final['server_id'], start['server_id'])
         self.assertEqual(final['model'], 'fixture-model')
-        self.assertEqual(start['raw_usage'], self.start_usage)
-        self.assertEqual(final['raw_usage'], {'output_tokens': 9})
+        # One usage value per event: the cumulative snapshot.
+        self.assertNotIn('raw_usage', start)
+        self.assertNotIn('raw_usage', final)
         self.assertEqual(start['usage'], self.start_usage)
         self.assertEqual(final['usage'], dict(self.start_usage, output_tokens=9))
         self.assertEqual(final['server_event'], 'message_delta')
@@ -754,7 +755,7 @@ class ServerUsageParserTests(unittest.TestCase):
         expected = copy.deepcopy(self.start_usage)
         expected['cache_creation']['ephemeral_5m_input_tokens'] = 80
         self.assertEqual(final['usage'], expected)
-        self.assertEqual(final['raw_usage'], {'cache_creation': {'ephemeral_5m_input_tokens': 80}})
+        self.assertNotIn('raw_usage', final)
 
     def test_codex_response_id_model_and_usage_are_preserved(self):
         parser = context_gateway.UsageSnapshots('codex')
@@ -764,7 +765,7 @@ class ServerUsageParserTests(unittest.TestCase):
         self.assertEqual(final['server_id'], 'resp-fixture')
         self.assertEqual(final['model'], 'fixture')
         self.assertEqual(final['usage'], native)
-        self.assertEqual(final['raw_usage'], native)
+        self.assertNotIn('raw_usage', final)
 
     def test_parser_does_not_mutate_events_or_prior_observations(self):
         parser = context_gateway.UsageSnapshots('anthropic')
@@ -774,7 +775,7 @@ class ServerUsageParserTests(unittest.TestCase):
         self.assertEqual(self.start, original)
         self.assertEqual(observed['usage'], self.start_usage)
         self.start['message']['usage']['input_tokens'] = 999
-        self.assertEqual(observed['raw_usage']['input_tokens'], 17)
+        self.assertEqual(observed['usage']['input_tokens'], 17)
 
     def stream(self, raw, headers=None):
         class MemoryUpstream:
@@ -872,6 +873,296 @@ class ServerUsageParserTests(unittest.TestCase):
         self.assertEqual(forwarded, raw)
         self.assertEqual(len(rows), 1)
         self.assertEqual(details['sse_events_observed'], 3)
+
+
+class UsageRecordShapeTests(unittest.TestCase):
+    """Gateway events record counts and byte totals instead of per-item lists, and one usage value."""
+
+    @staticmethod
+    def size(item):
+        return len(json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode())
+
+    def test_request_shape_counts_items_bytes_types_and_roles_per_field(self):
+        items = [{'type': 'message', 'role': 'user', 'content': 'a'},
+                 {'type': 'message', 'role': 'assistant', 'content': 'bb'},
+                 {'type': 'function_call_output', 'call_id': 'c1', 'output': 'x'}]
+        tools = [{'type': 'function', 'name': 'shell'}]
+        body = {'model': 'm', 'input': items, 'tools': tools, 'system': 'rules'}
+        shape = context_gateway.request_shape(json.dumps(body).encode(), '')
+        self.assertEqual(shape['fields'], ['model', 'input', 'tools', 'system'])
+        self.assertEqual(shape['model'], 'm')
+        self.assertEqual(shape['units'], {
+            'input': {'items': 3, 'bytes': sum(self.size(item) for item in items),
+                      'types': {'message': 2, 'function_call_output': 1}, 'roles': {'user': 1, 'assistant': 1}},
+            'tools': {'items': 1, 'bytes': self.size(tools[0]), 'types': {'function': 1}, 'roles': {}},
+            'system': {'items': 1, 'bytes': self.size('rules'), 'types': {}, 'roles': {}}})
+        self.assertNotIn('sha256', json.dumps(shape))
+
+    def test_usage_is_recorded_once_with_the_attribution_item_count(self):
+        attribution = {'items': {'msg_1': {'input_tokens': 4, 'content': [{'input_tokens': 4}]},
+                                 'ctc_2': {'input_tokens': 1}, 'at_3': {'output_tokens': 2}}}
+        native = dict(input_tokens=80, output_tokens=4, attribution=attribution)
+        parser = context_gateway.UsageSnapshots('codex')
+        observed = parser.observe(dict(type='response.completed', response=dict(id='resp-1', usage=native)))
+        self.assertNotIn('raw_usage', observed)
+        self.assertEqual(observed['usage'], dict(input_tokens=80, output_tokens=4, attribution={'item_count': 3}))
+        self.assertEqual(len(native['attribution']['items']), 3)
+
+    @staticmethod
+    def forward(read, write=None, flush=None, on_usage=None):
+        class Upstream:
+            headers = {}
+
+            def read1(self, size):
+                return read()
+
+        class Sink:
+            def __init__(self):
+                self.data = b''
+
+            def write(self, chunk):
+                if write is not None:
+                    write(chunk)
+                self.data += chunk
+
+            def flush(self):
+                if flush is not None:
+                    flush()
+        sink = Sink()
+        details = context_gateway.forward_stream(Upstream(), sink, 'codex', on_usage or (lambda usage: None))
+        return details, sink.data
+
+    @staticmethod
+    def chunks(*parts):
+        queue = list(parts)
+
+        def read():
+            item = queue.pop(0) if queue else b''
+            if isinstance(item, BaseException):
+                raise item
+            return item
+        return read
+
+    def test_a_response_forwarded_to_the_end_is_completed(self):
+        details, data = self.forward(self.chunks(b'data: {}\n\n', b'tail'))
+        self.assertEqual((details['result'], data), ('completed', b'data: {}\n\ntail'))
+        self.assertNotIn('error_type', details)
+
+    def test_a_client_side_write_failure_is_client_closed(self):
+        for failure, where in ((BrokenPipeError(32, 'Broken pipe'), 'write'),
+                               (ConnectionResetError(54, 'Connection reset by peer'), 'flush')):
+            with self.subTest(error=type(failure).__name__, where=where):
+                def fail(*_args, error=failure):
+                    raise error
+                details, _ = self.forward(self.chunks(b'one', b'two'), **{where: fail})
+                self.assertEqual((details['result'], details['error_type']), ('client-closed', type(failure).__name__))
+                self.assertEqual(details['wire_sha256'], hashlib.sha256(b'one').hexdigest())
+
+    def test_an_upstream_read_failure_is_upstream_closed(self):
+        for failure in (http.client.IncompleteRead(b''), ConnectionResetError(54, 'reset'), ValueError('chunk')):
+            with self.subTest(error=type(failure).__name__):
+                details, data = self.forward(self.chunks(b'one', failure))
+                self.assertEqual((details['result'], details['error_type']), ('upstream-closed', type(failure).__name__))
+                self.assertEqual(data, b'one')
+
+    def test_other_failures_still_raise(self):
+        def broken_disk(_chunk):
+            raise OSError(5, 'Input/output error')
+        with self.assertRaises(OSError):
+            self.forward(self.chunks(b'one'), write=broken_disk)
+
+        def bug(_usage):
+            raise RuntimeError('observer bug')
+        event = b'data: {"type":"response.completed","response":{"id":"r","usage":{"input_tokens":1}}}\n\n'
+        with self.assertRaises(RuntimeError):
+            self.forward(self.chunks(event), on_usage=bug)
+
+
+class GatewayStreamEndTests(unittest.TestCase):
+    """A real gateway records how each response ended; a disconnect leaves a result, not a traceback, whether the
+    client closed during the body or before the headers."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.log = Path(temp.name) / 'usage.jsonl'
+        environment = patch.dict('os.environ', {'GHOST_ALICE_GHOST_ROOT': temp.name})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+        class Upstream(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length', '0')))
+                if self.path.endswith('/slow-headers'):
+                    import time
+                    time.sleep(0.5)
+                if self.path.endswith('/stream') or self.path.endswith('/break'):
+                    self.send_response(200)
+                    self.send_header('Transfer-Encoding', 'chunked')
+                    self.end_headers()
+                    chunk = b'data: ' + b'x' * 65536 + b'\n\n'
+                    try:
+                        for _ in range(1 if self.path.endswith('/break') else 40):
+                            self.wfile.write(b'%x\r\n%s\r\n' % (len(chunk), chunk))
+                            self.wfile.flush()
+                            if self.path.endswith('/stream'):
+                                import time
+                                time.sleep(0.02)
+                        if self.path.endswith('/stream'):
+                            self.wfile.write(b'0\r\n\r\n')
+                    except (BrokenPipeError, ConnectionResetError):
+                        pass  # The gateway stopped reading after its client closed.
+                    self.close_connection = True
+                    return
+                body = b'data: {}\n\n'
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *_args):
+                pass
+
+        self.upstream = ThreadingHTTPServer(('127.0.0.1', 0), Upstream)
+        self.server = context_gateway.make_server('scope', self.log,
+            origins={'codex': f'http://127.0.0.1:{self.upstream.server_port}'})
+        for server in (self.upstream, self.server):
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(self.stop)
+        self.errors = io.StringIO()
+        redirect = patch('sys.stderr', self.errors)
+        redirect.start()
+        self.addCleanup(redirect.stop)
+
+    def stop(self):
+        for server in (self.server, self.upstream):
+            server.shutdown()
+            server.server_close()
+
+    def raw_request(self, path, *, close_after_headers=False, close_at_once=False):
+        import socket
+        import struct
+        body = b'{"model":"m","input":[]}'
+        connection = socket.create_connection(('127.0.0.1', self.server.server_port))
+        connection.sendall(b'POST /codex/' + path.encode() + b' HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\n'
+                           b'X-Ghost-Context-Scope: scope\r\nContent-Length: ' + str(len(body)).encode() + b'\r\n\r\n' + body)
+        if close_after_headers:
+            received = b''
+            while b'\r\n\r\n' not in received:
+                received += connection.recv(65536)
+        if close_at_once:
+            # Let the gateway read the request and wait for the slow upstream before the client goes away.
+            import time
+            time.sleep(0.2)
+        if close_after_headers or close_at_once:
+            connection.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack('ii', 1, 0))
+        else:
+            while connection.recv(65536):
+                pass
+        connection.close()
+
+    def response_end(self):
+        import time
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if self.log.exists():
+                for line in self.log.read_text(encoding='utf-8').splitlines():
+                    event = json.loads(line)
+                    if event['event'] == 'response-end':
+                        return event
+            time.sleep(0.05)
+        self.fail('no response-end event')
+
+    def test_a_response_forwarded_to_the_end_is_completed(self):
+        self.raw_request('ok')
+        self.assertEqual(self.response_end()['result'], 'completed')
+
+    def test_a_client_that_closes_during_the_body_leaves_client_closed_and_no_traceback(self):
+        self.raw_request('stream', close_after_headers=True)
+        event = self.response_end()
+        self.assertEqual(event['result'], 'client-closed')
+        self.assertIn(event['error_type'], ('BrokenPipeError', 'ConnectionResetError'))
+        self.assertNotIn('Traceback', self.errors.getvalue())
+
+    def test_a_client_that_closes_before_the_headers_leaves_client_closed_and_no_traceback(self):
+        self.raw_request('slow-headers', close_at_once=True)
+        event = self.response_end()
+        self.assertEqual(event['result'], 'client-closed')
+        self.assertNotIn('Traceback', self.errors.getvalue())
+
+    def test_an_upstream_that_breaks_its_body_leaves_upstream_closed_and_one_line(self):
+        self.raw_request('break')
+        event = self.response_end()
+        self.assertEqual(event['result'], 'upstream-closed')
+        lines = [line for line in self.errors.getvalue().splitlines() if line.strip()]
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn(event['request_id'], lines[0])
+        self.assertIn(event['error_type'], lines[0])
+        self.assertIn('upstream-closed', lines[0])
+
+    def test_an_error_response_to_a_closed_client_leaves_no_traceback(self):
+        handler = object.__new__(self.server.RequestHandlerClass)
+
+        class Closed:
+            def write(self, _data):
+                raise BrokenPipeError(32, 'Broken pipe')
+
+            def flush(self):
+                pass
+        handler.wfile, handler.request_version, handler.requestline = Closed(), 'HTTP/1.1', ''
+        handler.reject(502, 'codex', 'could not reach the model server')
+        self.assertTrue(handler.close_connection)
+
+    def test_every_record_offers_the_usage_log_to_its_retention_entry(self):
+        # The entry rotates past 20MB (state_retention tests); the writer offers its file after each event.
+        import state_retention
+        with patch.object(state_retention, 'apply', wraps=state_retention.apply) as apply:
+            self.raw_request('ok')
+            self.response_end()
+        calls = [call for call in apply.call_args_list if call.args[0] == 'gateway-usage']
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertTrue(all(Path(call.args[1]) == self.log for call in calls))
+
+
+class ServiceLogStartTests(unittest.TestCase):
+    """The gateway rotates the service log launchd opened for it before it serves."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.state = Path(temp.name) / 'context-gateway'
+        self.state.mkdir()
+        self.config = self.state / 'state.json'
+        self.config.write_text(json.dumps({'schema_version': 'context-gateway.v1', 'port': 1, 'scope': 's',
+                                           'ledger_root': str(self.state), 'codex_dir': str(self.state),
+                                           'usage_log': str(self.state / 'usage.jsonl')}), encoding='utf-8')
+        environment = patch.dict('os.environ', {'GHOST_ALICE_GHOST_ROOT': temp.name})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    def run_main(self):
+        with patch.object(context_lifecycle, 'select_request'), patch.object(context_gateway, 'make_server') as make:
+            context_gateway.main(['--config', str(self.config)])
+        make.return_value.serve_forever.assert_called_once()
+
+    def test_a_service_log_past_its_limit_is_copied_and_emptied_before_serving(self):
+        import state_retention
+        log = self.state / 'service.log'
+        log.write_bytes(b'Traceback\n' * 20)
+        policy = state_retention.POLICIES['gateway-service-log']._replace(limit=128)
+        with patch.dict(state_retention.POLICIES, {'gateway-service-log': policy}):
+            self.run_main()
+        self.assertEqual(log.read_bytes(), b'')
+        self.assertEqual(log.with_name('service.log.1').read_bytes(), b'Traceback\n' * 20)
+
+    def test_a_small_or_missing_service_log_is_left_alone(self):
+        self.run_main()
+        self.assertFalse((self.state / 'service.log').exists())
+        (self.state / 'service.log').write_bytes(b'one line\n')
+        self.run_main()
+        self.assertEqual((self.state / 'service.log').read_bytes(), b'one line\n')
 
 
 if __name__ == '__main__':

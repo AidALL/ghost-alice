@@ -142,6 +142,43 @@ class ContextGatewayInstallTests(unittest.TestCase):
         self.assertEqual(planning.remove_provider(config.read_text(encoding='utf-8')),
                          planning.remove_provider(original[config].decode()) + '\n[features]\nhooks=true\n')
 
+    def old_backups(self, count=7):
+        backups = self.reg.state_dir / 'backups'
+        backups.mkdir(exist_ok=True)
+        stamps = [f'202610{day:02d}T000000000000Z' for day in range(1, count + 1)]
+        for stamp in stamps:
+            (backups / f'{stamp}-config.toml').write_text('model="native"\n', encoding='utf-8')
+            (backups / f'{stamp}-artifacts').mkdir()
+            (backups / f'{stamp}-artifacts' / 'manifest.json').write_text('[]', encoding='utf-8')
+        environment = patch.dict('os.environ', {'GHOST_ALICE_GHOST_ROOT': str(self.reg.ghost)})
+        environment.start(); self.addCleanup(environment.stop)
+        return backups, stamps
+
+    def test_a_registration_keeps_the_five_newest_backups_after_it_commits(self):
+        # One backup is a registration's config.toml copy and its artifacts folder.
+        args, _ = self.installation_fixture()
+        backups, stamps = self.old_backups()
+        self.mocked_install(args, running=True)
+        recorded = Path(self.service()['config_backup'])
+        self.assertTrue(recorded.exists())
+        kept = {path.name.split('-', 1)[0] for path in backups.iterdir()}
+        self.assertEqual(kept, {*stamps[3:], recorded.name.split('-', 1)[0]})
+        self.assertTrue((backups / f'{stamps[3]}-artifacts' / 'manifest.json').exists())
+
+    def test_a_failed_registration_removes_no_backup(self):
+        args, _ = self.installation_fixture()
+        backups, stamps = self.old_backups()
+        active = [True]
+        with patch.object(install.sys, 'platform', 'darwin'), \
+             patch.object(install, '_service_state', side_effect=lambda _: 'running' if active[0] else 'absent'), \
+             patch.object(install, '_stop_service', side_effect=lambda _: active.__setitem__(0, False)), \
+             patch.object(install, '_start_service', side_effect=lambda *_: active.__setitem__(0, True)), \
+             patch.object(install, '_ready', side_effect=[False, True]):
+            with self.assertRaises(RuntimeError):
+                install.install(*args)
+        kept = {path.name.split('-', 1)[0] for path in backups.iterdir()}
+        self.assertTrue(set(stamps) <= kept)
+
     def test_changed_service_files_stop_the_refresh_before_any_change(self):
         mutations = {
             'launch-agent': lambda reg: reg.agent.write_bytes(b'user-edited service must stay'),
