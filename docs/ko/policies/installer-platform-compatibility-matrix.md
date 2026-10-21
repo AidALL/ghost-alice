@@ -2,7 +2,7 @@
 
 Language: [🇺🇸 English](../../policies/installer-platform-compatibility-matrix.md) | 🇰🇷 한국어
 
-개발자는 이 계약을 기준으로 Ghost-ALICE 설치기의 플랫폼별 호환성을 구현하고, 각 행에 지정된 담당 테스트로 해당 동작을 검증합니다. 단독 실행의 책임과 반환 경로는 [Core 아키텍처](../../../architecture_ko.md), 애드온 확장은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)를 따릅니다.
+개발자는 이 계약을 기준으로 Ghost-ALICE 인스톨러의 플랫폼별 호환성을 구현하고, 각 행에 지정된 담당 테스트로 해당 동작을 검증합니다. 단독 실행의 책임과 반환 경로는 [Core 아키텍처](../../../architecture_ko.md), 애드온 확장은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)를 따릅니다.
 
 ## Contents
 
@@ -35,7 +35,7 @@ Language: [🇺🇸 English](../../policies/installer-platform-compatibility-mat
 
 ## Agent Hook Runtime Contract
 
-설치기는 훅 파일의 존재뿐 아니라 훅 입력·출력과 플랫폼 권한 정책이 현재 저장소 계약과 맞는지도 확인합니다. 기존 훅 항목이 있어도 실행 명령이 달라지면 설치기는 관리 항목을 갱신합니다. `agent_visibility.profile`은 사용자에게 보이는 메시지만 제어하며 훅 누락·불일치 판정을 완화하지 않습니다.
+인스톨러는 훅 파일의 존재뿐 아니라 훅 입력·출력과 플랫폼 권한 정책이 현재 저장소 계약과 맞는지도 확인합니다. 기존 훅 항목이 있어도 실행 명령이 달라지면 인스톨러는 관리 항목을 갱신합니다. `agent_visibility.profile`은 사용자에게 보이는 메시지만 제어하며 훅 누락·불일치 판정을 완화하지 않습니다.
 
 Core Python 코드는 승인된 작업 단위·기준을 저장하고 현재 세션 어시스턴트의 주장·근거 판단을 인증합니다. 공식 privileged adapter는 선언된 네이티브 이벤트에서 이 계약을 소비합니다. 애드온 Python 코드는 불변 기록·영수증 스키마를 관리하고, 현재 세션 어시스턴트는 애드온 지침에 따라 추가 작업을 판단하며, 영향받은 애드온 동작의 근거가 필요합니다.
 
@@ -46,7 +46,7 @@ Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니�
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks와 `permissions.allow` | `platforms/claude/CLAUDE.md`의 독립적인 관리 블록을 설치하여 임의 작업 디렉터리에서도 공통 계약과 hookless fallback을 제공합니다. 표시가 없는 사용자 파일은 설치 상태로 계산하지 않는 제안 파일로 보존합니다. 모든 설치된 Ghost-ALICE skill에 `Skill(<name>)` 권한을 허용하며 core-only allowlist로 축소하지 않습니다. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
 | Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | visible Skill tool이 없으므로 required gates는 `SKILL.md` read와 workflow execution으로 기록합니다. `hooks.json`의 hook event names는 install-surface configuration이며 runtime firing proof가 아닙니다. gate-completion claim에는 observed hook payload evidence, runtime smoke, 또는 hookless/manual fallback wording이 필요합니다. `tool-checkpoint` payloads는 installation and drift verification targets입니다. 외부 도구 근거 선택은 해당 주장을 검증할 때 verification reference를 따릅니다. agent visibility profile은 hook execution을 줄이면 안 됩니다. Windows native Codex는 actual hook payload firing과 `SKILL.md` read records에 별도 smoke를 둡니다 | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
 
-Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공통 지침 소스로 지정합니다. 작업은 그 소스와 프로젝트 고유 제약을 함께 적용하며, 바로 답할 때는 로더의 도구 없는 답변 규칙을 따릅니다. Status와 doctor는 문단 제목과 관계없이 로더가 지정한 공통 파일을 요구합니다. 설치기는 다른 프로젝트의 지침 예산을 늘리지 않습니다. 사용자 거버넌스 파일을 보호하며, Codex 공통 계약 경로가 심볼릭 링크이면 교체를 거부합니다. 자세한 내용은 [공통 거버넌스와 프로젝트 지침](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)을 확인해 주세요.
+Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공통 지침 소스로 지정합니다. 작업은 그 소스와 프로젝트 고유 제약을 함께 적용하며, 바로 답할 때는 로더의 도구 없는 답변 규칙을 따릅니다. Status와 doctor는 문단 제목과 관계없이 로더가 지정한 공통 파일을 요구합니다. 인스톨러는 다른 프로젝트의 지침 예산을 늘리지 않습니다. 사용자 거버넌스 파일을 보호하며, Codex 공통 계약 경로가 심볼릭 링크이면 교체를 거부합니다. 자세한 내용은 [공통 거버넌스와 프로젝트 지침](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)을 확인해 주세요.
 
 ## Hook Message Semantics
 
@@ -56,11 +56,11 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### session-intent-analyzer
 
-설치기는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. Codex는 직접 확정하며 Claude는 신뢰된 PreToolUse/Stop 대조를 위해 네이티브 연결 정보를 보관합니다. 설치된 래퍼는 정확한 기준 사용자 입력을 반환하거나 pending을 유지하며, 작업 알림은 마지막 사용자 경로를 보존합니다. [접수 절차](../../../session-intent-analyzer/SKILL.md)와 [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)가 식별자·압축 변경·저장·호환성 내보내기를 담당합니다.
+인스톨러는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. Codex는 직접 확정하며 Claude는 신뢰된 PreToolUse/Stop 대조를 위해 네이티브 연결 정보를 보관합니다. 설치된 래퍼는 정확한 기준 사용자 입력을 반환하거나 pending을 유지하며, 작업 알림은 마지막 사용자 경로를 보존합니다. [접수 절차](../../../session-intent-analyzer/SKILL.md)와 [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)가 식별자·압축 변경·저장·호환성 내보내기를 담당합니다.
 
 ### pending merge precheck
 
-SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니페스트를 확인하고 결과를 사용자 화면에 알립니다. 선택된 작업이 설치된 스킬을 바꾸기 전과 사용자가 백업된 변경의 검토를 요청할 때, 현재 세션 어시스턴트는 `merge-companion`을 적용합니다. `merge-companion`은 세션 중 설치기 실행으로 항목이 생길 수 있으므로 매니페스트를 먼저 다시 확인합니다. 작업이 영향을 주는 미결 항목, 또는 사용자가 검토를 요청했을 때의 모든 미결 항목을 검토합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
+SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니페스트를 확인하고 결과를 사용자 화면에 알립니다. 선택된 작업이 설치된 스킬을 바꾸기 전과 사용자가 백업된 변경의 검토를 요청할 때, 현재 세션 어시스턴트는 `merge-companion`을 적용합니다. `merge-companion`은 세션 중 인스톨러 실행으로 항목이 생길 수 있으므로 매니페스트를 먼저 다시 확인합니다. 작업이 영향을 주는 미결 항목, 또는 사용자가 검토를 요청했을 때의 모든 미결 항목을 검토합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
 
 ### tool-checkpoint recovery surface
 
@@ -70,7 +70,7 @@ SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니�
 
 설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core는 모델의 서로 다른 주장·출처 판단과 응답 전체 판단을 인증하며, 스킬 로드나 화면 감사 필드는 별도의 수락 조건이 아닙니다. 독립 등록된 Core 가드와 Ghost-ALICE Autopilot 어댑터는 호출 순서를 가정하지 않고 같은 평가를 사용해야 합니다.
 
-Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토·접수 참조](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 설치기 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
+Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토·접수 참조](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
 
 ## Shell Matrix
 
@@ -85,8 +85,8 @@ Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고
 | Windows native Codex hook smoke | native Windows Codex installer path `.\install.cmd --platform codex`가 Codex bootstrap, `hooks.json`, `config.toml` hooks enabled를 작성하고 live smoke가 hook payload firing을 관찰합니다 | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/ko/policies/live-smoke-regression.md` |
 | Windows visibility preference smoke | native wrapper visibility forwarding이 `_shared/install_hooks.py --visibility`에 도달합니다. visibility alias는 compatibility coverage로 계속 허용되고 status는 hook state와 runtime profile을 separately report합니다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | 은퇴했습니다. `install.ps1`은 UTF-8 BOM과 Windows PowerShell 5.1 문법(`PSUseCompatibleSyntax`, 대상 5.1)을 유지해 5.1에서도 첫 문장까지 실행됩니다. 그 문장이 `PowerShell 7.6 or newer is required`와 `winget install --id Microsoft.PowerShell --exact`를 출력하고 종료 코드 1로 끝냅니다 | `scripts.tests.test_thin_shells`, `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
-| PowerShell 7 | 기준선은 7.6 LTS 계열입니다. `install.ps1`은 PowerShell 7.6 이상에서 실행되고, 더 낮은 7.x는 같은 요구 문구로 멈춥니다. 설치기는 PowerShell을 설치하지 않습니다. 콘솔 입출력을 UTF-8로 설정하고 Python 3.11 이상을 준비한 뒤, 예전 PowerShell 매개변수 이름을 cli 플래그로 바꾸어 모든 인수를 순서대로 `_shared/installer/cli.py`에 넘기고 그 종료 코드를 돌려줍니다 | `scripts.tests.test_thin_shells`(CI 러너처럼 `pwsh`가 있으면 `install.ps1`을 실행), `scripts.tests.test_powershell_static_analysis` |
-| CMD wrapper | `pwsh.exe`로, `pwsh.exe`가 없으면 `powershell.exe`로 `install.ps1`을 실행합니다. 후자에서는 `install.ps1`의 버전 확인이 요구 문구를 출력합니다. 인수를 그대로 넘기고 UTF-8을 강제하며 종료 코드를 돌려줍니다. 옵션, 공식 `--addon autopilot` 별칭, help는 Python 설치기가 제공합니다 | `scripts.tests.test_install_cmd_wrapper`, `scripts.tests.test_thin_shells` |
+| PowerShell 7 | 기준선은 7.6 LTS 계열입니다. `install.ps1`은 PowerShell 7.6 이상에서 실행되고, 더 낮은 7.x는 같은 요구 문구로 멈춥니다. 인스톨러는 PowerShell을 설치하지 않습니다. 콘솔 입출력을 UTF-8로 설정하고 Python 3.11 이상을 준비한 뒤, 예전 PowerShell 매개변수 이름을 cli 플래그로 바꾸어 모든 인수를 순서대로 `_shared/installer/cli.py`에 넘기고 그 종료 코드를 돌려줍니다 | `scripts.tests.test_thin_shells`(CI 러너처럼 `pwsh`가 있으면 `install.ps1`을 실행), `scripts.tests.test_powershell_static_analysis` |
+| CMD wrapper | `pwsh.exe`로, `pwsh.exe`가 없으면 `powershell.exe`로 `install.ps1`을 실행합니다. 후자에서는 `install.ps1`의 버전 확인이 요구 문구를 출력합니다. 인수를 그대로 넘기고 UTF-8을 강제하며 종료 코드를 돌려줍니다. 옵션, 공식 `--addon autopilot` 별칭, help는 Python 인스톨러가 제공합니다 | `scripts.tests.test_install_cmd_wrapper`, `scripts.tests.test_thin_shells` |
 
 ## CI Commands
 

@@ -36,16 +36,16 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | [platforms/codex/](https://github.com/AidALL/ghost-alice/tree/main/platforms/codex) | Codex 부트스트랩의 원본 |
 | [hooks/](https://github.com/AidALL/ghost-alice/tree/main/hooks) | 저장소 훅 관련 파일 |
 
-설치기 전체 구조는 [설치기 아키텍처](./installer-architecture.md)를 확인해 주세요.
+인스톨러 전체 구조는 [인스톨러 아키텍처](./installer-architecture.md)를 확인해 주세요.
 
 ## Shared Utilities
 
 | Path | Role |
 | --- | --- |
-| [_shared/](https://github.com/AidALL/ghost-alice/tree/main/_shared) | 설치기와 스킬이 공유하는 도우미 |
+| [_shared/](https://github.com/AidALL/ghost-alice/tree/main/_shared) | 인스톨러와 스킬이 공유하는 도우미 |
 | [_shared/secrets/](https://github.com/AidALL/ghost-alice/tree/main/_shared/secrets) | 외부 자격 증명을 조회하는 도우미 |
 | [_shared/mcp/](https://github.com/AidALL/ghost-alice/tree/main/_shared/mcp) | MCP 설치 도우미 |
-| [scripts/](https://github.com/AidALL/ghost-alice/tree/main/scripts) | 카탈로그 생성·검증·설치기 호환성·공개 안내 검증 스크립트 |
+| [scripts/](https://github.com/AidALL/ghost-alice/tree/main/scripts) | 카탈로그 생성·검증·인스톨러 호환성·공개 안내 검증 스크립트 |
 
 ## Core Governance And Runtime Gates
 
@@ -69,12 +69,12 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 
 ## Installed Runtime State
 
-설치기는 다음 자료를 저장소 밖의 사용자 홈 디렉터리에서 관리합니다.
+인스톨러는 다음 자료를 저장소 밖의 사용자 홈 디렉터리에서 관리합니다.
 
 | Path | Role |
 | --- | --- |
-| `~/.ghost-alice/install-state/` | 설치기가 기록한 플랫폼별 설치 상태 |
-| `~/.ghost-alice/pending-merges/` | 설치기가 보호한 사용자 수정 파일의 병합 대기 자료 |
+| `~/.ghost-alice/install-state/` | 인스톨러가 기록한 플랫폼별 설치 상태 |
+| `~/.ghost-alice/pending-merges/` | 인스톨러가 보호한 사용자 수정 파일의 병합 대기 자료 |
 | `~/.ghost-alice/uninstall-reports/` | 제거 명령이 작성한 결과 |
 | `~/.ghost-alice/secrets.env` | 표준 자격 증명 도우미의 저장소 |
 | `~/.agents/skills/` | Codex용 사용자 스킬 복사 설치 위치 |

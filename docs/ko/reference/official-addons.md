@@ -14,9 +14,9 @@ Language: [🇺🇸 English](../../reference/official-addons.md) | 🇰🇷 한�
 
 ## Official Addons
 
-공식 애드온은 Ghost-ALICE Core와 함께 유지됩니다. 사용자는 Core 저장소에서 설치기에 짧은 별칭을 전달합니다. Core 설치기는 별칭에 해당하는 관리 소스를 찾아 해당 패키지의 애드온 매니페스트를 읽습니다.
+공식 애드온은 Ghost-ALICE Core와 함께 유지됩니다. 사용자는 Core 저장소에서 인스톨러에 짧은 별칭을 전달합니다. Core 인스톨러는 별칭에 해당하는 관리 소스를 찾아 해당 패키지의 애드온 매니페스트를 읽습니다.
 
-공식 애드온을 설치하려면 설치기에 별칭을 전달해 주세요.
+공식 애드온을 설치하려면 인스톨러에 별칭을 전달해 주세요.
 
 ```bash
 bash install.sh --addon autopilot
@@ -44,8 +44,8 @@ bash install.sh --addon-source /path/to/addon-repo
 bash install.sh --addon-source https://github.com/your-org/your-addon.git
 ```
 
-- 사용자 정의 저장소: 직접 유지하거나 fork한 애드온의 URL을 `--addon-source`에 지정해 주세요. 설치기는 공식 별칭 대신 해당 소스의 애드온 매니페스트를 읽습니다.
-- 조직별 패키지: 조직 운영자는 해당 조직·고객에게 승인된 패키지를 선택하여 그 위치를 `--addon-source`에 전달합니다. 설치기는 그 소스의 애드온 매니페스트를 읽습니다. 소스 선택 자체가 사용 권한을 부여하지는 않습니다.
+- 사용자 정의 저장소: 직접 유지하거나 fork한 애드온의 URL을 `--addon-source`에 지정해 주세요. 인스톨러는 공식 별칭 대신 해당 소스의 애드온 매니페스트를 읽습니다.
+- 조직별 패키지: 조직 운영자는 해당 조직·고객에게 승인된 패키지를 선택하여 그 위치를 `--addon-source`에 전달합니다. 인스톨러는 그 소스의 애드온 매니페스트를 읽습니다. 소스 선택 자체가 사용 권한을 부여하지는 않습니다.
 - 로컬 개발 애드온: 개발자는 작업 사본의 디스크 경로(예: `/path/to/addon-repo`)를 `--addon-source`에 지정하여 게시 전에 설치하고 다시 테스트할 수 있습니다.
 
 ## Where To Go Next

@@ -29,7 +29,7 @@ Core 0.5.1과 Ghost-ALICE Autopilot 0.5.1은 현재 response-route와 완료 계
 
 ## 빠른 시작
 
-복제한 Ghost-ALICE 저장소 폴더에서 Core와 공식 Ghost-ALICE Autopilot을 한 번에 설치해 주세요. 설치기가 사용 가능한 에이전트 플랫폼을 자동으로 감지합니다.
+복제한 Ghost-ALICE 저장소 폴더에서 Core와 공식 Ghost-ALICE Autopilot을 한 번에 설치해 주세요. 인스톨러가 사용 가능한 에이전트 플랫폼을 자동으로 감지합니다.
 
 ```bash
 bash install.sh --addon autopilot
@@ -53,7 +53,7 @@ Ghost-ALICE Autopilot은 명시적으로 승인된 작업을 해당 세션의 �
 | 저장소 구조 | [저장소 구조](./docs/ko/reference/repository-structure.md) |
 | 스킬 목록과 참조 정보 | [스킬 카탈로그](./docs/ko/reference/skills.md) |
 | 세션 처리 단계와 필수 검사 규칙 | [세션 게이트 매트릭스](./docs/ko/policies/session-gate-matrix.md) |
-| 설치기의 플랫폼별 호환성 기준 | [설치기 플랫폼 호환성](./docs/ko/policies/installer-platform-compatibility-matrix.md) |
+| 인스톨러의 플랫폼별 호환성 기준 | [인스톨러 플랫폼 호환성](./docs/ko/policies/installer-platform-compatibility-matrix.md) |
 | 설계 원칙과 아키텍처 | [GitHub 위키](https://github.com/AidALL/ghost-alice/wiki/홈) |
 | 공식 애드온 사용법 | [공식 애드온 참조](./docs/ko/reference/official-addons.md) |
 | 애드온 제작 방법 | [위키: 애드온 작성](https://github.com/AidALL/ghost-alice/wiki/애드온-작성) |
@@ -64,7 +64,7 @@ Ghost-ALICE Autopilot은 명시적으로 승인된 작업을 해당 세션의 �
 - 사용자의 의도, 작업 범위, 검증 기준, 설치 상태를 핵심 관리 대상으로 다룹니다.
 - 응답 모델이 기록된 의도에서 현재 작업을 선택하고, Core가 제출 경로를 검증한 뒤 호스트 도구가 허용된 행동을 실행합니다.
 - 완료 주장은 담당 검증 근거가 필요하며, 변하지 않은 유효한 근거는 원래 출처와 시각으로 재사용합니다.
-- 설치기는 자신이 관리하는 파일과 설정을 추적하며, 관리 대상임을 입증할 수 없으면 삭제 범위를 넓히지 않습니다.
+- 인스톨러는 자신이 관리하는 파일과 설정을 추적하며, 관리 대상임을 입증할 수 없으면 삭제 범위를 넓히지 않습니다.
 
 작업 관리 메시지의 표시 수준은 다음 명령으로 조절하실 수 있습니다.
 
@@ -85,7 +85,7 @@ bash install.sh --uninstall
 
 ## 기여와 검증
 
-스킬, 설치기 동작, 공개 명령을 변경하기 전에는 [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)를 읽어 주세요. 새 스킬을 만들거나 기존 스킬을 수정하신 뒤에는 [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md)의 Phase 1-5를 통과해야 합니다.
+스킬, 인스톨러 동작, 공개 명령을 변경하기 전에는 [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)를 읽어 주세요. 새 스킬을 만들거나 기존 스킬을 수정하신 뒤에는 [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md)의 Phase 1-5를 통과해야 합니다.
 
 공개 문서와 명령 안내의 일관성은 다음 명령으로 검증하실 수 있습니다.
 
@@ -99,7 +99,7 @@ python3 scripts/validate_public_surfaces.py
 python scripts/check_skill_gate_contract.py
 ```
 
-설치기 호환성 검사 그룹은 다음 명령으로 조회하고 실행하실 수 있습니다.
+인스톨러 호환성 검사 그룹은 다음 명령으로 조회하고 실행하실 수 있습니다.
 
 ```bash
 python3 scripts/run_installer_compat_tests.py --list

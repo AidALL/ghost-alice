@@ -12,7 +12,7 @@ Core `0.5.1`과 Ghost-ALICE Autopilot `0.5.1`은 routing과 managed completion A
 
 ## 빠른 설치
 
-복제한 Core 저장소에서 다음 명령을 실행하시면 설치기가 사용 가능한 에이전트 플랫폼을 자동으로 감지하여 Core와 Ghost-ALICE Autopilot을 함께 설치합니다.
+복제한 Core 저장소에서 다음 명령을 실행하시면 인스톨러가 사용 가능한 에이전트 플랫폼을 자동으로 감지하여 Core와 Ghost-ALICE Autopilot을 함께 설치합니다.
 
 ```bash
 bash install.sh --addon autopilot
@@ -25,7 +25,7 @@ bash install.sh --addon autopilot
 1. 설치와 업데이트는 [getting-started/installation.md](./getting-started/installation.md)를 확인해 주세요.
 2. 업데이트가 막히면 [getting-started/troubleshooting.md](./getting-started/troubleshooting.md)를 확인해 주세요.
 3. 저장소 구조는 [reference/repository-structure.md](./reference/repository-structure.md)를 확인해 주세요.
-4. 설치기 구조는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 확인해 주세요.
+4. 인스톨러 구조는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 확인해 주세요.
 5. 공개 질문은 [SUPPORT.md](https://github.com/AidALL/ghost-alice/blob/main/SUPPORT.md)와 GitHub Issues를 이용해 주세요.
 6. 비공개 취약점 보고는 [SECURITY.md](https://github.com/AidALL/ghost-alice/blob/main/SECURITY.md)의 안내를 따라 주세요.
 
