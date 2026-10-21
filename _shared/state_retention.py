@@ -23,7 +23,7 @@ from pathlib import Path
 import re
 import shutil
 import time
-from typing import Callable, Iterable, NamedTuple
+from typing import Callable, Iterable, Mapping, NamedTuple
 import uuid
 
 import install_destination
@@ -117,8 +117,8 @@ _TABLE = (
             "{record}/runtime/current/session-intent-analyzer/scripts/[!.]*",
             "{record}/runtime/current/session-intent-analyzer/scripts/[!.]*/**")),
     Policy("installed-skills", "overwrite",
-           ("{claude}/skills/[!.]*", "{claude}/skills/[!.]*/**", "{agents}/skills/[!.]*",
-            "{agents}/skills/[!.]*/**")),
+           ("{claude_skills}/[!.]*", "{claude_skills}/[!.]*/**", "{codex_skills}/[!.]*",
+            "{codex_skills}/[!.]*/**")),
     Policy("host-settings", "overwrite",
            ("{claude}/settings.json", "{claude}/settings.json.corrupt-bak", "{codex}/hooks.json",
             "{codex}/hooks.json.corrupt-bak", "{codex}/config.toml", "{codex}/config.toml.bak")),
@@ -137,7 +137,7 @@ _TABLE = (
            ("{record}/addons/*/*.json", "{record}/addons/*/*.json.removing", "{ghost}/addon-permissions/*.json",
             "{ghost}/addon-resume.log", "{record}/resources/**", "{claude}/commands/*.md")),
     Policy("addon-source-cache", "overwrite", ("{record}/addon-source-cache/*", "{record}/addon-source-cache/*/**")),
-    Policy("live-smoke", "user-kept", ("{ghost}/live-smoke/**",)),
+    Policy("live-smoke", "user-kept", ("{record}/live-smoke/**",)),
     Policy("secrets", "user-kept", ("{ghost}/secrets.env",)),
     Policy("gateway-registration", "overwrite",
            ("{gateway}/state.json", "{launch_agents}/org.ghost-alice.context-gateway.plist",
@@ -147,31 +147,41 @@ _TABLE = (
 POLICIES: dict[str, Policy] = {policy.name: policy for policy in _TABLE}
 
 
-def default_roots(home: Path | str, env: dict | None = None) -> dict[str, Path]:
-    """The roots `POLICIES` patterns name, for `home` and `env` (the process environment when None): the Ghost-ALICE
-    state root from `install_destination`, and the record root, host homes and gateway state folder as the
-    installer's `installer.locations` names them."""
-    source = os.environ if env is None else env
-    home = Path(home)
-    record = home / ".ghost-alice"
-    return {
-        "ghost": Path(install_destination.ghost_root(home, env=source)),
-        "record": record,
-        "claude": Path(source["CLAUDE_CONFIG_DIR"]) if source.get("CLAUDE_CONFIG_DIR") else home / ".claude",
-        "codex": Path(source["CODEX_HOME"]) if source.get("CODEX_HOME") else home / ".codex",
-        "agents": home / ".agents",
-        "gateway": record / "context-gateway",
-        "launch_agents": home / "Library" / "LaunchAgents",
+def default_roots(service: Mapping[str, str] | None = None) -> dict[str, Path]:
+    """The roots `POLICIES` patterns name, as the process environment places them: the Ghost-ALICE state root from
+    `install_destination`, the record root, host homes and skill folders from the installer's `installer.locations`,
+    and the gateway state and launch agent folders from the `state_path` and `launch_agent` of `service`, or of the
+    install record's `service` section when `service` is None. An installation without a registered gateway has no
+    gateway roots, and `entry_for` skips the patterns under them."""
+    from installer import locations
+    import installed_payload
+
+    roots = {
+        "ghost": Path(install_destination.ghost_root()),
+        "record": locations.record_root(),
+        "claude": locations.claude_home(),
+        "codex": locations.codex_home(),
+        "claude_skills": locations.skills_dir("claude"),
+        "codex_skills": locations.skills_dir("codex"),
     }
+    if service is None:
+        service = (installed_payload.read(roots["record"]) or {}).get("service")
+    if service:
+        roots["gateway"] = Path(service["state_path"]).parent
+        roots["launch_agents"] = Path(service["launch_agent"]).parent
+    return roots
 
 
 def entry_for(path: Path | str, roots: dict[str, Path], *, directory: bool = False) -> str | None:
     """The name of the first entry a pattern of which matches `path`; an empty `directory` also matches when an
-    entry's pattern lies under it. None when no entry names the path."""
+    entry's pattern lies under it. None when no entry names the path. A pattern under a root `roots` lacks never
+    matches."""
     parts = Path(path).parts
     for policy in POLICIES.values():
         for template in policy.patterns:
             root, _, rest = template.partition("/")
+            if root.strip("{}") not in roots:
+                continue
             pattern = (*roots[root.strip("{}")].parts, *rest.split("/"))
             if _matches(parts, pattern, directory):
                 return policy.name
