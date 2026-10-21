@@ -394,6 +394,23 @@ class InstallSourceTests(SourceCase):
         self.assertEqual(code, 0)
         self.assertIn(f"[WARN] Install source check skipped: {self.record} is not JSON", out)
 
+    def test_a_command_that_cannot_replace_the_source_never_asks(self):
+        # Repair compares like the install but never replaces the install source, not even at a terminal.
+        for recorded in (self.other, self.root / "removed-clone"):
+            with self.subTest(recorded=recorded.name):
+                self.write_record(recorded)
+                ctx = make_context(self.home, "claude", adopt_source=True)
+                out = io.StringIO()
+                replies = mock.Mock(return_value="y")
+                with contextlib.redirect_stdout(out), mock.patch("installer.source.interactive", return_value=True), \
+                        mock.patch("builtins.input", replies), self.assertRaises(runner.InstallerExit) as stop:
+                    source.check_install_source(ctx, can_adopt=False)
+                self.assertEqual(stop.exception.code, 2)
+                replies.assert_not_called()
+                self.assertIn("[ERROR] Repair runs only from the install source; run the install from this checkout "
+                              "with --adopt-source to move the installation here.", out.getvalue())
+                self.assertNotIn("replaces", out.getvalue())
+
     def test_interactive_needs_a_terminal_on_both_ends(self):
         for stdin_tty, stdout_tty, expected in ((True, True, True), (True, False, False), (False, True, False)):
             with self.subTest(stdin=stdin_tty, stdout=stdout_tty), \

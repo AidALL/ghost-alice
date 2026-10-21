@@ -253,23 +253,23 @@ class OptionTests(CliCase):
 
     def test_table_columns(self):
         rows = {command.usage: (command.lock, command.platform, command.flag, command.before_lock is not None,
-                                command.checks_source)
+                                command.checks_source, command.adopts_source)
                 for command in cli.COMMANDS}
         self.assertEqual(rows, {
-            "--status, -s": (None, True, None, False, False),
-            "--doctor": (None, True, None, False, False),
-            "--repair": ("repair", True, None, False, True),
-            "--uninstall, -u": ("uninstall", True, None, False, False),
-            "SKILL_NAMES": ("install", True, None, True, True),
-            "--list, -l": (None, False, None, False, False),
-            "--cleanup-pending": ("cleanup-pending", True, "cleanup_pending", False, False),
-            "--update-source": (None, False, "update_source", False, False),
-            "--post-merge": (None, False, None, False, False),
-            "--list-addons": (None, True, "list_addons", False, False),
-            "--sync-commands": (None, True, None, False, False),
-            "--check-commands": (None, True, None, False, False),
-            "gateway ARGS...": ("gateway", False, None, False, False),
-            "--help, -h": (None, False, None, False, False),
+            "--status, -s": (None, True, None, False, False, False),
+            "--doctor": (None, True, None, False, False, False),
+            "--repair": ("repair", True, None, False, True, False),
+            "--uninstall, -u": ("uninstall", True, None, False, False, False),
+            "SKILL_NAMES": ("install", True, None, True, True, True),
+            "--list, -l": (None, False, None, False, False, False),
+            "--cleanup-pending": ("cleanup-pending", True, "cleanup_pending", False, False, False),
+            "--update-source": (None, False, "update_source", False, False, False),
+            "--post-merge": (None, False, None, False, False, False),
+            "--list-addons": (None, True, "list_addons", False, False, False),
+            "--sync-commands": (None, True, None, False, False, False),
+            "--check-commands": (None, True, None, False, False, False),
+            "gateway ARGS...": ("gateway", False, None, False, False, False),
+            "--help, -h": (None, False, None, False, False, False),
         })
         self.assertEqual(cli.INSTALL.names, ())
         self.assertEqual(cli.UNINSTALL.names, ("--uninstall", "--remove", "-u"))
@@ -562,6 +562,50 @@ class SourceCheckTests(DispatchCase):
         self.assertEqual(rc, 0)
         self.assertIn("run_install", self.names())
         self.assertIn(f"[INFO] Install source: this checkout replaces {self.other}", out)
+
+    def test_a_source_that_changed_while_waiting_for_the_lock_stops_the_command(self):
+        # Another installer adopted its own checkout between this command's check and its lock: the command compares
+        # again under the lock and publishes nothing from a checkout that is no longer the install source.
+        self.record_source(self.source)
+
+        def adopted_elsewhere(command, platform):
+            self.calls.append(("acquire", (command, platform), {}))
+            self.record_source(self.other)
+            return self.home / "lock"
+
+        self.patches.enter_context(mock.patch("installer.lock.acquire", side_effect=adopted_elsewhere))
+        for argv, handler in ((["--platform", "codex"], "run_install"), (["--platform", "claude", "--repair"], "run_repair")):
+            with self.subTest(argv=argv):
+                self.record_source(self.source)
+                self.calls.clear()
+                rc, out = self.dispatch(argv)
+                self.assertEqual(rc, 2, out)
+                self.assertIn(f"[ERROR]   Install source: {self.other}\n", out)
+                self.assertNotIn(handler, self.names())
+                self.assertEqual(self.names()[-1], "release")
+        # An unchanged source under the lock goes on without a second message.
+        self.patches.enter_context(mock.patch("installer.lock.acquire", return_value=self.home / "lock"))
+        self.record_source(self.source)
+        self.calls.clear()
+        rc, out = self.dispatch(["--platform", "codex"])
+        self.assertEqual((rc, out), (0, ""))
+        self.assertIn("run_install", self.names())
+
+    def test_repair_never_replaces_the_install_source(self):
+        # A repair re-provisions missing targets only: from another checkout it would publish nothing, or mix two
+        # checkouts. Moving the installation is the install's job, with --adopt-source or after the old one is gone.
+        hint = ("[ERROR] Repair runs only from the install source; run the install from this checkout with "
+                "--adopt-source to move the installation here.")
+        for recorded, extra in ((self.other, ["--adopt-source"]), (self.other, []),
+                                (self.home.parent / "removed-clone", [])):
+            with self.subTest(recorded=recorded.name, extra=extra):
+                self.record_source(recorded)
+                self.calls.clear()
+                rc, out = self.dispatch(["--platform", "claude", "--repair", *extra])
+                self.assertEqual(rc, 2, out)
+                self.assertIn(hint, out)
+                self.assertNotIn("this checkout replaces", out)
+                self.assertEqual([name for name in self.names() if name in self.CHANGES], [])
 
     def test_commands_that_install_nothing_are_not_checked(self):
         self.record_source(self.other)
