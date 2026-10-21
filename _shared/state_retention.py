@@ -152,7 +152,8 @@ def default_roots(service: Mapping[str, str] | None = None) -> dict[str, Path]:
     `install_destination`, the record root, host homes and skill folders from the installer's `installer.locations`,
     and the gateway state and launch agent folders from the `state_path` and `launch_agent` of `service`, or of the
     install record's `service` section when `service` is None. An installation without a registered gateway has no
-    gateway roots, and `entry_for` skips the patterns under them."""
+    gateway roots, and `entry_for` skips the patterns under them. An install record that cannot be read leaves out
+    only the gateway roots and adds one line to the failure record."""
     from installer import locations
     import installed_payload
 
@@ -165,7 +166,11 @@ def default_roots(service: Mapping[str, str] | None = None) -> dict[str, Path]:
         "codex_skills": locations.skills_dir("codex"),
     }
     if service is None:
-        service = (installed_payload.read(roots["record"]) or {}).get("service")
+        try:
+            service = (installed_payload.read(roots["record"]) or {}).get("service")
+        except installed_payload.RecordError as exc:
+            _record_failure("install-record", installed_payload.path(roots["record"]), type(exc).__name__, str(exc))
+            service = None
     if service:
         roots["gateway"] = Path(service["state_path"]).parent
         roots["launch_agents"] = Path(service["launch_agent"]).parent
