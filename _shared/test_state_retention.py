@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -279,6 +280,68 @@ class AgeTests(RetentionTestCase):
         self.assertFalse(target.exists())
 
 
+class AppendTests(RetentionTestCase):
+    """Writers that share a log append and apply its entry under one lock on the log, so no writer rotates with a size
+    it read before another writer rotated."""
+
+    def test_appends_and_rotations_of_one_log_never_overlap(self):
+        path = self.root / "governance-events.jsonl"
+        policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
+        inside, peak, counting = [0], [0], threading.Lock()
+        rotate = state_retention._size_rotation
+
+        def observed(target, entry):
+            with counting:
+                inside[0] += 1
+                peak[0] = max(peak[0], inside[0])
+            time.sleep(0.02)  # time for a writer without the lock to overlap
+            try:
+                return rotate(target, entry)
+            finally:
+                with counting:
+                    inside[0] -= 1
+
+        def writer(index):
+            for count in range(5):
+                state_retention.append("governance-events", path, f'{{"writer":{index},"n":{count}}}\n')
+
+        with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy}), \
+                mock.patch("state_retention._size_rotation", side_effect=observed):
+            threads = [threading.Thread(target=writer, args=(index,)) for index in range(3)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(30)
+        self.assertEqual(peak[0], 1)
+        self.assertEqual(self.failures(), [])
+
+    @unittest.skipIf(state_retention.fcntl is None, "this platform has no flock")
+    def test_a_writer_that_waited_while_the_log_was_rotated_locks_the_new_log(self):
+        path = self.root / "io-trace.jsonl"
+        path.write_text("old\n", encoding="utf-8")
+        locked = []
+
+        def writer():
+            with state_retention._exclusive(path) as held:
+                locked.append(held.st_ino)
+
+        with state_retention._exclusive(path):
+            thread = threading.Thread(target=writer)
+            thread.start()
+            time.sleep(0.1)  # the writer now waits for the lock on the old file
+            path.rename(path.with_name("io-trace.jsonl.1"))
+            path.write_text("new\n", encoding="utf-8")
+        thread.join(10)
+        self.assertEqual(locked, [path.stat().st_ino])
+
+    def test_append_writes_the_text_and_applies_the_entry(self):
+        path = self.root / "io-trace.jsonl"
+        with mock.patch.object(state_retention, "apply", wraps=state_retention.apply) as apply:
+            state_retention.append("io-trace", path, "one\n")
+        self.assertEqual(path.read_text(encoding="utf-8"), "one\n")
+        apply.assert_called_once_with("io-trace", path)
+
+
 class FailureTests(RetentionTestCase):
     def test_a_delete_failure_is_recorded_and_never_raised(self):
         root = self.root / "install"
@@ -291,6 +354,15 @@ class FailureTests(RetentionTestCase):
         self.assertEqual(len(failures), 2)
         self.assertEqual({failure["policy"] for failure in failures}, {"install-logs"})
         self.assertEqual({failure["error_type"] for failure in failures}, {"PermissionError"})
+
+    def test_an_entry_another_writer_already_removed_is_not_a_failure(self):
+        root = self.root / "install"
+        root.mkdir()
+        for day in range(1, 33):
+            (root / f"2026-10-{day:02d}-120000.log").write_text("", encoding="utf-8")
+        with mock.patch("state_retention._remove", side_effect=FileNotFoundError("gone")):
+            state_retention.apply("install-logs", root)
+        self.assertEqual(self.failures(), [])
 
     def test_an_unexpected_error_is_recorded_and_never_raised(self):
         path = self.root / "usage.jsonl"

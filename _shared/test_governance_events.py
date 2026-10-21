@@ -97,6 +97,18 @@ class GovernanceRetentionTests(unittest.TestCase):
         self.assertEqual(json.loads(previous[-1]), {"rule": "destructive-command"})
         self.assertFalse(output.exists())
 
+    def test_concurrent_writers_append_through_the_retention_lock(self) -> None:
+        sys.path.insert(0, str(ROOT))
+        import governance_events
+        import state_retention
+
+        temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="governance-retention-test-"))
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        output = temp_dir / "governance-events.jsonl"
+        with mock.patch.object(state_retention, "append") as append:
+            governance_events.append_event({"rule": "secret-pattern"}, output)
+        append.assert_called_once_with("governance-events", output, '{"rule": "secret-pattern"}\n')
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

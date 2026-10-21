@@ -289,10 +289,10 @@ class StagingAndRetentionTests(PublishCase):
         import state_retention
 
         log = self.ghost / "install-state" / "codex-events.jsonl"
-        with mock.patch.object(state_retention, "apply", wraps=state_retention.apply) as apply:
+        with mock.patch.object(state_retention, "append", wraps=state_retention.append) as append:
             install_transaction._write_failure_event(log, source=self.src / "alpha", dest=self.codex / "alpha",
                                                      phase="publish", error="disk full")
-        apply.assert_called_once_with("install-state-events", log)
+        self.assertEqual(append.call_args.args[:2], ("install-state-events", log))
         self.assertEqual(json.loads(log.read_text(encoding="utf-8"))["error"], "disk full")
 
 

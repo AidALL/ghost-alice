@@ -486,7 +486,8 @@ def test_retirement_events_offer_the_event_log_to_its_retention_entry(tmp_path, 
     event = tmp_path/'install-state'/'claude-events.jsonl'
     monkeypatch.setenv('GHOST_ALICE_GHOST_ROOT', str(tmp_path))
     calls = []
-    monkeypatch.setattr(state_retention, 'apply', lambda *args, **kwargs: calls.append(args))
+    append = state_retention.append
+    monkeypatch.setattr(state_retention, 'append', lambda *args, **kwargs: calls.append(args) or append(*args, **kwargs))
     retired_assets._audit(event, {'outcome': 'retired'}, 'retire')
-    assert calls == [('install-state-events', event)]
+    assert [call[:2] for call in calls] == [('install-state-events', event)]
     assert json.loads(event.read_text(encoding='utf-8'))['phase'] == 'retire'
