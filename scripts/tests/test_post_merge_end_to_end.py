@@ -75,6 +75,9 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         state = json.loads((self.home / ".ghost-alice" / "install-state" / "claude.json").read_text(encoding="utf-8"))
         change = next(item for item in state["system_env_changes"] if item["kind"] == "source_repo_hook_path")
         self.assertEqual((change["before_present"], change["after"]), (False, hooks))
+        # The record of the write, made in the same step as the write, for an install that stops before the end.
+        write_record = self.home / ".ghost-alice" / "install-state" / "source-repo-hook-path.json"
+        self.assertEqual(json.loads(write_record.read_text(encoding="utf-8"))["after"], hooks)
 
         # A worktree whose own commit holds an older hook file: its merge runs the install source's hook, which
         # names the worktree to the install source's installer, and nothing is installed.
@@ -107,6 +110,7 @@ class HookPathOwnershipEndToEndTests(unittest.TestCase):
         removed = self.install("--uninstall")
         self.assertEqual(removed.returncode, 0, removed.stdout + removed.stderr)
         self.assertIsNone(self.shared_hook_path())
+        self.assertFalse(write_record.exists())
 
 
 if __name__ == "__main__":

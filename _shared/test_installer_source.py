@@ -242,6 +242,46 @@ class GitHooksTests(SourceCase):
                                                        after=self.hooks))
         self.assertEqual(self.shared_value(), self.hooks)
 
+    def test_an_earlier_installers_record_of_the_relative_value_keeps_the_value_it_replaced(self):
+        # An earlier installer replaced a user's value with the relative `hooks` and recorded it: the value from before
+        # Ghost-ALICE is that user's value, for any checkout of the same repository.
+        worktree = (self.root / "earlier-worktree").resolve()
+        git(self.repo, "worktree", "add", "-q", "-b", "earlier", str(worktree))
+        for recorded_root in (self.repo, worktree):
+            with self.subTest(recorded_root=recorded_root.name):
+                git(self.repo, "config", "--local", "core.hooksPath", "hooks")
+                self.record_install_state("claude", repo_root=str(recorded_root), before_present=True,
+                                          before="custom-hooks", after="hooks")
+                change, _ = self.setup_hooks()
+                self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=True,
+                                                               before="custom-hooks", after=self.hooks))
+        # The relative value names no folder: a record from another repository says nothing about this one.
+        other = init_repo(self.root / "other").resolve()
+        git(self.repo, "config", "--local", "core.hooksPath", "hooks")
+        self.record_install_state("claude", repo_root=str(other), before_present=True, before="custom-hooks",
+                                  after="hooks")
+        change, _ = self.setup_hooks()
+        self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
+                                                       after=self.hooks))
+
+    def test_an_install_that_stops_after_the_write_leaves_its_record_for_the_retry(self):
+        # The git hook step runs before the later steps; an install that stops before its install-state is written
+        # still leaves the record of the write it made, written in the same step, so the retry knows the value to
+        # restore.
+        git(self.repo, "config", "--local", "core.hooksPath", "elsewhere")
+        self.setup_hooks()
+        record = json.loads((self.root / "home" / ".ghost-alice" / "install-state" / "source-repo-hook-path.json")
+                            .read_text(encoding="utf-8"))
+        self.assertEqual({key: record[key] for key in ("kind", "repo_root", "before_present", "before", "after")},
+                         {"kind": "source_repo_hook_path", "repo_root": self.repo.as_posix(), "before_present": True,
+                          "before": "elsewhere", "after": self.hooks})
+        self.assertTrue(record["applied_at"])
+        retry, out = self.setup_hooks()
+        self.assertEqual(retry, source.HookPathChange(changed=False, recorded=True, before_present=True,
+                                                      before="elsewhere", after=self.hooks,
+                                                      applied_at=record["applied_at"]))
+        self.assertEqual(out, "")
+
     def test_a_value_in_place_that_no_install_state_names_has_no_known_previous_value(self):
         # Another installation (another HOME) or the user wrote this value: the full uninstall leaves it alone.
         git(self.repo, "config", "--local", "core.hooksPath", self.hooks)

@@ -875,6 +875,35 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertEqual((source_hook["action"], source_hook["reason"], source_hook["shared_platforms"]),
                              ("unchanged", "source-repo-hook-path-in-use-by-other-platform", ["claude"]))
 
+    def test_the_record_of_the_hook_path_write_goes_with_the_last_host(self) -> None:
+        # The install writes one record of its hook path write for the whole installation, next to the hosts'
+        # install-state manifests; a host's removal keeps it while another host remains.
+        for other_host in (True, False):
+            with self.subTest(other_host=other_host), tempfile.TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                managed = _write_managed_skill(root, "task-router")
+                manifest = _write_manifest(
+                    root,
+                    [{"target_name": "task-router", "dest_path": managed.as_posix(), "install_mode": "copy"}],
+                )
+                record = manifest.parent / "source-repo-hook-path.json"
+                record.write_text(json.dumps({"kind": "source_repo_hook_path", "repo_root": (root / "repo").as_posix(),
+                                              "before_present": False, "before": None,
+                                              "after": (root / "repo" / "hooks").as_posix(),
+                                              "applied_at": "2026-10-21T00:00:00Z"}), encoding="utf-8")
+                if other_host:
+                    (manifest.parent / "claude.json").write_text(
+                        json.dumps({"schema_version": 1, "platform": "claude"}), encoding="utf-8")
+                report = root / "uninstall-report.json"
+
+                result = self.run_cleanup(root, manifest, report, confirm=True)
+
+                self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+                self.assertEqual(record.exists(), other_host)
+                data = json.loads(report.read_text(encoding="utf-8"))
+                item = next(item for item in data["items"] if item.get("target_name") == "source-repo-hook-path-record")
+                self.assertEqual(item["action"], "manual-review" if other_host else "removed")
+
     def test_confirm_restores_codex_hooks_feature_flag_from_change_record(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
