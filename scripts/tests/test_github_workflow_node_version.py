@@ -17,7 +17,7 @@ class GithubWorkflowNodeVersionTest(unittest.TestCase):
         for workflow in WORKFLOWS:
             with self.subTest(workflow=workflow):
                 text = (REPO_ROOT / workflow).read_text(encoding="utf-8")
-                self.assertIn("actions/setup-node@v4", text)
+                self.assertIn("actions/setup-node@v7", text)
                 self.assertIn('node-version: "24"', text)
 
 
