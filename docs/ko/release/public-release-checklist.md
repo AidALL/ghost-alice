@@ -15,7 +15,7 @@ Language: [🇺🇸 English](../../release/public-release-checklist.md) | 🇰�
 
 ## Release Scope
 
-- 배포 담당자는 후보 commit을 정하고 이번 배포에 속하는 검토된 Core·설치기·공개 스킬·스키마·테스트·문서를 포함합니다. 무관한 로컬 변경은 보존합니다.
+- 배포 담당자는 후보 commit을 정하고 이번 배포에 속하는 검토된 Core·인스톨러·공개 스킬·스키마·테스트·문서를 포함합니다. 무관한 로컬 변경은 보존합니다.
 - `VERSION`, 애드온 요구 조건과 현재 호환성 기록을 일치시킵니다. Core와 Ghost-ALICE Autopilot은 별도 패키지이며 Core 소스 업데이트만으로 Ghost-ALICE Autopilot이 게시되거나 설치되지는 않습니다.
 - `.tmp/`, 로컬 worktree, 설치 보고서, 세션 기록, 자격 증명, 비공개 애드온, 조직별 자료와 생성 캐시는 공개 산출물에서 제외합니다. 홈 디렉터리의 설치 사본이나 로컬 에이전트 설정도 포함하지 않습니다.
 - 소스 준비, 로컬 설치, 실행 중인 호스트의 반영, 통합과 공개 게시를 구별합니다. 한 단계의 근거로 다른 단계까지 입증하지 않습니다.
@@ -42,13 +42,13 @@ python3 scripts/validate_platform_adapters.py
 python3 scripts/run_installer_compat_tests.py --list
 ```
 
-설치기 동작에 영향이 있으면 해당 호환성 그룹을 사용합니다. 공용 실행 코드나 스크립트를 바꾸는 배포에는 `shared-all`과 `scripts-all`의 관련 검증이 필요하며, 변경이 여러 호환성 계약에 걸치면 전체 호환성 검사를 사용합니다. 담당 테스트는 [설치기 호환성 계약](../policies/installer-platform-compatibility-matrix.md)을 확인합니다. 정적 검사 통과는 실제 네이티브 호출이나 모델 행동의 근거가 아닙니다.
+인스톨러 동작에 영향이 있으면 해당 호환성 그룹을 사용합니다. 공용 실행 코드나 스크립트를 바꾸는 배포에는 `shared-all`과 `scripts-all`의 관련 검증이 필요하며, 변경이 여러 호환성 계약에 걸치면 전체 호환성 검사를 사용합니다. 담당 테스트는 [인스톨러 호환성 계약](../policies/installer-platform-compatibility-matrix.md)을 확인합니다. 정적 검사 통과는 실제 네이티브 호출이나 모델 행동의 근거가 아닙니다.
 
 ## Installed Behavior Gates
 
 설치된 실행 환경을 주장하려면 후보 설치의 출처와 [실행 점검 절차](../policies/live-smoke-regression.md)의 실제 네이티브 훅 관측을 보존합니다. 디스크의 훅 설정, 네이티브 신뢰와 실행 중인 호스트의 반영은 별개입니다. 필요하면 [재로드 복구 안내](../getting-started/troubleshooting.md#native-hook-trust-and-reload)를 따릅니다.
 
-거버넌스 점검은 실행 연결과 제어 표시를 입증하며 별도의 비공개 행동 검사를 대신하지 않습니다. 정규 설치기로 후보를 설치하고 설치기 소유 매니페스트를 갖춘 임시 환경에서, 지원을 주장하는 각 설치 플랫폼에 새 세션 평가 컨트롤러를 사용합니다. 자리표시자를 배포 담당자의 사례·평가 도구 경로로 바꾸며 평가 전용 비공개 자료는 대상 명령과 환경에 전달하지 않습니다.
+거버넌스 점검은 실행 연결과 제어 표시를 입증하며 별도의 비공개 행동 검사를 대신하지 않습니다. 정규 인스톨러로 후보를 설치하고 인스톨러 소유 매니페스트를 갖춘 임시 환경에서, 지원을 주장하는 각 설치 플랫폼에 새 세션 평가 컨트롤러를 사용합니다. 자리표시자를 배포 담당자의 사례·평가 도구 경로로 바꾸며 평가 전용 비공개 자료는 대상 명령과 환경에 전달하지 않습니다.
 
 ```bash
 python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform claude --subject-command '["claude"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-claude.json
