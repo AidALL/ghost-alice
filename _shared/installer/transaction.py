@@ -218,11 +218,17 @@ def _gateway_service_running() -> bool:
 
 
 def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
-    """One line about the context gateway after the runtime publish, read-only, and the same line
-    returned as `(summary, running)` for the report tail: None when the install record has no
-    `service` section; INFO with the service's runtime root while the service runs, WARN when it does
-    not or when the record cannot be read. The gateway participant already stopped and started the
-    service around the runtime publish; this line only tells the user what the record says."""
+    """One line about the context gateway after the runtime publish of an install and at the end of a repair,
+    read-only, and the same line returned as `(summary, running)` for the report tail.
+
+    With a `service` section: INFO with the service's runtime root while the service runs, WARN when it does
+    not; the gateway participant already stopped and started it around the runtime publish. Without one:
+    WARN when launchd has loaded a gateway service whose program lies under the runtime root
+    (`gateway_participant.loaded_service`, the removal's own observation). The installer has no record of
+    that service's files, so it neither stops nor starts it; the line names the registration command, which
+    records the service and restarts it. An observation that is not clear counts as none and leaves one
+    detail line. WARN when the record cannot be read.
+    """
     root = locations.record_root()
     try:
         record = installed_payload.read(root)
@@ -232,7 +238,7 @@ def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
         return summary, False
     service = (record or {}).get("service")
     if not isinstance(service, dict):
-        return None
+        return _report_unrecorded_service()
     summary = f"Context gateway: registered, runtime {service.get('runtime_root')}"
     if _gateway_service_running():
         summary += ", service running"
@@ -241,6 +247,23 @@ def report_gateway(ctx: "Context") -> tuple[str, bool] | None:
     summary += ", service not running"
     report.warn(summary)
     return summary, False
+
+
+def _report_unrecorded_service() -> tuple[str, bool] | None:
+    """The `report_gateway` line for a gateway service that launchd runs from the runtime root while the
+    install record has no `service` section; None without one."""
+    seen = gateway_participant.loaded_service()
+    if seen.state in ("inconclusive", "unreadable"):
+        report.info(f"Context gateway: launchd observation was inconclusive ({seen.detail}); "
+                    "no unrecorded service reported")
+        return None
+    if seen.state != "loaded" or not seen.runs_under(locations.runtime_root()):
+        return None
+    summary = (f"Context gateway: a loaded service runs from the runtime without an install record entry; "
+               f"register it with {report.install_command()} gateway --codex-dir <dir> --ledger-root <dir> "
+               f"--state-dir <dir> --launch-agent <plist>, which restarts it")
+    report.warn(summary)
+    return summary, True
 
 
 def migrate_record(ctx: "Context") -> None:
