@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tomllib
@@ -911,8 +912,60 @@ def _reconcile_native_intake(env, hook_payload):
         return
     from native_completion import _ledger
     module = _ledger(env)
+    # PreToolUse and Stop run after the host appends the turn's input row.
     module.reconcile_native_inputs(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
-                                   platform='claude', session_id=session)
+                                   platform='claude', session_id=session, record_wait=True)
+
+
+# Core's waiting reasons, worded for the user here at the host boundary.
+NATIVE_WAIT_REASONS = {
+    'row-not-found': 'an input has no matching row in the native transcript',
+    'row-ambiguous': 'an input matches more than one native transcript row',
+    'transcript-unavailable': 'the native transcript changed or is missing',
+    'unknown-actor': 'an input carries host markers Ghost-ALICE does not recognize',
+}
+
+
+def _accepts_system_notice(stdout: str, *, exit_code: int) -> bool:
+    """The host reads one JSON object on every exit code. Empty output becomes JSON
+    only on success, so a failing hook keeps its native error classification."""
+    if not stdout.strip():
+        return exit_code == 0
+    try:
+        return isinstance(json.loads(stdout), dict)
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
+def _with_system_notice(stdout: str, notice: str) -> str:
+    """Add one user warning to the host envelope; decisions and model context stay unchanged."""
+    protocol = json.loads(stdout) if stdout.strip() else {}
+    warning = protocol.get('systemMessage')
+    protocol['systemMessage'] = f'{warning}\n{notice}' if isinstance(warning, str) and warning else notice
+    return json.dumps(protocol, ensure_ascii=False) + '\n'
+
+
+def _native_intake_notice(env, hook_payload):
+    """Claim this session's first notice for the current wait's cause and word it; None otherwise."""
+    event = hook_payload.get('hook_event_name') or hook_payload.get('hookEventName')
+    if env.get('GHOST_ALICE_PLATFORM') != 'claude' or event not in ('PreToolUse', 'Stop'):
+        return None
+    session = bound_session_identity('claude', hook_payload, env)
+    if session is None:
+        return None
+    try:
+        from native_completion import _ledger
+        notice = _ledger(env).claim_native_input_notice(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
+                                                        platform='claude', session_id=session)
+    except (ImportError, OSError, ValueError, RuntimeError, sqlite3.Error):
+        return None  # The wait stays recorded; a later hook can still deliver its notice.
+    if not notice:
+        return None
+    reason = notice['cause'].split(':', 1)[0]
+    return (f"Ghost-ALICE intake: intent and route recording is paused in this session because "
+            f"{NATIVE_WAIT_REASONS.get(reason, 'an input origin is unconfirmed')} ({reason}). "
+            "It resumes at your next typed input. Later waits with this cause are only recorded; "
+            "`bash install.sh --doctor` lists them.")
 
 
 def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=None) -> int:
@@ -1052,6 +1105,13 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
     native_stdout = _native_protocol_output(host_stdout, platform=platform, event=event)
     user_stdout, user_stderr = _render_user_surface(item, native_stdout, result.stderr)
+    # Claim the notice only when this envelope can carry it; visibility
+    # profiles never hide it.
+    if binding is not None and _accepts_system_notice(
+            user_stdout, exit_code=0 if force_success else result.returncode):
+        notice = _native_intake_notice(env, hook_payload)
+        if notice:
+            user_stdout = _with_system_notice(user_stdout, notice)
     strict_session_log.append_event(
         home=_home_from_env(env),
         platform=platform,

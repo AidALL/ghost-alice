@@ -13,6 +13,15 @@ from pathlib import Path
 
 from text_lines import committed_byte_lines, committed_length, committed_lines, committed_records
 
+# Host entrypoints whose SDK-started turns Core reads as non-human context.
+SDK_ENTRYPOINTS = frozenset({'sdk-cli', 'claude-desktop'})
+# Every key Claude desktop 2.1.295-2.1.299 writes on an app event delivered
+# while Claude works. Its marker is the missing origin, so any other key keeps
+# the row unknown instead of removing a human input's authority.
+APP_EVENT_KEYS = frozenset({'type', 'commandMode', 'prompt', 'source_uuid', 'timestamp', 'delivery_id'})
+# Actors a located row can resolve to; None means the markers are unknown.
+RESOLVED_ACTORS = ('human', 'sdk', 'context', 'notification')
+
 
 def codex_transcript_path(platform_dir, session_id):
     """Find one host-owned transcript by native session identity, without copying it."""
@@ -72,16 +81,22 @@ def read_entries(path_value, session=None):
     return entries
 
 
+def _peer_hand_back(origin):
+    return (isinstance(origin, dict) and origin.get('kind') == 'peer' and origin.get('handback') is True
+            and isinstance(origin.get('senderTaskId'), str) and bool(origin['senderTaskId'])
+            and origin.get('from') == origin['senderTaskId'])
+
+
 def is_task_notification(entry):
     message = entry.get('attachment') if entry.get('type') == 'attachment' else entry
     if not isinstance(message, dict):
         return False
     origin = message.get('origin')
-    if (entry.get('type') == 'user' and entry.get('promptSource') == 'system'
-            and entry.get('turnOrigin') == 'peer' and isinstance(origin, dict)
-            and origin.get('kind') == 'peer' and origin.get('handback') is True
-            and isinstance(origin.get('senderTaskId'), str) and origin['senderTaskId']
-            and origin.get('from') == origin['senderTaskId']):
+    if _peer_hand_back(origin) and (
+            (entry.get('type') == 'user' and entry.get('promptSource') == 'system'
+             and entry.get('turnOrigin') == 'peer')
+            or (entry.get('type') == 'attachment' and message.get('type') == 'queued_command'
+                and message.get('commandMode') == 'prompt')):
         return True
     native_origin = (isinstance(origin, dict) and origin.get('kind') == 'task-notification'
                      and origin.get('producer') == 'session-task')
@@ -104,10 +119,32 @@ def is_actual_user_prompt(entry):
                                      for item in items)
 
 
+def _queued_prompt(entry):
+    """Attachment that delivers a prompt while Claude works; the row has no actor markers."""
+    attachment = entry.get('attachment') if entry.get('type') == 'attachment' else None
+    if (isinstance(attachment, dict) and attachment.get('type') == 'queued_command'
+            and attachment.get('commandMode') == 'prompt' and isinstance(attachment.get('prompt'), str)
+            and not entry.get('isMeta') and not entry.get('isSidechain')):
+        return attachment
+    return None
+
+
+def is_queued_human_prompt(entry):
+    """Input the user typed while Claude worked; the host stamps origin.kind=human."""
+    attachment = _queued_prompt(entry)
+    return (attachment is not None and not attachment.get('isMeta')
+            and isinstance(attachment.get('origin'), dict) and attachment['origin'].get('kind') == 'human')
+
+
+def is_prompt_row(entry):
+    """Row that starts the current input's turn, for intake and completion consumers alike."""
+    return is_actual_user_prompt(entry) or is_queued_human_prompt(entry)
+
+
 def assistant_text_this_turn(entries):
     """Select the last Claude assistant message after the latest human input."""
     start = next((i for i in range(len(entries) - 1, -1, -1)
-                  if is_actual_user_prompt(entries[i])), -1)
+                  if is_prompt_row(entries[i])), -1)
     for entry in reversed(entries[start + 1:]):
         message = entry.get('message')
         if not isinstance(message, dict) or message.get('role') != 'assistant':
@@ -248,7 +285,7 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
         return result('absent', 'current-input-has-no-tool-call')
     owned = [row for row in rows if row.get('sessionId') == session_id and not row.get('isSidechain')]
     for index in range(len(owned) - 1, -1, -1):
-        if is_actual_user_prompt(owned[index]):
+        if is_prompt_row(owned[index]):
             for row in owned[index + 1:]:
                 message = row.get('message')
                 if (row.get('type') != 'assistant' or not isinstance(message, dict)
@@ -283,19 +320,25 @@ def capture_append_boundary(path_value):
 
 
 def native_input_actor(entry):
-    """Require positive host origin; message wording supplies no actor evidence."""
+    """Require positive host origin; message wording supplies no actor evidence.
+
+    An SDK-started turn or a queued app event is non-human context: 'sdk' for a
+    user row that can serve as a content original, 'context' for an app event.
+    """
     if entry.get('isSidechain'):
         return None
     if is_task_notification(entry):
         return 'notification'
     if entry.get('isMeta'):
         return None
+    if is_queued_human_prompt(entry):
+        return 'human'
     origin = entry.get('origin')
     if (is_actual_user_prompt(entry) and isinstance(origin, dict) and origin.get('kind') == 'human'
             and entry.get('promptSource') != 'system' and entry.get('turnOrigin') in (None, 'human')):
         return 'human'
     if (is_actual_user_prompt(entry) and origin is None
-        and entry.get('entrypoint') == 'sdk-cli' and entry.get('userType') == 'external'
+        and entry.get('entrypoint') in SDK_ENTRYPOINTS and entry.get('userType') == 'external'
         and entry.get('promptSource') == 'sdk' and entry.get('turnOrigin') == 'sdk'
         and (entry.get('isMeta') is None or entry.get('isMeta') is False)
         and (entry.get('isSidechain') is None or entry.get('isSidechain') is False)):
@@ -305,7 +348,31 @@ def native_input_actor(entry):
             and isinstance(block.get('text'), str) and not set(block) - {'type', 'text', 'cache_control'}
             for block in content)):
             return 'sdk'
+    attachment = _queued_prompt(entry)
+    if (attachment is not None and set(attachment) <= APP_EVENT_KEYS
+            and entry.get('entrypoint') in SDK_ENTRYPOINTS and entry.get('userType') == 'external'):
+        return 'context'
     return None
+
+
+def input_shape(entry):
+    """Host markers of an input row for failure records; the message text never enters it."""
+    def marker(value):
+        if value is None or isinstance(value, bool):
+            return value
+        return value[:64] if isinstance(value, str) else type(value).__name__
+    if not isinstance(entry, dict):
+        return json.dumps(dict(type='invalid'))
+    attachment = entry.get('attachment') if entry.get('type') == 'attachment' else None
+    origin = (attachment if isinstance(attachment, dict) else entry).get('origin')
+    shape = dict(type=marker(entry.get('type')), entrypoint=marker(entry.get('entrypoint')),
+                 userType=marker(entry.get('userType')), promptSource=marker(entry.get('promptSource')),
+                 turnOrigin=marker(entry.get('turnOrigin')), isMeta=bool(entry.get('isMeta')),
+                 origin=marker(origin.get('kind')) if isinstance(origin, dict) else marker(origin))
+    if isinstance(attachment, dict):
+        shape.update(attachment=marker(attachment.get('type')), commandMode=marker(attachment.get('commandMode')),
+                     keys=sorted(str(key)[:64] for key in attachment))
+    return json.dumps(shape, sort_keys=True, separators=(',', ':'))
 
 
 def _input_text(entry):
@@ -348,57 +415,138 @@ def matches_input_text(content, binding):
                and exact(block.get('text')) for block in content) == 1
 
 
-def resolve_staged_input(observation, session_id, cursors, *, allow_unknown=False):
-    """Return one native actor/row locator, or leave the transport unresolved.
+def _row_content(entry):
+    message = entry.get('message')
+    return message.get('content') if isinstance(message, dict) else _input_text(entry)
 
+
+def _candidate_texts(content):
+    """Every text form matches_input_text can bind, so an index lookup misses no match."""
+    if isinstance(content, str):
+        return [content]
+    if (not isinstance(content, list) or any(not isinstance(block, dict) or not isinstance(block.get('type'), str)
+        or (block['type'] == 'text' and not isinstance(block.get('text'), str)) for block in content)):
+        return []
+    texts = [block['text'] for block in content if block['type'] == 'text']
+    return [''.join(texts), '\n'.join(texts), *texts] if texts else []
+
+
+class _TranscriptSnapshot:
+    """One read of a transcript: identity, bytes, prefix digests and a text-digest index."""
+
+    def __init__(self, identity, raw):
+        self.identity, self.raw = identity, raw
+        self._hashers = {0: hashlib.sha256()}
+        self._index, self._indexed_from = None, None
+
+    @classmethod
+    def read(cls, path):
+        try:
+            with Path(path).open('rb') as stream:
+                identity = os.fstat(stream.fileno())
+                return cls((identity.st_dev, identity.st_ino), stream.read())
+        except (OSError, TypeError, ValueError):
+            return None
+
+    def prefix_digest(self, offset):
+        """Digest of raw[:offset]; queue boundaries grow, so each call hashes only new bytes."""
+        if type(offset) is not int or not 0 <= offset <= len(self.raw):
+            return None
+        base = max(point for point in self._hashers if point <= offset)
+        hasher = self._hashers[base].copy()
+        hasher.update(self.raw[base:offset])
+        self._hashers[offset] = hasher.copy()
+        return hasher.hexdigest()
+
+    def rows_with(self, char_count, digest, start):
+        """(start, end) of committed user or attachment rows at or after start that carry the text."""
+        if self._index is None or start < self._indexed_from:
+            self._index, self._indexed_from = {}, start
+            for row_start, end, line in committed_byte_lines(self.raw, start):
+                try:
+                    entry = json.loads(line)
+                except (ValueError, UnicodeError):
+                    continue
+                if not isinstance(entry, dict) or entry.get('type') not in ('user', 'attachment'):
+                    continue
+                for text in set(_candidate_texts(_row_content(entry))):
+                    key = (len(text), 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
+                    self._index.setdefault(key, []).append((row_start, end))
+        return [row for row in self._index.get((char_count, digest), []) if row[0] >= start]
+
+
+class TranscriptCache:
+    """Each transcript is read once per caller operation, such as one reconcile.
+
+    Rows the host appends after that read wait for the caller's next operation.
+    """
+
+    def __init__(self):
+        self._snapshots = {}
+
+    def snapshot(self, path):
+        if path not in self._snapshots:
+            self._snapshots[path] = _TranscriptSnapshot.read(path)
+        return self._snapshots[path]
+
+
+def locate_staged_input(observation, session_id, cursors, *, cache=None):
+    """Find the one native row of a staged input, or name why no row is usable.
+
+    status is located, row-not-found, row-ambiguous or transcript-unavailable.
     A digest correlates content within an authenticated append window; it does
     not classify content. Exact native origin supplies the actor independently.
     """
+    unavailable = dict(status='transcript-unavailable')
     boundary = observation.get('transcript_boundary')
-    if not isinstance(boundary, dict):
-        return None
+    if not isinstance(boundary, dict) or not isinstance(boundary.get('path'), str):
+        return unavailable
+    snapshot = (cache if cache is not None else TranscriptCache()).snapshot(boundary['path'])
+    if snapshot is None:
+        return unavailable
     try:
-        with Path(boundary['path']).open('rb') as stream:
-            identity = os.fstat(stream.fileno())
-            if boundary['inode'] is not None and (identity.st_dev, identity.st_ino) != (boundary['device'], boundary['inode']):
-                return None
-            raw = stream.read()
-            prefix = raw[:boundary['offset']]
-            if len(prefix) != boundary['offset'] or hashlib.sha256(prefix).hexdigest() != boundary['prefix_digest']:
-                return None
-            cursor_key = hashlib.sha256(json.dumps([boundary['path'], identity.st_dev, identity.st_ino]).encode()).hexdigest()
-            start = max(boundary['offset'], cursors.get(cursor_key, 0))
-            if start > len(raw):
-                return None
-    except (OSError, KeyError, TypeError, ValueError):
-        return None
+        if boundary['inode'] is not None and snapshot.identity != (boundary['device'], boundary['inode']):
+            return unavailable
+        if snapshot.prefix_digest(boundary['offset']) != boundary['prefix_digest']:
+            return unavailable
+        cursor_key = hashlib.sha256(json.dumps([boundary['path'], *snapshot.identity]).encode()).hexdigest()
+        start = max(boundary['offset'], cursors.get(cursor_key, 0))
+    except (KeyError, TypeError, ValueError):
+        return unavailable
+    if start > len(snapshot.raw):
+        return unavailable
     matches = []
-    for row_start, offset, line in committed_byte_lines(raw, start):
-        try:
-            entry = json.loads(line)
-        except (ValueError, UnicodeError):
-            continue
-        if (not isinstance(entry, dict) or entry.get('sessionId') != session_id
+    for row_start, end in snapshot.rows_with(observation.get('input_char_count'), observation.get('input_digest'), start):
+        entry = json.loads(snapshot.raw[row_start:end])
+        if (entry.get('sessionId') != session_id
                 or (entry.get('isMeta') and not is_task_notification(entry)) or entry.get('isSidechain')):
-            continue
-        if entry.get('type') not in ('user', 'attachment'):
             continue
         # promptId belongs to a native prompt grain and may repeat. It is only
         # an additional correlation constraint, never observation identity.
         native_id = entry.get('promptId')
         if native_id is not None and native_id != observation.get('native_prompt_id'):
             continue
-        content = (entry.get('message', {}).get('content') if isinstance(entry.get('message'), dict)
-                   else _input_text(entry))
-        if not matches_input_text(content, observation):
-            continue
-        match = dict(actor=native_input_actor(entry), cursor_key=cursor_key,
-                     start_offset=row_start, end_offset=offset)
-        if match['actor'] == 'sdk':
-            source = dict(storage='source-reference.v1', locator=boundary['path'],
-                digest='sha256:' + hashlib.sha256(raw[:offset]).hexdigest(), byte_length=offset, appendable=True)
-            match.update(native_source=dict(source, source_id='sha256:' + hashlib.sha256(json.dumps(
-                source, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()),
-                native_file_identity=dict(device=identity.st_dev, inode=identity.st_ino))
-        matches.append(match)
-    return matches[0] if len(matches) == 1 and (matches[0]['actor'] is not None or allow_unknown is True) else None
+        if matches_input_text(_row_content(entry), observation):
+            matches.append((row_start, end, entry))
+    if len(matches) != 1:
+        return dict(status='row-ambiguous' if matches else 'row-not-found', cursor_key=cursor_key)
+    row_start, end, entry = matches[0]
+    match = dict(status='located', actor=native_input_actor(entry), cursor_key=cursor_key,
+                 start_offset=row_start, end_offset=end)
+    if match['actor'] is None:
+        match['shape'] = input_shape(entry)
+    if match['actor'] == 'sdk':
+        source = dict(storage='source-reference.v1', locator=boundary['path'],
+            digest='sha256:' + snapshot.prefix_digest(end), byte_length=end, appendable=True)
+        match.update(native_source=dict(source, source_id='sha256:' + hashlib.sha256(json.dumps(
+            source, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()),
+            native_file_identity=dict(device=snapshot.identity[0], inode=snapshot.identity[1]))
+    return match
+
+
+def resolve_staged_input(observation, session_id, cursors, *, allow_unknown=False, cache=None):
+    """Return one native actor/row locator, or leave the transport unresolved."""
+    located = locate_staged_input(observation, session_id, cursors, cache=cache)
+    if located['status'] != 'located' or (located['actor'] is None and allow_unknown is not True):
+        return None
+    return {key: value for key, value in located.items() if key not in ('status', 'shape')}

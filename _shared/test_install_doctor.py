@@ -555,6 +555,44 @@ class NodeRuntimeStatusTest(unittest.TestCase):
                     self.assertIn("missing", detail)
 
 
+class NativeIntakeWaitsTest(unittest.TestCase):
+    def test_doctor_lists_waiting_native_inputs_from_the_installed_ledger(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts"))
+        import session_intent_ledger as ledger
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger_root = root / "intent"
+            transcript = root / "waiting.jsonl"
+            transcript.write_text("", encoding="utf-8")
+            coords = dict(root=ledger_root, platform="claude", session_id="waiting-session")
+            ledger.stage_native_input(**coords, raw_input="Session message without a native row",
+                                      prompt_id=None, transcript_path=str(transcript))
+            ledger.reconcile_native_inputs(**coords, record_wait=True)
+            ghost = root / ".ghost-alice"
+            ghost.mkdir()
+            (ghost / "config.json").write_text(json.dumps(
+                {"install_locations": {"claude": {"ledger_root": str(ledger_root)}}}), encoding="utf-8")
+            lines = install_doctor._native_intake_wait_lines(ghost, "claude")
+            codex = install_doctor._native_intake_wait_lines(ghost, "codex")
+        self.assertEqual(lines[0], "native-intake-waits: 1")
+        self.assertIn("waiting-session", lines[1])
+        self.assertIn("row-not-found", lines[1])
+        self.assertEqual(codex, ["native-intake-waits: unavailable (no installed ledger root)"])
+
+    def test_doctor_reports_an_unreadable_ledger_without_failing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ghost = Path(tmp) / ".ghost-alice"
+            ghost.mkdir()
+            broken = Path(tmp) / "intent"
+            broken.mkdir()
+            (broken / "ghost-state.sqlite3").write_text("not a database", encoding="utf-8")
+            (ghost / "config.json").write_text(json.dumps(
+                {"install_locations": {"claude": {"ledger_root": str(broken)}}}), encoding="utf-8")
+            lines = install_doctor._native_intake_wait_lines(ghost, "claude")
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("native-intake-waits: unavailable ("))
+
+
 class NodeRuntimeRunPathTest(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -700,6 +738,11 @@ class NodeRuntimeRunPathTest(unittest.TestCase):
         after = {path: self._path_snapshot(path) for path in observed_paths}
         self.assertEqual(after, before, "doctor must not mutate runtime or Codex config")
         return result, output.getvalue()
+
+    def test_run_prints_native_intake_waits_without_changing_the_result(self) -> None:
+        result, output = self._run("claude", path_node=self._runtime())
+        self.assertEqual(result, 0, output)
+        self.assertIn("native-intake-waits: unavailable (no installed ledger root)", output)
 
     def test_strict_codex_uses_node_from_codex_home_config_after_path_loss(self) -> None:
         home = self.root / "isolated-home"

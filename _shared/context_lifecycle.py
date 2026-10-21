@@ -1177,7 +1177,7 @@ def _claude_native_readiness(core, root, owner, source, request, state, native_b
             resolved = native_api.resolve_staged_input(observation,owner['session_id'],state.get('native_input_cursors',{}),
                 allow_unknown=True)
             if resolved is not None:
-                return 'input-ready' if resolved['actor'] in ('human','sdk','notification') else None
+                return 'input-ready' if resolved['actor'] in native_api.RESOLVED_ACTORS else None
             for _, _, line in committed_byte_lines(content, start):
                 entry = json.loads(line)
                 if (isinstance(entry,dict) and entry.get('sessionId')==owner['session_id']
