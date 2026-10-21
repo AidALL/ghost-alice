@@ -251,6 +251,8 @@ def default_state(platform: str, session_id: str) -> dict[str, Any]:
         "current_context_input_event_id": "",
         "pending_native_inputs": [],
         "native_input_cursors": {},
+        "native_input_waiting": {},
+        "native_input_notified_causes": [],
         "latest_input_digest": "",
         "latest_input_char_count": 0,
         "created_at": now,
@@ -1352,12 +1354,81 @@ def stage_native_input(*, root: Path = DEFAULT_ROOT, platform: str, session_id: 
     return paths
 
 
-def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
-                            transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
-    """Resolve committed native origin once, before native consumers run.
+NOTIFIED_CAUSE_LIMIT = 32
+# Non-human context actors from the native reader. Only 'sdk' rows also become
+# a frozen content original for context selection.
+CONTEXT_ACTORS = ('sdk', 'context')
 
-    Public reads remain pure. Unknown origin leaves pending authority closed;
-    notification resolution preserves the exact preceding human route.
+
+def _native_input_cursors(state):
+    cursors = state.get('native_input_cursors', {})
+    if (not isinstance(cursors, dict) or any(not isinstance(k, str) or type(v) is not int or v < 0
+                                             for k, v in cursors.items())):
+        raise ValueError('native transcript cursors are invalid')
+    return cursors
+
+
+def _native_input_waiting(state):
+    waiting = state.get('native_input_waiting', {})
+    return waiting if isinstance(waiting, dict) else {}
+
+
+def _wait_cause(located):
+    """Failure key from the reader's common values: the waiting reason, and an unknown actor's marker shape."""
+    return 'unknown-actor:' + located['shape'] if located['status'] == 'located' else located['status']
+
+
+def _later_located_human(native, queued, session_id, cursors, cache):
+    """First later staged input whose own native row is located and human; nothing is written."""
+    probe = dict(cursors)
+    for observation in queued:
+        located = native.locate_staged_input(observation, session_id, probe, cache=cache)
+        if located['status'] != 'located':
+            continue
+        if located['actor'] == 'human':
+            return observation
+        probe[located['cursor_key']] = located['end_offset']
+    return None
+
+
+def _leave_native_input(state, observation, located):
+    """Remove the head input; a located row also advances its transcript cursor."""
+    state['pending_native_inputs'] = _pending_native_inputs(state)[1:]
+    if located['status'] == 'located':
+        state['native_input_cursors'] = dict(_native_input_cursors(state),
+                                             **{located['cursor_key']: located['end_offset']})
+    if _native_input_waiting(state).get('transport_observation_id') == observation['transport_observation_id']:
+        state['native_input_waiting'] = {}
+
+
+def _record_native_wait(connection, state, observation, cause):
+    """One failure record per blocking input and cause; the hook wrapper owns any notice."""
+    waiting = _native_input_waiting(state)
+    if (waiting.get('transport_observation_id'), waiting.get('cause')) == (observation['transport_observation_id'], cause):
+        return
+    state['native_input_waiting'] = dict(transport_observation_id=observation['transport_observation_id'],
+                                         cause=cause, since=utc_now())
+    state['intake_status'] = 'pending-native-origin'
+    _commit(connection, state, dict(ts=state['native_input_waiting']['since'], event='native-input-waiting',
+        platform=state['platform'], session_id=state['session_id'],
+        transport_observation_id=observation['transport_observation_id'], cause=cause,
+        pending_count=len(_pending_native_inputs(state)), input_event_id=state['latest_input_event_id']))
+
+
+def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+                            transaction: sqlite3.Connection | None = None,
+                            record_wait: bool = False) -> dict[str, Any]:
+    """Resolve committed native origin in queue order, before native consumers run.
+
+    Public reads remain pure. Each located row resolves by its actor. An unknown
+    or unlocated input never blocks a later located human input, which
+    supersedes it without promoting it. Without a later human input the queue
+    waits and dependent writes stay refused. Notification resolution preserves
+    the exact preceding human route. Each transcript is read once per call.
+
+    The lifecycle hook wrapper passes record_wait: PreToolUse and Stop run after
+    the host appends the turn's input, so a wait there is recorded once per
+    blocking input and cause. A generation-boundary call can precede the append.
     """
     validate_identity(platform, session_id)
     current = read_session_state(root=root, platform=platform, session_id=session_id, transaction=transaction)
@@ -1367,55 +1438,42 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
     paths = session_paths(root, platform, session_id)
     with _transaction(root, transaction) as connection:
         state = _load_state_for_update(connection, paths, platform, session_id)
+        cache = native.TranscriptCache()
         while pending := _pending_native_inputs(state):
             observation = pending[0]
-            cursors = state.get('native_input_cursors', {})
-            if (not isinstance(cursors, dict) or any(not isinstance(k, str) or type(v) is not int or v < 0
-                                                     for k, v in cursors.items())):
-                raise ValueError('native transcript cursors are invalid')
-            resolved = native.resolve_staged_input(observation, session_id, cursors)
-            if resolved is None:
-                # Unknown actors remain unauthenticated. A later bound human
-                # can take priority only after every earlier pending row is
-                # uniquely correlated in this same ordered native source.
-                correlated, probe_cursors, source_key = [], dict(cursors), None
-                for queued in pending:
-                    row = native.resolve_staged_input(queued, session_id, probe_cursors, allow_unknown=True)
-                    if row is None or (source_key is not None and row['cursor_key'] != source_key):
-                        row = None
-                        break
-                    source_key = row['cursor_key']
-                    if row['actor'] == 'human':
-                        break
-                    correlated.append((queued, row))
-                    probe_cursors[row['cursor_key']] = row['end_offset']
-                else:
-                    row = None
-                if row is None or row['actor'] != 'human' or not correlated:
+            cursors = _native_input_cursors(state)
+            located = native.locate_staged_input(observation, session_id, cursors, cache=cache)
+            actor = located['actor'] if located['status'] == 'located' else None
+            if actor is None:
+                probe = dict(cursors)
+                if located['status'] == 'located':
+                    probe[located['cursor_key']] = located['end_offset']
+                later = _later_located_human(native, pending[1:], session_id, probe, cache)
+                cause = _wait_cause(located)
+                if later is None:
+                    if record_wait:
+                        _record_native_wait(connection, state, observation, cause)
                     break
-                for earlier, located in correlated:
-                    state['pending_native_inputs'] = _pending_native_inputs(state)[1:]
-                    state['native_input_cursors'] = dict(state.get('native_input_cursors', {}),
-                        **{located['cursor_key']: located['end_offset']})
-                    _commit(connection, state, dict(ts=utc_now(), event='native-input-superseded',
-                        platform=platform, session_id=session_id,
-                        transport_observation_id=earlier['transport_observation_id'],
-                        superseded_by_transport_observation_id=queued['transport_observation_id'],
-                        actor=located['actor'] or 'unknown',
-                        native_row={key: located[key] for key in ('cursor_key', 'start_offset', 'end_offset')},
-                        reason='Later positively bound human input controls current authority; earlier actor is not promoted.',
-                        input_event_id=state['latest_input_event_id']))
+                _leave_native_input(state, observation, located)
+                event = dict(ts=utc_now(), event='native-input-superseded', platform=platform,
+                    session_id=session_id, transport_observation_id=observation['transport_observation_id'],
+                    superseded_by_transport_observation_id=later['transport_observation_id'],
+                    actor='unknown', cause=cause,
+                    reason='Later positively bound human input controls current authority; earlier actor is not promoted.',
+                    input_event_id=state['latest_input_event_id'])
+                if located['status'] == 'located':
+                    event['native_row'] = {key: located[key] for key in ('cursor_key', 'start_offset', 'end_offset')}
+                _commit(connection, state, event)
                 continue
-            state['pending_native_inputs'] = pending[1:]
-            state['native_input_cursors'] = dict(cursors, **{resolved['cursor_key']: resolved['end_offset']})
-            if resolved['actor'] == 'human':
+            _leave_native_input(state, observation, located)
+            if actor == 'human':
                 promoted = dict(observed_at=observation['observed_at'],
                     input_event_id=json_digest(dict(event='user-input-observed', platform=platform,
                         session_id=session_id, transport_observation_id=observation['transport_observation_id'])),
                     input_digest=observation['input_digest'], input_char_count=observation['input_char_count'])
                 state = _commit_turn(connection, state, promoted, has_input=True, intent_delta=None, source='hook', native_human=True)
             context_event = None
-            if resolved['actor'] == 'sdk':
+            if actor in CONTEXT_ACTORS:
                 context_event = json_digest(dict(event='context-input-resolved', platform=platform,
                     session_id=session_id, transport_observation_id=observation['transport_observation_id']))
                 state['current_context_input_event_id'] = context_event
@@ -1426,12 +1484,12 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
                                       'observed' if state['latest_input_event_id'] else 'pending')
             event = dict(ts=utc_now(), event='native-input-resolved', platform=platform,
                 session_id=session_id, transport_observation_id=observation['transport_observation_id'],
-                actor=resolved['actor'], native_row={key: resolved[key] for key in
+                actor=actor, native_row={key: located[key] for key in
                     ('cursor_key', 'start_offset', 'end_offset')}, input_event_id=state['latest_input_event_id'])
             if context_event:
                 event['context_input_event_id'] = context_event
             _commit(connection, state, event)
-            if context_event:
+            if actor == 'sdk':
                 staged = connection.execute('''SELECT sequence FROM intent_events WHERE platform=? AND session_id=?
                     AND json_extract(event_json,'$.event')='native-input-staged'
                     AND json_extract(event_json,'$.transport_observation_id')=?''',
@@ -1442,11 +1500,58 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
                     (platform,session_id)).fetchone()[0]
                 payload = dict(schema_version='context-input.v1', intent_root=str(Path(root).resolve()),
                     platform=platform,session_id=session_id,input_event_id=context_event,actor='sdk',
-                    observation=observation,native_row=event['native_row'],native_source=resolved['native_source'],
-                    native_file_identity=resolved['native_file_identity'])
+                    observation=observation,native_row=event['native_row'],native_source=located['native_source'],
+                    native_file_identity=located['native_file_identity'])
                 connection.execute('INSERT INTO core_context_intakes VALUES (?,?,?,?,?,?)',
                     (platform,session_id,context_event,json.dumps(payload,ensure_ascii=False,sort_keys=True),staged[0][0],sequence))
         return state
+
+
+def claim_native_input_notice(*, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
+                              transaction: sqlite3.Connection | None = None) -> dict[str, Any] | None:
+    """Claim the current wait's notice once per session and cause.
+
+    Only a caller that displays the notice claims it; reconcile_native_inputs
+    records every wait whoever calls it. The result holds host-neutral values.
+    """
+    validate_identity(platform, session_id)
+    if transaction is None and not storage_is_initialized(root):
+        return None
+    with _transaction(root, transaction) as connection:
+        state = _stored_state(connection, platform, session_id)
+        if state is None:
+            return None
+        waiting, pending = _native_input_waiting(state), _pending_native_inputs(state)
+        if not waiting or not pending or pending[0]['transport_observation_id'] != waiting.get('transport_observation_id'):
+            return None
+        notified = state.get('native_input_notified_causes', [])
+        notified = [cause for cause in notified if isinstance(cause, str)] if isinstance(notified, list) else []
+        if waiting.get('cause') in notified:
+            return None
+        state['native_input_notified_causes'] = [*notified, waiting['cause']][-NOTIFIED_CAUSE_LIMIT:]
+        _commit(connection, state, dict(ts=utc_now(), event='native-input-notice', platform=platform,
+            session_id=session_id, transport_observation_id=waiting['transport_observation_id'],
+            cause=waiting['cause'], input_event_id=state['latest_input_event_id']))
+        return dict(cause=waiting['cause'], since=waiting.get('since', ''), pending_count=len(pending))
+
+
+def list_native_input_waits(root: Path, platform: str | None = None) -> list[dict[str, Any]]:
+    """Sessions whose native inputs wait for a human input, read from their failure records."""
+    with _read_connection(root) as connection:
+        if connection is None:
+            return []
+        query = 'SELECT platform, session_id, state_json FROM sessions'
+        rows = (connection.execute(query + ' WHERE platform=?', (platform,)) if platform
+                else connection.execute(query)).fetchall()
+    waits = []
+    for owner, session, raw in rows:
+        state = json.loads(raw)
+        waiting = state.get('native_input_waiting') if isinstance(state, dict) else None
+        pending = state.get('pending_native_inputs') if isinstance(state, dict) else None
+        if isinstance(waiting, dict) and isinstance(waiting.get('cause'), str) and isinstance(pending, list) and pending:
+            waits.append(dict(platform=owner, session_id=session, cause=waiting['cause'],
+                              since=waiting.get('since', ''), pending_count=len(pending)))
+    return sorted(waits, key=lambda wait: (str(wait['since']), wait['session_id']))
 
 
 def _context_input_binding(connection, root, state, event_id):
@@ -2066,6 +2171,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--read-events", action="store_true", help="read ordered authoritative audit events")
     parser.add_argument("--migrate", action="store_true", help="atomically import the explicitly selected JSON session")
     parser.add_argument("--export-to", help="write a portable projection to a separate root")
+    parser.add_argument("--list-native-waits", action="store_true",
+                        help="list this platform's sessions whose native input waits, from their failure records")
     return parser
 
 
@@ -2077,6 +2184,12 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(delta, dict):
             raise SystemExit("--delta-json must decode to an object")
     root = Path(args.root)
+    if args.list_native_waits:
+        if (args.input is not None or delta is not None or args.migrate or args.session_id or args.snapshot
+                or args.read_intent or args.read_state or args.read_events or args.export_to):
+            raise SystemExit("--list-native-waits is a root-wide read; it takes no session, read or mutation flag")
+        print(json.dumps(list_native_input_waits(root, args.platform), ensure_ascii=False))
+        return 0
     read_only = (args.snapshot or args.read_intent or args.read_state or args.read_events or args.export_to) and args.input is None and delta is None and not args.migrate
     if args.pointer and not args.read_state:
         raise SystemExit("--pointer requires --read-state")

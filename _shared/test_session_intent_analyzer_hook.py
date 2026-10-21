@@ -211,14 +211,16 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(len([e for e in events if e['event']=='native-input-resolved' and e['actor']=='human']), 2)
         self.assertEqual(transcript.read_bytes(), original)
 
-    def test_missing_earlier_native_row_still_blocks_later_human(self):
+    def test_missing_earlier_native_row_does_not_block_later_human(self):
         coords, transcript, before = self.native_fixture()
         self.stage_native(coords, transcript, 'unmatched earlier input')
         self.stage_native(coords, transcript, 'later human')
         self.append_native(transcript, self.human_native(coords['session_id'], 'later human'))
         state = self.reconcile_native(coords)
-        self.assertEqual(state['intake_status'], 'pending-native-origin')
-        self.assertEqual(state['latest_input_event_id'], before['latest_input_event_id'])
+        self.assertEqual(state['intake_status'], 'observed')
+        self.assertEqual(state['latest_input_digest'], 'sha256:' + hashlib.sha256(b'later human').hexdigest())
+        superseded = [e for e in ledger_api.read_session_events(**coords) if e['event'] == 'native-input-superseded']
+        self.assertEqual([(e['actor'], e['cause']) for e in superseded], [('unknown', 'row-not-found')])
 
     def test_duplicate_prompt_blocks_do_not_resolve_native_input(self):
         coords, transcript, before = self.native_fixture()

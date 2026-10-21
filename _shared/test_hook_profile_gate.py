@@ -130,6 +130,46 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                     self.assertEqual(bool(observed[0]['latest_input_event_id']), event != 'UserPromptSubmit')
                     self.assertEqual(bool(observed[0]['pending_native_inputs']), event == 'UserPromptSubmit')
 
+    def test_claude_wrapper_warns_once_per_session_and_cause_for_a_waiting_input(self):
+        import session_intent_ledger as ledger
+        import install_destination
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = install_destination.InstallDestination(mode='normal', owned_root=str(root),
+                platform_dir=str(root / '.claude'), skills_dir=str(root / 'skills'),
+                ghost_root=str(root / '.ghost-alice'), ledger_root=str(root / 'intent'),
+                project_root=str(root), core_source_root=str(Path(__file__).resolve().parents[1]))
+            session = 'waiting-notice'
+            coords = dict(root=root / 'intent', platform='claude', session_id=session)
+            transcript = root / (session + '.jsonl')
+            transcript.write_text('')
+            ledger.stage_native_input(**coords, raw_input='Session message without a native row',
+                                      prompt_id=None, transcript_path=str(transcript))
+            command = base64.urlsafe_b64encode(shlex.join([sys.executable, '-c', 'print(1)']).encode()).decode()
+            decision = {'hookSpecificOutput': {'hookEventName': 'PreToolUse', 'permissionDecision': 'ask',
+                                               'permissionDecisionReason': 'inner decision'}}
+            outputs = []
+            for event, child_stdout in (('PreToolUse', json.dumps(decision) + '\n'), ('Stop', ''), ('PreToolUse', '{}\n')):
+                stdout = io.StringIO()
+                with (mock.patch.dict(os.environ, {'HOME': directory, 'GHOST_ALICE_AGENT_VISIBILITY': 'minimal'},
+                                      clear=True),
+                      mock.patch.object(hook_profile_gate, '_read_stdin', return_value=json.dumps(
+                          dict(session_id=session, hook_event_name=event, transcript_path=str(transcript)))),
+                      mock.patch.object(hook_profile_gate.subprocess, 'run',
+                                        return_value=subprocess.CompletedProcess([], 0, child_stdout, '')),
+                      mock.patch.object(sys, 'stdout', stdout)):
+                    hook_profile_gate._run('tool-checkpoint' if event == 'PreToolUse' else 'completion',
+                        command, platform='claude', binding=destination.binding())
+                outputs.append(stdout.getvalue())
+            first = json.loads(outputs[0])
+            self.assertIn('row-not-found', first['systemMessage'])
+            self.assertEqual(first['hookSpecificOutput'], decision['hookSpecificOutput'])
+            # The minimal profile renders an empty Stop envelope as plain text; neither later output warns.
+            self.assertNotIn('Ghost-ALICE intake', outputs[1] + outputs[2])
+            recorded = [event['event'] for event in ledger.read_session_events(**coords)
+                        if event['event'] in ('native-input-waiting', 'native-input-notice')]
+            self.assertEqual(recorded, ['native-input-waiting', 'native-input-notice'])
+
     def test_rejection_audit_uses_known_platform_without_platform_environment(self):
         with tempfile.TemporaryDirectory() as temporary:
             env = dict(os.environ, HOME=temporary, CODEX_THREAD_ID="native", GHOST_ALICE_SESSION_ID="generic")

@@ -883,6 +883,35 @@ def _runtime_session_intent_golden_status(
     return STATUS_OK, "golden-pass"
 
 
+def _native_intake_wait_lines(ghost_alice_root: Path, platform: str) -> list[str]:
+    """Status-neutral list of Core's native intake failure records; Core writes them, doctor reads them."""
+    try:
+        data = json.loads((ghost_alice_root.expanduser() / "config.json").read_text(encoding="utf-8"))
+        ledger_root = data["install_locations"][platform]["ledger_root"]
+    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
+        ledger_root = None
+    if not isinstance(ledger_root, str) or not Path(ledger_root).is_absolute():
+        return ["native-intake-waits: unavailable (no installed ledger root)"]
+    # The installer layer runs Core's ledger as a child process and imports none of the runtime.
+    ledger = Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
+    try:
+        listed = subprocess.run([sys.executable, str(ledger), "--root", ledger_root, "--platform", platform,
+                                 "--list-native-waits"], capture_output=True, text=True, encoding="utf-8",
+                                errors="replace", timeout=60, check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        return [f"native-intake-waits: unavailable ({type(error).__name__})"]
+    try:
+        waits = json.loads(listed.stdout) if listed.returncode == 0 else None
+    except json.JSONDecodeError:
+        waits = None
+    if not isinstance(waits, list):
+        detail = (listed.stderr.strip().splitlines() or [f"rc={listed.returncode}"])[-1]
+        return [f"native-intake-waits: unavailable ({detail[:160]})"]
+    return [f"native-intake-waits: {len(waits)}", *(
+        f"  {wait['platform']}/{wait['session_id']}: {wait['cause']} since {wait['since']}, "
+        f"{wait['pending_count']} pending" for wait in waits)]
+
+
 def _runtime_core_audit(
     source_shared: Path,
     runtime_shared: Path | None,
@@ -1080,6 +1109,10 @@ def run(args: argparse.Namespace) -> int:
             f"  {finding['status']} {finding['kind']}/{finding['name']}: "
             f"{finding['reason']}"
         )
+
+    # Informational: a wait needs no repair; the user's next typed input clears it.
+    for line in _native_intake_wait_lines(ghost_alice_root, args.platform):
+        print(line)
 
     overall = _max_status(statuses)
     print(f"overall: {overall}")
