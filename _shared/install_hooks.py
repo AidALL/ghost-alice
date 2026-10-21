@@ -79,6 +79,7 @@ import hook_definitions
 from hook_definitions import normalize_hook_id, resolve_hook_event
 import runtime_config
 import install_destination
+import state_retention
 import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
 
@@ -1204,7 +1205,7 @@ def _write_settings(
         install_destination.assert_mutation_path(backup)
         shutil.copy2(path, backup)
         _log(_t(f"Backup created: {backup}", f"Backup created: {backup}"))
-        _rotate_backups(path, keep=3)
+        state_retention.apply("hook-settings-backups", path, protect=_pending_merges_root())
     runtime_config._atomic_write_json(path, data)
     if report_saved:
         _report_saved(path)
@@ -1228,53 +1229,12 @@ def _restore_settings_snapshot(
     path.unlink(missing_ok=True)
 
 
-def _rotate_backups(
-    base_path: Path,
-    keep: int = 3,
-    _pending_root: Optional[Path] = None,
-) -> None:
-    """Collect base_path.name-prefixed .bak files in the same parent.
-
-    Keep the newest entries by mtime and unlink the rest.
-
-    Never rotate:
-      1. symlinks, to avoid touching unintended targets
-      2. paths under ~/.ghost-alice/pending-merges/, which are isolated user-change copies
-    """
-    parent = base_path.parent
-    pattern = base_path.name + ".bak*"
-
-    # Compute the absolute pending-merges prefix for the guard.
-    if _pending_root is not None:
-        pending_root: Optional[Path] = _pending_root
-    else:
-        try:
-            pending_root = (install_destination.ghost_root(_home()) / "pending-merges").resolve()
-        except OSError:
-            pending_root = None
-
-    candidates: list[Path] = []
-    for p in parent.glob(pattern):
-        if p.is_symlink():
-            continue
-        if not p.is_file():
-            continue
-        if pending_root is not None:
-            try:
-                resolved = p.resolve()
-                if str(resolved).startswith(str(pending_root)):
-                    continue
-            except OSError:
-                pass
-        candidates.append(p)
-
-    candidates.sort(key=lambda x: x.stat().st_mtime, reverse=True)
-    for old in candidates[keep:]:
-        try:
-            install_destination.assert_mutation_path(old)
-            old.unlink()
-        except OSError:
-            pass
+def _pending_merges_root() -> list[Path]:
+    """The pending-merges folder: user-change copies there are never rotated."""
+    try:
+        return [(install_destination.ghost_root(_home()) / "pending-merges").resolve()]
+    except OSError:
+        return []
 
 
 def _read_text_file(path: Path) -> str:

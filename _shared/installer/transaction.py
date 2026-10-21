@@ -269,8 +269,8 @@ def _report_unrecorded_service() -> tuple[str, bool] | None:
 def migrate_record(ctx: "Context") -> None:
     """Create the install record once from an earlier installer's records (`installed_payload.migrate`)
     for every host, then the gateway's `service` section once from its installation receipt
-    (`installed_payload.migrate_service`); a migration that cannot finish is reported and the command
-    goes on."""
+    (`installed_payload.migrate_service`), then remove the earlier installer's rollback folders; a migration
+    that cannot finish is reported and the command goes on."""
     root = locations.record_root()
     try:
         summary = installed_payload.migrate(root, locations.PLATFORMS, installer_commit=record_source(ctx)["commit"])
@@ -288,6 +288,23 @@ def migrate_record(ctx: "Context") -> None:
     if service is not None:
         report.info(f"Gateway record created from its installation receipt: {service['label']} "
                     f"(companion targets added {service['companions']})")
+    remove_earlier_rollback_folders()
+
+
+def remove_earlier_rollback_folders() -> None:
+    """Remove the two folders where an earlier installer kept the copies it replaced: `~/.ghost-alice/
+    install-rollbacks` and the Claude skills folder's `.ghost-alice-install-rollbacks`. A publish keeps what it
+    replaces in `rollbacks/<txid>/`, so nothing writes these folders now; a removal that fails is reported."""
+    for folder in (locations.record_root() / "install-rollbacks",
+                   locations.skills_dir("claude") / ".ghost-alice-install-rollbacks"):
+        if not (folder.exists() or folder.is_symlink()):
+            continue
+        try:
+            _remove_path(folder)
+        except OSError as exc:
+            report.warn(f"The earlier installer's rollback folder {folder} could not be removed: {exc}")
+            continue
+        report.info(f"Removed the earlier installer's rollback folder {folder}")
 
 
 def detect_install_mode(dest: Path, copy_only: bool) -> str:

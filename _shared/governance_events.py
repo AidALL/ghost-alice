@@ -15,6 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 import install_destination
+import state_retention
 from typing import Any
 
 
@@ -106,6 +107,7 @@ def append_event(event: dict[str, str], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    state_retention.apply("governance-events", path)
 
 
 def main() -> int:

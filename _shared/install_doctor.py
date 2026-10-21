@@ -39,6 +39,7 @@ from installer_assets import (
 )
 
 from mcp_health import summarize_state
+import state_retention
 
 
 STATUS_OK = "ok"
@@ -204,6 +205,23 @@ def _pending_manifest_status(manifest: Path) -> tuple[str, str, int]:
     if undecided:
         return STATUS_WARNING, f"pending ({len(undecided)} undecided)", len(undecided)
     return STATUS_OK, "clean", 0
+
+
+def _retention_failure_status(ghost_alice_root: Path) -> tuple[str, str]:
+    """The retention failure record `state_retention` writes: ok without a failure, else a warning with the count
+    and the last failure's time, entry and error type."""
+    record = ghost_alice_root / state_retention.FAILURES
+    try:
+        rows = [json.loads(line) for line in record.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except FileNotFoundError:
+        return STATUS_OK, "ok"
+    except (OSError, UnicodeDecodeError, ValueError):
+        return STATUS_WARNING, "warning record unreadable"
+    if not rows:
+        return STATUS_OK, "ok"
+    last = rows[-1] if isinstance(rows[-1], dict) else {}
+    return STATUS_WARNING, (f"warning {len(rows)} failures; last {last.get('ts')} {last.get('policy')} "
+                            f"{last.get('error_type')}")
 
 
 def _pending_merge_status(ghost_alice_root: Path, platform: str) -> tuple[str, str]:
@@ -1058,6 +1076,10 @@ def run(args: argparse.Namespace) -> int:
     )
     statuses.append(snapshot_status)
     print(f"snapshot: {snapshot_detail}")
+
+    retention_status, retention_detail = _retention_failure_status(ghost_alice_root)
+    statuses.append(retention_status)
+    print(f"state-retention: {retention_detail}")
 
     for skill_root in args.skill_root:
         layout_findings = _skill_layout_audit(skill_root, repo_root)

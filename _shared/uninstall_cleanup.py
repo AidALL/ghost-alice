@@ -23,6 +23,7 @@ from installer_assets import (
 )
 from global_rule_blocks import remove_claude_bootstrap, remove_codex_rule_file
 from install_hooks import uninstall_hook
+import state_retention
 
 REMOVABLE_TARGET_OWNERSHIPS = {
     OWNERSHIP_GHOST_ALICE_MANAGED,
@@ -1148,6 +1149,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.report_path is None:
         args.report_path = _default_report_path(args.platform, confirm=args.confirm)
+        # The reports folder keeps the last 30 reports before this one (`state_retention` uninstall-reports).
+        state_retention.apply("uninstall-reports", args.report_path.parent)
     prepare_report_path(args.report_path)
     report = build_report(args)
     write_report(report, args.report_path)

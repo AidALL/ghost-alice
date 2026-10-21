@@ -18,9 +18,7 @@ import install_destination
 from typing import Any
 
 from session_intent_analyzer_hook import bound_session_identity, _safe_component
-from text_lines import committed_length, split_lines
-
-MAX_LINES = 10000
+import state_retention
 
 # Best-effort neutral extraction of a shell row's operation + file target, so the autopilot continuation signal can render it platform-neutrally (e.g. "read <path>") instead of leaking a per-runtime command string. The raw command is still stored in `pattern` (the audit log is never reduced); `op`/`path` are an additive structured view. Extraction is conservative and never executes input.
 _SHELL_READ_VERBS = {"cat", "less", "more", "head", "tail", "type", "get-content", "gc"}
@@ -233,22 +231,7 @@ def _append_log(row: dict[str, str]) -> None:
     payload = {"ts": _utc_now(), **row}
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
-    _rotate(path)
-
-
-def _rotate(path: Path) -> None:
-    try:
-        raw = path.read_bytes()
-    except OSError:
-        return
-    end = committed_length(raw)
-    lines = split_lines(raw[:end].decode("utf-8"))
-    if len(lines) <= MAX_LINES:
-        return
-    keep = MAX_LINES // 2
-    install_destination.assert_mutation_path(path)
-    # A record another hook is still appending stays after the kept lines for its writer to finish.
-    path.write_bytes(("\n".join(lines[-keep:]) + "\n").encode("utf-8") + raw[end:])
+    state_retention.apply("io-trace", path)
 
 
 def main() -> int:
