@@ -542,6 +542,15 @@ class DefaultRootsTests(unittest.TestCase):
         roots = self.roots()
         self.assertEqual((roots["gateway"], roots["launch_agents"]), (self.root / "gateway-state", self.root / "agents"))
 
+    def test_an_unreadable_install_record_leaves_out_only_the_gateway_roots_and_is_recorded(self):
+        (self.record / "installed-payload.json").write_text("{not json", encoding="utf-8")
+        roots = self.roots()
+        self.assertNotIn("gateway", roots)
+        self.assertEqual(roots["record"], self.record)
+        rows = [json.loads(line) for line in
+                (self.root / "ghost" / state_retention.FAILURES).read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(row["policy"], row["error_type"]) for row in rows], [("install-record", "RecordError")])
+
     def test_an_installation_without_a_registered_gateway_has_no_gateway_roots(self):
         roots = self.roots()
         self.assertNotIn("gateway", roots)
