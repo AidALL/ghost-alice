@@ -42,6 +42,7 @@ class Options:
     prompt_platform: bool = False
     skip_source_health: bool = False
     adopt_source: bool = False
+    merged_checkout: str | None = None
     update_source: bool = False
     cleanup_pending: bool = False
     addon_sources: list[str] = field(default_factory=list)
@@ -151,8 +152,11 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(ADVANCED, "--update-source", "Stash source checkout local changes and run git pull --ff-only",
             names=("--update-source",), run=lambda ctx: source.update_source(), flag="update_source",
             platform=False),
-    Command(ADVANCED, "--post-merge", "Run by the git post-merge hook: install when this checkout is the install source",
+    Command(ADVANCED, "--post-merge",
+            "Run by the git post-merge hook: install when the merged checkout is the install source",
             names=("--post-merge",), run=lambda ctx: run_post_merge(ctx), platform=False),
+    HelpRow(ADVANCED, "--merged-checkout PATH",
+            "With --post-merge: the checkout the merge ran in (default: this checkout)"),
     HelpRow(ADVANCED, "--addon-source PATH|URL", "Add local addon repo or git URL source"),
     HelpRow(ADVANCED, "--addon-tag TAG", "Checkout branch/tag for git URL addon sources"),
     HelpRow(ADVANCED, "--addon-skip", "Disable addon installation"),
@@ -180,7 +184,7 @@ def _fail(message: str, code: int = 1) -> None:
 
 def parse_options(argv: list[str]) -> Options:
     """`--platform|-p`, `--prompt-platform`, `--auto|-a` (no-op), `--skip-source-health`,
-    `--adopt-source`, `--addon-source`, `--addon-tag`, `--addon-skip`, `--verbose|-v`,
+    `--adopt-source`, `--merged-checkout`, `--addon-source`, `--addon-tag`, `--addon-skip`, `--verbose|-v`,
     `--visibility|--agent-visibility` and the table's flag commands
     (`Command.flag`); everything else stays in `args` in order. Missing or
     invalid values print the shell's error and exit 1 (`install.sh:115-201`)."""
@@ -210,6 +214,11 @@ def parse_options(argv: list[str]) -> Options:
         elif token == "--adopt-source":
             options.adopt_source = True
             index += 1
+        elif token == "--merged-checkout":
+            if not has_value:
+                _fail("--merged-checkout requires a value")
+            options.merged_checkout = tokens[index + 1]
+            index += 2
         elif token in flag_fields:
             setattr(options, flag_fields[token], True)
             index += 1
@@ -556,17 +565,20 @@ def run_install(ctx: Context) -> int:
 
 
 def run_post_merge(ctx: Context) -> int:
-    """The step `hooks/post-merge` runs after a merge: in the checkout the install record names as the install
-    source, the auto-mode install for every detected host; anywhere else one line and nothing installed.
+    """The step the install source's `hooks/post-merge` runs after a merge in any worktree: when the merged checkout
+    (`--merged-checkout`, else this checkout) is the checkout the install record names as the install source, the
+    auto-mode install for every detected host; for any other checkout one line and nothing installed.
 
     `source.match_install_source`, the judgment of the install source check, decides. The step takes no lock:
     each host's install takes it and refuses while another install holds it, and the exit code tells the hook.
     """
-    match = source.match_install_source()
+    merged = Path(ctx.options.merged_checkout) if ctx.options.merged_checkout else None
+    match = source.match_install_source(merged)
     if match.state == "same":
         return dispatch(Options())
     if match.state == "other":
-        report.info(f"Post-merge: this checkout is not the install source ({match.recorded}); nothing was installed.")
+        report.info(f"Post-merge: the merged checkout {match.here} is not the install source ({match.recorded}); "
+                    "nothing was installed.")
     elif match.state == "unrecorded":
         report.info("Post-merge: no install record names an install source; nothing was installed.")
     else:

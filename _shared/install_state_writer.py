@@ -109,15 +109,16 @@ for sidecar_record in sidecar_records:
         dest_index[addon_dest] = addon_target
 
 system_env_changes = []
-if os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED") == "1":
+# The shared git hook path this install owns, whenever the installer knows the value the full uninstall restores.
+if os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED") == "1":
     before_present = os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE_PRESENT") == "1"
     change = {
         "kind": "source_repo_hook_path",
         "repo_root": as_posix(source_root),
         "before_present": before_present,
         "before": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_BEFORE") if before_present else None,
-        "after": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_AFTER") or "hooks",
-        "applied_at": installed_at,
+        "after": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_AFTER", ""),
+        "applied_at": os.environ.get("GHOST_ALICE_SOURCE_REPO_HOOK_APPLIED_AT") or installed_at,
     }
     system_env_changes.append(change)
 

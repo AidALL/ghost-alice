@@ -10,6 +10,7 @@ it before an install or a repair changes anything.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import shutil
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
     from installer.cli import Context
 
 HOOKS_DIR = "hooks"
+# The install-state `system_env_changes` kind of the repository's shared hook path.
+HOOK_PATH_CHANGE = "source_repo_hook_path"
 ADOPT_HINT = ("Rerun this command from the install source, or add --adopt-source to install from this checkout "
               "and record it as the install source.")
 REPAIR_HINT = ("Repair runs only from the install source; run the install from this checkout with --adopt-source to "
@@ -42,10 +45,20 @@ class SourceInfo:
 
 @dataclass(frozen=True)
 class HookPathChange:
+    """The repository's shared `core.hooksPath` this install owns, as the install-state records it.
+
+    `after` is the absolute path of the install source's hooks folder and `changed` says this command wrote it.
+    `recorded` says the install knows the value from before Ghost-ALICE wrote one: `before_present` and `before`
+    give it (False and "" for no value, which the full uninstall unsets). `applied_at` is when an earlier install
+    wrote the value this one found in place, else None.
+    """
+
     changed: bool
-    before_present: bool
-    before: str
-    after: str = HOOKS_DIR
+    recorded: bool
+    before_present: bool = False
+    before: str = ""
+    after: str = ""
+    applied_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -152,15 +165,16 @@ def _same_folder(first: Path, second: Path) -> bool:
         return os.path.normcase(str(first.resolve())) == os.path.normcase(str(second.resolve()))
 
 
-def match_install_source() -> SourceMatch:
-    """Compare `runner.REPO_ROOT` with the install record's `source.root`, both with their links followed.
+def match_install_source(checkout: Path | None = None) -> SourceMatch:
+    """Compare `checkout` (the checkout the installer runs from, `runner.REPO_ROOT`, when not given) with the
+    install record's `source.root`, both with their links followed.
 
     The record is read as it will be once every unfinished publish is restored: the comparison runs before
     the lock, and a publish that stopped halfway may have written its own source already. The installer's
-    check before an install or a repair and the post-merge hook ask this function, so the two never disagree
-    about which checkout is the install source.
+    check before an install or a repair and the post-merge step, which names the checkout the merge ran in,
+    ask this function, so the two never disagree about which checkout is the install source.
     """
-    here = Path(runner.REPO_ROOT).resolve()
+    here = Path(runner.REPO_ROOT if checkout is None else checkout).resolve()
     try:
         record = install_transaction.record_after_recovery(locations.record_root())
     except (installed_payload.RecordError, install_transaction.InstallTransactionError) as exc:
@@ -248,20 +262,61 @@ def update_source() -> int:
     return runner.run_tool("_shared/installer_source_update.py", "--source-dir", str(runner.REPO_ROOT)).returncode
 
 
+def hooks_path_value(checkout: Path) -> str:
+    """The `core.hooksPath` an install from `checkout` writes: the checkout's hooks folder by absolute path, links
+    followed."""
+    return (Path(checkout).resolve() / HOOKS_DIR).as_posix()
+
+
+def _recorded_hook_path(value: str) -> HookPathChange | None:
+    """The hook path change an install-state of either host records as writing `value`, else None."""
+    for platform in locations.PLATFORMS:
+        try:
+            state = json.loads(locations.install_state_path(platform).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        changes = state.get("system_env_changes") if isinstance(state, dict) else None
+        for change in changes if isinstance(changes, list) else []:
+            if isinstance(change, dict) and change.get("kind") == HOOK_PATH_CHANGE and change.get("after") == value:
+                before_present = change.get("before_present") is True and isinstance(change.get("before"), str)
+                return HookPathChange(changed=False, recorded=True, before_present=before_present,
+                                      before=change["before"] if before_present else "", after=value,
+                                      applied_at=change.get("applied_at"))
+    return None
+
+
 def setup_git_hooks() -> HookPathChange:
-    """Set the checkout's `core.hooksPath=hooks` when it differs, record the change
-    for the install-state manifest, make `hooks/post-merge` executable (`source_health.sh:91-116`)."""
+    """Write the repository's shared `core.hooksPath` as this checkout's hooks folder by absolute path, make
+    `hooks/post-merge` executable, and return what the install-state records (`source_health.sh:91-116`).
+
+    Every worktree of the repository inherits the shared value (`git config --local` writes the configuration the
+    worktrees share), so a merge in any worktree runs the install source's post-merge hook and no other checkout's
+    hook file; a worktree's own setting (`git config --worktree`) still comes first. The value the full uninstall
+    restores is the value from before Ghost-ALICE wrote one: none for an unset value or for the relative `hooks` an
+    earlier installer wrote; the recorded value when an install-state of either host names the earlier value as
+    written by an install, such as a reinstall or an install source that moved; else the earlier value itself. A
+    value already in place that no install-state names leaves the value to restore unknown, and the uninstall
+    leaves the hook path as it is.
+    """
     root = runner.REPO_ROOT
-    current = _git(root, "config", "--local", "core.hooksPath")
-    current_path = current.stdout.strip() if current.ok and current.stdout else ""
-    if current_path != HOOKS_DIR:
-        if not _git(root, "config", "--local", "core.hooksPath", HOOKS_DIR).ok:
-            report.warn("Failed to set Git hook path. Post-merge hook may not fire")
-            return HookPathChange(changed=False, before_present=current.ok, before=current_path)
-        change = HookPathChange(changed=True, before_present=current.ok, before=current_path if current.ok else "")
-        report.info(f"Git hook path → {HOOKS_DIR} (post-merge auto-refresh enabled)")
+    wanted = hooks_path_value(root)
+    found = _git(root, "config", "--local", "--get", "core.hooksPath")
+    current = found.stdout.strip() if found.ok and found.stdout.strip() else None
+    if current == wanted:
+        change = _recorded_hook_path(wanted) or HookPathChange(changed=False, recorded=False, after=wanted)
+    elif not _git(root, "config", "--local", "core.hooksPath", wanted).ok:
+        report.warn("Failed to set Git hook path. Post-merge hook may not fire")
+        return HookPathChange(changed=False, recorded=False)
     else:
-        change = HookPathChange(changed=False, before_present=True, before=current_path)
+        earlier = _recorded_hook_path(current) if current not in (None, HOOKS_DIR) else None
+        if earlier is not None:
+            change = HookPathChange(changed=True, recorded=True, before_present=earlier.before_present,
+                                    before=earlier.before, after=wanted)
+        else:
+            kept = current not in (None, HOOKS_DIR)
+            change = HookPathChange(changed=True, recorded=True, before_present=kept, before=current if kept else "",
+                                    after=wanted)
+        report.info(f"Git hook path → {wanted} (post-merge auto-refresh enabled)")
     hook = root / HOOKS_DIR / "post-merge"
     if hook.is_file() and not os.access(hook, os.X_OK):
         try:
