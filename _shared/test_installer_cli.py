@@ -532,23 +532,29 @@ class SourceCheckTests(DispatchCase):
                 self.assertEqual([name for name in self.names() if name in self.CHANGES], [])
 
     def test_the_check_comes_first_and_the_auto_mode_parent_checks_once(self):
+        # Before any change the command compares once; a locked command compares again once it holds the lock.
         self.record_source(self.source)
-        order = []
-        check = mock.patch("installer.source.check_install_source", create=True,
-                           side_effect=lambda ctx: order.append("check_install_source"))
-        self.patches.enter_context(check)
-        for argv, first_change in ((["--platform", "codex", "--addon-source", "/a"], "prepare_sources"),
-                                   (["--platform", "claude"], "prepare_install"),
-                                   (["--platform", "claude", "--repair"], "acquire"),
-                                   (["--addon-source", "/a"], "prepare_sources"),
-                                   ([], "run_install_children")):
+        for name in ("check_install_source", "recheck_install_source"):
+            self.patches.enter_context(mock.patch(f"installer.source.{name}", create=True,
+                                                  side_effect=lambda ctx, _name=name, **kwargs:
+                                                  self.calls.append((_name, (), kwargs))))
+        for argv, steps in ((["--platform", "codex", "--addon-source", "/a"],
+                             ["check_install_source", "prepare_sources", "prepare_install", "acquire",
+                              "recheck_install_source", "run_install", "release"]),
+                            (["--platform", "claude"],
+                             ["check_install_source", "prepare_install", "acquire", "recheck_install_source",
+                              "run_install", "release"]),
+                            (["--platform", "claude", "--repair"],
+                             ["check_install_source", "acquire", "recheck_install_source", "run_repair", "release"]),
+                            (["--addon-source", "/a"], ["check_install_source", "prepare_sources", "run_install_children"]),
+                            ([], ["check_install_source", "run_install_children"])):
             with self.subTest(argv=argv):
                 self.calls.clear()
-                order.clear()
                 rc, _ = self.dispatch(argv)
                 self.assertEqual(rc, 0)
-                self.assertEqual(order, ["check_install_source"])
-                self.assertIn(first_change, self.names())
+                self.assertEqual([name for name in self.names() if name in steps], steps)
+                adopts = [kwargs["can_adopt"] for name, _, kwargs in self.calls if name.endswith("check_install_source")]
+                self.assertEqual(set(adopts), {"--repair" not in argv})
 
     def test_the_same_checkout_and_adopt_source_go_on(self):
         self.record_source(self.source)
