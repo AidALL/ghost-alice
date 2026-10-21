@@ -48,15 +48,19 @@ def count_common_targets(ctx: "Context", platforms: list[str], skills: list[str]
 
 
 def child_command(ctx: "Context", platform: str, *, uninstall: bool = False) -> list[str]:
-    """`python cli.py --platform P [--skip-source-health] [--visibility V] [--verbose]
+    """`python cli.py --platform P [--skip-source-health] [--adopt-source] [--visibility V] [--verbose]
     [--addon-source S]... [--addon-tag T]... [--addon-skip] ARGS...`; tags are
-    dropped after the parent prepared git sources (`install.sh:315-333, 385`)."""
+    dropped after the parent prepared git sources (`install.sh:315-333, 385`).
+    `--adopt-source` carries the parent's install source decision, so a child
+    never asks again."""
     argv = [sys.executable, str(runner.REPO_ROOT / "_shared" / "installer" / "cli.py"), "--platform", platform]
     if uninstall:
         return argv + ["--uninstall"]
     options = ctx.options
     if options.skip_source_health:
         argv.append("--skip-source-health")
+    if options.adopt_source:
+        argv.append("--adopt-source")
     if options.visibility:
         argv.extend(["--visibility", options.visibility])
     if options.verbose:

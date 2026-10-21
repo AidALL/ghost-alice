@@ -189,4 +189,6 @@ def run_repair(ctx: "Context") -> int:
         report.error("repair: addon target repair failed; see addon registry sidecars")
         return 1
     report.ok(f"Repair complete: {repaired} re-provisioned, {kept} left untouched")
+    # The install's read-only gateway line, from the same report.
+    transaction.report_gateway(ctx)
     return 0

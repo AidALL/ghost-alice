@@ -2,6 +2,9 @@
 
 Port of `installer_lib/source_health.sh`, `installer_lib/install.sh:538-551`
 (`_install_state_resolve_source`) and `installer_lib/bootstrap.sh:5-10`.
+`match_install_source` is the one judgment of whether this checkout is the
+checkout the install record names as its source; `check_install_source` acts on
+it before an install or a repair changes anything.
 """
 
 from __future__ import annotations
@@ -11,11 +14,22 @@ import os
 from pathlib import Path
 import shutil
 import stat
+import sys
+from typing import TYPE_CHECKING
 
-from installer import report, runner
+import install_transaction
+import installed_payload
+from installer import locations, report, runner
 from installer.runner import InstallerExit
 
+if TYPE_CHECKING:
+    from installer.cli import Context
+
 HOOKS_DIR = "hooks"
+ADOPT_HINT = ("Rerun this command from the install source, or add --adopt-source to install from this checkout "
+              "and record it as the install source.")
+REPAIR_HINT = ("Repair runs only from the install source; run the install from this checkout with --adopt-source to "
+               "move the installation here.")
 
 
 @dataclass(frozen=True)
@@ -32,6 +46,21 @@ class HookPathChange:
     before_present: bool
     before: str
     after: str = HOOKS_DIR
+
+
+@dataclass(frozen=True)
+class SourceMatch:
+    """This checkout compared with the checkout the install record names as its source.
+
+    `state` is `same`, `other`, `unrecorded` (no record, or a record without a `source` section) or
+    `unreadable` (`detail` says why). `here` is this checkout with its links followed; `recorded` is the
+    record's `source.root` as the record writes it.
+    """
+
+    state: str
+    here: Path
+    recorded: Path | None = None
+    detail: str = ""
 
 
 def _git(root: Path, *args: str) -> runner.ToolResult:
@@ -112,6 +141,106 @@ def check_source_health(*, skip: bool) -> bool:
         report.warn("Source tree has tracked local changes; continuing. Installed target user edits remain protected "
                     "by pending-merges backup and manifest checks.")
     return True
+
+
+def _same_folder(first: Path, second: Path) -> bool:
+    """Whether two paths name one folder, their links followed: the same file system entry when both exist,
+    else the same resolved path."""
+    try:
+        return os.path.samefile(first, second)
+    except OSError:
+        return os.path.normcase(str(first.resolve())) == os.path.normcase(str(second.resolve()))
+
+
+def match_install_source() -> SourceMatch:
+    """Compare `runner.REPO_ROOT` with the install record's `source.root`, both with their links followed.
+
+    The record is read as it will be once every unfinished publish is restored: the comparison runs before
+    the lock, and a publish that stopped halfway may have written its own source already. The installer's
+    check before an install or a repair and the post-merge hook ask this function, so the two never disagree
+    about which checkout is the install source.
+    """
+    here = Path(runner.REPO_ROOT).resolve()
+    try:
+        record = install_transaction.record_after_recovery(locations.record_root())
+    except (installed_payload.RecordError, install_transaction.InstallTransactionError) as exc:
+        return SourceMatch("unreadable", here, detail=str(exc))
+    section = (record or {}).get("source")
+    root = section.get("root") if isinstance(section, dict) else None
+    if not isinstance(root, str) or not root:
+        return SourceMatch("unrecorded", here)
+    recorded = Path(root)
+    return SourceMatch("same" if _same_folder(recorded, here) else "other", here, recorded)
+
+
+def interactive() -> bool:
+    """A terminal on both ends: stdin to read an answer and stdout to show the question."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _name_both(say, match: SourceMatch) -> None:
+    say("This checkout is not the install source the install record names.")
+    say(f"  Install source: {match.recorded}")
+    say(f"  This checkout:  {match.here}")
+
+
+def check_install_source(ctx: "Context", *, can_adopt: bool = True, match: SourceMatch | None = None) -> None:
+    """Go on, or stop with exit 2, before an install or a repair changes anything.
+
+    No record, or a record without a source, goes on (the first install), and so does the recorded checkout;
+    an unreadable record skips the comparison with a warning. Another checkout stops a command that cannot
+    replace the install source (`can_adopt` False: repair), which names the install that moves it. An install
+    goes on from another checkout with `--adopt-source`, and without a question when the recorded checkout no
+    longer exists (a fresh clone at another path). Otherwise the installer names both folders; at a terminal
+    it asks whether this checkout replaces the install source (no by default), elsewhere it stops with the
+    command to run. A replacement is kept in the options, so the auto mode's children carry it instead of
+    judging again; the answer is kept for `recheck_install_source`. The command's first publish records this
+    checkout as the source.
+    """
+    match = match_install_source() if match is None else match
+    ctx.source_match = match
+    if match.state == "unreadable":
+        report.warn(f"Install source check skipped: {match.detail}")
+        return
+    if match.state != "other":
+        return
+    if not can_adopt:
+        _name_both(report.error, match)
+        report.error(REPAIR_HINT)
+        raise InstallerExit(2)
+    if ctx.options.adopt_source:
+        report.info(f"Install source: this checkout replaces {match.recorded}")
+        return
+    if not match.recorded.exists():
+        ctx.options.adopt_source = True
+        report.info(f"Install source: {match.recorded} no longer exists; this checkout replaces it")
+        return
+    asking = interactive()
+    _name_both(report.warn if asking else report.error, match)
+    if asking:
+        try:
+            answer = input("Replace the install source with this checkout? [y/N]: ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() in ("y", "yes"):
+            ctx.options.adopt_source = True
+            report.info(f"Install source: this checkout replaces {match.recorded}")
+            return
+    report.error(ADOPT_HINT)
+    raise InstallerExit(2)
+
+
+def recheck_install_source(ctx: "Context", *, can_adopt: bool) -> None:
+    """Compare again under the install lock: another installer may have changed the install source while this
+    command waited for the lock. The answer the check before the lock gave goes on without a second message;
+    any other answer is judged as `check_install_source` judges it."""
+    match = match_install_source()
+    if match == ctx.source_match:
+        return
+    check_install_source(ctx, can_adopt=can_adopt, match=match)
 
 
 def update_source() -> int:

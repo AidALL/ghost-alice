@@ -8,12 +8,15 @@ import contextlib
 import io
 import os
 from pathlib import Path
+import plistlib
 import sys
 import tempfile
 import unittest
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gateway_testing  # noqa: E402
+from context_gateway_model import LABEL  # noqa: E402
 from installer import lifecycle  # noqa: E402
 from installer.runner import InstallerExit, ToolResult  # noqa: E402
 from installer_testing import FakeRunner, make_context, make_source, quiet, use_source  # noqa: E402
@@ -279,6 +282,28 @@ class RepairTests(LifecycleCase):
         self.assertIn("[ERROR] repair: _shared could not be re-provisioned", out)
         self.assertNotIn("Repair complete", out)
         self.assertNotIn("repair_missing", self.calls)
+
+    def test_repair_reports_the_context_gateway_like_the_install(self):
+        # The same `Context gateway:` line as the install, from the same report: here a loaded service that the
+        # install record does not name, which the repair neither stops nor starts.
+        reg = gateway_testing.registered_home(self, self.home, service=False)
+        agent = self.home / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+        agent.parent.mkdir(parents=True, exist_ok=True)
+        agent.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": [
+            sys.executable, "-B", str(reg.program), "--config", str(reg.state_path)]}))
+        effects = gateway_testing.FakeEffects(self.home, running=True, agent=agent)
+        self.stub("installer.transaction.install_shared", 0)
+        self.stub("installer.transaction.link_or_copy", 0)
+        self.stub("installer.addons.repair_missing", True)
+        with mock.patch.object(sys, "platform", "darwin"), \
+                mock.patch("context_gateway_install._effects", return_value=effects):
+            rc, out = self.captured(lifecycle.run_repair, self.ctx)
+        self.assertEqual(rc, 0)
+        self.assertIn("[WARN] Context gateway: a loaded service runs from the runtime without an install record entry; "
+                      "register it with bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> "
+                      "--launch-agent <plist>, which restarts it\n", out)
+        self.assertLess(out.index("Repair complete"), out.index("Context gateway:"))
+        self.assertEqual(effects.service_calls(), [])
 
     def test_repair_failures(self):
         (self.ctx.skills_dir / "_shared").mkdir()

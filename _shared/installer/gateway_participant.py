@@ -7,13 +7,15 @@ data roots the service reads are not inputs. `GatewayParticipant` applies that j
 points of a publish: it stops the service before the files change, starts it after, confirms readiness
 and records the restart. `removal` applies it to the roots a removal deletes and detaches the service
 through `context_gateway_install.detach`; without a `service` section it asks launchd and holds only for
-a loaded service whose program is inside a removal root.
+a loaded service whose program is inside a removal root. `loaded_service` is that one launchd
+observation; the install report asks it too.
 
 This is the only installer package module that imports the gateway modules.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -209,28 +211,61 @@ def removal(ghost_root: Path | str, removing, *, remove_codex: bool = False, con
     return {"kind": "context-gateway", **result}
 
 
-def _unregistered(io, removing, platform) -> dict:
-    """Without a `service` section only launchd can say whether the gateway runs: a loaded service whose
-    program is inside a removal root holds the removal; an absent one means nothing to detach."""
-    missing = dict(kind="context-gateway", action="missing", reason="gateway-not-registered")
+@dataclass(frozen=True)
+class LoadedService:
+    """What launchd says about a service with the gateway's label: `absent` (also off macOS), `inconclusive`
+    (launchd gave no clear answer), `unreadable` (its plist names no absolute program) or `loaded` with the
+    `program` its plist runs. `detail` says why an answer is not clear."""
+
+    state: str
+    program: Path | None = None
+    detail: str = ""
+
+    def runs_under(self, root) -> bool:
+        """Whether the loaded program is `root` or lies under it."""
+        root = Path(root)
+        return self.program is not None and (self.program == root or root in self.program.parents)
+
+
+def loaded_service(*, effects=None, platform: str | None = None) -> LoadedService:
+    """Ask launchd once whether a service with the gateway's label is loaded and, when it is, read the program
+    its plist runs (`ProgramArguments[2]` of five arguments). A removal without a `service` section and the
+    install report both read launchd through this function. Off macOS nothing is asked."""
+    platform = _host(platform)
     if platform != "darwin":
-        return missing
-    observed = io.observe(gateway_platform.service_domain(platform))
-    if observed.presence == "absent":
-        return missing
-    if observed.presence != "present" or observed.agent is None:
-        raise GatewayBlocked("Gateway native discovery is inconclusive; retain Core for review",
-                             code="GATEWAY_SERVICE_UNCONFIRMED", exit_code=3)
-    definition = io.snapshot(observed.agent)
+        return LoadedService("absent")
+    io = gateway._effects() if effects is None else effects
     try:
+        observed = io.observe(gateway_platform.service_domain(platform))
+    except (OSError, RuntimeError, ValueError) as exc:
+        return LoadedService("inconclusive", detail=f"launchd cannot be asked: {exc}")
+    if observed.presence == "absent":
+        return LoadedService("absent")
+    if observed.presence != "present" or observed.agent is None:
+        return LoadedService("inconclusive", detail=observed.detail or f"launchd answered {observed.presence}")
+    try:
+        definition = io.snapshot(observed.agent)
         parsed = plistlib.loads(definition.raw) if definition.kind == "file" else None
-    except (ValueError, plistlib.InvalidFileException):
+    except (OSError, ValueError, plistlib.InvalidFileException):
         parsed = None
     argv = parsed.get("ProgramArguments") if isinstance(parsed, dict) else None
     if not isinstance(argv, list) or len(argv) != 5 or not isinstance(argv[2], str) or not Path(argv[2]).is_absolute():
+        return LoadedService("unreadable", detail=f"{observed.agent} names no absolute program")
+    return LoadedService("loaded", program=Path(argv[2]))
+
+
+def _unregistered(io, removing, platform) -> dict:
+    """Without a `service` section only launchd can say whether the gateway runs: a loaded service whose
+    program is inside a removal root holds the removal; an absent one means nothing to detach."""
+    seen = loaded_service(effects=io, platform=platform)
+    if seen.state == "absent":
+        return dict(kind="context-gateway", action="missing", reason="gateway-not-registered")
+    if seen.state == "inconclusive":
+        raise GatewayBlocked("Gateway native discovery is inconclusive; retain Core for review",
+                             code="GATEWAY_SERVICE_UNCONFIRMED", exit_code=3)
+    if seen.state == "unreadable":
         raise GatewayBlocked("Unregistered service arguments are unavailable; retain Core")
-    program = Path(argv[2])
-    if any(program == root or root in program.parents for root in removing):
+    if any(seen.runs_under(root) for root in removing):
         raise GatewayBlocked("A loaded gateway service runs from the selected removal root but has no install record "
                              "entry; retain Core for review", code="GATEWAY_SERVICE_UNCONFIRMED", exit_code=3)
     return dict(kind="context-gateway", action="unchanged", reason="independent-unregistered-gateway-runtime")

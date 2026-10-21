@@ -10,6 +10,7 @@ import io
 import json
 import os
 from pathlib import Path
+import plistlib
 import sys
 import tempfile
 import unittest
@@ -19,7 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gateway_testing  # noqa: E402
 import install_transaction  # noqa: E402
 import installed_payload  # noqa: E402
-from installer import report, transaction  # noqa: E402
+from context_gateway_model import LABEL  # noqa: E402
+from installer import gateway_participant, report, transaction  # noqa: E402
 from installer.runner import ToolResult  # noqa: E402
 from installer.selection import Target  # noqa: E402
 from installer.source import HookPathChange, SourceInfo  # noqa: E402
@@ -322,6 +324,19 @@ class PlacementTests(TransactionCase):
         self.assertEqual(transaction.cleanup_shared_if_unused(ctx, ctx.skills_dir), 1)
 
 
+def unrecorded_launchd(effects, platform="darwin"):
+    """Answer launchd questions with `effects` (a fake launchd) on `platform`."""
+    stack = contextlib.ExitStack()
+    stack.enter_context(mock.patch.object(sys, "platform", platform))
+    stack.enter_context(mock.patch("context_gateway_install._effects", return_value=effects))
+    return stack
+
+
+UNRECORDED_LINE = ("Context gateway: a loaded service runs from the runtime without an install record entry; register "
+                   "it with bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> "
+                   "--launch-agent <plist>, which restarts it")
+
+
 class GatewayReportTests(TransactionCase):
     """After the runtime publish, the install says whether a context gateway is registered and running. Read-only."""
 
@@ -329,8 +344,9 @@ class GatewayReportTests(TransactionCase):
         reg = gateway_testing.registered_home(self, self.home)
         return reg
 
-    def test_no_service_section_prints_nothing(self):
-        with self.runner.patch():
+    def test_no_service_section_and_no_loaded_service_prints_nothing(self):
+        absent = gateway_testing.FakeEffects(self.home, running=False)
+        with self.runner.patch(), unrecorded_launchd(absent):
             observed, out = self.captured(transaction.report_gateway, self.context("claude"))
         self.assertEqual(out, "")
         self.assertIsNone(observed)
@@ -339,7 +355,7 @@ class GatewayReportTests(TransactionCase):
         (self.ghost / "context-gateway").mkdir(parents=True)
         (self.ghost / "context-gateway" / "installation.json").write_text("{}", encoding="utf-8")
         (self.ghost / "context-gateway-binding.json").write_text("{}", encoding="utf-8")
-        with self.runner.patch():
+        with self.runner.patch(), unrecorded_launchd(absent):
             observed, out = self.captured(transaction.report_gateway, self.context("claude"))
         self.assertEqual((observed, out), (None, ""))
 
@@ -371,6 +387,76 @@ class GatewayReportTests(TransactionCase):
             observed, out = self.captured(transaction.report_gateway, self.context("claude"))
         self.assertIn(f"[WARN] Context gateway: the install record cannot be read: {record}", out)
         self.assertEqual(observed[1], False)
+
+
+class UnrecordedServiceTests(TransactionCase):
+    """A gateway service that launchd has loaded but the install record does not name (a migration that could not
+    finish, a hand-registered service). The installer has no record of its files, so it neither stops nor starts
+    it and does not hold the publish; after the runtime publish one warning names the registration command, which
+    records the service and restarts it on the new code."""
+
+    def setUp(self):
+        super().setUp()
+        self.reg = gateway_testing.registered_home(self, self.home, service=False)
+        self.agent = self.home / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+
+    def loaded(self, program, *, agent_known=True, raw=None):
+        self.agent.parent.mkdir(parents=True, exist_ok=True)
+        self.agent.write_bytes(raw if raw is not None else plistlib.dumps({"Label": LABEL, "ProgramArguments": [
+            sys.executable, "-B", str(program), "--config", str(self.reg.state_path)]}))
+        return gateway_testing.FakeEffects(self.home, running=True, agent=self.agent if agent_known else None)
+
+    def test_the_runtime_publish_goes_on_and_one_warning_names_the_registration(self):
+        effects = self.loaded(self.reg.program)
+        ctx = self.context("codex")
+        with unrecorded_launchd(effects):
+            published, _ = self.captured(transaction.sync_runtime_shared, ctx)
+            observed, out = self.captured(transaction.report_gateway, ctx)
+        self.assertTrue(published)
+        self.assertEqual((self.reg.shared / "install_hooks.py").read_text(encoding="utf-8"), "")
+        self.assertIn(f"[WARN] {UNRECORDED_LINE}\n", out)
+        self.assertEqual(observed, (UNRECORDED_LINE, True))
+        self.assertEqual(effects.service_calls(), [], "the installer never stops or starts a service it has no record of")
+        self.assertIsNone(self.reg.service())
+
+    def test_the_line_names_the_install_command_the_shell_reported(self):
+        effects = self.loaded(self.reg.program)
+        with unrecorded_launchd(effects), mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
+            observed, _ = self.captured(transaction.report_gateway, self.context("codex"))
+        self.assertIsNotNone(observed)
+        self.assertIn("register it with .\\install.cmd gateway --codex-dir", observed[0])
+
+    def test_a_loaded_service_that_runs_elsewhere_is_not_reported(self):
+        effects = self.loaded(self.home / "elsewhere" / "_shared" / "context_gateway.py")
+        with unrecorded_launchd(effects):
+            observed, out = self.captured(transaction.report_gateway, self.context("codex"))
+        self.assertEqual((observed, out), (None, ""))
+
+    def test_an_inconclusive_observation_counts_as_none_and_stays_in_the_details(self):
+        for name, effects in (("unknown definition", self.loaded(self.reg.program, agent_known=False)),
+                              ("unreadable plist", self.loaded(self.reg.program, raw=b"not a plist"))):
+            with self.subTest(case=name), unrecorded_launchd(effects):
+                observed, out = self.captured(transaction.report_gateway, self.context("codex"))
+                self.assertIsNone(observed)
+                self.assertNotIn("[WARN]", out)
+                self.assertIn("[INFO] Context gateway: launchd observation was inconclusive", out)
+                self.assertEqual(effects.service_calls(), [])
+
+    def test_launchd_is_asked_only_on_macos(self):
+        effects = self.loaded(self.reg.program)
+        with mock.patch.object(effects, "observe", side_effect=AssertionError("launchd asked")) as observe, \
+                unrecorded_launchd(effects, platform="linux"):
+            observed, out = self.captured(transaction.report_gateway, self.context("codex"))
+        observe.assert_not_called()
+        self.assertEqual((observed, out), (None, ""))
+
+    def test_the_report_and_the_removal_share_one_launchd_observation(self):
+        # The report reads launchd through the removal's own observation function, not a copy of it.
+        seen = gateway_participant.LoadedService("loaded", program=self.reg.program)
+        with mock.patch("installer.gateway_participant.loaded_service", return_value=seen) as observation:
+            observed, _ = self.captured(transaction.report_gateway, self.context("codex"))
+        observation.assert_called_once()
+        self.assertEqual(observed, (UNRECORDED_LINE, True))
 
 
 class RecordMigrationTests(TransactionCase):

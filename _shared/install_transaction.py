@@ -535,6 +535,18 @@ def unfinished(ghost_root) -> list[str]:
             if _journal_phase(folder) not in (*FINISHED_PHASES, "absent")]
 
 
+def record_after_recovery(ghost_root) -> dict | None:
+    """The install record as it will be once every unfinished publish is restored, read without changing
+    anything: the copy the oldest unfinished publish saved (None when it found no record), else the record
+    itself. installed_payload.RecordError when that record cannot be read, InstallTransactionError when an
+    unfinished publish's journal cannot be."""
+    pending = unfinished(ghost_root)
+    if not pending:
+        return installed_payload.read(ghost_root)
+    copy = Journal.load(ghost_root, pending[-1]).record_copy()
+    return installed_payload.read(copy.parent) if copy is not None else None
+
+
 def _prune_transactions(root: Path, keep: int) -> None:
     """Keep the newest `keep` finished publish folders; an unfinished one stays until it is restored."""
     try:

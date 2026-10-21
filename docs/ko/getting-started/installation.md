@@ -177,6 +177,22 @@ bash install.sh --status
 .\install.cmd --status
 ```
 
+### 설치 원본
+
+설치 기록 `~/.ghost-alice/installed-payload.json`은 설치본을 만든 체크아웃, 즉 설치 원본을 기록합니다. 설치와 `--repair`는 아무것도 바꾸기 전에 기록의 체크아웃과 자신이 실행되는 체크아웃을 비교합니다. 기록된 체크아웃이 더는 없으면(다른 경로에 다시 clone한 경우) 설치기는 묻지 않고 새 체크아웃을 설치 원본으로 기록합니다. 두 번째 clone이나 git worktree처럼 두 체크아웃이 모두 있으면 설치기는 두 폴더를 출력합니다. 터미널에서는 이 체크아웃으로 설치 원본을 교체할지 묻고, 교체를 승인하지 않으면 종료합니다. 터미널이 아니면 종료 코드 2로 종료합니다. 다른 체크아웃으로 설치본을 의도적으로 옮기려면 그 체크아웃에서 `--adopt-source`를 붙여 설치기를 실행해 주세요. 설치기는 첫 배치에서 그 체크아웃을 설치 원본으로 기록합니다. `--repair`는 설치본을 옮기지 않습니다. 다른 체크아웃에서 실행하면 종료 코드 2로 종료하고 그 설치 명령을 안내합니다.
+
+```bash
+cd /path/to/new-checkout
+bash install.sh --adopt-source
+```
+
+```cmd
+cd C:\path\to\new-checkout
+.\install.cmd --adopt-source
+```
+
+설치 원본에서 merge나 pull을 하면 git post-merge 훅이 감지한 모든 호스트에 설치를 이어서 실행합니다. 같은 저장소의 git worktree 같은 다른 체크아웃에서는 훅이 한 줄만 출력하고 설치하지 않습니다. 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며 merge는 교체하지 않습니다. 훅 때문에 merge가 실패하지도 않습니다.
+
 ## Common Commands
 
 | 용도 | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
@@ -214,7 +230,7 @@ Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynami
 
 설치기는 `--help`와 `--list`를 포함한 모든 명령에 Python 3.11 이상을 요구합니다. `install.sh`는 Python을 찾거나 준비한 뒤 인수를 그대로 `_shared/installer/cli.py`에 넘깁니다. 해당 버전이 없으면 가능한 환경에서 자동 준비를 시도합니다.
 
-선택적인 macOS 네이티브 컨텍스트 gateway에는 `compression.zstd`를 제공하는 Python 3.14 이상이 필요합니다. 등록 명령 `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 먼저 이 기능을 확인한 뒤 launch agent, `state.json`, Codex provider 블록을 작성하고 설치 기록에 서비스를 기록합니다. 등록 명령은 모듈을 복사하지 않습니다. 서비스는 설치기가 게시한 런타임 `_shared`를 실행하므로 Core를 먼저 설치합니다. Core 설치기와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`, launch agent, 상태 파일이 심볼릭 링크이면 등록과 분리는 서비스를 변경하기 전에 종료하고 링크와 원본을 보존합니다. 갱신은 서비스 파일 세 개가 설치 기록과 같은 동안 리스너의 포트와 scope를 유지합니다. 설치기 밖에서 바뀐 파일이 있으면 명령은 아무것도 바꾸기 전에 종료하고, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록은 보존합니다. 첫 등록이 실패하고 후보 서비스의 중지가 확인되면 해당 시도가 새로 작성한 상태 자료와 기록 항목을 되돌려 다음 등록을 진행할 수 있습니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 복구 자료를 보존하고 검토를 요청합니다. 등록 뒤에는 `bash install.sh`만으로 설치본을 갱신합니다. `bash install.sh gateway detach --confirm`은 서비스 등록을 해제하고 상태 디렉터리를 남깁니다.
+선택적인 macOS 네이티브 컨텍스트 gateway에는 `compression.zstd`를 제공하는 Python 3.14 이상이 필요합니다. 등록 명령 `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 먼저 이 기능을 확인한 뒤 launch agent, `state.json`, Codex provider 블록을 작성하고 설치 기록에 서비스를 기록합니다. 등록 명령은 모듈을 복사하지 않습니다. 서비스는 설치기가 게시한 런타임 `_shared`를 실행하므로 Core를 먼저 설치합니다. Core 설치기와 훅의 최소 요구 버전은 Python 3.11로 유지됩니다. Codex `config.toml`, launch agent, 상태 파일이 심볼릭 링크이면 등록과 분리는 서비스를 변경하기 전에 종료하고 링크와 원본을 보존합니다. 갱신은 서비스 파일 세 개가 설치 기록과 같은 동안 리스너의 포트와 scope를 유지합니다. 설치기 밖에서 바뀐 파일이 있으면 명령은 아무것도 바꾸기 전에 종료하고, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록은 보존합니다. 첫 등록이 실패하고 후보 서비스의 중지가 확인되면 해당 시도가 새로 작성한 상태 자료와 기록 항목을 되돌려 다음 등록을 진행할 수 있습니다. 중지를 확인할 수 없거나 자료가 동시에 변경되면 복구 자료를 보존하고 검토를 요청합니다. 등록 뒤에는 `bash install.sh`만으로 설치본을 갱신합니다. `bash install.sh gateway detach --confirm`은 서비스 등록을 해제하고 상태 디렉터리를 남깁니다. 설치 기록에 없는 게이트웨이 서비스를 launchd가 실행 중이면, 설치와 `--repair`는 그 서비스를 그대로 두고 등록 명령을 안내하는 경고 한 줄을 출력합니다. 등록 명령은 서비스를 기록에 작성하고 새 코드로 재시작합니다.
 
 - macOS: Homebrew가 있으면 `brew install python3`
 - Linux / WSL: `apt-get`, `dnf`, `yum`, `pacman` 같은 패키지 관리자

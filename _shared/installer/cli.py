@@ -41,6 +41,7 @@ class Options:
     platform_explicit: bool = False
     prompt_platform: bool = False
     skip_source_health: bool = False
+    adopt_source: bool = False
     update_source: bool = False
     cleanup_pending: bool = False
     addon_sources: list[str] = field(default_factory=list)
@@ -66,6 +67,7 @@ class Context:
     visibility: str = "dynamic"
     hook_change: object | None = None
     record_source: dict | None = None
+    source_match: object | None = None
 
     @property
     def verbose(self) -> bool:
@@ -92,6 +94,10 @@ class Command(HelpRow):
     name held around `run` (None: no lock); `before_lock` runs first, outside
     the lock. `platform` False: the command needs no platform, so
     `--prompt-platform` does not ask and the addon sources are not prepared.
+    `checks_source`: `dispatch` compares the install record's source with this
+    checkout (`source.check_install_source`) before anything else changes, and
+    `run_command` compares again under the lock. `adopts_source`: the command
+    may replace the install source; without it only the recorded checkout runs it.
     """
 
     names: tuple[str, ...]
@@ -100,6 +106,8 @@ class Command(HelpRow):
     lock: str | None = None
     platform: bool = True
     before_lock: Callable[["Context"], None] | None = None
+    checks_source: bool = False
+    adopts_source: bool = False
 
 
 COMMON, REMOVAL, ADVANCED = "Common commands", "Removal commands", "Advanced/operator commands"
@@ -118,7 +126,8 @@ UNINSTALL = Command(REMOVAL, "--uninstall, -u",
                     names=("--uninstall", "--remove", "-u"),
                     run=lambda ctx: lifecycle.uninstall(ctx, ctx.options.args[1:]), lock="uninstall")
 INSTALL = Command(ADVANCED, "SKILL_NAMES", "Install specified skills only", names=(),
-                  run=lambda ctx: run_install(ctx), lock="install", before_lock=lambda ctx: prepare_install(ctx))
+                  run=lambda ctx: run_install(ctx), lock="install", before_lock=lambda ctx: prepare_install(ctx),
+                  checks_source=True, adopts_source=True)
 COMMAND_LINE: tuple[HelpRow, ...] = (
     HelpRow(COMMON, "--platform, -p PLAT", "Choose claude | codex"),
     HelpRow(COMMON, "--prompt-platform", "Ask which AI tool to install"),
@@ -129,7 +138,7 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(COMMON, "--doctor", "Run install diagnostics", names=("--doctor",),
             run=lambda ctx: diagnostics.run_doctor(ctx)),
     Command(COMMON, "--repair", "Re-provision missing managed targets (never overwrites user-owned slots)",
-            names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair"),
+            names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair", checks_source=True),
     HelpRow(COMMON, "--verbose, -v", "Show per-target install details"),
     HelpRow(COMMON, "--addon autopilot", "Install official autopilot addon; --platform is optional"),
     UNINSTALL,
@@ -142,12 +151,15 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(ADVANCED, "--update-source", "Stash source checkout local changes and run git pull --ff-only",
             names=("--update-source",), run=lambda ctx: source.update_source(), flag="update_source",
             platform=False),
+    Command(ADVANCED, "--post-merge", "Run by the git post-merge hook: install when this checkout is the install source",
+            names=("--post-merge",), run=lambda ctx: run_post_merge(ctx), platform=False),
     HelpRow(ADVANCED, "--addon-source PATH|URL", "Add local addon repo or git URL source"),
     HelpRow(ADVANCED, "--addon-tag TAG", "Checkout branch/tag for git URL addon sources"),
     HelpRow(ADVANCED, "--addon-skip", "Disable addon installation"),
     Command(ADVANCED, "--list-addons", "List addon manifest targets", names=("--list-addons",),
             run=lambda ctx: addons.list_addons(ctx), flag="list_addons"),
     HelpRow(ADVANCED, "--skip-source-health", "Skip source health gate"),
+    HelpRow(ADVANCED, "--adopt-source", "Install from this checkout and record it as the install source"),
     Command(ADVANCED, "--sync-commands", "Sync workspace commands", names=("--sync-commands",),
             run=lambda ctx: hosts.sync_commands(ctx, "sync", ctx.platform)),
     Command(ADVANCED, "--check-commands", "Check workspace commands only", names=("--check-commands",),
@@ -168,7 +180,7 @@ def _fail(message: str, code: int = 1) -> None:
 
 def parse_options(argv: list[str]) -> Options:
     """`--platform|-p`, `--prompt-platform`, `--auto|-a` (no-op), `--skip-source-health`,
-    `--addon-source`, `--addon-tag`, `--addon-skip`, `--verbose|-v`,
+    `--adopt-source`, `--addon-source`, `--addon-tag`, `--addon-skip`, `--verbose|-v`,
     `--visibility|--agent-visibility` and the table's flag commands
     (`Command.flag`); everything else stays in `args` in order. Missing or
     invalid values print the shell's error and exit 1 (`install.sh:115-201`)."""
@@ -194,6 +206,9 @@ def parse_options(argv: list[str]) -> Options:
             index += 1
         elif token == "--skip-source-health":
             options.skip_source_health = True
+            index += 1
+        elif token == "--adopt-source":
+            options.adopt_source = True
             index += 1
         elif token in flag_fields:
             setattr(options, flag_fields[token], True)
@@ -540,14 +555,36 @@ def run_install(ctx: Context) -> int:
     return 0
 
 
+def run_post_merge(ctx: Context) -> int:
+    """The step `hooks/post-merge` runs after a merge: in the checkout the install record names as the install
+    source, the auto-mode install for every detected host; anywhere else one line and nothing installed.
+
+    `source.match_install_source`, the judgment of the install source check, decides. The step takes no lock:
+    each host's install takes it and refuses while another install holds it, and the exit code tells the hook.
+    """
+    match = source.match_install_source()
+    if match.state == "same":
+        return dispatch(Options())
+    if match.state == "other":
+        report.info(f"Post-merge: this checkout is not the install source ({match.recorded}); nothing was installed.")
+    elif match.state == "unrecorded":
+        report.info("Post-merge: no install record names an install source; nothing was installed.")
+    else:
+        report.warn(f"Post-merge: the install record cannot be read ({match.detail}); nothing was installed.")
+    return 0
+
+
 def run_command(command: Command, ctx: Context) -> int:
-    """`before_lock`, then `run` under the command's install lock when it names one; the exit code of `run`."""
+    """`before_lock`, then `run` under the command's install lock when it names one; the exit code of `run`.
+    A command that `checks_source` compares the install source again once it holds the lock."""
     if command.before_lock is not None:
         command.before_lock(ctx)
     if command.lock is None:
         return command.run(ctx)
     lock_path = lock.acquire(command.lock, ctx.platform)
     try:
+        if command.checks_source:
+            source.recheck_install_source(ctx, can_adopt=command.adopts_source)
         return command.run(ctx)
     finally:
         lock.release(lock_path)
@@ -557,7 +594,9 @@ def dispatch(options: Options) -> int:
     """`--addon` shortcuts, then the table's command (`find_command`): an unknown
     option ends with exit 1, the full uninstall and auto mode run once per
     detected platform, every other command runs once through `run_command`
-    (`install.sh:253-562`)."""
+    (`install.sh:253-562`). A command that `checks_source` compares the install
+    source first, before the addon sources are prepared; the auto mode compares
+    it once, in the parent."""
     normalize_official_addon_shortcuts(options)
     command = find_command(options)
     if command is None:
@@ -576,6 +615,8 @@ def dispatch(options: Options) -> int:
             report.warn("No AI platform home directories detected. At least one of ~/.claude, ~/.codex is required.")
             return 0
         ctx = build_context(options)
+        if command.checks_source:
+            source.check_install_source(ctx, can_adopt=command.adopts_source)
         if not options.addon_skip and ctx.addon_sources:
             addons.prepare_sources(ctx)
         return auto.run_install_children(ctx, detected)
@@ -585,6 +626,8 @@ def dispatch(options: Options) -> int:
         else:
             options.platform = prompt_platform()
     ctx = build_context(options)
+    if command.checks_source:
+        source.check_install_source(ctx, can_adopt=command.adopts_source)
     if command.platform and not options.addon_skip and ctx.addon_sources:
         addons.prepare_sources(ctx)
     return run_command(command, ctx)
