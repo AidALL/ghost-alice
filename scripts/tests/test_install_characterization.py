@@ -22,7 +22,6 @@ Determinism notes (read before editing the golden fixture):
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import shutil
@@ -30,12 +29,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from collections.abc import Iterator
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALL_SH = REPO_ROOT / "install.sh"
+sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer_testing import checkout_copy  # noqa: E402
+
 FIXTURE_DIR = Path(__file__).resolve().parent / "_fixtures" / "characterization"
 SETTINGS_SHAPE_FIXTURE = FIXTURE_DIR / "install_settings_shape.json"
 
@@ -71,8 +71,8 @@ def _find_test_bash() -> str | None:
     return None
 
 
-def _run_install(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run install.sh with a deterministic, offline, non-interactive environment.
+def _run_install(source: Path, home: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Run the install.sh of ``source`` (a checkout copy) with a deterministic, offline, non-interactive environment.
 
     ``HOME`` is pinned to ``home`` and progress animation is disabled so output
     is stable. ``--skip-source-health`` (passed by callers) disables all
@@ -89,62 +89,22 @@ def _run_install(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
     env["HOME"] = home.as_posix()
     env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
 
-    with _preserve_source_repo_hookspath():
-        return subprocess.run(
-            [bash_exe, str(INSTALL_SH), *args],
-            cwd=REPO_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=600,
-        )
+    return subprocess.run(
+        [bash_exe, str(source / "install.sh"), *args],
+        cwd=source,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=600,
+    )
 
 
-def _run_uninstall(home: Path, *args: str) -> subprocess.CompletedProcess[str]:
+def _run_uninstall(source: Path, home: Path, *args: str) -> subprocess.CompletedProcess[str]:
     """Run install.sh in uninstall mode with the same deterministic environment."""
 
-    return _run_install(home, "--uninstall", *args)
-
-
-@contextlib.contextmanager
-def _preserve_source_repo_hookspath() -> Iterator[None]:
-    """Snapshot and restore the source repo's ``core.hooksPath`` git config.
-
-    The uninstall path resolves the *source* repository from the installer's
-    location (this checkout) and, as part of cleanup, removes/restores its
-    ``core.hooksPath``. That is the behavior under characterization, but it
-    mutates the live worktree git config -- shared state that other installer
-    tests depend on. To avoid cross-test contamination we capture the current
-    value and restore it verbatim after the uninstall runs, without changing
-    what the installer actually does during the test.
-    """
-
-    def _read() -> str | None:
-        result = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "config", "--local", "--get", "core.hooksPath"],
-            capture_output=True,
-            text=True,
-        )
-        return result.stdout.strip() if result.returncode == 0 else None
-
-    previous = _read()
-    try:
-        yield
-    finally:
-        if previous is None:
-            subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "config", "--local", "--unset", "core.hooksPath"],
-                capture_output=True,
-                text=True,
-            )
-        else:
-            subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "config", "--local", "core.hooksPath", previous],
-                capture_output=True,
-                text=True,
-            )
+    return _run_install(source, home, "--uninstall", *args)
 
 
 def _markers_under_skills(home: Path) -> list[str]:
@@ -189,10 +149,11 @@ class InstallCharacterizationTest(unittest.TestCase):
                 "and commit it (see module docstring)."
             )
 
+        source = checkout_copy(self)
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir)
             result = _run_install(
-                home, "--platform", "claude", "--skip-source-health", "task-router"
+                source, home, "--platform", "claude", "--skip-source-health", "task-router"
             )
             self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
 
@@ -218,6 +179,7 @@ class InstallCharacterizationTest(unittest.TestCase):
         markers are removed from the selected skill root.
         """
 
+        source = checkout_copy(self)
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir)
             skills_dir = home / ".claude" / "skills"
@@ -226,7 +188,7 @@ class InstallCharacterizationTest(unittest.TestCase):
             user_file.write_text("keep me", encoding="utf-8")
 
             install_result = _run_install(
-                home, "--platform", "claude", "--skip-source-health", "task-router"
+                source, home, "--platform", "claude", "--skip-source-health", "task-router"
             )
             self.assertEqual(
                 install_result.returncode,
@@ -234,7 +196,7 @@ class InstallCharacterizationTest(unittest.TestCase):
                 msg=install_result.stderr + install_result.stdout,
             )
 
-            uninstall_result = _run_uninstall(home, "--platform", "claude")
+            uninstall_result = _run_uninstall(source, home, "--platform", "claude")
             self.assertEqual(
                 uninstall_result.returncode,
                 0,

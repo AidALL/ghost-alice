@@ -16,6 +16,9 @@ INSTALL_SH = REPO_ROOT / "install.sh"
 INSTALL_PS1 = REPO_ROOT / "install.ps1"
 README = REPO_ROOT / "README.md"
 ADDON_FIXTURE = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
+if str(REPO_ROOT / "_shared") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer_testing import checkout_copy  # noqa: E402
 
 
 def _find_test_bash() -> str | None:
@@ -56,7 +59,7 @@ def _skill_target_count(*skill_names: str) -> int:
     return total
 
 
-def _run_pty(command: list[str], *, env: dict[str, str]) -> tuple[int, str]:
+def _run_pty(command: list[str], *, env: dict[str, str], cwd: Path) -> tuple[int, str]:
     if not hasattr(os, "openpty"):
         raise unittest.SkipTest("pseudo-terminal support is required for TTY progress test")
 
@@ -66,7 +69,7 @@ def _run_pty(command: list[str], *, env: dict[str, str]) -> tuple[int, str]:
     try:
         proc = subprocess.Popen(
             command,
-            cwd=REPO_ROOT,
+            cwd=cwd,
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=slave_fd,
@@ -165,9 +168,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
 
+            source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(INSTALL_SH), "--verbose", "--skip-source-health", "task-router"],
-                cwd=REPO_ROOT,
+                [bash, str(source / "install.sh"), "--verbose", "--skip-source-health", "task-router"],
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -198,9 +202,11 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
+            source = checkout_copy(self)
             return_code, output = _run_pty(
-                [bash, str(INSTALL_SH), "--skip-source-health", "task-router"],
+                [bash, str(source / "install.sh"), "--skip-source-health", "task-router"],
                 env=env,
+                cwd=source,
             )
 
             expected_common_targets = _skill_target_count("task-router") + 1
@@ -245,9 +251,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
             env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = ADDON_FIXTURE.as_posix()
 
+            source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(INSTALL_SH), "--addon", "autopilot", "--skip-source-health"],
-                cwd=REPO_ROOT,
+                [bash, str(source / "install.sh"), "--addon", "autopilot", "--skip-source-health"],
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -298,10 +305,11 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["GHOST_ALICE_LANG"] = "en"
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
 
+            source = checkout_copy(self)
             result = subprocess.run(
                 [
                     bash,
-                    str(INSTALL_SH),
+                    str(source / "install.sh"),
                     "--addon-source",
                     addon_repo.resolve().as_uri(),
                     "--addon-tag",
@@ -309,7 +317,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     "--skip-source-health",
                     "task-router",
                 ],
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -338,9 +346,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
 
+            source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", *requested_skills],
-                cwd=REPO_ROOT,
+                [bash, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", *requested_skills],
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -395,9 +404,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
 
+            source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", "coding-convention"],
-                cwd=REPO_ROOT,
+                [bash, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", "coding-convention"],
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -428,9 +438,11 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
+            source = checkout_copy(self)
             return_code, output = _run_pty(
-                [bash, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", *requested_skills],
+                [bash, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", *requested_skills],
                 env=env,
+                cwd=source,
             )
             self.assertEqual(return_code, 0, msg=output)
             self.assertIn("\r  [2/5] Skill sync          [0] [Current], [0] [updated], [0] [newly added]", output)
@@ -456,6 +468,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
+            source = checkout_copy(self)
             return_code, output = _run_pty(
                 [
                     zsh,
@@ -463,6 +476,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     "./install.sh --platform codex --skip-source-health coding-convention",
                 ],
                 env=env,
+                cwd=source,
             )
 
             self.assertEqual(return_code, 0, msg=output)
@@ -486,6 +500,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["GHOST_ALICE_LANG"] = "en"
             env.setdefault("TERM", "xterm-256color")
 
+            source = checkout_copy(self)
             return_code, output = _run_pty(
                 [
                     zsh,
@@ -493,6 +508,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     "./install.sh --skip-source-health",
                 ],
                 env=env,
+                cwd=source,
             )
 
             self.assertEqual(return_code, 0, msg=output)
@@ -533,9 +549,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                     env["HOME"] = temp_home.as_posix()
                     env["GHOST_ALICE_LANG"] = "en"
 
+                    source = checkout_copy(self)
                     result = subprocess.run(
-                        [bash, str(INSTALL_SH), "--platform", "codex", "--skip-source-health", *requested_skills],
-                        cwd=REPO_ROOT,
+                        [bash, str(source / "install.sh"), "--platform", "codex", "--skip-source-health", *requested_skills],
+                        cwd=source,
                         env=env,
                         capture_output=True,
                         text=True,
@@ -566,9 +583,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
 
+            source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(INSTALL_SH), "--platform", "codex", "--visibility", "minimal", "--skip-source-health", *requested_skills],
-                cwd=REPO_ROOT,
+                [bash, str(source / "install.sh"), "--platform", "codex", "--visibility", "minimal", "--skip-source-health", *requested_skills],
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,

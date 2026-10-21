@@ -167,28 +167,98 @@ class SourceHealthTests(SourceCase):
 
 
 class GitHooksTests(SourceCase):
-    def test_setup_git_hooks_sets_and_records_the_path(self):
-        # source_health.sh:91-116
-        repo = init_repo(self.root / "repo")
-        self.enterContext(use_source(repo))
-        hook = repo / "hooks" / "post-merge"
-        hook.parent.mkdir()
-        hook.write_text("#!/bin/sh\n", encoding="utf-8")
-        hook.chmod(0o644)
+    """The install writes the repository's shared `core.hooksPath` as the absolute path of the install source's
+    hooks folder, so a merge in any worktree runs the install source's post-merge hook and no other checkout's hook
+    file. The change it returns tells the install-state what the full uninstall restores."""
+
+    def setUp(self):
+        super().setUp()
+        self.repo = init_repo(self.root / "repo").resolve()
+        self.enterContext(use_source(self.repo))
+        self.hooks = (self.repo / "hooks").as_posix()
+
+    def shared_value(self, repo: Path | None = None) -> str | None:
+        result = subprocess.run(["git", "-C", str(repo or self.repo), "config", "--local", "--get", "core.hooksPath"],
+                                capture_output=True, text=True)
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    def setup_hooks(self) -> tuple[source.HookPathChange, str]:
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             change = source.setup_git_hooks()
-        self.assertEqual(change, source.HookPathChange(changed=True, before_present=False, before="", after="hooks"))
-        self.assertEqual(git(repo, "config", "--local", "core.hooksPath"), "hooks")
-        self.assertIn("[INFO] Git hook path → hooks (post-merge auto-refresh enabled)", out.getvalue())
+        return change, out.getvalue()
+
+    def record_install_state(self, platform: str, **entry) -> None:
+        state = self.root / "home" / ".ghost-alice" / "install-state" / f"{platform}.json"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        change = {"kind": "source_repo_hook_path", "repo_root": "/earlier/source", **entry}
+        state.write_text(json.dumps({"schema_version": 1, "platform": platform, "targets": [],
+                                     "system_env_changes": [change]}), encoding="utf-8")
+
+    def test_the_shared_value_names_the_install_sources_hooks_folder_by_absolute_path(self):
+        # source_health.sh:91-116, with the absolute path in place of the relative `hooks`
+        hook = self.repo / "hooks" / "post-merge"
+        hook.parent.mkdir()
+        hook.write_text("#!/bin/sh\n", encoding="utf-8")
+        hook.chmod(0o644)
+        change, out = self.setup_hooks()
+        self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
+                                                       after=self.hooks))
+        self.assertEqual(self.shared_value(), self.hooks)
+        self.assertIn(f"[INFO] Git hook path → {self.hooks} (post-merge auto-refresh enabled)", out)
         self.assertTrue(hook.stat().st_mode & stat.S_IXUSR)
-        with contextlib.redirect_stdout(io.StringIO()):
-            again = source.setup_git_hooks()
-        self.assertFalse(again.changed)
-        git(repo, "config", "--local", "core.hooksPath", "elsewhere")
-        with contextlib.redirect_stdout(io.StringIO()):
-            replaced = source.setup_git_hooks()
-        self.assertEqual(replaced, source.HookPathChange(changed=True, before_present=True, before="elsewhere", after="hooks"))
+
+    def test_an_earlier_installers_relative_value_leaves_no_previous_value(self):
+        git(self.repo, "config", "--local", "core.hooksPath", "hooks")
+        change, _ = self.setup_hooks()
+        self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
+                                                       after=self.hooks))
+        self.assertEqual(self.shared_value(), self.hooks)
+
+    def test_another_value_is_the_value_to_restore(self):
+        git(self.repo, "config", "--local", "core.hooksPath", "elsewhere")
+        change, _ = self.setup_hooks()
+        self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=True,
+                                                       before="elsewhere", after=self.hooks))
+
+    def test_a_value_an_earlier_install_wrote_keeps_the_recorded_previous_value(self):
+        # A reinstall finds its own value in place: the install-state of either host carries what was there before.
+        git(self.repo, "config", "--local", "core.hooksPath", self.hooks)
+        self.record_install_state("codex", before_present=True, before="custom-hooks", after=self.hooks,
+                                  applied_at="2026-10-01T00:00:00Z")
+        change, out = self.setup_hooks()
+        self.assertEqual(change, source.HookPathChange(changed=False, recorded=True, before_present=True,
+                                                       before="custom-hooks", after=self.hooks,
+                                                       applied_at="2026-10-01T00:00:00Z"))
+        self.assertNotIn("Git hook path", out)
+        # An install source that moved inside the repository replaces the earlier source's value, and the value to
+        # restore stays the one from before Ghost-ALICE wrote any.
+        earlier = "/earlier/source/hooks"
+        git(self.repo, "config", "--local", "core.hooksPath", earlier)
+        self.record_install_state("codex", before_present=False, before=None, after=earlier,
+                                  applied_at="2026-09-01T00:00:00Z")
+        change, _ = self.setup_hooks()
+        self.assertEqual(change, source.HookPathChange(changed=True, recorded=True, before_present=False, before="",
+                                                       after=self.hooks))
+        self.assertEqual(self.shared_value(), self.hooks)
+
+    def test_a_value_in_place_that_no_install_state_names_has_no_known_previous_value(self):
+        # Another installation (another HOME) or the user wrote this value: the full uninstall leaves it alone.
+        git(self.repo, "config", "--local", "core.hooksPath", self.hooks)
+        change, out = self.setup_hooks()
+        self.assertEqual(change, source.HookPathChange(changed=False, recorded=False, after=self.hooks))
+        self.assertEqual(out, "")
+
+    def test_a_linked_worktree_writes_the_shared_value_and_keeps_the_worktree_setting(self):
+        worktree = (self.root / "worktree").resolve()
+        git(self.repo, "worktree", "add", "-q", "-b", "work", str(worktree))
+        git(self.repo, "config", "--local", "extensions.worktreeConfig", "true")
+        git(worktree, "config", "--worktree", "core.hooksPath", "/dev/null")
+        with use_source(worktree):
+            change, _ = self.setup_hooks()
+        self.assertEqual(change.after, (worktree / "hooks").as_posix())
+        self.assertEqual(self.shared_value(), (worktree / "hooks").as_posix())
+        self.assertEqual(git(worktree, "config", "--worktree", "--get", "core.hooksPath"), "/dev/null")
 
     def test_setup_git_hooks_outside_git_warns(self):
         plain = self.root / "plain"
@@ -197,7 +267,7 @@ class GitHooksTests(SourceCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
             change = source.setup_git_hooks()
-        self.assertFalse(change.changed)
+        self.assertFalse(change.changed or change.recorded)
         self.assertIn("[WARN] Failed to set Git hook path. Post-merge hook may not fire", out.getvalue())
 
 
@@ -292,6 +362,15 @@ class InstallSourceTests(SourceCase):
         self.write_record(None)
         self.assertEqual(source.match_install_source().state, "unrecorded")
         self.assertEqual(self.run_check()[:2], (0, ""))
+
+    def test_the_judgment_compares_the_checkout_it_is_given(self):
+        # The post-merge step names the checkout the merge ran in; the installer itself runs from the install source.
+        self.write_record(self.other)
+        merged = source.match_install_source(self.other)
+        self.assertEqual((merged.state, merged.here, merged.recorded), ("same", self.other.resolve(), self.other))
+        self.assertEqual(source.match_install_source(self.here).state, "other")
+        # Without a checkout the judgment compares the checkout the installer runs from.
+        self.assertEqual(source.match_install_source().state, "other")
 
     def test_the_recorded_checkout_goes_on_with_links_followed(self):
         link = self.root / "link-to-here"

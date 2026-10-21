@@ -1,3 +1,5 @@
+import contextlib
+import io
 import os
 import runpy
 import subprocess
@@ -26,6 +28,7 @@ class InstallerCompatMatrixTest(unittest.TestCase):
             shared.mkdir()
             shutil.copy2(RUNNER, root / "scripts" / RUNNER.name)
             shutil.copy2(REPO_ROOT / "_shared" / "project_runtime.py", shared)
+            shutil.copy2(REPO_ROOT / "_shared" / "git_hook_paths.py", shared)
             modules = (
                 "test_install_destination.py",
                 "test_retired_detector_stage.py",
@@ -162,6 +165,22 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         self.assertNotIn("3.14", runner)
         self.assertNotIn("python_versions = [", runner)
 
+    def test_a_group_that_changes_the_checkouts_hook_path_fails(self) -> None:
+        # The installer writes the git hook path of the repository it runs from; a test that installs from this
+        # checkout instead of a copy changes what every worktree of the repository runs after a merge.
+        namespace = runpy.run_path(str(RUNNER))
+        group = namespace["TestGroup"]("hook-probe", "passing group", (sys.executable, "-c", "pass"))
+        readings = iter(({"config": ["/source/hooks"]}, {"config": ["hooks"]}))
+        stderr = io.StringIO()
+        with mock.patch.object(namespace["subprocess"], "run",
+                               lambda command, **kwargs: subprocess.CompletedProcess(command, 0)), \
+                mock.patch.dict(namespace["run"].__globals__, {"hook_paths": lambda checkout: next(readings)}), \
+                contextlib.redirect_stderr(stderr):
+            result = namespace["run"]([group])
+        self.assertEqual(result, 1)
+        self.assertIn("FAILED hook-probe: the tests changed core.hooksPath of", stderr.getvalue())
+        self.assertIn("{'config': ['/source/hooks']} -> {'config': ['hooks']}", stderr.getvalue())
+
     def test_full_discovery_runners_report_method_progress(self) -> None:
         namespace = runpy.run_path(str(RUNNER))
         groups = {group.name: group for group in namespace["TEST_GROUPS"]}
@@ -184,6 +203,7 @@ class InstallerCompatMatrixTest(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0)
 
         hostile = r"C:\Users\Public\Documents\ESTsoft\CreatorTemp"
+        # The hook path check around each group runs git; this probe records only the group's child process.
         with mock.patch.dict(
             os.environ,
             {
@@ -193,7 +213,8 @@ class InstallerCompatMatrixTest(unittest.TestCase):
                 "PYTHONPYCACHEPREFIX": hostile,
             },
             clear=False,
-        ), mock.patch.object(namespace["subprocess"], "run", run_process):
+        ), mock.patch.object(namespace["subprocess"], "run", run_process), \
+                mock.patch.dict(namespace["run"].__globals__, {"hook_paths": lambda checkout: {}}):
             parent_before = {
                 key: os.environ[key]
                 for key in ("TEMP", "TMP", "TMPDIR", "PYTHONPYCACHEPREFIX")

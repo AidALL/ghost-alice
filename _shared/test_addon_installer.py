@@ -14,6 +14,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_ROOT = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer_testing import checkout_copy  # noqa: E402
 
 
 def _find_test_bash() -> str | None:
@@ -287,10 +288,11 @@ class AddonInstallerTest(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = temp_home
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+            source = checkout_copy(self)
             result = subprocess.run(
                 [
                     bash,
-                    str(REPO_ROOT / "install.sh"),
+                    str(source / "install.sh"),
                     "--platform",
                     "claude",
                     "--addon-source",
@@ -298,7 +300,7 @@ class AddonInstallerTest(unittest.TestCase):
                     "--skip-source-health",
                     "task-router",
                 ],
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -356,16 +358,17 @@ class AddonInstallerTest(unittest.TestCase):
             env = os.environ.copy()
             env["HOME"] = temp_home
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "off"
+            source = checkout_copy(self)
             result = subprocess.run(
                 [
                     bash,
-                    str(REPO_ROOT / "install.sh"),
+                    str(source / "install.sh"),
                     "--platform",
                     "claude",
                     "--skip-source-health",
                     "task-router",
                 ],
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -421,16 +424,17 @@ class AddonInstallerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_home:
             Path(temp_home, ".claude").mkdir()
             env = _isolated_shell_install_env(temp_home)
+            source = checkout_copy(self)
             result = subprocess.run(
                 [
                     bash,
-                    str(REPO_ROOT / "install.sh"),
+                    str(source / "install.sh"),
                     "--addon",
                     "autopilot",
                     "--skip-source-health",
                     "task-router",
                 ],
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,
@@ -456,16 +460,17 @@ class AddonInstallerTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_home:
             Path(temp_home, ".codex").mkdir()
             env = _isolated_shell_install_env(temp_home)
+            source = checkout_copy(self)
             result = subprocess.run(
                 [
                     bash,
-                    str(REPO_ROOT / "install.sh"),
+                    str(source / "install.sh"),
                     "--addon",
                     "autopilot",
                     "--skip-source-health",
                     "task-router",
                 ],
-                cwd=REPO_ROOT,
+                cwd=source,
                 env=env,
                 capture_output=True,
                 text=True,

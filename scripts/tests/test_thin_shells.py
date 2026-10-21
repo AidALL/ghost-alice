@@ -18,6 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALL_SH = REPO_ROOT / "install.sh"
 INSTALL_PS1 = REPO_ROOT / "install.ps1"
 INSTALL_CMD = REPO_ROOT / "install.cmd"
+sys.path.insert(0, str(REPO_ROOT / "_shared"))
+from installer_testing import checkout_copy  # noqa: E402
 
 # The parameter names of the earlier install.ps1 param block and the cli flag each becomes.
 # `-Skills` disappears: the skill names after it pass through as they are.
@@ -187,10 +189,12 @@ def _pwsh() -> str | None:
 class ThinInstallPs1RuntimeTests(unittest.TestCase):
     """Run install.ps1 under PowerShell 7.6+ (the CI runner's pwsh)."""
 
-    def run_ps1(self, *args: str, env: dict[str, str] | None = None, timeout: int = 120) -> subprocess.CompletedProcess:
-        return subprocess.run([_pwsh(), "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(INSTALL_PS1),
-                               *args], cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8",
-                              errors="replace", timeout=timeout)
+    def run_ps1(self, *args: str, env: dict[str, str] | None = None, timeout: int = 120,
+                checkout: Path = REPO_ROOT) -> subprocess.CompletedProcess:
+        """install.ps1 of `checkout`: this checkout, or a copy for a run that installs (`checkout_copy`)."""
+        return subprocess.run([_pwsh(), "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                               str(checkout / "install.ps1"), *args], cwd=checkout, env=env, capture_output=True,
+                              text=True, encoding="utf-8", errors="replace", timeout=timeout)
 
     def test_guard_refuses_powershell_before_7_6(self):
         guard = powershell_function(INSTALL_PS1.read_text(encoding="utf-8-sig"), "Assert-PowerShellBaseline")
@@ -281,7 +285,7 @@ class ThinInstallPs1RuntimeTests(unittest.TestCase):
                    "GHOST_ALICE_INSTALL_PROGRESS": "off"}
             env.pop("CLAUDE_CONFIG_DIR", None)
             result = self.run_ps1("-Platform", "codex", "-SkipSourceHealth", "-Skills", "coding-convention", env=env,
-                                  timeout=600)
+                                  timeout=600, checkout=checkout_copy(self))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("Ghost-ALICE OS installation Process Report", result.stdout)
             self.assertIn("  Platform: codex", result.stdout)

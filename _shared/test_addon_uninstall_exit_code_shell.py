@@ -23,6 +23,7 @@ sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 import addon_uninstall  # noqa: E402
 import install_transaction  # noqa: E402
+from installer_testing import checkout_copy  # noqa: E402
 from _shared.test_addon_installer import _find_test_bash  # noqa: E402
 
 
@@ -47,7 +48,7 @@ class UninstallExitCodeTest(unittest.TestCase):
 
     def _run(self, env, *args):
         return subprocess.run(
-            [self.bash, str(REPO_ROOT / "install.sh"), *args], cwd=REPO_ROOT,
+            [self.bash, str(self.source / "install.sh"), *args], cwd=self.source,
             env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
             timeout=180, check=False)
 
@@ -64,6 +65,7 @@ class UninstallExitCodeTest(unittest.TestCase):
             self.skipTest("bash required")
         if not _python_311():
             self.skipTest("python 3.11+ required")
+        self.source = checkout_copy(self)
 
     def test_unknown_addon_uninstall_is_nonzero(self):
         with tempfile.TemporaryDirectory() as home:

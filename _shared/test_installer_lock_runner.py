@@ -169,11 +169,11 @@ class RunnerTests(unittest.TestCase):
 
         with mock.patch("installer.runner.subprocess.run", side_effect=fake_run):
             runner.run_tool("_shared/retired_assets.py", "--skills-root", "x", no_bytecode=True,
-                            env={"GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED": "1"}, cwd=self.home)
+                            env={"GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED": "1"}, cwd=self.home)
         argv, kwargs = calls[0]
         self.assertEqual(argv[:3], [sys.executable, "-B", str(runner.REPO_ROOT / "_shared" / "retired_assets.py")])
         self.assertEqual(argv[3:], ["--skills-root", "x"])
-        self.assertEqual(kwargs["env"]["GHOST_ALICE_SOURCE_REPO_HOOK_CHANGED"], "1")
+        self.assertEqual(kwargs["env"]["GHOST_ALICE_SOURCE_REPO_HOOK_RECORDED"], "1")
         self.assertEqual(kwargs["env"]["HOME"], str(self.home))
         self.assertEqual(Path(kwargs["cwd"]), self.home)
 
