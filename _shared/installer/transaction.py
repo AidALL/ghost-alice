@@ -24,6 +24,7 @@ import install_transaction
 import installed_payload
 from installer import gateway_participant, locations, report, runner, source
 from installer.runner import ToolResult
+import state_retention
 
 if TYPE_CHECKING:
     from installer.cli import Context
@@ -303,6 +304,7 @@ def remove_earlier_rollback_folders() -> None:
             _remove_path(folder)
         except OSError as exc:
             report.warn(f"The earlier installer's rollback folder {folder} could not be removed: {exc}")
+            state_retention.record_failure("earlier-rollback-folders", folder, exc)
             continue
         report.info(f"Removed the earlier installer's rollback folder {folder}")
 

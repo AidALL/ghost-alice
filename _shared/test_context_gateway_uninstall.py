@@ -40,7 +40,7 @@ class RegisteredHomeCase(unittest.TestCase):
         self.active = True
         self.stops = 0
         self.patchers = [
-            patch.object(cleanup, '_user_home', return_value=self.root),
+            patch.object(cleanup.locations, 'home', return_value=self.root),
             patch.object(cleanup, '_codex_home', return_value=self.reg.codex),
             patch.object(gateway.sys, 'platform', 'darwin'),
             patch.object(gateway, '_service_state', side_effect=lambda _: 'running' if self.active else 'absent'),

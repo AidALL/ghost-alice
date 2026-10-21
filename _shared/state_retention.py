@@ -4,7 +4,8 @@
 folders, and how each stays bounded. A writer calls `apply(name, path)` at its own moment for an entry that removes
 something: size rotation, keep the newest N, age or line count. A log that several processes append to is written
 through `append(name, path, text)`, which appends and applies the entry under one lock on the log, so no writer
-rotates with a size it read before another writer rotated. Overwritten files and material kept for the user are named
+rotates with a size it read before another writer rotated. A lock held past `LOCK_WAIT_S` never stops the writer: the
+text is appended without the rule and the wait is recorded. Overwritten files and material kept for the user are named
 only. `apply` never raises: a failure is one line in `state-retention-failures.jsonl` under the Ghost-ALICE state
 root, which keeps its last 500 lines and which doctor reads. `entry_for` names the entry a created path belongs to, so
 a test can require every created path to have one.
@@ -35,6 +36,7 @@ except ImportError:
 
 MB = 1024 * 1024
 DAY = 86400
+LOCK_WAIT_S = 2.0  # the longest a writer waits for a shared log's lock
 METHODS = ("size-rotation", "keep-newest", "age", "line-count", "overwrite", "user-kept")
 FAILURES = "state-retention-failures.jsonl"
 
@@ -63,17 +65,25 @@ class Policy(NamedTuple):
     skip_links: bool = False
     copy_truncate: bool = False    # size-rotation of a file another process holds open in append mode
     marker: str | None = None      # age: the file whose modification time dates its folder
+    pending: str | None = None     # the change that adds the writer applying this entry, until it does
+
+
+class LockTimeout(Exception):
+    """A shared log's lock stayed held past `LOCK_WAIT_S`."""
+
+
+GATEWAY_CHANGE = "the context gateway change"
 
 
 _TABLE = (
     Policy("session-logs", "age", ("{ghost}/session-logs/*/*/**",), target="session-logs", limit=14, per_run=50,
            marker="strict-hook-output.jsonl"),
     Policy("gateway-usage", "size-rotation", ("{gateway}/usage.jsonl", "{gateway}/usage.jsonl.1"),
-           target="usage.jsonl", limit=20 * MB),
+           target="usage.jsonl", limit=20 * MB, pending=GATEWAY_CHANGE),
     Policy("gateway-service-log", "size-rotation", ("{gateway}/service.log", "{gateway}/service.log.1"),
-           target="service.log", limit=5 * MB, copy_truncate=True),
+           target="service.log", limit=5 * MB, copy_truncate=True, pending=GATEWAY_CHANGE),
     Policy("gateway-config-backups", "keep-newest", ("{gateway}/backups/*", "{gateway}/backups/*/**"),
-           target="backups", limit=5, group=r"^(?P<key>\d{8}T\d{6}\d*Z)-"),
+           target="backups", limit=5, group=r"^(?P<key>\d{8}T\d{6}\d*Z)-", pending=GATEWAY_CHANGE),
     Policy("governance-events", "size-rotation",
            ("{ghost}/governance-events.jsonl", "{ghost}/governance-events.jsonl.1"),
            target="governance-events.jsonl", limit=5 * MB),
@@ -212,28 +222,51 @@ def apply(name: str, path: Path | str, *, protect: Iterable[Path | str] = (),
 
 
 def append(name: str, path: Path | str, text: str) -> None:
-    """Append `text` to the log `path` and apply the entry `name`, both under the log's lock. Writing the text can
+    """Append `text` to the log `path` and apply the entry `name`, both under the log's lock. When the lock stays
+    held past `LOCK_WAIT_S`, the text is appended without the rule and the wait is recorded. Writing the text can
     raise like any write; the entry's failures are recorded and never raised."""
     path = Path(path)
     install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with _exclusive(path):
-        with path.open("a", encoding="utf-8") as stream:
-            stream.write(text)
-        apply(name, path)
+    try:
+        with _exclusive(path):
+            _append_once(path, text)
+            apply(name, path)
+            return
+    except LockTimeout as timeout:
+        _append_once(path, text)
+        _record_failure(name, path, type(timeout).__name__, f"lock held past {LOCK_WAIT_S}s; appended without the rule")
+
+
+def _append_once(path: Path, text: str) -> None:
+    """One append-mode write, so concurrent writers never interleave within a line."""
+    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+    try:
+        os.write(descriptor, text.encode("utf-8"))
+    finally:
+        os.close(descriptor)
 
 
 @contextmanager
 def _exclusive(path: Path):
     """An exclusive flock on the file at `path`, created when missing; yields the locked file's stat, or None
-    without `fcntl`. A writer that waited while another rotated the file locks the file now at `path`."""
+    without `fcntl`. A writer that waited while another rotated the file locks the file now at `path`; a lock still
+    held after `LOCK_WAIT_S` raises LockTimeout."""
     if fcntl is None:
         yield None
         return
+    deadline = time.monotonic() + LOCK_WAIT_S
     while True:
         descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
         try:
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            while True:
+                try:
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise LockTimeout(str(path))
+                    time.sleep(0.01)
             held = os.fstat(descriptor)
             try:
                 current = os.stat(path)
@@ -430,17 +463,30 @@ def _is_protected(entry: Path, protected: list[Path]) -> bool:
     return any(form == item or item in form.parents for form in forms for item in protected)
 
 
+def failure_record_path() -> Path:
+    """The retention failure record under the Ghost-ALICE state root; its writer and doctor both use this path."""
+    return Path(install_destination.ghost_root()) / FAILURES
+
+
+def record_failure(name: str, path: Path | str, error: BaseException) -> None:
+    """Record a removal that failed outside `apply`, such as the installer's staging folder, under `name`."""
+    _record_failure(name, Path(path), type(error).__name__, str(error))
+
+
 def _record_failure(name: str, path: Path, error_type: str, detail: str) -> None:
     """One line in the retention failure record; a failure to record is dropped so the writer goes on."""
     try:
-        record = Path(install_destination.ghost_root()) / FAILURES
+        record = failure_record_path()
         install_destination.assert_mutation_path(record)
         record.parent.mkdir(parents=True, exist_ok=True)
         row = {"ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "policy": name, "path": str(path),
                "error_type": error_type, "error": detail[:500]}
-        with _exclusive(record):
-            with record.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
-            _line_count(record, POLICIES["retention-failures"])
+        line = json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+        try:
+            with _exclusive(record):
+                _append_once(record, line)
+                _line_count(record, POLICIES["retention-failures"])
+        except LockTimeout:
+            _append_once(record, line)  # the record keeps its limit at the next failure
     except Exception:
         pass

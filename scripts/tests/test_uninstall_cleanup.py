@@ -170,7 +170,7 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.ghost = self.root / ".ghost-alice"
-        home = mock.patch.object(cleanup, "_user_home", return_value=self.root)
+        home = mock.patch.object(cleanup.locations, "home", return_value=self.root)
         home.start()
         self.addCleanup(home.stop)
         self.manifest = self.ghost / "install-state" / "codex.json"

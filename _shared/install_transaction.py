@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import errno
 import hashlib
 import json
 import os
@@ -356,12 +357,15 @@ class ReplacementBatch:
                 except OSError:
                     pass
         # The staging folder this batch created beside each target goes once it is empty; an entry another
-        # install still stages there keeps it.
+        # install still stages there keeps it. Any other failure to remove it is recorded.
         for stage_root in dict.fromkeys(item['stage'].parent for item in self.prepared):
             try:
                 stage_root.rmdir()
-            except OSError:
-                pass
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except OSError as exc:
+                if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                    state_retention.record_failure("install-staging", stage_root, exc)
 
     def run_unmanaged(self):
         try:

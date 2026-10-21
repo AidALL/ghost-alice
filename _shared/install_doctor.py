@@ -207,10 +207,9 @@ def _pending_manifest_status(manifest: Path) -> tuple[str, str, int]:
     return STATUS_OK, "clean", 0
 
 
-def _retention_failure_status(ghost_alice_root: Path) -> tuple[str, str]:
+def _retention_failure_status(record: Path) -> tuple[str, str]:
     """The retention failure record `state_retention` writes: ok without a failure, else a warning with the count
     and the last failure's time, entry and error type."""
-    record = ghost_alice_root / state_retention.FAILURES
     try:
         rows = [json.loads(line) for line in record.read_text(encoding="utf-8").splitlines() if line.strip()]
     except FileNotFoundError:
@@ -1077,7 +1076,7 @@ def run(args: argparse.Namespace) -> int:
     statuses.append(snapshot_status)
     print(f"snapshot: {snapshot_detail}")
 
-    retention_status, retention_detail = _retention_failure_status(ghost_alice_root)
+    retention_status, retention_detail = _retention_failure_status(state_retention.failure_record_path())
     statuses.append(retention_status)
     print(f"state-retention: {retention_detail}")
 

@@ -23,6 +23,7 @@ from installer_assets import (
 )
 from global_rule_blocks import remove_claude_bootstrap, remove_codex_rule_file
 from install_hooks import uninstall_hook
+from installer import locations
 import state_retention
 
 REMOVABLE_TARGET_OWNERSHIPS = {
@@ -30,29 +31,16 @@ REMOVABLE_TARGET_OWNERSHIPS = {
 }
 
 
-def _user_home() -> Path:
-    configured = os.environ.get("HOME")
-    if configured:
-        return Path(configured)
-    return Path.home()
-
-
 def _ghost_alice_root() -> Path:
-    return _user_home() / ".ghost-alice"
+    return locations.record_root()
 
 
 def _codex_home() -> Path:
-    configured = os.environ.get("CODEX_HOME")
-    if configured:
-        return Path(configured)
-    return _user_home() / ".codex"
+    return locations.codex_home()
 
 
 def _claude_home() -> Path:
-    configured = os.environ.get("CLAUDE_CONFIG_DIR")
-    if configured:
-        return Path(configured)
-    return _user_home() / ".claude"
+    return locations.claude_home()
 
 
 def _now() -> str:
@@ -109,7 +97,7 @@ def _platform_target_roots(platform: str) -> list[Path]:
     if platform == "claude":
         return [_claude_home() / "skills"]
     if platform == "codex":
-        return [_user_home() / ".agents" / "skills"]
+        return [locations.shared_skills_dir()]
     return []
 
 
