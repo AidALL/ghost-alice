@@ -177,6 +177,22 @@ bash install.sh --status
 .\install.cmd --status
 ```
 
+### Install Source
+
+The install record `~/.ghost-alice/installed-payload.json` names the checkout the installation came from, the install source. Install and `--repair` compare that checkout with the one they run from before they change anything. When the recorded checkout no longer exists, for example after a fresh clone at another path, the installer records the new checkout as the install source without asking. When both checkouts exist, such as a second clone or a git worktree, the installer shows both folders. At a terminal it asks whether this checkout replaces the install source and stops unless the answer is yes; elsewhere it stops with exit code 2. To move the installation to another checkout on purpose, run the installer there with `--adopt-source`; its first placement records that checkout as the install source.
+
+```bash
+cd /path/to/new-checkout
+bash install.sh --adopt-source
+```
+
+```cmd
+cd C:\path\to\new-checkout
+.\install.cmd --adopt-source
+```
+
+After a merge or pull in the install source, the git post-merge hook goes on with the install for every detected host. In another checkout, such as a git worktree of the same repository, the hook prints one line and installs nothing. Only an install you run replaces the install source; a merge never does, and a merge never fails because of the hook.
+
 ## Common Commands
 
 | Purpose | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
@@ -214,7 +230,7 @@ Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code works
 
 The installer requires Python 3.11 or newer for every command, `--help` and `--list` included: `install.sh` only finds or prepares Python and hands the arguments to `_shared/installer/cli.py`. If Python 3.11+ is missing, it attempts automatic preparation where possible.
 
-The optional macOS native context gateway requires Python 3.14 or newer with `compression.zstd`. Its registration command, `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`, checks that capability first, then writes the launch agent, `state.json` and the Codex provider blocks and records the service in the install record. It copies no module: the service runs the runtime `_shared` the installer published, so install Core first. This component requirement does not change the Core installer and hook minimum of Python 3.11. If Codex `config.toml`, the launch agent or a state file is a symlink, registration and detachment stop before changing the service and preserve the link and its target. A refresh keeps the listener's port and scope while the three service files are as the install record says; a file changed outside the installer stops the command before any change, and an existing launch agent, state directory entry or provider block the record does not name is preserved. If a first registration fails and the candidate service is confirmed stopped, rollback removes that attempt's new state artifacts and record entry so a new attempt can proceed. An uncertain stop or concurrent artifact change preserves recovery material for review. After the registration, `bash install.sh` alone updates the installation; `bash install.sh gateway detach --confirm` unregisters the service and keeps its state directory.
+The optional macOS native context gateway requires Python 3.14 or newer with `compression.zstd`. Its registration command, `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`, checks that capability first, then writes the launch agent, `state.json` and the Codex provider blocks and records the service in the install record. It copies no module: the service runs the runtime `_shared` the installer published, so install Core first. This component requirement does not change the Core installer and hook minimum of Python 3.11. If Codex `config.toml`, the launch agent or a state file is a symlink, registration and detachment stop before changing the service and preserve the link and its target. A refresh keeps the listener's port and scope while the three service files are as the install record says; a file changed outside the installer stops the command before any change, and an existing launch agent, state directory entry or provider block the record does not name is preserved. If a first registration fails and the candidate service is confirmed stopped, rollback removes that attempt's new state artifacts and record entry so a new attempt can proceed. An uncertain stop or concurrent artifact change preserves recovery material for review. After the registration, `bash install.sh` alone updates the installation; `bash install.sh gateway detach --confirm` unregisters the service and keeps its state directory. When launchd runs a gateway service that the install record does not name, install and `--repair` leave that service as it is and print one warning that names the registration command; the registration records the service and restarts it on the new code.
 
 - macOS: if Homebrew is available, `brew install python3`
 - Linux / WSL: available package managers such as `apt-get`, `dnf`, `yum`, or `pacman`
