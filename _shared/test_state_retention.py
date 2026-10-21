@@ -487,11 +487,6 @@ class EntryCallerTests(unittest.TestCase):
                 else:
                     self.assertIn(name, callers, f"no writer applies {name}")
 
-    def test_the_gateway_entries_wait_for_the_gateway_change(self):
-        for name in ("gateway-usage", "gateway-service-log", "gateway-config-backups"):
-            with self.subTest(name=name):
-                self.assertTrue(state_retention.POLICIES[name].pending)
-
 
 GATEWAY_AGENT = "org.ghost-alice.context-gateway.plist"
 

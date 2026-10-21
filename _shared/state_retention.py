@@ -72,18 +72,16 @@ class LockTimeout(Exception):
     """A shared log's lock stayed held past `LOCK_WAIT_S`."""
 
 
-GATEWAY_CHANGE = "the context gateway change"
-
 
 _TABLE = (
     Policy("session-logs", "age", ("{ghost}/session-logs/*/*/**",), target="session-logs", limit=14, per_run=50,
            marker="strict-hook-output.jsonl"),
     Policy("gateway-usage", "size-rotation", ("{gateway}/usage.jsonl", "{gateway}/usage.jsonl.1"),
-           target="usage.jsonl", limit=20 * MB, pending=GATEWAY_CHANGE),
+           target="usage.jsonl", limit=20 * MB),
     Policy("gateway-service-log", "size-rotation", ("{gateway}/service.log", "{gateway}/service.log.1"),
-           target="service.log", limit=5 * MB, copy_truncate=True, pending=GATEWAY_CHANGE),
+           target="service.log", limit=5 * MB, copy_truncate=True),
     Policy("gateway-config-backups", "keep-newest", ("{gateway}/backups/*", "{gateway}/backups/*/**"),
-           target="backups", limit=5, group=r"^(?P<key>\d{8}T\d{6}\d*Z)-", pending=GATEWAY_CHANGE),
+           target="backups", limit=5, group=r"^(?P<key>\d{8}T\d{6}\d*Z)-"),
     Policy("governance-events", "size-rotation",
            ("{ghost}/governance-events.jsonl", "{ghost}/governance-events.jsonl.1"),
            target="governance-events.jsonl", limit=5 * MB),
