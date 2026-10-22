@@ -56,8 +56,7 @@ class ModelRecordedSecurityDecisionIntegration(unittest.TestCase):
 
     def pretool(self) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["node", str(HOOK), "--platform", "claude", "--event", "PreToolUse",
-             "--hook", "tool-checkpoint", "--session-intent-root", str(self.tmp)],
+            ["node", str(HOOK), "--platform", "claude", "--event", "PreToolUse"],
             input=json.dumps({"session_id": self.session, "tool_name": "Bash"}),
             capture_output=True, text=True, check=True,
         )

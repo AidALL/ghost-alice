@@ -350,9 +350,9 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
     def test_dynamic_visibility_does_not_disable_tool_checkpoint(self):
         env = {"GHOST_ALICE_AGENT_VISIBILITY": "dynamic"}
 
-        self.assertTrue(hook_profile_gate.is_hook_enabled("prompt", env=env))
+        self.assertTrue(hook_profile_gate.is_hook_enabled("session-intent", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("completion", env=env))
-        self.assertTrue(hook_profile_gate.is_hook_enabled("web-search-first", env=env))
+        self.assertTrue(hook_profile_gate.is_hook_enabled("session-receipt", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("tool-checkpoint", env=env))
 
     def test_minimal_visibility_does_not_disable_hooks(self):
@@ -360,30 +360,63 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
 
         self.assertTrue(hook_profile_gate.is_hook_enabled("session-start", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("io-trace", env=env))
-        self.assertTrue(hook_profile_gate.is_hook_enabled("prompt", env=env))
-        self.assertTrue(hook_profile_gate.is_hook_enabled("web-search-first", env=env))
+        self.assertTrue(hook_profile_gate.is_hook_enabled("session-intent", env=env))
+        self.assertTrue(hook_profile_gate.is_hook_enabled("session-receipt", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("tool-checkpoint", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("completion", env=env))
 
     def test_legacy_hook_profile_env_does_not_control_visibility_or_execution(self):
         env = {"GHOST_ALICE_HOOK_PROFILE": "quiet"}
 
-        self.assertTrue(hook_profile_gate.is_hook_enabled("prompt", env=env))
-        self.assertTrue(hook_profile_gate.is_hook_enabled("web-search-first", env=env))
+        self.assertTrue(hook_profile_gate.is_hook_enabled("session-intent", env=env))
+        self.assertTrue(hook_profile_gate.is_hook_enabled("session-receipt", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("tool-checkpoint", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("completion", env=env))
 
     def test_disabled_hooks_accept_event_prefixes(self):
         env = {
             "GHOST_ALICE_AGENT_VISIBILITY": "strict",
-            "GHOST_ALICE_DISABLED_HOOKS": "prompt:web-search-first, tool_checkpoint",
+            "GHOST_ALICE_DISABLED_HOOKS": "prompt:session-intent, tool_checkpoint",
         }
 
-        self.assertIn("web-search-first", hook_profile_gate.disabled_hooks(env))
+        self.assertIn("session-intent", hook_profile_gate.disabled_hooks(env))
         self.assertIn("tool-checkpoint", hook_profile_gate.disabled_hooks(env))
-        self.assertFalse(hook_profile_gate.is_hook_enabled("web-search-first", env=env))
+        self.assertFalse(hook_profile_gate.is_hook_enabled("session-intent", env=env))
         self.assertFalse(hook_profile_gate.is_hook_enabled("tool-checkpoint", env=env))
         self.assertTrue(hook_profile_gate.is_hook_enabled("session-start", env=env))
+
+    def _classified_row(self, temp_home: str, session_id: str, stdout: str, payload: dict | None = None) -> dict:
+        command = f'"{hook_profile_gate.HOOK_PYTHON_SENTINEL}" "{Path(__file__).with_name("io_trace_hook.py").as_posix()}"'
+        encoded = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+        stdin_text = json.dumps({"session_id": session_id, "hook_event_name": "PostToolUse", **(payload or {})})
+        env = {"HOME": temp_home, "USERPROFILE": temp_home, "GHOST_ALICE_PLATFORM": "codex",
+               "GHOST_ALICE_AGENT_VISIBILITY": "minimal", "PATH": os.environ.get("PATH", "")}
+        with (
+            mock.patch.dict(os.environ, env, clear=True),
+            mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+            mock.patch.object(sys, "stdout", io.StringIO()),
+            mock.patch.object(hook_profile_gate.subprocess, "run",
+                              return_value=subprocess.CompletedProcess([], 0, stdout, "")),
+            self.assertRaises(SystemExit),
+        ):
+            hook_profile_gate.main(["run", "io-trace", encoded])
+        log_path = next((Path(temp_home) / ".ghost-alice" / "session-logs").glob(f"*/{session_id}/*.jsonl"))
+        return json.loads(log_path.read_text(encoding="utf-8").splitlines()[-1])
+
+    def test_retired_output_signals_do_not_classify_a_hook_result(self):
+        # Their producers are gone (the web-search-first hook, the reminder, the old checkpoint and gate wording),
+        # and no host or hook sends a routing surface in the hook input.
+        cases = {phrase: (phrase, None) for phrase in (
+            "external tool claim", "duplicate reminder", "no state change", "routine clean pass already persisted",
+            '{"decision": "deny"}', "tool checkpoint required", "destructive command", "external side effect",
+            "secret token", "security boundary", "Ledger write failed", "verification failed", "unresolved completion")}
+        cases["routing surface in the hook input"] = ("", {"routing_surface": {"forced_visibility": "yes", "focus_layer": "meta"}})
+        for index, (case, (stdout, payload)) in enumerate(cases.items()):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as temp_home:
+                row = self._classified_row(temp_home, f"s-retired-{index}", stdout, payload)
+                item = row["surface_item"]
+                self.assertEqual((row["visible_decision"], item["value_key"], item["exposure_class"]),
+                                 ("show", "io-trace", "essential"))
 
     def test_visibility_context_reads_pending_merge_manifest_only_for_its_owner(self):
         with tempfile.TemporaryDirectory() as temp_home:
@@ -397,8 +430,7 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             for hook_id in ("session-intent", "completion", "session-start"):
                 with self.subTest(hook_id=hook_id):
                     context = hook_profile_gate._visibility_context(
-                        hook_id, "routine clean pass already persisted", "", 0,
-                        env={"HOME": temp_home, "GHOST_ALICE_PLATFORM": "codex"}, hook_payload={},
+                        hook_id, "hook output", "", 0, env={"HOME": temp_home, "GHOST_ALICE_PLATFORM": "codex"},
                     )
                     self.assertEqual(bool(context.get("pending_merge_undecided")), hook_id == "session-start")
 
@@ -432,127 +464,24 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
         probe.assert_not_called()
         self.assertNotIn("pending_merge_undecided", context)
 
-    def test_visibility_context_ignores_current_downstream_block_gate(self):
-        with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as temp_root:
-            root = Path(temp_root)
-            session_dir = root / "codex" / "s-block"
-            session_dir.mkdir(parents=True)
-            (session_dir / "intent-state.json").write_text(json.dumps({
-                "schema_version": "session-intent-ledger.v1",
-                "platform": "codex", "session_id": "s-block", "ledger_revision": 1,
-                "latest_input_event_id": "evt-current", "latest_input_digest": "sha256:current",
-                "latest_input_char_count": 1,
-            }))
-            (session_dir / "downstream-gates.json").write_text(
-                json.dumps({
-                    "schema_version": "downstream-gates.v1",
-                    "platform": "codex",
-                    "session_id": "s-block",
-                    "gate": "jailbreak-detector",
-                    "decision": "block",
-                    "opened": False,
-                    "input_event_id": "evt-current",
-                    "input_digest": "sha256:current",
-                })
-                + "\n",
-                encoding="utf-8",
-            )
-
-            context = hook_profile_gate._visibility_context(
-                "prompt",
-                "routine clean pass already persisted",
-                "",
-                0,
-                env={
-                    "HOME": temp_home,
-                    "GHOST_ALICE_PLATFORM": "codex",
-                    "GHOST_ALICE_SESSION_INTENT_ROOT": str(root),
-                },
-                hook_payload={"session_id": "s-block"},
-            )
-
-        self.assertNotIn("security_boundary", context)
-
-    def test_visibility_context_ignores_stale_downstream_block_gate(self):
-        with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as temp_root:
-            root = Path(temp_root)
-            session_dir = root / "codex" / "s-stale"
-            session_dir.mkdir(parents=True)
-            (session_dir / "intent-state.json").write_text(json.dumps({
-                "schema_version": "session-intent-ledger.v1",
-                "platform": "codex", "session_id": "s-stale", "ledger_revision": 1,
-                "latest_input_event_id": "evt-new", "latest_input_digest": "sha256:new",
-                "latest_input_char_count": 1,
-            }))
-            (session_dir / "downstream-gates.json").write_text(
-                json.dumps({
-                    "schema_version": "downstream-gates.v1",
-                    "platform": "codex",
-                    "session_id": "s-stale",
-                    "gate": "jailbreak-detector",
-                    "decision": "block",
-                    "opened": False,
-                    "input_event_id": "evt-old",
-                    "input_digest": "sha256:old",
-                })
-                + "\n",
-                encoding="utf-8",
-            )
-
-            context = hook_profile_gate._visibility_context(
-                "prompt",
-                "routine clean pass already persisted",
-                "",
-                0,
-                env={
-                    "HOME": temp_home,
-                    "GHOST_ALICE_PLATFORM": "codex",
-                    "GHOST_ALICE_SESSION_INTENT_ROOT": str(root),
-                },
-                hook_payload={"session_id": "s-stale"},
-            )
-
-        self.assertNotIn("security_boundary", context)
-
-    def test_visibility_context_carries_routing_surface_from_payload(self):
-        surface = {
-            "intent_relation": "changed",
-            "change_depth": "localized",
-            "focus_layer": "meso",
-            "verification_complexity": "level-2",
-            "boundary_contract": "n/a",
-            "forced_visibility": "no",
-        }
-
-        context = hook_profile_gate._visibility_context(
-            "prompt",
-            "routine clean pass already persisted",
-            "",
-            0,
-            env={"HOME": "/tmp/ghost-alice-home", "GHOST_ALICE_PLATFORM": "codex"},
-            hook_payload={"routing_surface": surface},
-        )
-
-        self.assertEqual(context["routing_surface"], surface)
-
     def test_classify_surface_item_projects_routine_and_forced_values(self):
         routine = hook_profile_gate.classify_surface_item(
-            value_key="merge-precheck",
+            value_key="session-start",
             value_kind="routine",
             exposure_class="routine",
             profile="dynamic",
             strict_log_ref="strict-log#1",
-            source_hook="prompt",
-            value="routine clean pass already persisted",
+            source_hook="session-start",
+            value="merge-companion-precheck: clean",
         )
         forced = hook_profile_gate.classify_surface_item(
-            value_key="downstream-block",
+            value_key="pending-merge",
             value_kind="risk",
             exposure_class="forced",
             profile="minimal",
             strict_log_ref="strict-log#2",
-            source_hook="tool-checkpoint",
-            value="decision=block",
+            source_hook="session-start",
+            value="undecided_count=1",
         )
 
         self.assertEqual(routine["user_surface"], "hidden")
@@ -648,7 +577,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             command = (
                 f'"{hook_profile_gate.runtime_config.HOOK_NODE_SENTINEL}" '
                 f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
-                "--platform codex --event PreToolUse --hook tool-checkpoint"
+                "--platform codex --event PreToolUse"
             )
             env = {
                 "HOME": str(root),
@@ -663,79 +592,66 @@ class TestHookCommandAllowlist(unittest.TestCase):
 
         self.assertEqual(Path(argv[0]).resolve(), current_node.resolve())
 
-    def test_missing_legacy_managed_node_rebinds_to_current_codex_runtime(self):
+    def test_missing_hook_executable_is_rejected_and_audited(self):
+        # The installer replaces a pre-v0.2.2 registration that pinned a node path; the runner does not rebind it.
         with tempfile.TemporaryDirectory() as temp_home:
             root = Path(temp_home)
-            stale_node = (
-                root
-                / "AppData"
-                / "Local"
-                / "OpenAI"
-                / "Codex"
-                / "runtimes"
-                / "cua_node"
-                / "stale"
-                / "bin"
-                / ("node.exe" if os.name == "nt" else "node")
-            )
             current_node = root / "codex-runtime" / ("node.exe" if os.name == "nt" else "node")
-            current_node.parent.mkdir(parents=True, exist_ok=True)
+            current_node.parent.mkdir(parents=True)
             current_node.write_text("# current Codex node\n", encoding="utf-8")
             _make_node_executable(current_node)
             dispatcher = root / ".ghost-alice" / "hooks" / "ghost-alice-hook.mjs"
-            dispatcher.parent.mkdir(parents=True, exist_ok=True)
+            dispatcher.parent.mkdir(parents=True)
             dispatcher.write_text("// managed dispatcher\n", encoding="utf-8")
             codex_home = root / ".codex"
-            codex_home.mkdir(parents=True, exist_ok=True)
+            codex_home.mkdir()
             (codex_home / "config.toml").write_text(
                 "[mcp_servers.node_repl.env]\n"
                 f"NODE_REPL_NODE_PATH = {json.dumps(current_node.as_posix())}\n",
                 encoding="utf-8",
             )
-            session_intent_root = root / "project" / ".tmp" / "session-intent"
-            command = (
-                f'"{stale_node.as_posix()}" "{dispatcher.as_posix()}" '
-                "--platform codex --event PreToolUse --hook tool-checkpoint "
-                "--marker \"[tool-checkpoint] pre-tool-check\" "
-                f'--session-intent-root "{session_intent_root.as_posix()}"'
-            )
+            stale_node = root / "runtimes" / "stale" / "bin" / ("node.exe" if os.name == "nt" else "node")
+            commands = {
+                "pre-v0.2.2 registration": (
+                    f'"{stale_node.as_posix()}" "{dispatcher.as_posix()}" '
+                    "--platform codex --event PreToolUse --hook tool-checkpoint "
+                    '--marker "[tool-checkpoint] pre-tool-check" '
+                    f'--session-intent-root "{(root / "ledger").as_posix()}"'
+                ),
+                "allowed root": f'"{(Path(sys.executable).parent / "ghost-alice-missing-node").as_posix()}" --version',
+            }
             env = {
-                "HOME": str(root),
-                "USERPROFILE": str(root),
+                "HOME": temp_home,
+                "USERPROFILE": temp_home,
                 "CODEX_HOME": str(codex_home),
                 "GHOST_ALICE_PLATFORM": "codex",
                 "PATH": "",
             }
+            for index, (case, command) in enumerate(commands.items()):
+                with self.subTest(case=case):
+                    session_id = f"s-missing-executable-{index}"
+                    payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+                    stdin_text = json.dumps({"session_id": session_id, "hook_event_name": "PreToolUse"})
+                    stderr = io.StringIO()
+                    with (
+                        mock.patch.dict(os.environ, env, clear=True),
+                        mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                        mock.patch.object(sys, "stderr", stderr),
+                        mock.patch.object(
+                            hook_profile_gate.subprocess,
+                            "run",
+                            return_value=subprocess.CompletedProcess([], 0, "", ""),
+                        ) as child_run,
+                        self.assertRaises(SystemExit) as cm,
+                    ):
+                        hook_profile_gate.main(["run", "tool-checkpoint", payload])
 
-            argv = hook_profile_gate._validate_shell_command(command, env=env)
-            unmanaged_dispatcher = root / "other" / "ghost-alice-hook.mjs"
-            unmanaged_dispatcher.parent.mkdir(parents=True, exist_ok=True)
-            unmanaged_dispatcher.write_text("// unmanaged dispatcher\n", encoding="utf-8")
-            tampered_commands = {
-                "dispatcher": command.replace(
-                    dispatcher.as_posix(),
-                    unmanaged_dispatcher.as_posix(),
-                ),
-                "marker": command.replace(
-                    "[tool-checkpoint] pre-tool-check",
-                    "[tool-checkpoint] altered",
-                ),
-            }
-            for field, tampered in tampered_commands.items():
-                with self.subTest(field=field), self.assertRaises(
-                    hook_profile_gate.HookCommandRejected
-                ):
-                    hook_profile_gate._validate_shell_command(tampered, env=env)
-            with self.subTest(field="outer-platform"), self.assertRaisesRegex(
-                hook_profile_gate.HookCommandRejected,
-                "hook platform mismatch",
-            ):
-                hook_profile_gate._validate_shell_command(
-                    command,
-                    env={**env, "GHOST_ALICE_PLATFORM": "claude"},
-                )
-
-        self.assertEqual(Path(argv[0]).resolve(), current_node.resolve())
+                    self.assertEqual(cm.exception.code, 126)
+                    self.assertIn("hook executable missing", stderr.getvalue())
+                    child_run.assert_not_called()
+                    log_path = next((root / ".ghost-alice" / "session-logs").glob(f"*/{session_id}/*.jsonl"))
+                    row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+                    self.assertEqual((row["exit_code"], row["visible_decision"]), (126, "force_show"))
 
     def test_dynamic_node_runtime_preserves_registered_claude_priority(self):
         with tempfile.TemporaryDirectory() as temp_home:
@@ -762,7 +678,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             command = (
                 f'"{hook_profile_gate.runtime_config.HOOK_NODE_SENTINEL}" '
                 f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
-                "--platform claude --event PreToolUse --hook tool-checkpoint"
+                "--platform claude --event PreToolUse"
             )
             env = {
                 "HOME": str(root),
@@ -781,7 +697,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
         command = (
             f'"{hook_profile_gate.runtime_config.HOOK_NODE_SENTINEL}" '
             f'"{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
-            "--platform claude --event PreToolUse --hook tool-checkpoint"
+            "--platform claude --event PreToolUse"
         )
 
         with self.assertRaisesRegex(
@@ -822,7 +738,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             }
             suffix = (
                 f' "{Path(__file__).with_name("ghost-alice-hook.mjs").as_posix()}" '
-                "--platform codex --event PreToolUse --hook tool-checkpoint"
+                "--platform codex --event PreToolUse"
             )
 
             cached_argv = hook_profile_gate._validate_shell_command(
@@ -1325,11 +1241,17 @@ class TestHookCommandAllowlist(unittest.TestCase):
             ):
                 hook_profile_gate._validate_shell_command(command)
 
-    def test_allows_system_and_homebrew_binaries(self):
+    def test_allows_system_binary_and_executable_under_allowed_root(self):
         if os.name == "nt":
             self.skipTest("POSIX absolute executable allowlist does not apply on Windows")
         hook_profile_gate.assert_allowed_command(["/bin/bash", "-lc", "printf ok"], ["/bin", "/usr/bin"])
-        hook_profile_gate.assert_allowed_command(["/opt/homebrew/bin/python3"], ["/opt/homebrew"])
+        # The test creates the executable it allows; the check does not depend on what the host has installed.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            executable = root / "bin" / "python3"
+            executable.parent.mkdir()
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            hook_profile_gate.assert_allowed_command([str(executable)], [str(root)])
 
     def test_allows_versioned_python_bare_command_without_minor_pin(self):
         hook_profile_gate.assert_allowed_command(["python3.15", "-V"], ["/bin", "/usr/bin"])
@@ -2155,9 +2077,9 @@ class TestHookCommandAllowlist(unittest.TestCase):
             self.assertEqual(cm.exception.code, 0)
 
 
-    def test_runner_hides_clean_pass_after_strict_log_append(self):
-        message = "No pending warning from this hook means merge-companion-precheck is clean."
-        code = f"print({message!r})"
+    def test_runner_hides_declared_routine_after_strict_log_append(self):
+        message = "merge-companion-precheck: clean (hook-verified) at session start."
+        code = f"print({json.dumps({'continue': True, 'systemMessage': message, 'ghostAliceSurface': 'routine'})!r})"
         payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
@@ -2168,7 +2090,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
 
             result = subprocess.run(
-                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "prompt", payload],
+                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "session-start", payload],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2188,8 +2110,9 @@ class TestHookCommandAllowlist(unittest.TestCase):
             row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(row["stdout"].strip(), message)
+        # A hidden protocol result keeps its control fields and drops only the user notice.
+        self.assertEqual(json.loads(result.stdout), {"continue": True})
+        self.assertIn(message, row["stdout"])
         self.assertEqual(row["visible_decision"], "hide")
         self.assertIsInstance(row["observed_duration_s"], float)
         self.assertGreaterEqual(row["observed_duration_s"], 0.0)
@@ -2197,8 +2120,8 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertNotIn("reasoning_duration_s", row)
 
     def test_runner_records_work_impact_and_omits_model_output_for_hidden_routine(self):
-        message = "routine clean pass already persisted"
-        code = f"print({message!r})"
+        message = "merge-companion-precheck: clean (hook-verified) at session start."
+        code = f"print({json.dumps({'continue': True, 'systemMessage': message, 'ghostAliceSurface': 'routine'})!r})"
         payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
@@ -2209,7 +2132,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             env["GHOST_ALICE_AGENT_VISIBILITY"] = "dynamic"
 
             result = subprocess.run(
-                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "prompt", payload],
+                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "session-start", payload],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2229,90 +2152,33 @@ class TestHookCommandAllowlist(unittest.TestCase):
             row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "")
-        self.assertEqual(row["stdout"].strip(), message)
-        self.assertEqual(row["surface_item"]["value_key"], "merge-precheck")
+        # A hidden protocol result keeps its control fields and drops only the user notice.
+        self.assertEqual(json.loads(result.stdout), {"continue": True})
+        self.assertIn(message, row["stdout"])
+        self.assertEqual(row["surface_item"]["value_key"], "session-start")
         self.assertEqual(row["surface_item"]["user_surface"], "hidden")
         self.assertEqual(row["surface_item"]["model_surface"], "omitted")
         self.assertEqual(row["surface_item"]["work_impact"], "routine-noise")
         self.assertEqual(row["model_surface_output"], "")
 
-    def test_runner_materializes_routing_surface_compact_output_from_payload(self):
-        message = "routine clean pass already persisted"
-        code = f"print({message!r})"
-        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
-        hook_payload = {
-            "session_id": "s-routing-surface",
-            "hook_event_name": "UserPromptSubmit",
-            "routing_surface": {
-                "intent_relation": "changed",
-                "change_depth": "localized",
-                "focus_layer": "meso",
-                "verification_complexity": "level-2",
-                "boundary_contract": "n/a",
-                "forced_visibility": "no",
+    def test_render_user_surface_materializes_focused(self):
+        user_stdout, user_stderr = hook_profile_gate._render_user_surface(
+            {
+                "user_surface": "focused",
+                "value_key": "io-trace",
+                "value": "compact summary",
             },
-        }
+            "RAW HOOK OUTPUT\nsecond line\n",
+            "",
+        )
 
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            env["GHOST_ALICE_PLATFORM"] = "codex"
-            env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
-
-            result = subprocess.run(
-                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "prompt", payload],
-                input=json.dumps(hook_payload),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-            log_path = (
-                Path(temp_home)
-                / ".ghost-alice"
-                / "session-logs"
-                / "codex"
-                / "s-routing-surface"
-                / "strict-hook-output.jsonl"
-            )
-            row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
-
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, "routing-surface observed\n")
-        self.assertEqual(row["stdout"].strip(), message)
-        self.assertEqual(row["visible_decision"], "show")
-        self.assertEqual(row["surface_item"]["value_key"], "routing-surface")
-        self.assertEqual(row["surface_item"]["user_surface"], "compact")
-        self.assertEqual(row["surface_item"]["model_surface"], "digest")
-        self.assertEqual(row["user_surface_output"], "routing-surface observed\n")
-
-    def test_render_user_surface_materializes_compact_and_focused(self):
-        for surface, expected in (
-            ("compact", "routing-surface observed\n"),
-            ("focused", "routing-surface: compact summary\n"),
-        ):
-            with self.subTest(surface=surface):
-                user_stdout, user_stderr = hook_profile_gate._render_user_surface(
-                    {
-                        "user_surface": surface,
-                        "value_key": "routing-surface",
-                        "value": "compact summary",
-                    },
-                    "RAW HOOK OUTPUT\nsecond line\n",
-                    "",
-                )
-
-            self.assertEqual(user_stdout, expected)
-            self.assertEqual(user_stderr, "")
+        self.assertEqual(user_stdout, "io-trace: compact summary\n")
+        self.assertEqual(user_stderr, "")
 
     def test_empty_noop_object_remains_parseable_on_reduced_surfaces(self):
         message = "{}\n"
 
-        for surface in ("hidden", "compact", "focused"):
+        for surface in ("hidden", "focused"):
             with self.subTest(surface=surface):
                 self.assertEqual(
                     hook_profile_gate._render_user_surface(
@@ -2326,7 +2192,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
     def test_explicit_continue_noop_remains_parseable_on_reduced_surfaces(self):
         message = '{"continue": true, "systemMessage": ""}\n'
 
-        for surface in ("hidden", "compact", "focused"):
+        for surface in ("hidden", "focused"):
             with self.subTest(surface=surface):
                 self.assertEqual(
                     hook_profile_gate._render_user_surface(
@@ -2336,43 +2202,6 @@ class TestHookCommandAllowlist(unittest.TestCase):
                     ),
                     (message, ""),
                 )
-
-    def test_runner_emits_forced_action_denial_after_strict_log_append(self):
-        message = '{"decision":"deny","reason":"[tool-checkpoint] required"}'
-        code = f"print({message!r})"
-        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = os.environ.copy()
-            env["HOME"] = temp_home
-            env["GHOST_ALICE_PLATFORM"] = "codex"
-            env["GHOST_ALICE_SESSION_ID"] = "s-forced"
-            env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
-
-            result = subprocess.run(
-                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "tool-checkpoint", payload],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-            log_path = (
-                Path(temp_home)
-                / ".ghost-alice"
-                / "session-logs"
-                / "codex"
-                / "s-forced"
-                / "strict-hook-output.jsonl"
-            )
-            row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
-
-        self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), message)
-        self.assertEqual(row["stdout"].strip(), message)
-        self.assertEqual(row["visible_decision"], "force_show")
 
     def test_runner_preserves_protocol_block_json_under_minimal_visibility(self):
         message = '{"decision":"block","reason":"completion-check required"}'
@@ -2481,8 +2310,8 @@ class TestHookCommandAllowlist(unittest.TestCase):
 
 
     def test_runner_does_not_attach_pending_manifest_to_unrelated_routine_output(self):
-        message = "routine clean pass already persisted"
-        code = f"print({message!r})"
+        message = "merge-companion-precheck: clean (hook-verified) at session start."
+        code = f"print({json.dumps({'continue': True, 'systemMessage': message, 'ghostAliceSurface': 'routine'})!r})"
         payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
 
         with tempfile.TemporaryDirectory() as temp_home:
@@ -2499,7 +2328,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
 
             result = subprocess.run(
-                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "prompt", payload],
+                [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", "session-intent", payload],
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -2519,9 +2348,10 @@ class TestHookCommandAllowlist(unittest.TestCase):
             row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.strip(), "")
+        # A hidden protocol result keeps its control fields and drops only the user notice.
+        self.assertEqual(json.loads(result.stdout), {"continue": True})
+        self.assertIn(message, row["stdout"])
         self.assertEqual(row["visible_decision"], "hide")
-        self.assertEqual(row["stdout"].strip(), message)
 
     def test_runner_preserves_nonzero_exit_after_strict_log_append(self):
         command = _python_payload_command("-c 'import sys; print(\"bad\", file=sys.stderr); sys.exit(7)'")
@@ -2753,7 +2583,7 @@ class TestHookProtocolSurface(unittest.TestCase):
             {"continue": False, "stopReason": "Stop requested."},
         ]
         for protocol in protocols:
-            for surface in ("hidden", "compact", "focused", "full", "forced"):
+            for surface in ("hidden", "focused", "full", "forced"):
                 with self.subTest(protocol=protocol, surface=surface):
                     original = {**protocol, "systemMessage": "Routine user notice."}
                     output, _ = hook_profile_gate._render_user_surface(
@@ -2767,7 +2597,6 @@ class TestHookProtocolSurface(unittest.TestCase):
     def test_visibility_reduces_only_protocol_user_warning(self):
         for surface, expected in (
             ("hidden", None),
-            ("compact", "test-hook observed"),
             ("focused", "test-hook: First line. Second line."),
         ):
             with self.subTest(surface=surface):

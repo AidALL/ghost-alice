@@ -68,7 +68,7 @@ Tool-checkpoint는 도구 호출 전 단계(호스트의 `PreToolUse`/`BeforeToo
 
 ## Routing Surface Contract
 
-현재 세션 어시스턴트는 session-intent-analyzer를 적용하여 의미 사실과 누적 결정을 Python 원장 기록기에 제출합니다. 현재 대화의 응답 모델은 task-router를 적용하여 작업을 판단합니다. 표시 코드와 어시스턴트는 routing-surface의 기존 change-depth·focus-layer·verification-complexity 값을 사용하고 별도 척도를 만들지 않습니다. 알 수 없거나 모순되는 값은 더 충분히 표시하고 영향받은 선택을 다시 판단합니다.
+현재 세션 어시스턴트는 session-intent-analyzer를 적용하여 의미 사실과 누적 결정을 Python 원장 기록기에 제출합니다. 현재 대화의 응답 모델은 task-router를 적용하여 작업을 판단합니다. 응답 모델은 routing-surface의 기존 change-depth·focus-layer·verification-complexity 값을 사용하고 별도 척도를 만들지 않습니다. 알 수 없거나 모순되는 값은 영향받은 선택을 다시 판단합니다.
 
 task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 목적을 보존합니다. 조사나 worktree 확인은 사용자가 산출물로 요구하지 않았다면 수단입니다. Accepted-continuation에는 기록된 수락이 필요하며 근거 요구를 낮추지 않습니다.
 
@@ -80,10 +80,10 @@ task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 �
 
 - agent_visibility.profile은 표시량을 조정하며 훅 실행이나 엄격한 감사를 끄지 않습니다.
 - 강제·위험·게이트 값과 검증 실패는 전체 모델 안내와 강제 표시를 유지합니다.
-- 일상·디버그 값은 엄격한 로그에 남고 작업 판단에 영향을 줄 때만 모델 안내에 포함됩니다.
-- 알 수 없거나 모호하거나 실패한 값은 더 충분한 맥락을 표시하고 해당 판단을 다시 검토합니다.
+- 일상 값은 엄격한 로그에 남고 작업 판단에 영향을 줄 때만 모델 안내에 포함됩니다.
+- 알 수 없거나 실패한 값은 더 충분한 맥락을 표시하고 해당 판단을 다시 검토합니다.
 
-중복된 정상 안내·변화 없는 감사 항목·상관관계 메타데이터만으로 새 작업을 만들지 않습니다. 토큰 감소는 결과이며 성공 지표가 아닙니다.
+정상 통과 안내·상관관계 메타데이터만으로 새 작업을 만들지 않습니다. 토큰 감소는 결과이며 성공 지표가 아닙니다.
 
 ## Runtime Checkpoints
 

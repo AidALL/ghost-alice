@@ -49,6 +49,12 @@ def stop_feedback(reason):
 
 
 class StopRetrySurfaceTests(unittest.TestCase):
+    def test_unknown_option_ends_with_a_usage_error(self):
+        # Every Stop registration since v0.1.0 passes only --platform, through the runner that maps exit 2 to 1.
+        result = subprocess.run([sys.executable, str(HOOK), "--platform", "claude", "--format", "json"],
+                                input="{}", text=True, capture_output=True)
+        self.assertEqual((result.returncode, result.stdout), (2, ""))
+
     def test_unlinked_retained_result_summary_does_not_supply_proof(self):
         HISTORICAL_CONVERSATION_SUMMARY = "The retained records cover targeted checks; overall verification remains unresolved."
         entries = [prompt("앞서 검증한 결과로 두 문제가 마무리됐는지 설명해 주세요."),

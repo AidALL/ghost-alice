@@ -88,8 +88,8 @@ class RunnerHonorsDeclarationTests(unittest.TestCase):
         self.assertEqual(host["systemMessage"], CONTEXT)
 
     def test_focused_notice_does_not_repeat_its_label(self):
-        message = "web-search-first: AGENTS.md Rule 10. Cross-check community sources."
-        host = gate("web-search-first", json.dumps({"continue": True, "systemMessage": message}))
+        message = "io-trace: the tool call was recorded."
+        host = gate("io-trace", json.dumps({"continue": True, "systemMessage": message}))
         self.assertEqual(host["systemMessage"], message)
 
 

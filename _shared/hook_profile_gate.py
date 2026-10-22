@@ -317,52 +317,6 @@ def _resolve_dynamic_hook_node(argv: list[str], env: dict[str, str]) -> Path:
     raise HookCommandRejected(f"no trusted Node runtime available for {platform}")
 
 
-def _is_missing_legacy_managed_node_command(
-    argv: list[str],
-    env: dict[str, str],
-) -> bool:
-    if len(argv) != 12:
-        return False
-    stale_node = Path(argv[0]).expanduser()
-    if (
-        not stale_node.is_absolute()
-        or not _is_node_executable(stale_node)
-        or stale_node.is_file()
-    ):
-        return False
-    home = _home_from_env(env)
-    if home is None:
-        return False
-    expected_dispatcher = home / ".ghost-alice" / "hooks" / "ghost-alice-hook.mjs"
-    dispatcher = Path(argv[1]).expanduser()
-    if (
-        not dispatcher.is_absolute()
-        or not dispatcher.is_file()
-        or not expected_dispatcher.is_file()
-    ):
-        return False
-    try:
-        if not dispatcher.samefile(expected_dispatcher):
-            return False
-    except OSError:
-        return False
-    platform = argv[3] if argv[2] == "--platform" else ""
-    if platform not in VALID_HOOK_PLATFORMS:
-        return False
-    if argv[2:10] != [
-        "--platform",
-        platform,
-        "--event",
-        "PreToolUse",
-        "--hook",
-        "tool-checkpoint",
-        "--marker",
-        "[tool-checkpoint] pre-tool-check",
-    ]:
-        return False
-    return argv[10] == "--session-intent-root" and Path(argv[11]).is_absolute()
-
-
 def assert_allowed_command(
     argv: list[str],
     allowed_roots: list[str],
@@ -386,6 +340,9 @@ def assert_allowed_command(
         resolved = path.resolve()
     except OSError as exc:
         raise HookCommandRejected(f"hook executable cannot be resolved: {executable}") from exc
+    # A registration that pinned a removed executable is rejected and audited here instead of failing at launch.
+    if not resolved.is_file():
+        raise HookCommandRejected(f"hook executable missing: {executable}")
 
     if _is_configured_node_runtime(resolved, source_env, active_platform):
         return
@@ -446,8 +403,6 @@ def _validate_shell_command(
         argv[0] = sys.executable
     source_env = os.environ if env is None else env
     if argv and argv[0] == runtime_config.HOOK_NODE_SENTINEL:
-        argv[0] = str(_resolve_dynamic_hook_node(argv, source_env))
-    elif argv and _is_missing_legacy_managed_node_command(argv, source_env):
         argv[0] = str(_resolve_dynamic_hook_node(argv, source_env))
     assert_allowed_command(argv, default_allowed_roots(), env=source_env)
     return argv
@@ -617,19 +572,12 @@ def _visibility_context(
     exit_code: int,
     *,
     env: dict[str, str] | None = None,
-    hook_payload: dict[str, object] | None = None,
     declared: str = "",
 ) -> dict[str, object]:
     source_env = env if env is not None else os.environ
-    payload = hook_payload or {}
     platform = _platform_name(source_env)
     text = f"{stdout}\n{stderr}".lower()
     context: dict[str, object] = {}
-    routing_surface = payload.get("routing_surface")
-    if routing_surface is None:
-        routing_surface = payload.get("routing-surface")
-    if isinstance(routing_surface, dict):
-        context["routing_surface"] = routing_surface
     if hook_id == "session-start":
         # Pending state belongs to its check result, not every hook in the session.
         pending = None
@@ -649,29 +597,9 @@ def _visibility_context(
     if declared:
         # A declaring hook's own wording is not evidence of state; only the real state above and the exit code count.
         context["declared_surface"] = declared
-        if exit_code != 0:
-            context["failed_verification"] = True
         return context
-    if (
-        "no pending warning from this hook means merge-companion-precheck is clean" in text
-        or "routine clean pass" in text
-        or "clean pass already persisted" in text
-    ):
-        context["signal"] = "routine-clean-pass"
-    if "duplicate reminder" in text or "no state change" in text:
-        context["duplicate"] = True
-    if '"decision":"deny"' in text or '"decision": "deny"' in text:
-        context["decision"] = "deny"
     if "pending-merge" in text and "undecided" in text:
         context["pending_merge_undecided"] = True
-    if "external tool" in text:
-        context["external_tool_claim"] = True
-    if "destructive" in text or "external side effect" in text:
-        context["destructive"] = True
-    if "secret" in text or "security boundary" in text:
-        context["security_boundary"] = True
-    if exit_code != 0:
-        context["failed_verification"] = True
     return context
 
 
@@ -702,40 +630,14 @@ def _result_value(stdout: str, stderr: str) -> str:
     return _first_text(stdout.strip(), stderr.strip())
 
 
-def _classification_from_decision(
-    hook_id: str,
-    context: dict[str, object],
-    decision: dict[str, str],
-) -> tuple[str, str, str, bool]:
+def _classification_from_decision(hook_id: str, decision: dict[str, str]) -> tuple[str, str, str, bool]:
     reason = decision.get("reason", "")
-    if reason == "routine-clean-pass":
-        return ("merge-precheck", "routine", "routine", False)
-    if reason == "duplicate-reminder":
-        return ("duplicate-reminder", "routine", "routine", False)
-    if reason == "noop-audit":
-        return ("noop-audit", "debug", "audit-only", False)
     if reason == "declared-routine":
         return (normalize_hook_id(hook_id), "routine", "routine", False)
     if reason == "forced-pending-merge":
         return ("pending-merge", "risk", "forced", False)
-    if reason == "forced-security-boundary":
-        return ("downstream-block", "risk", "forced", False)
-    if reason == "forced-action-denial":
-        return ("tool-checkpoint", "gate", "forced", False)
     if reason in {"forced-verification", "forced-nonzero-exit"}:
         return ("completion-check", "verification", "forced", True)
-    if reason == "forced-routing-surface":
-        return ("routing-surface", "gate", "forced", False)
-    if reason in {"forced-side-effect", "forced-security-boundary"}:
-        return ("safety-boundary", "risk", "forced", False)
-    if reason == "routing-surface-fail-closed":
-        return ("routing-surface", "routing", "unknown", False)
-    if reason == "routing-surface-full":
-        return ("routing-surface", "routing", "essential", False)
-    if reason == "routing-surface-focused":
-        return ("routing-surface", "routing", "focused", False)
-    if context.get("external_tool_claim"):
-        return ("web-search-first", "routing", "focused", False)
     return (normalize_hook_id(hook_id), "routine", "essential", False)
 
 
@@ -744,16 +646,11 @@ def _surface_item_for_result(
     hook_id: str,
     stdout: str,
     stderr: str,
-    context: dict[str, object],
     decision: dict[str, str],
     profile: str,
     strict_log_ref: str,
 ) -> dict[str, object]:
-    value_key, value_kind, exposure_class, verification_failed = _classification_from_decision(
-        hook_id,
-        context,
-        decision,
-    )
+    value_key, value_kind, exposure_class, verification_failed = _classification_from_decision(hook_id, decision)
     return classify_surface_item(
         value_key=value_key,
         value_kind=value_kind,
@@ -781,10 +678,6 @@ def _render_model_surface(item: dict[str, object], stdout: str, stderr: str) -> 
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
     if level == "omitted":
         return ""
-    if level == "marker":
-        return f"{value_key} observed"
-    if level in {"digest", "focused"}:
-        return _labeled(value_key, value) if value else f"{value_key} observed"
     if level == "full":
         return "\n".join(part for part in (stdout, stderr) if part)
     return _labeled(value_key, value) if value else f"{value_key} observed"
@@ -809,9 +702,9 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
     stdout = _strip_private_protocol_metadata(stdout)
     level = str(item.get("user_surface") or "")
     if _is_hook_noop_json(stdout):
-        return (stdout, "" if level in {"hidden", "compact", "focused"} else stderr)
+        return (stdout, "" if level in {"hidden", "focused"} else stderr)
     value_key = str(item.get("value_key") or "surface-item")
-    if level in {"hidden", "compact", "focused"}:
+    if level in {"hidden", "focused"}:
         try:
             protocol = json.loads(stdout)
         except (json.JSONDecodeError, TypeError):
@@ -826,20 +719,13 @@ def _render_user_surface(item: dict[str, object], stdout: str, stderr: str) -> t
             if level == "hidden":
                 protocol.pop("systemMessage", None)
             elif isinstance(warning, str) and warning:
-                protocol["systemMessage"] = (
-                    f"{value_key} observed" if level == "compact"
-                    else _labeled(value_key, _one_line(warning))
-                )
+                protocol["systemMessage"] = _labeled(value_key, _one_line(warning))
             return (json.dumps(protocol, ensure_ascii=False) + "\n", "")
     value = _one_line(str(item.get("value") or _result_value(stdout, stderr)))
     if level == "hidden":
         return ("", "")
-    if level == "compact":
-        return (f"{value_key} observed\n", "")
     if level == "focused":
         return ((f"{_labeled(value_key, value)}\n" if value else f"{value_key} observed\n"), "")
-    if level in {"full", "forced"}:
-        return (stdout, stderr)
     return (stdout, stderr)
 
 
@@ -1096,7 +982,6 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         result.stderr,
         result.returncode,
         env=env,
-        hook_payload=hook_payload,
         declared=declared,
     )
     decision = agent_visibility_policy.decide(
@@ -1115,7 +1000,6 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         hook_id=hook_id,
         stdout=host_stdout,
         stderr=result.stderr,
-        context=context,
         decision=decision,
         profile=profile,
         strict_log_ref=log_ref,
