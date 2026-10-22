@@ -10,19 +10,16 @@ manifest before work changes an installed skill; no input hook repeats this chec
 from __future__ import annotations
 
 import argparse
-import base64
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from merge_companion_messages import render_pending_merge_message
 import install_destination
 from session_check_cache import observe_check, UnstableCheckTarget
 from session_intent_analyzer_hook import bound_session_identity
-
-HookKind = Literal["prompt-check", "hook-reminder", "session-check"]
 
 
 def _pending_manifest_path(platform: str) -> Path:
@@ -58,10 +55,6 @@ def _pending_entries(platform: str) -> list[dict[str, Any]]:
     ]
 
 
-def _decode_internal(value: str) -> str:
-    return base64.urlsafe_b64decode(value.encode("ascii")).decode("utf-8")
-
-
 def _pending_line(platform: str, count: int) -> str:
     return (
         f"merge-companion precheck: ~/.ghost-alice/pending-merges/{platform}/manifest.json "
@@ -91,20 +84,17 @@ def _read_hook_input() -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def _text_payload(platform: str, hook: HookKind, context: str, internal: str, result: dict | None = None) -> str:
+def _text_payload(platform: str, result: dict | None = None) -> str:
     count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
     if count:
         if result is not None and result["status"] == "reused":
             return f"merge-companion precheck: pending={count} (unchanged; session check reused)."
-        return "\n".join([
-            _pending_line(platform, count),
-            render_pending_merge_message(context),  # type: ignore[arg-type]
-        ])
+        return "\n".join([_pending_line(platform, count), render_pending_merge_message("session_start")])
 
     return _clean_contract_line(platform)
 
 
-def _json_payload(platform: str, internal: str, result: dict | None = None) -> str:
+def _json_payload(platform: str, result: dict | None = None) -> str:
     count = len(_pending_entries(platform)) if result is None else result["value"]["undecided_count"]
     receipt = {"platform": platform, "manifest_path": str(_pending_manifest_path(platform)), "undecided_count": count}
     if result is not None:
@@ -124,18 +114,10 @@ def _json_payload(platform: str, internal: str, result: dict | None = None) -> s
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--platform", required=True)
-    parser.add_argument("--hook", required=True, choices=["prompt-check", "hook-reminder", "session-check"])
-    parser.add_argument("--context", required=True, choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", required=True, choices=["text", "json"])
-    parser.add_argument("--internal-b64", required=True)
     parser.add_argument("--root", type=Path)
     args, _unknown = parser.parse_known_args()
 
-    if args.hook != "session-check":
-        # Input registrations are retired; an older install that still calls one does nothing.
-        print(json.dumps({"continue": True}) if args.format == "json" else "")
-        return 0
-    internal = _decode_internal(args.internal_b64)
     input_payload = _read_hook_input()
     result = None
     session_id = bound_session_identity(args.platform, input_payload)
@@ -154,9 +136,9 @@ def main() -> int:
             print(reason, file=sys.stderr)
             return 2
     if args.format == "json":
-        print(_json_payload(args.platform, internal, result))
+        print(_json_payload(args.platform, result))
     else:
-        print(_text_payload(args.platform, args.hook, args.context, internal, result))
+        print(_text_payload(args.platform, result))
     return 0
 
 

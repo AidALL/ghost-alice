@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from reminder_texts import instruction_override, reminder_text
+from reminder_texts import reminder_text
 
 import argparse
 import json
@@ -363,7 +363,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--hook", default="session-intent")
     parser.add_argument("--context", default="prompt_submit", choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", choices=["text", "json"], default="text")
-    parser.add_argument("--internal-b64", default=None)
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="session intent ledger root")
     return parser
 
@@ -371,12 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    try:
-        override = instruction_override(args.internal_b64)
-    except (ValueError, UnicodeError):
-        parser.error('Invalid custom instruction encoding')
-    message = override or ""
-    custom_instruction = (override + "\n") if override is not None else ""
+    message = ""
 
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
@@ -415,7 +409,7 @@ def main(argv: list[str] | None = None) -> int:
                     transcript_path=payload.get('transcript_path') or payload.get('transcriptPath'))
                 _clear_degrade_marker(ledger_root, args.platform, payload)
                 delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
-                message = custom_instruction + ("" if delivered else observation_receipt(paths, None))
+                message = "" if delivered else observation_receipt(paths, None)
                 sys.stdout.write(render_payload(args.format, message, ledger_root, routine=True)
                                  + ('\n' if args.format == 'json' else ''))
                 return 0
@@ -436,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
                 delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
-                message = custom_instruction + ("" if delivered else observation_receipt(paths, observation))
+                message = "" if delivered else observation_receipt(paths, observation)
                 routine = True
                 terminal = ""
     except Exception:

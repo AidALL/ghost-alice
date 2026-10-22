@@ -73,25 +73,6 @@ def test_legacy_record_cannot_derive_gate_or_detector_permission(tmp_path):
     assert any(row['event'] == 'intent-updated' for row in ledger.read_session_events(**coordinates))
 
 
-def test_router_uses_intake_without_legacy_classifier_or_backlog_authority(tmp_path):
-    destination, env, binding, coordinates = fixture(tmp_path)
-    ledger.record_turn(**coordinates, expected_input_event_id=binding['input_event_id'], intent_delta={
-        'acceptance_criteria':[dict(id='old-local-id', summary='Historical unmet work',
-            source='user-said', admitted=True, status='unmet')]})
-    result = subprocess.run([sys.executable, '-B', str(CORE/'_shared/task_router_reminder_hook.py'),
-        '--platform', 'claude', '--format', 'json', '--root', destination.ledger_root],
-        input=json.dumps({'session_id':binding['session_id']}), env=env, text=True, capture_output=True, check=True)
-    context = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
-    assert 'withheld' not in context
-    assert 'jailbreak' not in context
-    assert 'unresolved-work:' not in context
-    assert '--read-intent' in context
-    assert '--read-state' not in context
-    assert str(destination.ledger_root) in context
-    assert 'history, not a current work selection or execution authorization' in context
-    assert ledger.read_session_state(**coordinates)['model_security_decision']['decision'] == 'block'
-
-
 @pytest.mark.parametrize('binding', ('missing', 'foreign'))
 def test_retirement_preserves_exact_event_protected_writes(tmp_path, binding):
     coordinates = fixture(tmp_path)[3]

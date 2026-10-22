@@ -9,7 +9,6 @@ from typing import Dict, Literal
 PendingMessageContext = Literal[
     "install_tail",
     "session_start",
-    "prompt_submit",
     "git_pre_push",
     "readme",
 ]
@@ -21,9 +20,6 @@ _USER_COPY: Dict[PendingMessageContext, str] = {
     ),
     "session_start": (
         "This conversation is a new session. Backed-up personal changes from a previous " "agent tool update may still be unresolved. In this conversation, please ask " "'Please review backed-up changes.' to review what to keep or discard."
-    ),
-    "prompt_submit": (
-        "There may still be unresolved backed-up changes. In the current conversation, " "please ask 'Please review backed-up changes.' to choose keep, discard, or later."
     ),
     "git_pre_push": (
         "There are unresolved backed-up changes. Review them before sending this work to " "the remote repository. The default setting does not block push."

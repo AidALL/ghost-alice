@@ -27,10 +27,8 @@ class PrivateHookOutputTests(unittest.TestCase):
                         env = {k: v for k, v in os.environ.items() if not k.startswith(('GHOST_ALICE_', 'CODEX_', 'CLAUDE_'))}
                         env.update(HOME=str(home), USERPROFILE=str(home), GHOST_ALICE_PLATFORM=platform,
                                    GHOST_ALICE_AGENT_VISIBILITY=profile)
-                        internal = base64.urlsafe_b64encode(b'Native receipt fixture.').decode()
                         command = shlex.join([sys.executable, str(shared / 'pending_merge_precheck_hook.py'), '--platform', platform,
-                                              '--hook', 'session-check', '--context', 'session_start', '--format', 'json',
-                                              '--internal-b64', internal, '--root', str(home / 'private-state')])
+                                              '--format', 'json', '--root', str(home / 'private-state')])
                         encoded = base64.urlsafe_b64encode(command.encode()).decode()
                         result = subprocess.run([sys.executable, str(shared / 'hook_profile_gate.py'), 'run', 'session-start', encoded],
                                                 input=json.dumps({'session_id': 'native-receipt-fixture', 'hook_event_name': 'SessionStart'}),
@@ -68,7 +66,7 @@ class PrivateHookOutputTests(unittest.TestCase):
         receipt = {"platform": "codex", "manifest_path": "/private/home/.ghost-alice/pending-merges/codex/manifest.json", "undecided_count": 1}
         raw = json.dumps({"continue": True, "ghostAlicePendingMergeCheck": receipt})
         with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", side_effect=AssertionError("duplicate manifest inspection")):
-            context = hook_profile_gate._visibility_context("pending-merge-prompt", raw, "", 0, env=env, declared="routine")
+            context = hook_profile_gate._visibility_context("session-start", raw, "", 0, env=env, declared="routine")
         self.assertTrue(context["pending_merge_undecided"])
         rendered, _ = hook_profile_gate._render_user_surface({"user_surface": "full"}, raw, "")
         self.assertNotIn("ghostAlicePendingMergeCheck", json.loads(rendered))

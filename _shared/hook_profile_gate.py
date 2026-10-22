@@ -630,7 +630,7 @@ def _visibility_context(
         routing_surface = payload.get("routing-surface")
     if isinstance(routing_surface, dict):
         context["routing_surface"] = routing_surface
-    if hook_id in {"pending-merge-prompt", "session-start"}:
+    if hook_id == "session-start":
         # Pending state belongs to its check result, not every hook in the session.
         pending = None
         if exit_code == 0:
@@ -664,7 +664,7 @@ def _visibility_context(
         context["decision"] = "deny"
     if "pending-merge" in text and "undecided" in text:
         context["pending_merge_undecided"] = True
-    if "external tool" in text or hook_id == "web-search-first":
+    if "external tool" in text:
         context["external_tool_claim"] = True
     if "destructive" in text or "external side effect" in text:
         context["destructive"] = True
@@ -1135,6 +1135,11 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     _emit_rendered_user_surface(user_stdout, user_stderr)
     if force_success:
         return 0
+    # Core informs and stops; only a registered Autopilot adapter may block. A Core hook's
+    # usage error or removed script reaches the host as a non-blocking error; the strict
+    # log above keeps the original exit code.
+    if result.returncode == 2 and not (binding and binding.get("adapter")):
+        return 1
     return result.returncode
 
 
@@ -1226,7 +1231,8 @@ def main(argv: list[str] | None = None) -> NoReturn:
     normalized_args = _strip_trailing_marker_args(args)
     if normalized_args is None or normalized_args[0] != "run":
         sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|visibility-csv] <payload-b64>\n")
-        raise SystemExit(2)
+        # A malformed registration is Ghost-ALICE's own failure; exit 2 would block the host.
+        raise SystemExit(1)
 
     payload = normalized_args[2] if len(normalized_args) == 3 else normalized_args[3]
     positional_platform: str | None = None
@@ -1249,7 +1255,7 @@ def main(argv: list[str] | None = None) -> NoReturn:
                 )
             raise SystemExit(run(normalized_args[1], payload,binding=binding))
         sys.stderr.write("usage: hook_profile_gate.py run <hook-id> [platform|visibility-csv] <payload-b64>\n")
-        raise SystemExit(2)
+        raise SystemExit(1)
     except HookCommandRejected as exc:
         rejection_stderr = f"hook command rejected: {exc}\n"
         sys.stderr.write(rejection_stderr)

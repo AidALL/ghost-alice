@@ -15,7 +15,7 @@ import hook_definitions
 SHARED = Path(__file__).resolve().parent
 RUNTIME_MODULES = (
     "hook_profile_gate", "session_intent_analyzer_hook", "io_trace_hook", "pending_merge_precheck_hook",
-    "task_router_reminder_hook", "claude_stop_verification_hook", "native_completion", "strict_session_log",
+    "claude_stop_verification_hook", "native_completion", "strict_session_log",
     "agent_visibility_policy", "work_impact_projection", "governance_events", "completion_check_validator",
     "context_lifecycle", "response_context_use", "claude_context_adapter", "native_transcript", "source_lookup",
     "context_gateway",

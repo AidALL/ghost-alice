@@ -65,7 +65,6 @@ RUNTIME_SHARED_FILES = (
     "pending_merge_precheck_hook.py",
     "merge_companion_messages.py",
     "session_intent_analyzer_hook.py",
-    "task_router_reminder_hook.py",
     "text_lines.py",
     "hook_definitions.py",
 )
@@ -825,19 +824,22 @@ def _runtime_session_intent_golden_status(
                          ("resolve_session_id", "build_input_observation", "record_turn")):
                 result = {"dependency": "unavailable"}
             else:
-                from task_router_reminder_hook import session_material
-                root, platform = Path(sys.argv[2]), sys.argv[3]
-                material = session_material(root, platform, "doctor-runtime-golden")
-                if platform == "claude" and material["state"].get("pending_native_inputs"):
+                import session_intent_ledger as ledger
+                root, platform, session = Path(sys.argv[2]), sys.argv[3], "doctor-runtime-golden"
+                def material():
+                    return {"state": ledger.read_session_state(root=root, platform=platform, session_id=session,
+                                                               recover_audit=False),
+                            "degraded": (root / platform / session / hook.DEGRADE_MARKER_FILE).exists()}
+                observed = material()
+                if platform == "claude" and observed["state"].get("pending_native_inputs"):
                     # Native actor evidence follows UserPromptSubmit.
                     Path(sys.argv[4]).write_text(json.dumps(dict(type="user",
-                        sessionId="doctor-runtime-golden", promptId="doctor-runtime-prompt",
+                        sessionId=session, promptId="doctor-runtime-prompt",
                         origin=dict(kind="human"), promptSource="sdk", turnOrigin="human",
                         message=dict(role="user", content=sys.argv[5]))) + "\\n", encoding="utf-8")
-                    from session_intent_ledger import reconcile_native_inputs
-                    reconcile_native_inputs(root=root, platform=platform, session_id="doctor-runtime-golden")
-                    material = session_material(root, platform, "doctor-runtime-golden")
-                result = {"dependency": "available", "material": material}
+                    ledger.reconcile_native_inputs(root=root, platform=platform, session_id=session)
+                    observed = material()
+                result = {"dependency": "available", "material": observed}
             print(json.dumps(result))
         ''')
         observed = runtime.run([sys.executable, "-c", read_material, str(runtime_shared),
@@ -855,11 +857,10 @@ def _runtime_session_intent_golden_status(
         if observation.get("dependency") != "available":
             return STATUS_ERROR, "ledger-dependency-broken"
         material = observation["material"]
-        if material["degraded"] or not material["latest_input"]:
+        state = material["state"]
+        if (material["degraded"] or state.get("pending_native_inputs")
+                or state.get("latest_input_digest") != "sha256:" + hashlib.sha256(prompt.encode()).hexdigest()):
             return STATUS_ERROR, "session-intent-not-committed"
-        if (material['state'].get('pending_native_inputs')
-                or material['latest_input'].get('input_digest') != 'sha256:' + hashlib.sha256(prompt.encode()).hexdigest()):
-            return STATUS_ERROR, 'session-intent-not-committed'
     return STATUS_OK, "golden-pass"
 
 

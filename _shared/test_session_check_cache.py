@@ -46,7 +46,7 @@ class SessionCheckReuseTest(unittest.TestCase):
                 cache.observe_check(root, "codex", "a", "merge", target, check)
             output = io.StringIO()
             with mock.patch.object(hook, "observe_check", side_effect=cache.UnstableCheckTarget("keep changing")), \
-                 mock.patch.object(sys, "argv", ["hook", "--root", str(root), "--platform", "codex", "--hook", "session-check", "--context", "session_start", "--format", "json", "--internal-b64", ""]), \
+                 mock.patch.object(sys, "argv", ["hook", "--root", str(root), "--platform", "codex", "--format", "json"]), \
                  mock.patch.object(hook, "_read_hook_input", return_value={}), \
                  mock.patch.object(sys, "stdout", output):
                 self.assertEqual(hook.main(), 0)
@@ -115,7 +115,7 @@ class SessionCheckReuseTest(unittest.TestCase):
             manifest.write_text(json.dumps({"entries": [{"decided": False}]}))
             env = dict(os.environ)
             env.update({"HOME": directory, "CODEX_THREAD_ID": "session-test", "GHOST_ALICE_SESSION_ID": "session-test"})
-            command = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--hook", "session-check", "--context", "session_start", "--format", "json", "--internal-b64", "TE9ORyBXT1JLRkxPVw=="]
+            command = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--format", "json"]
             def run():
                 return json.loads(subprocess.run(command, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
             first, second = run(), run()
@@ -140,7 +140,7 @@ class SessionCheckReuseTest(unittest.TestCase):
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["status"], "checked")
             self.assertEqual(changed["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
 
-    def test_retired_input_check_adds_nothing_and_next_session_start_reports_change(self):
+    def test_next_session_start_reports_a_manifest_change(self):
         with tempfile.TemporaryDirectory() as directory:
             home = Path(directory)
             manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
@@ -148,17 +148,15 @@ class SessionCheckReuseTest(unittest.TestCase):
             manifest.write_text(json.dumps({"entries": []}))
             env = dict(os.environ)
             env.update({"HOME": directory, "CODEX_THREAD_ID": "session-new", "GHOST_ALICE_SESSION_ID": "session-new"})
-            base = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--format", "json", "--internal-b64", ""]
-            def run(hook, context):
-                command = base + ["--hook", hook, "--context", context]
-                return json.loads(subprocess.run(command, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
-            run("session-check", "session_start")
+            base = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")), "--root", str(home / "ledger"), "--platform", "codex", "--format", "json"]
+            def run():
+                return json.loads(subprocess.run(base, input='{}', text=True, capture_output=True, env=env, check=True).stdout)
+            run()
             # Another installer run backs up a modified skill during the session.
             manifest.write_text(json.dumps({"entries": [{"decided": False}]}))
-            # An older install that still calls the retired input check gets nothing; merge-companion
-            # re-checks the manifest before work changes an installed skill.
-            self.assertEqual(run("prompt-check", "prompt_submit"), {"continue": True})
-            compacted = run("session-check", "session_start")
+            # merge-companion re-checks the manifest before work changes an installed skill; the next
+            # session start reports the change.
+            compacted = run()
             self.assertNotIn("hookSpecificOutput", compacted)
             checked = compacted["ghostAlicePendingMergeCheck"]
             self.assertEqual((checked["undecided_count"], checked["status"]), (1, "checked"))
@@ -169,10 +167,9 @@ class SessionCheckReuseTest(unittest.TestCase):
         for count in (0, 2):
             result = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
                           value=dict(undecided_count=count))
-            body = json.loads(hook._json_payload('codex', 'LONG WORKFLOW', result))
+            body = json.loads(hook._json_payload('codex', result))
             # The user sees the screen notice; merge-companion re-checks before work changes a skill.
             self.assertNotIn('hookSpecificOutput', body)
-            self.assertNotIn('LONG WORKFLOW', json.dumps(body))
             self.assertEqual(body['ghostAlicePendingMergeCheck']['undecided_count'], count)
             self.assertIn('systemMessage', body)
 
