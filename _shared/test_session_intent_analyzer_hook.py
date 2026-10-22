@@ -830,7 +830,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         return self.root / "codex" / "s-degrade" / "ledger-degraded.json"
 
     def test_broken_ledger_writes_durable_degrade_marker(self) -> None:
-        # a BROKEN ledger must leave a ledger-independent marker so freshness consumers (task-router reminder) fail closed instead of riding the frozen lineage anchor.
+        # a BROKEN ledger must leave a ledger-independent marker that records the unobserved input.
         self._put_ledger("raise RuntimeError('boom at import')\n")
         result = self._run()
         self.assertEqual(result.returncode, 0, msg=result.stderr)
