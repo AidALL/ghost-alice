@@ -16,7 +16,7 @@ import subprocess
 import sys
 import textwrap
 import tomllib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Sequence
 
@@ -39,6 +39,7 @@ from installer_assets import (
 )
 
 from mcp_health import summarize_state
+import install_destination
 import state_retention
 
 
@@ -221,6 +222,115 @@ def _retention_failure_line(record: Path) -> str:
         return "ok"
     last = rows[-1] if isinstance(rows[-1], dict) else {}
     return f"{len(rows)} failures; last {last.get('ts')} {last.get('policy')} {last.get('error_type')}"
+
+
+# The hook runner records a command it refused to run as one row of the session's strict log
+# (`hook_profile_gate._append_rejection_audit`); this is the mark that row alone carries, as `append_event` writes it.
+HOOK_REJECTION_MARK = b'"value_key": "hook-command-rejection"'
+HOOK_REJECTION_DAYS = state_retention.POLICIES["session-logs"].limit   # what the session-logs retention keeps
+HOOK_REJECTION_SESSIONS_SHOWN = 5
+
+
+def _recent_session_logs(session_logs: Path, cutoff: datetime) -> list[tuple[str, Path]]:
+    """The strict logs of every host folder whose last change is within the window, as (host/session, log). A log
+    whose time cannot be read stays in the list so the read reports it."""
+    found: list[tuple[str, Path]] = []
+    if session_logs.is_symlink() or not session_logs.is_dir():
+        return found
+    for host in sorted(session_logs.iterdir()):
+        if host.is_symlink() or not host.is_dir():
+            continue
+        for folder in sorted(host.iterdir()):
+            log = folder / "strict-hook-output.jsonl"
+            if folder.is_symlink() or not folder.is_dir() or log.is_symlink():
+                continue
+            try:
+                if log.stat().st_mtime < cutoff.timestamp():
+                    continue
+            except FileNotFoundError:
+                continue
+            except OSError:
+                pass
+            found.append((f"{host.name}/{folder.name}", log))
+    return found
+
+
+def _hook_rejection_rows(log: Path) -> list[dict]:
+    """The rejection rows of one strict log. Only the lines that carry the mark are parsed; a log holds every hook
+    run's row with its output, so parsing them all would cost seconds per doctor run."""
+    rows: list[dict] = []
+
+    def take(lines: list[bytes]) -> None:
+        for line in lines:
+            if HOOK_REJECTION_MARK not in line:
+                continue
+            row = json.loads(line.decode("utf-8", errors="replace"))
+            item = row.get("surface_item") if isinstance(row, dict) else None
+            if isinstance(item, dict) and item.get("value_key") == "hook-command-rejection":
+                rows.append(row)
+
+    with log.open("rb") as handle:
+        rest = b""
+        while chunk := handle.read(1 << 20):
+            lines = (rest + chunk).split(b"\n")
+            rest = lines.pop()
+            take(lines)
+        take([rest])
+    return rows
+
+
+def _rejection_reason(row: dict) -> str:
+    """The first sentence of the runner's refusal, without its prefix; the whole message stays in the log."""
+    text = " ".join(str(row.get("stderr") or "").split())
+    prefix = "hook command rejected: "
+    if text.startswith(prefix):
+        text = text[len(prefix):]
+    return (text.split(". ")[0] or "unknown")[:100]
+
+
+def _hook_rejection_lines(session_logs: Path, *, now: datetime | None = None) -> list[str]:
+    """The hook runner's command rejections as informational doctor lines: the count of the retention window and,
+    for the sessions with a rejection, newest last rejection first and at most `HOOK_REJECTION_SESSIONS_SHOWN`, the
+    count and the last rejection's time, hook and reason. Doctor reads the logs the session-logs retention still
+    keeps, in every host folder because the runner's audit platform can be `unknown`, and imports none of the
+    runtime. A rejection is Ghost-ALICE's own refusal to run a hook command: the other doctor lines already name the
+    repair when one is needed, so these lines never change doctor's overall status."""
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=HOOK_REJECTION_DAYS)
+    try:
+        logs = _recent_session_logs(session_logs, cutoff)
+    except OSError as error:
+        return [f"hook-rejections: unavailable ({type(error).__name__})"]
+    sessions: list[tuple[datetime, str, int, dict]] = []
+    unreadable: list[str] = []
+    for name, log in logs:
+        try:
+            rows = _hook_rejection_rows(log)
+        except (OSError, ValueError) as error:
+            unreadable.append(f"{type(error).__name__} {name}")
+            continue
+        recent: list[tuple[datetime, dict]] = []
+        for row in rows:
+            stamp = _parse_timestamp(row.get("ts"))
+            if stamp is not None and stamp >= cutoff:
+                recent.append((stamp, row))
+        if recent:
+            last_stamp, last_row = max(recent, key=lambda entry: entry[0])
+            sessions.append((last_stamp, name, len(recent), last_row))
+    if unreadable and len(unreadable) == len(logs):
+        return [f"hook-rejections: unavailable ({unreadable[0]})"]
+    notes = []
+    if sessions:
+        shown = f", newest {HOOK_REJECTION_SESSIONS_SHOWN} shown" if len(sessions) > HOOK_REJECTION_SESSIONS_SHOWN else ""
+        notes.append(f"{len(sessions)} sessions{shown}")
+    if unreadable:
+        notes.append(f"{len(unreadable)} logs unreadable: {unreadable[0]}")
+    header = f"hook-rejections: {sum(count for _, _, count, _ in sessions)} in {HOOK_REJECTION_DAYS} days"
+    if notes:
+        header += f" ({'; '.join(notes)})"
+    sessions.sort(key=lambda entry: (-entry[0].timestamp(), entry[1]))
+    return [header, *(
+        f"  {name}: {count}, last {stamp.strftime('%Y-%m-%dT%H:%M:%SZ')} {row.get('hook_id') or 'unknown'}: "
+        f"{_rejection_reason(row)}" for stamp, name, count, row in sessions[:HOOK_REJECTION_SESSIONS_SHOWN])]
 
 
 def _pending_merge_status(ghost_alice_root: Path, platform: str) -> tuple[str, str]:
@@ -1078,6 +1188,10 @@ def run(args: argparse.Namespace) -> int:
 
     # Informational: a retention failure needs no repair by the user, so the line never changes overall.
     print(f"state-retention: {_retention_failure_line(state_retention.failure_record_path())}")
+
+    # Informational: the hook runner's own command rejections, read from the strict session logs it writes them to.
+    for line in _hook_rejection_lines(install_destination.ghost_root() / "session-logs"):
+        print(line)
 
     for skill_root in args.skill_root:
         layout_findings = _skill_layout_audit(skill_root, repo_root)
