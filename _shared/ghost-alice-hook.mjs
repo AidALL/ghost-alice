@@ -1,34 +1,21 @@
 #!/usr/bin/env node
 
-function parseArgs(argv) {
-  const args = {};
-  for (let i = 0; i < argv.length; i += 1) {
-    const key = argv[i];
-    if (!key.startsWith("--")) {
-      continue;
-    }
-    const name = key.slice(2);
-    const value = argv[i + 1] && !argv[i + 1].startsWith("--") ? argv[i + 1] : "true";
-    args[name] = value;
-    if (value !== "true") {
-      i += 1;
-    }
+// The installer registers exactly this call; it replaces every other form at install.
+function isRegisteredCall(argv) {
+  const values = new Map();
+  for (let i = 0; i + 1 < argv.length; i += 2) {
+    values.set(argv[i], argv[i + 1]);
   }
-  return args;
+  return argv.length === 4 && values.size === 2
+    && ["claude", "codex"].includes(values.get("--platform")) && values.get("--event") === "PreToolUse";
 }
 
-function emit(payload) {
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
-}
-
-try {
-  const args = parseArgs(process.argv.slice(2));
-  const platform = String(args.platform || "codex").toLowerCase();
-  const event = args.event || "BeforeAgent";
+if (isRegisteredCall(process.argv.slice(2))) {
   // The registered wrapper checks and audits every call. A healthy hook contributes
   // no instruction context; decision-relevant failures come from the wrapper.
-  emit(["claude", "codex"].includes(platform) && event === "PreToolUse" ? {} : { continue: true });
-} catch (error) {
-  process.stderr.write(`[ghost-alice-hook] ${error instanceof Error ? error.message : String(error)}\n`);
-  emit({ continue: true });
+  process.stdout.write("{}\n");
+} else {
+  // A usage error exits 2 like the Python hooks; the wrapper reports it to the host as a non-blocking 1.
+  process.stderr.write("[ghost-alice-hook] usage: ghost-alice-hook.mjs --platform claude|codex --event PreToolUse\n");
+  process.exitCode = 2;
 }

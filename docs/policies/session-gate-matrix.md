@@ -68,7 +68,7 @@ When work selection must change, the current-session assistant applies task-rout
 
 ## Routing Surface Contract
 
-The current-session assistant applies session-intent-analyzer to express semantic facts and decisions and submits them to the Python ledger writer. It applies task-router to make the reusable work judgment. Display code and the assistant use the resulting routing-surface values for change-depth, focus-layer and verification-complexity instead of inventing another scale. Unknown or conflicting values require fuller visibility and reconsideration of the affected selection.
+The current-session assistant applies session-intent-analyzer to express semantic facts and decisions and submits them to the Python ledger writer. It applies task-router to make the reusable work judgment. It uses the resulting routing-surface values for change-depth, focus-layer and verification-complexity instead of inventing another scale. Unknown or conflicting values require reconsideration of the affected selection.
 
 The current-session assistant applying task-router preserves the primary request and terminal objective. Investigation and worktree inspection remain means unless requested as deliverables. Accepted-continuation requires recorded acceptance and does not lower proof requirements.
 
@@ -80,10 +80,10 @@ Hooks classify values by whether they change the work boundary, focus layer, ver
 
 - agent_visibility.profile controls display, not hook execution or strict audit.
 - Forced/risk/gate values and failed verification retain full model hints and forced visibility.
-- Routine/debug values remain in the strict log and enter model guidance only when they affect a work decision.
-- Unknown, ambiguous or failed values expose fuller context and reopen the affected judgment.
+- Routine values remain in the strict log and enter model guidance only when they affect a work decision.
+- Unknown or failed values expose fuller context and reopen the affected judgment.
 
-Duplicate clean reminders, no-op audit entries and correlation metadata do not independently justify new work. Token reduction is a consequence, not a success metric.
+Clean-pass notices and correlation metadata do not independently justify new work. Token reduction is a consequence, not a success metric.
 
 ## Runtime Checkpoints
 

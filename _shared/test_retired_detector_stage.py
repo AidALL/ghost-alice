@@ -63,7 +63,7 @@ def test_legacy_record_cannot_derive_gate_or_detector_permission(tmp_path):
     destination, env, binding, coordinates = fixture(tmp_path)
     before = ledger.read_session_state(**coordinates)
     result = subprocess.run(['node', str(CORE/'_shared/ghost-alice-hook.mjs'), '--platform', 'claude',
-        '--event', 'PreToolUse', '--hook', 'tool-checkpoint', '--session-intent-root', destination.ledger_root],
+        '--event', 'PreToolUse'],
         input=json.dumps(dict(session_id=binding['session_id'], tool_name='Bash', tool_input={'command':'true'})),
         env=env, text=True, capture_output=True, check=True)
     assert result.stderr == ''

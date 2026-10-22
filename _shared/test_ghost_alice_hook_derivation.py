@@ -22,20 +22,23 @@ class DerivationTests(unittest.TestCase):
         for platform in ("codex", "claude"):
             with self.subTest(platform=platform):
                 out = subprocess.run(
-                    ["node", str(HOOK), "--platform", platform, "--event", "PreToolUse", "--hook", "tool-checkpoint"],
+                    ["node", str(HOOK), "--platform", platform, "--event", "PreToolUse"],
                     input=json.dumps({"session_id": "checkpoint", "tool_name": "Bash"}),
                     capture_output=True, text=True, check=True)
                 self.assertEqual(json.loads(out.stdout), {})
 
-    def test_retired_reminder_call_adds_no_context(self) -> None:
-        # The task-router reminder is retired (2f-1): an old registration that still calls it adds nothing.
-        for platform in ("codex", "claude"):
-            with self.subTest(platform=platform):
-                out = subprocess.run(["node", str(HOOK), "--platform", platform, "--event", "UserPromptSubmit",
-                                      "--hook", "hook-reminder"],
-                                     input=json.dumps({"session_id": "native"}), capture_output=True, text=True, check=False)
-                self.assertEqual(out.returncode, 0, out.stderr)
-                self.assertEqual(json.loads(out.stdout), {"continue": True})
+    def test_other_than_the_registered_options_end_with_a_usage_error(self) -> None:
+        # The registration passes only --platform and --event PreToolUse through the runner, which maps exit 2 to 1;
+        # the installer replaces the retired reminder and the pre-#84 tool-checkpoint forms.
+        for options in (["--platform", "claude", "--event", "UserPromptSubmit", "--hook", "hook-reminder"],
+                        ["--platform", "codex", "--event", "PreToolUse", "--hook", "tool-checkpoint",
+                         "--marker", "[tool-checkpoint] pre-tool-check", "--session-intent-root", "/tmp/ledger"],
+                        ["--platform", "claude"],
+                        ["--platform", "gemini", "--event", "PreToolUse"]):
+            with self.subTest(options=options):
+                out = subprocess.run(["node", str(HOOK), *options], input=json.dumps({"session_id": "stale"}),
+                                     capture_output=True, text=True, check=False)
+                self.assertEqual((out.returncode, out.stdout), (2, ""))
 
     def test_stored_judgments_and_tool_shapes_derive_no_gate_or_denial(self) -> None:
         # Do not restore the downstream gate: neither a stored model judgment, an old gate file nor the
@@ -60,8 +63,7 @@ class DerivationTests(unittest.TestCase):
             before = state.read_bytes(), gate.read_bytes()
             for tool in tools:
                 with self.subTest(platform=platform, tool=tool["tool_name"]):
-                    out = subprocess.run(["node", str(HOOK), "--platform", platform, "--event", "PreToolUse",
-                                          "--hook", "tool-checkpoint", "--session-intent-root", str(root)],
+                    out = subprocess.run(["node", str(HOOK), "--platform", platform, "--event", "PreToolUse"],
                                          input=json.dumps({"session_id": "s-derive", **tool}),
                                          capture_output=True, text=True, check=False)
                     self.assertEqual((out.returncode, out.stderr), (0, ""))

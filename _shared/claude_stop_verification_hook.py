@@ -41,7 +41,7 @@ def _read_hook_input() -> dict[str, Any]:
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--platform', choices=('claude', 'codex'), default='claude')
-    args = parser.parse_known_args()[0]
+    args = parser.parse_args()
     native_input = _read_hook_input()
     text = stop_response_text(native_input)
     if not text.strip():

@@ -1139,7 +1139,7 @@ class TestInstallHook(TempHomeTestCase):
         rows = [{'matcher': 'keep-matcher', 'custom': 'keep-metadata', 'hooks': [
             {'type': 'command', 'command': 'echo retired # ' + marker},
             {'type': 'command', 'command': 'echo custom-sibling'}]}]
-        self.assertEqual(install_hooks._remove_hook_entries(rows, marker), 1)
+        self.assertEqual(install_hooks._remove_hook_commands_by_command(rows, lambda command: marker in command), 1)
         self.assertEqual(rows, [{'matcher': 'keep-matcher', 'custom': 'keep-metadata', 'hooks': [
             {'type': 'command', 'command': 'echo custom-sibling'}]}])
 
@@ -2643,6 +2643,30 @@ class TestIdempotency(TempHomeTestCase):
         result = install_hooks.install_hook("claude")
         self.assertEqual(result, "already")
 
+    def test_install_counts_replaced_stale_hooks(self):
+        """Replacing stale copies of a hook counts each removed command."""
+        stale = "echo old-intake # " + install_hooks.SESSION_INTENT_MARKER
+        self._write_settings("claude", {"hooks": {"UserPromptSubmit": [{"matcher": "", "hooks": [
+            {"type": "command", "command": stale}, {"type": "command", "command": stale + " v2"}]}]}})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            install_hooks.install_hook("claude")
+        self.assertIn("Removed 2 stale session-intent-analyzer hook(s)", output.getvalue())
+
+    def test_install_replaces_a_registration_that_pinned_a_node_path(self):
+        """Before v0.2.2 the tool-checkpoint registration pinned a node path; install replaces it with the current command."""
+        dispatcher = install_hooks._resolve_installed_hook_dispatcher()
+        pinned = (f'"/opt/homebrew/Cellar/node/20.0.0/bin/node" "{dispatcher}" --platform claude --event PreToolUse '
+                  '--hook tool-checkpoint --marker "[tool-checkpoint] pre-tool-check" --session-intent-root "/tmp/ledger"')
+        old = install_hooks._hook_runner_command_entry(
+            "tool-checkpoint", pinned, install_hooks.TOOL_CHECKPOINT_MARKER, platform_key="claude")
+        self._write_settings("claude", {"hooks": {"PreToolUse": [old]}})
+        install_hooks.install_hook("claude")
+        commands = [hook["command"] for group in self._read_settings("claude")["hooks"]["PreToolUse"]
+                    for hook in group["hooks"]]
+        current = install_hooks._entry_command(install_hooks._platform_tool_checkpoint_entry("claude", "PreToolUse"))
+        self.assertEqual(commands, [current])
+
     def test_double_install_no_duplicate(self):
         """Installing twice does not duplicate hooks."""
         self._write_settings("claude", {})
@@ -2675,6 +2699,17 @@ class TestUninstallHook(TempHomeTestCase):
         settings = self._read_settings("claude")
         hooks = settings["hooks"]["UserPromptSubmit"]
         self.assertEqual(len(hooks), 0)
+
+    def test_uninstall_counts_removed_hooks_not_groups(self):
+        """The removal count is the number of removed hook commands, whatever groups hold them."""
+        intake = install_hooks.SESSION_INTENT_ENTRY["hooks"][0]
+        retired = {"type": "command", "command": "echo old # [web-search-first]"}
+        self._write_settings("claude", {"hooks": {
+            "UserPromptSubmit": [{"matcher": "", "hooks": [intake, dict(intake), retired]}]}})
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            self.assertEqual(install_hooks.uninstall_hook("claude"), "removed")
+        self.assertIn("Removed 3 hook(s)", output.getvalue())
 
     def test_uninstall_preserves_other_hooks(self):
         """Preserve other hooks without managed markers."""

@@ -1877,46 +1877,14 @@ def _remove_stale_hook_entries(
     extra_markers: tuple[str, ...] = (),
     hook_id: str | None = None,
 ) -> int:
-    """Remove stale entries for the same managed hook when command content differs."""
+    """Remove the same managed hook's commands that differ from the expected command; count removed hooks."""
     markers = (marker, *extra_markers)
-    removed = 0
-    i = 0
-    while i < len(hooks_list):
-        entry = hooks_list[i]
-        stale_commands = [
-            hook
-            for hook in entry.get("hooks", [])
-            if (any(candidate in hook.get("command", "") for candidate in markers)
-                or _hook_runner_id_match(hook.get("command", ""), hook_id))
-            and (hook.get("command", "") != expected_command
-                 or (require_dispatcher and not _is_dispatcher_command(hook.get("command", ""))))
-        ]
-        if stale_commands:
-            entry["hooks"] = [hook for hook in entry.get("hooks", []) if hook not in stale_commands]
-            removed += 1
-            if not entry["hooks"]:
-                hooks_list.pop(i)
-                continue
-        i += 1
-    return removed
 
+    def stale(command: str) -> bool:
+        owned = any(candidate in command for candidate in markers) or _hook_runner_id_match(command, hook_id)
+        return owned and (command != expected_command or (require_dispatcher and not _is_dispatcher_command(command)))
 
-def _remove_hook_entries(hooks_list: list, marker: str) -> int:
-    """Remove managed commands, preserving custom siblings; count affected entries."""
-    removed = 0
-    i = 0
-    while i < len(hooks_list):
-        entry = hooks_list[i]
-        retained = [hook for hook in entry.get("hooks", [])
-                    if marker not in hook.get("command", "")]
-        if len(retained) != len(entry.get("hooks", [])):
-            entry["hooks"] = retained
-            removed += 1
-            if not retained:
-                hooks_list.pop(i)
-                continue
-        i += 1
-    return removed
+    return _remove_hook_commands_by_command(hooks_list, stale)
 
 
 # Markers of the hooks Core installs now. Retired markers live in RETIRED_HOOK_MARKERS.
@@ -2070,13 +2038,11 @@ def install_hook(
         SESSION_INTENT_MARKER,
         session_intent_command,
         require_dispatcher=require_dispatcher,
+        extra_markers=LEGACY_SESSION_INTENT_MARKERS,
         hook_id="session-intent",
     )
-    for legacy_marker in LEGACY_SESSION_INTENT_MARKERS:
-        if _hook_already_exists(hook_list, legacy_marker):
-            removed += _remove_hook_entries(hook_list, legacy_marker)
     if removed:
-        _log(_t(f"  Removed {removed} stale session-intent-analyzer hook entry(ies)", f"  Removed {removed} stale session-intent-analyzer hook entry(ies)"))
+        _log(_t(f"  Removed {removed} stale session-intent-analyzer hook(s)", f"  Removed {removed} stale session-intent-analyzer hook(s)"))
         changed = True
 
     if _hook_already_exists(
@@ -2111,7 +2077,7 @@ def install_hook(
         hook_id="tool-checkpoint",
     )
     if removed:
-        _log(_t(f"  Removed {removed} stale {tool_checkpoint_key} tool-checkpoint hook entry(ies)", f"  Removed {removed} stale {tool_checkpoint_key} tool-checkpoint hook entry(ies)"))
+        _log(_t(f"  Removed {removed} stale {tool_checkpoint_key} tool-checkpoint hook(s)", f"  Removed {removed} stale {tool_checkpoint_key} tool-checkpoint hook(s)"))
         changed = True
 
     if _hook_already_exists(
@@ -2143,7 +2109,7 @@ def install_hook(
             hook_id="completion",
         )
         if removed:
-            _log(_t(f"  Removed {removed} stale {stop_key} completion hook entry(ies)", f"  Removed {removed} stale {stop_key} completion hook entry(ies)"))
+            _log(_t(f"  Removed {removed} stale {stop_key} completion hook(s)", f"  Removed {removed} stale {stop_key} completion hook(s)"))
             changed = True
         if _hook_already_exists(
             stop_list,
@@ -2174,7 +2140,7 @@ def install_hook(
             hook_id="session-start",
         )
         if removed:
-            _log(_t(f"  Removed {removed} stale {ss_key} session-start hook entry(ies)", f"  Removed {removed} stale {ss_key} session-start hook entry(ies)"))
+            _log(_t(f"  Removed {removed} stale {ss_key} session-start hook(s)", f"  Removed {removed} stale {ss_key} session-start hook(s)"))
             changed = True
         if _hook_already_exists(
             ss_list,
@@ -2199,7 +2165,7 @@ def install_hook(
             hook_id="session-receipt",
         )
         if removed:
-            _log(f"  Removed {removed} stale {ss_key} session-receipt hook entry(ies)")
+            _log(f"  Removed {removed} stale {ss_key} session-receipt hook(s)")
             changed = True
         if _hook_already_exists(
             ss_list,
@@ -2229,7 +2195,7 @@ def install_hook(
             hook_id="io-trace",
         )
         if removed:
-            _log(_t(f"  Removed {removed} stale {post_tool_key} io-trace hook entry(ies)", f"  Removed {removed} stale {post_tool_key} io-trace hook entry(ies)"))
+            _log(_t(f"  Removed {removed} stale {post_tool_key} io-trace hook(s)", f"  Removed {removed} stale {post_tool_key} io-trace hook(s)"))
             changed = True
         if not _hook_already_exists(
             pt_list,
@@ -2280,8 +2246,8 @@ def install_hook(
         removed = _remove_legacy_autopilot_hook_entries(hooks_obj)
         if removed:
             _log(_t(
-                f"  Removed {removed} legacy Claude autopilot hook entry(ies)",
-                f"  Removed {removed} legacy Claude autopilot hook entry(ies)",
+                f"  Removed {removed} legacy Claude autopilot hook(s)",
+                f"  Removed {removed} legacy Claude autopilot hook(s)",
             ))
             changed = True
     for spec in privileged_adapter_specs:
@@ -2629,11 +2595,7 @@ def _remove_hook_settings_commands(hooks_obj, predicate) -> int:
 
 
 def _remove_legacy_autopilot_hook_entries(hooks_obj: dict[str, Any]) -> int:
-    total = 0
-    for event_list in hooks_obj.values():
-        if isinstance(event_list, list):
-            total += _remove_hook_commands_by_command(event_list, _is_legacy_autopilot_hook_command)
-    return total
+    return _remove_hook_settings_commands(hooks_obj, _is_legacy_autopilot_hook_command)
 
 
 def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
@@ -2643,7 +2605,7 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     other string (e.g. a forged core marker like ``[completion-reminder] AGENTS.md``)
     is refused, so a tampered sidecar can never strip a core governance hook. The
     trailing-space match boundary keeps removal exact across hook ids that are
-    prefixes of one another. Returns the number of entries removed.
+    prefixes of one another. Returns the number of hooks removed.
     """
     if not isinstance(marker, str) or not _ADDON_HOOK_MARKER_RE.fullmatch(marker):
         return 0
@@ -2789,43 +2751,34 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
 
     total_removed = _remove_retired_hooks(hooks_obj)
 
+    def marked(*markers: str) -> Callable[[str], bool]:
+        return lambda command: any(marker in command for marker in markers)
+
     # Remove the session-intent-analyzer hook (same UserPromptSubmit event).
-    if _hook_already_exists(hook_list, SESSION_INTENT_MARKER):
-        total_removed += _remove_hook_entries(hook_list, SESSION_INTENT_MARKER)
-    for legacy_marker in LEGACY_SESSION_INTENT_MARKERS:
-        if _hook_already_exists(hook_list, legacy_marker):
-            total_removed += _remove_hook_entries(hook_list, legacy_marker)
+    total_removed += _remove_hook_commands_by_command(
+        hook_list, marked(SESSION_INTENT_MARKER, *LEGACY_SESSION_INTENT_MARKERS))
 
     # Remove the tool-checkpoint PreToolUse hook.
-    tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
-    tool_checkpoint_list = hooks_obj.get(tool_checkpoint_key, [])
-    for marker in (TOOL_CHECKPOINT_MARKER, *LEGACY_TOOL_CHECKPOINT_MARKERS):
-        if _hook_already_exists(tool_checkpoint_list, marker):
-            total_removed += _remove_hook_entries(tool_checkpoint_list, marker)
+    total_removed += _remove_hook_commands_by_command(
+        hooks_obj.get(resolve_hook_event("pre_tool_use", platform_key), []),
+        marked(TOOL_CHECKPOINT_MARKER, *LEGACY_TOOL_CHECKPOINT_MARKERS))
 
     # Remove the on_agent_stop hook.
     stop_intent = platform.get("stop_hook_intent")
     if stop_intent:
-        stop_key = resolve_hook_event(stop_intent, platform_key)
-        stop_list = hooks_obj.get(stop_key, [])
-        if _hook_already_exists(stop_list, STOP_HOOK_MARKER):
-            total_removed += _remove_hook_entries(stop_list, STOP_HOOK_MARKER)
+        total_removed += _remove_hook_commands_by_command(
+            hooks_obj.get(resolve_hook_event(stop_intent, platform_key), []), marked(STOP_HOOK_MARKER))
 
-    # Remove the SessionStart hook.
+    # Remove the SessionStart hooks.
     ss_intent = platform.get("session_start_intent")
     if ss_intent:
-        ss_key = resolve_hook_event(ss_intent, platform_key)
-        ss_list = hooks_obj.get(ss_key, [])
-        if _hook_already_exists(ss_list, SESSION_START_MARKER):
-            total_removed += _remove_hook_entries(ss_list, SESSION_START_MARKER)
-        if _hook_already_exists(ss_list, SESSION_RECEIPT_MARKER):
-            total_removed += _remove_hook_entries(ss_list, SESSION_RECEIPT_MARKER)
+        total_removed += _remove_hook_commands_by_command(
+            hooks_obj.get(resolve_hook_event(ss_intent, platform_key), []),
+            marked(SESSION_START_MARKER, SESSION_RECEIPT_MARKER))
 
     # Also remove the io-trace PostToolUse hook.
-    post_tool_key = resolve_hook_event("post_tool_use", platform_key)
-    pt_list = hooks_obj.get(post_tool_key, [])
-    if _hook_already_exists(pt_list, IO_TRACE_MARKER):
-        total_removed += _remove_hook_entries(pt_list, IO_TRACE_MARKER)
+    total_removed += _remove_hook_commands_by_command(
+        hooks_obj.get(resolve_hook_event("post_tool_use", platform_key), []), marked(IO_TRACE_MARKER))
 
     # Full uninstall also strips every MANAGED addon observational hook and every MANAGED privileged adapter hook, so neither a drifted addon hook nor an adapter hook is ever left firing live after a full uninstall.
     for ev_list in hooks_obj.values():
@@ -2843,7 +2796,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     else:
         _write_removed_hook_settings(settings_file, settings, platform_key,
                                      _trust_moves(hooks_before, settings_file, hooks_obj))
-    _log(_t(f"  Removed {total_removed} hook entry(ies)", f"  Removed {total_removed} hook entry(ies)"))
+    _log(_t(f"  Removed {total_removed} hook(s)", f"  Removed {total_removed} hook(s)"))
     return "removed"
 
 

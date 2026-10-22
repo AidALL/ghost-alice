@@ -7,33 +7,30 @@ verification burden, or recovery path. User visibility follows the runtime
 profile. The model-facing hint is derived from work impact.
 
 Materialization levels, low to high:
-  model_surface: omitted | marker | digest | focused | full
-  user_surface:  hidden | compact | focused | full | forced
+  model_surface: omitted | full
+  user_surface:  hidden | focused | full | forced
 
 Raw detail always remains reachable via strict_log_ref, independent of the two
 projection levels.
 
 Low-usefulness values are not deleted at hook time. They are classified as
-routine or audit-only unless they change focus, boundary, verification, or
-recovery. Examples include duplicate reminders, clean-pass status, noop audit
-rows, debug counters, correlation ids, and audit wording that does not
-change the next work decision.
+routine unless they change focus, boundary, verification, or recovery.
+Examples include clean-pass status, correlation ids, and audit wording that
+does not change the next work decision.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-VALUE_KINDS = {"gate", "risk", "routing", "verification", "routine", "debug"}
-EXPOSURE_CLASSES = {"forced", "essential", "focused", "routine", "audit-only"}
+VALUE_KINDS = {"gate", "risk", "verification", "routine"}
+EXPOSURE_CLASSES = {"forced", "essential", "routine"}
 PROFILES = {"strict", "dynamic", "minimal"}
 
-# exposure_class -> {profile -> (user_surface, model_surface_hint)} for the non-forced, non-fail-closed cases. User surface follows the visibility profile. Model surface hints follow work impact, so they do not vary by profile for routine/focused/essential values.
+# exposure_class -> {profile -> (user_surface, model_surface_hint)} for the non-forced, non-fail-closed cases. User surface follows the visibility profile. Model surface hints follow work impact, so they do not vary by profile for routine and essential values.
 _TABLE: dict[str, dict[str, tuple[str, str]]] = {
     "essential": {"dynamic": ("full", "full"), "minimal": ("focused", "full")},
-    "focused": {"dynamic": ("focused", "digest"), "minimal": ("compact", "digest")},
     "routine": {"dynamic": ("hidden", "omitted"), "minimal": ("hidden", "omitted")},
-    "audit-only": {"dynamic": ("hidden", "omitted"), "minimal": ("hidden", "omitted")},
 }
 
 # forced/risk/gate and failed verification reach both surfaces at the top.
@@ -93,11 +90,7 @@ def work_impact(
         return "fail-closed"
     if klass == "essential":
         return "changes-work-judgment"
-    if klass == "focused":
-        return "changes-focus-or-boundary"
-    if klass == "routine":
-        return "routine-noise"
-    return "audit-only"
+    return "routine-noise"
 
 
 def _model_surface_for_work_impact(exposure_class: str) -> str:
@@ -108,8 +101,6 @@ def _model_surface_for_work_impact(exposure_class: str) -> str:
     )
     if impact in {"interrupts-work", "changes-verification", "fail-closed", "changes-work-judgment"}:
         return "full"
-    if impact == "changes-focus-or-boundary":
-        return "digest"
     return "omitted"
 
 
