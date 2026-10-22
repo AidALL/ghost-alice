@@ -16,6 +16,7 @@ import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -1071,6 +1072,133 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
         self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
         self.record.write_bytes(b"\xff\xfe not json\n")
         self.assertEqual(install_doctor._retention_failure_line(self.record), "record unreadable")
+
+
+class HookRejectionDoctorTest(NodeRuntimeRunPathTest):
+    """Doctor reads the hook runner's command rejections from the strict session logs the runner writes them to."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        environment = mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.ghost_alice_root)})
+        environment.start()
+        self.addCleanup(environment.stop)
+        self.session_logs = self.ghost_alice_root / "session-logs"
+        self.now = datetime.now(timezone.utc)
+
+    def _stamp(self, *, days_ago: float = 0, seconds_ago: float = 0) -> str:
+        return (self.now - timedelta(days=days_ago, seconds=seconds_ago)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+    @staticmethod
+    def _printed(stamp: str) -> str:
+        return stamp[:19] + "Z"
+
+    def _row(self, platform: str, session: str, *, ts: str, rejected: bool = True,
+             hook_id: str = "tool-checkpoint", reason: str = "hook payload decode failed") -> dict:
+        """A strict log row as `strict_session_log.append_event` writes it. A rejection carries the runner's mark
+        (`surface_item.value_key`); the ordinary row quotes the mark's words inside a value, which is not the mark."""
+        stderr = f"hook command rejected: {reason}\n" if rejected else ""
+        item = {"source_hook": hook_id, "value_key": "hook-command-rejection" if rejected else hook_id,
+                "value_kind": "gate" if rejected else "routine", "exposure_class": "forced" if rejected else "routine",
+                "value": " ".join(stderr.split()), "strict_log_ref": "/dev/null"}
+        return {"schema_version": "strict-hook-output.v1", "ts": ts, "platform": platform, "session_id": session,
+                "hook_id": hook_id, "event": "PreToolUse", "agent_visibility_profile": "strict",
+                "visible_decision": "force_show" if rejected else "show", "exit_code": 126 if rejected else 0,
+                "stdout": "" if rejected else 'saw "value_key": "hook-command-rejection" in a value',
+                "stderr": stderr, "payload_digest": "sha256:0", "surface_item": item}
+
+    def _log(self, platform: str, session: str, rows: list[dict], *, age_days: float = 0) -> Path:
+        log = self.session_logs / platform / session / "strict-hook-output.jsonl"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("".join(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n" for row in rows),
+                       encoding="utf-8")
+        if age_days:
+            moment = (self.now - timedelta(days=age_days)).timestamp()
+            os.utime(log, (moment, moment))
+        return log
+
+    def test_without_session_logs_the_line_is_zero(self):
+        self.assertEqual(install_doctor._hook_rejection_lines(self.session_logs), ["hook-rejections: 0 in 14 days"])
+        _, output = self._run("claude", strict=False)
+        self.assertIn("hook-rejections: 0 in 14 days", output)
+
+    def test_rejections_are_listed_per_session_newest_first_without_changing_overall(self):
+        _, clean = self._run("claude", strict=False)
+        mismatch = ("registered adapter hash mismatch. Adapter was not executed. expected=0 actual=1. "
+                    "Check the installed adapter and current registration.")
+        older_last = self._stamp(days_ago=1)
+        self._log("claude", "s-older", [
+            self._row("claude", "s-older", ts=self._stamp(days_ago=2), hook_id="adapter-autopilot-mode-prepare-origin",
+                      reason=mismatch),
+            self._row("claude", "s-older", ts=self._stamp(days_ago=1, seconds_ago=10), rejected=False),
+            self._row("claude", "s-older", ts=older_last, hook_id="adapter-autopilot-mode-prepare-origin",
+                      reason=mismatch),
+        ])
+        newer_last = self._stamp(seconds_ago=30)
+        self._log("codex", "s-newer", [self._row("codex", "s-newer", ts=newer_last)])
+        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        self.assertEqual(lines, [
+            "hook-rejections: 3 in 14 days (2 sessions)",
+            f"  codex/s-newer: 1, last {self._printed(newer_last)} tool-checkpoint: hook payload decode failed",
+            f"  claude/s-older: 2, last {self._printed(older_last)} adapter-autopilot-mode-prepare-origin: "
+            "registered adapter hash mismatch",
+        ])
+        # Doctor for one platform lists every host folder: the audit platform of a rejection can be `unknown`.
+        _, output = self._run("claude", strict=False)
+        for line in lines:
+            self.assertIn(line, output)
+        # A rejection is Ghost-ALICE's own refusal to run a hook command: doctor reports it and overall stays
+        # what it was without the rows.
+        overall = lambda text: [line for line in text.splitlines() if line.startswith("overall:")]
+        self.assertEqual(overall(output), overall(clean))
+
+    def test_the_listing_shows_the_newest_five_sessions(self):
+        for index in range(7):
+            self._log("claude", f"s-{index}", [self._row("claude", f"s-{index}", ts=self._stamp(days_ago=index))])
+        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        self.assertEqual(lines[0], "hook-rejections: 7 in 14 days (7 sessions, newest 5 shown)")
+        self.assertEqual([line.split(":")[0].strip() for line in lines[1:]], [f"claude/s-{index}" for index in range(5)])
+
+    def test_sessions_and_rows_older_than_the_retention_window_are_left_out(self):
+        # The folder whose log last changed 15 days ago is one the session-logs retention removes; doctor does not
+        # read it. A row older than 14 days inside a live log is not counted either.
+        self._log("claude", "s-gone", [self._row("claude", "s-gone", ts=self._stamp(days_ago=1))], age_days=15)
+        self._log("claude", "s-live", [self._row("claude", "s-live", ts=self._stamp(days_ago=20)),
+                                       self._row("claude", "s-live", ts=self._stamp(days_ago=3))])
+        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[0], "hook-rejections: 1 in 14 days (1 sessions)")
+        self.assertTrue(lines[1].startswith("  claude/s-live: 1, last "), lines[1])
+
+    def test_an_unreadable_log_is_reported(self):
+        (self.session_logs / "claude" / "s-dir" / "strict-hook-output.jsonl").mkdir(parents=True)
+        self.assertEqual(install_doctor._hook_rejection_lines(self.session_logs),
+                         ["hook-rejections: unavailable (IsADirectoryError claude/s-dir)"])
+        _, output = self._run("claude", strict=False)
+        self.assertIn("hook-rejections: unavailable (IsADirectoryError claude/s-dir)", output)
+
+    def test_a_log_whose_marked_row_is_not_json_is_counted_as_unreadable_beside_the_readable_ones(self):
+        self._log("claude", "s-ok", [self._row("claude", "s-ok", ts=self._stamp(days_ago=1))])
+        broken = self.session_logs / "codex" / "s-bad" / "strict-hook-output.jsonl"
+        broken.parent.mkdir(parents=True)
+        broken.write_bytes(b'{"surface_item": {"value_key": "hook-command-rejection"}, broken\n')
+        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        self.assertEqual(lines[0],
+                         "hook-rejections: 1 in 14 days (1 sessions; 1 logs unreadable: JSONDecodeError codex/s-bad)")
+        self.assertEqual(len(lines), 2)
+
+    def test_doctor_reads_the_row_the_runner_writes(self):
+        # The runner's own writer, at the path it chooses from the same Ghost-ALICE root.
+        import hook_profile_gate
+        env = dict(os.environ, HOME=str(self.root), GHOST_ALICE_PLATFORM="claude", GHOST_ALICE_SESSION_ID="s-real")
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(hook_profile_gate, "_read_stdin", return_value="{}"):
+            hook_profile_gate._append_rejection_audit(
+                "tool-checkpoint", "hook command rejected: hook payload decode failed\n", platform="claude")
+        self.assertTrue((self.session_logs / "claude" / "s-real" / "strict-hook-output.jsonl").is_file())
+        lines = install_doctor._hook_rejection_lines(self.session_logs)
+        self.assertEqual(lines[0], "hook-rejections: 1 in 14 days (1 sessions)")
+        self.assertTrue(lines[1].startswith("  claude/s-real: 1, last "), lines[1])
+        self.assertTrue(lines[1].endswith(" tool-checkpoint: hook payload decode failed"), lines[1])
 
 
 class RuntimeCoreAuditTest(unittest.TestCase):
