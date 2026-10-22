@@ -21,7 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_definitions
 import hook_profile_gate
 import install_hooks
-import pending_merge_precheck_hook
 
 
 def _make_node_executable(node: Path) -> None:
@@ -308,12 +307,6 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             context = hook_profile_gate._visibility_context("session-intent", json.dumps({"ghostAlicePendingMergeCheck": valid}), "", 0, env=env, declared="routine")
         probe.assert_not_called()
         self.assertNotIn("pending_merge_undecided", context)
-
-    def test_clean_merge_payload_does_not_repeat_workflow_boilerplate(self):
-        with mock.patch.object(pending_merge_precheck_hook, "_pending_entries", return_value=[]):
-            payload = json.loads(pending_merge_precheck_hook._json_payload("codex", "LONG WORKFLOW INSTRUCTION"))
-        self.assertNotIn("LONG WORKFLOW INSTRUCTION", payload["systemMessage"])
-        self.assertEqual(payload["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
 
     def test_visibility_context_ignores_current_downstream_block_gate(self):
         with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as temp_root:

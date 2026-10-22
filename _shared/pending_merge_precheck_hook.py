@@ -116,7 +116,7 @@ def main() -> int:
     parser.add_argument("--platform", required=True)
     parser.add_argument("--format", required=True, choices=["text", "json"])
     parser.add_argument("--root", type=Path)
-    args, _unknown = parser.parse_known_args()
+    args = parser.parse_args()
 
     input_payload = _read_hook_input()
     result = None

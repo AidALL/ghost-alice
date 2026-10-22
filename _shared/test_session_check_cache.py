@@ -162,6 +162,22 @@ class SessionCheckReuseTest(unittest.TestCase):
             self.assertEqual((checked["undecided_count"], checked["status"]), (1, "checked"))
             self.assertIn("1 undecided", compacted["systemMessage"])
 
+    def test_removed_input_check_options_end_without_a_check(self):
+        # A 0.5.1 input registration still passes the removed options; the installer removes that registration.
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            manifest = home / ".ghost-alice/pending-merges/codex/manifest.json"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text(json.dumps({"entries": [{"decided": False}]}))
+            env = dict(os.environ)
+            env.update({"HOME": directory, "CODEX_THREAD_ID": "session-old", "GHOST_ALICE_SESSION_ID": "session-old"})
+            command = [sys.executable, str(Path(__file__).with_name("pending_merge_precheck_hook.py")),
+                       "--platform", "codex", "--hook", "prompt-check", "--context", "prompt_submit",
+                       "--format", "json", "--internal-b64", "eA==", "--root", str(home / "ledger")]
+            result = subprocess.run(command, input='{}', text=True, capture_output=True, env=env)
+            self.assertEqual((result.returncode, result.stdout), (2, ""))
+            self.assertFalse((home / "ledger/session-checks.sqlite3").exists())
+
     def test_pending_check_stays_out_of_model_context(self):
         import pending_merge_precheck_hook as hook
         for count in (0, 2):
