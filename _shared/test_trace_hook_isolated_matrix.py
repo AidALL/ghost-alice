@@ -44,15 +44,13 @@ def reply(text):
     return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
-def valid_text(platform, *, compact=False, trace="", verdict="pass"):
-    report = ("- verification-before-completion: done\n"
-              "- skill-call: verification-before-completion (this turn)\n") if platform == "codex" else ""
+def valid_text(*, verdict="pass"):
     criteria = "- acceptance-criteria:\n  - calculation: recompute time [source: user-said]\n"
     reference = "    criterion: calculation\n"
-    return (f"{BUSINESS}\n\n[completion-check]\n{report}{criteria}"
+    return (f"{BUSINESS}\n\n[completion-check]\n{criteria}"
             f"- claim-evidence-map:\n  - claim: operating time was checked\n{reference}"
             f"    evidence: synthetic calculation subprocess exited {0 if verdict == 'pass' else 1}\n"
-            f"    verdict: {verdict}\n- unverified:\n  - none\n{trace}")
+            f"    verdict: {verdict}\n- unverified:\n  - none\n")
 
 
 class TraceHookIsolatedMatrixTests(unittest.TestCase):
@@ -146,7 +144,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         root.mkdir(exist_ok=True)
         marked = '[completion-check]' in text.lower() or '[partial-check]' in text.lower()
         reviewed = text if marked and proof_validator.validate_completion_text(
-            text, require_completion_check=True) is None else valid_text(platform)
+            text, require_completion_check=True) is None else valid_text()
         review_root = ledger_root or root / 'ledger'
         skill_fixture.StopHookSkillEvidenceTests._review_format_fixture(root, platform, reviewed, env,
             session_id=session, ledger_root=review_root, core_root=self.source,
@@ -225,19 +223,9 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                                   "--platform", platform, "--session-id", session, "--snapshot"])
         return json.loads(state.stdout)["latest_input_event_id"]
 
-    def test_optional_trace_forms_full_and_compact_across_platforms_and_profiles(self):
-        traces = ("", "[io-trace]\n- files-read: [/synthetic/verification-before-completion/SKILL.md]\n",
-                  "[io-trace]\n- skills-loaded: [verification-before-completion]\n",
-                  "[io-trace]\n- skills-loaded: task-router; verification-before-completion.\n",
-                  "[io-trace]\n- skills-loaded:\n  - verification-before-completion (this turn)\n",
-                  "[io-trace]\n- skills-reused: [verification-before-completion (source: /synthetic/SKILL.md; load-record: same-session)]\n")
-        for platform, profile, compact, trace in itertools.product(PLATFORMS, PROFILES, (False,), traces):
-            with self.subTest(platform=platform, profile=profile, compact=compact, trace=trace):
-                self.assert_allow(self.stop(platform, valid_text(platform, compact=compact, trace=trace), profile=profile))
-
     def test_equivalent_field_and_line_serializations(self):
         for platform, form in itertools.product(PLATFORMS, ("lf", "crlf", "none-inline", "semicolon", "indented", "upper-header")):
-            text = valid_text(platform)
+            text = valid_text()
             if form == "crlf":
                 text = text.replace("\n", "\r\n")
             elif form == "none-inline":
@@ -260,7 +248,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             with self.subTest(platform=platform, profile=profile, text=text):
                 self.assert_allow(self.stop(platform, text, entries=[prompt(), reply(text)], profile=profile))
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
-            self.assert_allow(self.stop(platform, valid_text(platform, verdict="fail"), profile=profile))
+            self.assert_allow(self.stop(platform, valid_text(verdict="fail"), profile=profile))
 
     def test_response_purpose_not_prose_selects_completion_gate(self):
         for platform, profile, text in itertools.product(PLATFORMS, PROFILES,
@@ -279,7 +267,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                                            "--platform", platform], payload)
                 self.assert_allow(json.loads(result.stdout))
 
-    def test_core_evidence_negatives_cannot_be_hidden_by_optional_trace(self):
+    def test_core_evidence_negatives_are_unaccepted(self):
         changes = (
             ("claim: operating time was checked", "claim:"),
             ("    evidence: synthetic calculation subprocess exited 0\n", ""),
@@ -293,19 +281,14 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         )
         for platform, profile, (old, new) in itertools.product(PLATFORMS, PROFILES, changes):
             with self.subTest(platform=platform, profile=profile, change=new):
-                self.assert_unaccepted(self.stop(platform, valid_text(platform).replace(old, new), profile=profile))
+                self.assert_unaccepted(self.stop(platform, valid_text().replace(old, new), profile=profile))
         for profile in PROFILES:
-            text = valid_text("codex", trace="[io-trace]\n- skills-loaded: [verification-before-completion]\n")
-            for bad in (text.replace("- verification-before-completion: done\n", ""),
-                        text.replace("verification-before-completion (this turn)", "verification-before-completion-v2 (this turn)")):
-                with self.subTest(profile=profile, bad=bad):
-                    self.assert_allow(self.stop("codex", bad, profile=profile))
-            self.assert_allow(self.stop("claude", valid_text("claude"), entries=[prompt(), reply(valid_text("claude"))], profile=profile))
+            self.assert_allow(self.stop("claude", valid_text(), entries=[prompt(), reply(valid_text())], profile=profile))
 
     def test_payload_alias_and_transcript_precedence(self):
         for platform, key, path_key, direct_valid in itertools.product(PLATFORMS, DIRECT_KEYS,
                                                                        ("transcript_path", "transcriptPath"), (False, True)):
-            good = valid_text(platform)
+            good = valid_text()
             bad = good.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
             direct, recorded = (good, bad) if direct_valid else (bad, good)
             with self.subTest(platform=platform, key=key, path_key=path_key, direct_valid=direct_valid):
@@ -314,11 +297,11 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 expected_valid = direct_valid
                 (self.assert_allow if expected_valid else self.assert_unaccepted)(result)
         for platform, key in itertools.product(PLATFORMS, DIRECT_KEYS):
-            good = valid_text(platform)
+            good = valid_text()
             self.assert_allow(self.stop(platform, "", direct_key=key, entries=[prompt(), skill(), reply(good)]))
-        bad = valid_text("codex").replace("    evidence: synthetic calculation subprocess exited 0\n", "")
+        bad = valid_text().replace("    evidence: synthetic calculation subprocess exited 0\n", "")
         self.assert_unaccepted(self.stop("codex", bad, direct_key="lastAssistantMessage",
-                                    extra={"last_assistant_message": bad, "prompt_response": valid_text("codex")}))
+                                    extra={"last_assistant_message": bad, "prompt_response": valid_text()}))
 
     def test_last_reply_only_after_meta_tool_results_and_ask_answers(self):
         boundaries = (prompt("A real subsequent question."),
@@ -329,7 +312,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                       prompt([{"type": "tool_result", "tool_use_id": "synthetic-ask", "content": "Option A"}]),
                       prompt([{"type": "text", "text": "tool explanation"}, {"type": "tool_result", "content": "result"}]))
         for platform, boundary, final_valid in itertools.product(PLATFORMS, boundaries, (False, True)):
-            good = valid_text(platform)
+            good = valid_text()
             bad = good.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
             before, final = (bad, good) if final_valid else (good, bad)
             entries = [prompt(), skill(), reply(before), boundary, skill(), reply(final)]
@@ -341,7 +324,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                     self.assert_unaccepted(payload)
 
     def test_claude_review_is_independent_of_skill_call_display(self):
-        good = valid_text('claude')
+        good = valid_text()
         for boundary in (prompt('Real new input'), prompt('meta', isMeta=True),
                          prompt([{'type':'tool_result', 'content':'answer'}])):
             with self.subTest(boundary=boundary):
@@ -356,7 +339,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                       (False, prompt([{"type": "tool_result", "tool_use_id": "read", "content": "tool result"}])),
                       (False, prompt([{"type": "tool_result", "tool_use_id": "ask", "content": "Option A"}])))
         for platform, previous_valid, (new_turn, boundary) in itertools.product(PLATFORMS, (False, True), boundaries):
-            previous = valid_text(platform)
+            previous = valid_text()
             if not previous_valid:
                 previous = previous.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
             with self.subTest(platform=platform, previous_valid=previous_valid, new_turn=new_turn, boundary=boundary):
@@ -367,7 +350,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
     def test_recovery_never_forces_business_replay_for_any_configured_host(self):
         for platform, profile, host, defect in itertools.product(PLATFORMS, PROFILES, HOSTS,
                                                                 ("missing-evidence", "bad-verdict", "missing-marker")):
-            text = valid_text(platform)
+            text = valid_text()
             if defect == "missing-evidence":
                 text = text.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
             elif defect == "bad-verdict":
@@ -379,13 +362,13 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
 
     def test_repeated_metadata_defect_does_not_request_answer_retry(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
-            bad = valid_text(platform).replace("    evidence: synthetic calculation subprocess exited 0\n", "")
+            bad = valid_text().replace("    evidence: synthetic calculation subprocess exited 0\n", "")
             for hook_active in (False, True):
                 with self.subTest(platform=platform, profile=profile, hook_active=hook_active):
                     result = self.stop(platform, bad, profile=profile, extra={"stop_hook_active": hook_active})
                     self.assert_diagnostic(result)
                     self.assertFalse('retry' in json.dumps(result).lower())
-            self.assert_allow(self.stop(platform, valid_text(platform), profile=profile))
+            self.assert_allow(self.stop(platform, valid_text(), profile=profile))
 
     def test_installed_lifecycle_profile_matrix_keeps_audit_and_control_protocol(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
@@ -410,7 +393,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                     self.assertNotEqual(result.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
                 payload["hook_event_name"] = "PostToolUse"
                 self.assert_audit_surface(self.installed_hook(hooks, "PostToolUse", "io-trace", payload, env), profile)
-                good = valid_text(platform)
+                good = valid_text()
                 transcript = home / "synthetic-final.jsonl"
                 transcript.write_text("".join(json.dumps(e) + "\n" for e in [prompt(), skill(), reply(good)]), encoding="utf-8")
                 self.bind_review(platform, good, env, session=session, ledger_root=self.ledger_root)
@@ -435,7 +418,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
             with self.installed(platform, profile) as (home, env, hooks):
                 session = f"completion-{platform}-{profile}"
-                good = valid_text(platform)
+                good = valid_text()
                 bad = good.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
                 scenarios = ((True, good, [prompt(), skill(), reply(good)]),
                              (False, bad, [prompt(), skill(), reply(bad)]),

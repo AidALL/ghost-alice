@@ -918,8 +918,6 @@ class TestMessageLanguage(unittest.TestCase):
                                 "text": (
                                     "Paper A summary.\n\n"
                                     "[completion-check]\n"
-                                    "- verification-before-completion: done\n"
-                                    "- skill-call: verification-before-completion (this turn)\n"
                                     "- acceptance-criteria:\n"
                                     "  - c1: cite two papers [source: user-said]\n"
                                     "- claim-evidence-map:\n"
@@ -929,10 +927,7 @@ class TestMessageLanguage(unittest.TestCase):
                                     "    verdict: pass\n"
                                     "- unverified:\n"
                                     "  - none\n"
-                                    "- evidence: search result\n"
-                                    "[io-trace]\n"
-                                    "- web-accessed: [query]\n"
-                                    "- skills-loaded: [verification-before-completion]"
+                                    "- evidence: search result"
                                 ),
                             }],
                         },
@@ -983,12 +978,7 @@ class TestMessageLanguage(unittest.TestCase):
                             "content": [{
                                 "type": "text",
                                 "text": (
-                                    "[gate-state]\n"
-                                    "- task-router: done\n"
-                                    "\n"
                                     "[completion-check]\n"
-                                    "- verification-before-completion: done\n"
-                                    "- skill-call: verification-before-completion (this turn)\n"
                                     "- acceptance-criteria:\n"
                                     "  - crit-a: aligned work [source: system-doc]\n"
                                     "- claim-evidence-map:\n"
@@ -998,9 +988,7 @@ class TestMessageLanguage(unittest.TestCase):
                                     "    verdict: pass\n"
                                     "- unverified:\n"
                                     "  - none\n"
-                                    "- evidence: ran cmd\n"
-                                    "[io-trace]\n"
-                                    "- skills-loaded: [verification-before-completion]"
+                                    "- evidence: ran cmd"
                                 ),
                             }],
                         },
@@ -1073,37 +1061,25 @@ class TestMessageLanguage(unittest.TestCase):
                     json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
                         {"type": "tool_use", "name": "Skill",
                          "input": {"skill": "verification-before-completion"}}]}}),
-                    # earlier response carries an INVALID completion-check (missing verification-done)
+                    # earlier response carries an INVALID completion-check (a claim without evidence)
                     json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
                         {"type": "text", "text": (
-                            "[gate-state]\n"
-                            "- task-router: done\n"
-                            "\n"
                             "[completion-check]\n"
-                            "- skill-call: verification-before-completion (this turn)\n"
                             "- acceptance-criteria:\n"
                             "  - c1: stale [source: system-doc]\n"
                             "- claim-evidence-map:\n"
                             "  - claim: stale\n"
                             "    criterion: c1\n"
-                            "    evidence: stale\n"
                             "    verdict: pass\n"
                             "- unverified:\n"
-                            "  - none\n"
-                            "[io-trace]\n"
-                            "- skills-loaded: [verification-before-completion]")}]}}),
+                            "  - none")}]}}),
                     # an AskUserQuestion answer returns as a tool_result user entry (NOT a real prompt)
                     json.dumps({"type": "user", "message": {"role": "user", "content": [
                         {"type": "tool_result", "tool_use_id": "abc", "content": "option A"}]}}),
                     # FINAL response: a fully valid completion-check
                     json.dumps({"type": "assistant", "message": {"role": "assistant", "content": [
                         {"type": "text", "text": (
-                            "[gate-state]\n"
-                            "- task-router: done\n"
-                            "\n"
                             "[completion-check]\n"
-                            "- verification-before-completion: done\n"
-                            "- skill-call: verification-before-completion (this turn)\n"
                             "- acceptance-criteria:\n"
                             "  - crit-a: aligned [source: system-doc]\n"
                             "- claim-evidence-map:\n"
@@ -1113,9 +1089,7 @@ class TestMessageLanguage(unittest.TestCase):
                             "    verdict: pass\n"
                             "- unverified:\n"
                             "  - none\n"
-                            "- evidence: ran cmd\n"
-                            "[io-trace]\n"
-                            "- skills-loaded: [verification-before-completion]")}]}}),
+                            "- evidence: ran cmd")}]}}),
                 ]) + "\n",
                 encoding="utf-8",
             )
@@ -5935,12 +5909,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
             input_text=json.dumps({
                 "hook_event_name": "Stop",
                 "last_assistant_message": (
-                    "[gate-state]\n"
-                    "- task-router: done\n"
-                    "\n"
                     "[completion-check]\n"
-                    "- verification-before-completion: done\n"
-                    "- skill-call: verification-before-completion (this turn)\n"
                     "- acceptance-criteria:\n"
                     "  - crit-a: aligned [source: system-doc]\n"
                     "- claim-evidence-map:\n"
@@ -5950,9 +5919,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                     "    verdict: pass\n"
                     "- unverified:\n"
                     "  - none\n"
-                    "- evidence: ran cmd\n"
-                    "[io-trace]\n"
-                    "- skills-loaded: [verification-before-completion]"
+                    "- evidence: ran cmd"
                 ),
             }),
         )
@@ -5961,38 +5928,6 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         payload = json.loads(result.stdout)
         assert_stop_observation(self, payload)
         self.assertNotIn("systemMessage", payload)
-
-    def test_codex_stop_hook_optional_trace_does_not_require_retry(self):
-        result = _run_reviewed_stop_command(
-            install_hooks.STOP_HOOK_COMMAND_CODEX,
-            platform="codex",
-            input_text=json.dumps({
-                "hook_event_name": "Stop",
-                "last_assistant_message": (
-                    "[gate-state]\n"
-                    "- task-router: done\n"
-                    "\n"
-                    "[completion-check]\n"
-                    "- verification-before-completion: done\n"
-                    "- skill-call: verification-before-completion (this turn)\n"
-                    "- acceptance-criteria:\n"
-                    "  - c1: fixed formatting [source: user-said]\n"
-                    "- claim-evidence-map:\n"
-                    "  - claim: fixed formatting\n"
-                    "    criterion: c1\n"
-                    "    evidence: stop hook prompt\n"
-                    "    verdict: pass\n"
-                    "- unverified:\n"
-                    "  - none\n"
-                    "- evidence: stop hook prompt\n"
-                    "[io-trace] no tools run this correction turn."
-                ),
-            }),
-        )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        assert_stop_observation(self, payload)
 
     def test_codex_stop_hook_uses_validator_command(self):
         command = install_hooks.STOP_HOOK_COMMAND_CODEX

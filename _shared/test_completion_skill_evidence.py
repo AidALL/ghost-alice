@@ -27,15 +27,15 @@ BODY = """[completion-check]
   - none
 - evidence: python check.py exited 0
 """
-IO_TRACE = "[io-trace]\n- commands-run: [python check.py]\n"
-WITHOUT_SELF_REPORT = f"Business result: 82 hours 40 minutes.\n\n{BODY}{IO_TRACE}"
+WITHOUT_SELF_REPORT = f"Business result: 82 hours 40 minutes.\n\n{BODY}"
+# Decisions 7 and 14 retired these printed self-report lines; the guards below keep them powerless.
 SELF_REPORT_LINES = (
     "- verification-before-completion: done\n"
     "- skill-call: verification-before-completion (this turn)\n"
 )
 WITH_SELF_REPORT = WITHOUT_SELF_REPORT.replace(
     "[completion-check]\n", f"[completion-check]\n{SELF_REPORT_LINES}", 1,
-).replace("[io-trace]\n", "[io-trace]\n- skills-loaded: [verification-before-completion]\n", 1)
+) + "[io-trace]\n- skills-loaded: [verification-before-completion]\n"
 
 
 def user(text):
@@ -80,16 +80,6 @@ class ValidatorOptionTests(unittest.TestCase):
     def test_evidence_structure_still_rejects_a_missing_evidence_field(self):
         broken = WITHOUT_SELF_REPORT.replace("    evidence: python check.py exited 0\n", "")
         self.assertIn("evidence", self.check(broken))
-
-    def test_evidence_structure_accepts_missing_or_reordered_optional_trace(self):
-        self.assertIsNone(self.check(f"Result.\n\n{BODY}"))
-        before = f"Result.\n\n{IO_TRACE}\n{BODY}"
-        self.assertIsNone(self.check(before))
-
-    def test_retired_gate_state_after_the_block_is_ordinary_text(self):
-        # Decision 14 retired the printed [gate-state] block.
-        late = WITHOUT_SELF_REPORT + "\n[gate-state]\n- task-router: done\n"
-        self.assertNotIn("gate-state", self.check(late) or "")
 
 
 class StopHookSkillEvidenceTests(unittest.TestCase):
@@ -206,6 +196,13 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
     def test_first_codex_stop_accepts_review_without_procedural_markers(self):
         payload = self.run_hook(platform="codex", message=WITHOUT_SELF_REPORT)
         assert_stop_observation(self, payload)
+
+    def test_codex_self_report_lines_neither_establish_nor_block_the_review(self):
+        # Codex once read the printed skill-call line as its skill audit; Core's review now decides.
+        for verdict, issue in (("supported", None), ("unsupported", "response-unsupported")):
+            with self.subTest(verdict=verdict):
+                payload = self.run_hook(platform="codex", message=WITH_SELF_REPORT, review_verdict=verdict)
+                assert_stop_observation(self, payload, issue=issue)
 
     def test_authenticated_whole_answer_still_needs_supported_judgment(self):
         for platform in ("claude", "codex"):

@@ -116,12 +116,12 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             timed_out=False,
             log_text="hook: UserPromptSubmit Completed\nhook: Stop Completed\n",
             output_text=(
+                "[focus: meso]\n"
                 "The previous log contained ERROR codex_core::tools::router, "
                 "but this answer is quoting it as evidence.\n"
-                "[gate-state]\n- task-router: done\n[io-trace]\n- files-read: [agent.log]\n"
             ),
             output_exists=True,
-            required_markers=("[gate-state]", "[io-trace]"),
+            required_markers=("[focus: ",),
         )
 
         self.assertEqual(result.status, "pass")
@@ -140,12 +140,11 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
                 "123\n"
             ),
             output_text=(
-                "[gate-state]\n- task-router: done\n"
-                "[completion-check]\n- verification-before-completion: done\n"
-                "[io-trace]\n- files-read: [policy.md]\n"
+                "[focus: meso]\n"
+                "[completion-check]\n- unverified: none\n"
             ),
             output_exists=True,
-            required_markers=("[gate-state]", "[completion-check]", "[io-trace]"),
+            required_markers=("[focus: ", "[completion-check]"),
         )
 
         self.assertEqual(result.status, "pass")
@@ -160,12 +159,11 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
                 "hook: Stop Completed\n"
             ),
             output_text=(
-                "[gate-state]\n- task-router: done\n"
-                "[completion-check]\n- verification-before-completion: done\n"
-                "[io-trace]\n- files-read: [README.md]\n"
+                "[focus: meso]\n"
+                "[completion-check]\n- unverified: none\n"
             ),
             output_exists=True,
-            required_markers=("[gate-state]", "[completion-check]", "[io-trace]"),
+            required_markers=("[focus: ", "[completion-check]"),
         )
 
         self.assertEqual(result.status, "pass")
@@ -201,7 +199,6 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             output_text=(
                 "요청 조건상 현재 사용 가능한 로컬 파일 읽기 수단은 shell 명령뿐인데, "
                 "사용자가 shell 명령을 금지했으므로 파일 내용을 읽지 않았다.\n"
-                "[io-trace]\n- commands-run: none\n"
             ),
             output_exists=True,
         )
@@ -220,12 +217,9 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
                 "hook: Stop Completed\n"
             ),
             output_text=(
-                "[gate-state]\n"
-                "- task-router: done\n"
+                "[focus: meso]\n"
                 "[completion-check]\n"
-                "- verification-before-completion: done\n"
-                "[io-trace]\n"
-                "- files-read: [C:\\Users\\try2q\\ghost-alice\\README.md]\n"
+                "- unverified: none\n"
             ),
             output_exists=True,
         )
@@ -240,16 +234,15 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             log_text=(
                 "hook: UserPromptSubmit Completed\n"
                 "codex\n"
-                "[gate-state]\n"
-                "- task-router: done\n"
+                "[focus: meso]\n"
             ),
-            output_text="[io-trace]\n- files-read: [README.md]\n",
+            output_text="[completion-check]\n- unverified: none\n",
             output_exists=True,
-            required_markers=("[gate-state]", "[io-trace]"),
+            required_markers=("[focus: ", "[completion-check]"),
         )
 
         self.assertEqual(result.status, "fail")
-        self.assertIn("missing-marker:[gate-state]", result.reasons)
+        self.assertIn("missing-marker:[focus: ", result.reasons)
 
     def test_third_person_could_not_read_in_answer_is_not_invalid_harness(self):
         # A successful answer that incidentally describes some tool's behaviour ("the doctor could not read X") must not be flagged invalid-harness.
@@ -258,12 +251,11 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             timed_out=False,
             log_text="hook: UserPromptSubmit Completed\nhook: Stop Completed\n",
             output_text=(
-                "[gate-state]\n- task-router: done\n"
+                "[focus: meso]\n"
                 "Summary: install_doctor flags runs where it could not read the runtime file.\n"
-                "[io-trace]\n- files-read: [install_doctor.py]\n"
             ),
             output_exists=True,
-            required_markers=("[gate-state]", "[io-trace]"),
+            required_markers=("[focus: ",),
         )
         self.assertEqual(result.status, "pass")
 
@@ -273,12 +265,11 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             timed_out=False,
             log_text="hook: Stop Completed\n",
             output_text=(
-                "[gate-state]\n- task-router: done\n"
+                "[focus: meso]\n"
                 "The sandbox forbids shell commands in read-only mode, per policy.\n"
-                "[io-trace]\n- files-read: [policy.md]\n"
             ),
             output_exists=True,
-            required_markers=("[gate-state]", "[io-trace]"),
+            required_markers=("[focus: ",),
         )
         self.assertEqual(result.status, "pass")
 
@@ -337,13 +328,12 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
                 "hook: Stop Completed\n"
             ),
             output_text=(
-                "[gate-state]\n- task-router: done\n"
+                "[focus: meso]\n"
                 "Summary: completed the multi-step task.\n"
-                "[completion-check]\n- verification-before-completion: done\n"
-                "[io-trace]\n- files-read: [README.md]\n"
+                "[completion-check]\n- unverified: none\n"
             ),
             output_exists=True,
-            required_markers=("[gate-state]", "[completion-check]", "[io-trace]"),
+            required_markers=("[focus: ", "[completion-check]"),
         )
         self.assertEqual(result.status, "pass")
 
@@ -356,13 +346,12 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
                 "hook: UserPromptSubmit Completed\n"
             ),
             output_text=(
-                "[gate-state]\n- task-router: done\n"
+                "[focus: meso]\n"
                 "Summary: produced output despite the hook failure.\n"
-                "[completion-check]\n- verification-before-completion: done\n"
-                "[io-trace]\n- files-read: [README.md]\n"
+                "[completion-check]\n- unverified: none\n"
             ),
             output_exists=True,
-            required_markers=("[gate-state]", "[completion-check]", "[io-trace]"),
+            required_markers=("[focus: ", "[completion-check]"),
         )
         self.assertEqual(result.status, "fail")
         self.assertIn("hook-failure", result.reasons)
@@ -378,7 +367,7 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             ),
             output_text="partial output, no governance surface\n",
             output_exists=True,
-            required_markers=("[gate-state]", "[io-trace]"),
+            required_markers=("[focus: ",),
         )
         self.assertEqual(result.status, "fail")
         self.assertIn("tool-router-error", result.reasons)

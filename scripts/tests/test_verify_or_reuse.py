@@ -437,7 +437,7 @@ class RestatementAuditTests(_ModuleTestCase):
         self.assertEqual([(f["message"], f["first_seen"]) for f in audit["findings"]], [(1, 0)])
 
     def test_new_content_and_fenced_control_blocks_are_not_flagged(self) -> None:
-        block = "```text\n[gate-state]\n- task-router: done (routing recorded for this turn)\n```\n"
+        block = "```text\n[boundary-contract]\n- phase: execution (recorded for this turn)\n```\n"
         audit = VOR.audit_restatement([block + "Result A is ready for review now.", block + "Result B replaces the old draft."])
         self.assertEqual(audit["findings"], [])
 

@@ -807,7 +807,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         import completion_check_validator as parser
         self.assertTrue(callable(getattr(parser, 'extract_original_proof', None)), 'Original proof extraction is missing')
         proof = self.proof()
-        self.assertEqual(parser.extract_original_proof(proof + '\n\nThe footer is fixed.\n\n[io-trace]\n- files-read: []').strip(), proof)
+        self.assertEqual(parser.extract_original_proof(proof + '\n\nThe footer is fixed.').strip(), proof)
         for prefix in ('```text\n' + proof + '\n```\n\n', '> [completion-check]\n> example only\n\n'):
             answer = prefix + proof + '\n\nThe footer is fixed.'
             self.assertIsNone(parser.validate_completion_text(answer, require_completion_check=True))

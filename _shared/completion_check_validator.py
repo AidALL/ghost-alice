@@ -11,7 +11,7 @@ Public API:
         otherwise the diagnostic string.
 
 Helpers are exposed as module-level snake_case functions for unit testing:
-    strip_control_blocks, extract_control_block, looks_like_completion_claim,
+    extract_control_block, looks_like_completion_claim,
     extract_top_level_field_section, section_is_none,
     extract_acceptance_criteria_ids, extract_claim_evidence_entries,
     validate_completion_evidence_map
@@ -29,9 +29,8 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 from text_lines import LINE_BREAK
 
 
-_CONTROL_BLOCKS = frozenset(
-    {"tool-checkpoint", "task-router", "boundary-contract", "io-trace"}
-)
+# Printed control blocks whose nested fields are evidence data, not code examples.
+_CONTROL_BLOCKS = frozenset({"boundary-contract", "completion-check", "partial-check"})
 
 # Match block headers case-insensitively and allow leading whitespace so position lookup agrees with control-block extraction.
 _BLOCK_HEADER_RE = re.compile(r"^\[([a-z0-9-]+)\]", re.I)
@@ -252,8 +251,7 @@ def _strip_block_examples(text):
             kept.append("")
             continue
         header = _BLOCK_HEADER_RE.match(line.strip())
-        control_fields = bool(header and (header.group(1).lower() in _CONTROL_BLOCKS
-                                          or header.group(1).lower() in {"completion-check", "partial-check"}))
+        control_fields = bool(header and header.group(1).lower() in _CONTROL_BLOCKS)
         kept.append(line)
         paragraph = bool(content.strip()) and not _PARAGRAPH_BREAK_RE.match(content)
     return _mask_multiline_quoted_examples("\n".join(kept))
@@ -285,30 +283,6 @@ def _mask_multiline_quoted_examples(text):
                 return span
         return re.sub(r"[^\r\n]", " ", span)
     return _MULTILINE_QUOTED_SPAN_RE.sub(mask, text)
-
-
-def strip_control_blocks(text):
-    """Remove structural control blocks while preserving surrounding text.
-
-    A control block starts at a `[name]` header whose name is in
-    `_CONTROL_BLOCKS` and ends at the first blank line or a line that is
-    exactly `---`.
-    """
-    lines = _split_lines(text)
-    kept = []
-    in_control_block = False
-    for line in lines:
-        trimmed = line.strip()
-        block = _BLOCK_HEADER_RE.match(trimmed)
-        if block and block.group(1).lower() in _CONTROL_BLOCKS:
-            in_control_block = True
-            continue
-        if in_control_block:
-            if not trimmed or trimmed == "---":
-                in_control_block = False
-            continue
-        kept.append(line)
-    return "\n".join(kept)
 
 
 def _control_headers(text):

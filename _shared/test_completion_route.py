@@ -38,8 +38,6 @@ class PartialEvidenceRouteTests(unittest.TestCase):
         ctx = context(); ctx['response_route']['response_purpose'] = 'partial'
         text = '''[partial-check]
 - scope: partial
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
   - AC1: Repair the original failure [source: user-said]
   - waiting: Unresolved condition [source: user-said]
@@ -252,7 +250,7 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertEqual(result.get("evidence_route"), "no_external_check")
 
     def test_inline_quote_boundaries_cannot_hide_actual_control(self):
-        text = 'The command returned "OK."\n\n[completion-check]\n\n"[io-trace]"'
+        text = 'The command returned "OK."\n\n[completion-check]\n\n"[boundary-contract]"'
         result = self.select({}, dict(text=text, phase="final"), {})
         self.assertTrue(result.get("required_completion_check"))
         self.assertEqual(result.get("evidence_route"), "owner_verification")
