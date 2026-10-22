@@ -2436,8 +2436,8 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(row["visible_decision"], "force_show")
 
     def test_core_hook_exit_2_does_not_block_the_host(self):
-        # Core informs and stops; only a registered privileged adapter may block. A usage error or a
-        # removed script behind an old registration must not become a host block (exit 2).
+        # Core informs and stops. A usage error or a removed script behind an old registration
+        # must not become a host block (exit 2).
         gone = Path(__file__).with_name("retired_hook_that_is_gone.py").as_posix()
         for hook_id, args in (("session-intent", "-c 'import sys; sys.exit(2)'"), ("prompt", f"'{gone}'")):
             with self.subTest(hook_id=hook_id), tempfile.TemporaryDirectory() as temp_home:
@@ -2452,6 +2452,41 @@ class TestHookCommandAllowlist(unittest.TestCase):
                 row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(row["exit_code"], 2)
+
+    def test_adapter_exit_2_does_not_block_the_host(self):
+        # Core does not know add-ons, so the runner keeps no blocking exception for an adapter binding.
+        import addon_installer
+        import install_destination
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home) / "isolated"
+            root.mkdir()
+            script = root / "adapters" / "demo.py"
+            script.parent.mkdir()
+            script.write_text("# adapter bytes\n", encoding="utf-8")
+            destination = install_destination.InstallDestination(
+                mode="isolated", owned_root=str(root), platform_dir=str(root / ".codex"),
+                skills_dir=str(root / "skills"), ghost_root=str(root / ".ghost-alice"),
+                ledger_root=str(root / "intent"), project_root=str(root),
+                core_source_root=str(Path(__file__).resolve().parents[1]))
+            binding = destination.binding()
+            runner = addon_installer.privileged_adapter_runner_id("demo", "continue")
+            binding["adapter"] = dict(adapter_id="demo", runner_id=runner, script=str(script), event="Stop",
+                                      content_hash=hashlib.sha256(script.read_bytes()).hexdigest())
+            spec = dict(args_policy="no_args", hook_id_by_event={"on_agent_stop": "continue"},
+                        script_rel_by_event={"on_agent_stop": "adapters/demo.py"})
+            payload = base64.urlsafe_b64encode(shlex.join([sys.executable, str(script)]).encode()).decode()
+            child = subprocess.CompletedProcess([sys.executable, str(script)], 2, stdout="", stderr="adapter refused\n")
+            stdin_text = json.dumps(dict(session_id="s-adapter", hook_event_name="Stop"))
+            with (mock.patch.dict(os.environ, {"HOME": temp_home}, clear=True),
+                  mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                  mock.patch.object(sys, "stdout", io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()),
+                  mock.patch.object(hook_profile_gate, "_validate_shell_command", return_value=[sys.executable, str(script)]),
+                  mock.patch.object(hook_definitions, "load_privileged_adapter_allowlist", return_value={"demo": spec}),
+                  mock.patch.object(hook_profile_gate.subprocess, "run", return_value=child),
+                  self.assertRaises(SystemExit) as ran):
+                hook_profile_gate.main(["run", runner, "codex", payload,
+                                        "--binding-b64", install_destination.encode_binding(binding)])
+            self.assertEqual(ran.exception.code, 1)
 
     def test_runner_usage_error_does_not_block_the_host(self):
         result = subprocess.run([sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run"],
@@ -2567,7 +2602,7 @@ class TestHookProtocolSurface(unittest.TestCase):
                          'run', 'tool-checkpoint', payload],
                         input=json.dumps({'session_id': 'pretool-audit', 'hook_event_name': 'PreToolUse'}),
                         text=True, capture_output=True, env=env, check=False)
-                    # Only a registered privileged adapter may block; a Core hook's exit 2 reaches the host as 1.
+                    # No hook the runner runs blocks through exit 2; it reaches the host as 1.
                     self.assertEqual(result.returncode, 1 if denied else 0, result.stderr)
                     emitted = json.loads(result.stdout)
                     self.assertNotIn('completion_recording', emitted)
