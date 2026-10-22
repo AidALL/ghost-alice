@@ -35,32 +35,25 @@ class EntrypointBodyContractTest(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(source / rel, target)
 
-    def test_platform_port_parity_includes_claude_global_bootstrap(self) -> None:
+    def test_platform_ports_are_not_compared_by_rule_number(self) -> None:
+        # Decisions 8 and 9: each rule has one owner and the contract carries no numbered rules,
+        # so host templates are not compared with numbered rule headers.
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             codex_port = repo / "platforms" / "codex" / "AGENTS.md"
             claude_port = repo / "platforms" / "claude" / "CLAUDE.md"
             codex_port.parent.mkdir(parents=True)
             claude_port.parent.mkdir(parents=True)
-            ssot_rules = "\n".join(f"### {number}. Rule {number}" for number in range(13))
-            (repo / SSOT_RULES_FILE).write_text(ssot_rules + "\n", encoding="utf-8")
-            codex_port.write_text(ssot_rules + "\ntask-router\n", encoding="utf-8")
-            claude_port.write_text(
-                "\n".join(f"### {number}. Rule {number}" for number in range(12))
-                + "\ntask-router\n",
-                encoding="utf-8",
-            )
+            numbered = "\n".join(f"### {number}. Rule {number}" for number in range(13))
+            (repo / SSOT_RULES_FILE).write_text(numbered + "\n", encoding="utf-8")
+            codex_port.write_text("task-router\n", encoding="utf-8")
+            claude_port.write_text("task-router\n", encoding="utf-8")
 
             findings: list[Finding] = []
             check_platform_ports(repo, findings)
 
-            self.assertTrue(
-                any(
-                    finding.check == "parity-missing"
-                    and "platforms/claude/CLAUDE.md" in finding.message
-                    and "rule 12" in finding.message
-                    for finding in findings
-                ),
+            self.assertFalse(
+                any(finding.check.startswith("parity") for finding in findings),
                 [finding.to_dict() for finding in findings],
             )
 

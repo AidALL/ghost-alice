@@ -308,6 +308,13 @@ class LiveAgentSmokeClassificationTest(unittest.TestCase):
             )
             self.assertEqual(result.status, "invalid-harness", phrase)
 
+    def test_first_answer_cases_require_the_focus_line_not_gate_state(self):
+        # Decision 15: a fresh session's first answer shows a focus line; decision 14 retired [gate-state].
+        for case_id in ("readme-first-lines", "install-doctor-read"):
+            markers = live_agent_smoke.SMOKE_CASES[case_id].required_markers
+            self.assertIn("[focus: ", markers)
+            self.assertNotIn("[gate-state]", markers)
+
     def test_install_doctor_read_case_does_not_require_python(self):
         prompt = live_agent_smoke.SMOKE_CASES["install-doctor-read"].prompt
 

@@ -234,7 +234,7 @@ class SkillGateContractTest(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text((path.read_text(encoding="utf-8") if path.exists() else "") + "\n" + body, encoding="utf-8")
         self._write_file(root, "coding-convention/verification-before-completion/references/verify-or-reuse.md",
-                         "## Instruction Body Reuse\nskills-reused skills-loaded skill-call\n")
+                         "## Instruction Body Reuse\nsession_check_cache.py --body-retained\n")
         self._write_file(root, "coding-convention/verification-before-completion/references/autopilot-publication.md",
                          "## Apply and deliver\ncontinue: true response_assessment.body_issue strict audit does not hold or replace desktop output\n")
         claude = root / "platforms/claude/CLAUDE.md"
@@ -304,7 +304,7 @@ class SkillGateContractTest(unittest.TestCase):
         cases = (
             ("platforms/common-governance.md", ("why", "contract-ref", "contract-check")),
             ("session-intent-analyzer/references/ledger-schema.md", ("record_response_route", "response-route.v1")),
-            ("coding-convention/verification-before-completion/references/verify-or-reuse.md", ("skills-reused", "skills-loaded", "skill-call")),
+            ("coding-convention/verification-before-completion/references/verify-or-reuse.md", ("session_check_cache.py", "--body-retained")),
             ("coding-convention/verification-before-completion/references/autopilot-publication.md", ("continue: true", "response_assessment.body_issue", "strict audit", "does not hold or replace desktop output")),
         )
         for relative, fields in cases:
@@ -536,78 +536,27 @@ class SkillGateContractTest(unittest.TestCase):
             path.write_text(json.dumps(contract))
             self.assertTrue(any("merge-companion-precheck" in issue.message for issue in run_contract_checks(root)))
 
-    def test_gate_state_order_contract_rejects_task_router_before_session_intent(self) -> None:
+    def test_retired_gate_state_block_is_not_a_contract(self) -> None:
+        # Decision 14 retired the printed [gate-state] block, so no file is checked for its order.
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
-            self._write_file(
-                root,
-                "AGENTS.md",
-                (
-                    "skill-catalog/session-gates.json\n"
-                    "docs/policies/session-gate-matrix.md\n"
-                    "boundary-contract\n"
-                    "session-intent-analyzer\n"
-                    "session-intent-analyzer → task-router\n"
-                    "boundary-contract: required\n"
-                    "hook-verified\n"
-                    "English canonical narrative + English control surface\n"
-                    "[gate-state]\n"
-                    "- merge-companion-precheck: clean\n"
-                    "- task-router: done\n"
-                    "- session-intent-analyzer: done | hook-observed | pending\n"
-                    "- using-coding-convention: done | n/a\n"
-                    "- boundary-contract: required | done | n/a\n"
-                    "- skill-call:\n"
-                    "- next-required: <skill-name|none>\n"
-                    "[completion-check]\n"
-                    "acceptance-criteria\n"
-                    "claim-evidence-map\n"
-                    "unverified\n"
-                    "A required gate skill is not satisfied by a metadata-only match\n"
-                    "use a fresh or valid retained instruction body\n"
-                    "The pending-merge precheck is a pre-routing and session-start layer that completes before the user-input governance graph begins\n"
-                    "explicit user defer or skip\n"
-                ),
+            agents = root / "AGENTS.md"
+            agents.write_text(
+                agents.read_text() + "\n[gate-state]\n- task-router: done\n- session-intent-analyzer: done\n"
             )
 
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("gate-state must list session-intent-analyzer before task-router", messages)
+            messages = "\n".join(issue.message for issue in run_contract_checks(root))
+            self.assertNotIn("gate-state", messages)
 
-    def test_gate_state_order_contract_rejects_task_router_without_session_intent(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            self._write_file(
-                root,
-                "task-router/SKILL.md",
-                (
-                    "English canonical narrative + English control surface\n"
-                    "[gate-state]\n"
-                    "- task-router: done\n"
-                    "- using-coding-convention: done | n/a\n"
-                    "- skill-call: task-router (this turn); using-coding-convention (this turn) | n/a\n"
-                    "- next-required: <skill-name|none>\n"
-                    "intent-routing gate\n"
-                    "work intent analysis and skill routing\n"
-                    "after session-intent-analyzer intake\n"
-                    "not a tool permission owner\n"
-                    "not a tool-checkpoint owner\n"
-                    "using-coding-convention\n"
-                    "boundary-contract\n"
-                    "boundary-reason\n"
-                    "next-required\n"
-                    "hook-verified clean\n"
-                    "user-explicit defer/skip may continue\n"
-                    "pending merge remains undecided when deferred\n"
-                    "skill-call:\n"
-                ),
-            )
-
-            issues = run_contract_checks(root)
-            messages = "\n".join(issue.message for issue in issues)
-            self.assertIn("gate-state with task-router must include session-intent-analyzer", messages)
+    def test_instruction_reuse_names_no_retired_printed_fields(self) -> None:
+        # Decisions 6, 7 and 14 retired the printed skill-call, skills-loaded and skills-reused fields.
+        text = (
+            REPO_ROOT / "coding-convention/verification-before-completion/references/verify-or-reuse.md"
+        ).read_text(encoding="utf-8")
+        section = text.split("## Instruction Body Reuse", 1)[1].split("\n## ", 1)[0]
+        for field in ("skill-call", "skills-loaded", "skills-reused"):
+            self.assertNotIn(field, section)
 
     def test_retired_classifier_and_nonterminal_evolution_are_rejected(self):
         for mutation in ('detector', 'evolution'):

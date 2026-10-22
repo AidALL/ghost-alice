@@ -154,7 +154,7 @@ OWNER_SECTIONS = (
         "coding-convention/using-coding-convention/SKILL.md",
         "../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse",
         "coding-convention/verification-before-completion/references/verify-or-reuse.md",
-        "Instruction Body Reuse", ("skills-reused", "skills-loaded", "skill-call"),
+        "Instruction Body Reuse", ("session_check_cache.py", "--body-retained"),
     ),
     OwnerSection(
         "coding-convention/verification-before-completion/SKILL.md",
@@ -170,14 +170,6 @@ OWNER_SECTIONS = (
         ("continue: true", "response_assessment.body_issue", "strict audit", "does not hold or replace desktop output"),
     ),
 )
-
-GATE_STATE_ORDER_PATHS = [
-    "AGENTS.md",
-    "platforms/codex/AGENTS.md",
-    "docs/policies/session-gate-matrix.md",
-    "task-router/SKILL.md",
-    "coding-convention/using-coding-convention/SKILL.md",
-]
 
 LEGACY_TOOL_CHECKPOINT_TOKENS = (
     "action" + "-gate",
@@ -380,76 +372,6 @@ def _check_owner_sections(root: Path) -> list[ContractIssue]:
             if identifier not in body:
                 issues.append(ContractIssue("ERROR", contract.owner,
                                             f"owner section {contract.heading} missing required identifier: {identifier}"))
-    return issues
-
-
-def _gate_state_blocks(text: str) -> list[list[str]]:
-    lines = text.splitlines()
-    blocks: list[list[str]] = []
-    for index, line in enumerate(lines):
-        if line.strip() != "[gate-state]":
-            continue
-        block: list[str] = []
-        for body_line in lines[index + 1 :]:
-            stripped = body_line.strip()
-            if stripped.startswith("- "):
-                block.append(stripped)
-                continue
-            if not stripped:
-                continue
-            break
-        if block:
-            blocks.append(block)
-    return blocks
-
-
-def _gate_state_positions(block: list[str]) -> dict[str, int]:
-    positions: dict[str, int] = {}
-    for index, line in enumerate(block):
-        match = re.match(r"-\s+([a-z0-9-]+)\s*:", line)
-        if match:
-            positions.setdefault(match.group(1), index)
-    return positions
-
-
-def _check_gate_state_order(root: Path) -> list[ContractIssue]:
-    issues: list[ContractIssue] = []
-    for rel_path in GATE_STATE_ORDER_PATHS:
-        path = root / rel_path
-        if not path.is_file():
-            continue
-        for block in _gate_state_blocks(_read_text(path)):
-            positions = _gate_state_positions(block)
-            if "task-router" not in positions:
-                continue
-            if "session-intent-analyzer" not in positions:
-                issues.append(
-                    ContractIssue(
-                        "ERROR",
-                        rel_path,
-                        "gate-state with task-router must include session-intent-analyzer",
-                    )
-                )
-                continue
-            if positions["session-intent-analyzer"] > positions["task-router"]:
-                issues.append(
-                    ContractIssue(
-                        "ERROR",
-                        rel_path,
-                        "gate-state must list session-intent-analyzer before task-router",
-                    )
-                )
-            if (
-                "merge-companion-precheck" in positions
-                and positions["merge-companion-precheck"] > positions["session-intent-analyzer"]
-            ):
-                issues.append(
-                    ContractIssue(
-                        "ERROR",
-                        rel_path,
-                        "gate-state must list merge-companion-precheck before session-intent-analyzer",
-                    )
-                )
     return issues
 
 
@@ -762,7 +684,6 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
                 issues.append(ContractIssue("ERROR", rel_path, message))
 
     issues.extend(_check_owner_sections(root))
-    issues.extend(_check_gate_state_order(root))
     issues.extend(_check_claude_first_turn_contract(root))
     issues.extend(_check_legacy_tool_checkpoint_names(root))
     issues.extend(_check_removed_contract_wording(root))

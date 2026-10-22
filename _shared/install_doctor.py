@@ -719,15 +719,6 @@ def _runtime_validator_golden_status(runtime_shared: Path) -> tuple[str, str]:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         sample = (
-            "[gate-state]\n"
-            "- merge-companion-precheck: clean\n"
-            "- session-intent-analyzer: done\n"
-            "- task-router: done\n"
-            "- using-coding-convention: n/a\n"
-            "- boundary-contract: n/a\n"
-            "- skill-call: session-intent-analyzer (this turn); task-router (this turn)\n"
-            "- next-required: none\n"
-            "\n"
             "[completion-check]\n"
             "- acceptance-criteria:\n"
             "  - crit-a: golden sample [source: system-doc]\n"
@@ -738,8 +729,6 @@ def _runtime_validator_golden_status(runtime_shared: Path) -> tuple[str, str]:
             "    verdict: pass\n"
             "- unverified:\n"
             "  - none\n"
-            "[io-trace]\n"
-            "- skills-loaded: [verification-before-completion]\n"
         )
         reason = module.validate_completion_text(sample, require_completion_check=True)
     except Exception as exc:

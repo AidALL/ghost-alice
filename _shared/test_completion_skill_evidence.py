@@ -86,9 +86,10 @@ class ValidatorOptionTests(unittest.TestCase):
         before = f"Result.\n\n{IO_TRACE}\n{BODY}"
         self.assertIsNone(self.check(before))
 
-    def test_evidence_structure_still_rejects_gate_state_after_the_block(self):
+    def test_retired_gate_state_after_the_block_is_ordinary_text(self):
+        # Decision 14 retired the printed [gate-state] block.
         late = WITHOUT_SELF_REPORT + "\n[gate-state]\n- task-router: done\n"
-        self.assertIn("gate-state", self.check(late))
+        self.assertNotIn("gate-state", self.check(late) or "")
 
 
 class StopHookSkillEvidenceTests(unittest.TestCase):

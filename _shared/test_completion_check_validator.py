@@ -122,10 +122,9 @@ class TestCompletionTextFinalSurfaceOrder(unittest.TestCase):
                          "Invalid verdict value", "unverified section"):
             self.assertIn(expected, result)
 
-    def test_completion_check_rejects_gate_state_after_completion_check(self):
-        result = v.validate_completion_text(_final_text("completion", "summary", "gate", "io"))
-        self.assertIsNotNone(result)
-        self.assertIn("gate-state", result)
+    def test_retired_gate_state_after_completion_check_is_ordinary_text(self):
+        # Decision 14 retired the printed [gate-state] block; it no longer has a placement rule.
+        self.assertIsNone(v.validate_completion_text(_final_text("completion", "summary", "gate", "io")))
 
     def test_completion_check_allows_optional_trace_before_completion_check(self):
         result = v.validate_completion_text(_final_text("io", "completion", "summary"))
@@ -338,20 +337,6 @@ class TestIndentedCompletionHeader(unittest.TestCase):
         result = v.validate_completion_text(indented, require_completion_check=True)
         self.assertTrue(result is None or isinstance(result, str))
 
-
-class TestGateStatePlacement(unittest.TestCase):
-    # Stop validation receives the final assistant message, not necessarily the opening commentary where [gate-state] is surfaced. Enforce placement only when the block is present in the validated text.
-
-    def test_completion_surface_without_gate_state_is_allowed_in_hook_mode(self):
-        text = _final_text("completion", "summary", "io")
-        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
-
-    def test_completion_surface_with_gate_state_before_completion_check_is_allowed(self):
-        text = _final_text("gate", "completion", "summary", "io")
-        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
-
-    def test_gate_state_does_not_require_completion_controls(self):
-        self.assertIsNone(v.validate_completion_text("[gate-state]\n- task-router: done"))
 
 
 if __name__ == "__main__":

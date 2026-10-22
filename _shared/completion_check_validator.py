@@ -30,7 +30,7 @@ from text_lines import LINE_BREAK
 
 
 _CONTROL_BLOCKS = frozenset(
-    {"tool-checkpoint", "gate-state", "task-router", "boundary-contract", "io-trace"}
+    {"tool-checkpoint", "task-router", "boundary-contract", "io-trace"}
 )
 
 # Match block headers case-insensitively and allow leading whitespace so position lookup agrees with control-block extraction.
@@ -686,8 +686,6 @@ def validate_completion_text(text, *, require_completion_check=False):
         positions = find_control_block_positions(text, marker)
         if not positions:
             continue
-        if any(position > positions[0] for position in find_control_block_positions(text, "gate-state")):
-            issues.append(f"[gate-state] belongs to the opening surface and must not appear after [{marker}].")
         for block in extract_all_control_blocks(text, marker):
             reason = validate_completion_evidence_map(block, partial=marker == "partial-check")
             if reason:
