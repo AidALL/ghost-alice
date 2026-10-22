@@ -93,7 +93,7 @@ Read-only consumers may use it for discovery. Writers use exact receipt/host ide
 
 ## Hook Observation Receipt
 
-The session-start hook delivers a session receipt with the fixed coordinates and no input identity. The host repeats session start after resume, clear, compaction and fork, so one current copy stays in model context. After the hook records that delivery for the session, the input hook records each input and adds nothing to model context. When no delivery is recorded for the session, the input hook supplies the per-input receipt described below.
+The session-start hook delivers a session receipt with the fixed coordinates and no input identity. The host repeats session start after resume, clear, compaction and fork, so one current copy stays in model context. The hook records the digest of that receipt for the session in `session-checks.sqlite3` under the ledger root. While the recorded digest matches the current receipt, the input hook records each input and adds nothing to model context. A code update that builds the same receipt therefore adds nothing. When the record holds another digest, the input hook delivers the current session receipt once and updates the record. An input never creates the store or a record, because only a session whose start hook runs gets the receipt back after compaction. When the session has no record, or the update fails, the input hook supplies the per-input receipt described below with that input.
 
 ```json
 {

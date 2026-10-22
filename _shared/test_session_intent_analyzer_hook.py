@@ -5,12 +5,14 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import io
 import json
 import os
 import pathlib
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -380,11 +382,69 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(len(self.events("quiet-codex")), 2)
 
     def test_input_without_a_delivered_session_receipt_keeps_the_full_receipt(self):
+        # Without its own session start, a later compaction cannot restore the receipt, so every input keeps it.
         self.run_hook({"session_id": "other", "source": "startup"}, "--context", "session_start")
-        body = json.loads(self.run_hook({"session_id": "fallback", "prompt": "first"}).stdout)
-        receipt = receipt_from(body["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual(receipt["session_id"], "fallback")
-        self.assertIn("input_event_id", receipt)
+        for prompt in ("first", "second"):
+            body = json.loads(self.run_hook({"session_id": "fallback", "prompt": prompt}).stdout)
+            receipt = receipt_from(body["hookSpecificOutput"]["additionalContext"])
+            self.assertEqual(receipt["session_id"], "fallback")
+            self.assertIn("input_event_id", receipt)
+
+    def test_record_from_an_older_runtime_is_replaced_once(self):
+        # An older runtime keyed this session's record on the intake script's file stamp.
+        self.run_hook({"session_id": "older", "source": "startup"}, "--context", "session_start")
+        with closing(sqlite3.connect(self.ledger_root / "session-checks.sqlite3")) as connection:
+            connection.execute("UPDATE checks SET target=?, stamp=? WHERE session='older'",
+                               (str(SCRIPT), json.dumps(["16777230", "78749244", "19835", "1", "2"])))
+            connection.commit()
+        first = json.loads(self.run_hook({"session_id": "older", "prompt": "first"}).stdout)
+        self.assertEqual(receipt_from(first["hookSpecificOutput"]["additionalContext"])["schema_version"],
+                         "session-intent-session-receipt.v1")
+        second = json.loads(self.run_hook({"session_id": "older", "prompt": "second"}).stdout)
+        self.assertNotIn("hookSpecificOutput", second)
+
+    def test_replaced_hook_does_not_resend_an_unchanged_receipt(self):
+        hook = self.deploy()
+        for platform in ("codex", "claude"):
+            with self.subTest(platform=platform):
+                session = f"replaced-{platform}"
+                start = self.run_hook({"session_id": session, "source": "startup"}, "--platform", platform,
+                                      "--context", "session_start", script=hook)
+                self.assertIn("hookSpecificOutput", json.loads(start.stdout))
+                # An install writes the new script beside the old one and renames it into place.
+                staged = hook.with_name(hook.name + ".new")
+                staged.write_bytes(SCRIPT.read_bytes())
+                os.replace(staged, hook)
+                audit = self.check_event_count()
+                for prompt in ("first objective", "second objective"):
+                    result = self.run_hook({"session_id": session, "prompt": prompt}, "--platform", platform,
+                                           script=hook)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    body = json.loads(result.stdout)
+                    self.assertNotIn("hookSpecificOutput", body)
+                    self.assertNotIn("systemMessage", body)
+                # A quiet input only reads the record, so nothing accumulates per input.
+                self.assertEqual(self.check_event_count(), audit)
+
+    def test_changed_receipt_is_sent_once(self):
+        session = "changed-receipt"
+        self.run_hook({"session_id": session, "source": "startup"}, "--context", "session_start")
+        # The transcript naming the context provider appears after session start, so the current receipt
+        # differs from the delivered one.
+        native = self.tmp_home / "codex-native"
+        transcript = native / "sessions" / f"rollout-{session}.jsonl"
+        transcript.parent.mkdir(parents=True)
+        transcript.write_text(json.dumps({"type": "session_meta", "payload": {
+            "id": session, "model_provider": "ghost_alice_context"}}) + "\n")
+        changed = {"GHOST_ALICE_CODEX_DIR": str(native)}
+        first = json.loads(self.run_hook({"session_id": session, "prompt": "first"}, env_update=changed).stdout)
+        self.assertIn("hookSpecificOutput", first)
+        receipt = receipt_from(first["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(receipt["schema_version"], "session-intent-session-receipt.v1")
+        self.assertEqual(receipt["context_selection"]["native_dir"], str(native))
+        second = json.loads(self.run_hook({"session_id": session, "prompt": "second"}, env_update=changed).stdout)
+        self.assertNotIn("hookSpecificOutput", second)
+        self.assertNotIn("systemMessage", second)
 
     def test_session_start_without_exact_identity_delivers_nothing(self):
         start = self.run_hook({"source": "startup"}, "--context", "session_start")
@@ -422,6 +482,18 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
     def events(self, session_id, platform="codex"):
         return ledger_api.read_session_events(root=self.ledger_root, platform=platform, session_id=session_id)
 
+    def check_event_count(self) -> int:
+        with closing(sqlite3.connect(self.ledger_root / "session-checks.sqlite3")) as connection:
+            return connection.execute("SELECT count(*) FROM check_events").fetchone()[0]
+
+    def deploy(self) -> pathlib.Path:
+        """Place the intake hook with its runtime siblings, as an install does, and return the hook path."""
+        runtime = self.tmp_home / "runtime"
+        skip = shutil.ignore_patterns("test_*", "tests", "__pycache__")
+        shutil.copytree(SCRIPT.parent, runtime / "_shared", ignore=skip)
+        shutil.copytree(SCRIPT.parents[1] / "session-intent-analyzer", runtime / "session-intent-analyzer", ignore=skip)
+        return runtime / "_shared" / SCRIPT.name
+
     def run_hook(
         self,
         payload: dict,
@@ -429,6 +501,8 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         child_io_encoding: str | None = None,
         session_env: str | None = None,
         native_session_env: str | None = None,
+        script: pathlib.Path = SCRIPT,
+        env_update: dict[str, str] | None = None,
     ) -> subprocess.CompletedProcess:
         env = os.environ.copy()
         env["HOME"] = str(self.tmp_home)
@@ -440,10 +514,11 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             env["GHOST_ALICE_SESSION_ID"] = session_env
         if child_io_encoding:
             env["PYTHONIOENCODING"] = child_io_encoding
+        env.update(env_update or {})
         return subprocess.run(
             [
                 sys.executable,
-                str(SCRIPT),
+                str(script),
                 "--platform",
                 "codex",
                 "--format",

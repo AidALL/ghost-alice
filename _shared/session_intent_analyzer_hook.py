@@ -75,23 +75,6 @@ except Exception:
 TERMINAL_ROUTING_INSTRUCTION = reminder_text('terminal-routing')
 
 
-def terminal_routing_instruction(root: Path, platform: str, session_id: str,
-                                 input_event_id: str | None) -> str:
-    """Deliver once within an exact native input; never cache a routing decision."""
-    if not input_event_id or not session_id or session_id == "unknown":
-        return TERMINAL_ROUTING_INSTRUCTION
-    try:
-        from session_check_cache import observe_check
-        binding = {"input_event_id": input_event_id}
-        delivery = observe_check(root, platform, session_id, "hook-terminal-routing", Path(__file__),
-                                 lambda: binding, validate=lambda value: value == binding)
-        if delivery["status"] == "reused":
-            return ""
-    except (ImportError, OSError, ValueError, TypeError, KeyError):
-        pass
-    return TERMINAL_ROUTING_INSTRUCTION
-
-
 DEFAULT_INTERNAL = reminder_text('session-intent')
 LEDGER_UNAVAILABLE_DEGRADE = 'The intake hook cannot load the ledger dependency. The current-session assistant must not claim intake was recorded or substitute another ledger. Authorized ledger repair and a tool-free explanation remain possible.'
 LEDGER_WRITE_FAILED_DEGRADE = 'The intake hook could not write this input to the ledger. The current-session assistant must not claim persistence or use an old input binding. Authorized ledger repair and a tool-free explanation remain possible.'
@@ -308,14 +291,24 @@ def session_receipt(paths: dict[str, Path]) -> str:
     return _receipt_block(receipt)
 
 
-def _session_receipt_delivered(root: Path, platform: str, session_id: str) -> bool:
-    """Read-only: an input never creates the check store."""
+def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, Path],
+                  observation: dict[str, Any] | None) -> str:
+    """Add nothing while the session holds the current receipt; send a changed one once.
+
+    Only the session's own start creates its record, because only a session whose start hook runs gets the
+    receipt back after compaction. An input updates that record and never creates the store or a record.
+    """
+    receipt = session_receipt(paths)
     try:
-        from session_check_cache import peek_check
-        value = peek_check(root, platform, session_id, SESSION_RECEIPT_KEY, Path(__file__))
+        from session_check_cache import delivered, record_delivery
+        if delivered(root, platform, session_id, SESSION_RECEIPT_KEY, receipt):
+            return ""
+        if record_delivery(root, platform, session_id, SESSION_RECEIPT_KEY, receipt, create=False):
+            return receipt
     except (ImportError, OSError, ValueError, TypeError):
-        return False
-    return bool(value) and value.get("delivered") is True
+        pass
+    # Without its session-start record, or after a failed update, each input carries its own receipt.
+    return observation_receipt(paths, observation)
 
 
 def session_start(args: argparse.Namespace, payload: dict[str, Any], ledger_root: Path) -> str:
@@ -327,11 +320,10 @@ def session_start(args: argparse.Namespace, payload: dict[str, Any], ledger_root
     except (TypeError, ValueError, OSError):
         return json.dumps({"continue": True})
     try:
-        from session_check_cache import observe_check
-        observe_check(ledger_root, args.platform, session_id, SESSION_RECEIPT_KEY, Path(__file__),
-                      lambda: {"delivered": True}, force=True)
+        from session_check_cache import record_delivery
+        record_delivery(ledger_root, args.platform, session_id, SESSION_RECEIPT_KEY, message, create=True)
     except (ImportError, OSError, ValueError, TypeError):
-        pass  # Without the delivery record, inputs keep sending the full receipt.
+        pass  # Without the delivery record, each input carries its own receipt until the next session start.
     return render_payload(args.format, message, ledger_root, routine=True, event="SessionStart")
 
 
@@ -407,8 +399,7 @@ def main(argv: list[str] | None = None) -> int:
                     raw_input=prompt, prompt_id=payload.get('prompt_id'),
                     transcript_path=payload.get('transcript_path') or payload.get('transcriptPath'))
                 _clear_degrade_marker(ledger_root, args.platform, payload)
-                delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
-                message = "" if delivered else observation_receipt(paths, None)
+                message = input_receipt(ledger_root, args.platform, session_id, paths, None)
                 sys.stdout.write(render_payload(args.format, message, ledger_root, routine=True)
                                  + ('\n' if args.format == 'json' else ''))
                 return 0
@@ -428,8 +419,7 @@ def main(argv: list[str] | None = None) -> int:
                     observation=observation,
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
-                delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
-                message = "" if delivered else observation_receipt(paths, observation)
+                message = input_receipt(ledger_root, args.platform, session_id, paths, observation)
                 routine = True
                 terminal = ""
     except Exception:

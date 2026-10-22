@@ -3,13 +3,15 @@
 
 Dependencies: Python 3.11+ standard library. This is not an intent ledger or a
 security-decision cache. Values must be small check metadata, never prompts,
-instruction bodies, credentials or tool transcripts.
+instruction bodies, credentials or tool transcripts. A delivery record keeps the
+digest of content a session received, never the content.
 """
 from __future__ import annotations
 
 import argparse
 from contextlib import closing
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -42,10 +44,18 @@ def _stamp(target: Path) -> list[str] | None:
     return [str(value) for value in (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)]
 
 
-def _connect(root: Path) -> sqlite3.Connection:
-    install_destination.assert_mutation_path(root / "session-checks.sqlite3")
-    root.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(root / "session-checks.sqlite3", timeout=2)
+def _content_stamp(content: str) -> list[str]:
+    return ["sha256", hashlib.sha256(content.encode("utf-8")).hexdigest()]
+
+
+def _connect(root: Path, *, create: bool = True) -> sqlite3.Connection:
+    store = install_destination.assert_mutation_path(root / "session-checks.sqlite3")
+    if create:
+        root.mkdir(parents=True, exist_ok=True)
+        connection = sqlite3.connect(store, timeout=2)
+    else:
+        # mode=rw opens an existing store and never creates one.
+        connection = sqlite3.connect(store.absolute().as_uri() + "?mode=rw", uri=True, timeout=2)
     try:
         connection.execute("CREATE TABLE IF NOT EXISTS checks (platform TEXT, session TEXT, key TEXT, target TEXT, stamp TEXT, value TEXT, checked_at TEXT, PRIMARY KEY(platform,session,key))")
         connection.execute("CREATE TABLE IF NOT EXISTS check_events (platform TEXT, session TEXT, key TEXT, status TEXT, occurred_at TEXT)")
@@ -110,22 +120,43 @@ def observe_check(root: Path, platform: str, session_id: str, key: str,
             connection.close()
 
 
-def peek_check(root: Path, platform: str, session_id: str, key: str, target: Path) -> dict | None:
-    """Return this session's stored value for an unchanged target without creating or writing the store."""
+def delivered(root: Path, platform: str, session_id: str, key: str, content: str) -> bool:
+    """Whether this session's delivery record holds this exact content; reads without creating or writing the store."""
     store = root / "session-checks.sqlite3"
     if not (platform and session_id and session_id != "unknown") or not store.is_file():
-        return None
-    target = target.resolve()
-    stamp = _stamp(target)
+        return False
     try:
-        with closing(sqlite3.connect(store.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
-            row = connection.execute("SELECT target,stamp,value,checked_at FROM checks WHERE platform=? AND session=? AND key=?", (platform, session_id, key)).fetchone()
-        if not row or row[0] != str(target) or stamp is None or json.loads(row[1]) != stamp or not _valid_check_time(row[3]):
-            return None
-        value = json.loads(row[2])
+        with closing(sqlite3.connect(store.absolute().as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
+            row = connection.execute("SELECT stamp FROM checks WHERE platform=? AND session=? AND key=?", (platform, session_id, key)).fetchone()
+        return bool(row) and json.loads(row[0]) == _content_stamp(content)
     except (sqlite3.Error, OSError, ValueError, TypeError):
-        return None
-    return value if isinstance(value, dict) else None
+        return False
+
+
+def record_delivery(root: Path, platform: str, session_id: str, key: str, content: str,
+                    *, create: bool) -> bool:
+    """Record that this session received this content and return whether the record was written.
+
+    With create, the store and the session's record are created as needed. Without
+    create, only the session's existing record is updated; neither the store nor a
+    record is created. The stamp is the content digest, so a code update that
+    builds the same content keeps the record.
+    """
+    if not (platform and session_id and session_id != "unknown"):
+        return False
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    stamp, value = json.dumps(_content_stamp(content)), json.dumps({"delivered": True})
+    try:
+        with closing(_connect(root, create=create)) as connection:
+            if create:
+                connection.execute("INSERT OR REPLACE INTO checks VALUES (?,?,?,?,?,?,?)", (platform, session_id, key, "", stamp, value, recorded_at))
+            elif connection.execute("UPDATE checks SET target='', stamp=?, value=?, checked_at=? WHERE platform=? AND session=? AND key=?", (stamp, value, recorded_at, platform, session_id, key)).rowcount != 1:
+                return False
+            connection.execute("INSERT INTO check_events VALUES (?,?,?,?,?)", (platform, session_id, key, "delivered", recorded_at))
+            connection.commit()
+    except (sqlite3.Error, OSError, ValueError):
+        return False
+    return True
 
 
 def load_instruction(root: Path, platform: str, session_id: str, path: Path,
