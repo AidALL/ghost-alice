@@ -2,7 +2,8 @@
 
 `install` registers or refreshes the gateway service: it reads the runtime target from the install
 record, writes the launch agent, `state.json` and the Codex provider blocks, starts the service, confirms
-readiness and writes the record's `service` section. It copies no module: the service runs from the
+readiness and writes the record's `service` section. After that commit, the state folder's `backups/` keeps
+the five newest registrations and the one the record names. It copies no module: the service runs from the
 runtime the installer publishes. `detach` unregisters the service the record names. Registration
 requires Python 3.14+ with compression.zstd; detachment runs on Python 3.11+. Both take the installer's
 lock when no installer holds it.
@@ -24,6 +25,7 @@ import context_gateway_inventory as inventory
 import context_gateway_plan as planning
 import context_gateway_platform as platform
 import installed_payload
+import state_retention
 # The tests read the provider rendering, the markers and the native modules through this module.
 from context_gateway_model import (GatewayBlocked, GatewayFailure, GatewayServiceError, LABEL, Request, TABLE_BEGIN,  # noqa: F401
     TABLE_END, TOP_BEGIN, TOP_END)
@@ -107,7 +109,21 @@ def install(codex_dir, ledger_root, state_dir, launch_agent, claude_dir=None, *,
         plan = planning.install_plan(request, observed, prior, service, port=port, scope=scope,
             interpreter=sys.executable, stamp=now.strftime('%Y%m%dT%H%M%S%fZ'), now=now.isoformat(),
             domain=platform.service_domain(request.platform))
-        return execute(plan, io, confirm=confirm)
+        result = execute(plan, io, confirm=confirm)
+        if result.get('status') == 'installed':
+            _keep_recent_backups(home, request.state_dir / 'backups')
+        return result
+
+
+def _keep_recent_backups(home, backups):
+    """After a committed registration, keep the five newest backups and never the one the install record names;
+    without a readable record nothing is removed."""
+    try:
+        service = (installed_payload.read(Path(home) / '.ghost-alice') or {}).get('service') or {}
+    except installed_payload.RecordError:
+        return
+    recorded = service.get('config_backup')
+    state_retention.apply('gateway-config-backups', backups, protect=[recorded] if recorded else [])
 
 
 def detach(*, confirm=False, home=None, io=None, host_platform=None):

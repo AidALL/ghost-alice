@@ -95,9 +95,12 @@ The platform installation supplies common governance for every project. The Code
 | `~/.ghost-alice/install-state/<host>-events.jsonl` | Past 5 MB it becomes the one previous file | Each publish failure or retirement event |
 | `~/.ghost-alice/rollbacks/` | The newest 20 finished publishes; an unfinished publish stays until it is restored | Each publish |
 | `~/.ghost-alice/uninstall-reports/` | The newest 30 reports | The uninstall, before it writes a report |
+| `~/.ghost-alice/context-gateway/usage.jsonl` | Past 20 MB it becomes the one previous file | Each gateway event |
+| `~/.ghost-alice/context-gateway/service.log` | Past 5 MB it is copied to `service.log.1` and emptied, because launchd keeps it open for the service | The gateway, when it starts |
+| `~/.ghost-alice/context-gateway/backups/` | The newest 5 registrations and the backup the install record names | Each committed gateway registration |
 | `settings.json.bak*` and `hooks.json.bak*` in the host folders | The newest 3 | Each hook settings write |
 
-A file far past its limit keeps only its newest part, up to the limit, as the previous file. Install records, host settings, installed skills and the runtime are overwritten in place. The program never removes the uninstall backups under `~/.ghost-alice/uninstall-backup/<host>/support-state/`, pending merge copies or retirement backups, because they can hold the user's changes. The table also names the context gateway's usage log, service log and registration backups, but no writer applies their rules yet, so those files grow without a bound. The Core ledger database `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root is outside this table and keeps its rows without a time limit.
+A file far past its limit keeps only its newest part, up to the limit, as the previous file. The gateway records each request field as its item count, byte total and counts by type and role, records one usage value per usage event, and names in `response-end` how the response ended: `completed`, `client-closed` or `upstream-closed`. A client that closes its connection leaves that result instead of a traceback in `service.log`. Install records, host settings, installed skills and the runtime are overwritten in place. The program never removes the uninstall backups under `~/.ghost-alice/uninstall-backup/<host>/support-state/`, pending merge copies or retirement backups, because they can hold the user's changes. The Core ledger database `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root is outside this table and keeps its rows without a time limit.
 
 ## Documentation Responsibility
 

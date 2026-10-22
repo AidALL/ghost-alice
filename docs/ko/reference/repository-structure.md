@@ -96,9 +96,12 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | `~/.ghost-alice/install-state/<host>-events.jsonl` | 5MB를 넘으면 지난 파일 하나로 옮김 | 게시 실패나 은퇴 이벤트마다 |
 | `~/.ghost-alice/rollbacks/` | 끝난 게시 중 최근 20개. 끝나지 않은 게시는 복원될 때까지 남김 | 게시마다 |
 | `~/.ghost-alice/uninstall-reports/` | 최근 보고서 30개 | 제거 명령, 새 보고서를 작성하기 전 |
+| `~/.ghost-alice/context-gateway/usage.jsonl` | 20MB를 넘으면 지난 파일 하나로 옮김 | 게이트웨이 이벤트마다 |
+| `~/.ghost-alice/context-gateway/service.log` | 5MB를 넘으면 `service.log.1`로 복사한 뒤 비움. launchd가 서비스를 위해 이 파일을 열어 두기 때문 | 게이트웨이, 시작할 때 |
+| `~/.ghost-alice/context-gateway/backups/` | 최근 등록 5개와 설치 기록이 가리키는 백업 | 게이트웨이 등록이 끝날 때마다 |
 | 호스트 폴더의 `settings.json.bak*`, `hooks.json.bak*` | 최근 3개 | 훅 설정을 작성할 때마다 |
 
-한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본, 병합 대기 사본, 은퇴 백업에는 사용자 변경분이 들어 있을 수 있으므로 프로그램이 삭제하지 않습니다. 표에는 컨텍스트 게이트웨이의 사용 기록, 서비스 로그, 등록 백업도 있지만, 아직 그 규칙을 적용하는 작성 코드가 없어서 이 파일들은 한도 없이 커집니다. 영수증의 저장소 루트에 있는 Core 원장 데이터베이스 `.tmp/session-intent/ghost-state.sqlite3`는 이 표 밖에 있으며 행을 기한 없이 유지합니다.
+한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 게이트웨이는 요청 필드를 항목 수, 바이트 합, 종류·역할별 개수로 기록하고, 사용량 이벤트마다 사용량 값을 하나만 기록합니다. `response-end`에는 응답이 끝난 방식을 `completed`, `client-closed`, `upstream-closed` 중 하나로 기록합니다. 클라이언트가 연결을 닫으면 `service.log`에 traceback 대신 이 결과가 남습니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본, 병합 대기 사본, 은퇴 백업에는 사용자 변경분이 들어 있을 수 있으므로 프로그램이 삭제하지 않습니다. 영수증의 저장소 루트에 있는 Core 원장 데이터베이스 `.tmp/session-intent/ghost-state.sqlite3`는 이 표 밖에 있으며 행을 기한 없이 유지합니다.
 
 ## Documentation Responsibility
 
