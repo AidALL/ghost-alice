@@ -1,4 +1,4 @@
-"""Exercise registered-command output at the native Stop envelope boundary."""
+"""Exercise registered-command output at the native envelope boundary: the runner never blocks the host."""
 from __future__ import annotations
 
 import base64
@@ -13,15 +13,17 @@ import unittest
 
 
 RUNNER = Path(__file__).with_name("hook_profile_gate.py")
-STOP_FIELDS = {"continue", "decision", "reason", "stopReason", "suppressOutput", "systemMessage"}
+HOST_FIELDS = {"continue", "suppressOutput", "systemMessage", "hookSpecificOutput", "additionalContext"}
+HOST_CONTROLS = {"decision", "reason", "stopReason"}
 ACTIONABLE = "Recording is parked. Preserve the supported answer and continue eligible authorized work."
+NOT_BLOCKING = "does not block the host"
 
 
-class NativeStopProtocolTests(unittest.TestCase):
+class NativeEnvelopeTests(unittest.TestCase):
     def run_command(self, body, *, platform="codex", event="Stop", profile="dynamic"):
-        with tempfile.TemporaryDirectory(prefix="native-stop-envelope-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="native-envelope-") as temporary:
             home = Path(temporary)
-            state = home / "ap-state-fixture.json"
+            state = home / "state-fixture.json"
             code = (
                 "from pathlib import Path; import json; "
                 f"Path({str(state)!r}).write_text(json.dumps({body['recovery']!r})); "
@@ -34,7 +36,7 @@ class NativeStopProtocolTests(unittest.TestCase):
             env.update(HOME=str(home), GHOST_ALICE_PLATFORM=platform,
                        GHOST_ALICE_AGENT_VISIBILITY=profile)
             result = subprocess.run(
-                [sys.executable, "-B", str(RUNNER), "run", "adapter-autopilot-mode-continue", platform, wrapped],
+                [sys.executable, "-B", str(RUNNER), "run", "envelope-fixture", platform, wrapped],
                 input=json.dumps({"session_id": "envelope-fixture", "hook_event_name": event}),
                 text=True, capture_output=True, env=env, check=False, timeout=30,
             )
@@ -43,9 +45,11 @@ class NativeStopProtocolTests(unittest.TestCase):
             log = home / ".ghost-alice/session-logs" / platform / "envelope-fixture/strict-hook-output.jsonl"
             record = json.loads(log.read_text().splitlines()[-1])
             self.assertEqual(json.loads(record["stdout"]), body, "Strict audit lost internal output")
-            self.assertEqual(json.loads(state.read_text()), body["recovery"], "Projection changed stored AP state")
+            self.assertEqual(json.loads(state.read_text()), body["recovery"], "Projection changed stored state")
             self.assertEqual(json.loads(record["user_surface_output"]), host)
             self.assertIn("completion_recording", record["model_surface_output"])
+            self.assertLessEqual(set(host), HOST_FIELDS, "The host receives only its native envelope")
+            self.assertFalse(set(host) & HOST_CONTROLS, "The host never receives a blocking control")
             return host
 
     @staticmethod
@@ -55,57 +59,65 @@ class NativeStopProtocolTests(unittest.TestCase):
                 "completion_recording": {"status": "diagnostic", "business_proof_preserved": True},
                 "recovery": {"status": "parked", "same_failure": True}, **changes}
 
-    def test_codex_stop_projects_supported_fields_and_retains_full_audit(self):
-        body = self.body(stopReason="Owned stop reason", suppressOutput=False)
-        for profile in ("strict", "dynamic", "minimal"):
-            with self.subTest(profile=profile):
-                host = self.run_command(body, profile=profile)
-                self.assertLessEqual(set(host), STOP_FIELDS, "Native Stop rejects unknown fields")
-                self.assertEqual(host, {key: value for key, value in body.items() if key in STOP_FIELDS})
+    def test_stop_block_becomes_continue_with_the_reason_as_a_warning(self):
+        for platform in ("codex", "claude"):
+            for event in ("Stop", "SubagentStop"):
+                for profile in ("strict", "dynamic", "minimal"):
+                    with self.subTest(platform=platform, event=event, profile=profile):
+                        host = self.run_command(self.body(), platform=platform, event=event, profile=profile)
+                        self.assertIs(host["continue"], True)
+                        self.assertIn(ACTIONABLE, host["systemMessage"])
+                        self.assertIn(NOT_BLOCKING, host["systemMessage"])
 
-    def test_codex_block_reason_uses_original_actionable_message_when_missing(self):
-        body = self.body()
+    def test_block_without_a_message_still_tells_the_user(self):
+        host = self.run_command(self.body(reason=None, systemMessage=""))
+        self.assertIs(host["continue"], True)
+        self.assertIn("block", host["systemMessage"])
+        self.assertIn(NOT_BLOCKING, host["systemMessage"])
+
+    def test_continue_false_becomes_true_and_keeps_the_stop_reason_as_a_warning(self):
+        body = self.body(**{"continue": False, "stopReason": "Owned stop reason"})
+        body.pop("decision")
         body.pop("reason")
         host = self.run_command(body)
-        self.assertEqual(host.get("reason"), ACTIONABLE, "Native blocking requires a nonempty reason")
-        self.assertEqual(host["decision"], "block")
-        self.assertLessEqual(set(host), STOP_FIELDS)
+        self.assertIs(host["continue"], True)
+        self.assertNotIn("stopReason", host)
+        self.assertIn("Owned stop reason", host["systemMessage"])
+        self.assertIn(NOT_BLOCKING, host["systemMessage"])
 
-    def test_codex_empty_block_reason_uses_original_actionable_message(self):
-        host = self.run_command(self.body(reason="  "))
-        self.assertEqual(host.get("reason"), ACTIONABLE)
+    def test_pretool_permission_denial_is_removed_and_reported(self):
+        body = self.body(hookSpecificOutput={"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                             "permissionDecisionReason": "The current gate is closed.",
+                                             "additionalContext": "kept"})
+        body.pop("decision")
+        body.pop("reason")
+        host = self.run_command(body, platform="claude", event="PreToolUse")
+        self.assertEqual(host["hookSpecificOutput"], {"hookEventName": "PreToolUse", "additionalContext": "kept"})
+        self.assertIn("The current gate is closed.", host["systemMessage"])
+        self.assertIn(NOT_BLOCKING, host["systemMessage"])
 
-    def test_codex_subagent_stop_uses_the_same_supported_envelope(self):
-        host = self.run_command(self.body(), event="SubagentStop")
-        self.assertLessEqual(set(host), STOP_FIELDS)
-        self.assertEqual(host["reason"], ACTIONABLE)
+    def test_user_prompt_block_is_removed_on_both_hosts(self):
+        for platform in ("codex", "claude"):
+            with self.subTest(platform=platform):
+                host = self.run_command(self.body(), platform=platform, event="UserPromptSubmit")
+                self.assertIs(host["continue"], True)
+                self.assertIn(ACTIONABLE, host["systemMessage"])
 
-    def test_codex_parked_recording_notice_does_not_invent_a_block(self):
+    def test_parked_recording_notice_without_a_block_passes_unchanged(self):
         body = self.body()
         body.pop("decision")
         body.pop("reason")
         host = self.run_command(body)
-        self.assertLessEqual(set(host), STOP_FIELDS)
-        self.assertIs(host["continue"], True)
-        self.assertNotIn("decision", host)
-        self.assertNotIn("reason", host)
-        self.assertEqual(host["systemMessage"], ACTIONABLE)
+        self.assertEqual(host, {"continue": True, "systemMessage": ACTIONABLE})
 
-    def test_codex_block_without_a_message_retains_a_nonempty_protocol_diagnostic(self):
-        host = self.run_command(self.body(reason=None, systemMessage=""))
-        self.assertEqual(host["decision"], "block")
-        self.assertIsInstance(host["reason"], str)
-        self.assertTrue(host["reason"].strip())
-
-    def test_claude_stop_preserves_controls_and_keeps_internal_records_in_audit(self):
-        body = self.body()
-        self.assertEqual(self.run_command(body, platform="claude"),
-                         {key: value for key, value in body.items() if key not in {"completion_recording", "recovery"}})
-
-    def test_pretool_retains_native_controls_and_audits_internal_recording(self):
-        body = self.body(hookSpecificOutput={"hookEventName": "PreToolUse", "permissionDecision": "deny"})
-        self.assertEqual(self.run_command(body, event="PreToolUse"),
-                         {key: value for key, value in body.items() if key != "completion_recording"})
+    def test_internal_records_stay_in_the_strict_log_on_every_event(self):
+        body = self.body(suppressOutput=False)
+        body.pop("decision")
+        body.pop("reason")
+        for event in ("Stop", "PreToolUse", "PostToolUse", "SessionStart"):
+            with self.subTest(event=event):
+                host = self.run_command(body, event=event)
+                self.assertEqual(host, {"continue": True, "suppressOutput": False, "systemMessage": ACTIONABLE})
 
 
 if __name__ == "__main__":
