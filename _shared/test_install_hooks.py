@@ -955,14 +955,15 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertIn(instruction, result.stdout)
 
     def test_dispatcher_install_keeps_only_the_dispatcher(self):
-        # The dispatcher imports nothing; the reminder's snapshot module and text copy are retired.
+        # The dispatcher imports nothing and keeps no state; the reminder's snapshot module and text copy and
+        # the checkpoint surface state that 8a5e388 stopped writing are retired.
         prev_home = os.environ.get("HOME")
         with tempfile.TemporaryDirectory() as temp_home:
             os.environ["HOME"] = temp_home
             try:
                 hooks_dir = Path(temp_home) / ".ghost-alice" / "hooks"
                 hooks_dir.mkdir(parents=True)
-                for retired in ("session_intent_snapshot.mjs", "reminder_texts.json"):
+                for retired in ("session_intent_snapshot.mjs", "reminder_texts.json", "tool-checkpoint-surface-state.json"):
                     (hooks_dir / retired).write_text("old copy\n", encoding="utf-8")
                 install_hooks._ensure_hook_dispatcher_installed()
                 self.assertEqual(sorted(path.name for path in hooks_dir.iterdir()), ["ghost-alice-hook.mjs"])

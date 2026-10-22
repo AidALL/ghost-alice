@@ -681,8 +681,9 @@ def _resolve_installed_hook_dispatcher() -> Path:
     return _resolve_ghost_alice_hooks_dir() / "ghost-alice-hook.mjs"
 
 
-# Files an older installer copied beside the dispatcher for the retired task-router reminder.
-RETIRED_HOOK_FILES = ("session_intent_snapshot.mjs", "reminder_texts.json")
+# Files beside the dispatcher that nothing reads: copies an older installer made for the retired task-router
+# reminder, and the checkpoint surface state the dispatcher wrote before 8a5e388.
+RETIRED_HOOK_FILES = ("session_intent_snapshot.mjs", "reminder_texts.json", "tool-checkpoint-surface-state.json")
 
 
 def _quote_command_arg(value: str | Path) -> str:
