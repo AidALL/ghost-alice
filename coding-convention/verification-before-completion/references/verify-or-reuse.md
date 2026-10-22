@@ -93,7 +93,7 @@ Resolve the installed Core module root from the trusted runtime binding, separat
 
 On first use the helper reads the body and stores path, file version and check time in `session-checks.sqlite3` under the ledger root; it never stores the body. The JSON return includes `status`, `value` and `checked_at`; a performed read also returns `body`. Read that returned body before applying the workflow. On a later invocation, add `--body-retained` only when the complete usable body remains in current context. A `reused` result relies on that retained body and does not return it again. An observed instruction change, different session/copy, or missing/corrupt record requires a read; a read is also required when the retained body is lost. Cache failure falls back to an actual read; it does not fabricate successful persistence. Do not recreate hashes or inspect the file separately before this helper; its stamp and stored session record perform that mechanical decision once.
 
-Record reused instruction names in `skills-reused`, including their source path/original load evidence. `skills-loaded` and `files-read` describe actual reads this turn. A `skill-call` records current workflow execution, supported by either a fresh body read or this valid reuse; it never reuses a prior input's verdict. Visible Skill surfaces keep their platform-native invocation requirement.
+Current workflow execution rests on either a fresh body read or this valid reuse; it never reuses a prior input's verdict. Visible Skill surfaces keep their platform-native invocation requirement.
 
 The pending-merge hook uses the same session-bound store: unchanged manifest versions reuse a normalized count; creation, replacement or modification invalidates it. Hooks and strict logging still run, and every input's intent/security state is evaluated fresh. Cache failure performs the real check; it never grants permission or hides a block.
 
@@ -102,7 +102,7 @@ The pending-merge hook uses the same session-bound store: unchanged manifest ver
 - A collaborator, automation, synchronization, or external edit that might have happened without evidence that the path was open.
 - The artifact being remote, shared-drive, or local by storage type alone.
 - A new user message, including a question about the artifact.
-- Writing a `[completion-check]`, filling `[io-trace]`, or copying an existing successful result into a variable, file, or store.
+- Writing a `[completion-check]` or copying an existing successful result into a variable, file, or store.
 - The wish to feel certain; confidence gaps are resolved by the flow above, not by another read.
 
 ## Redundancy Corrections

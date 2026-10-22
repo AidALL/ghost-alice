@@ -504,14 +504,10 @@ class NativeCompletionTests(unittest.TestCase):
 
     def test_missing_route_precedes_successive_control_field_repairs(self):
         self.fixture.intake('Is the release ready?')
-        for body in ('[partial-check]\n- scope: partial',
-                     '[partial-check]\n- verification-before-completion: done\n'
-                     '- skill-call: verification-before-completion (this turn)\n- scope: partial'):
-            with self.subTest(body=body):
-                result = self.service()(self.source, text=body, phase='final')
-                self.assertTrue(result['body_issue'].startswith('route-unavailable:'))
-                self.assertIn('task-router', result['body_issue'])
-                self.assertEqual(result['completion_route']['selected_work_unit_ids'], [])
+        result = self.service()(self.source, text='[partial-check]\n- scope: partial', phase='final')
+        self.assertTrue(result['body_issue'].startswith('route-unavailable:'))
+        self.assertIn('task-router', result['body_issue'])
+        self.assertEqual(result['completion_route']['selected_work_unit_ids'], [])
 
     def test_missing_route_keeps_canonical_input_binding_without_inventing_selection(self):
         coords = dict(self.fixture.coords, session_id='unrouted')
@@ -611,9 +607,7 @@ class NativeProofBindingTests(unittest.TestCase):
         self.owner.setUp()
         self.addCleanup(self.owner.doCleanups)
         self.api = self.owner.api()
-        self.proof = self.owner.proof().replace('[completion-check]',
-            '[completion-check]\n- verification-before-completion: done\n'
-            '- skill-call: verification-before-completion (this turn)')
+        self.proof = self.owner.proof()
 
     def assess(self, proof):
         return importlib.import_module('native_completion').assess_native_completion(
@@ -650,7 +644,7 @@ class NativeProofBindingTests(unittest.TestCase):
         return candidate
 
     def test_final_accepts_exact_reviewed_response_and_rejects_later_expansion(self):
-        body = self.proof + '\n\nThe footer correction is verified.\n\n[io-trace]\n- files-read: original observation\n'
+        body = self.proof + '\n\nThe footer correction is verified.\n'
         self.review_response(body)
         self.assertIsNone(self.assess('\n' + body + '\n')['body_issue'])
         for changed in (body + 'The deployment is complete.', 'The deployment is complete.\n' + body,

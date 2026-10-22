@@ -6,8 +6,6 @@ import test_completion_skill_evidence as skill_evidence
 from test_completion_skill_evidence import assert_stop_observation, user, skill_call, reply
 
 PARTIAL_BODY = """[partial-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - scope: partial
 - acceptance-criteria:
   - behavior: targeted behavior checks [source: user-said]
@@ -34,8 +32,6 @@ SUPPLIED_KOREAN_ANSWER = """수정 후 Xcode에서 다시 빌드했고, **이슈
 - 남은 레이아웃 메시지는 기본 메뉴 막대 아이콘만 있는 별도 앱에서도 재현되는 AppKit 문제입니다.
 다만 엄격한 Clippy 검사는 아직 실패하므로 전체 검증이 모두 통과한 상태는 아닙니다. 자동 완료 기록도 보류했습니다."""
 SUPPLIED_PARTIAL_EVIDENCE = """[partial-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - scope: partial
 - acceptance-criteria:
   - xcode: Xcode issue list without suppressing warnings [source: previous-tool]
@@ -124,10 +120,6 @@ class PartialCompletionTests(unittest.TestCase):
     def test_full_completion_still_requires_unverified_none(self):
         reason = self.check(PARTIAL.replace('[partial-check]', '[completion-check]'))
         self.assertIn("unverified section to be 'none'", reason)
-
-    def test_partial_structure_does_not_require_skill_self_report(self):
-        missing = PARTIAL_BODY.replace('- verification-before-completion: done\n', '')
-        self.assertIsNone(self.check(missing))
 
     def test_partial_examples_do_not_trigger_evidence_gate(self):
         self.assertIsNone(validator.validate_completion_text(

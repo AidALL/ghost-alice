@@ -52,14 +52,14 @@ SMOKE_CASES: dict[str, SmokeCase] = {
         prompt=(
             "Read the first 10 lines of README.md using a read-only local " "command, summarize what Ghost-ALICE OS is in one paragraph, " "apply verification-before-completion before any completion " "claim. Do not edit files."
         ),
-        required_markers=("[gate-state]",),
+        required_markers=("[focus: ",),
     ),
     "install-doctor-read": SmokeCase(
         case_id="install-doctor-read",
         prompt=(
             "Read _shared/install_doctor.py using a simple read-only full-file " "command such as `Get-Content _shared/install_doctor.py -Raw`; avoid " "shell-side filtering or formatting for the target file. " "Summarize in at most 4 lines what runtime-core doctor drift " "detection covers, citing concrete code symbols as evidence. " "Do not edit files."
         ),
-        required_markers=("[gate-state]",),
+        required_markers=("[focus: ",),
     ),
     "completion-check-readme": SmokeCase(
         case_id="completion-check-readme",

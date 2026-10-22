@@ -187,28 +187,8 @@ def check_ssot_imports(repo: Path, findings: list[Finding]) -> None:
             )
 
 
-SSOT_RULE_HEADER_PATTERN = re.compile(r"(?m)^###\s*(\d+)\.\s*(.+)$")
-
-
-def extract_rule_headers(text: str) -> dict[int, str]:
-    """Return rule headers in `### N. Title` form as a {number: title} dictionary."""
-    out: dict[int, str] = {}
-    for m in SSOT_RULE_HEADER_PATTERN.finditer(text):
-        try:
-            num = int(m.group(1))
-        except ValueError:
-            continue
-        out[num] = m.group(2).strip()
-    return out
-
-
 def check_platform_ports(repo: Path, findings: list[Finding]) -> None:
-    """Check that global platform ports include every numbered SSOT rule."""
-    ssot_path = repo / SSOT_RULES_FILE
-    ssot_rules: dict[int, str] = {}
-    if ssot_path.is_file():
-        ssot_rules = extract_rule_headers(ssot_path.read_text(encoding="utf-8"))
-
+    """Check that global platform ports carry the common entry sections and name task-router."""
     for rel in PLATFORM_PORTS:
         path = repo / rel
         if not path.is_file():
@@ -248,43 +228,6 @@ def check_platform_ports(repo: Path, findings: list[Finding]) -> None:
                     f"{rel} does not mention task-router. The port does not explicitly point to the entrypoint skill.",
                 )
             )
-
-        # Parity: every rule number + title from AGENTS.md must appear in the port.
-        if ssot_rules:
-            port_rules = extract_rule_headers(text)
-            for num in sorted(ssot_rules.keys()):
-                ssot_title = ssot_rules[num]
-                if num not in port_rules:
-                    findings.append(
-                        Finding(
-                            "ERROR",
-                            "platform-port",
-                            "parity-missing",
-                            f"{rel} is missing rule {num}. SSOT title is '{ssot_title}'. Synchronization required.",
-                        )
-                    )
-                elif port_rules[num] != ssot_title:
-                    port_title = port_rules[num]
-                    findings.append(
-                        Finding(
-                            "ERROR",
-                            "platform-port",
-                            "parity-title",
-                            f"{rel} rule {num} title drift. SSOT='{ssot_title}' port='{port_title}'. Synchronization required.",
-                        )
-                    )
-            # Also catch rules present only in the port and absent from the SSOT.
-            for num in sorted(port_rules.keys()):
-                if num not in ssot_rules:
-                    port_title = port_rules[num]
-                    findings.append(
-                        Finding(
-                            "WARNING",
-                            "platform-port",
-                            "parity-extra",
-                            f"{rel} has rule {num} '{port_title}', but AGENTS.md does not. Update the SSOT or correct the port.",
-                        )
-                    )
 
 
 def check_task_router_body(repo: Path, findings: list[Finding]) -> None:

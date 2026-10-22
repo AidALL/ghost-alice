@@ -1306,5 +1306,29 @@ class RuntimeCoreAuditTest(unittest.TestCase):
         self.assertEqual(detail, "session-intent-not-committed")
 
 
+class RuntimeValidatorGoldenSampleTest(unittest.TestCase):
+    def test_golden_sample_carries_no_retired_printed_fields(self):
+        # Decisions 6, 7 and 14 retired the printed [gate-state] block and its skill-call and
+        # skills-loaded fields, so the doctor's golden answer must not depend on them.
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = Path(tmp)
+            seen = runtime / "sample.txt"
+            (runtime / "completion_check_validator.py").write_text(
+                "from pathlib import Path\n"
+                f"SEEN = Path({str(seen)!r})\n"
+                "def validate_completion_text(text, require_completion_check=False):\n"
+                "    SEEN.write_text(text, encoding='utf-8')\n"
+                "    return None\n",
+                encoding="utf-8",
+            )
+            status = install_doctor._runtime_validator_golden_status(runtime)
+            sample = seen.read_text(encoding="utf-8")
+
+        self.assertEqual(status, (install_doctor.STATUS_OK, "golden-pass"))
+        self.assertIn("[completion-check]", sample)
+        for retired in ("[gate-state]", "skill-call", "skills-loaded"):
+            self.assertNotIn(retired, sample)
+
+
 if __name__ == "__main__":
     unittest.main()

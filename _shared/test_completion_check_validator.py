@@ -70,8 +70,6 @@ def _final_text(*parts):
     completion_check = "\n".join(
         [
             "[completion-check]",
-            "- verification-before-completion: done",
-            "- skill-call: verification-before-completion (this turn)",
             "- acceptance-criteria:",
             "  - c1: do the thing [source: user-said]",
             "- claim-evidence-map:",
@@ -122,20 +120,16 @@ class TestCompletionTextFinalSurfaceOrder(unittest.TestCase):
                          "Invalid verdict value", "unverified section"):
             self.assertIn(expected, result)
 
-    def test_completion_check_rejects_gate_state_after_completion_check(self):
-        result = v.validate_completion_text(_final_text("completion", "summary", "gate", "io"))
-        self.assertIsNotNone(result)
-        self.assertIn("gate-state", result)
+    def test_retired_printed_blocks_after_completion_check_are_ordinary_text(self):
+        # Decisions 7 and 14 retired the printed [io-trace] and [gate-state] blocks; neither has a placement rule.
+        self.assertIsNone(v.validate_completion_text(_final_text("completion", "summary", "gate", "io")))
 
-    def test_completion_check_allows_optional_trace_before_completion_check(self):
-        result = v.validate_completion_text(_final_text("io", "completion", "summary"))
-        self.assertIsNone(result)
-
-    def test_completion_check_allows_completion_summary_io_trace_order(self):
-        self.assertIsNone(v.validate_completion_text(_final_text("completion", "summary", "io")))
+    def test_control_fields_follow_only_printed_control_blocks(self):
+        # The contract prints only these blocks; their nested fields are evidence data.
+        self.assertEqual(v._CONTROL_BLOCKS, {"boundary-contract", "completion-check", "partial-check"})
 
     def test_routine_text_without_completion_check_is_unchanged(self):
-        text = "[io-trace]\n- commands-run: [none]\n\nRoutine explanation without a final claim."
+        text = "[boundary-contract]\n- phase: discovery\n\nRoutine explanation without a final claim."
         self.assertIsNone(v.validate_completion_text(text))
 
 
@@ -280,13 +274,13 @@ class TestExplicitMultilineQuotedExamples(unittest.TestCase):
 
     def test_inline_quotes_cannot_hide_a_real_unquoted_control_block(self):
         for literal in ("OK.", "pending.", "(Next section)"):
-            text = f'The command returned "{literal}"\n\n' + _final_text("completion", "summary", "io") + '\n\n"[io-trace]"'
+            text = f'The command returned "{literal}"\n\n' + _final_text("completion", "summary") + '\n\n"[boundary-contract]"'
             with self.subTest(text=text):
                 self.assertTrue(v.looks_like_completion_claim(text))
                 self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
 
     def test_inline_quotes_cannot_hide_a_malformed_unquoted_control_block(self):
-        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[io-trace]"'
+        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[boundary-contract]"'
         self.assertTrue(v.looks_like_completion_claim(text))
         self.assertIsNotNone(v.validate_completion_text(text, require_completion_check=True))
 
@@ -298,17 +292,12 @@ class TestAllCompletionBlocksValidated(unittest.TestCase):
         valid = "\n".join(
             [
                 "[completion-check]",
-                "- verification-before-completion: done",
-                "- skill-call: verification-before-completion (this turn)",
                 "- claim-evidence-map:",
                 "  - claim: did it",
                 "    evidence: ran X",
                 "    verdict: pass",
                 "- unverified:",
                 "  - none",
-                "",
-                "[io-trace]",
-                "- skills-loaded: [verification-before-completion]",
                 "",
                 "[completion-check]",
                 "- claim-evidence-map:",
@@ -326,8 +315,6 @@ class TestIndentedCompletionHeader(unittest.TestCase):
         # An indented header returns a deny-reason string or None without raising IndexError.
         indented = (
             "   [completion-check]\n"
-            "- verification-before-completion: done\n"
-            "- skill-call: verification-before-completion (this turn)\n"
             "- claim-evidence-map:\n"
             "  - claim: x\n"
             "    evidence: y\n"
@@ -338,20 +325,6 @@ class TestIndentedCompletionHeader(unittest.TestCase):
         result = v.validate_completion_text(indented, require_completion_check=True)
         self.assertTrue(result is None or isinstance(result, str))
 
-
-class TestGateStatePlacement(unittest.TestCase):
-    # Stop validation receives the final assistant message, not necessarily the opening commentary where [gate-state] is surfaced. Enforce placement only when the block is present in the validated text.
-
-    def test_completion_surface_without_gate_state_is_allowed_in_hook_mode(self):
-        text = _final_text("completion", "summary", "io")
-        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
-
-    def test_completion_surface_with_gate_state_before_completion_check_is_allowed(self):
-        text = _final_text("gate", "completion", "summary", "io")
-        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
-
-    def test_gate_state_does_not_require_completion_controls(self):
-        self.assertIsNone(v.validate_completion_text("[gate-state]\n- task-router: done"))
 
 
 if __name__ == "__main__":

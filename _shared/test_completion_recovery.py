@@ -16,8 +16,6 @@ HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 VALID = """Business result: 82 hours 40 minutes.
 
 [completion-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
   - calculation: recompute the operating time [source: user-said]
 - claim-evidence-map:
@@ -27,8 +25,6 @@ VALID = """Business result: 82 hours 40 minutes.
     verdict: pass
 - unverified:
   - none
-[io-trace]
-- skills-loaded: [verification-before-completion]
 """
 
 
@@ -92,20 +88,6 @@ class CompletionRecoveryTests(unittest.TestCase):
     def test_inline_none_is_equivalent_to_nested_none(self):
         self.assertIsNone(self.check(VALID.replace("- unverified:\n  - none", "- unverified: none")))
 
-    def test_optional_skill_audit_punctuation_does_not_change_evidence_structure(self):
-        for value in ("task-router; verification-before-completion.",
-                      "task-router; verification-before-completion; boundary-contract",
-                      "verification-before-completion."):
-            with self.subTest(value=value):
-                self.assertIsNone(self.check(VALID.replace('skill-call: verification-before-completion (this turn)', 'skill-call: '+value)))
-
-    def test_optional_skill_audit_does_not_establish_or_block_evidence(self):
-        for value in ("task-router; verification-before-completion-v2.",
-                      "task-router; skipped verification-before-completion.",
-                      "task-router; verification-before-completion.fake"):
-            with self.subTest(value=value):
-                self.assertIsNone(self.check(VALID.replace('skill-call: verification-before-completion (this turn)', 'skill-call: '+value)))
-
     def test_multiple_declared_criteria_accept_equivalent_delimiters(self):
         text = VALID.replace('- claim-evidence-map:', '  - boundary: Preserve the protected file. [source: user-said]\n- claim-evidence-map:')
         for value in ('calculation,boundary', 'calculation boundary', 'calculation; boundary'):
@@ -162,7 +144,7 @@ class CompletionRecoveryTests(unittest.TestCase):
         for extra in ("- unverified: pending verification", "- claim-evidence-map:",
                       "- acceptance-criteria:\n  - other: an omitted requirement"):
             with self.subTest(extra=extra):
-                self.assertIsNotNone(self.check(VALID.replace("[io-trace]", extra + "\n[io-trace]")))
+                self.assertIsNotNone(self.check(VALID + extra + "\n"))
 
     def test_conflicting_or_duplicate_fields_do_not_overwrite(self):
         for replacement in (
@@ -285,13 +267,13 @@ class CompletionRecoveryTests(unittest.TestCase):
 
     def test_inline_quote_boundaries_cannot_bypass_stop_validation(self):
         for literal in ("OK.", "pending.", "(Next section)"):
-            text = f'The command returned "{literal}"\n\nThe task is complete.\n\n"[io-trace]"'
+            text = f'The command returned "{literal}"\n\nThe task is complete.\n\n"[boundary-contract]"'
             with self.subTest(text=text):
                 payload = self.hook(text)
                 assert_stop_observation(self, payload, issue="requires a [completion-check]")
 
     def test_inline_quotes_cannot_hide_a_malformed_unquoted_control_block(self):
-        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[io-trace]"'
+        text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[boundary-contract]"'
         payload = self.hook(text)
         assert_stop_observation(self, payload, issue="claim-evidence-map")
 

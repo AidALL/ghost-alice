@@ -155,7 +155,7 @@ class ProseWrappingCheckerTest(unittest.TestCase):
                 [second]: <https://example.com/two>
             """,
             "protocol": """
-                [gate-state]
+                [boundary-contract]
                 - intent: each field has a list marker
                 - why: the marker is an explicit boundary
             """,

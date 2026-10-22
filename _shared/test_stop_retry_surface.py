@@ -14,8 +14,6 @@ from test_completion_skill_evidence import assert_stop_observation
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 ANSWER = "Business result: 82 hours 40 minutes."
 CHECK_WITHOUT_EVIDENCE = """[completion-check]
-- verification-before-completion: done
-- skill-call: verification-before-completion (this turn)
 - acceptance-criteria:
   - calculation: recompute the operating time [source: user-said]
 - claim-evidence-map:
@@ -24,8 +22,6 @@ CHECK_WITHOUT_EVIDENCE = """[completion-check]
     verdict: pass
 - unverified:
   - none
-[io-trace]
-- skills-loaded: [verification-before-completion]
 """
 DEFECTIVE = f"{ANSWER}\n\n{CHECK_WITHOUT_EVIDENCE}"
 UNMARKED_CLOSURE = "작업을 완료했습니다."
