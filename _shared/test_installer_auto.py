@@ -197,7 +197,7 @@ class CompactAutoTests(AutoCase):
         rc, out = self.run_children(self.context(args=["task-router"]), ["claude", "codex"])
         self.assertEqual(rc, 0)
         self.assertEqual(out.count(f"  - {note}\n"), 1)
-        self.assertIn("  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n"
+        self.assertIn("  - visibility can be changed later in Claude Code with /visibility between: dynamic | minimal | strict\n"
                       f"  - {note}\n\nDetails\n", out)
 
     def test_failure_excerpt(self):

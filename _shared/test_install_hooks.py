@@ -2953,7 +2953,8 @@ class TempHomeTestCase(unittest.TestCase):
 
 
 class TestInstallHook(TempHomeTestCase):
-    def test_reinstall_preserves_one_explicit_intake_override_without_adding_a_second_owner(self):
+    def test_reinstall_replaces_an_old_intake_registration_with_the_current_command(self):
+        # 0.5.0 wrote the instruction text into the registration; it is an old form, not a caller policy.
         from install_destination import InstallDestination, use
         for platform in ('codex', 'claude'):
             with self.subTest(platform=platform):
@@ -2962,44 +2963,26 @@ class TestInstallHook(TempHomeTestCase):
                     ghost_root=str(self.fake_home / 'ghost'), ledger_root=str(self.fake_home / 'ledger'),
                     project_root=str(self.fake_home / 'project'),
                     core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
+                path = Path(destination.platform_dir) / ('hooks.json' if platform == 'codex' else 'settings.json')
+
+                def intake_commands():
+                    return [h['command'] for r in json.loads(path.read_text())['hooks']['UserPromptSubmit']
+                            for h in r['hooks'] if '[hook-runner:session-intent]' in h['command']]
+
                 with use(destination):
                     install_hooks.install_hook(platform, destination=destination)
+                    current = intake_commands()
                     command = install_hooks._session_intent_analyzer_command(platform=platform, output_format='json', payload_mode=True)
                     entry = install_hooks._hook_runner_command_entry('session-intent',
-                        command + ' --internal-b64 ' + base64.urlsafe_b64encode(b'Caller policy').decode(),
+                        command + ' --internal-b64 ' + base64.urlsafe_b64encode(b'Old instruction').decode(),
                         install_hooks.SESSION_INTENT_MARKER, platform_key=platform)
-                    path = Path(destination.platform_dir) / ('hooks.json' if platform == 'codex' else 'settings.json')
                     settings = json.loads(path.read_text())
                     for row in settings['hooks']['UserPromptSubmit']:
                         row['hooks'] = [h for h in row['hooks'] if '[hook-runner:session-intent]' not in h['command']]
                     settings['hooks']['UserPromptSubmit'].append(entry)
                     path.write_text(json.dumps(settings))
                     install_hooks.install_hook(platform, destination=destination)
-                actual = [h['command'] for r in json.loads(path.read_text())['hooks']['UserPromptSubmit']
-                          for h in r['hooks'] if '[hook-runner:session-intent]' in h['command']]
-                self.assertEqual(actual, [entry['hooks'][0]['command']])
-
-    def test_prompt_retirement_uses_executor_contract_and_preserves_explicit_custom_text(self):
-        from install_destination import InstallDestination, use
-        for platform in ('codex', 'claude'):
-            with self.subTest(platform=platform):
-                destination = InstallDestination(mode='normal', owned_root=str(self.fake_home),
-                    platform_dir=str(self.fake_home / platform), skills_dir=str(self.fake_home / 'skills'),
-                    ghost_root=str(self.fake_home / 'ghost'), ledger_root=str(self.fake_home / 'ledger'),
-                    project_root=str(self.fake_home / 'project'),
-                    core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]))
-                with use(destination):
-                    builtin = install_hooks._platform_hook_entry(platform, 'UserPromptSubmit')['hooks'][0]
-                    command = install_hooks._hook_reminder_command(platform=platform, output_format='json', payload_mode=True)
-                    body, marker = command.split(' # ', 1)
-                    override = base64.urlsafe_b64encode(install_hooks.HOOK_INTERNAL.encode()).decode()
-                    custom = install_hooks._hook_runner_command_entry('prompt',
-                        body + ' --internal-b64 ' + override + ' # ' + marker,
-                        install_hooks.HOOK_MARKER, platform_key=platform)['hooks'][0]
-                foreign = {'type': 'command', 'command': 'python /foreign/hook_profile_gate.py run prompt codex eA== # [hook-reminder] AGENTS.md'}
-                rows = [{'matcher': 'preserve', 'metadata': 7, 'hooks': [builtin, custom, foreign]}]
-                self.assertEqual(install_hooks.remove_managed_prompt_reminders(rows), 1)
-                self.assertEqual(rows, [{'matcher': 'preserve', 'metadata': 7, 'hooks': [custom, foreign]}])
+                self.assertEqual(intake_commands(), current)
 
     def test_legacy_managed_removal_preserves_custom_sibling(self):
         marker = install_hooks.LEGACY_SESSION_INTENT_MARKERS[0]
@@ -4008,9 +3991,8 @@ class TestInstallHook(TempHomeTestCase):
             with self.subTest(skill_name=skill_name):
                 self.assertIn(f"Skill({skill_name})", allow)
 
-    def test_user_prompt_routing_has_one_owner_and_removes_only_managed_reminder(self):
-        """Intake owns routing; upgrading preserves unrelated commands and metadata."""
-        from install_destination import use
+    def test_user_prompt_routing_has_one_owner(self):
+        """Intake owns routing; no retired input hook is installed beside it."""
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 self._write_settings(platform, {})
@@ -4034,18 +4016,6 @@ class TestInstallHook(TempHomeTestCase):
 
                 expected = ["session-intent"]
                 self.assertEqual(marker_order, expected)
-                with use(install_hooks._default_destination(platform)):
-                    old = install_hooks._platform_hook_entry(platform, event)['hooks'][0]
-                custom = {'type': 'command', 'command': 'echo custom # ' + install_hooks.HOOK_MARKER}
-                hooks.append({'matcher': 'preserve', 'custom': 7, 'hooks': [old, custom]})
-                self._write_settings(platform, settings)
-                self.assertEqual(install_hooks.install_hook(platform), 'installed')
-                updated = self._read_settings(platform)
-                self.assertEqual(updated['hooks'][event][-1],
-                                 {'matcher': 'preserve', 'custom': 7, 'hooks': [custom]})
-                self.assertEqual(updated['hooks'].get('PreToolUse'), settings['hooks'].get('PreToolUse'))
-                self.assertEqual(updated['hooks'].get('Stop'), settings['hooks'].get('Stop'))
-                self.assertEqual(updated['hooks'].get('PostToolUse'), settings['hooks'].get('PostToolUse'))
                 self.assertEqual(install_hooks.check_status_detail(platform).legacy_status, 'installed')
 
     def test_install_replaces_legacy_pre_tool_checkpoint_marker(self):
@@ -4213,7 +4183,9 @@ class TestInstallHook(TempHomeTestCase):
         self.assertIn("Default profile is dynamic unless --visibility overrides it.", text)
         self.assertIn("--agent-visibility remains accepted for compatibility.", text)
         self.assertIn("Profiles adjust user-facing governance message volume only", text)
-        self.assertIn("Use /visibility to inspect", text)
+        # Codex has no /visibility command; S71 and S72 retired its input hook.
+        self.assertNotIn("in trusted Codex sessions", text)
+        self.assertIn("Claude Code: /visibility strict|dynamic|minimal", text)
 
     def test_cli_install_fails_when_node_runtime_is_missing(self):
         """Hook-enabled installs fail before writing Node-backed tool-checkpoint commands without node."""
@@ -4241,7 +4213,7 @@ class TestInstallHook(TempHomeTestCase):
         self.assertIn("For full capability, install Node.js:", text)
         self.assertIn("https://nodejs.org/en/download", text)
         self.assertFalse((self.fake_home / ".claude" / "settings.json").exists())
-        self.assertIn("/visibility strict, /visibility dynamic, or /visibility minimal", text)
+        self.assertIn("Claude Code: /visibility strict|dynamic|minimal", text)
         self.assertIn("Hook execution, governance gates, and strict session logging remain unchanged.", text)
 
     def test_cli_install_uses_codex_configured_node_when_path_node_is_missing(self):

@@ -160,7 +160,8 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.assertEqual(install_hooks.remove_adapter_hook(marker,platform_key='codex'),1)
         self.assertEqual(tomllib.loads(config.read_text()),tomllib.loads(baseline))
 
-    def test_codex_user_changed_trust_hash_and_extra_fields_are_preserved(self):
+    def test_codex_removed_adapter_takes_its_trust_table_whatever_its_hash_or_fields(self):
+        # The table describes a position whose handler is gone; neither a changed hash nor a note keeps it.
         import install_hooks
         import tomllib
         marker='[adapter:autopilot-mode] continue'
@@ -173,14 +174,13 @@ class AddonSkillPermissionTest(unittest.TestCase):
         key=install_hooks._codex_hook_state_key(settings_file,'Stop',0,0)
         config=self.settings.parent/'config.toml'
         config.write_text(install_hooks._merge_codex_hook_trust_state('',{key:'user-changed-hash'})[0])
-        before=config.read_bytes();install_hooks.remove_adapter_hook(marker,platform_key='codex')
-        self.assertEqual(config.read_bytes(),before)
+        install_hooks.remove_adapter_hook(marker,platform_key='codex')
+        self.assertEqual(tomllib.loads(config.read_text()).get('hooks',{}).get('state',{}),{})
         settings_file.write_text(json.dumps(settings))
         owned_hash=install_hooks._codex_command_hook_hash('Stop',settings['hooks']['Stop'][0],entry['hooks'][0])
         config.write_text(install_hooks._merge_codex_hook_trust_state('',{key:owned_hash})[0]+'user_note = "preserve"\n')
         install_hooks.remove_adapter_hook(marker,platform_key='codex')
-        table=tomllib.loads(config.read_text())['hooks']['state'][key]
-        self.assertEqual(table,{'user_note':'preserve'})
+        self.assertEqual(tomllib.loads(config.read_text()).get('hooks',{}).get('state',{}),{})
 
 
 if __name__ == '__main__':

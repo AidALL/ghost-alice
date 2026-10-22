@@ -377,7 +377,8 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
         self.assertNotIn("_install_hook_bash_native", install_sh)
         self.assertNotIn("prompt + completion + io-trace", install_sh)
         hosts_py = (REPO_ROOT / "_shared" / "installer" / "hosts.py").read_text(encoding="utf-8")
-        self.assertIn("session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace", hosts_py)
+        # The hook suite label comes from the one list of core hooks.
+        self.assertIn('HOOK_ACTION_LABEL = " + ".join(hook_definitions.CORE_HOOK_IDS)', hosts_py)
 
     def test_install_ps1_has_no_partial_native_hook_fallback(self) -> None:
         install_ps1 = (REPO_ROOT / "install.ps1").read_text(encoding="utf-8-sig")

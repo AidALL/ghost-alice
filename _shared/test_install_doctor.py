@@ -1118,7 +1118,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
 
     def test_runtime_core_audit_accepts_runtime_hook_config(self):
         self._write_runtime_files()
-        command = f'"{sys.executable}" "{(self.runtime / "hook_profile_gate.py").as_posix()}" run prompt x # [hook-reminder] AGENTS.md'
+        command = f'"{sys.executable}" "{(self.runtime / "hook_profile_gate.py").as_posix()}" run session-intent x # [session-intent-analyzer]'
         self.config.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{"command": command}]}]}}),
                                encoding="utf-8")
 
@@ -1131,7 +1131,7 @@ class RuntimeCoreAuditTest(unittest.TestCase):
     def test_runtime_core_audit_rejects_platform_shared_hook_config(self):
         self._write_runtime_files()
         stale_runner = self.root / ".agents" / "skills" / "_shared" / "hook_profile_gate.py"
-        command = f'"{sys.executable}" "{stale_runner.as_posix()}" run prompt x # [hook-reminder] AGENTS.md'
+        command = f'"{sys.executable}" "{stale_runner.as_posix()}" run session-intent x # [session-intent-analyzer]'
         self.config.write_text(json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [{"command": command}]}]}}),
                                encoding="utf-8")
 

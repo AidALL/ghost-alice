@@ -371,13 +371,13 @@ class InstallerDefaultAutoTest(unittest.TestCase):
                 result.stdout,
             )
             self.assertIn(
-                "  [3/5] Hooks               prompt, session-intent, tool-checkpoint, completion, session-start, io-trace enabled",
+                "  [3/5] Hooks               session-intent, tool-checkpoint, completion, session-start, session-receipt, io-trace enabled",
                 result.stdout,
             )
             self.assertIn("  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]", result.stdout)
             self.assertIn("  [5/5] Verification        ok", result.stdout)
-            self.assertIn("Attention", result.stdout)
-            self.assertIn("visibility can be changed later with /visibility between: dynamic | minimal | strict", result.stdout)
+            # Codex has no /visibility command; only the Claude tail names it.
+            self.assertNotIn("/visibility", result.stdout)
             self.assertIn("Details", result.stdout)
             self.assertRegex(result.stdout, r"log: .+\.ghost-alice/install/\d{4}-\d{2}-\d{2}-\d{6}\.log")
             self.assertIn("rerun with --verbose to show per-skill actions", result.stdout)

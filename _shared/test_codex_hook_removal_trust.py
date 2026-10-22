@@ -95,27 +95,37 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
             self.key(0, 1): {'trusted_hash': entries[self.key(0, 2)], 'user_note': 'second'}})
         self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'][0]['hooks'], [user, user])
 
-    def test_user_metadata_at_shift_destination_refuses_overwrite_before_mutation(self):
+    def test_removed_handler_table_goes_with_its_metadata(self):
+        # The note annotates the removed adapter's position; the survivor's table moves into it.
         marker, addon = self.adapter('continue')
         user = {'hooks': [{'type': 'command', 'command': 'echo user'}]}
-        self.seed([addon, user])
+        _, entries = self.seed([addon, user])
         content = self.config.read_text()
         header = f'[hooks.state.{install_hooks._toml_basic_string(self.key(0))}]\n'
         self.config.write_text(content.replace(header, header + 'user_note = "precious"\n'))
-        before = self.config.read_bytes(), self.hooks.read_bytes()
-        with self.assertRaises(ValueError):
-            install_hooks.remove_adapter_hook(marker, platform_key='codex')
-        self.assertEqual((self.config.read_bytes(), self.hooks.read_bytes()), before)
+        self.assertEqual(install_hooks.remove_adapter_hook(marker, platform_key='codex'), 1)
+        self.assertEqual(self.state(), {self.key(0): {'trusted_hash': entries[self.key(1)]}})
+        self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'], [user])
 
-    def test_changed_survivor_trust_refuses_relocation_before_mutation(self):
+    def test_survivor_table_moves_without_granting_trust(self):
+        # Moving a table grants no trust: a changed hash still asks the user.
         marker, addon = self.adapter('continue')
         user = {'hooks': [{'type': 'command', 'command': 'echo user'}]}
         _, entries = self.seed([addon, user])
         self.config.write_text(self.config.read_text().replace(entries[self.key(1)], 'user-changed-hash'))
-        before = self.config.read_bytes(), self.hooks.read_bytes()
-        with self.assertRaises(ValueError):
-            install_hooks.remove_adapter_hook(marker, platform_key='codex')
-        self.assertEqual((self.config.read_bytes(), self.hooks.read_bytes()), before)
+        self.assertEqual(install_hooks.remove_adapter_hook(marker, platform_key='codex'), 1)
+        self.assertEqual(self.state(), {self.key(0): {'trusted_hash': 'user-changed-hash'}})
+        self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'], [user])
+
+    def test_removal_drops_orphan_tables_of_this_hooks_file_only(self):
+        marker, addon = self.adapter('continue')
+        self.seed([addon])
+        orphan = f'[hooks.state.{install_hooks._toml_basic_string(self.key(9))}]\ntrusted_hash = "orphan"\nenabled = true\n'
+        other = '[hooks.state."/elsewhere/hooks.json:stop:0:0"]\ntrusted_hash = "other-file"\n'
+        self.config.write_text(self.config.read_text() + orphan + other)
+        install_hooks.remove_adapter_hook(marker, platform_key='codex')
+        self.assertEqual(self.state(), {'/elsewhere/hooks.json:stop:0:0': {'trusted_hash': 'other-file'}})
+        self.assertEqual(tomllib.loads(self.config.read_text())['user'], {'keep': 'precious'})
 
     def test_partial_config_write_failure_preserves_active_config_and_hooks(self):
         marker, addon = self.adapter('continue')

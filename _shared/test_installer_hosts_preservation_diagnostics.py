@@ -64,8 +64,8 @@ class HookRegistrationTests(HostCase):
         with self.runner.patch():
             ok, out = self.captured(hosts.install_hooks, ctx, "install", "claude")
         self.assertTrue(ok)
-        self.assertIn("[INFO] Agent hook install... (session-intent + prompt + web-search + tool-checkpoint + "
-                      "completion + session-start + io-trace)", out)
+        self.assertIn("[INFO] Agent hook install... (session-intent + tool-checkpoint + completion + "
+                      "session-start + session-receipt + io-trace)", out)
         base = ["--core-source-root", str(self.source), "--platform", "claude",
                 "--hook-shared-dir", str(self.ghost / "runtime" / "current" / "_shared"), "--skills-dir", str(ctx.skills_dir)]
         self.assertEqual(self.runner.tool_calls("install_hooks.py")[0], base + ["--visibility", "dynamic", "--addon-source", "/a"])
