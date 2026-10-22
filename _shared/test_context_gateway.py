@@ -909,9 +909,10 @@ class UsageRecordShapeTests(unittest.TestCase):
         self.assertEqual(len(native['attribution']['items']), 3)
 
     @staticmethod
-    def forward(read, write=None, flush=None, on_usage=None):
+    def forward(read, write=None, flush=None, on_usage=None, remaining=None):
         class Upstream:
             headers = {}
+            length = remaining  # http.client's undelivered byte count of a declared body length
 
             def read1(self, size):
                 return read()
@@ -947,6 +948,15 @@ class UsageRecordShapeTests(unittest.TestCase):
         details, data = self.forward(self.chunks(b'data: {}\n\n', b'tail'))
         self.assertEqual((details['result'], data), ('completed', b'data: {}\n\ntail'))
         self.assertNotIn('error_type', details)
+
+    def test_an_upstream_that_ends_short_of_its_declared_length_is_upstream_closed(self):
+        # http.client's read1 returns b'' at a premature EOF and leaves the undelivered count in `length`;
+        # only read() raises IncompleteRead. A declared length delivered in full stays completed.
+        details, data = self.forward(self.chunks(b'hello'), remaining=95)
+        self.assertEqual((details['result'], details['error_type']), ('upstream-closed', 'IncompleteRead'))
+        self.assertEqual(data, b'hello')
+        details, _data = self.forward(self.chunks(b'hello'), remaining=0)
+        self.assertEqual(details['result'], 'completed')
 
     def test_a_client_side_write_failure_is_client_closed(self):
         for failure, where in ((BrokenPipeError(32, 'Broken pipe'), 'write'),

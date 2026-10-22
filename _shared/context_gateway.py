@@ -175,9 +175,10 @@ def _recorded_usage(usage):
 def forward_stream(upstream, sink, provider, on_usage):
     """Copy original response bytes while observing native usage separately.
 
-    Reading the upstream and writing the client are wrapped apart: a failed read ends the copy with
-    `upstream-closed`, a client that closed its connection ends it with `client-closed`, and any other error
-    is raised. The details name the result and, when the copy stopped early, the error type.
+    Reading the upstream and writing the client are wrapped apart: a failed read, or an end short of the
+    declared length, ends the copy with `upstream-closed`; a client that closed its connection ends it with
+    `client-closed`; any other error is raised. The details name the result and, when the copy stopped early,
+    the error type.
     """
     parser = UsageSnapshots(provider)
     pending = b''
@@ -205,6 +206,10 @@ def forward_stream(upstream, sink, provider, on_usage):
             result, error_type = 'upstream-closed', type(error).__name__
             break
         if not chunk:
+            # http.client's read1 returns b'' at a premature EOF and leaves the undelivered count in `length`;
+            # only read() raises IncompleteRead.
+            if getattr(upstream, 'length', None):
+                result, error_type = 'upstream-closed', 'IncompleteRead'
             break
         response_hash.update(chunk)
         try:
