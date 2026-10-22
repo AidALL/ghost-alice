@@ -360,7 +360,6 @@ def render_payload(output_format: str, message: str, ledger_root: Path, *, routi
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Record session intent guard hook event.")
     parser.add_argument("--platform", default="codex")
-    parser.add_argument("--hook", default="session-intent")
     parser.add_argument("--context", default="prompt_submit", choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", choices=["text", "json"], default="text")
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="session intent ledger root")

@@ -782,8 +782,6 @@ def _runtime_session_intent_golden_status(
                 str(hook),
                 "--platform",
                 platform,
-                "--hook",
-                "session-intent",
                 "--context",
                 "prompt_submit",
                 "--format",

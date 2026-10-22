@@ -797,7 +797,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
                 sys.executable, str(self.hook),
                 "--platform", "codex", "--format", "json",
                 "--root", str(self.root),
-                "--hook", "session-intent", "--context", "prompt_submit",
+                "--context", "prompt_submit",
             ],
             input=json.dumps({"session_id": "s-degrade", "prompt": "hello"}),
             capture_output=True, text=True, encoding="utf-8", errors="replace",

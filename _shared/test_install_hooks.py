@@ -564,44 +564,6 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
 
 
 class TestMessageLanguage(unittest.TestCase):
-    def test_codex_dispatcher_session_intent_ignores_no_prompt_payload(self):
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            root = Path(temp_home) / "session-intent"
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "BeforeAgent",
-                    "--hook",
-                    "session-intent",
-                    "--session-intent-root",
-                    str(root),
-                ],
-                input=json.dumps({"sessionId": "s-empty-payload"}),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=_strict_hook_env({"HOME": temp_home}),
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["continue"], True)
-            session_dir = root / "codex" / "s-empty-payload"
-            self.assertFalse((session_dir / "intent-events.jsonl").exists())
-            self.assertFalse((session_dir / "intent-state.json").exists())
-            self.assertFalse((root / "codex" / "current-session.json").exists())
-
     def test_dispatcher_does_not_own_session_intent_or_io_trace_writers(self):
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         source = dispatcher.read_text(encoding="utf-8")
@@ -3933,6 +3895,16 @@ class TestSessionStartHook(unittest.TestCase):
         for command in (SESSION_START_COMMAND, SESSION_START_COMMAND_CODEX):
             for unread in ("--hook", "--context", "--internal-b64"):
                 self.assertNotIn(unread, command)
+
+    def test_session_intent_registrations_carry_only_read_arguments(self):
+        # One intake script serves the input and the session start through --context; it never read --hook.
+        for context in ("prompt_submit", "session_start"):
+            for platform, output_format in (("claude", "text"), ("codex", "json")):
+                command = install_hooks._session_intent_analyzer_command(
+                    platform=platform, output_format=output_format, context=context)
+                self.assertIn("session_intent_analyzer_hook.py", command)
+                self.assertIn(f"--context {context}", command)
+                self.assertNotIn("--hook", command)
 
     def test_session_start_hook_uses_current_session_copy(self):
         from install_hooks import SESSION_START_COMMAND

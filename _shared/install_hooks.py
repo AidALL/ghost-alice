@@ -361,8 +361,6 @@ def _session_intent_analyzer_command(*, platform: str, output_format: str, paylo
             _quote_static_arg(script),
             "--platform",
             platform,
-            "--hook",
-            "session-intent",
             "--context",
             context,
             "--format",
@@ -1832,12 +1830,12 @@ def _managed_session_intent_options(command: str):
                 or len(argv[2:]) % 2):
             return None
         options = dict(zip(argv[2::2], argv[3::2]))
-        if (set(options) != {"--platform", "--format", "--root", "--hook", "--context"}
+        if (set(options) != {"--platform", "--format", "--root", "--context"}
                 or len(options) != len(argv[2:]) // 2
                 or options["--platform"] != args[2]
                 or options["--format"] not in {"json", "text"}
                 or options["--root"] != destination.ledger_root
-                or (options["--hook"], options["--context"]) != ("session-intent", "prompt_submit")):
+                or options["--context"] != "prompt_submit"):
             return None
         return options
     except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
