@@ -508,7 +508,7 @@ class RuntimeSurfaceTests(unittest.TestCase):
             env = {key: value for key, value in os.environ.items() if not key.startswith("GHOST_ALICE_")}
             env.update({"HOME": temp_home, "USERPROFILE": temp_home})
             result = subprocess.run(
-                [node, str(HOOK_DISPATCHER), "--platform", platform, "--event", "PreToolUse", "--hook", "tool-checkpoint"],
+                [node, str(HOOK_DISPATCHER), "--platform", platform, "--event", "PreToolUse"],
                 input=json.dumps({"session_id": f"s-{platform}-verify-or-reuse", "hook_event_name": "PreToolUse",
                                   "tool_name": "Read", "tool_input": {"file_path": "plan.md"}}),
                 capture_output=True,

@@ -16,7 +16,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import install_hooks
 
 ENTRIES = {
-    "prompt": (install_hooks._platform_hook_entry, "UserPromptSubmit"),
     "session-intent": (install_hooks._platform_session_intent_entry, "UserPromptSubmit"),
     "completion": (install_hooks._platform_stop_hook_entry, "Stop"),
     "session-start": (install_hooks._platform_session_start_entry, "SessionStart"),
@@ -35,7 +34,7 @@ class HookRunnerPlatformTests(unittest.TestCase):
                     self.assertEqual(match.group(2), platform)
 
     @unittest.skipIf(os.name == "nt", "POSIX shell launcher")
-    def test_prompt_hook_strict_log_lands_in_the_platform_folder(self):
+    def test_intake_hook_strict_log_lands_in_the_platform_folder(self):
         payload = json.dumps({"session_id": "s-platform-log", "prompt": "x", "hook_event_name": "UserPromptSubmit"})
         with tempfile.TemporaryDirectory() as home:
             root = Path(home)

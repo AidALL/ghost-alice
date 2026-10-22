@@ -55,6 +55,10 @@ LEGACY_WEB_SEARCH_ENTRY = {
     "matcher": "",
     "hooks": [{"type": "command", "command": "echo old # [web-search-first]"}],
 }
+LEGACY_HOOK_REMINDER_ENTRY = {
+    "matcher": "",
+    "hooks": [{"type": "command", "command": "echo old # " + install_hooks.HOOK_MARKER}],
+}
 
 
 class _FailAfterPartialWrite:
@@ -302,15 +306,6 @@ def _write_session_intent_preflight(
     )
 
 
-def _write_session_intent_digest_only_preflight(
-    home: str | Path,
-    platform: str,
-    session_id: str,
-    **kwargs: Any,
-) -> None:
-    _write_session_intent_preflight(home, platform, session_id, semantic_delta=False, **kwargs)
-
-
 def _write_downstream_gate(
     home: str | Path,
     platform: str,
@@ -401,15 +396,11 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
 
             for platform in ("claude", "codex"):
                 with self.subTest(platform=platform):
-                    command = install_hooks._dispatcher_hook_command(
-                        platform,
-                        "PreToolUse",
-                        "tool-checkpoint",
-                        "[test]",
-                        "tool-checkpoint",
-                        selected_node,
-                    )
+                    command = install_hooks._dispatcher_hook_command(platform, "PreToolUse", selected_node)
 
+                    # The dispatcher reads only the platform and the event.
+                    for unread in ("--hook", "--marker", "--session-intent-root"):
+                        self.assertNotIn(unread, command)
                     self.assertTrue(
                         command.startswith(
                             install_hooks._quote_command_arg(
@@ -573,90 +564,6 @@ class TestHookProfileGateWindowsCommandCompatibility(unittest.TestCase):
 
 
 class TestMessageLanguage(unittest.TestCase):
-    def assert_no_pretool_deny(self, payload: dict[str, object]) -> None:
-        output = payload.get("hookSpecificOutput", {})
-        if isinstance(output, dict):
-            self.assertNotEqual(output.get("permissionDecision"), "deny")
-            self.assertNotIn("permissionDecision", output)
-        self.assertNotEqual(payload.get("decision"), "deny")
-
-    def run_codex_pretool(
-        self,
-        request: dict[str, object],
-        *,
-        downstream_decision: str = "allow",
-    ) -> subprocess.CompletedProcess:
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            session_id = str(request.get("session_id") or "s-codex-pretool")
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "codex", session_id)
-            _write_downstream_gate(temp_home, "codex", session_id, downstream_decision)
-            return subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps(request),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-    def test_codex_dispatcher_session_intent_ignores_no_prompt_payload(self):
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            root = Path(temp_home) / "session-intent"
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "BeforeAgent",
-                    "--hook",
-                    "session-intent",
-                    "--session-intent-root",
-                    str(root),
-                ],
-                input=json.dumps({"sessionId": "s-empty-payload"}),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=_strict_hook_env({"HOME": temp_home}),
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            self.assertEqual(payload["continue"], True)
-            session_dir = root / "codex" / "s-empty-payload"
-            self.assertFalse((session_dir / "intent-events.jsonl").exists())
-            self.assertFalse((session_dir / "intent-state.json").exists())
-            self.assertFalse((root / "codex" / "current-session.json").exists())
-
     def test_dispatcher_does_not_own_session_intent_or_io_trace_writers(self):
         dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
         source = dispatcher.read_text(encoding="utf-8")
@@ -672,7 +579,6 @@ class TestMessageLanguage(unittest.TestCase):
 
     def test_generated_hook_messages_use_bridge_labels(self):
         for command, env in (
-            (install_hooks.HOOK_COMMAND, None),
             (install_hooks.SESSION_INTENT_COMMAND, None),
             (install_hooks.SESSION_START_COMMAND, None),
         ):
@@ -722,145 +628,16 @@ class TestMessageLanguage(unittest.TestCase):
                 self.assertIn("--event PreToolUse", command)
                 self.assertIn(f"--platform {platform}", command)
 
-    def test_hook_reminder_delegates_intake_and_routing_to_canonical_owners(self):
-        self.assertIn("after exact session-intent intake", install_hooks.HOOK_INTERNAL)
-        self.assertIn("follows task-router", install_hooks.HOOK_INTERNAL)
-        self.assertIn("register the Core response-route", install_hooks.HOOK_INTERNAL)
-        self.assertIn("common contract's Work Selection section", install_hooks.HOOK_INTERNAL)
-        self.assertNotIn("downstream-gates.json", install_hooks.HOOK_INTERNAL)
-        self.assertNotIn("[tool-checkpoint]", install_hooks.HOOK_INTERNAL)
+    def test_reminder_texts_hold_only_live_instructions(self):
+        # The task-router reminder is retired; its text has no reader.
+        data = json.loads(Path(install_hooks.__file__).with_name("reminder_texts.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(data), {"session-intent", "tool-checkpoint", "terminal-routing"})
 
     def test_session_intent_reminder_preserves_receipt_and_data_minimization(self):
         self.assertIn("digest-only intake", install_hooks.SESSION_INTENT_INTERNAL)
         self.assertIn("only when it affects a decision or a semantic update", install_hooks.SESSION_INTENT_INTERNAL)
         self.assertIn("using the exact receipt", install_hooks.SESSION_INTENT_INTERNAL)
         self.assertIn("exclude raw prompts, conversation/tool output, system instructions and secrets", install_hooks.SESSION_INTENT_INTERNAL)
-
-    def test_codex_hook_reminder_command_uses_task_router_gate_helper(self):
-        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ,
-                {"HOME":home,"CODEX_HOME":home+"/.codex","GHOST_ALICE_SESSION_INTENT_ROOT":""}):
-            entry_command = install_hooks._entry_command(
-                install_hooks._platform_hook_entry("codex", "UserPromptSubmit")
-            )
-        command = _visible_and_runner_payload_text(entry_command)
-
-        self.assertIn("task_router_reminder_hook.py", command)
-        self.assertIn("--root", command)
-        hook_command = next(
-            line for line in command.splitlines()
-            if "task_router_reminder_hook.py" in line
-        )
-        parts = shlex.split(hook_command)
-        root = Path(parts[parts.index("--root") + 1])
-        self.assertEqual(root, install_hooks._repo_root_from_this_file() / ".tmp" / "session-intent")
-
-    def test_codex_task_router_reminder_releases_after_intent_preflight_and_ignores_legacy_allow_gate(self):
-        script = Path(install_hooks.__file__).with_name("task_router_reminder_hook.py")
-        self.assertTrue(script.exists(), f"missing reminder helper: {script}")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            root = Path(temp_home) / ".ghost-alice" / "session-intent"
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-router")
-
-            first = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--platform",
-                    "codex",
-                    "--format",
-                    "json",
-                    "--root",
-                    str(root),
-                ],
-                input=json.dumps({"session_id": "s-codex-router"}),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
-
-            self.assertEqual(first.returncode, 0, msg=first.stderr)
-            first_payload = json.loads(first.stdout)
-            first_message = first_payload["systemMessage"]
-            self.assertIn("intake-ready: current input recorded", first_message)
-            self.assertNotIn(install_hooks.HOOK_INTERNAL, first_message)
-            self.assertNotIn("task-router withheld", first_message)
-
-            _write_downstream_gate(temp_home, "codex", "s-codex-router", "allow")
-            second = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--platform",
-                    "codex",
-                    "--format",
-                    "json",
-                    "--root",
-                    str(root),
-                ],
-                input=json.dumps({"session_id": "s-codex-router"}),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
-
-            self.assertEqual(second.returncode, 0, msg=second.stderr)
-            second_payload = json.loads(second.stdout)
-            message = second_payload["systemMessage"]
-            self.assertIn("intake-ready: current input recorded", message)
-            self.assertNotIn("decision=allow", message)
-            import session_intent_ledger
-            ledger_command = message.split("intent-ledger: use ", 1)[1].split(
-                " after session-intent preflight.", 1)[0]
-            ledger_args = shlex.split(ledger_command)
-            self.assertEqual(ledger_args, [
-                sys.executable, str(Path(session_intent_ledger.__file__).resolve()),
-                "--read-intent", "--root", str(root),
-                "--platform", "codex", "--session-id", "s-codex-router",
-            ])
-            self.assertNotIn(install_hooks.HOOK_INTERNAL, message)
-            self.assertNotIn("reuse retained instructions, reload if lost", message)
-            self.assertNotIn("task-router-step", message)
-            self.assertNotIn("atomic meaning decomposition", message)
-            self.assertNotIn("downstream-gate:", message)
-
-    def test_codex_task_router_reminder_releases_on_absent_gate_after_intent_preflight(self):
-        script = Path(install_hooks.__file__).with_name("task_router_reminder_hook.py")
-        self.assertTrue(script.exists(), f"missing reminder helper: {script}")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            root = Path(temp_home) / ".ghost-alice" / "session-intent"
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-silent-allow")
-
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(script),
-                    "--platform",
-                    "codex",
-                    "--format",
-                    "json",
-                    "--root",
-                    str(root),
-                ],
-                input=json.dumps({"session_id": "s-codex-silent-allow"}),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-            )
-
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            message = payload["systemMessage"]
-            self.assertIn("intake-ready: current input recorded", message)
-            self.assertNotIn(install_hooks.HOOK_INTERNAL, message)
-            self.assertNotIn("task-router withheld", message)
 
     def test_completion_reminder_delegates_evidence_review_and_preserves_original_time(self):
         self.assertIn("Core authenticates", install_hooks.STOP_HOOK_INTERNAL)
@@ -1146,7 +923,6 @@ class TestMessageLanguage(unittest.TestCase):
 
     def test_internal_instruction_lines_are_english_only(self):
         for command in (
-            install_hooks.HOOK_COMMAND,
             install_hooks.SESSION_INTENT_COMMAND,
             install_hooks.SESSION_START_COMMAND,
         ):
@@ -1178,1622 +954,23 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(instruction, result.stdout)
 
-    def test_codex_dispatcher_tool_checkpoint_returns_pre_tool_use_context_shape_with_legacy_block_record(self):
-        """Codex PreToolUse preserves context and leaves native permission to its host."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-tool-checkpoint")
-            _write_downstream_gate(temp_home, "codex", "s-codex-tool-checkpoint", "block")
-            request = json.dumps({
-                "session_id": "s-codex-tool-checkpoint",
-                "hook_event_name": "PreToolUse",
-                "tool_name": "apply_patch",
-                "tool_input": {"command": "*** Begin Patch\n*** End Patch\n"},
-            })
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "codex",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-
-            first = subprocess.run(
-                command,
-                input=request,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            second = subprocess.run(
-                command,
-                input=request,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(first.returncode, 0, msg=first.stderr)
-        first_payload = json.loads(first.stdout)
-        output = first_payload.get("hookSpecificOutput", {})
-        self.assertIn(output.get("hookEventName"), (None, "PreToolUse"))
-        self.assertNotIn("permissionDecision", output)
-
-        self.assertNotIn("continue", first_payload)
-        self.assertNotIn("systemMessage", first_payload)
-
-        self.assertEqual(second.returncode, 0, msg=second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assertNotIn("permissionDecision", second_payload.get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_routine_tool_checks_add_no_input_guidance(self):
-        """Recorded intake keeps checking each tool call but surfaces once per user input."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            session_id = "s-codex-tool-checkpoint-surface-batch"
-            _write_session_intent_preflight(
-                temp_home,
-                "codex",
-                session_id,
-                event_id="evt-a",
-                input_digest="sha256:a",
-            )
-            _write_downstream_gate(
-                temp_home,
-                "codex",
-                session_id,
-                "allow",
-                event_id="evt-a",
-                input_digest="sha256:a",
-            )
-            request = json.dumps({
-                "session_id": session_id,
-                "hook_event_name": "PreToolUse",
-                "tool_name": "apply_patch",
-                "tool_input": {"command": "*** Begin Patch\n*** End Patch\n"},
-            })
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "codex",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-
-            first = subprocess.run(
-                command,
-                input=request,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            second = subprocess.run(
-                command,
-                input=request,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            _write_session_intent_preflight(
-                temp_home,
-                "codex",
-                session_id,
-                event_id="evt-b",
-                input_digest="sha256:b",
-            )
-            _write_downstream_gate(
-                temp_home,
-                "codex",
-                session_id,
-                "allow",
-                event_id="evt-b",
-                input_digest="sha256:b",
-            )
-            third = subprocess.run(
-                command,
-                input=request,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(first.returncode, 0, msg=first.stderr)
-        first_payload = json.loads(first.stdout)
-        self.assert_no_pretool_deny(first_payload)
-        self.assertNotIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
-
-        self.assertEqual(second.returncode, 0, msg=second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assert_no_pretool_deny(second_payload)
-        self.assertNotIn("additionalContext", second_payload.get("hookSpecificOutput", {}))
-
-        self.assertEqual(third.returncode, 0, msg=third.stderr)
-        third_payload = json.loads(third.stdout)
-        self.assert_no_pretool_deny(third_payload)
-        self.assertNotIn("additionalContext", third_payload.get("hookSpecificOutput", {}))
-
-    def test_claude_dispatcher_tool_checkpoint_fallback_does_not_inject_answer_context(self):
-        """Claude print mode can miss intent lineage; allow checkpoints still avoid model-context text."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            session_id = "s-claude-tool-checkpoint-missing-lineage"
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "claude",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-
-            def run_tool(tool_name: str) -> subprocess.CompletedProcess:
-                return subprocess.run(
-                    command,
-                    input=json.dumps({
-                        "session_id": session_id,
-                        "hook_event_name": "PreToolUse",
-                        "tool_name": tool_name,
-                        "tool_input": {"command": "echo smoke"},
-                    }),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=env,
-                    check=False,
-                )
-
-            first = run_tool("PowerShell")
-            second = run_tool("WebSearch")
-
-        self.assertEqual(first.returncode, 0, msg=first.stderr)
-        first_payload = json.loads(first.stdout)
-        self.assert_no_pretool_deny(first_payload)
-        self.assertNotIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
-        self.assertNotIn("[tool-checkpoint]", first.stdout)
-
-        self.assertEqual(second.returncode, 0, msg=second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assert_no_pretool_deny(second_payload)
-        self.assertNotIn("additionalContext", second_payload.get("hookSpecificOutput", {}))
-        self.assertNotIn("[tool-checkpoint]", second.stdout)
-
-    def test_claude_dispatcher_tool_checkpoint_allow_does_not_inject_answer_surface_context(self):
-        """Claude allow checkpoints must not enter model context as answer-shaped text."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "claude",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-claude-tool-checkpoint-no-answer-leak",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "Bash",
-                    "tool_input": {"command": "ls"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        output = payload.get("hookSpecificOutput", {})
-        self.assertNotIn("additionalContext", output)
-        self.assertNotIn("[tool-checkpoint]", result.stdout)
-        self.assertNotIn("Surface a visible", result.stdout)
-
-    def test_claude_dispatcher_tool_checkpoint_transcript_fallback_avoids_answer_context(self):
-        """Claude transcript fallback never injects answer-shaped checkpoint text."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            session_id = "s-claude-tool-checkpoint-transcript-fallback"
-            transcript = Path(temp_home) / "transcript.jsonl"
-            transcript.write_text(
-                json.dumps({
-                    "type": "user",
-                    "message": {"role": "user", "content": "first prompt"},
-                })
-                + "\n",
-                encoding="utf-8",
-            )
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "claude",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-
-            def run_tool() -> subprocess.CompletedProcess:
-                return subprocess.run(
-                    command,
-                    input=json.dumps({
-                        "session_id": session_id,
-                        "transcript_path": str(transcript),
-                        "hook_event_name": "PreToolUse",
-                        "tool_name": "WebSearch",
-                        "tool_input": {"query": "neuromorphic AI"},
-                    }),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=env,
-                    check=False,
-                )
-
-            first = run_tool()
-            second = run_tool()
-            with transcript.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps({
-                    "type": "user",
-                    "message": {"role": "user", "content": [
-                        {"type": "tool_result", "content": "ignored tool result"},
-                    ]},
-                }) + "\n")
-                handle.write(json.dumps({
-                    "type": "user",
-                    "message": {"role": "user", "content": "second prompt"},
-                }) + "\n")
-            third = run_tool()
-
-        self.assertEqual(first.returncode, 0, msg=first.stderr)
-        first_payload = json.loads(first.stdout)
-        self.assertNotIn("additionalContext", first_payload.get("hookSpecificOutput", {}))
-        self.assertNotIn("[tool-checkpoint]", first.stdout)
-
-        self.assertEqual(second.returncode, 0, msg=second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assertNotIn("additionalContext", second_payload.get("hookSpecificOutput", {}))
-        self.assertNotIn("[tool-checkpoint]", second.stdout)
-
-        self.assertEqual(third.returncode, 0, msg=third.stderr)
-        third_payload = json.loads(third.stdout)
-        self.assertNotIn("additionalContext", third_payload.get("hookSpecificOutput", {}))
-        self.assertNotIn("[tool-checkpoint]", third.stdout)
-
-    def test_codex_dispatcher_parallel_routine_checks_add_no_input_guidance(self):
-        """Parallel tool calls in one input lineage share one user-facing checkpoint surface."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            session_id = "s-codex-tool-checkpoint-parallel-surface"
-            _write_session_intent_preflight(
-                temp_home,
-                "codex",
-                session_id,
-                event_id="evt-parallel",
-                input_digest="sha256:parallel",
-            )
-            _write_downstream_gate(
-                temp_home,
-                "codex",
-                session_id,
-                "allow",
-                event_id="evt-parallel",
-                input_digest="sha256:parallel",
-            )
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "codex",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-
-            def run_one(index: int) -> subprocess.CompletedProcess:
-                return subprocess.run(
-                    command,
-                    input=json.dumps({
-                        "session_id": session_id,
-                        "hook_event_name": "PreToolUse",
-                        "tool_name": "shell",
-                        "tool_input": {"cmd": f"echo parallel-{index}"},
-                    }),
-                    capture_output=True,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    env=env,
-                    check=False,
-                )
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
-                results = list(executor.map(run_one, range(8)))
-
-        payloads = []
-        for result in results:
-            self.assertEqual(result.returncode, 0, msg=result.stderr)
-            payload = json.loads(result.stdout)
-            self.assert_no_pretool_deny(payload)
-            payloads.append(payload)
-
-        surfaced_count = sum(
-            1
-            for payload in payloads
-            if payload.get("hookSpecificOutput", {}).get("additionalContext")
-        )
-        self.assertEqual(surfaced_count, 0)
-
-    def test_dispatcher_install_copies_companion_modules(self):
-        # Dispatcher companion-module invariant: the dispatcher imports a relative .mjs module; the installer must copy it alongside, or the installed enforcer fails ERR_MODULE_NOT_FOUND.
+    def test_dispatcher_install_keeps_only_the_dispatcher(self):
+        # The dispatcher imports nothing; the reminder's snapshot module and text copy are retired.
         prev_home = os.environ.get("HOME")
         with tempfile.TemporaryDirectory() as temp_home:
             os.environ["HOME"] = temp_home
             try:
-                install_hooks._ensure_hook_dispatcher_installed()
                 hooks_dir = Path(temp_home) / ".ghost-alice" / "hooks"
-                self.assertTrue((hooks_dir / "ghost-alice-hook.mjs").exists())
-                self.assertTrue(
-                    (hooks_dir / "session_intent_snapshot.mjs").exists(),
-                    "dispatcher companion module must be installed alongside the dispatcher",
-                )
-                self.assertTrue(
-                    (hooks_dir / "reminder_texts.json").exists(),
-                    "dispatcher reminder text data must be installed alongside the dispatcher",
-                )
+                hooks_dir.mkdir(parents=True)
+                for retired in ("session_intent_snapshot.mjs", "reminder_texts.json"):
+                    (hooks_dir / retired).write_text("old copy\n", encoding="utf-8")
+                install_hooks._ensure_hook_dispatcher_installed()
+                self.assertEqual(sorted(path.name for path in hooks_dir.iterdir()), ["ghost-alice-hook.mjs"])
             finally:
                 if prev_home is None:
                     os.environ.pop("HOME", None)
                 else:
                     os.environ["HOME"] = prev_home
-
-    def test_codex_dispatcher_tool_checkpoint_does_not_deny_by_input_event_or_tool_input(self):
-        """Codex checkpoints leave native permission with the host across input and tool identities."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-tool-checkpoint-changing-input")
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "codex",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-            first = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-codex-tool-checkpoint-changing-input",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "apply_patch",
-                    "tool_input": {"command": "*** Begin Patch\n*** End Patch\n"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            second = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-codex-tool-checkpoint-changing-input",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "write",
-                    "tool_input": {"path": "README.md", "content": "updated"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            replay = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-codex-tool-checkpoint-changing-input",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "write",
-                    "tool_input": {"path": "README.md", "content": "updated"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(first.returncode, 0, msg=first.stderr)
-        first_payload = json.loads(first.stdout)
-        self.assert_no_pretool_deny(first_payload)
-
-        self.assertEqual(second.returncode, 0, msg=second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assert_no_pretool_deny(second_payload)
-
-        self.assertEqual(replay.returncode, 0, msg=replay.stderr)
-        replay_payload = json.loads(replay.stdout)
-        self.assert_no_pretool_deny(replay_payload)
-
-    def test_codex_dispatcher_zero_deny_for_different_tool_input_payload_keys_with_open_gate(self):
-        """tool_input key names are not used as checkpoint decision signals."""
-        payload_variants = [
-            {"command": "echo command"},
-            {"cmd": "echo cmd"},
-            {"script": "echo script"},
-            {"text": "echo text"},
-            {"content": "echo content"},
-            {"input": "echo input"},
-            {"file_path": "/tmp/ghost-alice"},
-        ]
-        for tool_input in payload_variants:
-            with self.subTest(tool_input=tool_input):
-                result = self.run_codex_pretool({
-                    "session_id": "s-codex-payload-key-variants",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": tool_input,
-                })
-                self.assert_no_pretool_deny(json.loads(result.stdout))
-
-    def test_codex_dispatcher_block_gate_denies_regardless_of_tool_shape(self):
-        """A closed audit record supplies no native permission decision."""
-        requests = [
-            {"tool_name": "shell", "tool_input": {"cmd": "echo shell"}},
-            {"tool_name": "read", "tool_input": {"file_path": "README.md"}},
-            {"tool_name": "apply_patch", "tool_input": {"command": "*** Begin Patch\n*** End Patch\n"}},
-            {"tool_name": "unknown-tool", "tool_input": {"anything": "value"}},
-        ]
-        for request in requests:
-            with self.subTest(tool_name=request["tool_name"]):
-                result = self.run_codex_pretool({
-                    "session_id": "s-codex-block-regardless-tool-shape",
-                    "hook_event_name": "PreToolUse",
-                    **request,
-                }, downstream_decision="block")
-                payload = json.loads(result.stdout)
-                self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-
-    def test_codex_dispatcher_tool_checkpoint_does_not_deny_missing_session_intent_preflight(self):
-        """Missing session-intent preflight evidence is not a first-entry deny reason."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-missing-intent-preflight",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": {"cmd": "pwd"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-
-    def test_codex_dispatcher_tool_checkpoint_allows_read_only_bootstrap_batch_first_try(self):
-        """A first-entry read-only bootstrap batch must not hit tool-checkpoint retry."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            session_id = f"s-codex-read-only-bootstrap-batch-{Path(temp_home).name}"
-            command_text = (
-                "printf 'pending-merges\\n'; "
-                "sed -n '1,40p' \"$HOME/.agents/skills/task-router/SKILL.md\"; "
-                "sed -n '1,40p' \"$HOME/.agents/skills/session-intent-analyzer/SKILL.md\"; "
-                "sed -n '1,40p' \"$HOME/.agents/skills/using-coding-convention/SKILL.md\"; "
-                "rg --files \"$HOME/ghost-alice\" | rg 'session_intent|ghost-alice-hook'"
-            )
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": session_id,
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "functions.exec_command",
-                    "tool_input": {"cmd": command_text},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-
-    def test_codex_dispatcher_tool_checkpoint_does_not_deny_digest_only_session_intent(self):
-        """Digest-only session-intent evidence is an intake state, not a tool-scope deny reason."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_digest_only_preflight(temp_home, "codex", "s-codex-digest-only")
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-digest-only",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": {"cmd": "pwd"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-
-    def test_codex_dispatcher_tool_checkpoint_allows_session_intent_semantic_update_recovery(self):
-        """The semantic ledger update command stays open so digest-only preflight cannot deadlock."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        ledger_script = Path(install_hooks.__file__).parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
-        self.assertTrue(ledger_script.exists(), f"missing ledger script: {ledger_script}")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            session_root = Path(temp_home) / ".ghost-alice" / "session-intent"
-            _write_session_intent_digest_only_preflight(temp_home, "codex", "s-codex-semantic-recovery")
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-semantic-recovery",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "functions.exec_command",
-                    "tool_input": {
-                        "cmd": (
-                            f"python3 {ledger_script} --root {session_root} --platform codex "
-                            "--delta-json '{\"current_goal\":\"record semantic intent\"}' --snapshot"
-                        ),
-                    },
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_tool_checkpoint_allows_session_intent_ledger_help_before_preflight(self):
-        """A fresh agent can discover the session-intent recovery CLI before preflight exists."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        ledger_script = Path(install_hooks.__file__).parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
-        self.assertTrue(ledger_script.exists(), f"missing ledger script: {ledger_script}")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-ledger-help-before-preflight",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "functions.exec_command",
-                    "tool_input": {"cmd": f"python3 {ledger_script} --help"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_tool_checkpoint_allows_pending_merge_manifest_precheck_before_preflight(self):
-        """The pre-routing pending-merge manifest check must not depend on session-intent preflight."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            manifest_path = Path(temp_home) / ".ghost-alice" / "pending-merges" / "codex" / "manifest.json"
-            command_text = f"test -f {manifest_path} && sed -n '1,160p' {manifest_path} || true"
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-pending-merge-before-preflight",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "functions.exec_command",
-                    "tool_input": {"cmd": command_text},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_tool_checkpoint_allows_shell_content_after_open_gate(self):
-        """Codex checkpoints do not classify shell payloads for native permission."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        command = [
-            node,
-            str(dispatcher),
-            "--platform",
-            "codex",
-            "--event",
-            "PreToolUse",
-            "--hook",
-            "tool-checkpoint",
-            "--marker",
-            install_hooks.TOOL_CHECKPOINT_MARKER,
-        ]
-        routine_inspection_commands = [
-            "pwd",
-            "sed -n '1,20p' README.md",
-            "git diff --check -- install.sh",
-            "bash -n install.sh",
-            "zsh -n install.sh",
-            "pwsh -NoLogo -NoProfile -Command \"[System.Management.Automation.Language.Parser]::ParseFile('install.ps1',[ref]$null,[ref]$null)\"",
-            "cmd /c type README.md",
-        ]
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            for index, shell_command in enumerate(routine_inspection_commands):
-                with self.subTest(shell_command=shell_command):
-                    session_id = f"s-codex-routine-inspection-tool-checkpoint-{index}"
-                    _write_session_intent_preflight(temp_home, "codex", session_id)
-                    result = subprocess.run(
-                        command,
-                        input=json.dumps({
-                            "session_id": session_id,
-                            "hook_event_name": "PreToolUse",
-                            "tool_name": "shell",
-                            "tool_input": {"cmd": shell_command},
-                        }),
-                        capture_output=True,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        env=env,
-                        check=False,
-                    )
-                    self.assertEqual(result.returncode, 0, msg=result.stderr)
-                    payload = json.loads(result.stdout)
-                    self.assert_no_pretool_deny(payload)
-                    self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_tool_checkpoint_allows_functions_exec_command_inspection_after_intent_preflight(self):
-        """Codex developer-tool shell reads preserve the host native-permission boundary."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-functions-exec-command")
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-functions-exec-command",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "functions.exec_command",
-                    "tool_input": {"cmd": "rg -n session-intent-analyzer AGENTS.md"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_ignores_old_block_gate_for_newer_intent_event(self):
-        with tempfile.TemporaryDirectory() as temp_home:
-            session_id = "s-old-block-is-stale"
-            _write_session_intent_preflight(
-                temp_home,
-                "codex",
-                session_id,
-                event_id="evt-new",
-                input_digest="sha256:new",
-            )
-            _write_downstream_gate(
-                temp_home,
-                "codex",
-                session_id,
-                "block",
-                event_id="evt-old",
-                input_digest="sha256:old",
-            )
-
-            dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-            node = shutil.which("node") or shutil.which("node.exe")
-            if not node:
-                self.skipTest("node is required to execute the hook dispatcher")
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": session_id,
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": {"cmd": "opaque shell text"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assert_no_pretool_deny(json.loads(result.stdout))
-
-    def test_codex_dispatcher_does_not_parse_shell_command_content(self):
-        for command in [
-            "rg -n 'hook|gate' AGENTS.md",
-            "sed -n '1,20p' README.md",
-            "test -f README.md && wc -l README.md || true",
-            "git diff --check -- install.sh",
-            "shasum -a 256 README.md",
-        ]:
-            with self.subTest(command=command):
-                result = self.run_codex_pretool({
-                    "session_id": "s-shell-read-only-content",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": {"cmd": command},
-                })
-                payload = json.loads(result.stdout)
-                self.assert_no_pretool_deny(payload)
-                self.assertNotIn(command, json.dumps(payload, ensure_ascii=False))
-
-    def test_codex_dispatcher_tool_checkpoint_does_not_deny_unknown_shell_after_open_gate(self):
-        result = self.run_codex_pretool({
-            "session_id": "s-shell-unknown-content",
-            "hook_event_name": "PreToolUse",
-            "tool_name": "shell",
-            "tool_input": {"cmd": "opaque shell text with no known read-only command"},
-        })
-
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        self.assertNotIn("opaque shell text", json.dumps(payload, ensure_ascii=False))
-
-    def test_codex_dispatcher_ignores_legacy_gate_permission_for_shell(self):
-        result = self.run_codex_pretool({
-            "session_id": "s-shell-downstream-closed",
-            "hook_event_name": "PreToolUse",
-            "tool_name": "shell",
-            "tool_input": {"cmd": "opaque shell text"},
-        }, downstream_decision="block")
-        payload = json.loads(result.stdout)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-
-    def test_codex_dispatcher_tool_checkpoint_does_not_parse_compound_shell_mutation(self):
-        """Compound shell payloads do not create a checkpoint permission decision."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-compound-mutation")
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-compound-mutation",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": {"cmd": "sed -n '1p' README.md && rm -f README.md"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        self.assertNotIn("rm -f README.md", json.dumps(payload, ensure_ascii=False))
-
-    def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_decide_tool_permission(self):
-        """Stored detector state does not grant or deny native tool permission."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-jailbreak-block")
-            _write_downstream_gate(temp_home, "codex", "s-codex-jailbreak-block", "block")
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-jailbreak-block",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": {"cmd": "pwd"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        output = payload.get("hookSpecificOutput", {})
-        self.assertNotIn("permissionDecision", output)
-
-
-
-    def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_deny_session_intent_recovery(self):
-        """Stored gate records do not deny session-intent recovery calls."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-recovery-before-jailbreak")
-            _write_downstream_gate(temp_home, "codex", "s-codex-recovery-before-jailbreak", "block")
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-recovery-before-jailbreak",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "shell",
-                    "tool_input": {
-                        "cmd": "python3 /tmp/session_intent_ledger.py --delta-json '{}'",
-                    },
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-
-    def test_codex_dispatcher_tool_checkpoint_allows_governance_skill_doc_bootstrap_before_semantic_intent(self):
-        """Governance instruction reads remain available while semantic intake is pending."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            _write_session_intent_preflight(
-                temp_home,
-                "codex",
-                "s-codex-governance-skill-doc-bootstrap",
-                semantic_delta=False,
-            )
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "codex",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-codex-governance-skill-doc-bootstrap",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "functions.exec_command",
-                    "tool_input": {
-                        "cmd": "sed -n '1,120p' /Users/test/.agents/skills/task-router/SKILL.md",
-                    },
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-
-    def test_codex_dispatcher_tool_checkpoint_legacy_block_does_not_deny_historical_doc_reads(self):
-        """Stored gate records do not deny instruction calls or document reads."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        command = [
-            node,
-            str(dispatcher),
-            "--platform",
-            "codex",
-            "--event",
-            "PreToolUse",
-            "--hook",
-            "tool-checkpoint",
-            "--marker",
-            install_hooks.TOOL_CHECKPOINT_MARKER,
-        ]
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            _write_session_intent_preflight(temp_home, "codex", "s-codex-jailbreak-bootstrap")
-            _write_downstream_gate(temp_home, "codex", "s-codex-jailbreak-bootstrap", "block")
-            env = _strict_hook_env({"HOME": temp_home})
-            skill_call = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-codex-jailbreak-bootstrap",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "skill",
-                    "tool_input": {"skill": "jailbreak-detector"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            doc_read = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-codex-jailbreak-bootstrap",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "functions.exec_command",
-                    "tool_input": {
-                        "cmd": "sed -n '1,120p' /Users/test/.agents/skills/jailbreak-detector/SKILL.md",
-                    },
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(skill_call.returncode, 0, msg=skill_call.stderr)
-        self.assertNotIn("permissionDecision", json.loads(skill_call.stdout).get("hookSpecificOutput", {}))
-        self.assertEqual(doc_read.returncode, 0, msg=doc_read.stderr)
-        self.assertNotIn("permissionDecision", json.loads(doc_read.stdout).get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_preserves_host_permission_for_governance_skill_docs(self):
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-        command = [
-            node,
-            str(dispatcher),
-            "--platform",
-            "codex",
-            "--event",
-            "PreToolUse",
-            "--hook",
-            "tool-checkpoint",
-            "--marker",
-            install_hooks.TOOL_CHECKPOINT_MARKER,
-        ]
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            trusted_roots = [
-                Path(temp_home) / ".agents" / "skills",
-                Path(temp_home) / ".claude" / "skills",
-                Path(temp_home) / ".codex" / "skills",
-                Path(temp_home) / ".codex" / "skills" / ".system",
-            ]
-            for skill in [
-                "merge-companion",
-                "session-intent-analyzer",
-                "task-router",
-                "boundary-contract",
-                "using-coding-convention",
-                "verification-before-completion",
-            ]:
-                for root_index, trusted_root in enumerate(trusted_roots):
-                    with self.subTest(skill=skill, trusted_root=str(trusted_root)):
-                        session_id = f"s-governance-bootstrap-{skill}-{root_index}"
-                        _write_session_intent_preflight(temp_home, "codex", session_id)
-                        _write_downstream_gate(temp_home, "codex", session_id, "block")
-                        doc_path = trusted_root / skill / "SKILL.md"
-                        result = subprocess.run(
-                            command,
-                            input=json.dumps({
-                                "session_id": session_id,
-                                "hook_event_name": "PreToolUse",
-                                "tool_name": "functions.exec_command",
-                                "tool_input": {
-                                    "cmd": f"sed -n '1,120p' {doc_path}",
-                                },
-                            }),
-                            capture_output=True,
-                            text=True,
-                            encoding="utf-8",
-                            errors="replace",
-                            env=env,
-                            check=False,
-                        )
-                        self.assertEqual(result.returncode, 0, msg=result.stderr)
-                        payload = json.loads(result.stdout)
-                        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-    def test_codex_dispatcher_does_not_bootstrap_untrusted_governance_named_skill_doc(self):
-        result = self.run_codex_pretool({
-            "session_id": "s-untrusted-bootstrap",
-            "hook_event_name": "PreToolUse",
-            "tool_name": "functions.exec_command",
-            "tool_input": {
-                "cmd": "sed -n '1,120p' /tmp/session-intent-analyzer/SKILL.md",
-            },
-        }, downstream_decision="block")
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-
-    def test_claude_dispatcher_tool_checkpoint_blocks_governance_skill_bootstrap_when_gate_blocks(self):
-        """Claude Skill calls leave native permission with the host."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            _write_session_intent_preflight(temp_home, "claude", "s-claude-skill-bootstrap")
-            _write_downstream_gate(temp_home, "claude", "s-claude-skill-bootstrap", "block")
-            env = _strict_hook_env({"HOME": temp_home})
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "claude",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-claude-skill-bootstrap",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "Skill",
-                    "tool_input": {"skill": "task-router"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-
-    def test_claude_dispatcher_tool_checkpoint_returns_pre_tool_use_context_shape_with_legacy_block_record(self):
-        """Claude PreToolUse preserves context and leaves native permission to its host."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "claude", "s-claude-tool-checkpoint")
-            _write_downstream_gate(temp_home, "claude", "s-claude-tool-checkpoint", "block")
-            request = json.dumps({
-                "session_id": "s-claude-tool-checkpoint",
-                "hook_event_name": "PreToolUse",
-                "tool_name": "Bash",
-                "tool_input": {"command": "rm -f README.md"},
-            })
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "claude",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-
-            first = subprocess.run(
-                command,
-                input=request,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            second = subprocess.run(
-                command,
-                input=request,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(first.returncode, 0, msg=first.stderr)
-        first_payload = json.loads(first.stdout)
-        output = first_payload.get("hookSpecificOutput", {})
-        self.assertIn(output.get("hookEventName"), (None, "PreToolUse"))
-        self.assertNotIn("permissionDecision", output)
-
-        self.assertNotIn("continue", first_payload)
-        self.assertNotIn("systemMessage", first_payload)
-
-        self.assertEqual(second.returncode, 0, msg=second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assertNotIn("permissionDecision", second_payload.get("hookSpecificOutput", {}))
-
-    def test_claude_dispatcher_tool_checkpoint_does_not_deny_by_input_event_or_tool_input(self):
-        """Claude and Codex checkpoints leave tool permission to their native hosts."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "claude", "s-claude-tool-checkpoint-changing-input")
-            command = [
-                node,
-                str(dispatcher),
-                "--platform",
-                "claude",
-                "--event",
-                "PreToolUse",
-                "--hook",
-                "tool-checkpoint",
-                "--marker",
-                install_hooks.TOOL_CHECKPOINT_MARKER,
-            ]
-            first = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-claude-tool-checkpoint-changing-input",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "Bash",
-                    "tool_input": {"command": "rm -f README.md"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            second = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-claude-tool-checkpoint-changing-input",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "Write",
-                    "tool_input": {"file_path": "README.md", "content": "changed"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-            replay = subprocess.run(
-                command,
-                input=json.dumps({
-                    "session_id": "s-claude-tool-checkpoint-changing-input",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "Write",
-                    "tool_input": {"file_path": "README.md", "content": "changed"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(first.returncode, 0, msg=first.stderr)
-        first_payload = json.loads(first.stdout)
-        self.assert_no_pretool_deny(first_payload)
-
-        self.assertEqual(second.returncode, 0, msg=second.stderr)
-        second_payload = json.loads(second.stdout)
-        self.assert_no_pretool_deny(second_payload)
-
-        self.assertEqual(replay.returncode, 0, msg=replay.stderr)
-        replay_payload = json.loads(replay.stdout)
-        self.assert_no_pretool_deny(replay_payload)
-
-    def test_claude_dispatcher_tool_checkpoint_does_not_parse_bash_inspection(self):
-        """Claude Bash command content is not parsed for read/write classification."""
-        dispatcher = Path(install_hooks.__file__).with_name("ghost-alice-hook.mjs")
-        self.assertTrue(dispatcher.exists(), f"missing dispatcher: {dispatcher}")
-
-        node = shutil.which("node") or shutil.which("node.exe")
-        if not node:
-            self.skipTest("node is required to execute the hook dispatcher")
-
-        with tempfile.TemporaryDirectory() as temp_home:
-            env = _strict_hook_env({"HOME": temp_home})
-            _write_session_intent_preflight(temp_home, "claude", "s-claude-routine-inspection-tool-checkpoint")
-            result = subprocess.run(
-                [
-                    node,
-                    str(dispatcher),
-                    "--platform",
-                    "claude",
-                    "--event",
-                    "PreToolUse",
-                    "--hook",
-                    "tool-checkpoint",
-                    "--marker",
-                    install_hooks.TOOL_CHECKPOINT_MARKER,
-                ],
-                input=json.dumps({
-                    "session_id": "s-claude-routine-inspection-tool-checkpoint",
-                    "hook_event_name": "PreToolUse",
-                    "tool_name": "Bash",
-                    "tool_input": {"command": "bash -n install.sh"},
-                }),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                env=env,
-                check=False,
-            )
-
-        self.assertEqual(result.returncode, 0, msg=result.stderr)
-        payload = json.loads(result.stdout)
-        self.assert_no_pretool_deny(payload)
-        self.assertNotIn("bash -n install.sh", json.dumps(payload, ensure_ascii=False))
-
 
 class TempHomeTestCase(unittest.TestCase):
     """Base class that uses a temporary home directory for each test."""
@@ -2860,7 +1037,6 @@ class TempHomeTestCase(unittest.TestCase):
         for name in (
             "pending_merge_precheck_hook.py",
             "session_intent_analyzer_hook.py",
-            "task_router_reminder_hook.py",
             "claude_stop_verification_hook.py",
             "hook_profile_gate.py",
             "io_trace_hook.py",
@@ -2967,7 +1143,7 @@ class TestInstallHook(TempHomeTestCase):
         self.assertEqual(rows, [{'matcher': 'keep-matcher', 'custom': 'keep-metadata', 'hooks': [
             {'type': 'command', 'command': 'echo custom-sibling'}]}])
 
-    def test_managed_prompt_reinstall_preserves_custom_sibling_commands_and_settings(self):
+    def test_managed_intake_reinstall_preserves_custom_sibling_commands_and_settings(self):
         from install_destination import InstallDestination
         for platform in ('codex', 'claude'):
             with self.subTest(platform=platform), tempfile.TemporaryDirectory() as temporary:
@@ -2980,7 +1156,6 @@ class TestInstallHook(TempHomeTestCase):
                 # Existing installed managed commands contain the prior generated text.
                 with patch.dict(os.environ, {install_hooks.HOOK_SHARED_DIR_ENV: '',
                                              'GHOST_ALICE_RUNTIME_SHARED_DIR': ''}), \
-                     patch.object(install_hooks, 'HOOK_INTERNAL', 'previous generated router'), \
                      patch.object(install_hooks, 'SESSION_INTENT_INTERNAL', 'previous generated intake'):
                     self.assertEqual(install_hooks.install_hook(platform, destination=destination), 'installed')
                 config = owned / platform / ('hooks.json' if platform == 'codex' else 'settings.json')
@@ -2988,7 +1163,7 @@ class TestInstallHook(TempHomeTestCase):
                 before['customSetting'] = {'preserve': ['value']}
                 for row in before['hooks']['UserPromptSubmit']:
                     command = install_hooks._entry_command(row)
-                    if any(marker in command for marker in (install_hooks.HOOK_MARKER, install_hooks.SESSION_INTENT_MARKER)):
+                    if install_hooks.SESSION_INTENT_MARKER in command:
                         row['customEntryMetadata'] = 'preserve'
                         row['hooks'].append({'type': 'command', 'command': 'echo custom-sibling'})
                 config.write_text(json.dumps(before))
@@ -3009,7 +1184,7 @@ class TestInstallHook(TempHomeTestCase):
                 self.assertFalse(any(install_hooks.HOOK_MARKER in command for command in commands))
                 for command in commands:
                     decoded = _visible_and_runner_payload_text(command)
-                    if 'session_intent_analyzer_hook.py' in decoded or 'task_router_reminder_hook.py' in decoded:
+                    if 'session_intent_analyzer_hook.py' in decoded:
                         self.assertIn(str(owned / 'exact-ledger'), decoded)
 
     """Install behavior tests."""
@@ -4320,9 +2495,9 @@ class TestInstallHook(TempHomeTestCase):
     def test_agent_visibility_env_does_not_change_generated_hook_command(self):
         hook_key = hook_definitions.resolve_hook_event("on_user_prompt", "claude")
         with patch.dict(os.environ, {"GHOST_ALICE_AGENT_VISIBILITY": "strict"}):
-            strict_command = install_hooks._entry_command(install_hooks._platform_hook_entry("claude", hook_key))
+            strict_command = install_hooks._entry_command(install_hooks._platform_session_intent_entry("claude", hook_key))
         with patch.dict(os.environ, {"GHOST_ALICE_AGENT_VISIBILITY": "minimal"}):
-            minimal_command = install_hooks._entry_command(install_hooks._platform_hook_entry("claude", hook_key))
+            minimal_command = install_hooks._entry_command(install_hooks._platform_session_intent_entry("claude", hook_key))
 
         self.assertEqual(strict_command, minimal_command)
 
@@ -4491,7 +2666,7 @@ class TestUninstallHook(TempHomeTestCase):
         """Remove installed hooks."""
         self._write_settings("claude", {
             "hooks": {
-                "UserPromptSubmit": [install_hooks.HOOK_ENTRY],
+                "UserPromptSubmit": [install_hooks.SESSION_INTENT_ENTRY],
             },
         })
         result = install_hooks.uninstall_hook("claude")
@@ -4509,7 +2684,7 @@ class TestUninstallHook(TempHomeTestCase):
         }
         self._write_settings("claude", {
             "hooks": {
-                "UserPromptSubmit": [other_hook, install_hooks.HOOK_ENTRY],
+                "UserPromptSubmit": [other_hook, install_hooks.SESSION_INTENT_ENTRY],
             },
         })
         result = install_hooks.uninstall_hook("claude")
@@ -4531,7 +2706,7 @@ class TestUninstallHook(TempHomeTestCase):
         self._write_settings("claude", {
             "autoUpdatesChannel": "latest",
             "hooks": {
-                "UserPromptSubmit": [install_hooks.HOOK_ENTRY],
+                "UserPromptSubmit": [install_hooks.SESSION_INTENT_ENTRY],
                 "SessionStart": [],
             },
         })
@@ -4634,10 +2809,10 @@ class TestCheckStatus(TempHomeTestCase):
         self.assertEqual(status.legacy_status, "missing")
         self.assertEqual(status.missing_reason, "config_file_absent")
 
-    def test_status_missing_when_only_prompt_hook_is_installed(self):
-        """A prompt hook alone does not count as the full hook suite."""
+    def test_status_missing_when_only_the_intake_hook_is_installed(self):
+        """The intake hook alone does not count as the full hook suite."""
         self._write_settings("claude", {
-            "hooks": {"UserPromptSubmit": [install_hooks.HOOK_ENTRY]},
+            "hooks": {"UserPromptSubmit": [install_hooks.SESSION_INTENT_ENTRY]},
         })
         result = install_hooks.check_status("claude")
         self.assertEqual(result, "missing")
@@ -4670,7 +2845,7 @@ class TestCheckStatus(TempHomeTestCase):
         self._write_settings("claude", {
             "hooks": {
                 "UserPromptSubmit": [
-                    install_hooks.HOOK_ENTRY,
+                    LEGACY_HOOK_REMINDER_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
                 ],
                 "Stop": [install_hooks.STOP_HOOK_ENTRY],
@@ -4692,7 +2867,7 @@ class TestCheckStatus(TempHomeTestCase):
             "hooks": {
                 "UserPromptSubmit": [
                     LEGACY_PROMPT_PENDING_MERGE_ENTRY,
-                    install_hooks.HOOK_ENTRY,
+                    LEGACY_HOOK_REMINDER_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
                 ],
@@ -4714,7 +2889,7 @@ class TestCheckStatus(TempHomeTestCase):
             "hooks": {
                 "UserPromptSubmit": [
                     LEGACY_PROMPT_PENDING_MERGE_ENTRY,
-                    install_hooks.HOOK_ENTRY,
+                    LEGACY_HOOK_REMINDER_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
                 ],
@@ -5158,7 +3333,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             "hooks": {
                 "UserPromptSubmit": [
                     LEGACY_PROMPT_PENDING_MERGE_ENTRY,
-                    install_hooks.HOOK_ENTRY,
+                    LEGACY_HOOK_REMINDER_ENTRY,
                     install_hooks.SESSION_INTENT_ENTRY,
                     LEGACY_WEB_SEARCH_ENTRY,
                 ],
@@ -5252,7 +3427,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         """Codex does not count hooks.json alone as installed without the feature flag."""
         self._write_settings("codex", {
             "hooks": {
-                "UserPromptSubmit": [install_hooks.HOOK_ENTRY],
+                "UserPromptSubmit": [install_hooks.SESSION_INTENT_ENTRY],
                 "Stop": [install_hooks.STOP_HOOK_ENTRY],
             },
         })
@@ -5332,7 +3507,7 @@ class TestCodexHookSupportGuard(TempHomeTestCase):
     def test_uninstall_codex_hooks_unsupported_runtime(self):
         """Skip hook removal on unsupported runtimes."""
         self._write_settings("codex", {
-            "hooks": {"UserPromptSubmit": [install_hooks.HOOK_ENTRY]},
+            "hooks": {"UserPromptSubmit": [install_hooks.SESSION_INTENT_ENTRY]},
         })
         original = (self.fake_home / ".codex" / "hooks.json").read_text(encoding="utf-8")
         with patch.object(install_hooks, "_codex_hooks_supported", return_value=False):
@@ -5424,7 +3599,7 @@ class TestDryRun(TempHomeTestCase):
     def test_dry_run_uninstall_does_not_modify(self):
         """Dry-run removal does not modify files."""
         self._write_settings("claude", {
-            "hooks": {"UserPromptSubmit": [install_hooks.HOOK_ENTRY]},
+            "hooks": {"UserPromptSubmit": [install_hooks.SESSION_INTENT_ENTRY]},
         })
         original_content = (self.fake_home / ".claude" / "settings.json").read_text(encoding="utf-8")
 
@@ -5684,7 +3859,6 @@ class TestSessionStartHook(unittest.TestCase):
 
     def test_claude_prompt_hooks_use_json_payloads_to_avoid_answer_text_leakage(self):
         from install_hooks import (
-            _platform_hook_entry,
             _platform_session_intent_entry,
             _platform_session_receipt_entry,
             _platform_session_start_entry,
@@ -5692,7 +3866,6 @@ class TestSessionStartHook(unittest.TestCase):
 
         entries = [
             _platform_session_receipt_entry("claude", "SessionStart"),
-            _platform_hook_entry("claude", "UserPromptSubmit"),
             _platform_session_intent_entry("claude", "UserPromptSubmit"),
             _platform_session_start_entry("claude", "SessionStart"),
         ]
@@ -5714,6 +3887,24 @@ class TestSessionStartHook(unittest.TestCase):
     def test_session_start_command_has_failsafe(self):
         from install_hooks import SESSION_START_COMMAND
         self.assertIn("|| true", SESSION_START_COMMAND)
+
+    def test_session_start_registration_carries_only_read_arguments(self):
+        # The precheck has one hook and one context since the input checks retired, and it never read
+        # the instruction text the registration used to carry.
+        from install_hooks import SESSION_START_COMMAND, SESSION_START_COMMAND_CODEX
+        for command in (SESSION_START_COMMAND, SESSION_START_COMMAND_CODEX):
+            for unread in ("--hook", "--context", "--internal-b64"):
+                self.assertNotIn(unread, command)
+
+    def test_session_intent_registrations_carry_only_read_arguments(self):
+        # One intake script serves the input and the session start through --context; it never read --hook.
+        for context in ("prompt_submit", "session_start"):
+            for platform, output_format in (("claude", "text"), ("codex", "json")):
+                command = install_hooks._session_intent_analyzer_command(
+                    platform=platform, output_format=output_format, context=context)
+                self.assertIn("session_intent_analyzer_hook.py", command)
+                self.assertIn(f"--context {context}", command)
+                self.assertNotIn("--hook", command)
 
     def test_session_start_hook_uses_current_session_copy(self):
         from install_hooks import SESSION_START_COMMAND
@@ -5770,7 +3961,6 @@ class TestForegroundHookPayloads(TempHomeTestCase):
 
     def test_user_prompt_hooks_emit_non_json_prefixed_text(self):
         for cmd, env in (
-            (install_hooks.HOOK_COMMAND, None),
             (install_hooks.SESSION_INTENT_COMMAND, None),
         ):
             result = _run_hook_command(cmd, env=env)
@@ -5909,7 +4099,6 @@ class TestForegroundHookPayloads(TempHomeTestCase):
 
     def test_codex_foreground_hooks_emit_valid_json_system_messages(self):
         cases = (
-            (install_hooks.HOOK_COMMAND_CODEX, "hook-reminder"),
             (install_hooks.SESSION_START_COMMAND_CODEX, "merge-companion-precheck: clean (hook-verified)"),
         )
 
@@ -5975,7 +4164,6 @@ class TestForegroundHookPayloads(TempHomeTestCase):
 
     def test_foreground_hook_messages_run_under_cmd_exe(self):
         for cmd, env in (
-            (install_hooks.HOOK_COMMAND, None),
             (install_hooks.SESSION_START_COMMAND, None),
         ):
             result = _run_hook_command_via_cmd(cmd, env=env)

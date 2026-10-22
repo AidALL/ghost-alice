@@ -25,7 +25,6 @@ import hook_profile_gate
 import install_hooks
 import pending_merge_precheck_hook
 import session_intent_analyzer_hook
-import task_router_reminder_hook
 
 KEY = "ghostAliceSurface"
 CONTEXT = "session-intent-analyzer: model context stays exactly as written. Never persist secrets."
@@ -64,8 +63,8 @@ class RunnerHonorsDeclarationTests(unittest.TestCase):
         self.assertEqual(host["hookSpecificOutput"]["additionalContext"], CONTEXT)
 
     def test_strict_profile_still_shows_the_notice_without_the_private_key(self):
-        host = gate("prompt", declared("hook-reminder: routine release"), profile="strict")
-        self.assertEqual(host["systemMessage"], "hook-reminder: routine release")
+        host = gate("session-intent", declared("session-intent-analyzer: routine notice"), profile="strict")
+        self.assertEqual(host["systemMessage"], "session-intent-analyzer: routine notice")
         self.assertNotIn(KEY, host)
 
     def test_undecided_pending_merge_entry_forces_only_its_owner_notice(self):
@@ -73,16 +72,16 @@ class RunnerHonorsDeclarationTests(unittest.TestCase):
             manifest = Path(home) / ".ghost-alice" / "pending-merges" / "claude" / "manifest.json"
             manifest.parent.mkdir(parents=True)
             manifest.write_text(json.dumps({"entries": [{"skill": "task-router", "decided": False}]}), encoding="utf-8")
-            for hook_id in ("session-intent", "prompt", "completion", "pending-merge-prompt"):
+            for hook_id in ("session-intent", "completion", "session-start"):
                 with self.subTest(hook_id=hook_id):
                     host = gate(hook_id, declared("routine notice", context=CONTEXT), home=home)
-                    self.assertEqual("systemMessage" in host, hook_id == "pending-merge-prompt")
+                    self.assertEqual("systemMessage" in host, hook_id == "session-start")
                     self.assertEqual(host["hookSpecificOutput"]["additionalContext"], CONTEXT)
                     self.assertNotIn(KEY, host)
 
     def test_nonzero_exit_forces_the_notice_despite_a_routine_declaration(self):
-        host = gate("prompt", declared("hook-reminder: routine release"), exit_code=3)
-        self.assertEqual(host["systemMessage"], "hook-reminder: routine release")
+        host = gate("session-intent", declared("session-intent-analyzer: routine notice"), exit_code=3)
+        self.assertEqual(host["systemMessage"], "session-intent-analyzer: routine notice")
 
     def test_undeclared_output_keeps_the_previous_classification(self):
         host = gate("session-intent", json.dumps({"continue": True, "systemMessage": CONTEXT}))
@@ -97,23 +96,13 @@ class RunnerHonorsDeclarationTests(unittest.TestCase):
 class HooksDeclareOnlyRoutineStateTests(unittest.TestCase):
     def test_pending_merge_check_declares_routine_only_when_clean(self):
         with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}):
-            clean = json.loads(pending_merge_precheck_hook._json_payload("claude", "prompt-check"))
+            clean = json.loads(pending_merge_precheck_hook._json_payload("claude"))
             manifest = Path(home) / ".ghost-alice" / "pending-merges" / "claude" / "manifest.json"
             manifest.parent.mkdir(parents=True)
             manifest.write_text(json.dumps({"entries": [{"skill": "x", "decided": False}]}), encoding="utf-8")
-            pending = json.loads(pending_merge_precheck_hook._json_payload("claude", "prompt-check"))
+            pending = json.loads(pending_merge_precheck_hook._json_payload("claude"))
         self.assertEqual(clean.get(KEY), "routine")
         self.assertNotIn(KEY, pending)
-
-    def test_task_router_reminder_declares_routine_only_on_release(self):
-        released = json.loads(task_router_reminder_hook.render_payload("json", "hook-reminder: released", routine=True))
-        withheld = json.loads(task_router_reminder_hook.render_payload("json", "hook-reminder: withheld"))
-        self.assertEqual(released.get(KEY), "routine")
-        self.assertNotIn(KEY, withheld)
-        with tempfile.TemporaryDirectory() as root:
-            message, routine = task_router_reminder_hook.reminder_result("base", Path(root), "codex", {})
-        self.assertIn("withheld", message)
-        self.assertFalse(routine)
 
     def test_session_intent_declares_routine_only_after_a_recorded_observation(self):
         with tempfile.TemporaryDirectory() as temp:

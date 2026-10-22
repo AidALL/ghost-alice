@@ -45,9 +45,9 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         self.addCleanup(supported.stop)
 
     def retired_forms(self, platform):
-        """Every form an older installer wrote for each retired hook."""
+        """Every form an older installer wrote for a retired hook: with its marker, or with only its runner id."""
         forms = []
-        for hook_id, marker in install_hooks.RETIRED_HOOKS:
+        for hook_id, marker in zip(hook_definitions.RETIRED_CORE_HOOK_IDS, install_hooks.RETIRED_HOOK_MARKERS):
             forms += [
                 install_hooks._hook_runner_command_entry(
                     hook_id, f"python3 /old/_shared/retired_hook.py --internal-b64 eA== # {marker}",
@@ -57,6 +57,8 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                 {"type": "command", "command": f"echo 'Internal instruction: route the task.' # {marker}"},
                 {"type": "command", "command":
                     f"python /foreign/hook_profile_gate.py run {hook_id} {platform} eA== # {marker}"},
+                install_hooks._hook_runner_command_entry(
+                    hook_id, "python3 /old/_shared/retired_hook.py", "[old-form]", platform_key=platform)["hooks"][0],
             ]
         return forms
 
@@ -76,8 +78,9 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                 self.assertEqual(install_hooks.install_hook(platform), "installed")
                 after = self._read_settings(platform)
                 for command in _commands(after):
-                    for hook_id, marker in install_hooks.RETIRED_HOOKS:
+                    for marker in install_hooks.RETIRED_HOOK_MARKERS:
                         self.assertNotIn(marker, command)
+                    for hook_id in hook_definitions.RETIRED_CORE_HOOK_IDS:
                         self.assertFalse(install_hooks._hook_runner_id_match(command, hook_id), command)
                 self.assertIn({"matcher": "preserved", "custom": 7, "hooks": [user]},
                               after["hooks"]["UserPromptSubmit"])
@@ -163,7 +166,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                                  {"trusted_hash": user_hash}})
 
     def test_codex_trusts_no_retired_marker_command(self):
-        for _, marker in install_hooks.RETIRED_HOOKS:
+        for marker in install_hooks.RETIRED_HOOK_MARKERS:
             with self.subTest(marker=marker):
                 settings = {"hooks": {"UserPromptSubmit": [
                     {"hooks": [{"type": "command", "command": f"echo old # {marker}"}]}]}}
@@ -184,7 +187,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
 
     def test_doctor_counts_no_retired_marker_command_as_managed(self):
         shared = self._create_runtime_shared_dir()
-        for _, marker in install_hooks.RETIRED_HOOKS:
+        for marker in install_hooks.RETIRED_HOOK_MARKERS:
             with self.subTest(marker=marker):
                 self.assertEqual(install_doctor._runtime_hook_config_audit([f"echo old # {marker}"], shared),
                                  [{"status": install_doctor.STATUS_ERROR, "name": "managed-hooks",
@@ -199,7 +202,7 @@ class InstalledHookCleanupTests(TempHomeTestCase):
         self.addCleanup(sys.modules.pop, spec.name, None)
         spec.loader.exec_module(scanner)
         self.assertEqual(set(scanner.GHOST_ALICE_HOOK_MARKERS), set(install_hooks.GHOST_ALICE_HOOK_MARKERS))
-        for _, marker in install_hooks.RETIRED_HOOKS:
+        for marker in install_hooks.RETIRED_HOOK_MARKERS:
             self.assertNotIn(marker, install_hooks.GHOST_ALICE_HOOK_MARKERS)
 
     def test_install_report_lists_the_installed_core_hooks(self):

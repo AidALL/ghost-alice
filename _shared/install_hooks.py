@@ -253,7 +253,7 @@ def _retained_installed_ledger(platform_key):
         for group in groups if isinstance(groups,list) else []:
             for hook in group.get("hooks",[]):
                 command=hook.get("command","")
-                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","prompt","tool-checkpoint","session-start","pending-merge-prompt","session-receipt")):
+                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","tool-checkpoint","session-start","session-receipt")):
                     continue
                 outer=shlex.split(command,comments=True)
                 if "--binding-b64" in outer:
@@ -308,28 +308,19 @@ def _prepare_destination_runtime(destination, *, dry_run=False):
 def _pending_merge_precheck_command(
     *,
     platform: str,
-    hook: str,
-    context: str,
     output_format: str,
     internal_instruction: str,
     payload_mode: bool = False,
 ) -> str:
     script = _resolve_pending_merge_precheck_script()
     if script:
-        instruction_payload = base64.urlsafe_b64encode(internal_instruction.encode("utf-8")).decode("ascii")
         return " ".join([
             _hook_python_command(payload=payload_mode),
             _quote_static_arg(script),
             "--platform",
             platform,
-            "--hook",
-            hook,
-            "--context",
-            context,
             "--format",
             output_format,
-            "--internal-b64",
-            instruction_payload,
             "--root",
             _quote_static_arg(_session_intent_root(platform)),
         ])
@@ -338,8 +329,7 @@ def _pending_merge_precheck_command(
         return _shell_print_json({"continue": True, "systemMessage": internal_instruction}, payload_mode=payload_mode)
 
     return _shell_print_message(
-        f"Internal instruction: {internal_instruction}\n"
-        + render_pending_merge_message(context),  # type: ignore[arg-type]
+        f"Internal instruction: {internal_instruction}\n" + render_pending_merge_message("session_start"),
         payload=payload_mode,
     )
 
@@ -347,60 +337,8 @@ def _pending_merge_precheck_command(
 # merge-companion re-checks the manifest before work changes an installed skill.
 PROMPT_PENDING_MERGE_MARKER = "[merge-companion] prompt-check"
 
-# 1-B. Work-start hook: reminder to call task-router.
+# 1-B. Retired task-router reminder: the marker lets install and uninstall remove old entries.
 HOOK_MARKER = "[hook-reminder] AGENTS.md"
-HOOK_INTERNAL = reminder_text('task-router')
-
-
-def _resolve_task_router_reminder_hook_script() -> str:
-    return _resolve_shared_hook_script("task_router_reminder_hook.py")
-
-
-def _hook_reminder_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:
-    script = _resolve_task_router_reminder_hook_script()
-    if script:
-        return " ".join([
-            _hook_python_command(payload=payload_mode),
-            _quote_static_arg(script),
-            "--platform",
-            platform,
-            "--format",
-            output_format,
-            "--root",
-            _quote_static_arg(_session_intent_root(platform)),
-        ]) + f" # {HOOK_MARKER}"
-    if output_format == "json":
-        return _shell_print_json({"continue": True, "systemMessage": HOOK_INTERNAL}, payload_mode=payload_mode) + f" # {HOOK_MARKER}"
-    return _shell_print_message(_localized_bridge(
-        HOOK_INTERNAL,
-        "After exact session-intent preflight, run task-router.",
-        "Run task-router after exact session-intent preflight; native permission belongs to its host.",
-        "Terminal routing uses supplied context without tools; normal routing reads the exact ledger and assigns skills.",
-        "Terminal routing uses supplied context without tools; normal routing reads the exact ledger and assigns skills.",
-    ), payload=payload_mode) + f" # {HOOK_MARKER}"
-
-
-HOOK_COMMAND = _hook_reminder_command(platform="claude", output_format="text")
-HOOK_COMMAND_CODEX = _hook_reminder_command(platform="codex", output_format="json")
-
-HOOK_ENTRY = {
-    "matcher": "",
-    "hooks": [
-        {
-            "type": "command",
-            "command": HOOK_COMMAND,
-        }
-    ],
-}
-HOOK_ENTRY_CODEX = {
-    "matcher": "",
-    "hooks": [
-        {
-            "type": "command",
-            "command": HOOK_COMMAND_CODEX,
-        }
-    ],
-}
 
 # 1-A. Session intent hook: update the per-session intent ledger without the raw prompt.
 SESSION_INTENT_MARKER = "[session-intent-analyzer]"
@@ -423,8 +361,6 @@ def _session_intent_analyzer_command(*, platform: str, output_format: str, paylo
             _quote_static_arg(script),
             "--platform",
             platform,
-            "--hook",
-            "session-intent",
             "--context",
             context,
             "--format",
@@ -505,8 +441,6 @@ def _session_start_command(*, platform: str, output_format: str, payload_mode: b
     return (
         _pending_merge_precheck_command(
             platform=platform,
-            hook="session-check",
-            context="session_start",
             output_format=output_format,
             internal_instruction=SESSION_START_INTERNAL,
             payload_mode=payload_mode,
@@ -747,43 +681,8 @@ def _resolve_installed_hook_dispatcher() -> Path:
     return _resolve_ghost_alice_hooks_dir() / "ghost-alice-hook.mjs"
 
 
-def _resolve_hook_companion_modules() -> list[Path]:
-    """Files the dispatcher needs alongside it: relatively-imported .mjs modules and the
-    reminder_texts.json data file it reads at runtime.
-
-    These must be installed alongside the dispatcher, or the installed dispatcher fails at
-    load with ERR_MODULE_NOT_FOUND or falls back to a minimal tool-checkpoint reminder.
-    """
-    source = _resolve_source_hook_dispatcher()
-    try:
-        text = source.read_text(encoding="utf-8")
-    except OSError:
-        return []
-    names: list[str] = []
-    marker = 'from "./'
-    for line in text.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("import "):
-            continue
-        idx = stripped.find(marker)
-        if idx == -1:
-            continue
-        rest = stripped[idx + len(marker):]
-        end = rest.find('"')
-        if end == -1:
-            continue
-        name = rest[:end]
-        if name.endswith(".mjs") and name not in names:
-            names.append(name)
-    modules: list[Path] = []
-    for name in names:
-        candidate = source.with_name(name)
-        if candidate.exists():
-            modules.append(candidate)
-    reminder_json = source.with_name("reminder_texts.json")
-    if reminder_json.exists():
-        modules.append(reminder_json)
-    return modules
+# Files an older installer copied beside the dispatcher for the retired task-router reminder.
+RETIRED_HOOK_FILES = ("session_intent_snapshot.mjs", "reminder_texts.json")
 
 
 def _quote_command_arg(value: str | Path) -> str:
@@ -912,30 +811,17 @@ def _node_runtime_command(
 def _dispatcher_hook_command(
     platform: str,
     event: str,
-    hook_name: str,
-    marker: str,
-    hook_id: str,
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
 ) -> str:
-    dispatcher = _resolve_installed_hook_dispatcher()
-    parts = [
+    """The dispatcher reads only the platform and the event."""
+    return " ".join([
         _node_runtime_command(platform, node_runtime),
-        _quote_command_arg(dispatcher),
+        _quote_command_arg(_resolve_installed_hook_dispatcher()),
         "--platform",
         platform,
         "--event",
         event,
-        "--hook",
-        hook_name,
-        "--marker",
-        _quote_command_arg(marker),
-    ]
-    if normalize_hook_id(hook_id) in {"session-intent", "tool-checkpoint", "hook-reminder"}:
-        parts.extend([
-            "--session-intent-root",
-            _quote_command_arg(_session_intent_root()),
-        ])
-    return " ".join(parts)
+    ])
 
 
 def _command_entry(command: str) -> dict[str, Any]:
@@ -943,14 +829,6 @@ def _command_entry(command: str) -> dict[str, Any]:
         "matcher": "",
         "hooks": [{"type": "command", "command": command}],
     }
-
-
-def _platform_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
-    if platform_key == "codex":
-        command = _hook_reminder_command(platform="codex", output_format="json", payload_mode=True)
-    else:
-        command = _hook_reminder_command(platform="claude", output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("prompt", command, HOOK_MARKER, platform_key=platform_key)
 
 
 def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, Any]:
@@ -967,14 +845,7 @@ def _platform_tool_checkpoint_entry(
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
 ) -> dict[str, Any]:
     if platform_key in {"claude", "codex"}:
-        command = _dispatcher_hook_command(
-            platform_key,
-            event,
-            "tool-checkpoint",
-            TOOL_CHECKPOINT_MARKER,
-            "tool-checkpoint",
-            node_runtime,
-        )
+        command = _dispatcher_hook_command(platform_key, event, node_runtime)
         return _hook_runner_command_entry(
             "tool-checkpoint",
             command,
@@ -1058,35 +929,34 @@ def _ensure_hook_dispatcher_installed(dry_run: bool = False) -> bool:
     if not source.exists():
         raise FileNotFoundError(f"Ghost-ALICE hook dispatcher not found: {source}")
 
-    hooks_dir = _resolve_ghost_alice_hooks_dir()
-    pairs: list[tuple[Path, Path]] = [(source, target)]
-    for companion in _resolve_hook_companion_modules():
-        pairs.append((companion, hooks_dir / companion.name))
+    retired = [path for path in (_resolve_ghost_alice_hooks_dir() / name for name in RETIRED_HOOK_FILES) if path.exists()]
+    current = False
+    if target.exists():
+        try:
+            current = source.read_bytes() == target.read_bytes()
+        except OSError:
+            current = False
 
-    pending: list[tuple[Path, Path]] = []
-    for src, dst in pairs:
-        if dst.exists():
-            try:
-                if src.read_bytes() == dst.read_bytes():
-                    continue
-            except OSError:
-                pass
-        pending.append((src, dst))
-
-    if not pending:
+    if current and not retired:
         _log(_t("  Ghost-ALICE hook dispatcher is already current", "  Ghost-ALICE hook dispatcher is already current"))
         return False
 
     if dry_run:
-        for src, dst in pending:
-            _log(_t(f"DRY-RUN: Would copy {src} -> {dst}", f"DRY-RUN: Would copy {src} -> {dst}"))
+        if not current:
+            _log(_t(f"DRY-RUN: Would copy {source} -> {target}", f"DRY-RUN: Would copy {source} -> {target}"))
+        for path in retired:
+            _log(f"DRY-RUN: Would remove retired hook file {path}")
         return True
 
-    for src, dst in pending:
-        install_destination.assert_mutation_path(dst)
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        _log(_t(f"  Ghost-ALICE hook file installed: {dst}", f"  Ghost-ALICE hook file installed: {dst}"))
+    if not current:
+        install_destination.assert_mutation_path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        _log(_t(f"  Ghost-ALICE hook file installed: {target}", f"  Ghost-ALICE hook file installed: {target}"))
+    for path in retired:
+        install_destination.assert_mutation_path(path)
+        path.unlink()
+        _log(f"  Removed retired hook file {path}")
     return True
 
 
@@ -1105,7 +975,6 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "config_dir": _resolve_claude_dir,
         "hook_file": lambda: _resolve_claude_dir() / "settings.json",
         "hook_intent": "on_user_prompt",
-        "hook_entry": HOOK_ENTRY,
         "stop_hook_intent": "on_agent_stop",
         "stop_hook_entry": STOP_HOOK_ENTRY,
         "session_start_intent": "on_session_start",
@@ -1117,7 +986,6 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "config_dir": _resolve_codex_dir,
         "hook_file": lambda: _resolve_codex_dir() / "hooks.json",
         "hook_intent": "on_user_prompt",
-        "hook_entry": HOOK_ENTRY_CODEX,
         "stop_hook_intent": "on_agent_stop",
         "stop_hook_entry": STOP_HOOK_ENTRY_CODEX,
         "session_start_intent": "on_session_start",
@@ -1962,35 +1830,31 @@ def _managed_session_intent_options(command: str):
                 or len(argv[2:]) % 2):
             return None
         options = dict(zip(argv[2::2], argv[3::2]))
-        if (set(options) != {"--platform", "--format", "--root", "--hook", "--context"}
+        if (set(options) != {"--platform", "--format", "--root", "--context"}
                 or len(options) != len(argv[2:]) // 2
                 or options["--platform"] != args[2]
                 or options["--format"] not in {"json", "text"}
                 or options["--root"] != destination.ledger_root
-                or (options["--hook"], options["--context"]) != ("session-intent", "prompt_submit")):
+                or options["--context"] != "prompt_submit"):
             return None
         return options
     except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
         return None
 
 
-# Hooks that an older installer registered and Core no longer has. The installer
-# recognizes every installed form by its marker or runner id and removes it.
-RETIRED_HOOKS = (
-    ("prompt", HOOK_MARKER),
-    ("pending-merge-prompt", PROMPT_PENDING_MERGE_MARKER),
-    ("web-search-first", WEB_SEARCH_FIRST_MARKER),
-)
+# Markers an older installer put on the retired core hooks (hook_definitions.RETIRED_CORE_HOOK_IDS).
+RETIRED_HOOK_MARKERS = (HOOK_MARKER, PROMPT_PENDING_MERGE_MARKER, WEB_SEARCH_FIRST_MARKER)
+
+
+def _is_retired_hook_command(command: str) -> bool:
+    """Recognize every installed form of a retired hook by its marker or its runner id."""
+    return (any(marker in command for marker in RETIRED_HOOK_MARKERS)
+            or any(_hook_runner_id_match(command, hook_id) for hook_id in hook_definitions.RETIRED_CORE_HOOK_IDS))
 
 
 def _remove_retired_hooks(hooks_obj) -> int:
     """Remove every installed form of a retired hook from every event."""
-    removed = 0
-    for groups in hooks_obj.values():
-        if isinstance(groups, list):
-            for hook_id, marker in RETIRED_HOOKS:
-                removed += _remove_hook_entries(groups, marker, hook_id=hook_id)
-    return removed
+    return _remove_hook_settings_commands(hooks_obj, _is_retired_hook_command)
 
 
 def _remove_empty_hook_groups(hooks_obj) -> int:
@@ -2037,15 +1901,14 @@ def _remove_stale_hook_entries(
     return removed
 
 
-def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None = None) -> int:
+def _remove_hook_entries(hooks_list: list, marker: str) -> int:
     """Remove managed commands, preserving custom siblings; count affected entries."""
     removed = 0
     i = 0
     while i < len(hooks_list):
         entry = hooks_list[i]
         retained = [hook for hook in entry.get("hooks", [])
-                    if marker not in hook.get("command", "")
-                    and not _hook_runner_id_match(hook.get("command", ""), hook_id)]
+                    if marker not in hook.get("command", "")]
         if len(retained) != len(entry.get("hooks", [])):
             entry["hooks"] = retained
             removed += 1
@@ -2056,7 +1919,7 @@ def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None =
     return removed
 
 
-# Markers of the hooks Core installs now. Retired markers live in RETIRED_HOOKS.
+# Markers of the hooks Core installs now. Retired markers live in RETIRED_HOOK_MARKERS.
 GHOST_ALICE_HOOK_MARKERS = (
     SESSION_INTENT_MARKER,
     TOOL_CHECKPOINT_MARKER,
@@ -2196,7 +2059,7 @@ def install_hook(
 
     removed = _remove_retired_hooks(hooks_obj)
     if removed:
-        _log(f"  Removed {removed} retired hook entry(ies)")
+        _log(f"  Removed {removed} retired hook(s)")
         changed = True
 
     # Install the session-intent-analyzer hook (updates the session intent ledger for every user input).

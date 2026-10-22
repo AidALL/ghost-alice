@@ -74,18 +74,6 @@ CHECKS: list[LayerCheck] = [
         pattern=r"['\"]on_session_start['\"]",
     ),
     LayerCheck(
-        layer="pending-merge-user-prompt",
-        description="install_hooks.py creates the prompt-submit pending-merge precheck command",
-        file=REPO / "_shared" / "install_hooks.py",
-        pattern=r"HOOK_COMMAND\s*=\s*_hook_reminder_command\(",
-    ),
-    LayerCheck(
-        layer="pending-merge-user-prompt",
-        description="install_hooks.py HOOK_COMMAND body contains the word 'merge-companion'",
-        file=REPO / "_shared" / "install_hooks.py",
-        pattern=r"merge-companion",
-    ),
-    LayerCheck(
         layer="pending-merge-prose-rule",
         description="common governance applies merge-companion before an installed-skill change and for a requested review",
         file=REPO / "platforms" / "common-governance.md",

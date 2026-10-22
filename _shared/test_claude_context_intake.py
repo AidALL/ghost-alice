@@ -3,10 +3,8 @@ import copy
 from contextlib import closing
 import io
 import json
-import os
 from pathlib import Path
 import sqlite3
-import subprocess
 import sys
 import unittest
 from contextlib import redirect_stdout
@@ -186,23 +184,6 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         self.assertNotIn('context_only', self.binding())
         core.record_turn(**self.coords, expected_input_event_id=later['latest_input_event_id'], intent_delta={'current_goal':'Human authority restored'})
         self.assertEqual(self.binding(first['input_event_id'], current=False), first)
-
-    def test_javascript_snapshot_exposes_context_marker_without_old_human_freshness(self):
-        human, _, _ = self.setup_human_authority()
-        self.stage(); state = self.reconcile()
-        module = Path(__file__).with_name('session_intent_snapshot.mjs')
-        program = ('import { readSessionIntentSnapshot } from ' + json.dumps(module.as_uri()) + '; '
-            'console.log(JSON.stringify(readSessionIntentSnapshot(' + ','.join(json.dumps(value) for value in
-            (str(self.fixture.root / 'claude' / 'current'),'claude','current')) + ')));')
-        env = dict(os.environ,GHOST_ALICE_CORE_ROOT=str(module.parents[1]),GHOST_ALICE_PYTHON=sys.executable)
-        result = subprocess.run(['node','--input-type=module','-e',program],env=env,
-            stdin=subprocess.DEVNULL,text=True,capture_output=True)
-        self.assertEqual(result.returncode,0,result.stderr)
-        snapshot = json.loads(result.stdout)
-        self.assertIsNone(snapshot['latestInput'])
-        self.assertTrue(snapshot['pending'])
-        self.assertEqual(snapshot['state']['latest_input_event_id'],human)
-        self.assertEqual(snapshot['state']['current_context_input_event_id'],state['current_context_input_event_id'])
 
     def test_unknown_conflicting_meta_sidechain_tool_result_and_notification_shapes_stay_guarded(self):
         variants = [dict(entrypoint='unknown'),dict(userType='internal'),dict(promptSource='system'),

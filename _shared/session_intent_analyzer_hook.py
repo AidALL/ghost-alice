@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from reminder_texts import instruction_override, reminder_text
+from reminder_texts import reminder_text
 
 import argparse
 import json
@@ -110,7 +110,7 @@ def _safe_component(value: Any) -> str:
 
 def bound_session_identity(platform: str, payload: dict[str, Any],
                            env: dict[str, str] | None = None) -> str | None:
-    """Exact host identity shared with the reminder, even if the ledger is broken."""
+    """Exact host identity from the hook payload or environment, readable even when the ledger is broken."""
     environment = os.environ if env is None else env
     if not isinstance(platform, str) or not platform or _safe_component(platform) != platform or len(platform) > 120:
         return None
@@ -136,7 +136,7 @@ def _degrade_marker_path(root: Path, platform: str, payload: dict[str, Any]) -> 
 
 
 def _write_degrade_marker(root: Path, platform: str, payload: dict[str, Any], reason: str) -> None:
-    # Durable, ledger-independent record that THIS turn's input was NOT observed, so freshness consumers (task-router reminder and input lineage checks) can fail closed instead of riding a stale anchor. Best-effort: the audit marker must never break the hook itself.
+    # Durable, ledger-independent record that THIS turn's input was NOT observed; the doctor's runtime check reads it. Best-effort: the audit marker must never break the hook itself.
     try:
         path = _degrade_marker_path(root, platform, payload)
         if path is None:
@@ -360,10 +360,8 @@ def render_payload(output_format: str, message: str, ledger_root: Path, *, routi
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Record session intent guard hook event.")
     parser.add_argument("--platform", default="codex")
-    parser.add_argument("--hook", default="session-intent")
     parser.add_argument("--context", default="prompt_submit", choices=["prompt_submit", "session_start"])
     parser.add_argument("--format", choices=["text", "json"], default="text")
-    parser.add_argument("--internal-b64", default=None)
     parser.add_argument("--root", default=str(DEFAULT_ROOT), help="session intent ledger root")
     return parser
 
@@ -371,12 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
-    try:
-        override = instruction_override(args.internal_b64)
-    except (ValueError, UnicodeError):
-        parser.error('Invalid custom instruction encoding')
-    message = override or ""
-    custom_instruction = (override + "\n") if override is not None else ""
+    message = ""
 
     payload = read_payload()
     ledger_root = Path(args.root).expanduser()
@@ -394,7 +387,7 @@ def main(argv: list[str] | None = None) -> int:
             for func in (resolve_session_id, build_input_observation, record_turn)
         )
         if not ledger_available:
-            # Distinguish a genuinely absent ledger from one that is installed but broken at import, so a real defect is not silently mislabeled "unavailable". Both remain non-blocking (rc 0). A BROKEN ledger also leaves a durable degrade marker so freshness consumers fail closed instead of riding the frozen lineage anchor; an ABSENT ledger is the documented baseline and stays marker-free.
+            # Distinguish a genuinely absent ledger from one that is installed but broken at import, so a real defect is not silently mislabeled "unavailable". Both remain non-blocking (rc 0). A BROKEN ledger also leaves a durable degrade marker that records the unobserved input; an ABSENT ledger is the documented baseline and stays marker-free.
             if _LEDGER_IMPORT_BROKEN:
                 _write_degrade_marker(ledger_root, args.platform, payload, "ledger-broken")
             message = message + " " + (
@@ -415,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
                     transcript_path=payload.get('transcript_path') or payload.get('transcriptPath'))
                 _clear_degrade_marker(ledger_root, args.platform, payload)
                 delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
-                message = custom_instruction + ("" if delivered else observation_receipt(paths, None))
+                message = "" if delivered else observation_receipt(paths, None)
                 sys.stdout.write(render_payload(args.format, message, ledger_root, routine=True)
                                  + ('\n' if args.format == 'json' else ''))
                 return 0
@@ -436,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 _clear_degrade_marker(ledger_root, args.platform, payload)
                 delivered = _session_receipt_delivered(ledger_root, args.platform, session_id)
-                message = custom_instruction + ("" if delivered else observation_receipt(paths, observation))
+                message = "" if delivered else observation_receipt(paths, observation)
                 routine = True
                 terminal = ""
     except Exception:

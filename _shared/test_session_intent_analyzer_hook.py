@@ -34,26 +34,10 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
     def test_managed_commands_register_executor_without_procedure_snapshot(self):
         sys.path.insert(0, str(SCRIPT.parent))
         import install_hooks
-        with patch.object(install_hooks, '_resolve_session_intent_analyzer_hook_script', return_value=SCRIPT), \
-                patch.object(install_hooks, '_resolve_task_router_reminder_hook_script', return_value=SCRIPT):
+        with patch.object(install_hooks, '_resolve_session_intent_analyzer_hook_script', return_value=SCRIPT):
             for platform in ['codex', 'claude']:
-                for builder in [install_hooks._session_intent_analyzer_command, install_hooks._hook_reminder_command]:
-                    command = builder(platform=platform, output_format='json')
-                    self.assertNotIn('--internal-b64', command)
-
-    def test_explicit_custom_instruction_is_not_classified_by_content(self):
-        import base64
-        sys.path.insert(0, str(SCRIPT.parent))
-        import session_intent_analyzer_hook as analyzer
-        encoded = base64.urlsafe_b64encode(analyzer.DEFAULT_INTERNAL.encode()).decode()
-        result = self.run_hook({'session_id':'explicit-custom','prompt':'read a source'}, '--internal-b64', encoded)
-        self.assertEqual(result.returncode, 0)
-        self.assertIn(analyzer.DEFAULT_INTERNAL, json.loads(result.stdout)['systemMessage'])
-
-    def test_invalid_custom_configuration_cannot_become_builtin_guidance(self):
-        result = self.run_hook({'session_id':'invalid-custom','prompt':'read a source'}, '--internal-b64', '%%%')
-        self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn('[session-intent-receipt]', result.stdout)
+                command = install_hooks._session_intent_analyzer_command(platform=platform, output_format='json')
+                self.assertNotIn('--internal-b64', command)
 
     def test_receipt_exposes_native_context_provider_without_procedure_body(self):
         sys.path.insert(0, str(SCRIPT.parent))
@@ -426,17 +410,6 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             self.assertIn('Missing or pending identity blocks dependent writes', contract)
         self.assertIn('session-start receipt', (root / 'session-intent-analyzer/SKILL.md').read_text())
 
-    def test_custom_instruction_survives_healthy_intake_on_both_platforms(self):
-        import base64
-        custom = 'User-owned additional instruction: preserve this exact text.'
-        encoded = base64.urlsafe_b64encode(custom.encode()).decode()
-        for platform in ('codex', 'claude'):
-            result = self.run_hook({'session_id': 'custom-instruction', 'prompt': 'new task'},
-                                   '--platform', platform, '--internal-b64', encoded)
-            message = json.loads(result.stdout)['hookSpecificOutput']['additionalContext']
-            self.assertTrue(message.startswith(custom))
-            self.assertEqual(receipt_from(message)['platform'], platform)
-
     def setUp(self) -> None:
         self.tmp_home = pathlib.Path(tempfile.mkdtemp(prefix="session-intent-hook-test-"))
         self.ledger_root = self.tmp_home / "ghost-alice" / ".tmp" / "session-intent"
@@ -539,7 +512,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(self.state("other-env"), {})
 
     def test_receipt_stays_with_completed_observation_when_other_session_moves_pointer(self) -> None:
-        hook = TestDegradeMarkerPathParity._load("session_intent_analyzer_hook")
+        hook = _load_fresh("session_intent_analyzer_hook")
         real_record_turn = hook.record_turn
 
         def record_then_interleave(**kwargs):
@@ -824,7 +797,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
                 sys.executable, str(self.hook),
                 "--platform", "codex", "--format", "json",
                 "--root", str(self.root),
-                "--hook", "session-intent", "--context", "prompt_submit",
+                "--context", "prompt_submit",
             ],
             input=json.dumps({"session_id": "s-degrade", "prompt": "hello"}),
             capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -857,7 +830,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         return self.root / "codex" / "s-degrade" / "ledger-degraded.json"
 
     def test_broken_ledger_writes_durable_degrade_marker(self) -> None:
-        # a BROKEN ledger must leave a ledger-independent marker so freshness consumers (task-router reminder) fail closed instead of riding the frozen lineage anchor.
+        # a BROKEN ledger must leave a ledger-independent marker that records the unobserved input.
         self._put_ledger("raise RuntimeError('boom at import')\n")
         result = self._run()
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -884,43 +857,16 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.assertFalse(self._marker().exists(), msg=result.stdout)
 
 
-class TestDegradeMarkerPathParity(unittest.TestCase):
-    # Cross-module drift guard: the analyzer WRITES the degrade marker and the task-router reminder REBUILDS the same path to read it. Any charset or normalization drift between the two safe-component implementations hides the marker from the consumer (silent fail-open), so pin them equal over a hostile input set -- including '=' (base64-ish ids), consecutive unsafe runs, edge dots/dashes, over-long ids, non-ASCII, and empties.
+def _load_fresh(name: str):
+    """Load a separate copy of a shared module, so a test can patch it without touching the imported one."""
+    import importlib.util
 
-    @staticmethod
-    def _load(name: str):
-        import importlib.util
-
-        spec = importlib.util.spec_from_file_location(
-            f"{name}_parity", pathlib.Path(__file__).resolve().with_name(f"{name}.py")
-        )
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def test_safe_component_matches_router_over_hostile_inputs(self):
-        sah = self._load("session_intent_analyzer_hook")
-        trh = self._load("task_router_reminder_hook")
-        cases = [
-            "s==base64==", "normal-uuid-1234", "s!!weird!!", "...dots...",
-            "x" * 200, "한글세션", "", None, "a b c", ".-.",
-        ]
-        for case in cases:
-            self.assertEqual(
-                sah._safe_component(case),
-                trh.safe_path_component(case),
-                f"safe-component drift for {case!r}",
-            )
-
-    def test_marker_path_matches_router_session_dir_for_equals_id(self):
-        sah = self._load("session_intent_analyzer_hook")
-        trh = self._load("task_router_reminder_hook")
-        with tempfile.TemporaryDirectory() as tmp:
-            root = pathlib.Path(tmp)
-            payload = {"session_id": "s==base64=="}
-            produced = sah._degrade_marker_path(root, "codex", payload)
-            consumed = trh.session_dir(root, "codex", "s==base64==") / "ledger-degraded.json"
-            self.assertEqual(produced, consumed)
+    spec = importlib.util.spec_from_file_location(
+        f"{name}_fresh", pathlib.Path(__file__).resolve().with_name(f"{name}.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 if __name__ == "__main__":

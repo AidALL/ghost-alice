@@ -1,11 +1,13 @@
-"""SQLite authority through the live Python/Node hook and diagnostic readers."""
+"""SQLite authority for the readers outside the ledger: the doctor's read and the io-trace hook.
+
+The ledger's own tests (session-intent-analyzer/scripts/test_sqlite_authority.py) own the read
+semantics: database authority over exports, corrupt databases and deleted databases.
+"""
 
 import io
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,7 +17,6 @@ SHARED = Path(__file__).resolve().parent
 sys.path.insert(0, str(SHARED))
 sys.path.insert(0, str(SHARED.parent / "session-intent-analyzer" / "scripts"))
 import session_intent_ledger as ledger
-import task_router_reminder_hook as router
 import io_trace_hook as trace
 
 
@@ -27,64 +28,17 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
         self.platform, self.sid = "codex", "sqlite-session"
         self.directory = self.root / self.platform / self.sid
         self.directory.mkdir(parents=True)
-        self.env = dict(os.environ, HOME=str(self.root / "home"), CODEX_THREAD_ID="",
-                        GHOST_ALICE_SESSION_ID="", GHOST_ALICE_PYTHON=sys.executable,
-                        GHOST_ALICE_PLATFORM=self.platform,
-                        GHOST_ALICE_SESSION_INTENT_ROOT=str(self.root))
+        self.home = self.root / "home"
 
     def observe(self, text="bounded request"):
         ledger.record_turn(root=self.root, platform=self.platform, session_id=self.sid,
                            raw_user_input=text)
-        return ledger.read_session_state(root=self.root, platform=self.platform,
-                                         session_id=self.sid)
-
-    def block(self):
-        state = self.observe()
-        ledger.record_turn(root=self.root, platform=self.platform, session_id=self.sid,
-                           expected_input_event_id=state["latest_input_event_id"],
-                           intent_delta={"model_security_decision": {
-                               "decision": "block", "input_event_id": state["latest_input_event_id"]}})
-        return ledger.read_session_state(root=self.root, platform=self.platform,
-                                         session_id=self.sid)
-
-    def node(self, hook="tool-checkpoint", *, script=None, env=None, sid=None):
-        process = subprocess.run(
-            [shutil.which("node"), str(script or SHARED / "ghost-alice-hook.mjs"), "--platform", self.platform,
-             "--event", "PreToolUse", "--hook", hook, "--session-intent-root", str(self.root)],
-            input=json.dumps({"session_id": sid or self.sid, "tool_name": "Bash"}), env=env or self.env,
-            capture_output=True, text=True, check=True)
-        return json.loads(process.stdout)
-
-    def test_stale_json_cannot_hide_sqlite_current_model_block(self):
-        state = self.block()
-        state["model_security_decision"] = None
-        (self.directory / "intent-state.json").write_text(json.dumps(state))
-        material = router.session_material(self.root, self.platform, self.sid)
-        self.assertIsInstance(material["state"].get("model_security_decision"), dict)
-        self.assertEqual(material["state"]["model_security_decision"]["decision"], "block")
-        self.assertNotIn("permissionDecision", self.node().get("hookSpecificOutput", {}))
-
-    def test_missing_exports_do_not_hide_sqlite_preflight_or_block(self):
-        self.block()
-        for name in ("intent-state.json", "intent-events.jsonl"):
-            (self.directory / name).unlink(missing_ok=True)
-        material = router.session_material(self.root, self.platform, self.sid)
-        self.assertTrue(material["latest_input"])
-        self.assertEqual(material["state"]["model_security_decision"]["decision"], "block")
-        self.assertNotIn("permissionDecision", self.node().get("hookSpecificOutput", {}))
-
-    def test_stale_json_block_cannot_override_sqlite_no_decision(self):
-        state = self.observe()
-        state["model_security_decision"] = {"decision": "block", "input_event_id": state["latest_input_event_id"]}
-        (self.directory / "intent-state.json").write_text(json.dumps(state))
-        self.assertIsNone(router.session_material(self.root, self.platform, self.sid)["state"].get("model_security_decision"))
-        self.assertNotEqual(self.node().get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
 
     def test_posttool_audits_tools_without_inferring_missing_semantic_changes(self):
         for index in range(3):
             self.observe(f"request {index}")
         (self.directory / "intent-events.jsonl").unlink(missing_ok=True)
-        env = {"HOME": self.env["HOME"], "GHOST_ALICE_PLATFORM": self.platform,
+        env = {"HOME": str(self.home), "GHOST_ALICE_PLATFORM": self.platform,
                "GHOST_ALICE_SESSION_INTENT_ROOT": str(self.root)}
         payload = json.dumps({"session_id": self.sid, "tool_name": "Read",
                               "tool_input": {"file_path": "/tmp/source.txt"}})
@@ -92,50 +46,13 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
             for _ in range(2):
                 with patch.object(sys, "stdin", io.StringIO(payload)):
                     self.assertEqual(trace.main(), 0)
-        audit = Path(env["HOME"]) / ".ghost-alice" / "io-trace.jsonl"
+        audit = self.home / ".ghost-alice" / "io-trace.jsonl"
         rows = [json.loads(line) for line in audit.read_text().splitlines()]
         self.assertEqual([row["tool"] for row in rows], ["Read", "Read"])
         self.assertTrue(all(row["session"] == self.sid and
                             row["path"] == "/tmp/source.txt" for row in rows))
 
-    def test_corrupt_database_never_falls_back_to_json_decision(self):
-        state = self.block()
-        (self.directory / "intent-state.json").write_text(json.dumps(state))
-        (self.root / "ghost-state.sqlite3").write_bytes(b"not a SQLite database")
-        material = router.session_material(self.root, self.platform, self.sid)
-        self.assertTrue(material["degraded"])
-        self.assertFalse(material["latest_input"])
-        result = self.node()
-        self.assertNotEqual(result.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
-        self.assertIn("degraded", json.dumps(self.node("hook-reminder")))
-
-    def test_bound_identity_cannot_borrow_database_discovery_session(self):
-        self.block()
-        self.assertFalse(router.session_material(self.root, self.platform, "other-session")["latest_input"])
-        result = self.node(sid="other-session")
-        self.assertNotEqual(result.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
-        self.assertIn("withheld", json.dumps(self.node("hook-reminder", sid="other-session")))
-
-    def test_installed_node_reader_uses_installed_api_and_selected_python(self):
-        self.block()
-        home = Path(self.env["HOME"])
-        scripts = home / ".agents" / "skills" / "session-intent-analyzer" / "scripts"
-        shutil.copytree(SHARED.parent / "session-intent-analyzer" / "scripts", scripts,
-                        ignore=shutil.ignore_patterns("__pycache__", "test*"))
-        installed = home / ".ghost-alice" / "hooks"
-        installed.mkdir(parents=True)
-        for filename in ("ghost-alice-hook.mjs", "session_intent_snapshot.mjs", "reminder_texts.json"):
-            shutil.copy2(SHARED / filename, installed / filename)
-        # A Node process launched by the selected Python runner must also work
-        # when that interpreter is not discoverable through the child's PATH.
-        env = dict(self.env, PATH="")
-        (self.directory / "intent-state.json").unlink(missing_ok=True)
-        result = self.node(script=installed / "ghost-alice-hook.mjs", env=env)
-        self.assertNotIn("permissionDecision", result.get("hookSpecificOutput", {}))
-        self.assertIn("intake-ready", json.dumps(self.node("hook-reminder", script=installed / "ghost-alice-hook.mjs", env=env)))
-
-    def test_reading_hook_does_not_create_a_database_or_rewrite_legacy_export(self):
-        self.directory.mkdir(parents=True, exist_ok=True)
+    def test_doctor_read_does_not_create_a_database_or_rewrite_legacy_export(self):
         legacy = {"schema_version": "session-intent-ledger.v1", "platform": self.platform,
                   "session_id": self.sid, "ledger_revision": 1,
                   "latest_input_event_id": "legacy-input", "latest_input_digest": "sha256:legacy",
@@ -143,8 +60,10 @@ class SQLiteIntentConsumerTests(unittest.TestCase):
         export = self.directory / "intent-state.json"
         text = json.dumps(legacy)
         export.write_text(text)
-        self.assertTrue(router.session_material(self.root, self.platform, self.sid)["latest_input"])
-        self.node()
+        # The doctor reads the ledger this way (install_doctor's session-intent golden check).
+        state = ledger.read_session_state(root=self.root, platform=self.platform, session_id=self.sid,
+                                          recover_audit=False)
+        self.assertEqual(state["latest_input_event_id"], "legacy-input")
         self.assertEqual(export.read_text(), text)
         self.assertFalse((self.root / "ghost-state.sqlite3").exists())
 

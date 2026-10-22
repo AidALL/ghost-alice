@@ -21,7 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_definitions
 import hook_profile_gate
 import install_hooks
-import pending_merge_precheck_hook
 
 
 def _make_node_executable(node: Path) -> None:
@@ -271,14 +270,13 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            for hook_id in ("prompt", "completion", "pending-merge-prompt", "session-start"):
+            for hook_id in ("session-intent", "completion", "session-start"):
                 with self.subTest(hook_id=hook_id):
                     context = hook_profile_gate._visibility_context(
                         hook_id, "routine clean pass already persisted", "", 0,
                         env={"HOME": temp_home, "GHOST_ALICE_PLATFORM": "codex"}, hook_payload={},
                     )
-                    self.assertEqual(bool(context.get("pending_merge_undecided")),
-                                     hook_id in {"pending-merge-prompt", "session-start"})
+                    self.assertEqual(bool(context.get("pending_merge_undecided")), hook_id == "session-start")
 
     def test_pending_merge_hook_result_reuses_completed_manifest_check(self):
         with tempfile.TemporaryDirectory() as temp_home:
@@ -288,17 +286,17 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 receipt = {"platform": "codex", "manifest_path": str(manifest), "undecided_count": count}
                 stdout = json.dumps({"continue": True, "ghostAlicePendingMergeCheck": receipt})
                 with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", side_effect=AssertionError("duplicate manifest read")):
-                    context = hook_profile_gate._visibility_context("pending-merge-prompt", stdout, "", 0, env=env, declared="routine")
+                    context = hook_profile_gate._visibility_context("session-start", stdout, "", 0, env=env, declared="routine")
                 self.assertEqual(bool(context.get("pending_merge_undecided")), count > 0)
 
     def test_invalid_merge_owner_result_keeps_manifest_fallback(self):
         env = {"HOME": "/isolated", "GHOST_ALICE_PLATFORM": "codex"}
         valid = {"platform": "codex", "manifest_path": "/isolated/.ghost-alice/pending-merges/codex/manifest.json", "undecided_count": 0}
-        cases = [("pending-merge-prompt", {**valid, "platform": "claude"}, 0),
-                 ("pending-merge-prompt", {**valid, "manifest_path": "/foreign/manifest.json"}, 0),
-                 ("pending-merge-prompt", {**valid, "undecided_count": False}, 0),
-                 ("pending-merge-prompt", {**valid, "undecided_count": -1}, 0),
-                 ("pending-merge-prompt", valid, 1)]
+        cases = [("session-start", {**valid, "platform": "claude"}, 0),
+                 ("session-start", {**valid, "manifest_path": "/foreign/manifest.json"}, 0),
+                 ("session-start", {**valid, "undecided_count": False}, 0),
+                 ("session-start", {**valid, "undecided_count": -1}, 0),
+                 ("session-start", valid, 1)]
         for hook, receipt, exit_code in cases:
             with self.subTest(hook=hook, receipt=receipt, exit_code=exit_code):
                 with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided", return_value=True) as probe:
@@ -306,15 +304,9 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 probe.assert_called_once()
                 self.assertTrue(context["pending_merge_undecided"])
         with mock.patch.object(hook_profile_gate, "_has_pending_merge_undecided") as probe:
-            context = hook_profile_gate._visibility_context("prompt", json.dumps({"ghostAlicePendingMergeCheck": valid}), "", 0, env=env, declared="routine")
+            context = hook_profile_gate._visibility_context("session-intent", json.dumps({"ghostAlicePendingMergeCheck": valid}), "", 0, env=env, declared="routine")
         probe.assert_not_called()
         self.assertNotIn("pending_merge_undecided", context)
-
-    def test_clean_merge_payload_does_not_repeat_workflow_boilerplate(self):
-        with mock.patch.object(pending_merge_precheck_hook, "_pending_entries", return_value=[]):
-            payload = json.loads(pending_merge_precheck_hook._json_payload("codex", "LONG WORKFLOW INSTRUCTION"))
-        self.assertNotIn("LONG WORKFLOW INSTRUCTION", payload["systemMessage"])
-        self.assertEqual(payload["ghostAlicePendingMergeCheck"]["undecided_count"], 0)
 
     def test_visibility_context_ignores_current_downstream_block_gate(self):
         with tempfile.TemporaryDirectory() as temp_home, tempfile.TemporaryDirectory() as temp_root:
@@ -2443,6 +2435,65 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(row["exit_code"], 7)
         self.assertEqual(row["visible_decision"], "force_show")
 
+    def test_core_hook_exit_2_does_not_block_the_host(self):
+        # Core informs and stops. A usage error or a removed script behind an old registration
+        # must not become a host block (exit 2).
+        gone = Path(__file__).with_name("retired_hook_that_is_gone.py").as_posix()
+        for hook_id, args in (("session-intent", "-c 'import sys; sys.exit(2)'"), ("prompt", f"'{gone}'")):
+            with self.subTest(hook_id=hook_id), tempfile.TemporaryDirectory() as temp_home:
+                payload = base64.urlsafe_b64encode(_python_payload_command(args).encode("utf-8")).decode("ascii")
+                env = os.environ.copy()
+                env.update(HOME=temp_home, GHOST_ALICE_PLATFORM="claude", GHOST_ALICE_SESSION_ID="s-exit2",
+                           GHOST_ALICE_AGENT_VISIBILITY="dynamic")
+                result = subprocess.run(
+                    [sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run", hook_id, payload],
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, check=False)
+                log_path = Path(temp_home) / ".ghost-alice/session-logs/claude/s-exit2/strict-hook-output.jsonl"
+                row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(row["exit_code"], 2)
+
+    def test_adapter_exit_2_does_not_block_the_host(self):
+        # Core does not know add-ons, so the runner keeps no blocking exception for an adapter binding.
+        import addon_installer
+        import install_destination
+        with tempfile.TemporaryDirectory() as temp_home:
+            root = Path(temp_home) / "isolated"
+            root.mkdir()
+            script = root / "adapters" / "demo.py"
+            script.parent.mkdir()
+            script.write_text("# adapter bytes\n", encoding="utf-8")
+            destination = install_destination.InstallDestination(
+                mode="isolated", owned_root=str(root), platform_dir=str(root / ".codex"),
+                skills_dir=str(root / "skills"), ghost_root=str(root / ".ghost-alice"),
+                ledger_root=str(root / "intent"), project_root=str(root),
+                core_source_root=str(Path(__file__).resolve().parents[1]))
+            binding = destination.binding()
+            runner = addon_installer.privileged_adapter_runner_id("demo", "continue")
+            binding["adapter"] = dict(adapter_id="demo", runner_id=runner, script=str(script), event="Stop",
+                                      content_hash=hashlib.sha256(script.read_bytes()).hexdigest())
+            spec = dict(args_policy="no_args", hook_id_by_event={"on_agent_stop": "continue"},
+                        script_rel_by_event={"on_agent_stop": "adapters/demo.py"})
+            payload = base64.urlsafe_b64encode(shlex.join([sys.executable, str(script)]).encode()).decode()
+            child = subprocess.CompletedProcess([sys.executable, str(script)], 2, stdout="", stderr="adapter refused\n")
+            stdin_text = json.dumps(dict(session_id="s-adapter", hook_event_name="Stop"))
+            with (mock.patch.dict(os.environ, {"HOME": temp_home}, clear=True),
+                  mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
+                  mock.patch.object(sys, "stdout", io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()),
+                  mock.patch.object(hook_profile_gate, "_validate_shell_command", return_value=[sys.executable, str(script)]),
+                  mock.patch.object(hook_definitions, "load_privileged_adapter_allowlist", return_value={"demo": spec}),
+                  mock.patch.object(hook_profile_gate.subprocess, "run", return_value=child),
+                  self.assertRaises(SystemExit) as ran):
+                hook_profile_gate.main(["run", runner, "codex", payload,
+                                        "--binding-b64", install_destination.encode_binding(binding)])
+            self.assertEqual(ran.exception.code, 1)
+
+    def test_runner_usage_error_does_not_block_the_host(self):
+        result = subprocess.run([sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run"],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("usage:", result.stderr)
+
     def test_runner_logs_surrogate_stdin_without_crashing(self):
         command = _python_payload_command("-c 'import sys; sys.exit(0)'")
         payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
@@ -2548,10 +2599,11 @@ class TestHookProtocolSurface(unittest.TestCase):
                         'GHOST_ALICE_PLATFORM': platform, 'GHOST_ALICE_AGENT_VISIBILITY': 'minimal'}
                     result = subprocess.run(
                         [sys.executable, str(Path(__file__).with_name('hook_profile_gate.py')),
-                         'run', 'prompt', payload],
+                         'run', 'tool-checkpoint', payload],
                         input=json.dumps({'session_id': 'pretool-audit', 'hook_event_name': 'PreToolUse'}),
                         text=True, capture_output=True, env=env, check=False)
-                    self.assertEqual(result.returncode, exit_code, result.stderr)
+                    # No hook the runner runs blocks through exit 2; it reaches the host as 1.
+                    self.assertEqual(result.returncode, 1 if denied else 0, result.stderr)
                     emitted = json.loads(result.stdout)
                     self.assertNotIn('completion_recording', emitted)
                     self.assertEqual(emitted['continue'], protocol['continue'])
