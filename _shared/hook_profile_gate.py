@@ -1135,7 +1135,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     _emit_rendered_user_surface(user_stdout, user_stderr)
     if force_success:
         return 0
-    # Core informs and stops; only a registered Autopilot adapter may block. A Core hook's
+    # Core informs and stops; only a registered privileged adapter may block. A Core hook's
     # usage error or removed script reaches the host as a non-blocking error; the strict
     # log above keeps the original exit code.
     if result.returncode == 2 and not (binding and binding.get("adapter")):

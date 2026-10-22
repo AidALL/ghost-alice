@@ -2436,7 +2436,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(row["visible_decision"], "force_show")
 
     def test_core_hook_exit_2_does_not_block_the_host(self):
-        # Core informs and stops; only a registered Autopilot adapter may block. A usage error or a
+        # Core informs and stops; only a registered privileged adapter may block. A usage error or a
         # removed script behind an old registration must not become a host block (exit 2).
         gone = Path(__file__).with_name("retired_hook_that_is_gone.py").as_posix()
         for hook_id, args in (("session-intent", "-c 'import sys; sys.exit(2)'"), ("prompt", f"'{gone}'")):
@@ -2567,7 +2567,7 @@ class TestHookProtocolSurface(unittest.TestCase):
                          'run', 'tool-checkpoint', payload],
                         input=json.dumps({'session_id': 'pretool-audit', 'hook_event_name': 'PreToolUse'}),
                         text=True, capture_output=True, env=env, check=False)
-                    # Only a registered Autopilot adapter may block; a Core hook's exit 2 reaches the host as 1.
+                    # Only a registered privileged adapter may block; a Core hook's exit 2 reaches the host as 1.
                     self.assertEqual(result.returncode, 1 if denied else 0, result.stderr)
                     emitted = json.loads(result.stdout)
                     self.assertNotIn('completion_recording', emitted)
