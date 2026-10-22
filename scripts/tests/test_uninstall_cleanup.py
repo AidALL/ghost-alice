@@ -170,7 +170,7 @@ class SupportArtifactLifecycleTest(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.ghost = self.root / ".ghost-alice"
-        home = mock.patch.object(cleanup, "_user_home", return_value=self.root)
+        home = mock.patch.object(cleanup.locations, "home", return_value=self.root)
         home.start()
         self.addCleanup(home.stop)
         self.manifest = self.ghost / "install-state" / "codex.json"
@@ -462,6 +462,40 @@ class UninstallCleanupTest(unittest.TestCase):
             self.assertNotIn(str(Path.home() / ".ghost-alice" / "uninstall-reports"), result.stdout)
             reports = glob(str(temp_report_root / "codex-confirm-*.json"))
             self.assertEqual(len(reports), 1, msg=result.stdout)
+
+    def test_the_ghost_alice_root_comes_from_the_installer_locations(self) -> None:
+        with mock.patch.object(cleanup.locations, "record_root", return_value=Path("/configured/.ghost-alice")):
+            self.assertEqual(cleanup._ghost_alice_root(), Path("/configured/.ghost-alice"))
+
+    def test_a_new_default_report_keeps_the_last_thirty_reports_before_it(self) -> None:
+        # The reports folder keeps 30 reports; the backup copies stay for the user.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            reports = root / ".ghost-alice" / "uninstall-reports"
+            reports.mkdir(parents=True)
+            old = []
+            for index in range(32):
+                path = reports / f"codex-dry-run-202610{index // 24 + 1:02d}T{index % 24:02d}0000Z.json"
+                path.write_text("{}\n", encoding="utf-8")
+                os.utime(path, (1_000_000 + index, 1_000_000 + index))
+                old.append(path)
+            kept_copy = root / ".ghost-alice" / "uninstall-backup" / "codex" / "support-state" / "x-1" / "original"
+            kept_copy.mkdir(parents=True)
+            manifest = _write_manifest(root, [])
+            env = os.environ.copy()
+            env.update(HOME=str(root), USERPROFILE=str(root), CODEX_HOME=str(root / ".codex"),
+                       GHOST_ALICE_GHOST_ROOT=str(root / ".ghost-alice"))
+            result = subprocess.run(
+                [sys.executable, str(UNINSTALL_CLEANUP), "--platform", "codex", "--install-state-manifest",
+                 str(manifest)],
+                cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
+            remaining = sorted(reports.iterdir())
+            self.assertEqual(len(remaining), 31)
+            self.assertFalse(old[0].exists())
+            self.assertFalse(old[1].exists())
+            self.assertTrue(old[2].exists())
+            self.assertTrue(kept_copy.is_dir())
 
     def test_dry_run_reports_managed_targets_without_deleting_user_owned_paths(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

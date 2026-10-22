@@ -235,6 +235,38 @@ class TestIoTraceHook(unittest.TestCase):
         self.assertEqual(notebook["path"], "/work/analysis.ipynb")
 
 
+class TestIoTraceRetention(unittest.TestCase):
+    """io-trace keeps its limit (over 10,000 lines keeps the last 5,000) in the retention table."""
+
+    def test_the_trim_rule_lives_in_the_retention_table(self):
+        self.assertFalse(hasattr(io_trace_hook, "_rotate"))
+        self.assertFalse(hasattr(io_trace_hook, "MAX_LINES"))
+
+    def test_rows_are_appended_through_the_retention_lock(self):
+        with tempfile.TemporaryDirectory() as temp_home:
+            environment = {"HOME": temp_home, "GHOST_ALICE_GHOST_ROOT": str(Path(temp_home) / ".ghost-alice")}
+            with mock.patch.dict(os.environ, environment, clear=False), \
+                    mock.patch.object(io_trace_hook.state_retention, "append") as append:
+                io_trace_hook._append_log({"tool": "Read"})
+        [call] = append.call_args_list
+        self.assertEqual(call.args[:2], ("io-trace", Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"))
+        self.assertEqual(json.loads(call.args[2])["tool"], "Read")
+
+    def test_an_append_past_ten_thousand_lines_keeps_the_last_five_thousand(self):
+        raw = '{"session_id":"s-1","tool_name":"Read","tool_input":{"file_path":"/tmp/x"}}'
+        with tempfile.TemporaryDirectory() as temp_home:
+            path = Path(temp_home) / ".ghost-alice" / "io-trace.jsonl"
+            path.parent.mkdir(parents=True)
+            path.write_text("".join(f'{{"n":{index}}}\n' for index in range(10_000)), encoding="utf-8")
+            environment = {"HOME": temp_home, "GHOST_ALICE_GHOST_ROOT": str(path.parent)}
+            with mock.patch.dict(os.environ, environment, clear=False), \
+                    mock.patch.object(sys, "stdin", io.StringIO(raw)):
+                io_trace_hook.main()
+            lines = path.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 5_000)
+        self.assertEqual(lines[0], '{"n":5001}')
+        self.assertEqual(json.loads(lines[-1])["tool"], "Read")
+
 
 if __name__ == "__main__":
     unittest.main()

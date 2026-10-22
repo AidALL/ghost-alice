@@ -65,10 +65,10 @@ Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달합니다. `i
 1. 설치 원본 확인. 아무것도 바꾸기 전에 실행합니다. `installer.source.match_install_source`가 설치 기록의 `source.root`와 인스톨러가 실행되는 체크아웃을 링크를 따라간 경로로 비교합니다. 이 함수가 어느 체크아웃이 설치 원본인지 판정하는 유일한 함수입니다. `installer.source.check_install_source`는 그 결과로 진행하거나 종료합니다. 기록이 없거나, 기록에 원본이 없거나, 기록의 체크아웃이면 진행합니다. 두 번째 clone이나 git worktree 같은 다른 체크아웃은 `--adopt-source`가 있으면 진행합니다. 기록된 체크아웃이 더는 없으면(다른 경로에 다시 clone한 경우) 묻지 않고 진행합니다. 그 밖의 경우 인스톨러는 두 폴더를 출력하고, 터미널에서는 이 체크아웃으로 설치 원본을 교체할지 묻습니다(기본값 아니오). 터미널이 아니면 종료 코드 2로 종료하고 실행할 명령을 안내합니다. 자동 모드는 부모 프로세스가 한 번만 확인하고, 교체 결정을 `--adopt-source`로 자식 프로세스에 전달합니다. 기록을 읽을 수 없으면 경고를 출력하고 확인을 건너뜁니다. 명령의 첫 게시가 새 원본을 기록합니다. 애드온 소스는 이 단계 뒤에 준비합니다. `--repair`도 이 단계를 먼저 실행하지만 설치 원본을 교체하지 않습니다. 다른 체크아웃에서 실행하면 종료 코드 2로 종료하고, 설치본을 옮기는 설치 명령을 안내합니다. 명령은 잠금(3단계)을 잡은 뒤 한 번 더 비교합니다. 그래서 이 명령이 잠금을 기다리는 동안 다른 인스톨러가 원본을 바꿨다면, 바뀐 상태로 다시 판정합니다.
 2. 선행 도구(`git`, `node`)와 git 훅 경로. 인스톨러는 저장소의 공용 `core.hooksPath`를 설치 원본 `hooks` 폴더의 절대 경로로 작성합니다([post-merge 훅](#post-merge-훅)).
 3. 설치 잠금(`~/.ghost-alice/install.lock`). 명령이 끝날 때까지 쥡니다. 인스톨러는 잠금을 생성한 직후, 저널이 `done`도 `restored`도 아닌 게시를 모두 복원합니다.
-4. 설치 기록 이관. `~/.ghost-alice/installed-payload.json`이 없고 이전 인스톨러의 install-state가 있을 때만 실행합니다. 그다음 소스 상태 확인, 그다음 대상 수집(핵심 스킬, `_shared`, 애드온 대상).
+4. 이관. 설치 기록 이관은 `~/.ghost-alice/installed-payload.json`이 없고 이전 인스톨러의 install-state가 있을 때만 실행합니다. 이전 인스톨러가 교체한 사본을 보관하던 폴더 둘(`~/.ghost-alice/install-rollbacks`, Claude 스킬 폴더의 `.ghost-alice-install-rollbacks`)은 이 단계에서 삭제합니다. 삭제하지 못한 폴더는 경고로 알리고 `~/.ghost-alice/state-retention-failures.jsonl`에 기록합니다. 그다음 소스 상태 확인, 그다음 대상 수집(핵심 스킬, `_shared`, 애드온 대상).
 5. deprecated 설치 스킬을 발견 경로 밖으로 옮긴 뒤, 인코딩 검사, 그다음 로컬 수정을 격리하거나 기록하는 사전 점검.
 6. 중단된 애드온 제거를 재개합니다. 애드온 충돌은 설치를 멈춥니다.
-7. 배치: `_shared`와 모든 대상을 링크(Claude Code)로, 또는 하나의 복사 배치(Codex)로 놓습니다. 배치 한 번은 인스톨러 프로세스 안의 `install_transaction.publish` 호출 한 번이며, 설치 기록이 지정한 참여자와 함께 같은 단계에서 대상들의 설치 기록 항목을 작성합니다.
+7. 배치: `_shared`와 모든 대상을 링크(Claude Code)로, 또는 하나의 복사 배치(Codex)로 놓습니다. 배치 한 번은 인스톨러 프로세스 안의 `install_transaction.publish` 호출 한 번이며, 설치 기록이 지정한 참여자와 함께 같은 단계에서 대상들의 설치 기록 항목을 작성합니다. 게시는 대상 옆의 `.ghost-alice-install-staging`에서 대상을 준비하고, 게시나 복원이 끝난 뒤 그 폴더가 비었으면 삭제합니다. 다른 항목이 있는 폴더는 남기고, 다른 이유로 삭제하지 못하면 `~/.ghost-alice/state-retention-failures.jsonl`에 기록합니다.
 8. 런타임 게시: `_shared`와 동반 스크립트 `session-intent-analyzer/scripts/session_intent_ledger.py`를 `~/.ghost-alice/runtime/current` 아래에 게시 한 번으로 놓습니다. 설치 기록에 `service` 섹션이 있으면 게이트웨이 참여자가 파일 교체 전에 등록된 서비스를 중지하고 교체 뒤에 시작합니다. Codex 복사본 `~/.agents/skills/_shared`와 Claude 링크는 서비스의 코드가 아니므로 그 배치는 서비스 효과를 호출하지 않습니다. 그다음 읽기만 하는 `Context gateway:` 보고 줄 하나, 그다음 훅 설치, 관리 규칙 블록, 명령 래퍼.
 9. 검증, 소유 표지, merge-companion 스냅숏, 애드온 사이드카, 설치 상태 매니페스트, 설치 이벤트. 인스톨러는 배치 뒤에 이 이전 기록들을 예전처럼 작성하며, status·doctor·보존·제거·복구는 이 기록들을 계속 조회합니다.
 
@@ -180,10 +180,10 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 | State path | Why it exists |
 | --- | --- |
 | `~/.ghost-alice/installed-payload.json` | 설치 기록입니다. 두 호스트의 모든 설치 위치, 출처, 복사한 파일의 지문을 배치와 같은 단계에서 기록합니다 |
-| `~/.ghost-alice/rollbacks/<txid>/` | 게시 한 번이 교체한 원래 파일, 게시 전의 기록, 저널을 보관합니다. 저널이 done을 기록하기 전에 중지된 게시는 다음 잠금 명령이 복원합니다 |
+| `~/.ghost-alice/rollbacks/<txid>/` | 게시 한 번이 교체한 원래 파일, 게시 전의 기록, 저널을 보관합니다. 저널이 done을 기록하기 전에 중지된 게시는 다음 잠금 명령이 복원합니다. 끝난 게시는 최근 20개만 남깁니다 |
 | `~/.ghost-alice/install-state/<platform>.json` | 인스톨러가 관리한 대상과 환경 변경을 기록하며 상태 조회와 제거 명령이 읽습니다 |
 | `~/.ghost-alice/pending-merges/<platform>/` | 인스톨러가 Ghost-ALICE 복사 설치 스킬 파일을 바꾸기 전에 사용자 수정본을 보존합니다. 설치 표식이 있는 폴더와, 이번 설치가 바꾸는 폴더는 표식이 사라졌어도 확인하며, merge-companion과 사용자가 병합 여부를 결정합니다. Claude 앱의 `synced`처럼 Ghost-ALICE가 설치하지 않는 폴더는 기록하지 않습니다 |
-| `~/.ghost-alice/install/` | 감사와 복구에 필요한 설치 결과와 이벤트를 보관합니다 |
+| `~/.ghost-alice/install/` | 감사와 복구에 필요한 설치 결과와 이벤트를 최근 30회 실행분만 보관합니다 |
 
 설치된 파일, 훅이나 실행 설정을 바꾸는 개발자는 상태 조회, 진단, 병합 대기 처리와 제거 복원에 미치는 영향도 확인해야 합니다. 이 절차들은 같은 설치 기록에 의존합니다.
 

@@ -23,6 +23,7 @@ from typing import IO, Callable, Sequence, TypeVar
 import hook_definitions
 import install_report_events
 from installer import locations
+import state_retention
 
 T = TypeVar("T")
 
@@ -170,16 +171,14 @@ def live_counter_enabled() -> bool:
     return _state.tty
 
 
-def _home() -> Path:
-    return _state.home if _state.home is not None else locations.home()
-
-
 def log_init() -> Path:
     """Create `<home>/.ghost-alice/install/YYYY-MM-DD-HHMMSS.log` once and export
-    `GHOST_ALICE_INSTALL_LOG_FILE`; an already chosen log file is kept (`report.sh:78-89`)."""
+    `GHOST_ALICE_INSTALL_LOG_FILE`; an already chosen log file is kept (`report.sh:78-89`). Before it opens a new
+    log, the folder keeps the last 30 runs (`state_retention` install-logs)."""
     if _state.log_file is None:
-        root = _home() / ".ghost-alice" / "install"
+        root = locations.install_log_root(_state.home)
         root.mkdir(parents=True, exist_ok=True)
+        state_retention.apply("install-logs", root)
         _state.log_file = root / (datetime.now().strftime("%Y-%m-%d-%H%M%S") + ".log")
     os.environ["GHOST_ALICE_INSTALL_LOG_FILE"] = str(_state.log_file)
     return _state.log_file

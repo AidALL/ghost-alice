@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parent
@@ -74,6 +75,39 @@ class GovernanceEventsTests(unittest.TestCase):
 
         self.assertIn("governance_events.py", text)
         self.assertIn("check=False", text)
+
+
+class GovernanceRetentionTests(unittest.TestCase):
+    """A write that takes the event log past 5MB turns it into the one previous file."""
+
+    def test_a_write_past_the_limit_rotates_the_log(self) -> None:
+        sys.path.insert(0, str(ROOT))
+        import governance_events
+        import state_retention
+
+        temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="governance-retention-test-"))
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        output = temp_dir / "governance-events.jsonl"
+        output.write_text("x" * 80 + "\n", encoding="utf-8")
+        policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
+        with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy}), \
+                mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(temp_dir)}):
+            governance_events.append_event({"rule": "destructive-command"}, output)
+        previous = output.with_name("governance-events.jsonl.1").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(json.loads(previous[-1]), {"rule": "destructive-command"})
+        self.assertFalse(output.exists())
+
+    def test_concurrent_writers_append_through_the_retention_lock(self) -> None:
+        sys.path.insert(0, str(ROOT))
+        import governance_events
+        import state_retention
+
+        temp_dir = pathlib.Path(tempfile.mkdtemp(prefix="governance-retention-test-"))
+        self.addCleanup(lambda: shutil.rmtree(temp_dir, ignore_errors=True))
+        output = temp_dir / "governance-events.jsonl"
+        with mock.patch.object(state_retention, "append") as append:
+            governance_events.append_event({"rule": "secret-pattern"}, output)
+        append.assert_called_once_with("governance-events", output, '{"rule": "secret-pattern"}\n')
 
 
 if __name__ == "__main__":

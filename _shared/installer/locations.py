@@ -97,9 +97,9 @@ def claude_commands_dir() -> Path:
     return claude_home() / "commands"
 
 
-def install_log_root() -> Path:
-    """`~/.ghost-alice/install`."""
-    return home() / ".ghost-alice" / "install"
+def install_log_root(base: Path | None = None) -> Path:
+    """`~/.ghost-alice/install`, under `base` instead of the home when one is given."""
+    return (Path(base) if base is not None else home()) / ".ghost-alice" / "install"
 
 
 def record_root() -> Path:

@@ -9,6 +9,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 import install_destination
+import state_retention
 from typing import Any
 
 SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -125,6 +126,7 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
     path = log_path(home=home, platform=safe_platform, session_id=safe_session_id)
     install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    first_row = not path.exists()
 
     row = {
         "schema_version": "strict-hook-output.v1",
@@ -149,4 +151,7 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
             row[optional_key] = _safe_json_value(event[optional_key])
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    if first_row:
+        # A new session removes the session folders of every host whose log has been idle for 14 days.
+        state_retention.apply("session-logs", path.parents[2], protect=[path.parent])
     return path

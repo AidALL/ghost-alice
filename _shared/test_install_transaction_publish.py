@@ -229,6 +229,88 @@ class PublishTests(PublishCase):
                          ["20260101T000000Z-1-aaaaaaaa", "20260104T000000Z-1-dddddddd", txid])
 
 
+class StagingAndRetentionTests(PublishCase):
+    """The publish removes the staging folder it created when it is empty, the replacement names its
+    rollback folder, and the retention rules live in `state_retention`."""
+
+    def setUp(self):
+        super().setUp()
+        environment = mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.ghost)})
+        environment.start()
+        self.addCleanup(environment.stop)
+
+    @staticmethod
+    def staging(parent: Path) -> Path:
+        return parent / ".ghost-alice-install-staging"
+
+    def test_an_empty_staging_folder_is_removed_after_a_publish(self):
+        install_transaction.publish(self.request("codex", self.target("alpha", self.codex / "alpha", "copy"),
+                                                 self.target("beta", self.claude / "beta", "link")))
+        self.assertFalse(self.staging(self.codex).exists())
+        self.assertFalse(self.staging(self.claude).exists())
+
+    def test_an_empty_staging_folder_is_removed_after_a_restore(self):
+        self.old_copy(self.codex / "alpha")
+        with mock.patch.object(install_transaction.installed_payload, "update", side_effect=OSError("disk full")):
+            with self.assertRaises(install_transaction.InstallTransactionError):
+                install_transaction.publish(self.request("codex", self.target("alpha", self.codex / "alpha", "copy")))
+        self.assertEqual((self.codex / "alpha" / "SKILL.md").read_text(encoding="utf-8"), "v1\n")
+        self.assertFalse(self.staging(self.codex).exists())
+
+    def test_a_staging_folder_that_holds_another_entry_stays(self):
+        other = self.staging(self.codex) / "stage-of-another-install"
+        other.mkdir(parents=True)
+        install_transaction.publish(self.request("codex", self.target("alpha", self.codex / "alpha", "copy")))
+        self.assertTrue(other.is_dir())
+        self.assertFalse((self.ghost / "state-retention-failures.jsonl").exists())
+
+    def test_a_staging_folder_that_cannot_be_removed_is_recorded(self):
+        real_rmdir = Path.rmdir
+
+        def rmdir(path):
+            if path.name == ".ghost-alice-install-staging":
+                raise PermissionError(13, "Permission denied")
+            return real_rmdir(path)
+
+        with mock.patch.object(Path, "rmdir", rmdir):
+            install_transaction.publish(self.request("codex", self.target("alpha", self.codex / "alpha", "copy")))
+        rows = [json.loads(line) for line in
+                (self.ghost / "state-retention-failures.jsonl").read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(row["policy"], row["error_type"]) for row in rows], [("install-staging", "PermissionError")])
+
+    def test_the_prune_helpers_live_in_the_retention_table(self):
+        for name in ("_prune_transactions", "_prune_rollback_root"):
+            with self.subTest(name=name):
+                self.assertFalse(hasattr(install_transaction, name))
+
+    def test_a_replacement_names_its_rollback_folder(self):
+        with self.assertRaises(TypeError):
+            install_transaction.ReplacementBatch([(self.src / "alpha", self.codex / "alpha", "copy")])
+        with self.assertRaises(TypeError):
+            install_transaction.staged_copy_replace(self.src / "alpha", self.codex / "alpha")
+
+    def test_the_replacement_commands_require_a_rollback_folder(self):
+        commands = (["copy-replace", "--source", "a", "--dest", "b"],
+                    ["symlink-replace", "--source", "a", "--dest", "b"],
+                    ["copy-replace-many", "--target", "a", "b"])
+        for command in commands:
+            with self.subTest(command=command[0]), contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as stop:
+                    install_transaction._parse_args(command)
+                self.assertEqual(stop.exception.code, 2)
+
+    def test_a_publish_failure_event_offers_the_event_log_to_its_retention_entry(self):
+        # The entry rotates past 5MB (state_retention tests); the writer offers its log after each event.
+        import state_retention
+
+        log = self.ghost / "install-state" / "codex-events.jsonl"
+        with mock.patch.object(state_retention, "append", wraps=state_retention.append) as append:
+            install_transaction._write_failure_event(log, source=self.src / "alpha", dest=self.codex / "alpha",
+                                                     phase="publish", error="disk full")
+        self.assertEqual(append.call_args.args[:2], ("install-state-events", log))
+        self.assertEqual(json.loads(log.read_text(encoding="utf-8"))["error"], "disk full")
+
+
 class FailureTests(PublishCase):
     def setUp(self):
         super().setUp()

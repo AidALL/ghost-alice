@@ -15,6 +15,7 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 import install_destination
+import state_retention
 from typing import Any
 
 
@@ -102,10 +103,8 @@ def output_path() -> Path:
 
 
 def append_event(event: dict[str, str], path: Path) -> None:
-    install_destination.assert_mutation_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    # Hooks of concurrent tool calls append here; the retention lock keeps their appends and rotations apart.
+    state_retention.append("governance-events", path, json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 
 def main() -> int:

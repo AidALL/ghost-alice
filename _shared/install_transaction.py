@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter
+import errno
 import hashlib
 import json
 import os
@@ -31,6 +32,7 @@ from typing import Sequence
 import content_digest
 import install_lock
 import installed_payload
+import state_retention
 from installer.participant import PublishContext
 
 EXCLUDED_COPY_DIR_NAMES = {
@@ -43,7 +45,6 @@ EXCLUDED_COPY_DIR_NAMES = {
 }
 EXCLUDED_COPY_FILE_NAMES = {".DS_Store"}
 EXCLUDED_COPY_FILE_SUFFIXES = {".pyc"}
-DEFAULT_ROLLBACK_KEEP = 20
 REQUEST_SCHEMA_VERSION = 1
 JOURNAL_SCHEMA_VERSION = 1
 ROLLBACKS_DIRNAME = "rollbacks"
@@ -131,30 +132,6 @@ def _create_directory_link(source: Path, link: Path) -> str:
         return "junction"
 
 
-def _prune_rollback_root(root: Path, keep: int = DEFAULT_ROLLBACK_KEEP) -> None:
-    if keep < 0:
-        keep = 0
-    try:
-        entries = list(root.iterdir())
-    except OSError:
-        return
-    if len(entries) <= keep:
-        return
-
-    def sort_key(entry: Path) -> tuple[int, str]:
-        try:
-            return (entry.stat().st_mtime_ns, entry.name)
-        except OSError:
-            return (0, entry.name)
-
-    entries.sort(key=sort_key)
-    for entry in entries[: max(0, len(entries) - keep)]:
-        try:
-            _remove_path(entry)
-        except OSError:
-            continue
-
-
 def _file_hash(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as fh:
@@ -229,10 +206,9 @@ def _write_failure_event(
         "error": error,
     }
     try:
-        event_log.parent.mkdir(parents=True, exist_ok=True)
-        with event_log.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-    except OSError:
+        state_retention.append("install-state-events", event_log,
+                               json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+    except (OSError, ValueError):
         return
 
 
@@ -263,11 +239,12 @@ def _write_target_progress_event(
 
 
 class ReplacementBatch:
-    """Reversible filesystem participant; its caller owns service recovery."""
-    def __init__(self, targets, *, rollback_root=None, rollback_keep=DEFAULT_ROLLBACK_KEEP,
+    """Reversible filesystem participant; its caller owns service recovery and names the rollback folder the
+    replaced originals move into. `rollback_keep` replaces the retention table's limit for that folder."""
+    def __init__(self, targets, *, rollback_root, rollback_keep=None,
                  progress_callback=None, progress_event_file=None, progress_events=None):
         self.targets = [(Path(src), Path(dst), mode) for src, dst, mode in targets]
-        self.root = Path(rollback_root) if rollback_root is not None else self.targets[0][1].parent / '.ghost-alice-install-rollbacks'
+        self.root = Path(rollback_root)
         self.keep = rollback_keep
         self.callback, self.event_file, self.events = progress_callback, progress_event_file, progress_events
         if self.events is not None and len(self.events) != len(self.targets):
@@ -368,10 +345,7 @@ class ReplacementBatch:
     def finalize(self):
         # Retention cleanup is performed only after the whole service/file
         # transaction commits; never discard rollback material during recovery.
-        try:
-            _prune_rollback_root(self.root, self.keep)
-        except OSError:
-            pass
+        state_retention.apply("rollback-root", self.root, limit=self.keep)
 
     def cleanup(self):
         for item in self.prepared:
@@ -382,6 +356,16 @@ class ReplacementBatch:
                         _remove_path(stage)
                 except OSError:
                     pass
+        # The staging folder this batch created beside each target goes once it is empty; an entry another
+        # install still stages there keeps it. Any other failure to remove it is recorded.
+        for stage_root in dict.fromkeys(item['stage'].parent for item in self.prepared):
+            try:
+                stage_root.rmdir()
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+            except OSError as exc:
+                if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST):
+                    state_retention.record_failure("install-staging", stage_root, exc)
 
     def run_unmanaged(self):
         try:
@@ -406,7 +390,7 @@ def _wrapped_failure(exc, batch, detail=None):
     return wrapped
 
 
-def _replace(targets, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP,
+def _replace(targets, *, rollback_root, event_log=None, rollback_keep=None,
              progress_callback=None, progress_event_file=None, progress_events=None):
     if not targets:
         return
@@ -547,21 +531,6 @@ def record_after_recovery(ghost_root) -> dict | None:
     return installed_payload.read(copy.parent) if copy is not None else None
 
 
-def _prune_transactions(root: Path, keep: int) -> None:
-    """Keep the newest `keep` finished publish folders; an unfinished one stays until it is restored."""
-    try:
-        folders = sorted((path for path in root.iterdir() if path.is_dir() and not path.is_symlink()),
-                         key=lambda path: path.name)
-    except OSError:
-        return
-    finished = [folder for folder in folders if _journal_phase(folder) in (*FINISHED_PHASES, "absent")]
-    for folder in finished[: max(0, len(finished) - max(0, keep))]:
-        try:
-            shutil.rmtree(folder)
-        except OSError:
-            continue
-
-
 def _record_key(dest) -> str:
     return Path(dest).as_posix()
 
@@ -594,7 +563,7 @@ class PublishBatch(ReplacementBatch):
     """
 
     def __init__(self, request: dict, replaced: list[dict], current: list[dict], journal: Journal, *,
-                 rollback_keep=DEFAULT_ROLLBACK_KEEP, progress_callback=None, progress_events=None):
+                 rollback_keep=None, progress_callback=None, progress_events=None):
         self.request, self.journal = request, journal
         self.replaced, self.current = replaced, current
         self.ghost_root = Path(request["ghost_root"])
@@ -644,7 +613,9 @@ class PublishBatch(ReplacementBatch):
 
     def finalize(self):
         self.journal.mark("done")
-        _prune_transactions(rollbacks_root(self.ghost_root), self.keep)
+        # The newest finished publish folders stay; an unfinished one stays until it is restored.
+        state_retention.apply("publish-rollbacks", rollbacks_root(self.ghost_root), limit=self.keep,
+                              eligible=lambda folder: _journal_phase(folder) in (*FINISHED_PHASES, "absent"))
 
 
 def _validated_request(request) -> dict:
@@ -690,7 +661,7 @@ def _require_lock(ghost_root) -> None:
         raise InstallTransactionError(f"publish runs only under the install lock of this process or its parent: {lock}")
 
 
-def publish(request: dict, participants: Sequence = (), *, rollback_keep: int = DEFAULT_ROLLBACK_KEEP) -> str:
+def publish(request: dict, participants: Sequence = (), *, rollback_keep: int | None = None) -> str:
     """Publish the request's targets and their install record entries; return the transaction id.
 
     When the request replaces targets, every participant's `before_publish` runs after
@@ -816,15 +787,15 @@ def recover(ghost_root, txid: str) -> list[str]:
     return lines
 
 
-def staged_copy_replace(source, dest, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP):
+def staged_copy_replace(source, dest, *, rollback_root, event_log=None, rollback_keep=None):
     _replace([(source, dest, 'copy')], rollback_root=rollback_root, event_log=event_log, rollback_keep=rollback_keep)
 
 
-def staged_symlink_replace(source, dest, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP):
+def staged_symlink_replace(source, dest, *, rollback_root, event_log=None, rollback_keep=None):
     _replace([(source, dest, 'symlink')], rollback_root=rollback_root, event_log=event_log, rollback_keep=rollback_keep)
 
 
-def staged_copy_replace_many(targets, *, rollback_root=None, event_log=None, rollback_keep=DEFAULT_ROLLBACK_KEEP,
+def staged_copy_replace_many(targets, *, rollback_root, event_log=None, rollback_keep=None,
         progress_callback=None, progress_event_file=None, progress_events=None):
     _replace([(src, dst, 'copy') for src, dst in targets], rollback_root=rollback_root, event_log=event_log,
         rollback_keep=rollback_keep, progress_callback=progress_callback,
@@ -838,22 +809,22 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     copy_replace = subparsers.add_parser("copy-replace")
     copy_replace.add_argument("--source", required=True, type=Path)
     copy_replace.add_argument("--dest", required=True, type=Path)
-    copy_replace.add_argument("--rollback-root", type=Path, default=None)
+    copy_replace.add_argument("--rollback-root", type=Path, required=True)
     copy_replace.add_argument("--event-log", type=Path, default=None)
-    copy_replace.add_argument("--rollback-keep", type=int, default=DEFAULT_ROLLBACK_KEEP)
+    copy_replace.add_argument("--rollback-keep", type=int, default=None)
 
     symlink_replace = subparsers.add_parser("symlink-replace")
     symlink_replace.add_argument("--source", required=True, type=Path)
     symlink_replace.add_argument("--dest", required=True, type=Path)
-    symlink_replace.add_argument("--rollback-root", type=Path, default=None)
+    symlink_replace.add_argument("--rollback-root", type=Path, required=True)
     symlink_replace.add_argument("--event-log", type=Path, default=None)
-    symlink_replace.add_argument("--rollback-keep", type=int, default=DEFAULT_ROLLBACK_KEEP)
+    symlink_replace.add_argument("--rollback-keep", type=int, default=None)
 
     copy_replace_many = subparsers.add_parser("copy-replace-many")
     copy_replace_many.add_argument("--target", action="append", nargs=2, required=True, type=Path, metavar=("SOURCE", "DEST"))
-    copy_replace_many.add_argument("--rollback-root", type=Path, default=None)
+    copy_replace_many.add_argument("--rollback-root", type=Path, required=True)
     copy_replace_many.add_argument("--event-log", type=Path, default=None)
-    copy_replace_many.add_argument("--rollback-keep", type=int, default=DEFAULT_ROLLBACK_KEEP)
+    copy_replace_many.add_argument("--rollback-keep", type=int, default=None)
     copy_replace_many.add_argument("--progress-label", default=None)
     copy_replace_many.add_argument(
         "--progress-status",

@@ -3713,62 +3713,36 @@ class TestEnvVarOverride(TempHomeTestCase):
 
 
 class TestBackupRotation(unittest.TestCase):
+    """A settings write keeps the newest three `<name>.bak*` through the retention table's hook-settings-backups."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.parent = Path(self.tmp.name)
         self.path = self.parent / "cfg.json"
+        self.path.write_text("{}", encoding="utf-8")
 
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_rotate_keeps_only_last_three(self):
-        from install_hooks import _rotate_backups
-        for i in range(5):
-            bak = self.path.with_name(f"cfg.json.bak.{i}")
-            bak.write_text(f"v{i}", encoding="utf-8")
-            os.utime(bak, (1000 + i, 1000 + i))
-        _rotate_backups(self.path, keep=3)
-        remaining = sorted(self.parent.glob("cfg.json.bak*"))
-        self.assertEqual(len(remaining), 3)
-        names = {p.name for p in remaining}
-        self.assertNotIn("cfg.json.bak.0", names)
-        self.assertNotIn("cfg.json.bak.1", names)
+    def test_the_rotation_lives_in_the_retention_table(self):
+        self.assertFalse(hasattr(install_hooks, "_rotate_backups"))
 
-    def test_rotate_skips_pending_merges_dir(self):
-        """The guard protects pending-merges/ descendants even when they match the rotation glob."""
-        from install_hooks import _rotate_backups
-        pending = self.parent / ".ghost-alice" / "pending-merges" / "codex"
-        pending.mkdir(parents=True)
-        protected = pending / "cfg.json.bak.protected"
-        protected.write_text("must survive", encoding="utf-8")
-        for i in range(5):
-            bak = self.path.with_name(f"cfg.json.bak.{i}")
-            bak.write_text(f"v{i}", encoding="utf-8")
-            os.utime(bak, (1000 + i, 1000 + i))
-        _rotate_backups(
-            self.path,
-            keep=3,
-            _pending_root=self.parent / ".ghost-alice" / "pending-merges",
-        )
-        self.assertTrue(protected.exists(), "pending-merges/ descendant .bak files must never be deleted")
+    def test_a_settings_write_applies_the_entry_with_the_pending_merges_folder_protected(self):
+        with patch("install_hooks.state_retention.apply") as apply, \
+                patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.parent / "ghost")}):
+            install_hooks._write_settings(self.path, {"hooks": {}}, report_saved=False)
+        apply.assert_called_once_with("hook-settings-backups", self.path,
+                                      protect=[(self.parent / "ghost" / "pending-merges").resolve()])
 
-    def test_rotate_does_not_unlink_symlinks(self):
-        """Symlink .bak files are excluded from rotation to avoid unintended target impact."""
-        from install_hooks import _rotate_backups
-        target = self.path.with_name("real-target.txt")
-        target.write_text("target", encoding="utf-8")
-        link = self.path.with_name("cfg.json.bak.linked")
-        try:
-            link.symlink_to(target)
-        except OSError as exc:
-            self.skipTest(f"Symlink creation is unavailable in this environment: {exc}")
+    def test_a_settings_write_keeps_the_three_newest_backups(self):
         for i in range(5):
             bak = self.path.with_name(f"cfg.json.bak.{i}")
             bak.write_text(f"v{i}", encoding="utf-8")
             os.utime(bak, (1000 + i, 1000 + i))
-        _rotate_backups(self.path, keep=3)
-        self.assertTrue(link.is_symlink(), "symlink .bak files are excluded from rotation")
-        self.assertTrue(target.exists(), "symlink target is unaffected")
+        with patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.parent / "ghost")}):
+            install_hooks._write_settings(self.path, {"hooks": {}}, report_saved=False)
+        names = sorted(p.name for p in self.parent.glob("cfg.json.bak*"))
+        self.assertEqual(names, ["cfg.json.bak", "cfg.json.bak.3", "cfg.json.bak.4"])
 
 
 class TestSessionStartHook(unittest.TestCase):

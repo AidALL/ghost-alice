@@ -19,6 +19,7 @@ import uuid
 from installer_assets import _content_hashes, classify_skill_root, OWNERSHIP_GHOST_ALICE_MANAGED, OWNERSHIP_USER_MODIFIED_MANAGED
 from install_destination import assert_mutation_path, ghost_root
 from install_transaction import _rename_path
+import state_retention
 
 RETIRED_SKILLS = ('jailbreak-detector',)
 
@@ -40,10 +41,7 @@ def _pending(entry, root, platform, source_root):
 
 
 def _audit(event, result, phase):
-    assert_mutation_path(event)
-    event.parent.mkdir(parents=True, exist_ok=True)
-    with event.open('a', encoding='utf-8') as stream:
-        stream.write(json.dumps(dict(result, phase=phase, ts=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')), sort_keys=True)+'\n')
+    state_retention.append('install-state-events', event, json.dumps(dict(result, phase=phase, ts=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')), sort_keys=True)+'\n')
 
 
 def _restore_no_replace(source, destination):
