@@ -327,7 +327,7 @@ class AgentSecuritySurfaceScannerTests(unittest.TestCase):
                                 "hooks": [
                                     {
                                         "type": "command",
-                                        "command": "python3 helper.py # [hook-reminder] AGENTS.md",
+                                        "command": "python3 helper.py # [session-intent-analyzer]",
                                     },
                                     {
                                         "type": "command",

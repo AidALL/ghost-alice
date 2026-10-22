@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import hook_definitions
 from installer import locations, report, runner
 
 if TYPE_CHECKING:
@@ -21,7 +22,7 @@ CODEX_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: codex-bootstrap -
 CLAUDE_BOOTSTRAP_MARKER = "# Ghost-ALICE Claude Bootstrap"
 CLAUDE_MANAGED_BLOCK_BEGIN = "<!-- Ghost-ALICE managed block begin: claude-bootstrap -->"
 CLAUDE_MANAGED_BLOCK_END = "<!-- Ghost-ALICE managed block end: claude-bootstrap -->"
-HOOK_ACTION_LABEL = "session-intent + prompt + web-search + tool-checkpoint + completion + session-start + io-trace"
+HOOK_ACTION_LABEL = " + ".join(hook_definitions.CORE_HOOK_IDS)
 GLOBAL_RULE_BLOCKS = "_shared/global_rule_blocks.py"
 
 

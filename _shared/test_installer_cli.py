@@ -840,7 +840,7 @@ class InstallOrderTests(CliCase):
         ctx = make_context(self.home, "claude", args=["task-router"])
         rc, out = self.captured(cli.run_command, cli.INSTALL, ctx)
         self.assertEqual(rc, 0)
-        self.assertIn(f"Attention\n  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n"
+        self.assertIn(f"Attention\n  - visibility can be changed later in Claude Code with /visibility between: dynamic | minimal | strict\n"
                       f"  - {note}\n", out)
         # Verbose mode: the line prints where it happens and the tail is not printed.
         quiet(self.home, verbose=True)

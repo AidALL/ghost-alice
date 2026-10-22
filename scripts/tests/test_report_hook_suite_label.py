@@ -20,8 +20,10 @@ class ReportHookSuiteLabelTests(unittest.TestCase):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 label = suite_label(platform)
-                for hook in ("prompt", "session-intent", "tool-checkpoint", "completion", "session-start", "io-trace"):
+                for hook in ("session-intent", "tool-checkpoint", "completion", "session-start", "session-receipt", "io-trace"):
                     self.assertIn(hook, label)
+                # The task-router reminder ("prompt") is retired.
+                self.assertNotIn("prompt", label)
 
 
 if __name__ == "__main__":

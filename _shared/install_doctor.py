@@ -69,17 +69,6 @@ RUNTIME_SHARED_FILES = (
     "text_lines.py",
     "hook_definitions.py",
 )
-RUNTIME_MANAGED_MARKERS = (
-    "[merge-companion] prompt-check",
-    "[hook-reminder] AGENTS.md",
-    "[session-intent-analyzer]",
-    "[web-search-first]",
-    "[tool-checkpoint] pre-tool-check",
-    "[completion-reminder] AGENTS.md",
-    "[merge-companion] session-check",
-    "[session-intent-receipt] session-start",
-    "[io-trace] audit",
-)
 BASE64_TOKEN_RE = re.compile(r"[A-Za-z0-9_-]{32,}={0,2}")
 
 
@@ -665,11 +654,13 @@ def _norm_for_compare(text: str) -> str:
 
 
 def _runtime_hook_config_audit(commands: list[str], runtime_shared: Path) -> list[dict[str, str]]:
+    from install_hooks import GHOST_ALICE_HOOK_MARKERS
+
     findings: list[dict[str, str]] = []
     runtime_runner = _path_token(runtime_shared / "hook_profile_gate.py")
     managed = [
         command for command in commands
-        if any(marker in command for marker in RUNTIME_MANAGED_MARKERS)
+        if any(marker in command for marker in GHOST_ALICE_HOOK_MARKERS)
     ]
     if not managed:
         return [{"status": STATUS_ERROR, "name": "managed-hooks", "kind": "hook-config", "reason": "none-found"}]
@@ -752,11 +743,11 @@ def _runtime_session_intent_golden_status(
     destination = None
     if hook_commands is not None:
         import install_destination
-        from install_hooks import _managed_instruction_contract
+        from install_hooks import _managed_session_intent_options
 
         destinations = {}
         for command in hook_commands:
-            if _managed_instruction_contract(command, "session-intent") is None:
+            if _managed_session_intent_options(command) is None:
                 continue
             outer = shlex.split(command, comments=True)
             script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1

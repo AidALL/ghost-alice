@@ -20,13 +20,14 @@ import sys
 import time
 from typing import IO, Callable, Sequence, TypeVar
 
+import hook_definitions
 import install_report_events
 from installer import locations
 
 T = TypeVar("T")
 
 PROGRESS_OFF_VALUES = frozenset({"0", "false", "False", "FALSE", "off", "OFF", "no", "NO"})
-HOOK_SUITE_LABEL = "prompt, session-intent, tool-checkpoint, completion, session-start, io-trace"
+HOOK_SUITE_LABEL = ", ".join(hook_definitions.CORE_HOOK_IDS)
 FAILURE_EXCERPT_PATTERN = (r"\[ERROR\]|\[WARN\] \[auto\].*failed|addon install collision|addon manifest error|"
                            r"Exception:|failed - aborting|clone failed|not found|Python 3\.11\+")
 _FAILURE_EXCERPT_RE = re.compile(FAILURE_EXCERPT_PATTERN)
@@ -231,7 +232,7 @@ def print_skill_sync_summary(skill_targets: int, support_targets: int, installed
 
 
 def hook_suite_label(platform: str = "") -> str:
-    """`prompt, session-intent, tool-checkpoint, completion, session-start, io-trace` (`report.sh:126-129`)."""
+    """The core hooks the installer registers on every host (`report.sh:126-129`)."""
     return HOOK_SUITE_LABEL
 
 
@@ -297,17 +298,23 @@ def print_start(platform_label: str, total_targets: int, visibility: str = "dyna
 
 
 def print_tail(platform_label: str, visibility: str = "dynamic", notes: Sequence[str] = ()) -> None:
-    """`[3/5] Hooks`, `[4/5] Runtime config`, `[5/5] Verification`, Attention with `notes` after the
-    visibility hint, Details (`report.sh:201-211`)."""
+    """`[3/5] Hooks`, `[4/5] Runtime config`, `[5/5] Verification`, Attention, Details (`report.sh:201-211`).
+
+    Attention carries the `/visibility` hint when Claude Code is among the platforms (Codex has
+    no such command), then `notes`; with neither, the section is left out.
+    """
     log = log_init()
     emit(f"  [3/5] Hooks               {hook_suite_label(platform_label)} enabled")
     emit(f"  [4/5] Runtime config      {platform_label} hooks=true, Visibility Level=[{visibility}]")
     emit("  [5/5] Verification        ok\n")
-    emit("Attention")
-    emit("  - visibility can be changed later with /visibility between: dynamic | minimal | strict")
-    for note in notes:
-        emit(f"  - {note}")
-    emit("")
+    attention = list(notes)
+    if "claude" in (platform.strip() for platform in platform_label.split(",")):
+        attention.insert(0, "visibility can be changed later in Claude Code with /visibility between: dynamic | minimal | strict")
+    if attention:
+        emit("Attention")
+        for item in attention:
+            emit(f"  - {item}")
+        emit("")
     emit("Details")
     emit(f"  log: {log}")
     emit("  rerun with --verbose to show per-skill actions")

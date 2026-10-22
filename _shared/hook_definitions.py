@@ -45,6 +45,9 @@ HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
     },
 }
 
+# Core hooks the installer registers on every host, in report order.
+CORE_HOOK_IDS = ("session-intent", "tool-checkpoint", "completion", "session-start", "session-receipt", "io-trace")
+
 
 def resolve_hook_event(intent: str, platform: str) -> str:
     """Convert a semantic intent to the concrete event name for a platform."""

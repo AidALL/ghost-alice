@@ -38,12 +38,14 @@ MCP_PACKAGE_MANAGER_RE = re.compile(
     r"(?i)\b(uvx|pipx|bunx|pnpm\s+dlx|yarn\s+dlx|npm\s+(install|i|exec)|"
     r"pip\s+install|python\s+-m\s+pip\s+install|cargo\s+install|go\s+install)\b"
 )
+# This skill runs without _shared, so it keeps a copy of the installer's current
+# Ghost-ALICE hook markers; a _shared test keeps the two lists equal.
 GHOST_ALICE_HOOK_MARKERS = (
-    "[hook-reminder] AGENTS.md",
-    "[web-search-first]",
+    "[session-intent-analyzer]",
     "[tool-checkpoint] pre-tool-check",
     "[completion-reminder] AGENTS.md",
     "[merge-companion] session-check",
+    "[session-intent-receipt] session-start",
     "[io-trace] audit",
 )
 SHELL_COMMANDS = {"bash", "cmd", "cmd.exe", "powershell", "powershell.exe", "pwsh", "pwsh.exe", "sh", "zsh"}

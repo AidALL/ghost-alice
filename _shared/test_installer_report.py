@@ -214,8 +214,9 @@ class LineTests(ReportCase):
         # report.sh:126-129; test_report_hook_suite_label.py
         for platform in ("claude", "codex", ""):
             label = report.hook_suite_label(platform)
-            self.assertEqual(label, "prompt, session-intent, tool-checkpoint, completion, session-start, io-trace")
+            self.assertEqual(label, "session-intent, tool-checkpoint, completion, session-start, session-receipt, io-trace")
             self.assertNotIn("web-search-first", label)
+            self.assertNotIn("prompt", label)
 
     def test_sync_lines(self):
         # report.sh:131-140
@@ -271,12 +272,11 @@ class ReportTextTests(ReportCase):
         log = report.state().log_file
         self.assertIsNotNone(log)
         tail = self.captured(report.print_tail, "codex", "dynamic")
+        # Codex has no /visibility command, so a Codex-only tail without notes has no Attention section.
         self.assertEqual(tail,
-            "  [3/5] Hooks               prompt, session-intent, tool-checkpoint, completion, session-start, io-trace enabled\n"
+            "  [3/5] Hooks               session-intent, tool-checkpoint, completion, session-start, session-receipt, io-trace enabled\n"
             "  [4/5] Runtime config      codex hooks=true, Visibility Level=[dynamic]\n"
             "  [5/5] Verification        ok\n\n"
-            "Attention\n"
-            "  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n\n"
             "Details\n"
             f"  log: {log}\n"
             "  rerun with --verbose to show per-skill actions\n")
@@ -292,13 +292,17 @@ class ReportTextTests(ReportCase):
         tail = self.captured(report.print_tail, "claude", "dynamic",
                              notes=["Context gateway: registered from /src, 32 files, service running"])
         self.assertIn("Attention\n"
-                      "  - visibility can be changed later with /visibility between: dynamic | minimal | strict\n"
+                      "  - visibility can be changed later in Claude Code with /visibility between: dynamic | minimal | strict\n"
                       "  - Context gateway: registered from /src, 32 files, service running\n\n"
                       "Details\n", tail)
         full = self.captured(report.print_full, "claude", 7, 1, 2, 4, "minimal", notes=["one note"])
         self.assertIn("  - one note\n", full)
         auto = self.captured(report.print_auto_full, "claude, codex", 24, "dynamic", 24, notes=["one note"])
+        self.assertIn("  - visibility can be changed later in Claude Code with /visibility", auto)
         self.assertIn("  - one note\n", auto)
+        codex = self.captured(report.print_tail, "codex", "dynamic", notes=["one note"])
+        self.assertIn("Attention\n  - one note\n\nDetails\n", codex)
+        self.assertNotIn("/visibility", codex)
 
     def test_gateway_event_round_trip(self):
         event_file = self.home / "run.events.jsonl"

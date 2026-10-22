@@ -81,6 +81,7 @@ import runtime_config
 import install_destination
 import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
+import retired_assets
 
 # Prevent Windows cp949 stdout encoding issues.
 if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
@@ -1937,16 +1938,16 @@ def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
         return False
 
 
-def _managed_instruction_contract(command: str, identity: str):
-    """Resolve the executor and explicit instruction ownership from its bound arguments."""
+def _managed_session_intent_options(command: str):
+    """Return the options of the current managed session-intent registration, or None for any other form."""
     import shlex
-    if not _hook_runner_id_match(command, identity):
+    if not _hook_runner_id_match(command, "session-intent"):
         return None
     try:
         outer = shlex.split(command, comments=True)
         script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
         args = outer[script_index + 1:]
-        if len(args) != 6 or args[:2] != ["run", identity] or args[2] not in {"codex", "claude"} or args[4] != "--binding-b64":
+        if len(args) != 6 or args[:2] != ["run", "session-intent"] or args[2] not in {"codex", "claude"} or args[4] != "--binding-b64":
             return None
         binding = install_destination.decode_binding(args[5])
         if set(binding) != {"schema_version", "destination"}:
@@ -1954,51 +1955,53 @@ def _managed_instruction_contract(command: str, identity: str):
         destination = install_destination.InstallDestination.parse(binding["destination"])
         if Path(outer[script_index]) != Path(destination.runtime_shared_dir) / "hook_profile_gate.py":
             return None
-        script_name = {"prompt": "task_router_reminder_hook.py", "session-intent": "session_intent_analyzer_hook.py"}[identity]
         inner = base64.urlsafe_b64decode(args[3]).decode("utf-8")
         argv = shlex.split(inner, comments=True)
         if (len(argv) < 4 or argv[0] != HOOK_PYTHON_SENTINEL
-                or Path(argv[1]) != Path(destination.runtime_shared_dir) / script_name
+                or Path(argv[1]) != Path(destination.runtime_shared_dir) / "session_intent_analyzer_hook.py"
                 or len(argv[2:]) % 2):
             return None
         options = dict(zip(argv[2::2], argv[3::2]))
-        required = {"--platform", "--format", "--root"}
-        if identity == "session-intent":
-            required |= {"--hook", "--context"}
-        if (set(options) - {"--internal-b64"} != required or len(options) != len(argv[2:]) // 2
+        if (set(options) != {"--platform", "--format", "--root", "--hook", "--context"}
+                or len(options) != len(argv[2:]) // 2
                 or options["--platform"] != args[2]
                 or options["--format"] not in {"json", "text"}
                 or options["--root"] != destination.ledger_root
-                or (identity == "session-intent" and (options["--hook"], options["--context"]) != ("session-intent", "prompt_submit"))):
+                or (options["--hook"], options["--context"]) != ("session-intent", "prompt_submit")):
             return None
         return options
     except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
         return None
 
 
-def _managed_prompt_executor(command: str, identity: str):
-    contract = _managed_instruction_contract(command, identity)
-    return contract is not None and "--internal-b64" not in contract
+# Hooks that an older installer registered and Core no longer has. The installer
+# recognizes every installed form by its marker or runner id and removes it.
+RETIRED_HOOKS = (
+    ("prompt", HOOK_MARKER),
+    ("pending-merge-prompt", PROMPT_PENDING_MERGE_MARKER),
+    ("web-search-first", WEB_SEARCH_FIRST_MARKER),
+)
 
 
-def resolve_instruction_command(rows, identity, default_command):
-    """An explicit caller policy selects one executor; ambiguity prevents replacement."""
-    overrides = []
-    for row in rows:
-        for hook in row.get("hooks", []):
-            command = hook.get("command", "")
-            contract = _managed_instruction_contract(command, identity)
-            if hook.get("type") == "command" and contract is not None and "--internal-b64" in contract:
-                overrides.append(command)
-    if len(overrides) > 1:
-        raise ValueError("Instruction ownership is ambiguous")
-    return overrides[0] if overrides else default_command
+def _remove_retired_hooks(hooks_obj) -> int:
+    """Remove every installed form of a retired hook from every event."""
+    removed = 0
+    for groups in hooks_obj.values():
+        if isinstance(groups, list):
+            for hook_id, marker in RETIRED_HOOKS:
+                removed += _remove_hook_entries(groups, marker, hook_id=hook_id)
+    return removed
 
 
-def remove_managed_prompt_reminders(hooks_list: list) -> int:
-    """Retire the redundant default executor; explicit custom commands remain intact."""
-    return _remove_hook_commands_by_command(hooks_list,
-        lambda command: _managed_prompt_executor(command, "prompt") is True)
+def _remove_empty_hook_groups(hooks_obj) -> int:
+    """Remove groups without handlers; an empty group runs nothing whatever its matcher."""
+    removed = 0
+    for groups in hooks_obj.values():
+        if isinstance(groups, list):
+            kept = [group for group in groups if not (isinstance(group, dict) and not group.get("hooks"))]
+            removed += len(groups) - len(kept)
+            groups[:] = kept
+    return removed
 
 
 def _remove_stale_hook_entries(
@@ -2053,11 +2056,9 @@ def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None =
     return removed
 
 
+# Markers of the hooks Core installs now. Retired markers live in RETIRED_HOOKS.
 GHOST_ALICE_HOOK_MARKERS = (
-    PROMPT_PENDING_MERGE_MARKER,
-    HOOK_MARKER,
     SESSION_INTENT_MARKER,
-    WEB_SEARCH_FIRST_MARKER,
     TOOL_CHECKPOINT_MARKER,
     STOP_HOOK_MARKER,
     SESSION_START_MARKER,
@@ -2081,7 +2082,9 @@ def _ensure_claude_ghost_alice_skill_permissions(
         permissions["allow"] = allow
 
     original_len = len(allow)
-    allow[:] = [item for item in allow if not _is_stale_legacy_checkout_path_permission(item)]
+    retired = {f"Skill({name})" for name in retired_assets.RETIRED_SKILLS}
+    allow[:] = [item for item in allow
+                if not _is_stale_legacy_checkout_path_permission(item) and item not in retired]
     existing = {item for item in allow if isinstance(item, str)}
     changed = len(allow) != original_len
     for rule in _claude_ghost_alice_skill_permissions(addon_sources):
@@ -2178,6 +2181,8 @@ def install_hook(
     if "hooks" not in settings:
         settings["hooks"] = {}
     hooks_obj = settings["hooks"]
+    # Codex keys trust by handler position; record positions before any edit so trust can follow its handler.
+    hooks_before = _hook_positions(settings_file, hooks_obj) if platform_key == "codex" else []
 
     if hook_key not in hooks_obj:
         hooks_obj[hook_key] = []
@@ -2189,20 +2194,14 @@ def install_hook(
         if _ensure_hook_dispatcher_installed(dry_run=dry_run):
             changed = True
 
-    # The input pending-merge hook is retired; merge-companion re-checks before skill changes.
-    removed = _remove_hook_entries(hook_list, PROMPT_PENDING_MERGE_MARKER, hook_id="pending-merge-prompt")
+    removed = _remove_retired_hooks(hooks_obj)
     if removed:
-        _log(f"  Removed {removed} retired input pending-merge hook entry(ies)")
-        changed = True
-
-    removed = remove_managed_prompt_reminders(hook_list)
-    if removed:
-        _log(f"  Removed {removed} redundant managed task-router reminder(s); intake owns routing guidance")
+        _log(f"  Removed {removed} retired hook entry(ies)")
         changed = True
 
     # Install the session-intent-analyzer hook (updates the session intent ledger for every user input).
     session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
-    session_intent_command = resolve_instruction_command(hook_list, "session-intent", _entry_command(session_intent_entry))
+    session_intent_command = _entry_command(session_intent_entry)
     removed = _remove_stale_hook_entries(
         hook_list,
         SESSION_INTENT_MARKER,
@@ -2227,15 +2226,6 @@ def install_hook(
     else:
         hook_list.append(session_intent_entry)
         _log(_t("  session-intent-analyzer hook added", "  session-intent-analyzer hook added"))
-        changed = True
-
-    # External evidence selection belongs to the verification reference, not input intake.
-    removed = _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER, hook_id="web-search-first")
-    if removed:
-        _log(_t(
-            f"  Removed {removed} web-search-first hook entry(ies)",
-            f"  Removed {removed} web-search-first hook entry(ies)",
-        ))
         changed = True
 
     # Install the pre_tool_use hook (tool-checkpoint: enforce narration before tool calls).
@@ -2454,10 +2444,17 @@ def install_hook(
         else:
             _log(_t(f"  {event_name} adapter hook already exists: {marker}", f"  {event_name} adapter hook already exists: {marker}"))
 
+    removed = _remove_empty_hook_groups(hooks_obj)
+    if removed:
+        _log(f"  Removed {removed} hook group(s) without hooks")
+        changed = True
+
     if platform_key == "codex":
         if _ensure_codex_hook_feature_enabled(dry_run=dry_run):
             changed = True
         if _ensure_codex_project_trusted(dry_run=dry_run):
+            changed = True
+        if _follow_codex_hook_trust(settings_file, settings, hooks_before, dry_run=dry_run):
             changed = True
         if _ensure_codex_hook_trust_state(
             settings_file, settings, dry_run=dry_run,
@@ -2587,67 +2584,98 @@ def _is_legacy_autopilot_hook_command(command: str) -> bool:
     return any(marker in normalized and script in normalized for marker, script in _LEGACY_AUTOPILOT_HOOKS)
 
 
-def _reconcile_codex_hook_trust(content, changes):
-    """Remove owned hashes and relocate surviving occurrences without granting trust.
+def _hook_positions(settings_file: Path, hooks_obj) -> list[tuple[dict[str, Any], str]]:
+    """Each handler with its Codex trust key, in hooks-file order."""
+    positions = []
+    if not isinstance(hooks_obj, dict):
+        return positions
+    for event, groups in hooks_obj.items():
+        if not isinstance(groups, list):
+            continue
+        for group_index, group in enumerate(groups):
+            hooks = group.get("hooks") if isinstance(group, dict) else None
+            if not isinstance(hooks, list):
+                continue
+            for handler_index, hook in enumerate(hooks):
+                if isinstance(hook, dict):
+                    positions.append((hook, _codex_hook_state_key(settings_file, event, group_index, handler_index)))
+    return positions
 
-    Each change binds an original position to its new position (or removal) and
-    original command hash. The removal pass supplies this mapping directly;
-    hashes never identify duplicate occurrences. User-edited or colliding
-    tables that cannot be relocated intact reject the whole removal.
+
+def _trust_moves(before, settings_file: Path, hooks_obj) -> dict[str, Optional[str]]:
+    """Map each handler's original trust key to its current key, or to None once removed.
+
+    `before` holds the original handler objects, so identity cannot match a handler created later.
     """
-    parsed = tomllib.loads(content)
+    after = {id(hook): key for hook, key in _hook_positions(settings_file, hooks_obj)}
+    return {key: after.get(id(hook)) for hook, key in before if after.get(id(hook)) != key}
+
+
+def _reconcile_codex_hook_trust(content: str, settings_file: Path, settings: dict[str, Any], moves) -> str:
+    """Make Codex trust tables follow their handlers.
+
+    `moves` maps a handler's original trust key to its new key, or to None for a
+    removed handler. A table for this hooks file at a position without a handler
+    is an orphan and goes. A table moves with all of its lines, so a stale hash
+    still asks the user: moving grants no trust. Tables for other hook files stay
+    unchanged. When the edit cannot be shown to keep every other value, the
+    content stays unchanged and the reason is logged; trust bookkeeping never
+    stops an install or a removal.
+    """
+    own = settings_file.as_posix().replace("\\", "/")
+    current = {key for _, key in _hook_positions(settings_file, settings.get("hooks"))}
+
+    def target(key):
+        parts = _codex_hook_state_key_parts(key)
+        if parts is None or parts[0] != own:
+            return key
+        canonical = ":".join((own, *parts[1:]))
+        if canonical in moves:
+            return moves[canonical]
+        return key if canonical in current else None
+
+    def unchanged(reason):
+        _log(f"  Codex hook trust tables left unchanged: {reason}")
+        return content
+
+    try:
+        parsed = tomllib.loads(content)
+    except tomllib.TOMLDecodeError as error:
+        return unchanged(f"config.toml does not parse ({error})")
     hooks = parsed.get("hooks", {})
-    if not isinstance(hooks, dict) or not isinstance(hooks.get("state", {}), dict):
-        raise ValueError("Codex hook trust state must be a TOML table")
-    tables = hooks.get("state", {})
-    expected = copy.deepcopy(parsed)
-    expected_tables = expected.get("hooks", {}).get("state", {})
+    state = hooks.get("state", {}) if isinstance(hooks, dict) else None
+    if not isinstance(state, dict):
+        return unchanged("hooks.state is not a table")
+
     lines = content.splitlines(keepends=True)
-    edits = []
-    vacated = set()
-    moves = {}
-    for key, (new_key, expected_hash) in changes.items():
-        table = tables.get(key)
-        header = f"[hooks.state.{_toml_basic_string(key)}]"
-        start, end = _find_toml_header_bounds(lines, header)
-        if new_key is not None:
-            if table is not None:
-                if not isinstance(table, dict) or table.get("trusted_hash") != expected_hash or start is None:
-                    raise ValueError(f"Cannot relocate user-edited Codex hook trust: {key}")
-                replacement = lines[start:end].copy()
-                replacement[0] = replacement[0].replace(header, f"[hooks.state.{_toml_basic_string(new_key)}]", 1)
-                edits.append((start, end, replacement))
-                vacated.add(key)
-                moves[key] = (new_key, table)
-            continue
-        if not isinstance(table, dict) or table.get("trusted_hash") != expected_hash or start is None:
-            continue
-        trusted_index = next((i for i in range(start + 1, end)
-            if lines[i].split("=", 1)[0].strip() == "trusted_hash" and "=" in lines[i]), None)
-        if trusted_index is None:
-            continue
-        if lines[trusted_index].strip() != f'trusted_hash = "{expected_hash}"':
-            continue  # User-edited representations/comments are not our unchanged line.
-        if set(table) == {"trusted_hash"} and not any(line.strip().startswith("#") for line in lines[start + 1:end]):
-            edits.append((start, end, []))
-            expected_tables.pop(key)
-            vacated.add(key)
-        else:
-            edits.append((trusted_index, trusted_index + 1, []))
-            expected_tables[key].pop("trusted_hash")
-    for key, (new_key, _) in changes.items():
-        if new_key is not None and new_key in tables and new_key not in vacated:
-            raise ValueError(f"Codex hook trust destination retains user data: {new_key}")
-    for key in moves:
-        expected_tables.pop(key)
-    for new_key, table in moves.values():
-        expected_tables[new_key] = table
-    for start, end, replacement in sorted(edits, reverse=True):
-        lines[start:end] = replacement
-    result = ''.join(lines)
-    actual = tomllib.loads(result)
-    # Removing the last generated nested header also removes its implicit
-    # empty ancestors. Other user tables, including empty ones, stay exact.
+    starts = [index for index, line in enumerate(lines)
+              if line.strip().startswith("[") and line.strip().endswith("]")]
+    result = lines[:starts[0]] if starts else list(lines)
+    written = set()
+    for start, end in zip(starts, [*starts[1:], len(lines)]):
+        block = lines[start:end]
+        key = _codex_hook_state_header_key(block[0])
+        if key is not None:
+            new_key = target(key)
+            if new_key is None:
+                continue
+            if new_key in written:
+                return unchanged(f"two tables would share {new_key}")
+            written.add(new_key)
+            if new_key != key:
+                ending = block[0][len(block[0].rstrip("\r\n")):]
+                block = [f"[hooks.state.{_toml_basic_string(new_key)}]{ending}", *block[1:]]
+        result += block
+    reconciled = "".join(result)
+
+    expected = copy.deepcopy(parsed)
+    if isinstance(expected.get("hooks"), dict):
+        expected["hooks"]["state"] = {target(key): table for key, table in state.items() if target(key) is not None}
+    try:
+        actual = tomllib.loads(reconciled)
+    except tomllib.TOMLDecodeError as error:
+        return unchanged(f"the edited text does not parse ({error})")
+    # Removing the last nested header also removes its implicit empty ancestors.
     for value in (expected, actual):
         hook_tables = value.get("hooks")
         if isinstance(hook_tables, dict):
@@ -2656,13 +2684,28 @@ def _reconcile_codex_hook_trust(content, changes):
             if not hook_tables:
                 value.pop("hooks")
     if actual != expected:
-        raise ValueError("Codex hook trust representation cannot be reconciled without changing user data")
-    return result
+        return unchanged("the edit would change other configuration")
+    return reconciled
 
 
-def _write_removed_hook_settings(settings_file, settings, platform_key, changes):
+def _follow_codex_hook_trust(settings_file: Path, settings: dict[str, Any], before, *, dry_run: bool = False) -> bool:
+    """Match Codex trust tables to the handlers this install moved or removed."""
+    config_file = _resolve_codex_config_toml()
+    if not config_file.exists():
+        return False
+    current = _read_text_file(config_file)
+    updated = _reconcile_codex_hook_trust(current, settings_file, settings,
+                                          _trust_moves(before, settings_file, settings.get("hooks")))
+    if updated == current:
+        return False
+    _write_text_file(config_file, updated, dry_run=dry_run)
+    _log("  Matched Codex hook trust to the current hooks")
+    return True
+
+
+def _write_removed_hook_settings(settings_file, settings, platform_key, moves):
     """Commit trust/settings atomically per file; restore trust on settings failure."""
-    if platform_key != "codex" or not changes:
+    if platform_key != "codex":
         _write_settings(settings_file, settings, dry_run=False)
         return
     config_file = _resolve_codex_config_toml()
@@ -2671,7 +2714,7 @@ def _write_removed_hook_settings(settings_file, settings, platform_key, changes)
         return
     original = config_file.read_bytes()
     stat_before = config_file.stat()
-    content = _reconcile_codex_hook_trust(original.decode('utf-8'), changes).encode('utf-8')
+    content = _reconcile_codex_hook_trust(original.decode('utf-8'), settings_file, settings, moves).encode('utf-8')
     if content == original:
         _write_settings(settings_file, settings, dry_run=False)
         return
@@ -2692,10 +2735,10 @@ def _write_removed_hook_settings(settings_file, settings, platform_key, changes)
         raise
 
 
-def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str], bool], *, position_callback=None) -> int:
+def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str], bool]) -> int:
     removed = 0
     kept = []
-    for old_group, entry in enumerate(hooks_list):
+    for entry in hooks_list:
         if not isinstance(entry, dict):
             kept.append(entry)
             continue
@@ -2703,49 +2746,23 @@ def _remove_hook_commands_by_command(hooks_list: list, predicate: Callable[[str]
         if not isinstance(hooks, list):
             kept.append(entry)
             continue
-        kept_hooks = []
-        positions = []
-        removed_from_entry = 0
-        for old_handler, hook in enumerate(hooks):
-            if isinstance(hook, dict) and predicate(hook.get("command", "")):
-                removed += 1
-                removed_from_entry += 1
-                positions.append((old_handler, None, hook))
-            else:
-                positions.append((old_handler, len(kept_hooks), hook))
-                kept_hooks.append(hook)
-        if position_callback is not None:
-            for old_handler, new_handler, hook in positions:
-                if isinstance(hook, dict) and hook.get("type") == "command":
-                    new_position = None if new_handler is None else (len(kept), new_handler)
-                    position_callback((old_group, old_handler), new_position, entry, hook)
+        kept_hooks = [hook for hook in hooks if not (isinstance(hook, dict) and predicate(hook.get("command", "")))]
+        removed_from_entry = len(hooks) - len(kept_hooks)
+        removed += removed_from_entry
         if kept_hooks:
             if removed_from_entry:
                 entry["hooks"] = kept_hooks
             kept.append(entry)
         elif not removed_from_entry:
             kept.append(entry)
-        else:
-            # All commands in this entry were managed addon commands; remove the now-empty entry instead of leaving a no-op hook container behind.
-            pass
+        # An entry whose commands were all removed goes instead of staying as a no-op container.
     hooks_list[:] = kept
     return removed
 
 
-def _remove_hook_settings_commands(settings_file, hooks_obj, predicate, *, collect_trust=False):
-    changes = {}
-    total = 0
-    for event, groups in hooks_obj.items():
-        if not isinstance(groups, list):
-            continue
-        def position(old, new, group, hook):
-            if old == new:
-                return
-            key = _codex_hook_state_key(settings_file, event, *old)
-            new_key = None if new is None else _codex_hook_state_key(settings_file, event, *new)
-            changes[key] = (new_key, _codex_command_hook_hash(event, group, hook))
-        total += _remove_hook_commands_by_command(groups, predicate, position_callback=position if collect_trust else None)
-    return total, changes
+def _remove_hook_settings_commands(hooks_obj, predicate) -> int:
+    return sum(_remove_hook_commands_by_command(groups, predicate)
+               for groups in hooks_obj.values() if isinstance(groups, list))
 
 
 def _remove_legacy_autopilot_hook_entries(hooks_obj: dict[str, Any]) -> int:
@@ -2778,10 +2795,10 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     if not isinstance(hooks_obj, dict):
         return 0
     # Ownership proof: remove only the command generated by _hook_runner_command(). A user hook can contain the marker text, or even a fake [hook-runner:] token; it is not ours unless the comment carries the exact generated marker/runner signature and argv invokes the same normalized hook id.
-    total, changes = _remove_hook_settings_commands(settings_file, hooks_obj,
-        lambda command: _is_exact_addon_hook_command(command, marker), collect_trust=platform_key == "codex")
+    before = _hook_positions(settings_file, hooks_obj)
+    total = _remove_hook_settings_commands(hooks_obj, lambda command: _is_exact_addon_hook_command(command, marker))
     if total and not dry_run:
-        _write_removed_hook_settings(settings_file, settings, platform_key, changes)
+        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj))
     return total
 
 
@@ -2799,10 +2816,10 @@ def remove_adapter_hook(marker: str, *, platform_key: str, dry_run: bool = False
     hooks_obj = settings.get("hooks", {})
     if not isinstance(hooks_obj, dict):
         return 0
-    total, changes = _remove_hook_settings_commands(settings_file, hooks_obj,
-        lambda command: _is_exact_adapter_hook_command(command, marker), collect_trust=platform_key == "codex")
+    before = _hook_positions(settings_file, hooks_obj)
+    total = _remove_hook_settings_commands(hooks_obj, lambda command: _is_exact_adapter_hook_command(command, marker))
     if total and not dry_run:
-        _write_removed_hook_settings(settings_file, settings, platform_key, changes)
+        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj))
     return total
 
 
@@ -2905,14 +2922,9 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
 
     hooks_obj = settings.get("hooks", {})
     hook_list = hooks_obj.get(hook_key, [])
+    hooks_before = _hook_positions(settings_file, hooks_obj)
 
-    total_removed = 0
-
-    if _hook_already_exists(hook_list, PROMPT_PENDING_MERGE_MARKER):
-        total_removed += _remove_hook_entries(hook_list, PROMPT_PENDING_MERGE_MARKER)
-
-    if _hook_already_exists(hook_list, HOOK_MARKER):
-        total_removed += _remove_hook_entries(hook_list, HOOK_MARKER)
+    total_removed = _remove_retired_hooks(hooks_obj)
 
     # Remove the session-intent-analyzer hook (same UserPromptSubmit event).
     if _hook_already_exists(hook_list, SESSION_INTENT_MARKER):
@@ -2920,9 +2932,6 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     for legacy_marker in LEGACY_SESSION_INTENT_MARKERS:
         if _hook_already_exists(hook_list, legacy_marker):
             total_removed += _remove_hook_entries(hook_list, legacy_marker)
-
-    # Remove the web-search-first hook (same UserPromptSubmit event).
-    total_removed += _remove_hook_entries(hook_list, WEB_SEARCH_FIRST_MARKER, hook_id="web-search-first")
 
     # Remove the tool-checkpoint PreToolUse hook.
     tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
@@ -2965,7 +2974,12 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
         _log(_t("  No hooks found. Nothing to remove", "  No hooks found. Nothing to remove"))
         return "not_found"
 
-    _write_settings(settings_file, settings, dry_run=dry_run)
+    _remove_empty_hook_groups(hooks_obj)
+    if dry_run:
+        _write_settings(settings_file, settings, dry_run=True)
+    else:
+        _write_removed_hook_settings(settings_file, settings, platform_key,
+                                     _trust_moves(hooks_before, settings_file, hooks_obj))
     _log(_t(f"  Removed {total_removed} hook entry(ies)", f"  Removed {total_removed} hook entry(ies)"))
     return "removed"
 
@@ -3241,9 +3255,6 @@ def _print_runtime_visibility_guidance() -> None:
     _log("    --agent-visibility remains accepted for compatibility.")
     _log(
         "    Profiles adjust user-facing governance message volume only; " "they do not disable hooks or gates."
-    )
-    _log(
-        "    Use /visibility to inspect, or /visibility strict, /visibility dynamic, " "or /visibility minimal to change it in trusted Codex sessions."
     )
     _log(
         "    Claude Code: /visibility strict|dynamic|minimal; " "all platforms: python3 _shared/agent_visibility_cli.py show|set <profile>."
