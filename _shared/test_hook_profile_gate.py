@@ -1241,11 +1241,17 @@ class TestHookCommandAllowlist(unittest.TestCase):
             ):
                 hook_profile_gate._validate_shell_command(command)
 
-    def test_allows_system_and_homebrew_binaries(self):
+    def test_allows_system_binary_and_executable_under_allowed_root(self):
         if os.name == "nt":
             self.skipTest("POSIX absolute executable allowlist does not apply on Windows")
         hook_profile_gate.assert_allowed_command(["/bin/bash", "-lc", "printf ok"], ["/bin", "/usr/bin"])
-        hook_profile_gate.assert_allowed_command(["/opt/homebrew/bin/python3"], ["/opt/homebrew"])
+        # The test creates the executable it allows; the check does not depend on what the host has installed.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            executable = root / "bin" / "python3"
+            executable.parent.mkdir()
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            hook_profile_gate.assert_allowed_command([str(executable)], [str(root)])
 
     def test_allows_versioned_python_bare_command_without_minor_pin(self):
         hook_profile_gate.assert_allowed_command(["python3.15", "-V"], ["/bin", "/usr/bin"])
