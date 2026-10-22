@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 from hook_definitions import (
+    CORE_HOOK_IDS,
+    RETIRED_CORE_HOOK_IDS,
     AddonManifestError,
     SAFE_ID_RE as ADDON_ID_RE,
     adapter_marker_from_spec,
@@ -36,11 +38,8 @@ _SEMVER_RE = re.compile(r"^(0|[1-9][0-9]{0,3})\.(0|[1-9][0-9]{0,3})\.(0|[1-9][0-
 
 # Tier-2 addon hooks may ONLY observe; events that can block or alter control flow / governance gates are rejected fail-closed. PostToolUse and SessionStart observe; PreToolUse can block a tool, Stop can block completion, and UserPromptSubmit can alter intent -- none are permitted for addons.
 ALLOWED_ADDON_HOOK_EVENTS = frozenset({"post_tool_use", "on_session_start"})
-# Reserved core hook ids an addon hook id must not collide with (the runner namespaces used by the core hook suite).
-RESERVED_CORE_HOOK_IDS = frozenset({
-    "prompt", "pending-merge-prompt", "session-intent", "web-search-first",
-    "tool-checkpoint", "completion", "session-start", "session-receipt", "io-trace",
-})
+# Core runner ids an addon hook id must not collide with: the current ones and the retired ones.
+RESERVED_CORE_HOOK_IDS = frozenset(CORE_HOOK_IDS + RETIRED_CORE_HOOK_IDS)
 _SIDECAR_KNOWN_OPTIONAL_FIELDS = frozenset({"secrets", "hooks", "migration"})
 PRIVILEGED_ADAPTER_REQUEST_FIELD = "privileged_adapters"
 _PRIVILEGED_ADAPTER_IMPLEMENTATION_FIELDS = frozenset({

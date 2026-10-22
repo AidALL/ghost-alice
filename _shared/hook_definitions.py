@@ -47,6 +47,9 @@ HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
 
 # Core hooks the installer registers on every host, in report order.
 CORE_HOOK_IDS = ("session-intent", "tool-checkpoint", "completion", "session-start", "session-receipt", "io-trace")
+# Core hooks an older installer registered and Core no longer has. The installer removes a
+# registration with one of these runner ids at every install; an addon hook may not take one.
+RETIRED_CORE_HOOK_IDS = ("prompt", "pending-merge-prompt", "web-search-first")
 
 
 def resolve_hook_event(intent: str, platform: str) -> str:

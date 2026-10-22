@@ -91,8 +91,14 @@ class AddonHookParseTest(unittest.TestCase):
         self._assert_rejected([{"id": "a", "event": "post_tool_use", "script": "/etc/passwd"}], "")
 
     def test_core_id_collision_rejected(self):
-        # an addon hook id colliding with a reserved core hook id is rejected
-        self._assert_rejected([{"id": "io-trace", "event": "post_tool_use", "script": "hooks/obs.py"}], "")
+        # An addon hook may not take a core runner id: the installer registers the current ones and
+        # removes a registration with a retired one at every install.
+        import hook_definitions
+        for hook_id in hook_definitions.CORE_HOOK_IDS + hook_definitions.RETIRED_CORE_HOOK_IDS:
+            with self.subTest(hook_id=hook_id):
+                src = _make_addon(self.tmp / hook_id, [{"id": hook_id, "event": "post_tool_use", "script": "hooks/obs.py"}])
+                with self.assertRaisesRegex(ai.AddonManifestError, "collides with a reserved core hook id"):
+                    ai.load_addon_targets([src], platform="claude")
 
     def test_duplicate_hook_id_rejected(self):
         self._assert_rejected([

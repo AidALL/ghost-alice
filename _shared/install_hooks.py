@@ -1844,23 +1844,19 @@ def _managed_session_intent_options(command: str):
         return None
 
 
-# Hooks that an older installer registered and Core no longer has. The installer
-# recognizes every installed form by its marker or runner id and removes it.
-RETIRED_HOOKS = (
-    ("prompt", HOOK_MARKER),
-    ("pending-merge-prompt", PROMPT_PENDING_MERGE_MARKER),
-    ("web-search-first", WEB_SEARCH_FIRST_MARKER),
-)
+# Markers an older installer put on the retired core hooks (hook_definitions.RETIRED_CORE_HOOK_IDS).
+RETIRED_HOOK_MARKERS = (HOOK_MARKER, PROMPT_PENDING_MERGE_MARKER, WEB_SEARCH_FIRST_MARKER)
+
+
+def _is_retired_hook_command(command: str) -> bool:
+    """Recognize every installed form of a retired hook by its marker or its runner id."""
+    return (any(marker in command for marker in RETIRED_HOOK_MARKERS)
+            or any(_hook_runner_id_match(command, hook_id) for hook_id in hook_definitions.RETIRED_CORE_HOOK_IDS))
 
 
 def _remove_retired_hooks(hooks_obj) -> int:
     """Remove every installed form of a retired hook from every event."""
-    removed = 0
-    for groups in hooks_obj.values():
-        if isinstance(groups, list):
-            for hook_id, marker in RETIRED_HOOKS:
-                removed += _remove_hook_entries(groups, marker, hook_id=hook_id)
-    return removed
+    return _remove_hook_settings_commands(hooks_obj, _is_retired_hook_command)
 
 
 def _remove_empty_hook_groups(hooks_obj) -> int:
@@ -1907,15 +1903,14 @@ def _remove_stale_hook_entries(
     return removed
 
 
-def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None = None) -> int:
+def _remove_hook_entries(hooks_list: list, marker: str) -> int:
     """Remove managed commands, preserving custom siblings; count affected entries."""
     removed = 0
     i = 0
     while i < len(hooks_list):
         entry = hooks_list[i]
         retained = [hook for hook in entry.get("hooks", [])
-                    if marker not in hook.get("command", "")
-                    and not _hook_runner_id_match(hook.get("command", ""), hook_id)]
+                    if marker not in hook.get("command", "")]
         if len(retained) != len(entry.get("hooks", [])):
             entry["hooks"] = retained
             removed += 1
@@ -1926,7 +1921,7 @@ def _remove_hook_entries(hooks_list: list, marker: str, *, hook_id: str | None =
     return removed
 
 
-# Markers of the hooks Core installs now. Retired markers live in RETIRED_HOOKS.
+# Markers of the hooks Core installs now. Retired markers live in RETIRED_HOOK_MARKERS.
 GHOST_ALICE_HOOK_MARKERS = (
     SESSION_INTENT_MARKER,
     TOOL_CHECKPOINT_MARKER,
@@ -2066,7 +2061,7 @@ def install_hook(
 
     removed = _remove_retired_hooks(hooks_obj)
     if removed:
-        _log(f"  Removed {removed} retired hook entry(ies)")
+        _log(f"  Removed {removed} retired hook(s)")
         changed = True
 
     # Install the session-intent-analyzer hook (updates the session intent ledger for every user input).
