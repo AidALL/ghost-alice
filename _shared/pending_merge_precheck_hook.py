@@ -4,7 +4,8 @@
 At session start, after resume, clear, compaction and fork, this hook checks the current platform's
 pending-merge manifest and reports the result on the user's screen; it adds nothing to the model
 context. An installer run can add entries during the session, so merge-companion re-checks the
-manifest before work changes an installed skill; no input hook repeats this check.
+manifest before work changes an installed skill; no input hook repeats this check. A manifest that
+keeps changing during the check is reported as an unfinished check; the hook never blocks the host.
 """
 
 from __future__ import annotations
@@ -60,6 +61,13 @@ def _pending_line(platform: str, count: int) -> str:
         f"merge-companion precheck: ~/.ghost-alice/pending-merges/{platform}/manifest.json "
         f"has {count} undecided entr{'y' if count == 1 else 'ies'}. "
         "Apply merge-companion before changing affected skills or when the user requests backup review. Unrelated read-only work may continue; an explicit defer leaves entries undecided."
+    )
+
+
+def _unstable_line(platform: str) -> str:
+    return (
+        f"merge-companion precheck: ~/.ghost-alice/pending-merges/{platform}/manifest.json kept changing "
+        "while this hook checked it, so the check did not finish. Re-check it before changing an installed skill."
     )
 
 
@@ -128,13 +136,15 @@ def main() -> int:
             result = observe_check(args.root, args.platform, session_id, "pending-merges", _pending_manifest_path(args.platform),
                                    lambda: {"undecided_count": len(_pending_entries(args.platform))},
                                    validate=lambda value: type(value.get("undecided_count")) is int and value["undecided_count"] >= 0)
-        except UnstableCheckTarget as error:
-            reason = f"merge-companion precheck: {error}"
+        except UnstableCheckTarget:
+            # A manifest that keeps changing has no stable count; a direct read could see a half-written file
+            # and report a clean pass. The user sees that the check did not finish, and the session goes on.
+            message = _unstable_line(args.platform)
             if args.format == "json":
-                print(json.dumps({"decision": "block", "reason": reason}))
-                return 0
-            print(reason, file=sys.stderr)
-            return 2
+                print(json.dumps({"continue": True, "systemMessage": message}, ensure_ascii=False))
+            else:
+                print(message)
+            return 0
     if args.format == "json":
         print(_json_payload(args.platform, result))
     else:
