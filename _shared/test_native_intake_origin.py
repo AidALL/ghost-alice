@@ -9,6 +9,7 @@ from pathlib import Path
 import sqlite3
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from unittest import mock
@@ -120,6 +121,68 @@ class IntakeOriginQueueTests(unittest.TestCase):
         self.assertTrue(waiting[0]['cause'].startswith('unknown-actor:'))
         self.assertNotIn(text, json.dumps(waiting[0]))
         self.assertEqual(state['native_input_waiting']['transport_observation_id'], blocked)
+
+    def test_a_row_text_that_cannot_be_encoded_does_not_fail_the_reconcile(self):
+        missing = self.stage('Prompt whose native row the host never wrote.')
+        # json.dumps escapes the unpaired surrogate; json.loads returns it as text that UTF-8 cannot encode.
+        self.append(dict(shapes.typed_human('broken \ud800 row'), promptId=None))
+        typed = 'Typed after the broken row.'
+        self.stage(typed, shapes.typed_human(typed))
+        state = self.reconcile()
+        self.assertEqual(state['pending_native_inputs'], [])
+        self.assertEqual(state['latest_input_digest'], digest(typed))
+        superseded = self.events('native-input-superseded')
+        self.assertEqual([(event['transport_observation_id'], event['cause']) for event in superseded],
+                         [(missing, 'row-not-found')])
+
+    def test_notice_check_reads_without_a_write_lock_when_nothing_is_due(self):
+        self.human('Typed request.')
+        blocker = sqlite3.connect(self.root / 'ghost-state.sqlite3', isolation_level=None)
+        blocker.execute('BEGIN IMMEDIATE')
+        try:
+            started = time.monotonic()
+            self.assertIsNone(ledger.claim_native_input_notice(**self.coords))
+            self.assertLess(time.monotonic() - started, 2)
+        finally:
+            blocker.execute('ROLLBACK')
+            blocker.close()
+
+    def test_failed_reconcile_is_recorded_once_per_session_with_a_count(self):
+        self.human('Typed request.')
+        for error in (sqlite3.OperationalError('database is locked'),
+                      UnicodeEncodeError('utf-8', 'x\ud800', 1, 2, 'surrogates not allowed')):
+            ledger.record_native_intake_failure(**self.coords, error=error)
+        state = ledger.read_session_state(**self.coords)
+        failure = state['native_intake_failure']
+        self.assertEqual((failure['count'], failure['error']), (2, 'UnicodeEncodeError'))
+        self.assertLessEqual(failure['first_at'], failure['last_at'])
+        self.assertTrue(failure['detail'].isascii())
+        self.assertEqual([event['error'] for event in self.events('native-intake-failed')],
+                         ['OperationalError', 'UnicodeEncodeError'])
+        self.assertEqual(state['latest_input_digest'], digest('Typed request.'))
+        listed = ledger.list_native_intake_failures(self.root, 'claude')
+        self.assertEqual([(item['session_id'], item['count'], item['error']) for item in listed],
+                         [(SESSION, 2, 'UnicodeEncodeError')])
+        self.assertEqual(ledger.list_native_intake_failures(self.root, 'codex'), [])
+
+    def test_repeated_failures_of_one_kind_count_without_new_events(self):
+        """A cause that persists fails every PreToolUse and Stop; the count carries that, an event per repeat would not."""
+        self.human('Typed request.')
+        errors = [ValueError('native transcript cursors are invalid')] * 3 + [
+            KeyError('pending'), KeyError('cursor'), ValueError('native transcript cursors are invalid')]
+        for error in errors:
+            ledger.record_native_intake_failure(**self.coords, error=error)
+        state = ledger.read_session_state(**self.coords)
+        failure = state['native_intake_failure']
+        self.assertEqual((failure['count'], failure['error'], failure['detail']),
+                         (len(errors), 'ValueError', 'native transcript cursors are invalid'))
+        self.assertLessEqual(failure['first_at'], failure['last_at'])
+        self.assertEqual([event['error'] for event in self.events('native-intake-failed')],
+                         ['ValueError', 'KeyError', 'ValueError'])
+        # A state-only save keeps the revision paired with the last event.
+        self.assertEqual(state['ledger_revision'], self.events()[-1]['ledger_revision'])
+        self.assertEqual([(item['count'], item['error']) for item in ledger.list_native_intake_failures(self.root)],
+                         [(len(errors), 'ValueError')])
 
     def test_generation_boundary_reconcile_records_no_wait(self):
         self.stage('Prompt whose native row the host has not appended yet.')

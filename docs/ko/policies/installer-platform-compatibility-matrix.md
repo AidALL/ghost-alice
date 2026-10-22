@@ -56,7 +56,7 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### session-intent-analyzer
 
-인스톨러는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. Codex는 직접 확정하며 Claude는 신뢰된 PreToolUse/Stop 대조를 위해 네이티브 연결 정보를 보관합니다. 설치된 래퍼는 정확한 기준 사용자 입력을 반환하거나 pending을 유지하며, 작업 알림은 마지막 사용자 경로를 보존합니다. [접수 절차](../../../session-intent-analyzer/SKILL.md)와 [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)가 식별자·압축 변경·저장·호환성 내보내기를 담당합니다.
+인스톨러는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. Codex는 직접 확정하며 Claude는 신뢰된 PreToolUse/Stop 대조를 위해 네이티브 연결 정보를 보관합니다. 설치된 래퍼는 임시 기록된 입력을 순서대로 판정합니다. 작업 중에 친 입력을 포함한 사용자 입력은 기준 입력이 되고, SDK가 시작한 턴과 작업 중에 앱이 넣은 이벤트는 비인간 문맥이 되며, 작업 알림과 하위 에이전트 회신은 마지막 사용자 경로를 보존합니다. 출처를 판정하지 못했거나 대화 기록에서 찾지 못한 입력은 뒤에 찾은 사용자 입력이 넘깁니다. 그런 입력이 없으면 그 입력은 pending으로 남고 의존 쓰기는 거부되며, 래퍼가 그 대기를 기록하고 같은 세션·같은 원인으로 한 번 경고합니다. 판정이 실패하면 래퍼가 그 실패를 기록하고 안쪽 훅은 그대로 실행합니다. [접수 절차](../../../session-intent-analyzer/SKILL.md)와 [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)가 식별자·압축 변경·저장·호환성 내보내기를 담당합니다.
 
 ### pending merge precheck
 

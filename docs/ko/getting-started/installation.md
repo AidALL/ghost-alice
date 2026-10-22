@@ -145,6 +145,8 @@ bash install.sh --status
 
 정상 목표는 `overall: ok`입니다.
 
+Doctor는 `overall`에 영향을 주지 않는 Core 정보 줄 두 개도 출력합니다. `native-intake-waits`는 Core가 최근 입력의 출처를 확인하지 못한 Claude 세션을 보이며, 각 세션은 사용자가 다음에 직접 친 입력을 기다립니다. `native-intake-failures`는 Core의 입력 판정이 실패한 세션을 보입니다. 훅은 그대로 계속되었고, 이 줄은 예외 종류·횟수·마지막 시각을 보입니다. [입력 경고](troubleshooting.md#intake-warning-and-doctor-lists)를 참고해 주세요.
+
 ## Update
 
 인스톨러를 통해 복제한 저장소를 갱신해 주세요. 이 경로는 소스를 fast-forward하기 전에 로컬 변경을 stash에 보관합니다.
@@ -213,6 +215,8 @@ cd C:\path\to\new-checkout
 ### Agent Visibility Profile
 
 기본 표시 프로필은 `dynamic`입니다. 사용자에게 보이는 거버넌스 메시지의 양만 조절하며 훅, 엄격한 감사 로그와 Work-Impact Projection은 끄지 않습니다.
+
+확인된 입력이 필요한 기록이 멈췄다고 알리는 Ghost-ALICE 입력 경고는 어느 프로필에서나 같은 세션·같은 원인으로 한 번 표시됩니다. 프로필에 따라 훅의 빈 결과가 일반 텍스트 줄로 바뀔 수 있습니다. 그 훅은 경고를 싣지 못하므로, 경고는 다음 PreToolUse 또는 Stop에 표시됩니다.
 
 | 프로필 | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |

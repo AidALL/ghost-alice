@@ -13,6 +13,7 @@ import inspect
 import io
 import json
 import os
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -579,6 +580,23 @@ class NativeIntakeWaitsTest(unittest.TestCase):
         self.assertIn("row-not-found", lines[1])
         self.assertEqual(codex, ["native-intake-waits: unavailable (no installed ledger root)"])
 
+    def test_doctor_lists_recorded_native_intake_failures(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts"))
+        import session_intent_ledger as ledger
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ledger_root = root / "intent"
+            coords = dict(root=ledger_root, platform="claude", session_id="failure-session")
+            for _ in range(2):
+                ledger.record_native_intake_failure(**coords, error=sqlite3.OperationalError("database is locked"))
+            ghost = root / ".ghost-alice"
+            ghost.mkdir()
+            (ghost / "config.json").write_text(json.dumps(
+                {"install_locations": {"claude": {"ledger_root": str(ledger_root)}}}), encoding="utf-8")
+            lines = install_doctor._native_intake_failure_lines(ghost, "claude")
+        self.assertEqual(lines[0], "native-intake-failures: 1")
+        self.assertIn("claude/failure-session: OperationalError x2", lines[1])
+
     def test_doctor_reports_an_unreadable_ledger_without_failing(self):
         with tempfile.TemporaryDirectory() as tmp:
             ghost = Path(tmp) / ".ghost-alice"
@@ -743,6 +761,7 @@ class NodeRuntimeRunPathTest(unittest.TestCase):
         result, output = self._run("claude", path_node=self._runtime())
         self.assertEqual(result, 0, output)
         self.assertIn("native-intake-waits: unavailable (no installed ledger root)", output)
+        self.assertIn("native-intake-failures: unavailable (no installed ledger root)", output)
 
     def test_strict_codex_uses_node_from_codex_home_config_after_path_loss(self) -> None:
         home = self.root / "isolated-home"
