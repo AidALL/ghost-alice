@@ -268,7 +268,7 @@ class DeliveryRecordTest(unittest.TestCase):
             # The store keeps a digest of the delivered content, never the content.
             self.assertNotIn(b"content v2", (root / "session-checks.sqlite3").read_bytes())
 
-    def test_delivery_record_without_create_writes_only_an_existing_store(self):
+    def test_delivery_record_without_create_creates_neither_store_nor_record(self):
         from session_check_cache import delivered, record_delivery
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "ledger"
@@ -276,8 +276,24 @@ class DeliveryRecordTest(unittest.TestCase):
             self.assertFalse(delivered(root, "codex", "a", "receipt", "content"))
             self.assertFalse(record_delivery(root, "codex", "unknown", "receipt", "content", create=True))
             self.assertFalse(root.exists())
-            root.mkdir()
+            self.assertTrue(record_delivery(root, "codex", "a", "receipt", "content", create=True))
+            # Only a session's own start creates its record; an existing store does not change that.
+            self.assertFalse(record_delivery(root, "codex", "b", "receipt", "content", create=False))
+            self.assertFalse(delivered(root, "codex", "b", "receipt", "content"))
             (root / "session-checks.sqlite3").write_bytes(b"broken")
             for create in (False, True):
                 self.assertFalse(record_delivery(root, "codex", "a", "receipt", "content", create=create))
             self.assertFalse(delivered(root, "codex", "a", "receipt", "content"))
+
+    def test_store_path_symlink_loop_reads_and_records_nothing(self):
+        from session_check_cache import delivered, record_delivery
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = root / "session-checks.sqlite3"
+            try:
+                store.symlink_to(store)
+            except OSError as error:
+                self.skipTest(f"symbolic links unavailable: {error}")
+            self.assertFalse(delivered(root, "codex", "a", "receipt", "content"))
+            for create in (False, True):
+                self.assertFalse(record_delivery(root, "codex", "a", "receipt", "content", create=create))

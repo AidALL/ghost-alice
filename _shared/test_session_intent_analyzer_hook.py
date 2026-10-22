@@ -5,12 +5,14 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
+from contextlib import closing
 import hashlib
 import io
 import json
 import os
 import pathlib
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -379,17 +381,27 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                 self.assertEqual(receipt_from(compact["hookSpecificOutput"]["additionalContext"]), receipt)
         self.assertEqual(len(self.events("quiet-codex")), 2)
 
-    def test_input_without_a_delivery_record_sends_the_session_receipt_once(self):
-        # Another session's start created the store; this session had no session start.
+    def test_input_without_a_delivered_session_receipt_keeps_the_full_receipt(self):
+        # Without its own session start, a later compaction cannot restore the receipt, so every input keeps it.
         self.run_hook({"session_id": "other", "source": "startup"}, "--context", "session_start")
-        first = json.loads(self.run_hook({"session_id": "fallback", "prompt": "first"}).stdout)
-        receipt = receipt_from(first["hookSpecificOutput"]["additionalContext"])
-        self.assertEqual(receipt["schema_version"], "session-intent-session-receipt.v1")
-        self.assertEqual(receipt["session_id"], "fallback")
-        self.assertNotIn("input_event_id", receipt)
-        second = json.loads(self.run_hook({"session_id": "fallback", "prompt": "second"}).stdout)
+        for prompt in ("first", "second"):
+            body = json.loads(self.run_hook({"session_id": "fallback", "prompt": prompt}).stdout)
+            receipt = receipt_from(body["hookSpecificOutput"]["additionalContext"])
+            self.assertEqual(receipt["session_id"], "fallback")
+            self.assertIn("input_event_id", receipt)
+
+    def test_record_from_an_older_runtime_is_replaced_once(self):
+        # An older runtime keyed this session's record on the intake script's file stamp.
+        self.run_hook({"session_id": "older", "source": "startup"}, "--context", "session_start")
+        with closing(sqlite3.connect(self.ledger_root / "session-checks.sqlite3")) as connection:
+            connection.execute("UPDATE checks SET target=?, stamp=? WHERE session='older'",
+                               (str(SCRIPT), json.dumps(["16777230", "78749244", "19835", "1", "2"])))
+            connection.commit()
+        first = json.loads(self.run_hook({"session_id": "older", "prompt": "first"}).stdout)
+        self.assertEqual(receipt_from(first["hookSpecificOutput"]["additionalContext"])["schema_version"],
+                         "session-intent-session-receipt.v1")
+        second = json.loads(self.run_hook({"session_id": "older", "prompt": "second"}).stdout)
         self.assertNotIn("hookSpecificOutput", second)
-        self.assertEqual(len(self.events("fallback")), 2)
 
     def test_replaced_hook_does_not_resend_an_unchanged_receipt(self):
         hook = self.deploy()
@@ -403,6 +415,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                 staged = hook.with_name(hook.name + ".new")
                 staged.write_bytes(SCRIPT.read_bytes())
                 os.replace(staged, hook)
+                audit = self.check_event_count()
                 for prompt in ("first objective", "second objective"):
                     result = self.run_hook({"session_id": session, "prompt": prompt}, "--platform", platform,
                                            script=hook)
@@ -410,6 +423,8 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                     body = json.loads(result.stdout)
                     self.assertNotIn("hookSpecificOutput", body)
                     self.assertNotIn("systemMessage", body)
+                # A quiet input only reads the record, so nothing accumulates per input.
+                self.assertEqual(self.check_event_count(), audit)
 
     def test_changed_receipt_is_sent_once(self):
         session = "changed-receipt"
@@ -466,6 +481,10 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
 
     def events(self, session_id, platform="codex"):
         return ledger_api.read_session_events(root=self.ledger_root, platform=platform, session_id=session_id)
+
+    def check_event_count(self) -> int:
+        with closing(sqlite3.connect(self.ledger_root / "session-checks.sqlite3")) as connection:
+            return connection.execute("SELECT count(*) FROM check_events").fetchone()[0]
 
     def deploy(self) -> pathlib.Path:
         """Place the intake hook with its runtime siblings, as an install does, and return the hook path."""
