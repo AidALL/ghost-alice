@@ -131,7 +131,7 @@ bash install.sh --prompt-platform
 
 ## Check Status
 
-Doctor는 상태를 변경하지 않는 엄격한 진단입니다. 설치 상태가 의심스러우면 변경 전에 doctor를 실행해 주세요.
+Doctor는 상태를 변경하지 않는 엄격한 진단입니다. 설치 상태가 의심스러우면 변경 전에 doctor를 실행해 주세요. `hook-rejections` 줄은 Ghost-ALICE 훅 실행기가 최근 14일 동안 실행을 거부한 훅 명령을 세션마다 한 줄씩 개수와 마지막 거부의 시각·훅·이유와 함께 보이며, `overall`은 바꾸지 않습니다.
 
 ```bash
 bash install.sh --doctor

@@ -131,7 +131,7 @@ bash install.sh --prompt-platform
 
 ## Check Status
 
-Doctor is a read-only strict diagnostic. Use it before changing a suspicious install.
+Doctor is a read-only strict diagnostic. Use it before changing a suspicious install. The `hook-rejections` line lists the hook commands the Ghost-ALICE hook runner refused to run in the last 14 days, one line per session with the count and the last refusal's time, hook and reason, and it does not change `overall`.
 
 ```bash
 bash install.sh --doctor
