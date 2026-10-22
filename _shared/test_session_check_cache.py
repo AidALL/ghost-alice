@@ -250,3 +250,34 @@ class SessionCheckReuseTest(unittest.TestCase):
             result = observe_check(root, "codex", "unknown", "check", root / "absent", lambda: {"done": True})
             self.assertEqual(result["status"], "uncached")
             self.assertFalse((root / "session-checks.sqlite3").exists())
+
+
+class DeliveryRecordTest(unittest.TestCase):
+    def test_delivery_follows_the_content_of_one_session(self):
+        from session_check_cache import delivered, record_delivery
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertTrue(record_delivery(root, "codex", "a", "receipt", "content v1", create=True))
+            self.assertTrue(delivered(root, "codex", "a", "receipt", "content v1"))
+            for other in (("codex", "a", "receipt", "content v2"), ("codex", "b", "receipt", "content v1"),
+                          ("claude", "a", "receipt", "content v1"), ("codex", "a", "other", "content v1")):
+                self.assertFalse(delivered(root, *other))
+            self.assertTrue(record_delivery(root, "codex", "a", "receipt", "content v2", create=False))
+            self.assertTrue(delivered(root, "codex", "a", "receipt", "content v2"))
+            self.assertFalse(delivered(root, "codex", "a", "receipt", "content v1"))
+            # The store keeps a digest of the delivered content, never the content.
+            self.assertNotIn(b"content v2", (root / "session-checks.sqlite3").read_bytes())
+
+    def test_delivery_record_without_create_writes_only_an_existing_store(self):
+        from session_check_cache import delivered, record_delivery
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "ledger"
+            self.assertFalse(record_delivery(root, "codex", "a", "receipt", "content", create=False))
+            self.assertFalse(delivered(root, "codex", "a", "receipt", "content"))
+            self.assertFalse(record_delivery(root, "codex", "unknown", "receipt", "content", create=True))
+            self.assertFalse(root.exists())
+            root.mkdir()
+            (root / "session-checks.sqlite3").write_bytes(b"broken")
+            for create in (False, True):
+                self.assertFalse(record_delivery(root, "codex", "a", "receipt", "content", create=create))
+            self.assertFalse(delivered(root, "codex", "a", "receipt", "content"))
