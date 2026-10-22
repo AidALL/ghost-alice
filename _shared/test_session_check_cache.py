@@ -50,8 +50,97 @@ class SessionCheckReuseTest(unittest.TestCase):
                  mock.patch.object(hook, "_read_hook_input", return_value={}), \
                  mock.patch.object(sys, "stdout", output):
                 self.assertEqual(hook.main(), 0)
-            self.assertEqual(json.loads(output.getvalue())["decision"], "block")
+            # The check did not finish: the hook says so and leaves the host's flow alone.
+            body = json.loads(output.getvalue())
+            self.assertNotIn("decision", body)
+            self.assertIs(body.get("continue"), True)
+            self.assertIn("did not finish", body.get("systemMessage", ""))
+            self.assertNotIn("clean", body.get("systemMessage", ""))
             self.assertNotIn("ghostAlicePendingMergeCheck", output.getvalue())
+
+    def test_unstable_check_informs_the_user_on_both_hosts_and_formats(self):
+        import session_check_cache as cache
+        import pending_merge_precheck_hook as hook
+        import agent_visibility_policy
+        import hook_profile_gate
+        import io
+        absolute = "/private/home/.ghost-alice/pending-merges/codex/manifest.json"
+        for platform in ("claude", "codex"):
+            for output_format in ("json", "text"):
+                with self.subTest(platform=platform, output_format=output_format), tempfile.TemporaryDirectory() as directory:
+                    stdout, stderr = io.StringIO(), io.StringIO()
+                    error = cache.UnstableCheckTarget(f"Check target changed repeatedly: {absolute}; recheck before continuing")
+                    with mock.patch.object(hook, "observe_check", side_effect=error), \
+                         mock.patch.object(sys, "argv", ["hook", "--root", directory, "--platform", platform, "--format", output_format]), \
+                         mock.patch.object(hook, "_read_hook_input", return_value={}), \
+                         mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr):
+                        self.assertEqual(hook.main(), 0)
+                    if output_format == "json":
+                        body = json.loads(stdout.getvalue())
+                        self.assertIn("systemMessage", body)
+                        notice = body["systemMessage"]
+                    else:
+                        notice = stdout.getvalue()
+                    # SessionStart shows systemMessage to the user on both hosts; the notice names the manifest the
+                    # way the other precheck lines do and never echoes the account's absolute path.
+                    self.assertIn(f"~/.ghost-alice/pending-merges/{platform}/manifest.json", notice)
+                    self.assertIn("did not finish", notice)
+                    self.assertNotIn(absolute, stdout.getvalue() + stderr.getvalue())
+                    self.assertEqual(stderr.getvalue(), "")
+                    if output_format == "json":
+                        declared, host_stdout = hook_profile_gate._take_surface_declaration(stdout.getvalue())
+                        context = hook_profile_gate._visibility_context(
+                            "session-start", host_stdout, "", 0, env={"HOME": directory, "GHOST_ALICE_PLATFORM": platform},
+                            declared=declared)
+                        for profile in ("strict", "dynamic", "minimal"):
+                            decision = agent_visibility_policy.decide(
+                                profile=profile, hook_id="session-start", event="SessionStart", stdout=host_stdout,
+                                stderr="", exit_code=0, context=context)
+                            self.assertEqual(decision["visible_decision"], "force_show", profile)
+
+    def test_every_check_outcome_informs_without_flow_control(self):
+        # Core informs and stops: no outcome of a parsed check carries a host control field or a blocking exit.
+        import session_check_cache as cache
+        import pending_merge_precheck_hook as hook
+        import io
+        control_fields = {"decision", "reason", "stopReason", "permissionDecision"}
+        for platform in ("claude", "codex"):
+            for output_format in ("json", "text"):
+                for outcome in ("clean", "pending", "reused", "unstable"):
+                    with self.subTest(platform=platform, output_format=output_format, outcome=outcome), \
+                         tempfile.TemporaryDirectory() as directory:
+                        manifest = Path(directory) / ".ghost-alice/pending-merges" / platform / "manifest.json"
+                        manifest.parent.mkdir(parents=True)
+                        manifest.write_text(json.dumps({"entries": [] if outcome == "clean" else [{"decided": False}]}))
+                        argv = ["hook", "--root", str(Path(directory) / "ledger"), "--platform", platform, "--format", output_format]
+                        environment = {key: value for key, value in os.environ.items()
+                                       if not key.startswith(("GHOST_ALICE_", "CODEX_"))}
+                        environment["HOME"] = directory
+                        def run():
+                            stdout = io.StringIO()
+                            unstable = cache.UnstableCheckTarget("keep changing")
+                            with mock.patch.dict(os.environ, environment, clear=True), mock.patch.object(sys, "argv", argv), \
+                                 mock.patch.object(hook, "_read_hook_input", return_value={"session_id": "session-outcomes"}), \
+                                 mock.patch.object(hook, "observe_check",
+                                                   side_effect=unstable if outcome == "unstable" else hook.observe_check), \
+                                 mock.patch.object(sys, "stdout", stdout):
+                                return hook.main(), stdout.getvalue()
+                        if outcome == "reused":
+                            run()
+                        code, output = run()
+                        self.assertEqual(code, 0)
+                        if output_format == "json":
+                            body = json.loads(output)
+                            self.assertIs(body.get("continue"), True)
+                            self.assertFalse(control_fields & set(body))
+                            if outcome != "unstable":
+                                status = body["ghostAlicePendingMergeCheck"]["status"]
+                                self.assertEqual(status, "reused" if outcome == "reused" else "checked")
+                        else:
+                            self.assertTrue(output.strip())
+                            self.assertNotIn('"decision"', output)
+                            if outcome == "reused":
+                                self.assertIn("session check reused", output)
 
     def test_mutation_during_check_retries_and_never_returns_the_old_value(self):
         from session_check_cache import observe_check
