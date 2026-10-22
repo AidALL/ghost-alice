@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -14,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -171,11 +173,11 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             self.assertEqual(recorded, ['native-input-waiting', 'native-input-notice'])
 
     @staticmethod
-    def _wrapper_fixture(directory, session):
+    def _wrapper_fixture(directory, session, platform='claude'):
         import install_destination
         root = Path(directory)
         destination = install_destination.InstallDestination(mode='normal', owned_root=str(root),
-            platform_dir=str(root / '.claude'), skills_dir=str(root / 'skills'),
+            platform_dir=str(root / ('.claude' if platform == 'claude' else '.codex')), skills_dir=str(root / 'skills'),
             ghost_root=str(root / '.ghost-alice'), ledger_root=str(root / 'intent'),
             project_root=str(root), core_source_root=str(Path(__file__).resolve().parents[1]))
         transcript = root / (session + '.jsonl')
@@ -183,8 +185,8 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
         return destination, transcript
 
     @staticmethod
-    def _run_wrapper(directory, destination, transcript, session, event, child_stdout='{}\n'):
-        """One bound Claude hook run with a stubbed inner hook; returns (exit code, inner calls, stdout)."""
+    def _run_wrapper(directory, destination, transcript, session, event, child_stdout='{}\n', platform='claude'):
+        """One bound hook run with a stubbed inner hook; returns (exit code, inner calls, stdout)."""
         command = base64.urlsafe_b64encode(shlex.join([sys.executable, '-c', 'print(1)']).encode()).decode()
         stdout = io.StringIO()
         child = mock.Mock(return_value=subprocess.CompletedProcess([], 0, child_stdout, ''))
@@ -194,12 +196,12 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
               mock.patch.object(hook_profile_gate.subprocess, 'run', child),
               mock.patch.object(sys, 'stdout', stdout)):
             code = hook_profile_gate._run('tool-checkpoint' if event == 'PreToolUse' else 'completion',
-                                          command, platform='claude', binding=destination.binding())
+                                          command, platform=platform, binding=destination.binding())
         return code, child.call_count, stdout.getvalue()
 
     def test_claude_wrapper_records_a_failed_reconcile_and_still_runs_the_inner_hook(self):
         import session_intent_ledger as ledger
-        errors = (sqlite3.OperationalError('database is locked'), ValueError('native transcript cursors are invalid'),
+        errors = (sqlite3.OperationalError('unable to open database file'), ValueError('native transcript cursors are invalid'),
                   UnicodeEncodeError('utf-8', 'x\ud800', 1, 2, 'surrogates not allowed'), KeyError('pending'))
         with tempfile.TemporaryDirectory() as directory:
             session = 'failed-reconcile'
@@ -225,14 +227,56 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
             session = 'unrecorded-failure'
             destination, transcript = self._wrapper_fixture(directory, session)
             with (mock.patch.object(hook_profile_gate, '_reconcile_native_intake',
-                                    side_effect=sqlite3.OperationalError('database is locked')),
+                                    side_effect=ValueError('native transcript cursors are invalid')),
                   mock.patch('native_completion._ledger', return_value=broken)):
                 code, calls, _ = self._run_wrapper(directory, destination, transcript, session, 'Stop', '')
             rows = [json.loads(line) for line in
                     _strict_log_path(directory, 'claude', session).read_text(encoding='utf-8').splitlines()]
         self.assertEqual((code, calls), (0, 1))
+        broken.record_native_intake_failure.assert_called_once()
         failure = rows[-1]['surface_item']['native_intake_failure']
-        self.assertEqual((failure['recorded'], failure['error']), ('hook-log', 'OperationalError'))
+        self.assertEqual((failure['recorded'], failure['error']), ('hook-log', 'ValueError'))
+
+    def test_wrapper_skips_the_locked_ledger_and_keeps_the_failure_in_the_hook_log(self):
+        """A reconcile that failed on the ledger lock is not recorded through the same lock; the hook waits once."""
+        import session_intent_ledger as ledger
+        with tempfile.TemporaryDirectory() as directory:
+            session = 'locked-ledger'
+            hosts = {platform: self._wrapper_fixture(directory, session, platform) for platform in ('claude', 'codex')}
+            transcript = hosts['claude'][1]
+            coords = dict(root=Path(directory) / 'intent', platform='claude', session_id=session)
+            ledger.stage_native_input(**coords, raw_input='Typed request', prompt_id=None,
+                                      transcript_path=str(transcript))
+            blocker = sqlite3.connect(coords['root'] / 'ghost-state.sqlite3', isolation_level=None)
+            blocker.execute('BEGIN IMMEDIATE')
+            try:
+                for platform, event in (('claude', 'PreToolUse'), ('codex', 'Stop')):
+                    # Codex has no native intake step; its reconcile returns before the ledger.
+                    reconcile = (mock.patch.object(hook_profile_gate, '_reconcile_native_intake',
+                                                   side_effect=sqlite3.OperationalError('database is locked'))
+                                 if platform == 'claude' else contextlib.nullcontext())
+                    with self.subTest(platform=platform), reconcile:
+                        started = time.monotonic()
+                        code, calls, _ = self._run_wrapper(directory, hosts[platform][0], transcript, session,
+                                                           event, '', platform=platform)
+                        elapsed = time.monotonic() - started
+                        self.assertEqual((code, calls), (0, 1))
+                        self.assertLess(elapsed, 2)
+                        row = json.loads(_strict_log_path(directory, platform, session)
+                                         .read_text(encoding='utf-8').splitlines()[-1])
+                        if platform == 'claude':
+                            self.assertEqual(row['surface_item']['native_intake_failure'], dict(
+                                phase='reconcile', error='OperationalError', detail='database is locked',
+                                recorded='hook-log'))
+                        else:
+                            self.assertNotIn('native_intake_failure', row['surface_item'])
+            finally:
+                blocker.execute('ROLLBACK')
+                blocker.close()
+            state = ledger.read_session_state(**coords)
+            self.assertNotIn('native_intake_failure', state)
+            self.assertEqual([event for event in ledger.read_session_events(**coords)
+                              if event['event'] == 'native-intake-failed'], [])
 
     def test_claude_wrapper_emits_the_inner_output_when_the_notice_check_fails(self):
         failing = mock.Mock()

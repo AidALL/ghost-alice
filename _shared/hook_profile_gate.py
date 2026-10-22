@@ -14,6 +14,7 @@ import os
 import re
 import shlex
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tomllib
@@ -970,6 +971,10 @@ def _native_intake_notice(env, hook_payload):
 def _record_native_intake_failure(env, hook_payload, error):
     """Record a failed reconcile in the ledger, else in this run's session hook log row; the hook continues."""
     failure = dict(phase='reconcile', error=type(error).__name__, detail=str(error)[:200], recorded='ledger')
+    if isinstance(error, sqlite3.OperationalError) and 'database is locked' in str(error):
+        # The ledger record would wait for the same lock the reconcile already waited for.
+        failure['recorded'] = 'hook-log'
+        return failure
     try:
         session = bound_session_identity('claude', hook_payload, env)
         if session is None:

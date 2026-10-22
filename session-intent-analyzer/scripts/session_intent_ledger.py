@@ -1552,8 +1552,10 @@ def record_native_intake_failure(*, root: Path = DEFAULT_ROOT, platform: str, se
                                  error: BaseException, transaction: sqlite3.Connection | None = None) -> dict[str, Any]:
     """Record one failed native intake step for this session; the hook that caught it continues.
 
-    The session keeps one failure entry with a count and its first and last
-    times; each occurrence also appends a native-intake-failed event.
+    The session keeps one failure entry that counts every occurrence with its
+    first and last times. A native-intake-failed event marks the session's
+    first failure and each change of error type; a repeat of the same type
+    updates the entry without an event or a revision step.
     """
     validate_identity(platform, session_id)
     now = utc_now()
@@ -1567,8 +1569,12 @@ def record_native_intake_failure(*, root: Path = DEFAULT_ROOT, platform: str, se
         count = previous['count'] if type(previous.get('count')) is int and previous['count'] > 0 else 0
         first = previous.get('first_at') if count and isinstance(previous.get('first_at'), str) else now
         state['native_intake_failure'] = dict(error=name, detail=detail, count=count + 1, first_at=first, last_at=now)
-        _commit(connection, state, dict(ts=now, event='native-intake-failed', platform=platform,
-            session_id=session_id, error=name, detail=detail, input_event_id=state['latest_input_event_id']))
+        if count and previous.get('error') == name:
+            # A persisting cause fails every PreToolUse and Stop; the count carries that, an event per repeat would not.
+            _save_state(connection, state)
+        else:
+            _commit(connection, state, dict(ts=now, event='native-intake-failed', platform=platform,
+                session_id=session_id, error=name, detail=detail, input_event_id=state['latest_input_event_id']))
         return state['native_intake_failure']
 
 

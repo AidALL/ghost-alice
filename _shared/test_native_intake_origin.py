@@ -165,6 +165,25 @@ class IntakeOriginQueueTests(unittest.TestCase):
                          [(SESSION, 2, 'UnicodeEncodeError')])
         self.assertEqual(ledger.list_native_intake_failures(self.root, 'codex'), [])
 
+    def test_repeated_failures_of_one_kind_count_without_new_events(self):
+        """A cause that persists fails every PreToolUse and Stop; the count carries that, an event per repeat would not."""
+        self.human('Typed request.')
+        errors = [ValueError('native transcript cursors are invalid')] * 3 + [
+            KeyError('pending'), KeyError('cursor'), ValueError('native transcript cursors are invalid')]
+        for error in errors:
+            ledger.record_native_intake_failure(**self.coords, error=error)
+        state = ledger.read_session_state(**self.coords)
+        failure = state['native_intake_failure']
+        self.assertEqual((failure['count'], failure['error'], failure['detail']),
+                         (len(errors), 'ValueError', 'native transcript cursors are invalid'))
+        self.assertLessEqual(failure['first_at'], failure['last_at'])
+        self.assertEqual([event['error'] for event in self.events('native-intake-failed')],
+                         ['ValueError', 'KeyError', 'ValueError'])
+        # A state-only save keeps the revision paired with the last event.
+        self.assertEqual(state['ledger_revision'], self.events()[-1]['ledger_revision'])
+        self.assertEqual([(item['count'], item['error']) for item in ledger.list_native_intake_failures(self.root)],
+                         [(len(errors), 'ValueError')])
+
     def test_generation_boundary_reconcile_records_no_wait(self):
         self.stage('Prompt whose native row the host has not appended yet.')
         before = ledger.read_session_state(**self.coords)
