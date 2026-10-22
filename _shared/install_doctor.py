@@ -207,20 +207,20 @@ def _pending_manifest_status(manifest: Path) -> tuple[str, str, int]:
     return STATUS_OK, "clean", 0
 
 
-def _retention_failure_status(record: Path) -> tuple[str, str]:
-    """The retention failure record `state_retention` writes: ok without a failure, else a warning with the count
-    and the last failure's time, entry and error type."""
+def _retention_failure_line(record: Path) -> str:
+    """The retention failure record `state_retention` writes, as one informational doctor line: ok without a
+    failure, else the count and the last failure's time, entry and error type. A retention failure is Ghost-ALICE's
+    own and needs no repair by the user, so the line never changes doctor's overall status."""
     try:
         rows = [json.loads(line) for line in record.read_text(encoding="utf-8").splitlines() if line.strip()]
     except FileNotFoundError:
-        return STATUS_OK, "ok"
+        return "ok"
     except (OSError, UnicodeDecodeError, ValueError):
-        return STATUS_WARNING, "warning record unreadable"
+        return "record unreadable"
     if not rows:
-        return STATUS_OK, "ok"
+        return "ok"
     last = rows[-1] if isinstance(rows[-1], dict) else {}
-    return STATUS_WARNING, (f"warning {len(rows)} failures; last {last.get('ts')} {last.get('policy')} "
-                            f"{last.get('error_type')}")
+    return f"{len(rows)} failures; last {last.get('ts')} {last.get('policy')} {last.get('error_type')}"
 
 
 def _pending_merge_status(ghost_alice_root: Path, platform: str) -> tuple[str, str]:
@@ -1076,9 +1076,8 @@ def run(args: argparse.Namespace) -> int:
     statuses.append(snapshot_status)
     print(f"snapshot: {snapshot_detail}")
 
-    retention_status, retention_detail = _retention_failure_status(state_retention.failure_record_path())
-    statuses.append(retention_status)
-    print(f"state-retention: {retention_detail}")
+    # Informational: a retention failure needs no repair by the user, so the line never changes overall.
+    print(f"state-retention: {_retention_failure_line(state_retention.failure_record_path())}")
 
     for skill_root in args.skill_root:
         layout_findings = _skill_layout_audit(skill_root, repo_root)

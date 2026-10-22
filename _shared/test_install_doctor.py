@@ -1045,31 +1045,32 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
             state_retention.apply("no-such-entry", self.root)
             _, output = self._run("claude", strict=False)
         self.assertTrue((elsewhere / "state-retention-failures.jsonl").exists())
-        self.assertIn("state-retention: warning 1 failures", output)
+        self.assertIn("state-retention: 1 failures", output)
 
     def test_without_failures_the_retention_line_is_ok(self):
-        status, detail = install_doctor._retention_failure_status(self.record)
-        self.assertEqual((status, detail), (install_doctor.STATUS_OK, "ok"))
+        self.assertEqual(install_doctor._retention_failure_line(self.record), "ok")
         _, output = self._run("claude", strict=False)
         self.assertIn("state-retention: ok", output)
 
-    def test_recorded_failures_are_a_warning_with_the_count_and_the_last_one(self):
+    def test_recorded_failures_are_listed_without_changing_overall(self):
+        _, clean = self._run("claude", strict=False)
         self._record({"ts": "2026-10-21T00:00:00Z", "policy": "session-logs", "path": "/a", "error_type": "OSError",
                       "error": "busy"},
                      {"ts": "2026-10-22T01:02:03Z", "policy": "gateway-usage", "path": "/b",
                       "error_type": "PermissionError", "error": "denied"})
-        status, detail = install_doctor._retention_failure_status(self.record)
-        self.assertEqual(status, install_doctor.STATUS_WARNING)
-        self.assertEqual(detail, "warning 2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError")
+        self.assertEqual(install_doctor._retention_failure_line(self.record),
+                         "2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError")
         _, output = self._run("claude", strict=False)
-        self.assertIn("state-retention: warning 2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError",
-                      output)
+        self.assertIn("state-retention: 2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError", output)
+        # A retention failure is Ghost-ALICE's own and needs no repair by the user: doctor reports it and
+        # overall stays what it was without the record.
+        overall = lambda text: [line for line in text.splitlines() if line.startswith("overall:")]
+        self.assertEqual(overall(output), overall(clean))
 
-    def test_an_unreadable_record_is_a_warning(self):
+    def test_an_unreadable_record_is_reported(self):
         self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
         self.record.write_bytes(b"\xff\xfe not json\n")
-        status, detail = install_doctor._retention_failure_status(self.record)
-        self.assertEqual((status, detail), (install_doctor.STATUS_WARNING, "warning record unreadable"))
+        self.assertEqual(install_doctor._retention_failure_line(self.record), "record unreadable")
 
 
 class RuntimeCoreAuditTest(unittest.TestCase):
