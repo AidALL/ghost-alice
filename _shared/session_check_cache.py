@@ -55,7 +55,7 @@ def _connect(root: Path, *, create: bool = True) -> sqlite3.Connection:
         connection = sqlite3.connect(store, timeout=2)
     else:
         # mode=rw opens an existing store and never creates one.
-        connection = sqlite3.connect(store.resolve().as_uri() + "?mode=rw", uri=True, timeout=2)
+        connection = sqlite3.connect(store.absolute().as_uri() + "?mode=rw", uri=True, timeout=2)
     try:
         connection.execute("CREATE TABLE IF NOT EXISTS checks (platform TEXT, session TEXT, key TEXT, target TEXT, stamp TEXT, value TEXT, checked_at TEXT, PRIMARY KEY(platform,session,key))")
         connection.execute("CREATE TABLE IF NOT EXISTS check_events (platform TEXT, session TEXT, key TEXT, status TEXT, occurred_at TEXT)")
@@ -126,7 +126,7 @@ def delivered(root: Path, platform: str, session_id: str, key: str, content: str
     if not (platform and session_id and session_id != "unknown") or not store.is_file():
         return False
     try:
-        with closing(sqlite3.connect(store.resolve().as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
+        with closing(sqlite3.connect(store.absolute().as_uri() + "?mode=ro", uri=True, timeout=2)) as connection:
             row = connection.execute("SELECT stamp FROM checks WHERE platform=? AND session=? AND key=?", (platform, session_id, key)).fetchone()
         return bool(row) and json.loads(row[0]) == _content_stamp(content)
     except (sqlite3.Error, OSError, ValueError, TypeError):
@@ -137,15 +137,21 @@ def record_delivery(root: Path, platform: str, session_id: str, key: str, conten
                     *, create: bool) -> bool:
     """Record that this session received this content and return whether the record was written.
 
-    Without create, only an existing store is written. The stamp is the content
-    digest, so a code update that builds the same content keeps the record.
+    With create, the store and the session's record are created as needed. Without
+    create, only the session's existing record is updated; neither the store nor a
+    record is created. The stamp is the content digest, so a code update that
+    builds the same content keeps the record.
     """
     if not (platform and session_id and session_id != "unknown"):
         return False
     recorded_at = datetime.now(timezone.utc).isoformat()
+    stamp, value = json.dumps(_content_stamp(content)), json.dumps({"delivered": True})
     try:
         with closing(_connect(root, create=create)) as connection:
-            connection.execute("INSERT OR REPLACE INTO checks VALUES (?,?,?,?,?,?,?)", (platform, session_id, key, "", json.dumps(_content_stamp(content)), json.dumps({"delivered": True}), recorded_at))
+            if create:
+                connection.execute("INSERT OR REPLACE INTO checks VALUES (?,?,?,?,?,?,?)", (platform, session_id, key, "", stamp, value, recorded_at))
+            elif connection.execute("UPDATE checks SET target='', stamp=?, value=?, checked_at=? WHERE platform=? AND session=? AND key=?", (stamp, value, recorded_at, platform, session_id, key)).rowcount != 1:
+                return False
             connection.execute("INSERT INTO check_events VALUES (?,?,?,?,?)", (platform, session_id, key, "delivered", recorded_at))
             connection.commit()
     except (sqlite3.Error, OSError, ValueError):

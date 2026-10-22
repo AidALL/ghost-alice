@@ -293,9 +293,10 @@ def session_receipt(paths: dict[str, Path]) -> str:
 
 def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, Path],
                   observation: dict[str, Any] | None) -> str:
-    """Add nothing while the session holds the current receipt; send a missing or changed one once.
+    """Add nothing while the session holds the current receipt; send a changed one once.
 
-    An input writes its delivery record only into an existing check store; it never creates the store.
+    Only the session's own start creates its record, because only a session whose start hook runs gets the
+    receipt back after compaction. An input updates that record and never creates the store or a record.
     """
     receipt = session_receipt(paths)
     try:
@@ -306,7 +307,7 @@ def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, P
             return receipt
     except (ImportError, OSError, ValueError, TypeError):
         pass
-    # An input that could not record the delivery, without a store or after a failed write, carries its own receipt.
+    # Without its session-start record, or after a failed update, each input carries its own receipt.
     return observation_receipt(paths, observation)
 
 
@@ -322,7 +323,7 @@ def session_start(args: argparse.Namespace, payload: dict[str, Any], ledger_root
         from session_check_cache import record_delivery
         record_delivery(ledger_root, args.platform, session_id, SESSION_RECEIPT_KEY, message, create=True)
     except (ImportError, OSError, ValueError, TypeError):
-        pass  # Without the delivery record, the next input delivers the receipt.
+        pass  # Without the delivery record, each input carries its own receipt until the next session start.
     return render_payload(args.format, message, ledger_root, routine=True, event="SessionStart")
 
 
