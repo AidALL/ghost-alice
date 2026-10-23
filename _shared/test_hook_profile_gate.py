@@ -165,7 +165,8 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 outputs.append(stdout.getvalue())
             first = json.loads(outputs[0])
             self.assertIn('row-not-found', first['systemMessage'])
-            self.assertEqual(first['hookSpecificOutput'], decision['hookSpecificOutput'])
+            self.assertIn('ask the tool (inner decision)', first['systemMessage'])
+            self.assertEqual(first['hookSpecificOutput'], {'hookEventName': 'PreToolUse'})
             # The minimal profile renders an empty Stop envelope as plain text; neither later output warns.
             self.assertNotIn('Ghost-ALICE intake', outputs[1] + outputs[2])
             recorded = [event['event'] for event in ledger.read_session_events(**coords)
@@ -291,7 +292,10 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
                 code, calls, output = self._run_wrapper(directory, destination, transcript, session, 'PreToolUse',
                                                         json.dumps(decision) + '\n')
         self.assertEqual((code, calls), (0, 1))
-        self.assertEqual(json.loads(output), decision)
+        self.assertEqual(json.loads(output), {
+            'hookSpecificOutput': {'hookEventName': 'PreToolUse'},
+            'systemMessage': 'tool-checkpoint asked the host to ask the tool (inner decision). '
+                             'Ghost-ALICE Core does not block the host.'})
 
     def test_rejection_audit_uses_known_platform_without_platform_environment(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -2203,7 +2207,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
                     (message, ""),
                 )
 
-    def test_runner_preserves_protocol_block_json_under_minimal_visibility(self):
+    def test_runner_turns_a_protocol_block_into_a_warning_under_minimal_visibility(self):
         message = '{"decision":"block","reason":"completion-check required"}'
         code = f"print({message!r})"
         payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
@@ -2236,7 +2240,10 @@ class TestHookCommandAllowlist(unittest.TestCase):
             row = json.loads(log_path.read_text(encoding="utf-8").splitlines()[0])
 
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout, message + "\n")
+        emitted = json.loads(result.stdout)
+        self.assertNotIn("decision", emitted)
+        self.assertIn("completion-check required", emitted["systemMessage"])
+        self.assertIn("does not block the host", emitted["systemMessage"])
         self.assertEqual(row["stdout"].strip(), message)
         self.assertEqual(row["visible_decision"], "force_show")
 
@@ -2531,7 +2538,7 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
 
 
 class TestHookProtocolSurface(unittest.TestCase):
-    def test_pretool_recording_metadata_stays_in_raw_audit_not_native_envelope(self):
+    def test_pretool_controls_and_recording_metadata_stay_in_raw_audit_not_native_envelope(self):
         for platform in ('codex', 'claude'):
             for denied in (False, True):
                 with self.subTest(platform=platform, denied=denied), tempfile.TemporaryDirectory() as home:
@@ -2560,11 +2567,19 @@ class TestHookProtocolSurface(unittest.TestCase):
                     self.assertEqual(result.returncode, 1 if denied else 0, result.stderr)
                     emitted = json.loads(result.stdout)
                     self.assertNotIn('completion_recording', emitted)
-                    self.assertEqual(emitted['continue'], protocol['continue'])
-                    self.assertEqual(emitted['hookSpecificOutput'], protocol['hookSpecificOutput'])
+                    # The host never receives a permission decision, a stop or a stop reason from the runner.
+                    self.assertIs(emitted['continue'], True)
+                    self.assertEqual(emitted['hookSpecificOutput'], {
+                        'hookEventName': 'PreToolUse',
+                        'additionalContext': 'Preserve the original supported evidence.'})
+                    self.assertNotIn('stopReason', emitted)
                     if denied:
-                        self.assertEqual(emitted['systemMessage'], protocol['systemMessage'])
-                        self.assertEqual(emitted['stopReason'], protocol['stopReason'])
+                        self.assertTrue(emitted['systemMessage'].startswith(protocol['systemMessage']))
+                        self.assertIn('stop (Current gate is blocked.)', emitted['systemMessage'])
+                        self.assertIn('deny the tool (Current gate is blocked.)', emitted['systemMessage'])
+                        self.assertIn('does not block the host', emitted['systemMessage'])
+                    else:
+                        self.assertNotIn('systemMessage', emitted)
                     row = json.loads(_strict_log_path(home, platform, 'pretool-audit').read_text().splitlines()[0])
                     self.assertEqual(json.loads(row['stdout']), protocol)
                     self.assertEqual(row['exit_code'], exit_code)

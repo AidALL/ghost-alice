@@ -530,39 +530,49 @@ def _strip_private_protocol_metadata(stdout: str) -> str:
     return json.dumps(protocol, ensure_ascii=False) + "\n"
 
 
-def _native_protocol_output(stdout: str, *, platform: str, event: str) -> str:
-    """Project only the host envelope; raw output and domain state stay intact."""
-    pretool = platform in {"codex", "claude"} and event == "PreToolUse"
-    if not pretool and (platform not in {"codex", "claude"} or event not in {"Stop", "SubagentStop"}):
-        return stdout
+# Fields a hook may use to block or stop the host, and the native envelope the host receives. Core informs
+# and stops: the runner removes the controls from every hook it runs, says so in systemMessage, keeps the
+# hook's raw output in the strict log and drops keys outside the envelope (internal records).
+HOST_CONTROL_FIELDS = ("decision", "reason", "stopReason")
+PERMISSION_FIELDS = ("permissionDecision", "permissionDecisionReason")
+HOST_ENVELOPE_FIELDS = frozenset({"continue", "suppressOutput", "systemMessage", "hookSpecificOutput", "additionalContext"})
+
+
+def _native_protocol_output(stdout: str, *, hook_id: str) -> str:
+    """Project a hook's JSON output to the host envelope without a blocking control, on every event."""
     try:
         protocol = json.loads(stdout)
     except (json.JSONDecodeError, TypeError):
         return stdout
     if not isinstance(protocol, dict):
         return stdout
-    if pretool:
-        # Ghost-ALICE Autopilot's recording result is retained in the raw strict audit. It is not
-        # a native PreToolUse field; permissions and all host controls survive.
-        if "completion_recording" not in protocol:
-            return stdout
-        protocol.pop("completion_recording")
-        return json.dumps(protocol, ensure_ascii=False) + "\n"
-    # Native Stop receives the host envelope, not internal assessment records.
-    # Internal recording and recovery records belong in the domain and strict log.
-    fields = {"continue", "decision", "reason", "stopReason", "suppressOutput", "systemMessage"}
-    projected = {key: value for key, value in protocol.items() if key in fields}
-    if projected.get("decision") == "block":
-        reason = projected.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            projected["reason"] = next(
-                (value for key in ("systemMessage", "stopReason")
-                 if isinstance(value := protocol.get(key), str) and value.strip()),
-                "A registered Stop hook blocked completion without a usable reason. Inspect the strict hook output.",
-            )
+    asked: list[str] = []
+    if protocol.get("decision") == "block":
+        asked.append(f"block ({_control_reason(protocol.get('reason'), protocol.get('systemMessage'))})")
+    if protocol.get("continue") is False:
+        asked.append(f"stop ({_control_reason(protocol.get('stopReason'), protocol.get('systemMessage'))})")
+    projected = {key: value for key, value in protocol.items()
+                 if key in HOST_ENVELOPE_FIELDS and key not in HOST_CONTROL_FIELDS}
+    if protocol.get("continue") is False:
+        projected["continue"] = True
+    specific = projected.get("hookSpecificOutput")
+    if isinstance(specific, dict) and any(key in specific for key in PERMISSION_FIELDS):
+        if specific.get("permissionDecision") in {"deny", "ask"}:
+            asked.append(f"{specific['permissionDecision']} the tool "
+                         f"({_control_reason(specific.get('permissionDecisionReason'), None)})")
+        projected["hookSpecificOutput"] = {key: value for key, value in specific.items()
+                                           if key not in PERMISSION_FIELDS}
+    if asked:
+        notice = f"{hook_id} asked the host to {'; '.join(asked)}. Ghost-ALICE Core does not block the host."
+        warning = projected.get("systemMessage")
+        projected["systemMessage"] = f"{warning}\n{notice}" if isinstance(warning, str) and warning.strip() else notice
     if projected == protocol:
         return stdout
     return json.dumps(projected, ensure_ascii=False) + "\n"
+
+
+def _control_reason(*candidates: object) -> str:
+    return next((value.strip() for value in candidates if isinstance(value, str) and value.strip()), "no reason given")
 
 
 def _visibility_context(
@@ -891,8 +901,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     registration_refresh = None
     if binding is not None:
         if binding['destination']['mode'] == 'normal':
-            # Core context follows the firing native cwd. Ghost-ALICE Autopilot retains explicit
-            # targets and owns platform-specific discovery from the input/CLI.
+            # Core context follows the firing native cwd; explicit targets already in the environment stay.
             native_cwd = _payload_from_stdin(stdin_text).get('cwd')
             if isinstance(native_cwd,str) and Path(native_cwd).is_absolute():
                 env['GHOST_ALICE_PROJECT_CWD'] = native_cwd
@@ -1009,7 +1018,7 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     if native_intake_failure is not None:
         item['native_intake_failure'] = native_intake_failure
     model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
-    native_stdout = _native_protocol_output(host_stdout, platform=platform, event=event)
+    native_stdout = _native_protocol_output(host_stdout, hook_id=hook_id)
     user_stdout, user_stderr = _render_user_surface(item, native_stdout, result.stderr)
     # Claim the notice only when this envelope can carry it; visibility
     # profiles never hide it.
