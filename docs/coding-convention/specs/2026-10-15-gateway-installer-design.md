@@ -6,9 +6,9 @@ Status: implemented in the source checkout; local acceptance and remote publicat
 
 ## Scope
 
-Restructure installation, refresh, removal and recovery for the optional context gateway, including the general installer's replacement of gateway dependencies and Core cleanup's deletion of those dependencies. Core response processing, context selection, native hooks and Autopilot business logic are outside this change. Their installer callers may change; their feature behavior must remain unchanged. Subscription authentication, model selection and native thinking settings remain unchanged.
+Restructure installation, refresh, removal and recovery for the optional context gateway, including the general installer's replacement of gateway dependencies and Core cleanup's deletion of those dependencies. Core response processing, context selection, native hooks and addon logic are outside this change. Their installer callers may change; their feature behavior must remain unchanged. Subscription authentication, model selection and native thinking settings remain unchanged.
 
-The existing Core and Autopilot publication remains one sole-author commit per repository. This design adds no release, remote review request, persistent installation backup or new checkout. Existing recovery material and unrelated user changes remain intact. Removal of obsolete generated files follows the same ownership and transaction rules as other mutations.
+Publication remains one sole-author commit per repository. This design adds no release, remote review request, persistent installation backup or new checkout. Existing recovery material and unrelated user changes remain intact. Removal of obsolete generated files follows the same ownership and transaction rules as other mutations.
 
 ## Current callers and structural cause
 

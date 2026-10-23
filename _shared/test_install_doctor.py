@@ -1146,10 +1146,10 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathTest):
                     "Check the installed adapter and current registration.")
         older_last = self._stamp(days_ago=1)
         self._log("claude", "s-older", [
-            self._row("claude", "s-older", ts=self._stamp(days_ago=2), hook_id="adapter-autopilot-mode-prepare-origin",
+            self._row("claude", "s-older", ts=self._stamp(days_ago=2), hook_id="adapter-demo-prepare-origin",
                       reason=mismatch),
             self._row("claude", "s-older", ts=self._stamp(days_ago=1, seconds_ago=10), rejected=False),
-            self._row("claude", "s-older", ts=older_last, hook_id="adapter-autopilot-mode-prepare-origin",
+            self._row("claude", "s-older", ts=older_last, hook_id="adapter-demo-prepare-origin",
                       reason=mismatch),
         ])
         newer_last = self._stamp(seconds_ago=30)
@@ -1158,7 +1158,7 @@ class HookRejectionDoctorTest(NodeRuntimeRunPathTest):
         self.assertEqual(lines, [
             "hook-rejections: 3 in 14 days (2 sessions)",
             f"  codex/s-newer: 1, last {self._printed(newer_last)} tool-checkpoint: hook payload decode failed",
-            f"  claude/s-older: 2, last {self._printed(older_last)} adapter-autopilot-mode-prepare-origin: "
+            f"  claude/s-older: 2, last {self._printed(older_last)} adapter-demo-prepare-origin: "
             "registered adapter hash mismatch",
         ])
         # Doctor for one platform lists every host folder: the audit platform of a rejection can be `unknown`.

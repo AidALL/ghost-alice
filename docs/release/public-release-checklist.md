@@ -16,7 +16,7 @@ Use this checklist to release the current Ghost-ALICE Core repository and its pu
 ## Release Scope
 
 - Identify the candidate commit and include the reviewed Core, installer, public skills, schemas, tests and documentation that belong to this release. Preserve unrelated local changes.
-- Keep `VERSION`, addon requirements and the current compatibility records consistent. Core and Ghost-ALICE Autopilot are separate packages; a Core source update does not publish or install Ghost-ALICE Autopilot.
+- Keep `VERSION` and the current compatibility records consistent. Core and addons are separate packages; a Core source update does not publish or install an addon.
 - Keep `.tmp/`, local worktrees, install reports, session records, credentials, private addons, tenant material and generated caches outside the public artifact. Do not include installed home-directory copies or local agent settings.
 - Distinguish source preparation, local installation, native host adoption, integration and public publication. Evidence for one does not establish the others.
 

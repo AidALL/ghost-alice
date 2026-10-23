@@ -462,14 +462,14 @@
         <div class="actions"><a class="btn primary" href="./README_ko.html">문서 보기</a><a class="btn" href="./docs/ko/getting-started/installation.html">설치</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/홈">위키</a></div>
       </div>
       <div class="hero-visual"><div class="quick-panel">
-        <div class="panel-head"><span>빠른 시작 · Core + Ghost-ALICE Autopilot</span><button class="copy-btn" type="button" data-copy="bash install.sh --addon autopilot">복사</button></div>
-        <pre><code>bash install.sh --addon autopilot</code></pre>
+        <div class="panel-head"><span>빠른 시작 · Core</span><button class="copy-btn" type="button" data-copy="bash install.sh">복사</button></div>
+        <pre><code>bash install.sh</code></pre>
         <p class="muted">복제한 저장소에서 실행하면 인스톨러가 사용 가능한 에이전트 플랫폼을 감지합니다. <a href="./docs/ko/getting-started/installation.html">운영체제별 명령과 플랫폼 옵션 보기</a></p>
       </div></div>
     </div></section>
     <section id="latest-release"><div class="wrap">
-      <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.1</h2><p class="section-note">이 문서는 Core와 Ghost-ALICE Autopilot 0.5.1을 설명합니다. 로컬 설치와 공개 릴리즈는 별개입니다. Ghost-ALICE Autopilot 0.5.1에는 Core 0.5.1 이상이 필요합니다.</p></div>
-      <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core 릴리즈</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Ghost-ALICE Autopilot 릴리즈</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">호환성</a></div>
+      <div class="section-head"><h2>Core 0.5.1</h2><p class="section-note">이 문서는 Core 0.5.1을 설명합니다. 로컬 설치와 공개 릴리즈는 별개입니다.</p></div>
+      <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core 릴리즈</a></div>
     </div></section>
     <section id="how-it-works"><div class="wrap"><div class="section-head"><h2 id="flow-heading">Core 동작</h2><p class="section-note">응답 모델은 사용자 목적과 원본을 비교하고, 필요한 작업과 검증 깊이를 선택합니다. 판단 대상은 micro·meso·macro·meta이며, 검증 깊이와는 별개입니다.</p></div>
 <figure class="diagram-block" aria-labelledby="flow-heading"><pre class="mermaid">flowchart TD
@@ -488,16 +488,8 @@
 <p>근거가 필요한 결과와 충돌하면 응답 모델은 필요한 수정이나 조사를 선택합니다. 미확인 조건은 드러내고, 변하지 않은 근거와 원래 검증 시점은 재사용합니다.</p>
 <p><a href="./architecture.html">Core 아키텍처 읽기</a></p>
 </div></section>
-    <section id="official-addons"><div class="wrap"><div class="section-head"><h2 id="autopilot-flow-heading">Autopilot 설치 시 확장되는 Core 흐름</h2><p class="section-note">Autopilot은 Core가 인증한 근거의 반영과 현재 필요한 계속 작업의 선택을 구분합니다. 승인된 작업·경계·의존 조건·전제 조건을 확인하고 필요한 다음 정보와 원본 참조만 보냅니다. 미충족 기준만으로 요청을 만들지는 않습니다. 네이티브 호스트에 보낸 요청과 실제 실행은 별도로 확인합니다. 설치만으로 실행 권한이 생기지 않습니다.</p></div>
-<figure class="diagram-block" aria-labelledby="autopilot-flow-heading"><pre class="mermaid">flowchart TD
- C[&quot;Core가 인증한 근거&quot;] --&gt; A[&quot;Autopilot의 근거 반영과 계속 가능한 작업 선택&quot;]
- F[&quot;Core가 인증한 현재 필요성과 다음 필요 정보&quot;] --&gt; A
- U[&quot;승인된 작업·경계·의존 조건·전제 조건&quot;] --&gt; A
- A --&gt;|필요하고 준비된 승인 작업| H[&quot;네이티브 호스트에 계속 요청&quot;]
- H --&gt; M[&quot;응답 모델의 승인된 작업 실행&quot;]
- A --&gt;|계속 가능한 현재 작업 없음| E[&quot;계속 요청 없음&quot;]
-</pre></figure>
-<div class="actions"><a class="btn" href="./docs/ko/reference/official-addons.html">공식·사용자 애드온 소스</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md">Ghost-ALICE Autopilot</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/애드온-작성">애드온 작성</a></div>
+    <section id="official-addons"><div class="wrap"><div class="section-head"><h2 id="addons-heading">애드온</h2><p class="section-note">애드온은 <code>bash install.sh --addon-source &lt;저장소-또는-경로&gt;</code>로 자체 저장소나 로컬 경로에서 설치합니다. Core는 애드온의 스킬과 관찰 훅을 등록합니다. 그 훅은 호스트를 막지 않고, 설치만으로 실행 권한이 생기지 않습니다. 애드온이 더하는 기능은 애드온 자체 문서가 설명합니다.</p></div>
+<div class="actions"><a class="btn" href="./docs/ko/reference/official-addons.html">애드온 소스</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/애드온-작성">애드온 작성</a></div>
 </div></section>
     <section id="routes"><div class="wrap">
       <div class="section-head"><h2>문서</h2><p class="section-note">실행 명령은 저장소 가이드에서, 온보딩과 배경 설명은 위키에서 확인합니다. 영어판과 한국어판은 같은 동작을 설명합니다.</p></div>

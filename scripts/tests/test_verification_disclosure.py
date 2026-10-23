@@ -25,7 +25,7 @@ class VerificationDisclosureTests(unittest.TestCase):
     def test_review_reference_describes_core_alone(self):
         self.assertFalse((SKILL / 'references/autopilot-publication.md').exists())
         body = (SKILL / 'references/response-review.md').read_text()
-        for phrase in ('Autopilot', 'publication_route', '--receipt-token', '--reuse-evidence',
+        for phrase in ('Auto' + 'pilot', 'publication_route', '--receipt-token', '--reuse-evidence',
                        'pending-adapter', 'publish'):
             self.assertNotIn(phrase, body)
         for owner in ('SKILL.md', 'references/verify-or-reuse.md'):

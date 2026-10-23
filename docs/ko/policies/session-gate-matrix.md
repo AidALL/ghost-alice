@@ -17,7 +17,7 @@ Language: [🇺🇸 English](../../policies/session-gate-matrix.md) | 🇰🇷 �
 - [tool-checkpoint Visible Surface](#tool-checkpoint-visible-surface)
 - [tool-checkpoint Batch / Continuation Compression](#tool-checkpoint-batch--continuation-compression)
 - [Notes](#notes)
-- [Managed Completion Recording Contract](#managed-completion-recording-contract)
+- [Completion Recording Contract](#completion-recording-contract)
 - [Current Selection and Bounded Recovery](#current-selection-and-bounded-recovery)
 - [Repair and authority conditions](#repair-and-authority-conditions)
 
@@ -55,8 +55,8 @@ Core는 원문을 저장하지 않고 확정된 사용자 입력의 다이제스
 
 1. session-intent-analyzer SessionStart 훅이 세션 영수증을 제공합니다. UserPromptSubmit 훅은 입력마다 입력을 기록하고, 그 영수증을 보내지 못했거나 접수에 실패했을 때만 모델 문맥을 더합니다. Core는 Codex의 직접 접수 또는 Claude의 신뢰된 대조 절차로 정확한 기준 사용자 입력을 확정합니다. Read-state는 읽기만 수행합니다. 현재 세션 어시스턴트는 task-router를 적용하여 작업을 선택하며, 보고가 필요하면 같은 접수에 skill-evolution을 별도로 적용합니다.
 2. 현재 세션 어시스턴트는 정상 경로 후보를 Core에 제출합니다. Core Python 코드는 현재 입력·소유권·승인·선택 기준을 확인한 뒤 ready 경로를 기록합니다.
-3. 현재 세션 어시스턴트는 필요한 경계와 담당 스킬을 따릅니다. 호스트는 도구 권한을 적용하고 허용된 호출을 실행합니다. 해당 Ghost-ALICE Autopilot 사전 훅은 출처를 기록하고 PostToolUse는 엄격한 감사를 유지합니다.
-4. 완료 시 가드와 Ghost-ALICE Autopilot 어댑터는 같은 입력·본문에 연결된 Core 평가를 호출합니다. 독립적으로 등록된 훅 사이의 정책 실행 순서를 가정하지 않습니다.
+3. 현재 세션 어시스턴트는 필요한 경계와 담당 스킬을 따릅니다. 호스트는 도구 권한을 적용하고 허용된 호출을 실행합니다. PostToolUse는 엄격한 감사를 유지합니다.
+4. 완료 시 Stop 관찰자는 입력·본문에 연결된 Core 평가를 호출하고 결과를 기록합니다. 호스트를 막지 않습니다.
 
 Tool-checkpoint는 도구 호출 전 단계(호스트의 `PreToolUse`/`BeforeTool`)에서 실행되며 사용자 입력 접수가 아닙니다. 도구 입력이나 감사 메타데이터는 네이티브 권한을 부여하지 않습니다. 설치 설정만으로 훅 호출이나 호스트 실행을 입증할 수 없으며, 필요한 실행 관찰은 [live-smoke-regression](live-smoke-regression.md)이 담당합니다.
 
@@ -108,17 +108,17 @@ Continuation은 같은 process/session/tool-call ID를 다시 조회하는 경�
 
 절차 담당자를 지정하면 중복 규칙의 불일치를 줄일 수 있습니다. 현재 세션 어시스턴트는 [지침 본문 재사용](../../../coding-convention/verification-before-completion/references/verify-or-reuse.md)을 따르고 실제 읽기 또는 유효한 재사용을 내부에 기록합니다. 일상적인 정상 상태는 반복하지 않으며 미결·변경·실패 상태는 판단에 필요한 안내를 유지합니다.
 
-소스 수정, 지정 검사 통과, 설치된 바이트, 네이티브 실행, 수락된 접수, 적용된 기준과 보이는 답변은 각각 다른 주장입니다. 한 단계의 근거가 다른 단계를 입증하지는 않습니다.
+소스 수정, 지정 검사 통과, 설치된 바이트, 네이티브 실행, 기록된 검토, 충족된 기준과 보이는 답변은 각각 다른 주장입니다. 한 단계의 근거가 다른 단계를 입증하지는 않습니다.
 
-## Managed Completion Recording Contract
+## Completion Recording Contract
 
 새 완료 또는 부분 완료 제출에서 Core Python 코드는 증거 형식과 인증된 의미 검토보다 현재 소유 경로를 먼저 확인합니다. 따라서 경로가 없으면 증거 필드 수정을 요구하기 전에 경로 오류를 반환합니다.
 
 이 조건에서는 응답 모델이 [담당 검토 절차](../../../coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review)에 따라 두 판단을 기록합니다. [Core 응답 흐름](../../../architecture_ko.md#근거와-네이티브-표시)은 인증과 네이티브 답변 전달을 설명하며, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 지원·미지원 결과를 구분합니다.
 
-등록된 관리 훅은 v2의 작업 단위별 승인 기준을 사용하고 직접 공개 API는 v1 기본값을 유지합니다. 소스 API·실행 모듈·원장·프로젝트·설치 스킬·플랫폼 상태는 별도의 위치 연결을 유지합니다. 일반 업데이트는 원장 권위를 보존하며 전송 방식이 origin·세션·접수·승인을 부여하지 않습니다.
+소스 API·실행 모듈·원장·프로젝트·설치 스킬·플랫폼 상태는 별도의 위치 연결을 유지합니다. 일반 업데이트는 원장 권위를 보존하며 전송 방식이 origin·세션·접수·승인을 부여하지 않습니다.
 
-관리형 네이티브 Stop에서는 Ghost-ALICE Autopilot 어댑터가 준비된 출처 영수증과 Core가 인증한 검토로 해당 근거를 기록합니다. 모델이 이 경로를 위해 별도 게시 명령을 실행하지 않습니다. 수락된 접수는 pending-adapter이며 적용된 완료가 아닙니다. Ghost-ALICE Autopilot 어댑터는 기록을 인증하고 Core에 보호된 기준 갱신을 요청합니다. 근거가 없거나 미해결인 기준은 unmet으로 남습니다. 근거가 있는 보고도 작업 기준을 충족하지 않을 수 있으며 이때 제출이 필요하지 않을 수 있습니다.
+네이티브 Stop에서는 Core의 관찰자가 전달된 본문을 기록된 검토와 대조하고 결과를 엄격한 감사에 남깁니다. 별도 명령을 실행하지 않고 출력을 붙잡지 않습니다. 지원·미지원·미해결 상태는 구별됩니다. 미해결 기준은 unmet으로 남고, 근거가 있는 보고도 작업 기준을 충족하지 않을 수 있습니다.
 
 ## Current Selection and Bounded Recovery
 

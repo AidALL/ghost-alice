@@ -2,7 +2,7 @@
 
 Language: [🇺🇸 English](../../policies/installer-platform-compatibility-matrix.md) | 🇰🇷 한국어
 
-개발자는 이 계약을 기준으로 Ghost-ALICE 인스톨러의 플랫폼별 호환성을 구현하고, 각 행에 지정된 담당 테스트로 해당 동작을 검증합니다. 단독 실행의 책임과 반환 경로는 [Core 아키텍처](../../../architecture_ko.md), 애드온 확장은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)를 따릅니다.
+개발자는 이 계약을 기준으로 Ghost-ALICE 인스톨러의 플랫폼별 호환성을 구현하고, 각 행에 지정된 담당 테스트로 해당 동작을 검증합니다. 책임과 반환 경로는 [Core 아키텍처](../../../architecture_ko.md)를 따릅니다.
 
 ## Contents
 
@@ -37,7 +37,7 @@ Language: [🇺🇸 English](../../policies/installer-platform-compatibility-mat
 
 인스톨러는 훅 파일의 존재뿐 아니라 훅 입력·출력과 플랫폼 권한 정책이 현재 저장소 계약과 맞는지도 확인합니다. 기존 훅 항목이 있어도 실행 명령이 달라지면 인스톨러는 관리 항목을 갱신합니다. `agent_visibility.profile`은 사용자에게 보이는 메시지만 제어하며 훅 누락·불일치 판정을 완화하지 않습니다.
 
-Core Python 코드는 승인된 작업 단위·기준을 저장하고 현재 세션 어시스턴트의 주장·근거 판단을 인증합니다. 공식 privileged adapter는 선언된 네이티브 이벤트에서 이 계약을 소비합니다. 애드온 Python 코드는 불변 기록·영수증 스키마를 관리하고, 현재 세션 어시스턴트는 애드온 지침에 따라 추가 작업을 판단하며, 영향받은 애드온 동작의 근거가 필요합니다.
+Core Python 코드는 승인된 작업 단위·기준을 저장하고 현재 세션 어시스턴트의 주장·근거 판단을 인증합니다. 애드온은 선언한 네이티브 이벤트에 관찰 훅을 등록하며, Core 실행기는 그 훅이 호스트를 막지 못하게 합니다. 애드온 Python 코드는 자체 기록을 관리하고, 현재 세션 어시스턴트는 애드온 지침에 따라 추가 작업을 판단하며, 영향받은 애드온 동작의 근거가 필요합니다.
 
 Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니다. 이 procedure는 지원할 설치된 Claude Code·Codex 대상에 같은 README first 10 lines request를 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission behavior를 관찰합니다.
 
@@ -68,7 +68,7 @@ SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니�
 
 ### completion-reminder
 
-설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core는 모델의 서로 다른 주장·출처 판단과 응답 전체 판단을 인증하며, 스킬 로드나 화면 감사 필드는 별도의 수락 조건이 아닙니다. 독립 등록된 Core 가드와 Ghost-ALICE Autopilot 어댑터는 호출 순서를 가정하지 않고 같은 평가를 사용해야 합니다.
+설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core는 모델의 서로 다른 주장·출처 판단과 응답 전체 판단을 인증하며, 스킬 로드나 화면 감사 필드는 별도의 수락 조건이 아닙니다. Core의 Stop 관찰자가 그 평가를 사용하며 호스트를 막지 않습니다.
 
 Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
 
@@ -86,7 +86,7 @@ Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고
 | Windows visibility preference smoke | native wrapper visibility forwarding이 `_shared/install_hooks.py --visibility`에 도달합니다. visibility alias는 compatibility coverage로 계속 허용되고 status는 hook state와 runtime profile을 separately report합니다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | 은퇴했습니다. `install.ps1`은 UTF-8 BOM과 Windows PowerShell 5.1 문법(`PSUseCompatibleSyntax`, 대상 5.1)을 유지해 5.1에서도 첫 문장까지 실행됩니다. 그 문장이 `PowerShell 7.6 or newer is required`와 `winget install --id Microsoft.PowerShell --exact`를 출력하고 종료 코드 1로 끝냅니다 | `scripts.tests.test_thin_shells`, `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | PowerShell 7 | 기준선은 7.6 LTS 계열입니다. `install.ps1`은 PowerShell 7.6 이상에서 실행되고, 더 낮은 7.x는 같은 요구 문구로 멈춥니다. 인스톨러는 PowerShell을 설치하지 않습니다. 콘솔 입출력을 UTF-8로 설정하고 Python 3.11 이상을 준비한 뒤, 예전 PowerShell 매개변수 이름을 cli 플래그로 바꾸어 모든 인수를 순서대로 `_shared/installer/cli.py`에 넘기고 그 종료 코드를 돌려줍니다 | `scripts.tests.test_thin_shells`(CI 러너처럼 `pwsh`가 있으면 `install.ps1`을 실행), `scripts.tests.test_powershell_static_analysis` |
-| CMD wrapper | `pwsh.exe`로, `pwsh.exe`가 없으면 `powershell.exe`로 `install.ps1`을 실행합니다. 후자에서는 `install.ps1`의 버전 확인이 요구 문구를 출력합니다. 인수를 그대로 넘기고 UTF-8을 강제하며 종료 코드를 돌려줍니다. 옵션, 공식 `--addon autopilot` 별칭, help는 Python 인스톨러가 제공합니다 | `scripts.tests.test_install_cmd_wrapper`, `scripts.tests.test_thin_shells` |
+| CMD wrapper | `pwsh.exe`로, `pwsh.exe`가 없으면 `powershell.exe`로 `install.ps1`을 실행합니다. 후자에서는 `install.ps1`의 버전 확인이 요구 문구를 출력합니다. 인수를 그대로 넘기고 UTF-8을 강제하며 종료 코드를 돌려줍니다. 옵션과 help는 Python 인스톨러가 제공합니다 | `scripts.tests.test_install_cmd_wrapper`, `scripts.tests.test_thin_shells` |
 
 ## CI Commands
 

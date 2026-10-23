@@ -462,14 +462,14 @@
         <div class="actions"><a class="btn primary" href="./README.html">Read the docs</a><a class="btn" href="./docs/getting-started/installation.html">Install</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a></div>
       </div>
       <div class="hero-visual"><div class="quick-panel">
-        <div class="panel-head"><span>Quick start · Core + Ghost-ALICE Autopilot</span><button class="copy-btn" type="button" data-copy="bash install.sh --addon autopilot">Copy</button></div>
-        <pre><code>bash install.sh --addon autopilot</code></pre>
+        <div class="panel-head"><span>Quick start · Core</span><button class="copy-btn" type="button" data-copy="bash install.sh">Copy</button></div>
+        <pre><code>bash install.sh</code></pre>
         <p class="muted">Run from the cloned repository. The installer detects available agent platforms. <a href="./docs/getting-started/installation.html">See OS-native commands and platform options.</a></p>
       </div></div>
     </div></section>
     <section id="latest-release"><div class="wrap">
-      <div class="section-head"><h2>Core + Ghost-ALICE Autopilot 0.5.1</h2><p class="section-note">This documentation describes Core and Ghost-ALICE Autopilot 0.5.1. A local installation is separate from a published release. Ghost-ALICE Autopilot 0.5.1 requires Core 0.5.1 or later.</p></div>
-      <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/releases">Ghost-ALICE Autopilot releases</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot/blob/main/compatibility-matrix.json">Compatibility</a></div>
+      <div class="section-head"><h2>Core 0.5.1</h2><p class="section-note">This documentation describes Core 0.5.1. A local installation is separate from a published release.</p></div>
+      <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core releases</a></div>
     </div></section>
     <section id="how-it-works"><div class="wrap"><div class="section-head"><h2 id="flow-heading">Core operation</h2><p class="section-note">The response model compares the objective with original sources and selects needed work and verification depth. Judgment focus can be micro, meso, macro or meta; verification depth is a separate choice.</p></div>
 <figure class="diagram-block" aria-labelledby="flow-heading"><pre class="mermaid">flowchart TD
@@ -488,16 +488,8 @@
 <p>When evidence conflicts with a required result, the response model selects a needed correction or investigation. It exposes unresolved conditions and reuses unchanged evidence at its original verification time.</p>
 <p><a href="./architecture.html">Read the Core architecture</a></p>
 </div></section>
-    <section id="official-addons"><div class="wrap"><div class="section-head"><h2 id="autopilot-flow-heading">How installing Autopilot extends Core</h2><p class="section-note">Autopilot applies Core-authenticated proof separately from selecting current necessary continuation. It checks the approved task, boundary, dependencies and prerequisites, then sends only needed next information and original references. An unmet criterion alone creates no request. A request to the native host and actual execution are separate observations. Installation grants no run authority.</p></div>
-<figure class="diagram-block" aria-labelledby="autopilot-flow-heading"><pre class="mermaid">flowchart TD
- C[&quot;Core-authenticated proof&quot;] --&gt; A[&quot;Autopilot applies proof and selects eligible continuation&quot;]
- F[&quot;Core-authenticated current necessity and next information&quot;] --&gt; A
- U[&quot;Approved task, boundary, dependencies and prerequisites&quot;] --&gt; A
- A --&gt;|Necessary ready authorized work| H[&quot;Request continuation from the native host&quot;]
- H --&gt; M[&quot;Response model performs authorized work&quot;]
- A --&gt;|No eligible current work| E[&quot;No continuation request&quot;]
-</pre></figure>
-<div class="actions"><a class="btn" href="./docs/reference/official-addons.html">Official and custom addon sources</a><a class="btn" href="https://github.com/AidALL/ghost-alice-autopilot">Ghost-ALICE Autopilot</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring">Addon authoring</a></div>
+    <section id="official-addons"><div class="wrap"><div class="section-head"><h2 id="addons-heading">Addons</h2><p class="section-note">An addon is installed from its own repository or a local path with <code>bash install.sh --addon-source &lt;repository-or-path&gt;</code>. Core registers the addon's skills and observational hooks; those hooks never block the host, and installation grants no run authority. The addon's own documentation describes what it adds.</p></div>
+<div class="actions"><a class="btn" href="./docs/reference/official-addons.html">Addon sources</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring">Addon authoring</a></div>
 </div></section>
     <section id="routes"><div class="wrap">
       <div class="section-head"><h2>Documentation</h2><p class="section-note">Practical commands live in repository guides; Wiki provides onboarding and background. English and Korean pages describe the same behavior.</p></div>

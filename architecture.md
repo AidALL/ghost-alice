@@ -33,7 +33,7 @@ The model chooses the next judgment target: micro for an individual result, meso
 
 ## Response boundary
 
-The model performs the work already authorized by the current request before final delivery. Its internal work and correction loop does not require Autopilot. At the response boundary, the model asks whether a currently actionable required follow-up remains. No means an answer with the supported result and any unresolved conditions. Yes means that answer plus recommended additional work, its reason and the next needed information. Core can authenticate this feedback but does not schedule a new request or return from answer delivery to work selection. No actionable follow-up does not establish whole completion: required conditions may still depend on missing authority or external support.
+The model performs the work already authorized by the current request before final delivery. At the response boundary, the model asks whether a currently actionable required follow-up remains. No means an answer with the supported result and any unresolved conditions. Yes means that answer plus recommended additional work, its reason and the next needed information. Core can authenticate this feedback but does not schedule a new request or return from answer delivery to work selection. No actionable follow-up does not establish whole completion: required conditions may still depend on missing authority or external support.
 
 ```mermaid
 flowchart TD
@@ -44,7 +44,7 @@ flowchart TD
   B --> D
 ```
 
-A later user request can start another native model invocation. Optional Autopilot can also request one within an approved plan after checking the current need, stop control, dependencies and boundary. That new invocation rechecks the current objective, original criteria and constraints before selecting work. Request submission, host receipt, actual execution and business completion remain separate observations.
+A later user request starts the next native model invocation; Core schedules none. That new invocation rechecks the current objective, original criteria and constraints before selecting work.
 
 ## Context and original evidence
 
@@ -62,7 +62,7 @@ Healthy hooks supply current receipts and changed decision-relevant conditions. 
 
 The native host independently retains conversation history and builds model requests. Selecting a concise Ghost-ALICE handoff does not remove earlier native messages. Prompt caching, compaction and lower token counts do not by themselves demonstrate that obsolete source bodies have been excluded. Usage observations and native display checks establish only what their original records show.
 
-A configured request adapter applies supported explicit content choices at the server boundary. When actual continued work requires changing the input representation of used material, the model compares that material with the next decision. It does not predict a lifetime or add a judgment call to every lookup. Core authenticates the native session, current input and original material independently of work authority and Autopilot's continuation decision. The adapter substitutes explicitly judged bodies with conclusions, unresolved conditions and an original retrieval reference when the protocol supports that change. It preserves needed or unjudged general source bodies and sends server answers unchanged. Original history remains available for explicit retrieval.
+A configured request adapter applies supported explicit content choices at the server boundary. When actual continued work requires changing the input representation of used material, the model compares that material with the next decision. It does not predict a lifetime or add a judgment call to every lookup. Core authenticates the native session, current input and original material independently of work authority. The adapter substitutes explicitly judged bodies with conclusions, unresolved conditions and an original retrieval reference when the protocol supports that change. It preserves needed or unjudged general source bodies and sends server answers unchanged. Original history remains available for explicit retrieval.
 
 Claude client substitution requires unsigned content and explicitly disabled thinking. Editing preceding messages would break their signed reasoning prefix. With an existing native context-management capability, the gateway can instead request server clearing for authenticated whole tool-result omissions that the provider's tool-name policy represents exactly. It preserves signed history and reasoning settings, protects necessary results of the same tool, and observes provider application separately from the request. Arbitrary text and producer-subbody replacement remain unsupported under signed thinking. The [native context procedure](_shared/context_lifecycle.md#apply-and-observe) owns these support conditions. Source conformance, installation and actual native adoption remain distinct observations.
 
@@ -90,8 +90,6 @@ The [verification procedure](coding-convention/verification-before-completion/SK
 
 Supported results retain their original evidence, verification times and correction links. A changed criterion, artifact or contrary observation reopens only the affected evidence. A recording or delivery defect does not justify replaying unchanged business work. An accurate partial answer may be accepted as an answer while required work remains incomplete. The wiki page [Focus and Recovery](https://github.com/AidALL/ghost-alice/wiki/Focus-and-Recovery) describes unresolved conditions and the model's next judgment.
 
-## Optional Autopilot extension
+## Necessary-work declaration
 
-The responding model declares current necessary unprocessed work, its reason and the next needed information in Core's existing route. Core authenticates the selected criteria, current human, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core can record this judgment independently of Autopilot.
-
-Installing Ghost-ALICE Autopilot adds supported-criterion application and continuation within an approved plan. It consumes current necessary-work feedback, checks the frozen boundary and dependencies, and sends only eligible next information. An unmet criterion alone creates no continuation request. The [Autopilot architecture](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README.md#how-autopilot-extends-core) owns the combined flow, its added hooks and the native host's conditional delivery of that request.
+The responding model declares current necessary unprocessed work, its reason and the next needed information in Core's existing route. Core authenticates the selected criteria, current human, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core records this declaration and schedules none of the work it names; only a later user request starts that work.

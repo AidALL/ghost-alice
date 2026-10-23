@@ -17,7 +17,7 @@ The machine gate index is [skill-catalog/session-gates.json](../../skill-catalog
 - [tool-checkpoint Visible Surface](#tool-checkpoint-visible-surface)
 - [tool-checkpoint Batch / Continuation Compression](#tool-checkpoint-batch--continuation-compression)
 - [Notes](#notes)
-- [Managed Completion Recording Contract](#managed-completion-recording-contract)
+- [Completion Recording Contract](#completion-recording-contract)
 - [Current Selection and Bounded Recovery](#current-selection-and-bounded-recovery)
 - [Repair and authority conditions](#repair-and-authority-conditions)
 
@@ -55,8 +55,8 @@ Runtime consumers use the public API with the exact session-receipt root/platfor
 
 1. The session-intent-analyzer SessionStart hook supplies the session receipt. The UserPromptSubmit hook records each input and adds model context only when that receipt was not delivered or intake failed. Core intake establishes exact canonical human input through direct Codex observation or trusted Claude reconciliation. Read-state remains a pure read. The current-session assistant applies task-router to select work; it separately applies skill-evolution when report-only analysis is required.
 2. The current-session assistant submits the normal route candidate to Core. Core Python code validates current input, ownership, admission and selected criteria before storing the ready projection.
-3. The current-session assistant follows any required boundary and owning workflow. The host enforces tool permission and executes permitted calls. The applicable Ghost-ALICE Autopilot pretool records provenance; PostToolUse retains strict audit.
-4. At completion, the guard and Ghost-ALICE Autopilot call the same input/body-bound Core assessment. Their independently registered hooks do not require a policy ordering between them.
+3. The current-session assistant follows any required boundary and owning workflow. The host enforces tool permission and executes permitted calls. PostToolUse retains strict audit.
+4. At completion, the Stop observer calls Core's input/body-bound assessment and records the result; it blocks nothing.
 
 Tool-checkpoint runs at the before-tool stage (host `PreToolUse`/`BeforeTool`) and is not user-input intake. Tool payloads and audit metadata do not grant native permission. Installed configuration proves neither hook firing nor host execution; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
 
@@ -107,17 +107,17 @@ Continuation refers only to polling the same process/session/tool-call ID. A den
 
 Procedure ownership prevents duplicated rules from drifting. The current-session assistant follows [instruction-body reuse](../../coding-convention/verification-before-completion/references/verify-or-reuse.md) and records actual reads or valid reuse internally. Routine clean states need no repeated prose; pending, changed and failed states retain their decision-relevant notice.
 
-Source edit, named test pass, installed bytes, native execution, accepted publication, applied criterion and visible answer are separate claims. Evidence for one stage cannot establish another.
+Source edit, named test pass, installed bytes, native execution, recorded review, met criterion and visible answer are separate claims. Evidence for one stage cannot establish another.
 
-## Managed Completion Recording Contract
+## Completion Recording Contract
 
 For a new completion or partial submission, Core Python code checks the current owned route before proof formatting and authenticated semantic review. A missing route therefore returns the route defect before requesting corrected proof fields.
 
 For this condition, the responding model records both judgments using the [owning review procedure](../../coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review). The [Core response flow](../../architecture.md#evidence-and-native-delivery) explains authentication and native answer delivery; [output semantics](tool-output-semantics.md#review-output-and-continuation) distinguishes supported and unsupported results.
 
-The managed registered hook chain uses v2 unit-qualified admitted criteria; direct public APIs retain the v1 default. Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
+Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
 
-On the managed native Stop path, the Ghost-ALICE Autopilot adapter uses its prepared provenance receipt and Core-authenticated review to record applicable proof. The model does not issue a second publication command for that native path. Accepted publication and applied completion remain distinct: the adapter authenticates the records before requesting Core’s guarded criterion update. Unsupported or unresolved criteria remain unmet. A supported report may fulfill no work criterion and require no publication.
+On the native Stop path, Core's observer validates the delivered text against the recorded review and keeps the result in strict audit; it issues no second command and holds no output. Supported, unsupported and unresolved states stay distinct: an unresolved criterion remains unmet, and a supported report may fulfill no work criterion.
 
 ## Current Selection and Bounded Recovery
 
