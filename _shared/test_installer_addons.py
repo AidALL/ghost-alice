@@ -33,8 +33,7 @@ class AddonCase(unittest.TestCase):
         self.enterContext(use_source(self.source))
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
-        for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_GHOST_ROOT", "GHOST_ALICE_ADDON_SOURCE_CACHE_DIR",
-                    "GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"):
+        for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_GHOST_ROOT", "GHOST_ALICE_ADDON_SOURCE_CACHE_DIR"):
             os.environ.pop(key, None)
         quiet(self.home)
         self.runner = FakeRunner()
@@ -55,13 +54,6 @@ class AddonCase(unittest.TestCase):
 
 
 class SourceTests(AddonCase):
-    def test_official_source(self):
-        # install.sh:203-213
-        self.assertEqual(addons.official_addon_source("autopilot"), "https://github.com/AidALL/ghost-alice-autopilot.git")
-        self.assertEqual(addons.official_addon_source("autopilot-mode"), "https://github.com/AidALL/ghost-alice-autopilot.git")
-        with mock.patch.dict(os.environ, {"GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE": "/tmp/local-autopilot"}):
-            self.assertEqual(addons.official_addon_source("autopilot"), "/tmp/local-autopilot")
-        self.assertIsNone(addons.official_addon_source("other"))
 
     def test_git_url_detection(self):
         # targets.sh:28-34

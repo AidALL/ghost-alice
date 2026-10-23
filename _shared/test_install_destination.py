@@ -33,8 +33,16 @@ def test_native_assessment_needs_no_display_trace_or_delivery_instruction():
     assert 'delivery-route:' not in json.dumps(payload)
 
 
-def test_bound_runner_transports_locations_without_adapter_args():
+def test_bound_runner_transports_locations_in_the_binding():
     assert 'binding' in inspect.signature(hook_profile_gate.run).parameters
+
+
+def test_binding_with_an_adapter_key_is_rejected(tmp_path):
+    import install_destination
+    value=destination_fixture(tmp_path/'owned')
+    encoded=install_destination.encode_binding(dict(schema_version='ghost-alice-hook-binding.v1',destination=value,adapter={'adapter_id':'x'}))
+    with pytest.raises(ValueError):
+        install_destination.decode_binding(encoded)
 
 
 def destination_fixture(root):
@@ -48,8 +56,7 @@ def _bound_hook_environment(tmp_path, platform, *, mode='normal', extra_env=None
     import install_destination
     root=tmp_path/'owned';root.mkdir()
     value=destination_fixture(root);value['mode']=mode
-    fields=('GHOST_ALICE_PROJECT_CWD','GHOST_ALICE_AUTOPILOT_CWD',
-            'GHOST_ALICE_AUTOPILOT_RUN_DIR','CLAUDE_PROJECT_DIR','GHOST_ALICE_PLATFORM')
+    fields=('GHOST_ALICE_PROJECT_CWD','CLAUDE_PROJECT_DIR','GHOST_ALICE_PLATFORM')
     code=f'import json,os,sys; print(json.dumps({{"continue":True,"systemMessage":json.dumps({{"env":{{k:os.environ.get(k) for k in {fields!r}}},"input":json.load(sys.stdin)}})}}))'
     command=f'{sys.executable.replace(chr(92),"/")} -c {shlex.quote(code)}'
     wrapped=base64.urlsafe_b64encode(command.encode()).decode()
@@ -64,14 +71,6 @@ def _bound_hook_environment(tmp_path, platform, *, mode='normal', extra_env=None
     return json.loads(json.loads(result.stdout)['systemMessage'])
 
 
-def test_normal_transport_does_not_invent_an_ap_target_from_installation_locations(tmp_path):
-    import install_destination
-    value=destination_fixture(tmp_path/'owned');value['mode']='normal'
-    env=install_destination.binding_environment(value,{})
-    assert 'GHOST_ALICE_AUTOPILOT_CWD' not in env
-    assert 'GHOST_ALICE_AUTOPILOT_RUN_DIR' not in env
-
-
 @pytest.mark.parametrize('platform',('claude','codex'))
 def test_normal_bound_runner_preserves_native_context_and_domain_project_hint(tmp_path,platform):
     native=str(tmp_path/'Windows/System32') if platform=='claude' else str(tmp_path/'native-project')
@@ -79,41 +78,14 @@ def test_normal_bound_runner_preserves_native_context_and_domain_project_hint(tm
     observed=_bound_hook_environment(tmp_path,platform,native_cwd=native,
         extra_env={'CLAUDE_PROJECT_DIR':cli_project})
     assert observed['env']['GHOST_ALICE_PROJECT_CWD']==native
-    assert observed['env']['GHOST_ALICE_AUTOPILOT_CWD'] is None
     assert observed['env']['CLAUDE_PROJECT_DIR']==cli_project
     assert observed['env']['GHOST_ALICE_PLATFORM']==platform
     assert observed['input']['cwd']==native
 
 
-@pytest.mark.parametrize('explicit',(
-    {'GHOST_ALICE_AUTOPILOT_RUN_DIR':'/explicit/run'},
-    {'GHOST_ALICE_AUTOPILOT_CWD':'/explicit/project'},
-    {'GHOST_ALICE_AUTOPILOT_RUN_DIR':'/explicit/run','GHOST_ALICE_AUTOPILOT_CWD':'/explicit/project'},
-    {'GHOST_ALICE_AUTOPILOT_CWD':'invalid-relative-project'},
-    {'GHOST_ALICE_AUTOPILOT_RUN_DIR':'invalid-relative-run'},
-))
-def test_normal_bound_runner_preserves_explicit_ap_targets_without_substitution(tmp_path,explicit):
-    native=str(tmp_path/'native-project')
-    observed=_bound_hook_environment(tmp_path,'claude',native_cwd=native,
-        extra_env=dict(CLAUDE_PROJECT_DIR=str(tmp_path/'different-claude-project'),**explicit))
-    assert observed['env']['GHOST_ALICE_PROJECT_CWD']==native
-    for key in ('GHOST_ALICE_AUTOPILOT_CWD','GHOST_ALICE_AUTOPILOT_RUN_DIR'):
-        assert observed['env'][key]==explicit.get(key)
-
-
 def test_normal_bound_runner_does_not_use_installation_project_when_native_cwd_is_invalid(tmp_path):
     observed=_bound_hook_environment(tmp_path,'codex',native_cwd='invalid-relative-cwd')
     assert observed['env']['GHOST_ALICE_PROJECT_CWD'] is None
-    assert observed['env']['GHOST_ALICE_AUTOPILOT_CWD'] is None
-
-
-def test_isolated_transport_keeps_its_owned_ap_target(tmp_path):
-    import install_destination
-    value=destination_fixture(tmp_path/'owned')
-    env=install_destination.binding_environment(value,dict(
-        GHOST_ALICE_AUTOPILOT_CWD='/explicit/project',GHOST_ALICE_AUTOPILOT_RUN_DIR='/explicit/run'))
-    assert env['GHOST_ALICE_AUTOPILOT_CWD']==value['project_root']
-    assert 'GHOST_ALICE_AUTOPILOT_RUN_DIR' not in env
 
 
 @pytest.mark.parametrize('invalid',({},[],'',False,0))
@@ -285,7 +257,7 @@ def test_invalid_addon_action_precedes_visibility_write(tmp_path):
 
 
 def test_managed_outer_parser_does_not_accept_lookalike_runner():
-    assert not install_hooks._hook_runner_id_match('python3 /tmp/not_hook_profile_gate.py run adapter-autopilot-mode-continue "eA=="','adapter-autopilot-mode-continue')
+    assert not install_hooks._hook_runner_id_match('python3 /tmp/not_hook_profile_gate.py run lookalike-hook "eA=="','lookalike-hook')
 
 
 def test_normal_upgrade_retains_ledger_after_source_relocation(tmp_path):

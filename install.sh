@@ -12,7 +12,6 @@
 #   bash install.sh --uninstall  # Full uninstall for all detected Ghost-ALICE managed footprint
 #   bash install.sh --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
 #   bash install.sh --list       # List available skills
-#   bash install.sh --addon autopilot  # Install the official autopilot addon
 #   bash install.sh --addon-source ./ghost-alice-addons --list-addons
 #   bash install.sh --status     # Check current install status
 #

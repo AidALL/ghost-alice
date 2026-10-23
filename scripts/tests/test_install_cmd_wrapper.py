@@ -50,11 +50,11 @@ class InstallCmdWrapperTest(unittest.TestCase):
     def test_docs_prefer_cmd_wrapper_when_powershell_policy_blocks_ps1(self) -> None:
         expectations = {
             README: [
-                "bash install.sh --addon autopilot",
+                "bash install.sh",
                 "./docs/getting-started/installation.md",
             ],
             README_KO: [
-                "bash install.sh --addon autopilot",
+                "bash install.sh",
                 "./docs/ko/getting-started/installation.md",
             ],
             INSTALLATION_DOC: [
@@ -97,61 +97,18 @@ class InstallCmdWrapperTest(unittest.TestCase):
         self.assertNotIn("rerun install.ps1", install_ps1)
         self.assertNotIn("Run .\\install.ps1 -List", install_ps1)
 
-    def test_docs_explain_autopilot_addon_installs_from_core_checkout(self) -> None:
-        expectations = {
-            README: [
-                "## Official Addons",
-                "bash install.sh --addon autopilot",
-                "Installation does not grant run approval",
-                "./docs/getting-started/installation.md",
-                "./docs/reference/official-addons.md",
-                "https://github.com/AidALL/ghost-alice-autopilot",
-            ],
-            README_KO: [
-                "## 공식 애드온",
-                "bash install.sh --addon autopilot",
-                "설치 자체가 실행 승인을 부여하지는 않습니다",
-                "./docs/ko/getting-started/installation.md",
-                "./docs/ko/reference/official-addons.md",
-                "https://github.com/AidALL/ghost-alice-autopilot",
-            ],
-            INSTALLATION_DOC: [
-                "## Install Official Addons",
-                "## Official Addon List",
-                "bash install.sh --addon autopilot",
-                "This install example is not a full runtime compatibility claim",
-                "compatibility-matrix.json",
-                "Windows Command Prompt or PowerShell",
-                "## Runtime And Platform Reference",
-            ],
-            INSTALLATION_DOC_KO: [
-                "## Install Official Addons",
-                "## Official Addon List",
-                "bash install.sh --addon autopilot",
-                "설치 예시가 전체 실행 환경의 호환성을 입증하지는 않습니다",
-                "compatibility-matrix.json",
-                "Windows Command Prompt와 PowerShell에서도",
-                "## Runtime And Platform Reference",
-            ],
-        }
-
-        for path, snippets in expectations.items():
-            with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
-                text = path.read_text(encoding="utf-8-sig")
-                for snippet in snippets:
-                    self.assertIn(snippet, text)
 
     def test_install_and_uninstall_docs_put_command_choices_before_runtime_detail(self) -> None:
         install_docs = {
-            INSTALLATION_DOC: ("## Quick Install", "## Install Official Addons", "## Runtime And Platform Reference"),
-            INSTALLATION_DOC_KO: ("## Quick Install", "## Install Official Addons", "## Runtime And Platform Reference"),
+            INSTALLATION_DOC: ("## Quick Install", "## Install Addons", "## Runtime And Platform Reference"),
+            INSTALLATION_DOC_KO: ("## Quick Install", "## Install Addons", "## Runtime And Platform Reference"),
         }
         for path, markers in install_docs.items():
             with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
                 text = path.read_text(encoding="utf-8-sig")
                 positions = [text.index(marker) for marker in markers]
                 self.assertEqual(positions, sorted(positions))
-                self.assertLess(text.index("## Install Official Addons"), text.index("## Install One Platform"))
+                self.assertLess(text.index("## Install Addons"), text.index("## Install One Platform"))
                 self.assertLess(text.index("## Common Commands"), text.index("## Runtime And Platform Reference"))
 
         uninstall_docs = [

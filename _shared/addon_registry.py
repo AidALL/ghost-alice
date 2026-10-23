@@ -71,6 +71,7 @@ _PROVIDED_REQUIRED_NONEMPTY_STR: tuple[str, ...] = (
     "ownership",
     "install_mode",
 )
+# "adapter" is a kind an older installer wrote; it is read so an old sidecar still validates, never written.
 _PROVIDED_KINDS = frozenset({"skill", "command", "hook", "adapter", "resource"})
 _PROVIDED_INSTALL_MODES = frozenset({"symlink", "junction", "copy", "missing"})
 

@@ -29,16 +29,6 @@ def _wiki_root() -> Path | None:
     return None
 
 
-def _autopilot_root() -> Path | None:
-    env = os.environ.get("GHOST_ALICE_AUTOPILOT_DIR")
-    if env:
-        return Path(env)
-    sibling = REPO_ROOT.parent / "ghost-alice-autopilot"
-    if sibling.exists():
-        return sibling
-    return None
-
-
 def _scan_files(paths: list[Path], patterns: dict[str, re.Pattern[str]]) -> list[str]:
     findings: list[str] = []
     for path in paths:
@@ -69,10 +59,10 @@ class PublicCommandSurfaceTest(unittest.TestCase):
     ]
     WINDOWS_NATIVE_WRAPPER_REQUIREMENTS = {
         REPO_ROOT / "docs" / "getting-started" / "installation.md": (
-            r".\install.cmd --addon autopilot"
+            r".\install.cmd"
         ),
         REPO_ROOT / "docs" / "ko" / "getting-started" / "installation.md": (
-            r".\install.cmd --addon autopilot"
+            r".\install.cmd"
         ),
     }
 
@@ -128,7 +118,7 @@ class PublicCommandSurfaceTest(unittest.TestCase):
             text = readme.read_text(encoding="utf-8")
             with self.subTest(readme=readme.name):
                 self.assertIn(guide, text)
-                self.assertEqual("bash install.sh --addon autopilot",
+                self.assertEqual("bash install.sh",
                                  text.split("```bash\n", 1)[1].split("```", 1)[0].strip())
 
     def test_public_docs_avoid_powershell_style_installer_command_surface(self) -> None:
@@ -176,20 +166,9 @@ class PublicCommandSurfaceTest(unittest.TestCase):
                     self.assertIn(
                         "https://github.com/AidALL/ghost-alice/blob/main/" + guide,
                         path.read_text(encoding="utf-8"))
-                    self.assertIn(r".\install.cmd --addon autopilot",
+                    self.assertIn(r".\install.cmd",
                                   (REPO_ROOT / guide).read_text(encoding="utf-8"))
 
-    def test_autopilot_docs_avoid_powershell_style_installer_command_surface_when_available(self) -> None:
-        autopilot = _autopilot_root()
-        if autopilot is None:
-            self.skipTest("set GHOST_ALICE_AUTOPILOT_DIR or place ghost-alice-autopilot next to the repo")
-        public_docs = [
-            autopilot / "README.md",
-            autopilot / "README_ko.md",
-            *_markdown_files(autopilot / "addons"),
-            *_markdown_files(autopilot / "docs"),
-        ]
-        self.assertEqual([], _scan_files(public_docs, self.PUBLIC_DOC_FORBIDDEN_PATTERNS))
 
     def test_repo_docs_have_ko_counterpart_for_each_english_markdown_file(self) -> None:
         english_root = REPO_ROOT / "docs"

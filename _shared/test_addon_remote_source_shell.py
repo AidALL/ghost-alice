@@ -45,32 +45,33 @@ def _python_311() -> bool:
     return False
 
 
-def _write_remote_autopilot_addon(work: Path) -> None:
-    skill = work / "addons" / "autopilot-mode" / "skill"
-    adapters = skill / "adapters"
-    adapters.mkdir(parents=True)
+def _write_remote_hook_addon(work: Path) -> None:
+    skill = work / "addons" / "remote-demo" / "skill"
+    hooks = work / "addons" / "remote-demo" / "hooks"
+    hooks.mkdir(parents=True)
+    skill.mkdir(parents=True)
     (work / "addons-manifest.json").write_text(
         json.dumps({
             "manifest_version": 1,
             "addons": [
                 {
-                    "id": "autopilot-mode",
-                    "path": "addons/autopilot-mode",
+                    "id": "remote-demo",
+                    "path": "addons/remote-demo",
                     "min_core_version": "0.1.0",
                 }
             ],
         }),
         encoding="utf-8",
     )
-    (work / "addons" / "autopilot-mode" / "addon.json").write_text(
+    (work / "addons" / "remote-demo" / "addon.json").write_text(
         json.dumps({
             "addon_version": "0.1.0",
-            "addon_id": "autopilot-mode",
-            "skills": [{"name": "autopilot-mode", "source": "skill", "skill_dir": "skill"}],
+            "addon_id": "remote-demo",
+            "skills": [{"name": "remote-demo", "source": "skill", "skill_dir": "skill"}],
             "platforms": ["claude"],
             "depends_on_core": ["task-router", "verification-before-completion"],
             "secrets": [],
-            "privileged_adapters": ["autopilot-mode"],
+            "hooks": [{"id": "watch", "event": "post_tool_use", "script": "hooks/watch.py"}],
         }),
         encoding="utf-8",
     )
@@ -78,13 +79,13 @@ def _write_remote_autopilot_addon(work: Path) -> None:
         textwrap.dedent(
             """\
             ---
-            name: autopilot-mode
+            name: remote-demo
             description: "Use for remote addon source install smoke tests."
             compatibility:
               - "Python 3.11+ standard library"
             ---
 
-            # autopilot-mode
+            # remote-demo
 
             ## Critical Rules
 
@@ -93,32 +94,29 @@ def _write_remote_autopilot_addon(work: Path) -> None:
         ),
         encoding="utf-8",
     )
-    (adapters / "autopilot_mode.py").write_text(
+    (hooks / "watch.py").write_text(
         textwrap.dedent(
             """\
             #!/usr/bin/env python3
             import json
             import sys
 
-            if len(sys.argv) > 1:
-                raise SystemExit(64)
-            print(json.dumps({"continue": True, "systemMessage": "remote-clone-adapter-smoke"}))
+            print(json.dumps({"continue": True, "systemMessage": "remote-clone-hook-smoke"}))
             """
         ),
         encoding="utf-8",
     )
-    (adapters / "autopilot_pretool.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
 
 
 def _make_bare_remote(root: Path) -> str:
     work = root / "addon-work"
     bare = root / "addon.git"
     work.mkdir()
-    _write_remote_autopilot_addon(work)
+    _write_remote_hook_addon(work)
     subprocess.run(["git", "init"], cwd=work, check=True, capture_output=True, text=True)
     subprocess.run(["git", "config", "user.name", "test"], cwd=work, check=True)
     subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=work, check=True)
-    subprocess.run(["git", "checkout", "-b", "p6-privileged-adapter"], cwd=work, check=True, capture_output=True, text=True)
+    subprocess.run(["git", "checkout", "-b", "remote-hook-fixture"], cwd=work, check=True, capture_output=True, text=True)
     subprocess.run(["git", "add", "."], cwd=work, check=True)
     subprocess.run(["git", "commit", "-m", "remote addon fixture"], cwd=work, check=True, capture_output=True, text=True)
     subprocess.run(["git", "clone", "--bare", str(work), str(bare)], cwd=root, check=True, capture_output=True, text=True)
@@ -137,7 +135,7 @@ def _hook_commands(settings_path: Path) -> list[str]:
 
 
 class RemoteAddonSourceLifecycleTest(unittest.TestCase):
-    def test_git_url_addon_source_installs_runs_and_uninstalls_adapter_hook(self):
+    def test_git_url_addon_source_installs_runs_and_uninstalls_its_hook(self):
         bash = _find_test_bash()
         if not bash:
             self.skipTest("bash required")
@@ -180,7 +178,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             install = run(
                 "--platform", "claude",
                 "--addon-source", remote_url,
-                "--addon-tag", "p6-privileged-adapter",
+                "--addon-tag", "remote-hook-fixture",
                 "--skip-source-health",
                 "task-router",
             )
@@ -189,17 +187,17 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             cache = home / ".ghost-alice" / "addon-source-cache"
             cloned = [p for p in cache.glob("*") if (p / "addons-manifest.json").is_file()]
             self.assertEqual(len(cloned), 1, msg=f"expected one cloned addon source under {cache}")
-            self.assertTrue((claude / "skills" / "autopilot-mode" / "SKILL.md").exists())
+            self.assertTrue((claude / "skills" / "remote-demo" / "SKILL.md").exists())
 
             commands = _hook_commands(claude / "settings.json")
-            adapter_commands = [cmd for cmd in commands if "[adapter:autopilot-mode] continue" in cmd]
-            self.assertEqual(len(adapter_commands), 1, msg="\n".join(commands))
+            hook_commands = [cmd for cmd in commands if "[addon:remote-demo] watch" in cmd]
+            self.assertEqual(len(hook_commands), 1, msg="\n".join(commands))
 
             hook = subprocess.run(
-                adapter_commands[0],
+                hook_commands[0],
                 cwd=project,
                 env=env,
-                input=json.dumps({"hook_event_name":"Stop", "session_id":"remote-addon-smoke", "cwd":str(project)}),
+                input=json.dumps({"hook_event_name":"PostToolUse", "session_id":"remote-addon-smoke", "cwd":str(project)}),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -209,39 +207,18 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(hook.returncode, 0, msg=hook.stderr + hook.stdout)
-            self.assertIn("remote-clone-adapter-smoke", hook.stdout)
+            self.assertIn("remote-clone-hook-smoke", hook.stdout)
 
-            # Authentic registration still rejects another native event and
-            # changed installed bytes; fixing the fixture must not weaken it.
-            def invoke_adapter(event):
-                return subprocess.run(adapter_commands[0], cwd=project, env=env,
-                    input=json.dumps({"hook_event_name":event, "session_id":"remote-addon-smoke", "cwd":str(project)}),
-                    capture_output=True, text=True, shell=True, timeout=60, check=False)
-            rejected = invoke_adapter("PreToolUse")
-            self.assertEqual(rejected.returncode, 126)
-            self.assertIn("registered adapter event mismatch", rejected.stderr)
-            self.assertNotIn("remote-clone-adapter-smoke", rejected.stdout)
-            installed_adapter = claude / "skills/autopilot-mode/adapters/autopilot_mode.py"
-            original = installed_adapter.read_bytes()
-            try:
-                installed_adapter.write_bytes(original + b"\n# changed installed fixture\n")
-                rejected = invoke_adapter("Stop")
-                self.assertEqual(rejected.returncode, 126)
-                self.assertIn("registered adapter hash mismatch", rejected.stderr)
-                self.assertNotIn("remote-clone-adapter-smoke", rejected.stdout)
-            finally:
-                installed_adapter.write_bytes(original)
-
-            per_addon = run("--platform", "claude", "--uninstall", "--addon", "autopilot-mode")
+            per_addon = run("--platform", "claude", "--uninstall", "--addon", "remote-demo")
             self.assertEqual(per_addon.returncode, 0, msg=per_addon.stderr + per_addon.stdout)
-            self.assertFalse((claude / "skills" / "autopilot-mode").exists())
+            self.assertFalse((claude / "skills" / "remote-demo").exists())
             commands_after = _hook_commands(claude / "settings.json")
-            self.assertFalse(any("[adapter:autopilot-mode]" in cmd for cmd in commands_after))
+            self.assertFalse(any("[addon:remote-demo]" in cmd for cmd in commands_after))
             self.assertTrue(any("tool-checkpoint" in cmd for cmd in commands_after), msg="core hooks should remain")
 
             status = run("--platform", "claude", "--status")
             self.assertEqual(status.returncode, 0, msg=status.stderr + status.stdout)
-            self.assertNotIn("[adapter:autopilot-mode]", status.stdout + status.stderr)
+            self.assertNotIn("[addon:remote-demo]", status.stdout + status.stderr)
 
     def test_zsh_launcher_reexecutes_bash_for_remote_addon_lifecycle(self):
         zsh = shutil.which("zsh")
@@ -288,7 +265,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             install = run(
                 "--platform", "claude",
                 "--addon-source", remote_url,
-                "--addon-tag", "p6-privileged-adapter",
+                "--addon-tag", "remote-hook-fixture",
                 "--skip-source-health",
                 "task-router",
             )
@@ -297,14 +274,14 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             cache = home / ".ghost-alice" / "addon-source-cache"
             cloned = [p for p in cache.glob("*") if (p / "addons-manifest.json").is_file()]
             self.assertEqual(len(cloned), 1, msg=f"expected one cloned addon source under {cache}")
-            self.assertTrue((claude / "skills" / "autopilot-mode" / "SKILL.md").exists())
+            self.assertTrue((claude / "skills" / "remote-demo" / "SKILL.md").exists())
 
             commands = _hook_commands(claude / "settings.json")
-            adapter_commands = [cmd for cmd in commands if "[adapter:autopilot-mode] continue" in cmd]
-            self.assertEqual(len(adapter_commands), 1, msg="\n".join(commands))
+            hook_commands = [cmd for cmd in commands if "[addon:remote-demo] watch" in cmd]
+            self.assertEqual(len(hook_commands), 1, msg="\n".join(commands))
 
             hook = subprocess.run(
-                adapter_commands[0],
+                hook_commands[0],
                 cwd=project,
                 env=env,
                 input=json.dumps({"hook_event_name":"Stop", "session_id":"remote-addon-zsh-smoke", "cwd":str(project)}),
@@ -317,17 +294,17 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(hook.returncode, 0, msg=hook.stderr + hook.stdout)
-            self.assertIn("remote-clone-adapter-smoke", hook.stdout)
+            self.assertIn("remote-clone-hook-smoke", hook.stdout)
 
-            per_addon = run("--platform", "claude", "--uninstall", "--addon", "autopilot-mode")
+            per_addon = run("--platform", "claude", "--uninstall", "--addon", "remote-demo")
             self.assertEqual(per_addon.returncode, 0, msg=per_addon.stderr + per_addon.stdout)
             commands_after = _hook_commands(claude / "settings.json")
-            self.assertFalse(any("[adapter:autopilot-mode]" in cmd for cmd in commands_after))
+            self.assertFalse(any("[addon:remote-demo]" in cmd for cmd in commands_after))
             self.assertTrue(any("tool-checkpoint" in cmd for cmd in commands_after), msg="core hooks should remain")
 
             status = run("--platform", "claude", "--status")
             self.assertEqual(status.returncode, 0, msg=status.stderr + status.stdout)
-            self.assertNotIn("[adapter:autopilot-mode]", status.stdout + status.stderr)
+            self.assertNotIn("[addon:remote-demo]", status.stdout + status.stderr)
 
     def test_bad_git_ref_fails_before_installing_remote_addon_targets(self):
         bash = _find_test_bash()
@@ -374,7 +351,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             )
             self.assertNotEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             self.assertIn("Addon source clone failed", install.stderr + install.stdout)
-            self.assertFalse((claude / "skills" / "autopilot-mode").exists())
+            self.assertFalse((claude / "skills" / "remote-demo").exists())
             self.assertFalse((claude / "settings.json").exists())
 
     def test_local_addon_source_rejects_addon_tag_without_install_side_effects(self):
@@ -392,7 +369,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             home.mkdir()
             claude.mkdir()
             addon.mkdir()
-            _write_remote_autopilot_addon(addon)
+            _write_remote_hook_addon(addon)
             env = os.environ.copy()
             env.update({
                 "HOME": str(home),
@@ -407,7 +384,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
                     str(source / "install.sh"),
                     "--platform", "claude",
                     "--addon-source", str(addon),
-                    "--addon-tag", "p6-privileged-adapter",
+                    "--addon-tag", "remote-hook-fixture",
                     "--skip-source-health",
                     "task-router",
                 ],
@@ -422,7 +399,7 @@ class RemoteAddonSourceLifecycleTest(unittest.TestCase):
             )
             self.assertNotEqual(install.returncode, 0, msg=install.stderr + install.stdout)
             self.assertIn("--addon-tag can only be used with git URL addon sources", install.stderr + install.stdout)
-            self.assertFalse((claude / "skills" / "autopilot-mode").exists())
+            self.assertFalse((claude / "skills" / "remote-demo").exists())
             self.assertFalse((claude / "settings.json").exists())
 
 

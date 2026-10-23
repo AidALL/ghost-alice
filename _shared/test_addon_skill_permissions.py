@@ -139,13 +139,13 @@ class AddonSkillPermissionTest(unittest.TestCase):
         self.assertEqual(resumed.returncode,2,resumed.stderr)
         self.assertEqual(json.loads(resumed.stdout)['resumed'][0]['status'],'error')
 
-    def test_codex_owned_adapter_trust_removed_preserving_core_and_user_tables(self):
+    def test_codex_owned_addon_hook_trust_removed_preserving_core_and_user_tables(self):
         import install_hooks
         import tomllib
-        marker='[adapter:autopilot-mode] continue'
-        runner=install_hooks.addon_installer.privileged_adapter_runner_id('autopilot-mode','continue')
-        script=self.root/'skills/autopilot-mode/adapters/autopilot_mode.py'
-        script.parent.mkdir(parents=True);script.write_text('# adapter fixture\n')
+        marker='[addon:demo] continue'
+        runner=install_hooks._managed_addon_runner_id('demo','continue')
+        script=self.root/'skills/demo/hooks/continue.py'
+        script.parent.mkdir(parents=True);script.write_text('# addon hook fixture\n')
         entry=install_hooks._hook_runner_command_entry(runner,install_hooks._hook_python_command(script,payload=True),marker,platform_key='codex')
         core=install_hooks._hook_runner_command_entry('completion','echo core','[completion-reminder] AGENTS.md',platform_key='codex')
         settings_file=self.settings.parent/'hooks.json'
@@ -157,29 +157,29 @@ class AddonSkillPermissionTest(unittest.TestCase):
         entries=install_hooks._codex_trusted_hook_state_entries(settings_file,settings,verified_addon_commands={('Stop',command)})
         config=self.settings.parent/'config.toml'
         config.write_text(install_hooks._merge_codex_hook_trust_state(baseline,entries)[0])
-        self.assertEqual(install_hooks.remove_adapter_hook(marker,platform_key='codex'),1)
+        self.assertEqual(install_hooks.remove_addon_hook(marker,platform_key='codex'),1)
         self.assertEqual(tomllib.loads(config.read_text()),tomllib.loads(baseline))
 
-    def test_codex_removed_adapter_takes_its_trust_table_whatever_its_hash_or_fields(self):
+    def test_codex_removed_addon_hook_takes_its_trust_table_whatever_its_hash_or_fields(self):
         # The table describes a position whose handler is gone; neither a changed hash nor a note keeps it.
         import install_hooks
         import tomllib
-        marker='[adapter:autopilot-mode] continue'
-        runner=install_hooks.addon_installer.privileged_adapter_runner_id('autopilot-mode','continue')
-        script=self.root/'skills/autopilot-mode/adapters/autopilot_mode.py'
-        script.parent.mkdir(parents=True);script.write_text('# adapter fixture\n')
+        marker='[addon:demo] continue'
+        runner=install_hooks._managed_addon_runner_id('demo','continue')
+        script=self.root/'skills/demo/hooks/continue.py'
+        script.parent.mkdir(parents=True);script.write_text('# addon hook fixture\n')
         entry=install_hooks._hook_runner_command_entry(runner,install_hooks._hook_python_command(script,payload=True),marker,platform_key='codex')
         settings_file=self.settings.parent/'hooks.json';settings={'hooks':{'Stop':[entry]}}
         settings_file.write_text(json.dumps(settings))
         key=install_hooks._codex_hook_state_key(settings_file,'Stop',0,0)
         config=self.settings.parent/'config.toml'
         config.write_text(install_hooks._merge_codex_hook_trust_state('',{key:'user-changed-hash'})[0])
-        install_hooks.remove_adapter_hook(marker,platform_key='codex')
+        install_hooks.remove_addon_hook(marker,platform_key='codex')
         self.assertEqual(tomllib.loads(config.read_text()).get('hooks',{}).get('state',{}),{})
         settings_file.write_text(json.dumps(settings))
         owned_hash=install_hooks._codex_command_hook_hash('Stop',settings['hooks']['Stop'][0],entry['hooks'][0])
         config.write_text(install_hooks._merge_codex_hook_trust_state('',{key:owned_hash})[0]+'user_note = "preserve"\n')
-        install_hooks.remove_adapter_hook(marker,platform_key='codex')
+        install_hooks.remove_addon_hook(marker,platform_key='codex')
         self.assertEqual(tomllib.loads(config.read_text()).get('hooks',{}).get('state',{}),{})
 
 

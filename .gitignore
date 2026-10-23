@@ -48,7 +48,6 @@ venv/
 # Local work notes
 TODO.md
 .tmp/
-.autopilot/
 
 # Local tool settings (track commands/ only)
 .claude/*

@@ -320,7 +320,7 @@ def _migrated_entry(host: str, state: dict, raw: object, sidecar_paths: dict, si
     else:
         kind = "support" if name == "_shared" else "skill"
     if kind not in KINDS:
-        # An adapter script or a hook file sits inside an install location; it is not one.
+        # A hook file sits inside an install location; it is not one.
         return None
     entry = {"name": name, "kind": kind, "mode": mode, "provider": f"addon:{addon_id}" if addon_id else "core",
              "source": str(raw.get("source_path") or ""), "source_commit": str(state.get("source_head") or "unknown"),

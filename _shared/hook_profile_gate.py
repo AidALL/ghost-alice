@@ -763,41 +763,6 @@ def run(hook_id: str, payload: str, *, platform: str | None = None, binding=None
         return _run(hook_id,payload,platform=platform,binding=binding)
 
 
-def _current_adapter_hash(binding, hook_id, platform, payload):
-    """Resolve a managed update from current registration, never from observed bytes.
-
-    A host can retain an older command after installation. Only the hash may
-    change: destination, adapter identity, event, script and command must match.
-    Missing, conflicting or malformed registrations retain the original pin.
-    """
-    filename = {'codex': 'hooks.json', 'claude': 'settings.json'}.get(platform)
-    if not filename:
-        return None
-    try:
-        config = json.loads((Path(binding['destination']['platform_dir']) / filename).read_text())
-        hashes = []
-        for group in config.get('hooks', {}).get(binding['adapter']['event'], []):
-            for entry in group.get('hooks', []):
-                if entry.get('type') != 'command':
-                    continue
-                parts = shlex.split(entry['command'])
-                if '--binding-b64' not in parts or 'run' not in parts:
-                    continue
-                run = parts.index('run')
-                if parts[run + 1:run + 4] != [hook_id, platform, payload]:
-                    continue
-                current = install_destination.decode_binding(parts[parts.index('--binding-b64') + 1])
-                adapter = dict(current.get('adapter', {}))
-                digest = adapter.pop('content_hash', None)
-                expected = dict(binding['adapter']); expected.pop('content_hash', None)
-                if (current['destination'] == binding['destination'] and adapter == expected
-                        and isinstance(digest, str) and re.fullmatch(r'[0-9a-f]{64}', digest)):
-                    hashes.append(digest)
-        return hashes[0] if len(hashes) == 1 else None
-    except (OSError, ValueError, KeyError, IndexError, TypeError):
-        return None
-
-
 def _reconcile_native_intake(env, hook_payload):
     """One native lifecycle transition, shared by every bound tool/Stop hook."""
     event = hook_payload.get('hook_event_name') or hook_payload.get('hookEventName')
@@ -898,7 +863,6 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     argv = _validate_shell_command(command, env=env)
     stdin_text = _read_stdin()
     hook_payload = _payload_from_stdin(stdin_text)
-    registration_refresh = None
     if binding is not None:
         if binding['destination']['mode'] == 'normal':
             # Core context follows the firing native cwd; explicit targets already in the environment stay.
@@ -910,50 +874,6 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         for flag in ("--root","--session-intent-root"):
             if flag in argv and argv[argv.index(flag)+1] != env["GHOST_ALICE_SESSION_INTENT_ROOT"]:
                 raise HookCommandRejected("inner ledger root conflicts with trusted binding", hook_payload=hook_payload)
-        if adapter := binding.get("adapter"):
-            from hook_definitions import load_privileged_adapter_allowlist, privileged_adapter_runner_id
-            spec = load_privileged_adapter_allowlist(official_path=Path(env["GHOST_ALICE_CORE_ROOT"])/"skill-catalog/privileged-adapters.json").get(adapter.get("adapter_id"))
-            if (not spec or spec.get("args_policy") != "no_args" or adapter.get("runner_id") != hook_id
-                    or len(argv) != 2 or argv[1] != adapter.get("script")):
-                raise HookCommandRejected("registered adapter identity/arguments mismatch", hook_payload=hook_payload)
-            event = _payload_from_stdin(stdin_text).get("hook_event_name") or _payload_from_stdin(stdin_text).get("hookEventName")
-            semantic = "on_agent_stop" if adapter.get("event") == "Stop" else "pre_tool_use"
-            script = Path(argv[1])
-            expected_rel = Path(spec["script_rel_by_event"][semantic])
-            mismatch = None
-            if event != adapter.get("event"):
-                mismatch = dict(mismatch="event", expected_event=adapter.get("event"), actual_event=event)
-            elif (hook_id != privileged_adapter_runner_id(adapter["adapter_id"],spec["hook_id_by_event"][semantic])
-                    or script.parts[-len(expected_rel.parts):] != expected_rel.parts):
-                mismatch = dict(mismatch="source", expected_relative_source=str(expected_rel), actual_source=str(script))
-            else:
-                actual_hash = __import__('hashlib').sha256(script.read_bytes()).hexdigest()
-                expected_hash = adapter.get("content_hash")
-                if actual_hash != expected_hash:
-                    expected_hash = _current_adapter_hash(binding, hook_id, platform, payload) or expected_hash
-                    if actual_hash == expected_hash:
-                        registration_refresh = dict(source='current-platform-registration',
-                            previous_hash=adapter.get('content_hash'), verified_hash=expected_hash)
-                if actual_hash != expected_hash:
-                    mismatch = dict(mismatch="hash", expected_hash=expected_hash if isinstance(expected_hash,str)
-                        and re.fullmatch(r"[0-9a-fA-F]{64}",expected_hash) else "invalid-sha256", actual_hash=actual_hash)
-            if mismatch:
-                message = f"registered adapter {mismatch['mismatch']} mismatch. Adapter was not executed. "
-                if mismatch["mismatch"] == "hash":
-                    message += (
-                        f"expected={mismatch['expected_hash']} actual={mismatch['actual_hash']}. "
-                        "Check the installed adapter and current registration. If they match, "
-                        "refresh the host's loaded hook commands; otherwise repair the managed "
-                        "installation/registration. Do not bypass hash validation or repeat "
-                        "unchanged business verification."
-                    )
-                else:
-                    message += "Repair the registered adapter event/source through the Core installer."
-                raise HookCommandRejected(message,
-                    hook_payload=hook_payload, audit_details=mismatch)
-            env["GHOST_ALICE_COMPLETION_SCHEMA"] = "autopilot-completion-receipt.v2"
-        elif hook_id.startswith("adapter-"):
-            raise HookCommandRejected("adapter missing registered transport descriptor", hook_payload=hook_payload)
     native_intake_failure = None
     if binding is not None:
         try:
@@ -1013,8 +933,6 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         profile=profile,
         strict_log_ref=log_ref,
     )
-    if registration_refresh is not None:
-        item['adapter_registration'] = registration_refresh
     if native_intake_failure is not None:
         item['native_intake_failure'] = native_intake_failure
     model_surface_output = _render_model_surface(item, host_stdout, result.stderr)

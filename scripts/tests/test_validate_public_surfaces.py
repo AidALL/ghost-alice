@@ -135,13 +135,12 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
                 bash install.sh
                 ```
 
-                ## Official Addons
+                ## Addons
 
-                Official addons are maintained as separate repositories and installed from the
-                Ghost-ALICE core checkout with a short alias.
+                An addon is installed from its own repository or a local path.
 
                 ```bash
-                bash install.sh --addon autopilot
+                bash install.sh --addon-source <repository-or-path>
                 ```
 
                 ## Documentation Map

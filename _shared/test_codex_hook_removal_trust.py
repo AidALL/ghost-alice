@@ -33,12 +33,12 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
         self.hooks = self.native / 'hooks.json'
         self.config = self.native / 'config.toml'
 
-    def adapter(self, name):
-        marker = f'[adapter:autopilot-mode] {name}'
-        runner = install_hooks.addon_installer.privileged_adapter_runner_id('autopilot-mode', name)
-        script = self.root / 'skills/autopilot-mode/adapters' / f'{name}.py'
+    def addon(self, name):
+        marker = f'[addon:demo] {name}'
+        runner = install_hooks._managed_addon_runner_id('demo', name)
+        script = self.root / 'skills/demo/hooks' / f'{name}.py'
         script.parent.mkdir(parents=True, exist_ok=True)
-        script.write_text('# isolated adapter fixture\n')
+        script.write_text('# isolated addon hook fixture\n')
         entry = install_hooks._hook_runner_command_entry(runner, install_hooks._hook_python_command(script, payload=True), marker, platform_key='codex')
         return marker, entry
 
@@ -58,28 +58,28 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
     def state(self):
         return tomllib.loads(self.config.read_text()).get('hooks', {}).get('state', {})
 
-    def test_sequential_adapter_removal_leaves_no_original_trust_rows(self):
-        first, a = self.adapter('first')
-        second, b = self.adapter('second')
+    def test_sequential_addon_hook_removal_leaves_no_original_trust_rows(self):
+        first, a = self.addon('first')
+        second, b = self.addon('second')
         self.seed([a, b])
-        self.assertEqual(install_hooks.remove_adapter_hook(first, platform_key='codex'), 1)
-        self.assertEqual(install_hooks.remove_adapter_hook(second, platform_key='codex'), 1)
+        self.assertEqual(install_hooks.remove_addon_hook(first, platform_key='codex'), 1)
+        self.assertEqual(install_hooks.remove_addon_hook(second, platform_key='codex'), 1)
         self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'], [])
         self.assertEqual(self.state(), {})
         self.assertEqual(tomllib.loads(self.config.read_text())['user'], {'keep': 'precious'})
 
-    def test_adapter_before_core_relocates_whole_trust_table_preserving_user_metadata(self):
-        marker, addon = self.adapter('continue')
+    def test_addon_hook_before_core_relocates_whole_trust_table_preserving_user_metadata(self):
+        marker, addon = self.addon('continue')
         core = install_hooks._hook_runner_command_entry('completion', 'echo core', '[completion-reminder] AGENTS.md', platform_key='codex')
         _, entries = self.seed([addon, core])
         self.config.write_text(self.config.read_text() + '# keep this explanation\nuser_note = "preserve"\n')
-        install_hooks.remove_adapter_hook(marker, platform_key='codex')
+        install_hooks.remove_addon_hook(marker, platform_key='codex')
         self.assertEqual(self.state(), {self.key(0): {'trusted_hash': entries[self.key(1)], 'user_note': 'preserve'}})
         self.assertIn('# keep this explanation\nuser_note = "preserve"', self.config.read_text())
         self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'], [core])
 
     def test_same_group_handler_indices_and_duplicate_survivors_keep_occurrence_metadata(self):
-        marker, addon = self.adapter('continue')
+        marker, addon = self.addon('continue')
         user = {'type': 'command', 'command': 'echo user'}
         group = {'matcher': '', 'hooks': [addon['hooks'][0], copy.deepcopy(user), copy.deepcopy(user)]}
         _, entries = self.seed([group])
@@ -89,46 +89,46 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
             pos = lines.index(header)
             lines.insert(pos + 2, f'user_note = "{label}"\n')
         self.config.write_text(''.join(lines))
-        install_hooks.remove_adapter_hook(marker, platform_key='codex')
+        install_hooks.remove_addon_hook(marker, platform_key='codex')
         self.assertEqual(self.state(), {
             self.key(0, 0): {'trusted_hash': entries[self.key(0, 1)], 'user_note': 'first'},
             self.key(0, 1): {'trusted_hash': entries[self.key(0, 2)], 'user_note': 'second'}})
         self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'][0]['hooks'], [user, user])
 
     def test_removed_handler_table_goes_with_its_metadata(self):
-        # The note annotates the removed adapter's position; the survivor's table moves into it.
-        marker, addon = self.adapter('continue')
+        # The note annotates the removed addon hook's position; the survivor's table moves into it.
+        marker, addon = self.addon('continue')
         user = {'hooks': [{'type': 'command', 'command': 'echo user'}]}
         _, entries = self.seed([addon, user])
         content = self.config.read_text()
         header = f'[hooks.state.{install_hooks._toml_basic_string(self.key(0))}]\n'
         self.config.write_text(content.replace(header, header + 'user_note = "precious"\n'))
-        self.assertEqual(install_hooks.remove_adapter_hook(marker, platform_key='codex'), 1)
+        self.assertEqual(install_hooks.remove_addon_hook(marker, platform_key='codex'), 1)
         self.assertEqual(self.state(), {self.key(0): {'trusted_hash': entries[self.key(1)]}})
         self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'], [user])
 
     def test_survivor_table_moves_without_granting_trust(self):
         # Moving a table grants no trust: a changed hash still asks the user.
-        marker, addon = self.adapter('continue')
+        marker, addon = self.addon('continue')
         user = {'hooks': [{'type': 'command', 'command': 'echo user'}]}
         _, entries = self.seed([addon, user])
         self.config.write_text(self.config.read_text().replace(entries[self.key(1)], 'user-changed-hash'))
-        self.assertEqual(install_hooks.remove_adapter_hook(marker, platform_key='codex'), 1)
+        self.assertEqual(install_hooks.remove_addon_hook(marker, platform_key='codex'), 1)
         self.assertEqual(self.state(), {self.key(0): {'trusted_hash': 'user-changed-hash'}})
         self.assertEqual(json.loads(self.hooks.read_text())['hooks']['Stop'], [user])
 
     def test_removal_drops_orphan_tables_of_this_hooks_file_only(self):
-        marker, addon = self.adapter('continue')
+        marker, addon = self.addon('continue')
         self.seed([addon])
         orphan = f'[hooks.state.{install_hooks._toml_basic_string(self.key(9))}]\ntrusted_hash = "orphan"\nenabled = true\n'
         other = '[hooks.state."/elsewhere/hooks.json:stop:0:0"]\ntrusted_hash = "other-file"\n'
         self.config.write_text(self.config.read_text() + orphan + other)
-        install_hooks.remove_adapter_hook(marker, platform_key='codex')
+        install_hooks.remove_addon_hook(marker, platform_key='codex')
         self.assertEqual(self.state(), {'/elsewhere/hooks.json:stop:0:0': {'trusted_hash': 'other-file'}})
         self.assertEqual(tomllib.loads(self.config.read_text())['user'], {'keep': 'precious'})
 
     def test_partial_config_write_failure_preserves_active_config_and_hooks(self):
-        marker, addon = self.adapter('continue')
+        marker, addon = self.addon('continue')
         self.seed([addon])
         before = self.config.read_bytes(), self.hooks.read_bytes(), self.config.stat().st_mtime_ns
         original_open, original_fdopen = builtins.open, os.fdopen
@@ -147,38 +147,38 @@ class CodexHookRemovalTrustTest(unittest.TestCase):
             return PartialWriter(original_fdopen(descriptor, mode, *args, **kwargs))
         with mock.patch('builtins.open', opened), mock.patch.object(runtime_config.os, 'fdopen', fdopened):
             with self.assertRaises(OSError):
-                install_hooks.remove_adapter_hook(marker, platform_key='codex')
+                install_hooks.remove_addon_hook(marker, platform_key='codex')
         self.assertEqual((self.config.read_bytes(), self.hooks.read_bytes(), self.config.stat().st_mtime_ns), before)
         self.assertEqual(list(self.native.glob('.*.tmp')), [])
 
     def test_settings_write_failure_restores_config_bytes_mode_and_original_mtime(self):
-        marker, addon = self.adapter('continue')
+        marker, addon = self.addon('continue')
         self.seed([addon])
         before = self.config.read_bytes(), self.hooks.read_bytes(), self.config.stat().st_mtime_ns
         with mock.patch.object(install_hooks, '_write_settings', side_effect=OSError('hooks-write-failure')):
             with self.assertRaises(OSError):
-                install_hooks.remove_adapter_hook(marker, platform_key='codex')
+                install_hooks.remove_addon_hook(marker, platform_key='codex')
         self.assertEqual((self.config.read_bytes(), self.hooks.read_bytes(), self.config.stat().st_mtime_ns), before)
         self.assertEqual(self.config.stat().st_mode & 0o777, 0o600)
 
     def test_config_symlink_preserved_and_target_updated_atomically(self):
-        marker, addon = self.adapter('continue')
+        marker, addon = self.addon('continue')
         self.seed([addon])
         target = self.root / 'user-config.toml'
         self.config.rename(target)
         self.config.symlink_to(target)
         link = self.config.lstat()
-        install_hooks.remove_adapter_hook(marker, platform_key='codex')
+        install_hooks.remove_addon_hook(marker, platform_key='codex')
         self.assertTrue(self.config.is_symlink())
         self.assertEqual((self.config.lstat().st_ino, self.config.lstat().st_mtime_ns), (link.st_ino, link.st_mtime_ns))
         self.assertEqual(target.stat().st_mode & 0o777, 0o600)
         self.assertEqual(self.state(), {})
 
     def test_dry_run_leaves_trust_and_settings_unchanged(self):
-        marker, addon = self.adapter('continue')
+        marker, addon = self.addon('continue')
         self.seed([addon])
         before = self.config.read_bytes(), self.hooks.read_bytes()
-        self.assertEqual(install_hooks.remove_adapter_hook(marker, platform_key='codex', dry_run=True), 1)
+        self.assertEqual(install_hooks.remove_addon_hook(marker, platform_key='codex', dry_run=True), 1)
         self.assertEqual((self.config.read_bytes(), self.hooks.read_bytes()), before)
 
 

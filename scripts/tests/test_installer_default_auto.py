@@ -144,7 +144,7 @@ class InstallerDefaultAutoTest(unittest.TestCase):
         install_ps1 = INSTALL_PS1.read_text(encoding="utf-8-sig")
 
         first_command = readme.split("```bash\n", 1)[1].split("```", 1)[0].strip()
-        self.assertEqual(first_command, "bash install.sh --addon autopilot")
+        self.assertEqual(first_command, "bash install.sh")
         self.assertIn("./docs/getting-started/installation.md", readme)
         self.assertNotIn("```powershell\n.\\install.ps1\n```", readme)
         self.assertNotIn("bash install.sh --auto", readme)
@@ -249,11 +249,10 @@ class InstallerDefaultAutoTest(unittest.TestCase):
             env["HOME"] = temp_home.as_posix()
             env["GHOST_ALICE_LANG"] = "en"
             env["GHOST_ALICE_INSTALL_PROGRESS"] = "0"
-            env["GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"] = ADDON_FIXTURE.as_posix()
 
             source = checkout_copy(self)
             result = subprocess.run(
-                [bash, str(source / "install.sh"), "--addon", "autopilot", "--skip-source-health"],
+                [bash, str(source / "install.sh"), "--addon-source", ADDON_FIXTURE.as_posix(), "--skip-source-health"],
                 cwd=source,
                 env=env,
                 capture_output=True,

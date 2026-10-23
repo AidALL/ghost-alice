@@ -11,7 +11,6 @@
 #   .\install.cmd --uninstall                      # Full uninstall for all detected Ghost-ALICE managed footprint
 #   .\install.cmd --platform codex --uninstall skill-evolution  # Remove selected core skills from one platform
 #   .\install.cmd --list                           # List available skills
-#   .\install.cmd --addon autopilot                # Install official autopilot addon
 #   .\install.cmd --status                         # Show current install status
 #   .\install.cmd --help                           # Show every command and option
 # Where .ps1 script execution is already allowed, .\install.ps1 takes the same arguments.

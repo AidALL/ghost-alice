@@ -11,23 +11,20 @@ Windows에서는 `install.cmd`가 기본 래퍼를 통해 인스톨러를 실행
 
 Windows 인스톨러에는 PowerShell 7.6 이상이 필요합니다. Windows PowerShell 5.1은 은퇴했습니다. 더 낮은 PowerShell에서는 인스톨러가 요구 사항을 출력하고 멈춥니다. `winget install --id Microsoft.PowerShell --exact`로 PowerShell을 설치한 뒤 `.\install.cmd`를 다시 실행해 주세요.
 
-## Core와 Ghost-ALICE Autopilot 함께 설치
+## Install Core
 
-저장소를 복제한 뒤 아래 명령으로 에이전트 플랫폼을 자동 감지하여 함께 설치해 주세요.
+저장소를 복제한 뒤 플랫폼 자동 감지 설치를 사용해 주세요:
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 ```
 
-Windows Command Prompt 또는 PowerShell에서는 `.\install.cmd --addon autopilot`을 사용해 주세요. 아래 상세 옵션으로 특정 에이전트 플랫폼을 선택하거나 설치를 개별적으로 관리하실 수 있습니다.
+Windows Command Prompt 또는 PowerShell에서는 `.\install.cmd`를 사용해 주세요. 아래 상세 옵션으로 특정 에이전트 플랫폼을 선택하거나 설치를 개별적으로 관리하실 수 있습니다.
 
 ## Contents
 
 - [Quick Install](#quick-install)
-- [Install Official Addons](#install-official-addons)
-- [Official Addon List](#official-addon-list)
-- [Install One Official Addon To One Platform](#install-one-official-addon-to-one-platform)
-- [Install Custom Addons](#install-custom-addons)
+- [Install Addons](#install-addons)
 - [Install One Platform](#install-one-platform)
 - [Check Status](#check-status)
 - [Update](#update)
@@ -43,7 +40,7 @@ macOS, Linux, WSL, Git Bash:
 ```bash
 git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice
 cd ~/ghost-alice
-bash install.sh --addon autopilot
+bash install.sh
 ```
 
 Windows Command Prompt:
@@ -51,54 +48,12 @@ Windows Command Prompt:
 ```cmd
 git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice
 cd %USERPROFILE%\ghost-alice
-.\install.cmd --addon autopilot
+.\install.cmd
 ```
 
-## Install Official Addons
+## Install Addons
 
-공식 애드온은 짧은 별칭으로 지정하며 복제한 Ghost-ALICE Core 저장소에서 설치합니다.
-
-macOS, Linux, WSL, Git Bash:
-
-```bash
-bash install.sh --addon autopilot
-```
-
-Windows Command Prompt 또는 PowerShell:
-
-```cmd
-.\install.cmd --addon autopilot
-```
-
-Windows Command Prompt와 PowerShell에서도 `.\install.cmd --addon autopilot`로 같은 공식 별칭을 사용합니다.
-
-이 명령은 복제한 Ghost-ALICE Core 저장소에서 실행해 주세요. Core 인스톨러가 공식 애드온 패키지를 가져오므로 Ghost-ALICE Autopilot 저장소를 따로 복제하거나 그 안에서 인스톨러를 실행하실 필요는 없습니다. 설치 예시가 전체 실행 환경의 호환성을 입증하지는 않습니다. 지원 범위는 애드온 저장소의 `compatibility-matrix.json`에서 확인해 주세요.
-
-한 플랫폼만 설치하는 명령은 [플랫폼별 공식 애드온 설치](#install-one-official-addon-to-one-platform)를 확인해 주세요.
-
-애드온별 동작, 상태 파일, 일시정지·재개와 제거 안내는 각 애드온 저장소에서 제공합니다. 공통 설치 명령은 Core 저장소에서 실행합니다.
-
-## Official Addon List
-
-| Addon | 용도 | macOS / Linux / WSL | Windows Command Prompt / PowerShell | Details |
-| --- | --- | --- | --- | --- |
-| autopilot | 명시적으로 승인된 자율 실행을 작업 항목 단위로 이어갑니다 | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
-
-Core `0.5.1`과 Ghost-ALICE Autopilot `0.5.1`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.1` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
-
-## Install One Official Addon To One Platform
-
-```bash
-bash install.sh --platform codex --addon autopilot
-```
-
-```cmd
-.\install.cmd --platform codex --addon autopilot
-```
-
-## Install Custom Addons
-
-사용자 정의, 조직 전용이나 로컬 개발 애드온은 `--addon-source PATH|URL`로 지정합니다.
+애드온은 자체 저장소나 로컬 경로에서 `--addon-source PATH|URL`로 설치합니다. 한 플랫폼에만 설치하려면 `--platform`을 더해 주세요.
 
 ```bash
 bash install.sh --addon-source /path/to/addon-repo
@@ -112,7 +67,7 @@ Git URL로 애드온 소스를 지정하면 `--addon-tag`로 로컬 소스 캐�
 
 ## Install One Platform
 
-다음 명령은 Core만 설치합니다. 선택한 플랫폼에 Ghost-ALICE Autopilot도 설치하시려면 `--addon autopilot`을 추가해 주세요.
+다음 명령은 Core만 설치합니다. 선택한 플랫폼에 애드온도 설치하시려면 `--addon-source PATH|URL`을 추가해 주세요.
 
 | 대상 | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |
@@ -165,16 +120,16 @@ cd %USERPROFILE%\ghost-alice
 
 소스 갱신이 충돌, 갈라진 브랜치나 fast-forward 불가 상태에서 멈추면 인스톨러를 반복 실행하지 마세요. 먼저 [문제 해결](./troubleshooting.md)을 확인해 주세요.
 
-`--update-source`는 Core 저장소의 소스를 갱신하며 애드온 패키지를 갱신하지 않습니다. 다음 명령으로 Core와 Ghost-ALICE Autopilot을 함께 다시 설치하고 설치 상태를 확인해 주세요. 부트스트랩 업데이트가 Core만 다시 설치하더라도 같은 명령으로 두 패키지를 함께 설치해 주세요.
+`--update-source`는 Core 저장소의 소스를 갱신하며 애드온 패키지를 갱신하지 않습니다. Core를 다시 설치하고(설치한 애드온은 `--addon-source`를 더해) 설치 상태를 확인해 주세요. 부트스트랩 갱신기는 Core만 다시 설치할 수 있으므로 그 뒤 이 명령들을 실행해 주세요.
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 bash install.sh --doctor
 bash install.sh --status
 ```
 
 ```cmd
-.\install.cmd --addon autopilot
+.\install.cmd
 .\install.cmd --doctor
 .\install.cmd --status
 ```
@@ -203,8 +158,7 @@ cd C:\path\to\new-checkout
 | 설치 상태 확인 | `bash install.sh --status` | `.\install.cmd --status` |
 | 보호 진단 실행 | `bash install.sh --doctor` | `.\install.cmd --doctor` |
 | 안전한 소스 갱신 | `bash install.sh --update-source` | `.\install.cmd --update-source` |
-| 공식 Ghost-ALICE Autopilot 설치 | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` |
-| 사용자 정의 애드온 설치 | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd --addon-source C:\path\to\addon-repo` |
+| 애드온 설치 | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd --addon-source C:\path\to\addon-repo` |
 | 선택한 Core 스킬 설치 | `bash install.sh task-router verification-before-completion` | `.\install.cmd task-router verification-before-completion` |
 | 전체 제거 | `bash install.sh --uninstall` | `.\install.cmd --uninstall` |
 | 선택 제거 | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd --platform codex --uninstall task-router` |
@@ -266,18 +220,18 @@ Claude Code와 Codex의 훅 설치에는 사용 가능한 Node.js 실행 환경�
 
 디스크의 설치 상태와 실행 중인 호스트의 반영은 별개입니다. 훅 명령을 바꾼 뒤에는 해당 네이티브 신뢰 항목을 확인하고 다음 실제 콜백을 관측해 주세요. 호스트가 이전 등록을 유지하면 재로드 또는 완전한 종료·재시작 절차를 사용합니다. 자세한 내용은 [네이티브 훅 신뢰와 재로드](./troubleshooting.md#native-hook-trust-and-reload)를 확인해 주세요. 호스트 반영을 확인하려고 변경 없는 업무 검증을 반복하지 않습니다.
 
-### Core와 선택적 Autopilot 전환
+### Core and addon transitions
 
-Core 설치와 애드온 제거는 별도 작업입니다. 새 Core 설치는 지침, 입력·출처 연결, 작업·검토 기록과 Core 훅을 제공합니다. Autopilot의 자동 재개는 등록하지 않습니다. 애드온 옵션 없이 Core를 갱신하면 이미 설치된 애드온은 유지합니다. `--addon-skip`은 애드온 설치를 건너뛰며 기존 애드온의 제거를 요청하지 않습니다.
+Core 설치와 애드온 제거는 별도 작업입니다. 새 Core 설치는 지침, 입력·출처 연결, 작업·검토 기록과 Core 훅을 제공합니다. 애드온 옵션 없이 Core를 갱신하면 이미 설치된 애드온은 유지합니다. `--addon-skip`은 애드온 설치를 건너뛰며 기존 애드온의 제거를 요청하지 않습니다.
 
 | 동작 | Codex 예시 | 관리 범위 |
 | --- | --- | --- |
 | 새 Core 설치 또는 Core 갱신 | `bash install.sh --platform codex` | Core를 설치·갱신하며 기존 애드온 파일과 등록은 유지합니다 |
-| Autopilot 추가 또는 갱신 | `bash install.sh --platform codex --addon autopilot` | Core와 매니페스트가 선택한 애드온 스킬·전용 어댑터를 설치합니다 |
-| Core를 유지하며 Autopilot 제거 | `bash install.sh --platform codex --uninstall --addon autopilot-mode` | 기록된 애드온·어댑터 훅을 먼저 해제하고 검증된 전용 파일을 제거합니다 |
+| 애드온 추가 또는 갱신 | `bash install.sh --platform codex --addon-source /path/to/addon-repo` | Core와 애드온 매니페스트가 선택한 스킬·관찰용 훅을 설치합니다 |
+| Core를 유지하며 애드온 제거 | `bash install.sh --platform codex --uninstall --addon <addon-id>` | 기록된 애드온 훅을 먼저 해제하고 검증된 애드온 파일을 제거합니다 |
 | 한 플랫폼 제거 | `bash install.sh --platform codex --uninstall` | 해당 플랫폼의 애드온·Core를 제거하고 다른 설치 플랫폼이 사용하는 공용 파일은 유지합니다 |
 
-Core는 모델이 추천하는 후속 작업을 Autopilot과 독립적으로 인증합니다. 선택적이고 승인된 계속 경로가 호스트에 다음 호출을 요청합니다. Autopilot을 제거해도 Core 기록은 유지되며 미충족 기준이 완료로 바뀌지 않습니다. 개별 애드온 제거는 수정된 파일과 부속 기록·제거 표시를 검토 또는 재시도를 위해 남기면서 해당 애드온의 관리되는 실행 훅 등록을 해제합니다. 이는 설정·파일 작업이며, 실행 중인 호스트의 반영과 이미 전달된 작업의 중지는 별도 관찰입니다.
+애드온을 제거해도 Core 기록은 유지되며 미충족 기준이 완료로 바뀌지 않습니다. 개별 애드온 제거는 수정된 파일과 부속 기록·제거 표시를 검토 또는 재시도를 위해 남기면서 해당 애드온의 관리되는 실행 훅 등록을 해제합니다. 이는 설정·파일 작업이며, 실행 중인 호스트의 반영과 이미 전달된 작업의 중지는 별도 관찰입니다.
 
 전체 또는 플랫폼 제거는 미결 병합 원본과 마지막 플랫폼의 설치 복구 사본을 `~/.ghost-alice/uninstall-backup/<platform>/support-state/` 아래의 새 디렉터리에 보존합니다. 기존 보존 사본, 소스 작업 트리, 대화·세션 근거, 의도 원장, 감사 기록과 비밀 파일은 유지합니다. 소유권과 공용 파일의 처리 기준은 [제거 안내](./uninstall.md)를 확인해 주세요.
 
@@ -289,7 +243,7 @@ Claude 인스톨러는 매니페스트가 선택한 애드온의 `Skill(...)` �
 
 - `skill-catalog/skills.json`의 Core 스킬
 - coding-convention 작업 절차 스킬
-- 공식 `--addon` 별칭이나 사용자 정의 `--addon-source`로 설치하는 선택 애드온 스킬
+- `--addon-source`로 설치하는 선택 애드온 스킬
 - `_shared/` 공용 도구
 - 플랫폼 훅 설정
 - `~/.ghost-alice/hooks/`의 Node 기반 훅 실행 파일
