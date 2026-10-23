@@ -8,8 +8,10 @@ Run: python3 -m pytest _shared/test_addon_uninstall.py -q
 
 from __future__ import annotations
 
+import base64
 import json
 import os
+import shlex
 import shutil
 import sys
 import tempfile
@@ -296,6 +298,16 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertFalse(self._marker("alpha").exists())  # dry-run persists no marker
 
 
+def _with_old_adapter_binding(command: str) -> str:
+    """The registration an older installer wrote: its binding carries the adapter key this Core rejects."""
+    outer = shlex.split(command, comments=True)
+    encoded = outer[outer.index("--binding-b64") + 1]
+    binding = json.loads(base64.urlsafe_b64decode(encoded))
+    binding["adapter"] = {"adapter_id": "demo-addon", "runner_id": "adapter-demo-addon-stop", "script": "/x/adapters/stop.py",
+                          "content_hash": "0" * 64, "event": "Stop"}
+    return command.replace(encoded, install_destination.encode_binding(binding))
+
+
 class ExecutableDetachmentOrderTest(UninstallTestBase):
     """Detach real temporary hook registrations before changing addon files."""
 
@@ -326,6 +338,7 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         retired = install_hooks._hook_runner_command_entry(
             "adapter-demo-addon-stop", f'{sys.executable} "{retired_script}"', "[adapter:demo-addon] stop", platform_key="claude",
         )
+        retired["hooks"][0]["command"] = _with_old_adapter_binding(retired["hooks"][0]["command"])
         self.retained_commands = ["echo core-completion # [completion]", "echo user-hook"]
         self.settings.write_text(json.dumps({"hooks": {
             "PostToolUse": [observer],

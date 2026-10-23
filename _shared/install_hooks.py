@@ -1707,11 +1707,13 @@ def _io_trace_hook_command(*, payload_mode: bool = False) -> str:
     return f'{_hook_python_command(io_script, payload=payload_mode)} # {IO_TRACE_MARKER}'
 
 
-def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
+def _hook_runner_id_match(command: str, hook_id: str | None, *, decode_binding: bool = True) -> bool:
     """Recognize the actual managed outer argv, including serialized binding.
 
     Marker text and a lookalike filename do not establish runner ownership.
     Commands without an outer binding are removable without granting v2 capability.
+    A retired adapter registration carries a binding this Core rejects; `decode_binding=False`
+    recognizes its argv for removal only, never for execution.
     """
     if not hook_id:
         return False
@@ -1736,7 +1738,9 @@ def _hook_runner_id_match(command: str, hook_id: str | None) -> bool:
             return False
         args=argv[script_index+1:]
         if len(args) in {5,6} and args[-2]=="--binding-b64":
-            install_destination.decode_binding(args[-1]);args=args[:-2]
+            if decode_binding:
+                install_destination.decode_binding(args[-1])
+            args=args[:-2]
         if len(args) not in {3,4} or args[:2] != ["run",normalize_hook_id(hook_id)]:
             return False
         base64.urlsafe_b64decode(args[-1]).decode('utf-8')
@@ -1790,9 +1794,12 @@ RETIRED_ADAPTER_COMMENT_RE = re.compile(
 
 
 def _is_retired_adapter_command(command: str) -> bool:
-    """A managed adapter registration: the retired comment and a runner call with the same id."""
+    """A managed adapter registration: the retired comment and a runner call with the same id.
+
+    Its binding carries the adapter key this Core rejects, so the argv is read without decoding the binding.
+    """
     match = RETIRED_ADAPTER_COMMENT_RE.search(command)
-    return match is not None and _hook_runner_id_match(command, match.group("runner_id"))
+    return match is not None and _hook_runner_id_match(command, match.group("runner_id"), decode_binding=False)
 
 
 def _is_retired_hook_command(command: str) -> bool:

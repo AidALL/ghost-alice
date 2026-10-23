@@ -25,6 +25,16 @@ import install_destination  # noqa: E402
 from test_addon_hooks import _make_addon  # noqa: E402
 
 
+def _with_old_adapter_binding(command: str) -> str:
+    """The registration an older installer wrote: its binding carries the adapter key this Core rejects."""
+    outer = shlex.split(command, comments=True)
+    encoded = outer[outer.index("--binding-b64") + 1]
+    binding = json.loads(base64.urlsafe_b64decode(encoded))
+    binding["adapter"] = {"adapter_id": "demo", "runner_id": "adapter-demo-continue", "script": "/x/adapters/demo.py",
+                          "content_hash": "0" * 64, "event": "Stop"}
+    return command.replace(encoded, install_destination.encode_binding(binding))
+
+
 class AddonHookInstallTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -170,9 +180,10 @@ class AddonHookInstallTest(unittest.TestCase):
         # adapters, so install removes the registration and keeps a user command that only quotes the comment.
         script = self.tmp / "old-adapter.py"
         script.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
-        retired = install_hooks._entry_command(install_hooks._hook_runner_command_entry(
+        retired = _with_old_adapter_binding(install_hooks._entry_command(install_hooks._hook_runner_command_entry(
             "adapter-demo-continue", install_hooks._hook_python_command(script, payload=True),
-            "[adapter:demo] continue", platform_key="claude"))
+            "[adapter:demo] continue", platform_key="claude")))
+        self.assertTrue(install_hooks._is_retired_hook_command(retired))
         user_audit = "echo user audit '[adapter:demo] continue [hook-runner:adapter-demo-continue]' >> ~/audit.log"
         (self.claude / "settings.json").write_text(json.dumps({
             "hooks": {"Stop": [{"matcher": "", "hooks": [
