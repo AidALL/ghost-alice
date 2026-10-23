@@ -321,7 +321,8 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         })
         reg.write_record(record, addons_dir=self.addons)
         observer = install_hooks._hook_runner_command_entry(
-            "obs", "echo observer", "[addon:demo-addon] obs", platform_key="claude",
+            install_hooks._managed_addon_runner_id("demo-addon", "obs"), "echo observer", "[addon:demo-addon] obs",
+            platform_key="claude",
         )
         retired_script = self.src / "demo-addon" / "pilot-skill" / "adapters" / "stop.py"
         retired_script.parent.mkdir(parents=True)
@@ -621,7 +622,7 @@ class UninstallScenarioGapTest(UninstallTestBase):
         self._install("alpha", ["one"])
         settings_path = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "settings.json"
         hook_entry = install_hooks._hook_runner_command_entry(
-            "addon:alpha:obs",
+            install_hooks._managed_addon_runner_id("alpha", "obs"),
             f"{Path(__file__).parent / 'hook_profile_gate.py'} run obs e30=",
             "[addon:alpha] obs",
         )
