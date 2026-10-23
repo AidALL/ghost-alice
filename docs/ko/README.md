@@ -6,19 +6,19 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 
 쌍을 이루는 문서는 상단의 언어 전환 줄로 오가실 수 있습니다. 전환 줄 형식은 [언어 정책](concepts/language-policy.md)에서 정합니다.
 
-Core `0.5.1`과 Ghost-ALICE Autopilot `0.5.1`은 routing과 managed completion API를 사용합니다. Ghost-ALICE Autopilot에는 Core `0.5.1` 이상이 필요합니다. 소스 검사, native runtime 검증과 게시는 서로 다른 근거를 제공합니다.
+Core `0.5.1`은 routing과 완료 검토 API를 제공합니다. 소스 검사, native runtime 검증과 공개 릴리즈는 서로 다른 근거를 제공합니다.
 
-응답 모델은 주장과 원본 출처, 답변 전체와 사용자 목적을 판단합니다. Core는 기록을 인증하고 네이티브 호스트가 답변을 표시합니다. 단독 흐름은 [Core 아키텍처](../../architecture_ko.md), 애드온의 근거 반영과 승인 계획의 계속 작업은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)를 확인해 주세요.
+응답 모델은 주장과 원본 출처, 답변 전체와 사용자 목적을 판단합니다. Core는 기록을 인증하고 네이티브 호스트가 답변을 표시합니다. 흐름은 [Core 아키텍처](../../architecture_ko.md)를 확인해 주세요.
 
 ## 빠른 설치
 
-복제한 Core 저장소에서 다음 명령을 실행하시면 인스톨러가 사용 가능한 에이전트 플랫폼을 자동으로 감지하여 Core와 Ghost-ALICE Autopilot을 함께 설치합니다.
+복제한 Core 저장소에서 다음 명령을 실행하시면 인스톨러가 사용 가능한 에이전트 플랫폼을 자동으로 감지하여 Core를 설치합니다.
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 ```
 
-에이전트는 상태 질문과 교정 중에도 승인된 작업의 범위를 유지하며 작업을 이어가고, 완료 보고를 항목별 근거와 연결합니다. 저장소 복제, 운영체제별 명령과 명시적인 플랫폼 선택은 [설치 안내](./getting-started/installation.md)를 확인해 주세요.
+에이전트는 상태 질문과 교정 중에도 승인된 작업의 범위를 유지하며 작업을 이어가고, 완료 보고를 항목별 근거와 연결합니다. 저장소 복제, 운영체제별 명령과 명시적인 플랫폼 선택은 [설치 안내](./getting-started/installation.md)를 확인해 주세요. 애드온은 자체 저장소나 로컬 경로에서 설치합니다. [Install Addons](./getting-started/installation.md#install-addons)를 확인해 주세요.
 
 ## 시작 안내
 

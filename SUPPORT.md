@@ -23,7 +23,7 @@ Ghost-ALICE OS is an open source project. Support is provided on a best-effort b
 - Troubleshooting: [docs/getting-started/troubleshooting.md](./docs/getting-started/troubleshooting.md)
 - Repository map: [docs/reference/repository-structure.md](./docs/reference/repository-structure.md)
 
-Ghost-ALICE Autopilot 0.5.1 requires Core 0.5.1 or later for routing and completion APIs. For Codex contract-loading issues, include redacted status/doctor results for the managed loader and its declared `ghost-alice-governance.md` companion. For a running host, distinguish installed files from observed native loading using the [hook trust and reload guide](./docs/getting-started/troubleshooting.md#native-hook-trust-and-reload). For Ghost-ALICE Autopilot issues, identify the selected platform and current session without sharing private run-state files.
+For Codex contract-loading issues, include redacted status/doctor results for the managed loader and its declared `ghost-alice-governance.md` companion. For a running host, distinguish installed files from observed native loading using the [hook trust and reload guide](./docs/getting-started/troubleshooting.md#native-hook-trust-and-reload). For an addon issue, identify the selected platform, the addon source and the current session without sharing private run-state files, and report the addon's own behavior to that addon's repository.
 
 ## Opening An Issue
 

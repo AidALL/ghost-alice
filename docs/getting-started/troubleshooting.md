@@ -17,7 +17,7 @@ This document is a fast recovery playbook for cases where a user cannot pull the
 - [4. When Local Changes Must Be Preserved](#4-when-local-changes-must-be-preserved)
 - [5. Run the Installer After Git Is Clean](#5-run-the-installer-after-git-is-clean)
 - [6. Operating Principles](#6-operating-principles)
-- [Privileged Adapter Registration Mismatch](#privileged-adapter-registration-mismatch)
+- [Retired Adapter Registration](#retired-adapter-registration)
 - [Native Hook Trust And Reload](#native-hook-trust-and-reload)
 - [Intake Warning And Doctor Lists](#intake-warning-and-doctor-lists)
 
@@ -137,10 +137,10 @@ Then share `git status --short --branch`, the conflict file list, and both diff 
 
 ### 5. Run the Installer After Git Is Clean
 
-After source recovery, reinstall Core and Ghost-ALICE Autopilot together. `--update-source` alone refreshes Core source; the addon is fetched by the paired installation command. On Windows, use `.\install.cmd --addon autopilot`, then `--doctor` and `--status`:
+After source recovery, reinstall Core. `--update-source` alone refreshes the Core source; the installation command below installs it, and installed addons stay installed. On Windows, use `.\install.cmd`, then `--doctor` and `--status`:
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 bash install.sh --doctor
 bash install.sh --status
 ```
@@ -154,21 +154,19 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 - A blocked-user guide is not enough when it exists only inside the repo. Keep an online source link available from the Wiki so the guide can be read without pulling.
 - Do not run the installer while `UU` or `AA` remains in Git status.
 
-## Privileged Adapter Registration Mismatch
+## Retired Adapter Registration
 
-The Core hook runner pins each privileged adapter's script hash, event and source in its registered command. A mismatch rejects that invocation with exit 126 before the adapter executes. The rejection message identifies `hash`, `event` or `source`; the strict hook log retains the diagnostic under `surface_item.rejection_diagnostic` and the original native session.
+An older installer registered addon adapters with a binding that carried an `adapter` key. The current Core hook runner accepts a binding with `schema_version` and `destination` only, so such an invocation ends with `hook binding rejected` and exit 126 before any module is imported; the strict hook log retains the rejection with its original native session. Every install and uninstall removes those retired registrations from the host's hook settings.
 
-For a hash mismatch, compare the rejected command's expected hash, the installed script's actual hash and the currently registered command. If the current registration and installed script match but the rejected invocation expects an older hash, that invocation used an older registration. Refresh the host's loaded hook commands through its available session/restart controls. A registration-file update alone is not evidence that an existing host consumed it. If the current registration also differs from the installed script, repair the managed installation and registration together after preserving local changes. Event/source mismatches require repair of the registered mapping through the Core installer.
-
-Do not bypass hash validation, regenerate historical proof timestamps, or repeat unchanged business verification to fix registration. Confirm recovery from a subsequent native Ghost-ALICE Autopilot callback. Distinguish an accepted `pending-adapter` publication from an `applied` result and its application reference in the owning session's Stop log.
+Run the Core installer to remove a retired registration, then reload the host as described below. A registration-file update alone is not evidence that a running host consumed it. Do not edit the binding by hand or repeat unchanged business verification to repair registration.
 
 ## Native Hook Trust And Reload
 
-Check installation, native trust and running-host adoption separately. The installed script and registered command can match while the host retains a previous command or trust decision. A native `modified` hook state identifies a trust mismatch; it is different from the Core adapter runner's exit 126 rejection.
+Check installation, native trust and running-host adoption separately. The installed script and registered command can match while the host retains a previous command or trust decision. A native `modified` hook state identifies a trust mismatch; it is different from the Core hook runner's exit 126 rejection of a retired registration.
 
 1. Preserve local configuration, then use the Core installer to synchronize the managed hook command and its native trust entry. Review the exact changed command before accepting its new hash. Keep unrelated trust entries and each hook's enabled/disabled choice unchanged.
 2. Use the host's available reload controls. If the active host still uses an older command or trust entry, fully exit and reopen it; starting another conversation alone is not proof of reload.
-3. Observe the next actual input, routing and Ghost-ALICE Autopilot callback in that session. Installed files, a separate diagnostic process and a successful publication request do not establish what the active host invoked.
+3. Observe the next actual input and routing in that session. Installed files and a separate diagnostic process do not establish what the active host invoked.
 
 Keep strict audit enabled. Restore the affected registration or trust binding without disabling the guard or replaying completed business checks. A remaining recording failure is reported separately from the supported business result.
 

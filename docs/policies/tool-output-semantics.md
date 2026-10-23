@@ -21,10 +21,9 @@ flowchart LR
   M["Responding model: claims and whole-answer judgments"] --> C["Core: authenticate bindings"]
   C -->|Status and references| M
   M --> H["Native host: display answer"]
-  H -->|Stop observation| A["Autopilot: apply eligible evidence"]
-  A -->|Authorized task request| H
+  H -->|Stop observation| S["Core observer: record the assessment"]
 ```
 
-An accepted answer can accurately report incomplete work. Authentication, publication and criterion application are separate results. Original evidence keeps its original verification time during unchanged reuse. A recording failure does not authorize repeating the business operation.
+An accepted answer can accurately report incomplete work. Authentication, recording and criterion state are separate results. Original evidence keeps its original verification time during unchanged reuse. A recording failure does not authorize repeating the business operation.
 
-Native Stop observes the response and permits the native conversation to continue. A diagnostic assessment does not establish answer visibility or create missing judgments. Autopilot selects continuation from an admitted plan; a returned request proves neither delivery nor execution. See the [architecture](../../architecture.md) and [session gate owner map](session-gate-matrix.md) for responsibilities.
+Native Stop observes the response and permits the native conversation to continue. A diagnostic assessment does not establish answer visibility or create missing judgments. See the [architecture](../../architecture.md) and [session gate owner map](session-gate-matrix.md) for responsibilities.

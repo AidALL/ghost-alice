@@ -2,7 +2,7 @@
 
 언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/installer-platform-compatibility-matrix.md)
 
-This document is the compatibility test contract for the Ghost-ALICE installer. The [Core architecture](../../architecture.md) describes the standalone responsibilities and return paths; the [Autopilot architecture](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README.md#how-autopilot-extends-core) describes the addon extension.
+This document is the compatibility test contract for the Ghost-ALICE installer. The [Core architecture](../../architecture.md) describes the responsibilities and return paths.
 
 ## Contents
 
@@ -37,7 +37,7 @@ This document is the compatibility test contract for the Ghost-ALICE installer. 
 
 The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. Hook payload and platform permission policy must also be synchronized with the current repo contract. Even if an older hook entry exists, the installer must update managed entries when the runtime payload changes. Hook presence and `agent_visibility.profile` are separate concerns. The profile controls the user-facing message surface; it must not relax missing or drift judgments.
 
-Core Python code stores admitted work units and criteria and authenticates the current-session assistant's claim–evidence judgments. Official privileged adapters consume that contract at their declared native events. Addon Python code manages immutable records and receipt schemas; the current-session assistant follows addon instructions to judge additional work and require evidence for the affected addon behavior.
+Core Python code stores admitted work units and criteria and authenticates the current-session assistant's claim–evidence judgments. An addon registers observational hooks at its declared native events, and the Core runner never lets them block the host. Addon Python code manages its own records; the current-session assistant follows addon instructions to judge additional work and require evidence for the affected addon behavior.
 
 Runtime live smoke follows `docs/policies/live-smoke-regression.md`. That procedure sends the same README first 10 lines request to the claimed installed Claude Code and Codex targets to observe `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, and skill activation permission behavior.
 
@@ -68,7 +68,7 @@ Runtime tool-checkpoint payload does not require routine recovery cost or recove
 
 ### completion-reminder
 
-Installed completion hooks consume Core's current-input and exact-answer assessment. Core authenticates the model's distinct claim/source and whole-response judgments; skill loading and printed audit fields are not separate acceptance prerequisites. The independently registered Core guard and Ghost-ALICE Autopilot adapter must use this same assessment without assuming their invocation order.
+Installed completion hooks consume Core's current-input and exact-answer assessment. Core authenticates the model's distinct claim/source and whole-response judgments; skill loading and printed audit fields are not separate acceptance prerequisites. Core's Stop observer consumes that assessment and blocks nothing.
 
 Claude retains its one-retry budget and visible unresolved-defect notice; Codex blocks genuine completion-evidence defects. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check those registered payloads and platform mappings, not the truth of model judgments.
 
@@ -86,7 +86,7 @@ Claude retains its one-retry budget and visible unresolved-defect notice; Codex 
 | Windows visibility preference smoke | Native wrapper visibility forwarding reaches `_shared/install_hooks.py --visibility`; visibility aliases remain accepted as compatibility coverage, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | Retired. `install.ps1` keeps a UTF-8 BOM and Windows PowerShell 5.1 syntax (`PSUseCompatibleSyntax` with target 5.1) so that 5.1 reaches its first statement, which prints `PowerShell 7.6 or newer is required` with `winget install --id Microsoft.PowerShell --exact` and exits 1 | `scripts.tests.test_thin_shells`, `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | PowerShell 7 | The 7.6 LTS line is the baseline: `install.ps1` runs under PowerShell 7.6 or newer and stops older 7.x with the same requirement; the installer installs no PowerShell. It sets UTF-8 console I/O, prepares Python 3.11+, turns the earlier PowerShell parameter names into the cli flags, passes every argument in order to `_shared/installer/cli.py` and returns that exit code | `scripts.tests.test_thin_shells` (runs `install.ps1` where `pwsh` exists, as on the CI runner), `scripts.tests.test_powershell_static_analysis` |
-| CMD wrapper | Delegates to `install.ps1` with `pwsh.exe`, or with `powershell.exe` when `pwsh.exe` is absent, where the `install.ps1` version check prints the requirement; forwards arguments, forces UTF-8 and returns the exit code. Options, the official `--addon autopilot` alias and help come from the Python installer | `scripts.tests.test_install_cmd_wrapper`, `scripts.tests.test_thin_shells` |
+| CMD wrapper | Delegates to `install.ps1` with `pwsh.exe`, or with `powershell.exe` when `pwsh.exe` is absent, where the `install.ps1` version check prints the requirement; forwards arguments, forces UTF-8 and returns the exit code. Options and help come from the Python installer | `scripts.tests.test_install_cmd_wrapper`, `scripts.tests.test_thin_shells` |
 
 ## CI Commands
 
