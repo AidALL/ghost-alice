@@ -17,7 +17,7 @@ This document is a fast recovery playbook for cases where a user cannot pull the
 - [4. When Local Changes Must Be Preserved](#4-when-local-changes-must-be-preserved)
 - [5. Run the Installer After Git Is Clean](#5-run-the-installer-after-git-is-clean)
 - [6. Operating Principles](#6-operating-principles)
-- [Retired Adapter Registration](#retired-adapter-registration)
+- [Retired Hook Registration](#retired-hook-registration)
 - [Native Hook Trust And Reload](#native-hook-trust-and-reload)
 - [Intake Warning And Doctor Lists](#intake-warning-and-doctor-lists)
 
@@ -154,11 +154,11 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 - A blocked-user guide is not enough when it exists only inside the repo. Keep an online source link available from the Wiki so the guide can be read without pulling.
 - Do not run the installer while `UU` or `AA` remains in Git status.
 
-## Retired Adapter Registration
+## Retired Hook Registration
 
-An older installer registered addon adapters with a binding that carried an `adapter` key. The current Core hook runner accepts a binding with `schema_version` and `destination` only, so such an invocation ends with `hook binding rejected` and exit 126 before any module is imported; the strict hook log retains the rejection with its original native session. Every install and uninstall removes those retired registrations from the host's hook settings.
+An older installer registered every hook with a long command that carried the Python discovery, the runner path, the inner command and the destination binding, and registered addon adapters with a binding that carried an `adapter` key. The current installer registers one short command per hook, `"<ghost_root>/bin/hook-launcher" <hook-id> <platform> # <marker> [hook-runner:<hook-id>]`, and keeps the inner command and the destination in the install record ([Hook Registration](../reference/installer-architecture.md#hook-registration)). Every install and uninstall removes the long form of a Core hook and the adapter registrations from the host's hook settings.
 
-Run the Core installer to remove a retired registration, then reload the host as described below. A registration-file update alone is not evidence that a running host consumed it. Do not edit the binding by hand or repeat unchanged business verification to repair registration.
+A long Core registration a host still has loaded keeps running until the host reloads, because the Core hook runner still accepts it. An adapter registration ends with `hook binding rejected` and exit 126 before any module is imported. A short registration whose record entry is missing, for example after the record was removed by hand, ends with `hook registration rejected: ...` and exit 126; the strict hook log keeps the rejection with its native session, and `bash install.sh --doctor` lists it under `hook-rejections`. Run the Core installer to rewrite the registrations, the launcher and the record together, then reload the host as described below. A registration-file update alone is not evidence that a running host consumed it. Do not edit the launcher, the record or a binding by hand, and do not repeat unchanged business verification to repair registration.
 
 ## Native Hook Trust And Reload
 

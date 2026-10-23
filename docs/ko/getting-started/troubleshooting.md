@@ -17,7 +17,7 @@ Language: [🇺🇸 English](../../getting-started/troubleshooting.md) | 🇰�
 - [4. When Local Changes Must Be Preserved](#4-when-local-changes-must-be-preserved)
 - [5. Run The Installer After Git Is Clean](#5-run-the-installer-after-git-is-clean)
 - [6. Operating Principles](#6-operating-principles)
-- [Retired Adapter Registration](#retired-adapter-registration)
+- [Retired Hook Registration](#retired-hook-registration)
 - [Native Hook Trust And Reload](#native-hook-trust-and-reload)
 - [Intake Warning And Doctor Lists](#intake-warning-and-doctor-lists)
 
@@ -154,11 +154,11 @@ bash install.sh --status
 - 막힌 사용자를 위한 guide는 repo 안에만 두면 부족합니다. Wiki에서 온라인 소스 안내로 연결하여 pull 없이 읽을 수 있게 합니다.
 - Git status에 `UU` 또는 `AA`가 남아 있으면 installer를 실행하지 않습니다.
 
-## Retired Adapter Registration
+## Retired Hook Registration
 
-예전 인스톨러는 애드온 어댑터를 `adapter` 키가 든 바인딩으로 등록했습니다. 현재 Core 훅 실행기는 `schema_version`과 `destination`만 있는 바인딩을 받으므로, 그런 호출은 모듈을 불러오기 전에 `hook binding rejected`와 종료 코드 126으로 끝납니다. 엄격한 훅 로그는 원래 네이티브 세션과 함께 그 거부를 보존합니다. 모든 설치와 제거는 은퇴한 등록을 호스트의 훅 설정에서 지웁니다.
+예전 인스톨러는 모든 훅을 긴 명령으로 등록했습니다. 그 명령은 Python 탐색, 실행기 경로, 안쪽 명령, destination 바인딩을 담았습니다. 애드온 어댑터는 `adapter` 키가 든 바인딩으로 등록했습니다. 현재 인스톨러는 훅마다 짧은 명령 하나 `"<ghost_root>/bin/hook-launcher" <hook-id> <platform> # <marker> [hook-runner:<hook-id>]`를 등록하고, 안쪽 명령과 destination은 설치 기록에 둡니다([Hook Registration](../reference/installer-architecture.md#hook-registration)). 모든 설치와 제거는 Core 훅의 긴 형식과 어댑터 등록을 호스트의 훅 설정에서 지웁니다.
 
-은퇴한 등록을 지우려면 Core 인스톨러를 실행한 뒤 아래 절차로 호스트를 다시 불러오세요. 등록 파일을 바꾼 것만으로 실행 중인 호스트의 반영을 입증할 수 없습니다. 바인딩을 손으로 고치거나 변경 없는 업무 검증을 반복해서 등록을 복구하지 마세요.
+호스트가 아직 불러 둔 긴 Core 등록은 호스트를 다시 불러올 때까지 계속 동작합니다. Core 훅 실행기가 그 형식을 계속 받기 때문입니다. 어댑터 등록은 모듈을 불러오기 전에 `hook binding rejected`와 종료 코드 126으로 끝납니다. 기록 항목이 없는 짧은 등록은, 예를 들어 기록을 손으로 지운 뒤에는, `hook registration rejected: ...`와 종료 코드 126으로 끝납니다. 엄격한 훅 로그는 네이티브 세션과 함께 그 거부를 보존하고, `bash install.sh --doctor`는 `hook-rejections`에 그 거부를 보입니다. Core 인스톨러를 실행해 등록, 런처, 기록을 함께 다시 쓴 뒤 아래 절차로 호스트를 다시 불러오세요. 등록 파일을 바꾼 것만으로 실행 중인 호스트의 반영을 입증할 수 없습니다. 런처, 기록, 바인딩을 손으로 고치거나 변경 없는 업무 검증을 반복해서 등록을 복구하지 마세요.
 
 ## Native Hook Trust And Reload
 

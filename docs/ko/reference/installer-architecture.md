@@ -11,6 +11,7 @@ Language: [🇺🇸 English](../../reference/installer-architecture.md) | 🇰�
 - [Architecture Summary](#architecture-summary)
 - [Install Flow](#install-flow)
 - [Install Record](#install-record)
+- [Hook Registration](#hook-registration)
 - [Gateway Lifecycle](#gateway-lifecycle)
 - [Platform Surfaces](#platform-surfaces)
 - [State And Safety Model](#state-and-safety-model)
@@ -69,7 +70,7 @@ Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달합니다. `i
 5. deprecated 설치 스킬을 발견 경로 밖으로 옮긴 뒤, 인코딩 검사, 그다음 로컬 수정을 격리하거나 기록하는 사전 점검.
 6. 중단된 애드온 제거를 재개합니다. 애드온 충돌은 설치를 멈춥니다.
 7. 배치: `_shared`와 모든 대상을 링크(Claude Code)로, 또는 하나의 복사 배치(Codex)로 놓습니다. 배치 한 번은 인스톨러 프로세스 안의 `install_transaction.publish` 호출 한 번이며, 설치 기록이 지정한 참여자와 함께 같은 단계에서 대상들의 설치 기록 항목을 작성합니다. 게시는 대상 옆의 `.ghost-alice-install-staging`에서 대상을 준비하고, 게시나 복원이 끝난 뒤 그 폴더가 비었으면 삭제합니다. 다른 항목이 있는 폴더는 남기고, 다른 이유로 삭제하지 못하면 `~/.ghost-alice/state-retention-failures.jsonl`에 기록합니다.
-8. 런타임 게시: `_shared`와 동반 스크립트 `session-intent-analyzer/scripts/session_intent_ledger.py`를 `~/.ghost-alice/runtime/current` 아래에 게시 한 번으로 놓습니다. 설치 기록에 `service` 섹션이 있으면 게이트웨이 참여자가 파일 교체 전에 등록된 서비스를 중지하고 교체 뒤에 시작합니다. Codex 복사본 `~/.agents/skills/_shared`와 Claude 링크는 서비스의 코드가 아니므로 그 배치는 서비스 효과를 호출하지 않습니다. 그다음 읽기만 하는 `Context gateway:` 보고 줄 하나, 그다음 훅 설치, 관리 규칙 블록, 명령 래퍼.
+8. 런타임 게시: `_shared`와 동반 스크립트 `session-intent-analyzer/scripts/session_intent_ledger.py`를 `~/.ghost-alice/runtime/current` 아래에 게시 한 번으로 놓습니다. 설치 기록에 `service` 섹션이 있으면 게이트웨이 참여자가 파일 교체 전에 등록된 서비스를 중지하고 교체 뒤에 시작합니다. Codex 복사본 `~/.agents/skills/_shared`와 Claude 링크는 서비스의 코드가 아니므로 그 배치는 서비스 효과를 호출하지 않습니다. 그다음 읽기만 하는 `Context gateway:` 보고 줄 하나, 그다음 훅 등록([Hook Registration](#hook-registration)), 관리 규칙 블록, 명령 래퍼.
 9. 검증, 소유 표지, merge-companion 스냅숏, 애드온 사이드카, 설치 상태 매니페스트, 설치 이벤트. 인스톨러는 배치 뒤에 이 이전 기록들을 예전처럼 작성하며, status·doctor·보존·제거·복구는 이 기록들을 계속 조회합니다.
 
 명령 표가 명령마다 잠금을 지정합니다. 설치, 제거, 복구(`--repair`), `--cleanup-pending`, `gateway` 전달 명령이 잠금 아래에서 실행되며, `installer.cli.run_command`가 처리 함수 전에 잠금을 잡고 끝난 뒤 풉니다. 자식 도구는 자신을 호출한 인스톨러 프로세스의 잠금을 그대로 씁니다. 잠금 파일이 그 프로세스 ID를 기록하며, `install_lock.held_by_process_tree`가 잠금이 호출한 프로세스나 그 부모 프로세스의 것인지 판정합니다. 게이트웨이 등록 명령과 설치 기록 작성 함수가 모두 이 함수를 호출하며, 무관한 소유자는 둘을 막습니다. 단독으로 실행한 등록 명령은 잠금을 스스로 획득합니다. 잠금의 소유자 문자열은 표시용이며 아무 권한도 주지 않습니다.
@@ -94,6 +95,7 @@ git 훅 단계(2단계)는 저장소의 `core.hooksPath`를 `git config --local`
 | `last_transaction` | 마지막 게시의 `id`, `updated_at`, `rollback_dir` |
 | `targets` | 설치 위치마다 `name`, `kind`(`skill`, `support`, `runtime`, `command`, `resource`), `mode`(`link`, `copy`), `provider`(`core` 또는 `addon:<id>`), `source`, `source_commit`, `used_by`, 링크이면 `link_target`, 복사이면 `files`, `installed_at`, `baseline` |
 | `service` | 등록된 컨텍스트 게이트웨이. 등록이 없으면 이 섹션도 없습니다. `label`, `runtime_root`(서비스가 실행하는 런타임 `_shared`의 상위 폴더), `program`, 서비스 파일 세 개 `launch_agent`·`state_path`·`config_path`와 지문 `launch_agent_digest`·`state_digest`·`config_block_digest`(Codex `config.toml`의 provider 블록 지문. 등록 명령이 기록하기 전에는 `null`), `config_backup`, `registered_at`, `restarted_at`, `listener_ready` |
+| `hooks` | 호스트들이 가진 훅 등록. 첫 등록 전에는 이 섹션도 없습니다. `launcher`(런처 파일의 `path`, `python`, `digest`, `written_at`)와 호스트(`claude`, `codex`)마다 `hook_file`, `destination`(훅이 실행하는 설치 위치), `entries`(훅 id마다 `event`, `marker`, `command`, `provider`), `registered_at` |
 
 복사 항목의 `files`는 상대 경로마다 파일 내용의 `sha256:<hex>` 지문을 기록하며, 파일 하나를 복사한 항목은 자기 자신을 경로 `.`로 기록합니다. 링크 항목은 링크가 가리키는 경로만 기록합니다. `content_digest`가 둘을 생성하며 캐시(`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.git`), `.pyc`·`.DS_Store` 파일, 소유 표지 파일, 링크인 파일과 폴더를 제외합니다. `baseline`은 지문의 출처입니다. `recorded`는 게시가 작성한 지문, `migrated`는 이전 인스톨러의 기록에서 이관한 지문, `unknown`은 이전 기록에 지문이 없었다는 뜻입니다.
 
@@ -104,6 +106,7 @@ git 훅 단계(2단계)는 저장소의 `core.hooksPath`를 `git config --local`
 | `installed_payload.migrate_service` | 기록에 `service` 섹션이 없고 `~/.ghost-alice/context-gateway-binding.json`이 설치된 게이트웨이 영수증을 가리킬 때의 첫 설치, 복구 또는 제거 | 영수증에서 `service` 섹션을 작성합니다(`config_block_digest`는 등록 명령이 기록하기 전까지 `null`). 영수증이 지문을 기록한 동반 스크립트마다 `migrated` 런타임 대상을 작성합니다. 영수증과 바인딩 파일은 변경하지 않으며 다시 조회하지 않습니다 |
 | `context_gateway_install.py` | `gateway` 등록·분리 명령의 단계 기계가 commit 단계에서 | 등록은 서비스 준비 확인 뒤 `service` 섹션을 작성하고, 분리는 섹션을 삭제합니다. 실패한 작업은 섹션을 이전 값으로 복원합니다 |
 | `installer.gateway_participant` | 서비스의 코드를 바꾼 게시 뒤 | 서비스가 다시 준비되면 `service` 섹션의 `restarted_at`과 `listener_ready`를 갱신합니다 |
+| `hook_launcher.write_registration` | 설치마다의 훅 등록. `install_hooks.py`가 호스트 파일을 바꾸기 전에 | `hooks` 섹션을 작성합니다. 런처 파일의 경로·Python·지문과 호스트의 `hook_file`·`destination`·항목들입니다. 호스트의 제거는 자기 부분을 지우고, 마지막 호스트의 제거는 런처도 지웁니다 |
 
 `installed_payload.update`는 기록 섹션을 작성하는 유일한 함수이고, `installed_payload.restore`는 게시가 보관한 사본으로 기록을 복원합니다. 두 함수는 임시 파일에 작성한 뒤 이름을 변경하여 교체하며, 설치 잠금이 호출한 프로세스나 그 부모 프로세스의 것이 아니면 거부합니다. 다른 schema version처럼 이 인스톨러가 읽을 수 없는 기록은 변경하지 않고, 파일 게시는 계속합니다. `--status`와 `--doctor`는 기록에서 해당 플랫폼의 대상을 요약한 줄 하나와, 기록과 다른 대상마다 줄 하나를 출력합니다. 기준값이 없는 대상은 개수만 알리고 비교하지 않으며, 일치는 비교한 대상에 대해서만 보고합니다. 기록은 두 명령의 결과를 변경하지 않습니다.
 
@@ -127,6 +130,20 @@ flowchart TB
 ```
 
 게시는 교체한 자료를 `~/.ghost-alice/rollbacks/<txid>/` 한 곳에만 보관합니다. 원래 파일, 기록 사본, `journal.json`이 그 폴더에 있습니다. 저널은 게시가 교체하는 대상을 기록하고, 대상마다 원래 상태와 준비한 결과를 기록합니다. 파일은 지문, 링크는 가리키는 경로, 폴더는 빈 폴더까지 모두 기록하며 캐시와 생성 파일만 제외합니다. 저널은 무엇이든 변경하기 전에 `prepare`, 파일·기록과 참여자의 `after_publish`가 모두 끝난 뒤 `done`, 복원한 뒤 `restored`를 기록합니다. 참여자의 오류는 복원 뒤에도 자신의 종료 코드(2, 3, 4, 5)를 유지하며, 복원 단계가 자신의 코드로 실패하면 그 코드를 보고합니다(서비스 복구를 확인하지 못하면 5). 교체할 대상이 없는 게시(이미 원본을 가리키는 링크)는 참여자를 호출하지 않습니다. `install_transaction`은 참여자 인터페이스만 압니다(`installer/participant.py`: `before_publish`, `after_publish`, `before_restore`, `after_restore`. 기록 루트, 호스트, 작업 번호, 교체하는 설치 위치를 전달합니다). 인스톨러 모듈 중 게이트웨이 모듈을 가져오는 파일은 `installer/gateway_participant.py` 하나입니다. 프로세스가 `done` 전에 중지되면 다음 잠금 명령이 `install_transaction.py recover --txid <id>`를 호출합니다. 이 명령은 모든 대상을 먼저 확인합니다. 설치 위치에는 게시가 남긴 결과나 원래 파일이 있어야 하고, 이동한 원래 파일이 남아 있어야 합니다. 복원할 수 없는 게시는 명령을 종료 코드 1로 중지하고 검토할 폴더를 알립니다. 절반만 게시된 파일 위에 다시 게시하면 어느 파일이 원래 파일인지 판별할 수 없기 때문입니다. 이 복원은 파일과 기록만 복원하며 컨텍스트 게이트웨이 서비스를 중지하거나 재시작하지 않습니다.
+
+## Hook Registration
+
+호스트의 훅 설정(Claude Code는 `settings.json`, Codex는 `hooks.json`)은 Core 훅마다 짧은 명령 하나를 등록합니다.
+
+```text
+"<ghost_root>/bin/hook-launcher" <hook-id> <platform> # <marker> [hook-runner:<hook-id>]
+```
+
+`<hook-id>`는 `hook_definitions.CORE_HOOK_IDS`의 하나 또는 애드온의 훅 id이고, `<platform>`은 `claude` 또는 `codex`이며, 주석은 인스톨러·status·doctor·보안 스캔이 알아보는 소유 표식입니다. 명령은 그 밖의 것을 담지 않습니다. 런처 `~/.ghost-alice/bin/hook-launcher`(Windows는 `hook-launcher.cmd`)이 이전의 긴 등록과 같은 방법으로 Python 3.11+를 찾고, 설치 기록의 경로와 함께 런타임 `_shared/hook_launcher.py`를 실행합니다. 이 모듈은 기록의 `hooks.<platform>` 섹션을 읽어 `destination`을 환경에 묶고, 항목의 안쪽 명령과 destination 바인딩을 `run <hook-id> <platform> <payload> --binding-b64 <binding>`으로 실행기 `hook_profile_gate.py`에 넘깁니다. 실행기는 전과 같이 안쪽 명령을 검증하고 실행하고 감사합니다. 기록에 없는 등록은 `hook registration rejected`와 종료 코드 126으로 끝나며, 호스트의 destination을 알 수 있으면 엄격한 훅 로그에 행 하나를 남깁니다. 인자 오류는 종료 코드 1입니다. 어느 경우도 호스트를 막지 않습니다.
+
+`_shared/hook_launcher.py`가 형식, 런처 파일, 기록 섹션을 소유합니다. `_shared/install_hooks.py`는 런처 파일, 기록 섹션, 호스트 파일의 순서로 씁니다. 그래서 호스트 파일은 아직 없는 런처를 가리키지 않습니다. 기록을 쓰지 못하면 호스트 파일을 바꾸기 전에 훅 설치가 멈춥니다. 제거는 반대 순서입니다. 호스트 파일, 기록 섹션, 마지막 호스트 뒤에는 런처 파일입니다. status는 호스트 명령을 기대 명령과 비교하고, 기록 섹션과 런처의 지문을 설치가 쓰는 값과 비교합니다. 다르면 `registration` 드리프트로 보고합니다. doctor는 관리 훅이 런타임 코어를 실행하는지 확인할 때 기록과 런처 파일로 등록을 풀어 확인합니다.
+
+이전 인스톨러는 긴 형식을 등록했습니다. 명령마다 Python 탐색, 실행기 경로, 안쪽 명령, destination 바인딩을 담았습니다. 모든 설치와 제거는 Core 훅 id의 그 형식을 지웁니다([Retired Hook Registration](../getting-started/troubleshooting.md#retired-hook-registration)). 실행기는 그 형식을 계속 받으므로, 다음 재로드 전까지 이전 명령을 유지하는 호스트는 전처럼 동작합니다. 애드온의 긴 등록은 그 애드온을 다시 설치하거나 전체 제거가 지울 때까지 남습니다. 훅이 실행하는 destination은 기록에 있습니다. 이전 인스톨러가 `config.json`의 `install_locations`에 둔 사본은 ledger root를 유지하기 위해 한 번 읽고 다시 쓰지 않습니다.
 
 ## Gateway Lifecycle
 
@@ -165,7 +182,7 @@ flowchart LR
 | --- | --- |
 | Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`, `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Claude command wrappers |
 | Codex | `~/.agents/skills/`, `~/.codex/AGENTS.md`, `~/.codex/ghost-alice-governance.md`, `~/.codex/hooks.json`, `~/.codex/config.toml` |
-| Shared state | `~/.ghost-alice/installed-payload.json`, `~/.ghost-alice/rollbacks/`, `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
+| Shared state | `~/.ghost-alice/installed-payload.json`, `~/.ghost-alice/bin/hook-launcher`, `~/.ghost-alice/rollbacks/`, `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
 
 Claude Code의 native skill invocation과 hook permission은 저장소 밖의 세션에 필요한 global instruction을 대신하지 않습니다. installer는 `platforms/claude/CLAUDE.md`의 managed block을 Claude config directory에 병합합니다. Codex의 별도 bootstrap과 hook config는 required gate를 `SKILL.md` read record와 hook payload로 감사할 수 있게 합니다. 두 global rule file은 managed block 밖의 사용자 텍스트를 보존하며, marker가 없는 사용자 파일에는 덮어쓰기 대신 `.ghost-alice-proposed` 제안 파일을 만듭니다.
 
@@ -179,7 +196,8 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 
 | State path | Why it exists |
 | --- | --- |
-| `~/.ghost-alice/installed-payload.json` | 설치 기록입니다. 두 호스트의 모든 설치 위치, 출처, 복사한 파일의 지문을 배치와 같은 단계에서 기록합니다 |
+| `~/.ghost-alice/installed-payload.json` | 설치 기록입니다. 두 호스트의 모든 설치 위치, 출처, 복사한 파일의 지문을 배치와 같은 단계에서 기록하고, 두 호스트의 훅 등록을 호스트 파일이 가리키기 전에 기록합니다 |
+| `~/.ghost-alice/bin/hook-launcher` | 모든 호스트의 훅 등록이 실행하는 런처입니다. Python 3.11+를 찾아 설치 기록과 함께 런타임 `hook_launcher.py`를 실행합니다. 등록과 함께 쓰고, 마지막 호스트의 제거와 함께 지웁니다 |
 | `~/.ghost-alice/rollbacks/<txid>/` | 게시 한 번이 교체한 원래 파일, 게시 전의 기록, 저널을 보관합니다. 저널이 done을 기록하기 전에 중지된 게시는 다음 잠금 명령이 복원합니다. 끝난 게시는 최근 20개만 남깁니다 |
 | `~/.ghost-alice/install-state/<platform>.json` | 인스톨러가 관리한 대상과 환경 변경을 기록하며 상태 조회와 제거 명령이 읽습니다 |
 | `~/.ghost-alice/pending-merges/<platform>/` | 인스톨러가 Ghost-ALICE 복사 설치 스킬 파일을 바꾸기 전에 사용자 수정본을 보존합니다. 설치 표식이 있는 폴더와, 이번 설치가 바꾸는 폴더는 표식이 사라졌어도 확인하며, merge-companion과 사용자가 병합 여부를 결정합니다. Claude 앱의 `synced`처럼 Ghost-ALICE가 설치하지 않는 폴더는 기록하지 않습니다 |
@@ -196,6 +214,7 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 | Installer wording or the install report | `_shared/installer/report.py` | `_shared/test_installer_report.py`, `scripts/tests/test_installer_default_auto.py` |
 | Hook payload or hook status wording | `_shared/install_hooks.py` | `_shared.test_install_hooks`, `scripts/check_skill_gate_contract.py` |
 | Hook id or host event name | `_shared/hook_definitions.py` | `_shared.test_hook_definitions` |
+| Hook registration format, the launcher file or the record's `hooks` section | `_shared/hook_launcher.py`, `_shared/install_hooks.py` | `_shared/test_hook_launcher.py`, `_shared/test_install_hooks.py`, `_shared/test_installed_hook_cleanup.py` |
 | Install record, fingerprints, publish journal or restore | `_shared/installed_payload.py`, `_shared/content_digest.py`, `_shared/install_transaction.py`, `_shared/installer/transaction.py`, `_shared/installer/lock.py` | `_shared/test_installed_payload.py`, `_shared/test_content_digest.py`, `_shared/test_install_transaction_publish.py`, `_shared/test_install_record_shell.py` |
 | Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `_shared/installer/lifecycle.py`, `_shared/installer/transaction.py` | `_shared/test_installer_lifecycle.py`, `_shared/test_installer_transaction.py`, install-state schema tests and uninstall tests |
 | Public docs or command surface | `README.md`, `docs/`, `docs/index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
