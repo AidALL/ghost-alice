@@ -207,9 +207,9 @@ class AddonHookInstallTest(unittest.TestCase):
             entries = self._addon_entries("PostToolUse", f"[addon:{addon}] obs")
             self.assertEqual(len(entries), 1, addon)
             registration = hook_launcher.parse_registration(entries[0])
-            self.assertEqual(registration.hook_id, f"addon-{addon}-obs")
-            self.assertIn(f"[addon:{addon}] obs [hook-runner:addon-{addon}-obs]", entries[0])
-            _, entry = hook_launcher.read_registration(record_path, "claude", f"addon-{addon}-obs")
+            self.assertEqual(registration.hook_id, f"addon-4-{addon}-obs")
+            self.assertIn(f"[addon:{addon}] obs [hook-runner:addon-4-{addon}-obs]", entries[0])
+            _, entry = hook_launcher.read_registration(record_path, "claude", f"addon-4-{addon}-obs")
             self.assertTrue(entry["command"].replace("\\", "/").endswith(f'addons/{addon}/hooks/h.py"'), entry["command"])
             self.assertEqual(entry["provider"], f"addon:{addon}")
         # Removing one addon's hook leaves the other's registration and record entry, and that hook still runs.
@@ -219,7 +219,7 @@ class AddonHookInstallTest(unittest.TestCase):
         self.assertEqual(len(remaining), 1)
         record = json.loads(record_path.read_text(encoding="utf-8"))
         self.assertEqual(sorted(key for key in record["hooks"]["claude"]["entries"] if key.startswith("addon-")),
-                         ["addon-atwo-obs"])
+                         ["addon-4-atwo-obs"])
         if os.name != "nt":
             env = {key: value for key, value in os.environ.items() if not key.startswith("GHOST_ALICE_")}
             result = subprocess.run(["/bin/sh", "-c", remaining[0]], cwd=self.tmp, env=env, timeout=60,
@@ -228,17 +228,61 @@ class AddonHookInstallTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             log = self.tmp / ".ghost-alice" / "session-logs" / "claude" / "same-hook-id" / "strict-hook-output.jsonl"
             row = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
-            self.assertEqual(row["hook_id"], "addon-atwo-obs")
+            self.assertEqual(row["hook_id"], "addon-4-atwo-obs")
             self.assertIn("atwo", row["stdout"])
+
+    def test_hyphenated_addon_and_hook_ids_keep_separate_registrations_and_record_entries(self):
+        # addon alpha-beta with hook obs and addon alpha with hook beta-obs: a plain hyphen join would give both
+        # the same id; the addon id's length in the id keeps them apart.
+        src = _make_addons(self.tmp, (("alpha-beta", "obs"), ("alpha", "beta-obs")))
+        self.assertEqual(install_hooks.install_hook("claude", addon_sources=[str(src)]), "installed")
+        record_path = self.tmp / ".ghost-alice" / installed_payload.FILENAME
+        expected = {("alpha-beta", "obs"): "addon-10-alpha-beta-obs", ("alpha", "beta-obs"): "addon-5-alpha-beta-obs"}
+        for (addon, hook), runner_id in expected.items():
+            entries = self._addon_entries("PostToolUse", f"[addon:{addon}] {hook}")
+            self.assertEqual(len(entries), 1, addon)
+            self.assertEqual(hook_launcher.parse_registration(entries[0]).hook_id, runner_id)
+            _, entry = hook_launcher.read_registration(record_path, "claude", runner_id)
+            self.assertTrue(entry["command"].replace("\\", "/").endswith(f'addons/{addon}/hooks/h.py"'), entry["command"])
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        self.assertEqual(sorted(key for key in record["hooks"]["claude"]["entries"] if key.startswith("addon-")),
+                         sorted(expected.values()))
+        self.assertEqual(install_hooks.remove_addon_hook("[addon:alpha-beta] obs", platform_key="claude"), 1)
+        self.assertEqual(self._addon_entries("PostToolUse", "[addon:alpha-beta] obs"), [])
+        remaining = self._addon_entries("PostToolUse", "[addon:alpha] beta-obs")
+        self.assertEqual(len(remaining), 1)
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        self.assertIn("addon-5-alpha-beta-obs", record["hooks"]["claude"]["entries"])
+        self.assertNotIn("addon-10-alpha-beta-obs", record["hooks"]["claude"]["entries"])
+        if os.name != "nt":
+            env = {key: value for key, value in os.environ.items() if not key.startswith("GHOST_ALICE_")}
+            result = subprocess.run(["/bin/sh", "-c", remaining[0]], cwd=self.tmp, env=env, timeout=60,
+                                    input=json.dumps({"hook_event_name": "PostToolUse", "session_id": "hyphen-pair"}),
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            log = self.tmp / ".ghost-alice" / "session-logs" / "claude" / "hyphen-pair" / "strict-hook-output.jsonl"
+            row = json.loads(log.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertEqual(row["hook_id"], "addon-5-alpha-beta-obs")
+            self.assertIn("alpha", row["stdout"])
 
     def test_addon_runner_ids_are_provider_qualified_and_never_core_ids(self):
         reserved = set(hook_definitions.CORE_HOOK_IDS) | set(hook_definitions.RETIRED_CORE_HOOK_IDS)
         for hook_id in sorted(reserved | {"obs", "Stop_Hook"}):
             runner_id = install_hooks._managed_addon_runner_id("demo", hook_id)
-            self.assertTrue(runner_id.startswith("addon-demo-"), runner_id)
+            self.assertTrue(runner_id.startswith("addon-4-demo-"), runner_id)
             self.assertNotIn(runner_id, reserved)
             self.assertEqual(runner_id, hook_definitions.normalize_hook_id(runner_id))
             self.assertEqual(install_hooks._addon_runner_token("demo", hook_id), f"[hook-runner:{runner_id}]")
+        # The addon id's length marks the boundary, so hyphenated ids cannot form the same string.
+        self.assertEqual(install_hooks._managed_addon_runner_id("hookaddon", "obs"), "addon-9-hookaddon-obs")
+        self.assertEqual(install_hooks._managed_addon_runner_id("alpha-beta", "obs"), "addon-10-alpha-beta-obs")
+        self.assertEqual(install_hooks._managed_addon_runner_id("alpha", "beta-obs"), "addon-5-alpha-beta-obs")
+        pairs = [("alpha-beta", "obs"), ("alpha", "beta-obs"), ("alpha-beta-obs", "x"), ("a", "lpha-beta-obs")]
+        self.assertEqual(len({install_hooks._managed_addon_runner_id(*pair) for pair in pairs}), len(pairs))
+        for pair in pairs:
+            self.assertTrue(install_hooks._is_managed_addon_command(hook_launcher.registration_command(
+                "/g/bin/hook-launcher", install_hooks._managed_addon_runner_id(*pair), "claude",
+                f"[addon:{pair[0]}] {pair[1]}")))
 
     def test_reinstall_replaces_an_older_long_addon_registration_with_the_qualified_one(self):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
@@ -260,7 +304,7 @@ class AddonHookInstallTest(unittest.TestCase):
         entries = self._addon_entries("PostToolUse")
         self.assertEqual(len(entries), 1)
         self.assertNotIn(older, entries)
-        self.assertIn("[addon:hookaddon] obs [hook-runner:addon-hookaddon-obs]", entries[0])
+        self.assertIn("[addon:hookaddon] obs [hook-runner:addon-9-hookaddon-obs]", entries[0])
 
     def test_install_removes_a_retired_adapter_registration(self):
         # An older installer registered addon adapter hooks through the runner with this comment; this Core has no
@@ -352,7 +396,7 @@ class AddonHookSecurityTest(AddonHookInstallTest):
         self.assertEqual(removed, 1)
         self.assertTrue(any("[hook-runner:not-addon]" in command for command in commands),
                         msg="remove_addon_hook deleted a fake-runner non-managed hook")
-        self.assertFalse(any("[addon:hookaddon] obs [hook-runner:addon-hookaddon-obs]" in command for command in commands),
+        self.assertFalse(any("[addon:hookaddon] obs [hook-runner:addon-9-hookaddon-obs]" in command for command in commands),
                          msg="remove_addon_hook failed to delete the managed addon hook")
 
     def test_remove_addon_hook_preserves_user_command_in_same_entry(self):
@@ -373,7 +417,7 @@ class AddonHookSecurityTest(AddonHookInstallTest):
         self.assertEqual(removed, 1)
         self.assertTrue(any("user sibling hook" in command for command in commands),
                         msg="remove_addon_hook deleted a user command in the same entry")
-        self.assertFalse(any("[addon:hookaddon] obs [hook-runner:addon-hookaddon-obs]" in command for command in commands),
+        self.assertFalse(any("[addon:hookaddon] obs [hook-runner:addon-9-hookaddon-obs]" in command for command in commands),
                          msg="remove_addon_hook failed to delete the managed addon hook")
 
 

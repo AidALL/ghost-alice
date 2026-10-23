@@ -111,6 +111,23 @@ class AddonHookParseTest(unittest.TestCase):
                 with self.assertRaisesRegex(ai.AddonManifestError, "collides with a reserved core hook id"):
                     ai.load_addon_targets([src], platform="claude")
 
+    def test_ids_must_be_canonical_so_that_their_registration_id_is_unambiguous(self):
+        # The registration id addon-<n>-<addon id>-<hook id> is stable under normalize_hook_id only while both
+        # ids are lowercase letters, digits and single hyphens; a doubled or trailing hyphen is refused.
+        for hook_id in ("obs--x", "obs-"):
+            src = _make_addon(self.tmp / hook_id.replace("-", "_"),
+                              [{"id": hook_id, "event": "post_tool_use", "script": "hooks/obs.py"}])
+            with self.assertRaisesRegex(ai.AddonManifestError, "hooks\\[\\]\\.id"):
+                ai.load_addon_targets([src], platform="claude")
+        for addon_id in ("alpha--beta", "alpha-"):
+            src = _make_addon(self.tmp / addon_id.replace("-", "_"),
+                              [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}], addon_id=addon_id)
+            with self.assertRaises(ai.AddonManifestError):
+                ai.load_addon_targets([src], platform="claude")
+        src = _make_addon(self.tmp / "ok", [{"id": "obs-2", "event": "post_tool_use", "script": "hooks/obs.py"}],
+                          addon_id="alpha-beta")
+        self.assertEqual([t.addon_id for t in ai.load_addon_targets([src], platform="claude")], ["alpha-beta"])
+
     def test_duplicate_hook_id_rejected(self):
         self._assert_rejected([
             {"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"},
