@@ -433,7 +433,7 @@ def _check_database(connection: sqlite3.Connection) -> None:
 
 def _initialize_database(connection: sqlite3.Connection) -> None:
     # Individual statements preserve the caller's transaction; executescript
-    # would implicitly commit and break Core/Ghost-ALICE Autopilot atomicity.
+    # would implicitly commit and break Core atomicity.
     version = connection.execute("PRAGMA user_version").fetchone()[0]
     if version not in (0, STORAGE_SCHEMA_VERSION):
         raise ValueError("unsupported Ghost state database schema")
@@ -492,7 +492,7 @@ def _enable_wal(connection: sqlite3.Connection) -> None:
 
 @contextmanager
 def storage_transaction(root: Path):
-    """One durable unit of work, including bound Ghost-ALICE Autopilot mutations.
+    """One durable unit of work.
 
     Lock waiting limits contention, not the lifetime of an autonomous task.
     Connections are operation-local and must be passed explicitly to nested
@@ -1962,7 +1962,7 @@ def mark_acceptance_criterion_met(
     The caller supplies the accepted full or partial proof digest and exact
     input/criterion snapshot. This writer checks binding and digest syntax;
     it does not review source meaning or infer fulfillment from work execution.
-    Managed Ghost-ALICE Autopilot callers apply only the criteria supported by Core's assessment.
+    A caller applies only the criteria supported by Core's assessment.
     Raw semantic deltas cannot assert "met".
     """
     digest = str(completion_check_digest or "").strip().lower()
@@ -2028,14 +2028,10 @@ def invalidate_acceptance_criterion(
     criterion_id: str, expected_input_event_id: str,
     expected_criterion: dict[str, Any], expected_completion_check_digest: str,
     invalidation_reason: str, transaction: sqlite3.Connection | None = None,
-    correction_assessment: dict[str, Any] | None = None,
-    correction_source: dict[str, str] | None = None,
 ) -> dict[str, Path]:
     """Reopen observed invalid evidence without changing its admitted meaning.
 
-    Core authenticates the assistant's recorded review of correction proof;
-    dependency callers supply observed changes.
-    This writer checks exact current
+    Dependency callers supply observed changes. This writer checks exact current
     native selection, immutable definition and the currently met proof (CAS).
     It cannot assert pass. Duplicate invalidation of that same proof/input is a
     no-op only when the last proof event for this qualified criterion is the
@@ -2046,7 +2042,7 @@ def invalidate_acceptance_criterion(
             or not isinstance(expected_criterion, dict)
             or not isinstance(expected_completion_check_digest, str)
             or not COMPLETION_CHECK_DIGEST_PATTERN.fullmatch(expected_completion_check_digest)
-            or invalidation_reason not in {"dependency-mismatch", "completion-correction"}):
+            or invalidation_reason != "dependency-mismatch"):
         raise ValueError("invalidation requires current input, definition, proof digest and an allowed evidence change")
     digest = expected_completion_check_digest.removeprefix("sha256:").lower()
     paths = session_paths(root, platform, session_id)
@@ -2075,17 +2071,6 @@ def invalidate_acceptance_criterion(
                 and u["owner"] == {"platform": platform, "session_id": session_id}
                 for u in route["work_units"])):
             raise ValueError("invalidation requires the ready current native owner selection")
-        if invalidation_reason == "completion-correction":
-            if not isinstance(correction_assessment, dict) or set(correction_assessment) != {"contract", "proof", "verified_at", "original_evidence_reference"}:
-                raise ValueError("correction requires exact Core-assessed replacement proof")
-            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "_shared"))
-            from completion_assessment import authorize_correction
-            coordinates={"GHOST_ALICE_SESSION_INTENT_ROOT": str(root.resolve()),
-                "GHOST_ALICE_PLATFORM": platform, "GHOST_ALICE_SESSION_ID": session_id}
-            if not isinstance(correction_source, dict) or any(correction_source.get(k) != v for k,v in coordinates.items()):
-                raise ValueError("correction source must retain the exact native authority")
-            authorize_correction(dict(correction_source, GHOST_ALICE_CORE_ROOT=str(Path(__file__).resolve().parents[2])),
-                criterion=dict(expected_criterion, criterion_id=criterion_id),transaction=connection, **correction_assessment)
         if criterion.get("status") != "met":
             events = read_session_events(root=root, platform=platform, session_id=session_id, transaction=connection)
             latest = next((e for e in reversed(events) if

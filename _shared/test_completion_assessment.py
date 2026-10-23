@@ -449,7 +449,7 @@ class CompletionAssessmentTests(unittest.TestCase):
                 import native_completion
                 result = native_completion.assess_native_completion(self.source, text=body, phase='final')
                 self.assertIsNone(result['body_issue'])
-                self.assertEqual(result['completion_route']['publication_route'], 'none')
+                self.assertNotIn('publication_route', result['completion_route'])
                 retained = api.prepare_response_review(self.source, response_text=body,
                     source_paths=[str(self.observation)], claim_statements=[body])
                 self.assertEqual(retained['candidate_reference'], candidate['candidate_reference'])
@@ -545,7 +545,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         import native_completion
         result = native_completion.assess_native_completion(self.source, text=body, phase='final')
         self.assertIsNone(result['body_issue'])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
+        self.assertNotIn('publication_route', result['completion_route'])
         import json, os, subprocess, sys
         hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
@@ -658,12 +658,9 @@ class CompletionAssessmentTests(unittest.TestCase):
                 api.assessment_coverage(assessment, args['contract'], args['proof'], args['verified_at'])
 
     def test_source_mutation_invalidates_review_and_historical_reuse_preserves_time(self):
-        capture = {'origin_token': 'retained-original-capture', 'input_event_id': self.fixture.event}
-        provider = mock.Mock()
-        provider.capture_binding.return_value = capture
-        with mock.patch('original_claim_evidence._managed_archive_provider', return_value=provider):
-            candidate = self.prepare()
-        self.assertEqual(candidate.get('capture_binding'), capture)
+        candidate = self.prepare()
+        self.assertNotIn('capture_binding', candidate)
+        self.assertNotIn('reuse_evidence', candidate)
         self.review(candidate)
         self.observation.write_text('Changed after original observation')
         with self.assertRaises(self.api().CompletionAssessmentError) as caught:
@@ -673,13 +670,10 @@ class CompletionAssessmentTests(unittest.TestCase):
             verified_at=self.time, source_paths=[], reuse_candidate=candidate['candidate_reference'])
         self.assertEqual(retained['sources'], candidate['sources'])
         self.assertEqual(retained['verified_at'], self.time)
-        self.assertEqual(retained['capture_binding'], capture)
         with self.assertRaises(self.api().CompletionAssessmentError) as unavailable:
             self.review(retained)
         self.assertEqual(unavailable.exception.reason, 'source-changed')
         historical = self.lookup(candidate, historical=True)
-        self.assertEqual(self.api().assessment_capture_binding(historical,
-            candidate['contract'], candidate['proof'], self.time), capture)
         self.assertTrue(self.api().assessment_coverage(historical,
             candidate['contract'], candidate['proof'], self.time))
 
@@ -712,41 +706,20 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertTrue(self.lookup(candidate))
         self.assertEqual(before, fixtures.ledger.read_session_state(**self.fixture.coords))
 
-    def test_correction_requires_complete_review_of_affected_canonical_binding(self):
-        candidate = self.prepare(); self.review(candidate, 'unsupported', 'The cited observation does not establish the claim.')
-        self.assertTrue(callable(getattr(self.api(), 'authorize_correction', None)), 'Core correction authorization is missing')
-        key = dict(work_unit_id='first', contract_revision=1, criterion_id='AC1')
-        self.assertEqual(self.api().assessment_reviewed(self.lookup(candidate), candidate['contract'],
-            candidate['proof'], self.time), {('first', 1, 'AC1')})
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().authorize_correction(self.source, criterion=key,
-                proof=candidate['proof'], verified_at=self.time, contract=candidate['contract'])
-        key['criterion_id'] = 'unrelated'
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().authorize_correction(self.source, criterion=key,
-                proof=candidate['proof'], verified_at=self.time, contract=candidate['contract'])
-
-    def test_unavailable_review_never_authorizes_correction(self):
+    def test_unavailable_review_keeps_the_criterion_out_of_coverage(self):
         candidate = self.prepare(); self.review(candidate, 'unavailable', 'The original observation is inconclusive.')
-        self.assertTrue(callable(getattr(self.api(), 'authorize_correction', None)), 'Core correction authorization is missing')
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().authorize_correction(self.source,
-                criterion=dict(work_unit_id='first', contract_revision=1, criterion_id='AC1'),
-                proof=candidate['proof'], verified_at=self.time, contract=candidate['contract'])
+        self.assertEqual(self.api().assessment_coverage(self.lookup(candidate), candidate['contract'],
+            candidate['proof'], self.time), set())
 
-    def test_missing_core_review_is_not_policy_coverage(self):
+    def test_core_review_api_exposes_no_correction_or_archive_entry_points(self):
         import inspect
-        import completion_evidence_policy as policy
-        self.assertIn('source', inspect.signature(policy.assess_reference_coverage).parameters,
-                      'Policy must authenticate owning assessments')
-        candidate = self.prepare()
-        row = candidate['contract']['criteria'][0]
-        record = dict(contract=candidate['contract'], criteria=[row], target={'path': 'test'},
-            proof=candidate['proof'], verified_at=self.time, dependencies=[],
-            criterion_dependencies=[dict(work_unit_id='first', contract_revision=1, criterion_id='AC1', locators=[])])
-        with self.assertRaises(policy.CompletionEvidencePolicyError) as caught:
-            policy.assess_reference_coverage({'ref': record}, record['contract'], record['target'], {}, source=self.source)
-        self.assertEqual(caught.exception.reason, 'assessment-required')
+        api = self.api()
+        for name in ('authorize_correction', 'assessed_definitions', 'assessment_definitions',
+                     'assessment_capture_binding', 'assessment_rejections', 'assessment_reviewed',
+                     'lookup_publication_assessment'):
+            self.assertFalse(hasattr(api, name), name)
+        for function in (api.prepare_assessment, api.prepare_response_review):
+            self.assertNotIn('reuse_evidence', inspect.signature(function).parameters, function.__name__)
 
     def test_current_proof_lookup_accepts_boundary_whitespace_and_preserves_raw_proof(self):
         candidate = self.prepare(); self.review(candidate)
@@ -823,14 +796,6 @@ class CompletionAssessmentTests(unittest.TestCase):
         partial = partial.replace('    evidence:', '    evidence: explained the literal [completion-check] marker;')
         self.assertEqual(parser.parse_original_completion_evidence(partial, allow_partial=True)['scope'], 'partial')
 
-    def test_legacy_reuse_requires_authenticated_accepted_record(self):
-        import inspect
-        self.assertIn('reuse_evidence', inspect.signature(self.api().prepare_assessment).parameters,
-                      'Legacy proof needs an authenticated historical-source path')
-        with self.assertRaises(self.api().CompletionAssessmentError):
-            self.api().prepare_assessment(self.source, proof=self.proof(), verified_at=self.time,
-                source_paths=[], reuse_evidence='sha256:' + 'a' * 64)
-
     def test_partial_unverified_condition_never_becomes_supported_coverage(self):
         proof = self.proof().replace('[completion-check]', '[partial-check]\n- scope: partial').replace('  - none', '  - AC1: unresolved')
         candidate = self.prepare(proof); self.review(candidate)
@@ -850,31 +815,6 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.review(other, 'unsupported', 'This proof does not establish the second condition.')
         with self.assertRaises(self.api().CompletionAssessmentError):
             self.api().lookup_current_proof(self.source, candidate['proof'])
-
-    def test_publication_definitions_come_from_core_reviewed_bindings(self):
-        candidate = self.prepare(self.proof('The arm is visible.', 'Keep arm visible.'))
-        self.review(candidate, 'unsupported', 'Arm visibility is unrelated to the canonical footer requirement.')
-        self.assertTrue(callable(getattr(self.api(), 'assessed_definitions', None)), 'Core reviewed definitions API is missing')
-        self.assertEqual(self.api().assessed_definitions(self.source, candidate['contract'], candidate['proof'], self.time),
-                         candidate['contract']['criteria'])
-
-    def test_fresh_source_or_generic_candidate_reuse_cannot_authorize_historical_correction(self):
-        import inspect
-        self.assertIn('original_evidence_reference', inspect.signature(self.api().authorize_correction).parameters,
-                      'Corrections must bind the exact authenticated accepted predecessor')
-        original = self.prepare(); self.review(original)
-        self.observation.write_text('A later business observation that was not part of the accepted proof')
-        fresh = self.prepare(self.proof('Corrected footer claim using later bytes.')); self.review(fresh)
-        reused = self.api().prepare_assessment(self.source, proof=self.proof('Another correction using generic reuse.'),
-            verified_at=self.time, source_paths=[], reuse_candidate=fresh['candidate_reference'])
-        self.review(reused)
-        for candidate in (fresh, reused):
-            with self.subTest(candidate=candidate['candidate_reference']), self.assertRaises(self.api().CompletionAssessmentError) as caught:
-                self.api().authorize_correction(self.source,
-                    criterion=dict(work_unit_id='first', contract_revision=1, criterion_id='AC1'),
-                    proof=candidate['proof'], verified_at=self.time, contract=candidate['contract'],
-                    original_evidence_reference='sha256:' + 'a' * 64)
-            self.assertEqual(caught.exception.reason, 'correction-source-unbound')
 
     def test_supported_honest_failure_is_reviewable_but_never_pass_coverage(self):
         from completion_check_validator import parse_original_completion_evidence

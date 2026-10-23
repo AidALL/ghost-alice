@@ -303,6 +303,13 @@ def _prepare_destination_runtime(destination, *, dry_run=False):
         output.parent.mkdir(parents=True, exist_ok=True)
         if not output.exists() or output.read_bytes() != source.read_bytes():
             shutil.copy2(source, output)
+    # The runtime mirrors the current source set. A module removed from the
+    # source leaves the runtime too, so an installed hook never imports it.
+    expected = {output for _, output in sources}
+    for stale in (target.iterdir() if target.is_dir() else ()):
+        if stale.is_file() and stale.suffix in {'.py', '.mjs', '.json'} and stale not in expected:
+            install_destination.assert_mutation_path(stale)
+            stale.unlink()
 
 
 def _pending_merge_precheck_command(

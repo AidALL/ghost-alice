@@ -491,9 +491,8 @@ class ResponseRouteTests(unittest.TestCase):
                 route = self.api.read_response_route(**self.coords)
                 result = select_completion_route(
                     dict(platform="codex", session_id="current", input_event_id=event, response_route=route),
-                    dict(text="The returned path names the working directory.", phase="final"),
-                    {}, dict(enabled=True, publication_status="prepared"))
-                self.assertEqual(result["publication_route"], "none")
+                    dict(text="The returned path names the working directory.", phase="final"), {})
+                self.assertNotIn("publication_route", result)
                 self.assertEqual(result["evidence_route"], "no_external_check")
                 self.assertEqual(result["selected_criteria"], [])
                 self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"], preserved)
@@ -511,8 +510,8 @@ class ResponseRouteTests(unittest.TestCase):
         result = select_completion_route(
             dict(platform="codex", session_id="current", input_event_id=self.event, response_route=route,
                  verification_plan=dict(checks=[dict(key, check_id="directory-lookup")])),
-            dict(text="", phase="before_tool"), {}, dict(enabled=True, publication_status="unprepared"))
-        self.assertEqual(result["publication_route"], "prepare")
+            dict(text="", phase="before_tool"), {})
+        self.assertNotIn("publication_route", result)
         self.assertEqual(result["evidence_route"], "fresh_affected")
         self.assertEqual(result["unit_decisions"][0]["criteria"][0]["check_ids"], ["directory-lookup"])
 

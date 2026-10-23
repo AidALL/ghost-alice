@@ -29,7 +29,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
             "coding-convention/verification-before-completion/SKILL.md",
             "merge-companion/SKILL.md",
             "coding-convention/verification-before-completion/references/verify-or-reuse.md",
-            "coding-convention/verification-before-completion/references/autopilot-publication.md",
+            "coding-convention/verification-before-completion/references/response-review.md",
         ):
             target = repo / rel
             target.parent.mkdir(parents=True, exist_ok=True)

@@ -563,13 +563,13 @@ def review_comparison_text(text):
 
 
 def parse_original_completion_evidence(evidence_text, *, allow_partial=False, allow_failed_completion=False):
-    """Interpret an original qualified proof for publication and retained claims.
+    """Interpret an original qualified proof into its criterion rows and claims.
 
     This parser checks structure. The current-session assistant judges claims
     against original sources; completion_assessment.py authenticates that record.
     Criterion IDs and pass rows alone do not establish semantic support.
     allow_failed_completion permits a full failure report through this parser.
-    Failed criteria never enter criterion_ids; publication defaults to all-pass.
+    Failed criteria never enter criterion_ids; without allow_failed_completion every row must pass.
     """
     markers = [name for name, _, _ in _control_headers(evidence_text)
                if name in {"completion-check", "partial-check"}]

@@ -2,13 +2,12 @@
 
 The current-session assistant reads the candidate and judges meaning. This
 module checks provenance and exact bindings, not the truth of model reasoning.
-Ghost-ALICE Autopilot adapter code consumes authenticated results; IDs and metadata cannot replace
-the assistant's review. This module does not rerun business observations.
+IDs and metadata cannot replace the assistant's review. This module does not
+rerun business observations.
 """
 from __future__ import annotations
 
 import argparse
-import base64
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -156,8 +155,6 @@ def _source_issues(candidate, source_ids=None):
         if source_ids is not None and source['source_id'] not in source_ids:
             continue
         reference = source.get('storage') in (FORMAT, CORE_FORMAT)
-        if not reference and (candidate.get('reuse_evidence') or source.get('kind') == 'accepted-proof'):
-            continue
         try:
             if reference:
                 verify_source(source)
@@ -337,15 +334,6 @@ def prepare_response_scope(source, *, expected_input_event_id, source_paths, app
                     'scope-invalid', 'Original route snapshot does not match its owning intake')
                 scope.update(route=retained['route'], relevant_context=retained['relevant_context'],
                     canonical_criteria=retained['canonical_criteria'])
-        scope['capture_bindings'] = {}
-        state = core._stored_state(connection, **owner)
-        if (scope['route'] is not None and scope['route'].get('response_purpose') != 'explanation'
-                and state.get('latest_input_event_id') == expected_input_event_id):
-            for unit in scope['route']['selected_work_unit_ids']:
-                contract = _scope_contract(scope, unit)
-                capture = _capture_binding(source, contract, expected_input_event_id, connection)
-                if capture is not None:
-                    scope['capture_bindings'][unit] = capture
         _schema(connection)
         reference = _reference(scope)
         connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
@@ -477,7 +465,7 @@ def lookup_native_response_record(source, *, expected_input_event_id, text, nati
 
 
 def prepare_response_review(source, *, response_text, source_paths, verified_at=None,
-                            reuse_candidate=None, reuse_evidence=None, work_unit_id=None,
+                            reuse_candidate=None, work_unit_id=None,
                             claim_statements=None, scope_reference=None):
     """Retain the complete answer and return references for the two judgments.
 
@@ -487,7 +475,7 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
     _require(isinstance(response_text, str) and bool(response_text.strip()),
         'response-unbound', 'A complete response draft is required')
     marker = looks_like_evidence_claim(response_text)
-    if marker or reuse_candidate or reuse_evidence:
+    if marker or reuse_candidate:
         _require(claim_statements is None, 'response-unbound',
             'Completion claim bindings come from the original proof block')
         proof = extract_original_proof(response_text) if marker else None
@@ -503,7 +491,7 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
         _require(isinstance(verified_at, str) and bool(verified_at),
             'proof-invalid', 'Completion evidence requires its original verification time')
         return review_receipt(prepare_assessment(source, proof=proof, verified_at=verified_at,
-            source_paths=source_paths, reuse_candidate=reuse_candidate, reuse_evidence=reuse_evidence,
+            source_paths=source_paths, reuse_candidate=reuse_candidate,
             work_unit_id=work_unit_id, response_text=response_text, scope_reference=scope_reference))
     core, root, owner = _coordinates(source)
     _require(verified_at is None, 'response-unbound', 'An explanation does not create a verification timestamp')
@@ -640,68 +628,12 @@ def _lookup_source_response(core, root, owner, connection, text):
     return reviewed
 
 
-def _accepted_observation(source, reference, contract, verified_at, *, transaction=None, criterion=None):
-    from original_claim_evidence import _managed_archive_provider
-    _, root, owner = _coordinates(source)
-    try:
-        provider = _managed_archive_provider(source)
-        with provider.open_claim_archive(source) as archive:
-            record = archive.accepted_evidence(contract['work_unit_id'], reference, datetime.now(timezone.utc).isoformat())
-        _require(isinstance(record, dict), 'assessment-required', 'Accepted original evidence is unavailable')
-        _require(record['contract']['owner'] == contract['owner']
-            and record['contract']['work_unit_id'] == contract['work_unit_id'] and record['verified_at'] == verified_at,
-            'assessment-invalid', 'Historical reuse must preserve accepted owner, unit and original time')
-        if criterion is not None:
-            _require(any((row['work_unit_id'], row['contract_revision'], row['id']) ==
-                (criterion['work_unit_id'], criterion['contract_revision'], criterion['criterion_id'])
-                for row in record['criteria']), 'criterion-unbound', 'Predecessor must cover the affected qualified criterion')
-        try:
-            original = lookup_assessment(source, record['contract'], record['proof'], record['verified_at'],
-                transaction=transaction, historical=True)
-            return _record_source_references(original.candidate['sources'], root, owner, original.candidate_reference), original.candidate.get('capture_binding'), record['proof']
-        except CompletionAssessmentError as exc:
-            if exc.reason != 'assessment-required':
-                raise
-        raw = record['proof'].encode()
-        item = dict(kind='accepted-proof', locator=reference, digest=_digest(raw),
-            bytes_base64=base64.b64encode(raw).decode(), text=record['proof'],
-            verified_at=record['verified_at'], original_contract=record['contract'], dependencies=record['dependencies'])
-        item['source_id'] = _reference(item)
-        return [item], None, record['proof']
-    except CompletionAssessmentError:
-        raise
-    except (ValueError, OSError, ImportError, AttributeError, KeyError, TypeError) as exc:
-        raise CompletionAssessmentError('assessment-required', 'Trusted accepted original source is unavailable') from exc
-
-
-def _capture_binding(source, contract, event, connection):
-    """Read the existing Ghost-ALICE Autopilot capture before snapshotting new review sources.
-
-    Ghost-ALICE Autopilot is optional. A provider without capture_binding supplies no causal proof. An invalid
-    capture record is an error, never permission to infer ordering.
-    """
-    from original_claim_evidence import _managed_archive_provider, _Rejected
-    try:
-        provider = _managed_archive_provider(source)
-        capture = getattr(provider, 'capture_binding', None)
-        binding = capture(source, contract, transaction=connection) if callable(capture) else None
-        return binding if binding is not None and binding.get(
-            'authority_input_event_id', binding['input_event_id']) == event else None
-    except _Rejected as exc:
-        if exc.reason == 'archive-provider-unavailable':
-            return None
-        raise CompletionAssessmentError('capture-invalid', str(exc)) from exc
-    except (ValueError, OSError, ImportError) as exc:
-        raise CompletionAssessmentError('capture-invalid', str(exc)) from exc
-
-
 def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candidate=None,
-                       reuse_evidence=None, work_unit_id=None, response_text=None, transaction=None,
+                       work_unit_id=None, response_text=None, transaction=None,
                        scope_reference=None):
     """Snapshot explicit observation paths and canonical conditions for review.
 
-    This proof-storage primitive is also used for retained Ghost-ALICE Autopilot evidence. Native
-    answer producers use prepare_response_review and record_response_review;
+    Native answer producers use prepare_response_review and record_response_review;
     proof-only records do not approve a complete native answer.
     Reuse copies a prior candidate's actual bytes/time for recording correction;
     it never reads a changed file and presents it as the original observation.
@@ -730,25 +662,15 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
             contract = _scope_contract(scope, work_unit_id)
             event, selected = scope['input_binding']['input_event_id'], scope['route']['selected_criteria']
         _schema(connection)
-        _require(not (reuse_candidate and reuse_evidence), 'assessment-invalid', 'Choose one original source for reuse')
-        if reuse_evidence:
-            _require(not source_paths, 'assessment-invalid', 'Historical reuse cannot import newly read observation bytes')
-            sources, capture, original_proof = _accepted_observation(
-                source, reuse_evidence, contract, verified_at, transaction=connection)
-            if proof.strip() == original_proof.strip():
-                proof = original_proof
-        elif reuse_candidate:
+        if reuse_candidate:
             old = _stored(connection, 'core_completion_candidates', reuse_candidate)
             _require(old['contract']['owner'] == owner and old['intent_root'] == str(root)
                 and old['contract']['work_unit_id'] == contract['work_unit_id'] and not source_paths
                 and old['verified_at'] == verified_at, 'assessment-invalid', 'Reuse preserves original owner, sources and time')
             sources = _record_source_references(old['sources'], root, owner, reuse_candidate)
-            capture = old.get('capture_binding')
             if proof.strip() == old['proof'].strip():
                 proof = old['proof']
         else:
-            capture = (scope['capture_bindings'].get(contract['work_unit_id']) if scope is not None
-                else _capture_binding(source, contract, event, connection))
             try:
                 sources = _scope_sources(scope, source_paths) if scope is not None else _reference_sources(source_paths)
             except OSError as exc:
@@ -767,9 +689,7 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
         candidate = dict(schema_version='completion-assessment-candidate.v1', intent_root=str(root),
             input_event_id=event, contract=contract, proof=proof, proof_digest=_digest(proof),
             verified_at=verified_at, sources=sources, bindings=bindings,
-            reuse_candidate=reuse_candidate, reuse_evidence=reuse_evidence)
-        if capture is not None:
-            candidate['capture_binding'] = capture
+            reuse_candidate=reuse_candidate)
         if response_text is not None:
             response = dict(text=response_text, proof_digest=_digest(proof))
             if report_only:
@@ -857,7 +777,6 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
                     return {j['binding_id']: (j['verdict'], sorted(j['source_ids'])) for j in rows}
                 _require(_same_sources(original_candidate['sources'], candidate['sources'])
                     and original_candidate['bindings'] == candidate['bindings']
-                    and original_candidate.get('capture_binding') == candidate.get('capture_binding')
                     and decisions(old['judgments']) == decisions(judgments),
                     'assessment-conflict', 'Response review cannot replace original observations or proof judgments')
             reference = previous[0][0]
@@ -1053,7 +972,7 @@ def lookup_original_response_record(source, response_reference, *, expected_inpu
     """Authenticate exact reviewed bytes for their original native input.
 
     This read preserves historical judgments and never grants current work
-    completion, publication, or permission to replace another turn's output.
+    completion or permission to replace another turn's output.
     """
     core, root, owner = _coordinates(source)
     with core._read_connection(root, transaction) as connection:
@@ -1097,31 +1016,6 @@ def lookup_original_response_record(source, response_reference, *, expected_inpu
         candidate_reference=reviewed['candidate_reference'])
 
 
-def lookup_publication_assessment(source, contract, text, verified_at, *, transaction=None):
-    """Give Ghost-ALICE Autopilot the original proof of a reviewed answer, without rewriting it."""
-    _require(isinstance(text, str) and bool(text.strip()), 'proof-invalid', 'Publication requires reviewed evidence')
-    assessment = lookup_current_response(source, text, transaction=transaction)
-    _require(assessment.candidate['contract'] == contract
-        and assessment.candidate['verified_at'] == verified_at,
-        'response-unbound', 'Publication must retain the reviewed contract and original verification time')
-    return assessment
-
-
-def assessed_definitions(source, contract, proof, verified_at, *, transaction=None):
-    """Return reviewed canonical rows, including unsupported rows needed for correction."""
-    assessment = lookup_assessment(source, contract, proof, verified_at, transaction=transaction)
-    return assessment_definitions(assessment, contract, proof, verified_at)
-
-
-def assessment_definitions(assessment, contract, proof, verified_at):
-    """Return canonical declared rows from an authenticated Core assessment."""
-    bindings = _assessed_bindings(assessment, contract, proof, verified_at)
-    declared = set(parse_original_completion_evidence(proof, allow_partial=True)['criterion_ids'])
-    rows = {b['criterion']['id']: b['criterion'] for b, _ in bindings
-            if b['criterion']['id'] in declared}
-    return list(rows.values())
-
-
 def _assessed_bindings(assessment, contract, proof, verified_at):
     _require(isinstance(assessment, VerifiedAssessment) and assessment._seal is _SEAL,
              'assessment-required', 'Only authenticated Core assessments can establish coverage')
@@ -1144,48 +1038,6 @@ def assessment_coverage(assessment, contract, proof, verified_at):
         (supported if judgment['verdict'] == 'supported' and binding['declared_verdict'] == 'pass' and row['id'] in declared
          else rejected).add(key)
     return supported - rejected
-
-
-def assessment_capture_binding(assessment, contract, proof, verified_at):
-    """Return causal review provenance only from an authenticated Core record.
-
-    The capture preceded this candidate's source snapshot. That sequence does
-    not attest when a historical business operation actually ran.
-    """
-    _assessed_bindings(assessment, contract, proof, verified_at)
-    return assessment.candidate.get('capture_binding')
-
-
-def assessment_rejections(assessment, contract, proof, verified_at):
-    """Return criterion keys explicitly marked unsupported in the recorded assistant review."""
-    return {(b['criterion']['work_unit_id'], b['criterion']['contract_revision'], b['criterion']['id'])
-            for b, j in _assessed_bindings(assessment, contract, proof, verified_at) if j['verdict'] == 'unsupported'}
-
-
-def assessment_reviewed(assessment, contract, proof, verified_at):
-    reviewed, unavailable = set(), set()
-    for binding, judgment in _assessed_bindings(assessment, contract, proof, verified_at):
-        row = binding['criterion']; key = (row['work_unit_id'], row['contract_revision'], row['id'])
-        (unavailable if judgment['verdict'] == 'unavailable' else reviewed).add(key)
-    return reviewed - unavailable
-
-
-def authorize_correction(source, *, criterion, proof, verified_at, contract,
-                         original_evidence_reference=None, transaction=None):
-    assessment = lookup_assessment(source, contract, proof, verified_at, transaction=transaction)
-    candidate = assessment.candidate
-    _require(isinstance(original_evidence_reference, str) and bool(original_evidence_reference)
-        and candidate.get('reuse_evidence') == original_evidence_reference,
-        'correction-source-unbound', 'Correction must retain the exact accepted predecessor through reuse_evidence')
-    original_sources, original_capture, _ = _accepted_observation(source, original_evidence_reference, contract, verified_at,
-        transaction=transaction, criterion=criterion)
-    _require(candidate['sources'] == original_sources and candidate.get('capture_binding') == original_capture,
-             'correction-source-unbound',
-             'Correction sources must be the authenticated original observation snapshots')
-    key = tuple(criterion[k] for k in ('work_unit_id', 'contract_revision', 'criterion_id'))
-    _require(key in assessment_reviewed(assessment, contract, proof, verified_at),
-             'assessment-required', 'The current-session assistant must record a judgment for every claim binding affected by the correction')
-    return True
 
 
 def read_review_claims(source, candidate_reference, claim_indices):
@@ -1237,7 +1089,6 @@ def main():
     response_prepare.add_argument('--claims-file', help='JSON array of exact source-backed statements from an explanation draft')
     response_prepare.add_argument('--verified-at')
     response_prepare.add_argument('--reuse-candidate')
-    response_prepare.add_argument('--reuse-evidence')
     response_prepare.add_argument('--work-unit-id')
     response_record = commands.add_parser('record-response')
     response_record.add_argument('--candidate', required=True)
@@ -1256,7 +1107,7 @@ def main():
             result = prepare_response_review(os.environ,
                 response_text=Path(args.response_file).read_text(), source_paths=args.source,
                 verified_at=args.verified_at, reuse_candidate=args.reuse_candidate,
-                reuse_evidence=args.reuse_evidence, work_unit_id=args.work_unit_id,
+                work_unit_id=args.work_unit_id,
                 claim_statements=json.loads(Path(args.claims_file).read_text()) if args.claims_file else None)
         else:
             result = record_response_review(os.environ, args.candidate,

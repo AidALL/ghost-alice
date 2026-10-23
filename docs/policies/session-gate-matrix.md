@@ -113,7 +113,7 @@ Source edit, named test pass, installed bytes, native execution, accepted public
 
 For a new completion or partial submission, Core Python code checks the current owned route before proof formatting and authenticated semantic review. A missing route therefore returns the route defect before requesting corrected proof fields.
 
-For this condition, the responding model records both judgments using the [owning review procedure](../../coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review). The [Core response flow](../../architecture.md#evidence-and-native-delivery) explains authentication and native answer delivery; [output semantics](tool-output-semantics.md#review-output-and-continuation) distinguishes supported and unsupported results.
+For this condition, the responding model records both judgments using the [owning review procedure](../../coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review). The [Core response flow](../../architecture.md#evidence-and-native-delivery) explains authentication and native answer delivery; [output semantics](tool-output-semantics.md#review-output-and-continuation) distinguishes supported and unsupported results.
 
 The managed registered hook chain uses v2 unit-qualified admitted criteria; direct public APIs retain the v1 default. Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
 
@@ -125,13 +125,13 @@ Core validates the current response route supplied by the model following task-r
 
 A named route, proof or recording defect returns to its procedure owner below. The model chooses correction only when needed for the objective or a required dependency and within authority. Unsupported claims are revised or withdrawn; required unresolved criteria stay unmet. Identical unchanged recording failure parks dependent application without replaying business work or blocking independent authorized work.
 
-[Review and delivery](../../coding-convention/verification-before-completion/references/autopilot-publication.md) owns the calling sequence and correction shape. [Tool output semantics](tool-output-semantics.md#review-output-and-continuation) names the returned selectors. Core's retained-report path applies only when original applied proof supports the exact entire statement; added prose or a broader claim needs its own review.
+[Review and delivery](../../coding-convention/verification-before-completion/references/response-review.md) owns the calling sequence and correction shape. [Tool output semantics](tool-output-semantics.md#review-output-and-continuation) names the returned selectors. Core's retained-report path applies only when original applied proof supports the exact entire statement; added prose or a broader claim needs its own review.
 
 ## Repair and authority conditions
 
 - [Boundary-contract: Authority and renewal](../../boundary-contract/SKILL.md#authority-and-renewal) owns human authority, allowed targets and resource limits.
 - [Systematic-debugging: Incident accounting and continuation](../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation) owns failed repair rounds, reassessment and bounded continuation.
 - [Verification-before-completion: Evidence Selection And Stop Gate](../../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate) owns useful checks and proof reuse.
-- [Ghost-ALICE Autopilot publication contract](../../coding-convention/verification-before-completion/references/autopilot-publication.md) owns capture, publication, application and recording recovery.
+- [Response review](../../coding-convention/verification-before-completion/references/response-review.md) owns the review record, delivery and recording recovery.
 
 These owners preserve cumulative attempts, original source/time and unaffected criteria. A branch-local failure blocks its dependencies, not unrelated authorized work.

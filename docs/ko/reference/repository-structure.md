@@ -57,8 +57,7 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | 작업의 목표·허용 범위·금지 대상·중단 조건을 선언하는 절차 |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | 개발 작업 절차를 제공하는 스킬 모음 |
 | [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | 실행 환경이 읽는 생성된 검사 메타데이터 |
-| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | 완료 guard와 Ghost-ALICE Autopilot이 함께 사용하는 Core의 단일 평가 |
-| [_shared/original_claim_evidence.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/original_claim_evidence.py) | 보존된 원본 주장 연결을 현재 기준·의존 관계에 대조하여 인증합니다 |
+| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Stop 관찰자가 읽는 Core의 단일 평가 |
 
 ## Official Docs And Policies
 

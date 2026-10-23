@@ -4,7 +4,7 @@ This reference defines stored state, mutation bindings, provenance and the Core 
 
 ## State and transaction authority
 
-The database is `<ledger_root>/ghost-state.sqlite3`, keyed by exact `(platform, session_id)`. A successful intake or semantic commit advances ledger_revision once and commits the state, input anchor, ordered event and advisory discovery metadata in one SQLite transaction. A bound Ghost-ALICE Autopilot writer passes the same explicit transaction connection to Core; an outer rollback also rolls back completion evidence. Foreign keys bind events to the session, and a connection from another database root is rejected.
+The database is `<ledger_root>/ghost-state.sqlite3`, keyed by exact `(platform, session_id)`. A successful intake or semantic commit advances ledger_revision once and commits the state, input anchor, ordered event and advisory discovery metadata in one SQLite transaction. A writer that joins the same unit of work passes the same explicit transaction connection to Core; an outer rollback also rolls back completion evidence. Foreign keys bind events to the session, and a connection from another database root is rejected.
 
 Revision and input character count are integers from zero through `2**53 - 1`, excluding booleans. The input anchor consists of `ledger_revision`, `latest_input_event_id`, `latest_input_digest` and `latest_input_char_count`. Once any anchor field exists, all four must exist; a partial anchor cannot fall back to historical events. A custom intake observation must match the raw input's digest and exact character count before mutation or pending-audit recovery.
 
@@ -51,7 +51,7 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
 }
 ```
 
-`model_security_decision` is compatibility audit data. Import/audit callers may record it under exact-event mutation rules; intake, routing, checkpoints and Ghost-ALICE Autopilot do not derive native permission or execution authorization from it.
+`model_security_decision` is compatibility audit data. Import/audit callers may record it under exact-event mutation rules; intake, routing and checkpoints do not derive native permission or execution authorization from it.
 
 Completion proof belongs to the current criterion definition. Recording the same ID with unchanged summary preserves verified met status, digest and time. Changing the summary or explicitly withdrawing admission resets that criterion to unmet and removes current proof fields; other criteria retain their proof. A wording change counts as a changed condition because the parser cannot establish semantic equivalence. The prior acceptance-criterion-met event remains historical evidence, not proof for the revised condition. A semantic delta cannot set met; completion uses the owning verification writer.
 
@@ -155,7 +155,7 @@ The current-session assistant applies task-router to form the current semantic r
 
 A new input marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap, intake or security. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
 
-The optional response_purpose is `execution | explanation | approval-wait | partial | completion`; legacy v1 defaults to execution. Changing purpose neither revises the contract nor marks a criterion met. An actual completion/partial control marker or registered purpose `completion` declares a completion submission; prose and selected execution work alone do not. Explanatory, waiting or partial responses can retain continuing selected work without new publication. The current-session assistant explicitly routes and verifies new completion claims under the owning workflow.
+The optional response_purpose is `execution | explanation | approval-wait | partial | completion`; legacy v1 defaults to execution. Changing purpose neither revises the contract nor marks a criterion met. An actual completion/partial control marker or registered purpose `completion` declares a completion submission; prose and selected execution work alone do not. Explanatory, waiting or partial responses can retain continuing selected work without a new completion submission. The current-session assistant explicitly routes and verifies new completion claims under the owning workflow.
 
 A direct answer or a confirmation question follows the common contract without agent-side ledger access or route registration. Hook observation still stales the prior projection, and semantic persistence waits for the next authorized normal route. An already supplied internal host handoff may carry a terminal projection; without it the projection remains absent. These restrictions do not prohibit authorized Core recording repair on a normal route.
 
@@ -231,7 +231,7 @@ The canonical route writer authenticates each `(candidate_reference, source_id)`
 
 The reader revalidates referenced originals without rewriting the stored declaration. An affected row receives a read-only `continuation_feedback_issues` entry `{pointer, issue}`; its pointer is `/continuation_feedback/required_unprocessed/<index>` and its issue is `source-unverified | source-owner-unbound | source-changed | source-unavailable`. Consumers hold that row and can continue unrelated approved groups. The declaration contents and row indices stay unchanged, so the existing `response-route-recorded` event remains the original source. A consumer computing its event digest excludes only read-added `current_input_event_id` and `continuation_feedback_issues`. These metadata fields cannot be supplied to the route writer. A later human input stales the route and its feedback together.
 
-Ghost-ALICE Autopilot consumes this authenticated current declaration after independent proof bookkeeping. It maps a whole necessity row to one already approved task, checks the frozen boundary, allowed surfaces, dependencies and current prerequisite, and requests only the needed information. Core-only installations record the same judgment without automatically scheduling it. The Autopilot installed `references/continuation.md` owns plan admission and delivery; queueing a request proves neither host receipt nor execution.
+Core records this authenticated current declaration and schedules none of the work it names. The declaration carries each whole necessity row with its frozen boundary, allowed surfaces, dependencies and current prerequisite; recording it proves neither that the work was requested nor that it ran.
 
 ### APIs and CLI
 
@@ -266,7 +266,7 @@ For admitted ownerless criteria matching an existing current owner's latest froz
 
 Core Python code requires canonical intake, exact revision, the admitted same-session execution unit at its latest revision and exact frozen definitions. It compares full row snapshots with type-sensitive values and rejects ambiguous rows, partial ownership or collisions. It adds only the owner pair, preserving order, definition, admission, status, proof and time, and writes the ownership audit event.
 
-The CLI binds rows and registers the route in one transaction; either failure rolls back both. Library callers pass the same storage_transaction connection to obtain that boundary. The current-session assistant must not resubmit rows through the semantic writer, which creates distinct owned entries. Binding creates no criteria or admission, does not mark completion and does not convert old proof into accepted Ghost-ALICE Autopilot v2 evidence.
+The CLI binds rows and registers the route in one transaction; either failure rolls back both. Library callers pass the same storage_transaction connection to obtain that boundary. The current-session assistant must not resubmit rows through the semantic writer, which creates distinct owned entries. Binding creates no criteria or admission and does not mark completion.
 
 ## Forbidden persistence
 

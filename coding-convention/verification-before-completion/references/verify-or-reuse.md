@@ -19,7 +19,7 @@ This reference is the canonical semantic contract for deciding whether a claim a
 - [Conversation Audit Template](#conversation-audit-template)
 - [Worked Cases](#worked-cases)
 - [Out Of Scope](#out-of-scope)
-- [Publication Binding And Evidence Time](#publication-binding-and-evidence-time)
+- [Recording Binding And Evidence Time](#recording-binding-and-evidence-time)
 - [Discriminating checks and required evidence](#discriminating-checks-and-required-evidence)
 
 ## Purpose
@@ -89,7 +89,7 @@ An agent write re-anchors evidence when the agent retains the full content it wr
 
 Instruction loading and current-input workflow execution are separate obligations. In Codex, a retained instruction body already read in the same session may be reused; a new user input alone does not require another body read. Still execute the applicable workflow for the current input, including intent, routing and completion decisions. Metadata, a name, a prior verdict or a thin summary is not a retained body.
 
-Resolve the installed Core module root from the trusted runtime binding, separately from the receipt's ledger root, as defined in [Prepare and record the response review](autopilot-publication.md#prepare-and-record-the-response-review). Through the host's exposed shell tool, run `python3 <absolute-Core-root>/_shared/session_check_cache.py --root <receipt.ledger_root> --platform <receipt.platform> --session-id <receipt.session_id> --instruction-path <absolute-SKILL.md>`. Replace every argument with its established current-session value before invocation; do not substitute an ambient checkout or another session when a binding is missing.
+Resolve the installed Core module root from the trusted runtime binding, separately from the receipt's ledger root, as defined in [Prepare and record the response review](response-review.md#prepare-and-record-the-response-review). Through the host's exposed shell tool, run `python3 <absolute-Core-root>/_shared/session_check_cache.py --root <receipt.ledger_root> --platform <receipt.platform> --session-id <receipt.session_id> --instruction-path <absolute-SKILL.md>`. Replace every argument with its established current-session value before invocation; do not substitute an ambient checkout or another session when a binding is missing.
 
 On first use the helper reads the body and stores path, file version and check time in `session-checks.sqlite3` under the ledger root; it never stores the body. The JSON return includes `status`, `value` and `checked_at`; a performed read also returns `body`. Read that returned body before applying the workflow. On a later invocation, add `--body-retained` only when the complete usable body remains in current context. A `reused` result relies on that retained body and does not return it again. An observed instruction change, different session/copy, or missing/corrupt record requires a read; a read is also required when the retained body is lost. Cache failure falls back to an actual read; it does not fabricate successful persistence. Do not recreate hashes or inspect the file separately before this helper; its stamp and stored session record perform that mechanical decision once.
 
@@ -128,7 +128,7 @@ For a confirmed flaw in an authored prompt, document, plan or other requested ar
 | Fix is unsafe or outside the agreed scope | `confirm-before-fix` |
 | No flaw confirmed | `none` |
 
-A correction confined to completion control fields follows [Apply and deliver](autopilot-publication.md#apply-and-deliver), which may preserve an already visible answer.
+A correction confined to completion control fields follows [Deliver](response-review.md#deliver), which may preserve an already visible answer.
 
 Failure classes: `confirmed-flaw-not-propagated` for an explanation, a previous version, or a partial patch where the corrected complete deliverable was required; `unnecessary-reapproval` for asking permission for a safe in-scope fix; `unconfirmed-out-of-scope-change` for applying an out-of-scope fix without confirmation.
 
@@ -199,9 +199,9 @@ Use this template to review a finished turn without storing raw conversation tex
 
 This contract does not track theoretical external changes, hash every artifact, or query a remote store solely because of its location. When the change path is closed, retained conversation evidence accounts for mutations. When the path is open, an agent-only hook registry cannot establish the external writes needed for a current-state claim. Additional tracking is justified only by an observed missing mutation fact that can change the next decision.
 
-## Publication Binding And Evidence Time
+## Recording Binding And Evidence Time
 
-Follow [autopilot-publication.md](autopilot-publication.md) for current receipt binding, retained original time and recording-specific recovery. A recording dependency and the business claim it records have distinct evidence conditions.
+Follow [response-review.md](response-review.md) for current receipt binding, retained original time and recording-specific recovery. A recording dependency and the business claim it records have distinct evidence conditions.
 
 ## Discriminating checks and required evidence
 

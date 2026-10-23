@@ -57,8 +57,7 @@ For the full installer architecture, read [installer architecture](./installer-a
 | [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | Work boundary contract gate |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | Development workflow family |
 | [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | Generated gate metadata used by the runtime |
-| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Single Core assessment consumed by the completion guard and Ghost-ALICE Autopilot |
-| [_shared/original_claim_evidence.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/original_claim_evidence.py) | Authenticates retained claim bindings against current criteria and dependencies |
+| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Single Core assessment read by the Stop observer |
 
 ## Official Docs And Policies
 

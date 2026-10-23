@@ -70,7 +70,7 @@ Runtime tool-checkpoint payload does not require routine recovery cost or recove
 
 Installed completion hooks consume Core's current-input and exact-answer assessment. Core authenticates the model's distinct claim/source and whole-response judgments; skill loading and printed audit fields are not separate acceptance prerequisites. The independently registered Core guard and Ghost-ALICE Autopilot adapter must use this same assessment without assuming their invocation order.
 
-Claude retains its one-retry budget and visible unresolved-defect notice; Codex blocks genuine completion-evidence defects. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review/publication reference](../../coding-convention/verification-before-completion/references/autopilot-publication.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check those registered payloads and platform mappings, not the truth of model judgments.
+Claude retains its one-retry budget and visible unresolved-defect notice; Codex blocks genuine completion-evidence defects. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check those registered payloads and platform mappings, not the truth of model judgments.
 
 ## Shell Matrix
 
