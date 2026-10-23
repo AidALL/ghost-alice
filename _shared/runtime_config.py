@@ -90,8 +90,6 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> 
         config["hook_runtime"]["node"] = _normalized_node_registrations(
             hook_runtime.get("node")
         )
-    if isinstance(loaded.get("install_locations"), dict):
-        config["install_locations"] = loaded["install_locations"]
     config["schema_version"] = "ghost-alice-config.v1"
     config["agent_visibility"]["profile"] = canonical_agent_visibility_profile(
         config["agent_visibility"].get("profile")
@@ -187,8 +185,6 @@ def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
     install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     normalized = load_config(env={}, home=home)
-    if isinstance(config.get("install_locations"),dict):
-        normalized.setdefault("install_locations",{}).update(config["install_locations"])
     agent_visibility = config.get("agent_visibility")
     if isinstance(agent_visibility, dict):
         normalized["agent_visibility"].update(agent_visibility)

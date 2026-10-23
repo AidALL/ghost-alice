@@ -870,6 +870,14 @@ def _support_artifact_items(args: argparse.Namespace) -> list[dict[str, Any]]:
             confirm=args.confirm,
             shared_platforms=others,
         ),
+        # The launcher every host's hook registration runs; the hook uninstall removes it with the last host's
+        # registration, and this item takes a launcher that removal left behind.
+        _support_artifact_item(
+            "hook-launcher",
+            _ghost_alice_root() / "bin",
+            confirm=args.confirm,
+            shared_platforms=others,
+        ),
         _support_artifact_item(
             "install-rollbacks",
             _ghost_alice_root() / "install-rollbacks",

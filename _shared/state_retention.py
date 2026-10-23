@@ -109,7 +109,8 @@ _TABLE = (
     Policy("uninstall-quarantine", "overwrite",
            ("{record}/uninstall-backup/*/*", "{record}/uninstall-backup/*/*/**")),
     Policy("runtime-config", "overwrite", ("{ghost}/config.json",)),
-    Policy("hook-assets", "overwrite", ("{ghost}/hooks/*",)),
+    # The Node dispatcher under hooks/ and the launcher every hook registration runs under bin/.
+    Policy("hook-assets", "overwrite", ("{ghost}/hooks/*", "{ghost}/bin/hook-launcher", "{ghost}/bin/hook-launcher.cmd")),
     Policy("runtime-code", "overwrite",
            ("{record}/runtime/current/_shared/**",
             "{record}/runtime/current/session-intent-analyzer/scripts/[!.]*",

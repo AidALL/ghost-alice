@@ -56,6 +56,7 @@ SUPPORTED_PLATFORMS = ("claude", "codex")
 NODE_JS_DOWNLOAD_URL = "https://nodejs.org/en/download"
 RUNTIME_SHARED_FILES = (
     "hook_profile_gate.py",
+    "hook_launcher.py",
     "agent_visibility_policy.py",
     "runtime_config.py",
     "work_impact_projection.py",
@@ -779,11 +780,32 @@ def _norm_for_compare(text: str) -> str:
     return text.casefold() if os.name == "nt" else text
 
 
-def _runtime_hook_config_audit(commands: list[str], runtime_shared: Path) -> list[dict[str, str]]:
+def _recorded_hook_entry(record: dict | None, platform: str, hook_id: str) -> dict | None:
+    """The record's `hooks.<platform>.entries[hook_id]`, or None."""
+    section = ((record or {}).get("hooks") or {}).get(platform)
+    entries = section.get("entries") if isinstance(section, dict) else None
+    entry = entries.get(hook_id) if isinstance(entries, dict) else None
+    return entry if isinstance(entry, dict) and isinstance(entry.get("command"), str) else None
+
+
+def _launcher_text(launcher: Path) -> str:
+    try:
+        return launcher.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ""
+
+
+def _runtime_hook_config_audit(commands: list[str], runtime_shared: Path, *,
+                               record: dict | None = None) -> list[dict[str, str]]:
+    """Each managed registration runs the runtime core: a launcher registration through its launcher file
+    (which names the runtime `hook_launcher.py`) and the record entry the launcher reads, the long form an older
+    installer wrote through the runner path and payload it carries."""
+    import hook_launcher
     from install_hooks import GHOST_ALICE_HOOK_MARKERS
 
     findings: list[dict[str, str]] = []
     runtime_runner = _path_token(runtime_shared / "hook_profile_gate.py")
+    runtime_launcher_module = _path_token(runtime_shared / "hook_launcher.py")
     managed = [
         command for command in commands
         if any(marker in command for marker in GHOST_ALICE_HOOK_MARKERS)
@@ -792,10 +814,26 @@ def _runtime_hook_config_audit(commands: list[str], runtime_shared: Path) -> lis
         return [{"status": STATUS_ERROR, "name": "managed-hooks", "kind": "hook-config", "reason": "none-found"}]
 
     for index, command in enumerate(managed):
-        expanded = _expanded_hook_command_text(command).replace("\\", "/")
-        expanded_cmp = _norm_for_compare(expanded)
         name = f"managed-hook-{index + 1}"
-        if _norm_for_compare(runtime_runner) not in expanded_cmp:
+        registration = hook_launcher.parse_registration(command)
+        if registration is not None:
+            entry = _recorded_hook_entry(record, registration.platform, registration.hook_id)
+            if entry is None:
+                findings.append({
+                    "status": STATUS_ERROR,
+                    "name": name,
+                    "kind": "hook-config",
+                    "reason": "registration-missing",
+                })
+                continue
+            launcher_text = _launcher_text(registration.launcher).replace("\\", "/")
+            runner_reference = _norm_for_compare(runtime_launcher_module) in _norm_for_compare(launcher_text)
+            expanded = f"{launcher_text}\n{entry['command']}".replace("\\", "/")
+        else:
+            expanded = _expanded_hook_command_text(command).replace("\\", "/")
+            runner_reference = _norm_for_compare(runtime_runner) in _norm_for_compare(expanded)
+        expanded_cmp = _norm_for_compare(expanded)
+        if not runner_reference:
             findings.append({
                 "status": STATUS_ERROR,
                 "name": name,
@@ -861,7 +899,13 @@ def _runtime_session_intent_golden_status(
     *,
     repo_root: Path | str | None = None,
     hook_commands: list[str] | None = None,
+    record: dict | None = None,
 ) -> tuple[str, str]:
+    """The golden intake run with the destination the install record registers for this host.
+
+    With `hook_commands`, the record's `hooks.<platform>` must name the destination and the session-intent entry
+    the installed registration runs; the entry's executor is the runtime `session_intent_analyzer_hook.py`.
+    """
     hook = runtime_shared / "session_intent_analyzer_hook.py"
     if not hook.exists():
         return STATUS_ERROR, "hook-missing"
@@ -869,25 +913,22 @@ def _runtime_session_intent_golden_status(
     destination = None
     if hook_commands is not None:
         import install_destination
-        from install_hooks import _managed_session_intent_options
 
-        destinations = {}
-        for command in hook_commands:
-            if _managed_session_intent_options(command) is None:
-                continue
-            outer = shlex.split(command, comments=True)
-            script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
-            args = outer[script_index + 1:]
-            binding = install_destination.decode_binding(args[-1])
-            candidate = install_destination.InstallDestination.parse(binding["destination"])
-            if (args[2] != platform
-                    or Path(candidate.runtime_shared_dir).resolve() != runtime_shared.resolve()
-                    or Path(candidate.core_source_root).resolve() != owning_root):
-                return STATUS_ERROR, "session-intent-binding-mismatch"
-            destinations[json.dumps(binding, sort_keys=True)] = candidate
-        if len(destinations) != 1:
-            return STATUS_ERROR, "session-intent-binding-missing-or-ambiguous"
-        destination = next(iter(destinations.values()))
+        section = ((record or {}).get("hooks") or {}).get(platform)
+        entry = _recorded_hook_entry(record, platform, "session-intent")
+        if not isinstance(section, dict) or entry is None:
+            return STATUS_ERROR, "session-intent-registration-missing"
+        try:
+            destination = install_destination.InstallDestination.parse(section.get("destination"))
+        except ValueError:
+            return STATUS_ERROR, "session-intent-registration-invalid"
+        if (Path(destination.runtime_shared_dir).resolve() != runtime_shared.resolve()
+                or Path(destination.core_source_root).resolve() != owning_root):
+            return STATUS_ERROR, "session-intent-binding-mismatch"
+        executor = _norm_for_compare(_path_token(runtime_shared / "session_intent_analyzer_hook.py"))
+        if (executor not in _norm_for_compare(entry["command"].replace("\\", "/"))
+                or f"--platform {platform}" not in entry["command"]):
+            return STATUS_ERROR, "session-intent-registration-invalid"
     scratch_owner = Path(destination.owned_root) if destination and destination.mode == "isolated" else owning_root
     with project_runtime(scratch_owner, "install-doctor-session-intent") as runtime:
         root = runtime.work_dir / "session-intent"
@@ -989,14 +1030,26 @@ def _runtime_session_intent_golden_status(
     return STATUS_OK, "golden-pass"
 
 
+def _installed_ledger_root(ghost_alice_root: Path, platform: str) -> str | None:
+    """The ledger root the install record's hook registration of this host names, else the copy an older
+    installer kept in config.json `install_locations`; None without either."""
+    root = ghost_alice_root.expanduser()
+    section = ((_read_install_record(root) or {}).get("hooks") or {}).get(platform)
+    destination = section.get("destination") if isinstance(section, dict) else None
+    ledger_root = destination.get("ledger_root") if isinstance(destination, dict) else None
+    if not isinstance(ledger_root, str) or not Path(ledger_root).is_absolute():
+        try:
+            data = json.loads((root / "config.json").read_text(encoding="utf-8"))
+            ledger_root = data["install_locations"][platform]["ledger_root"]
+        except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
+            ledger_root = None
+    return ledger_root if isinstance(ledger_root, str) and Path(ledger_root).is_absolute() else None
+
+
 def _native_intake_listing(ghost_alice_root: Path, platform: str, flag: str) -> list | str:
     """One Core ledger listing for doctor, or why it is unavailable; Core writes the records, doctor reads them."""
-    try:
-        data = json.loads((ghost_alice_root.expanduser() / "config.json").read_text(encoding="utf-8"))
-        ledger_root = data["install_locations"][platform]["ledger_root"]
-    except (OSError, UnicodeDecodeError, ValueError, KeyError, TypeError):
-        ledger_root = None
-    if not isinstance(ledger_root, str) or not Path(ledger_root).is_absolute():
+    ledger_root = _installed_ledger_root(ghost_alice_root, platform)
+    if ledger_root is None:
         return "no installed ledger root"
     # The installer layer runs Core's ledger as a child process and imports none of the runtime.
     ledger = Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py"
@@ -1035,11 +1088,22 @@ def _native_intake_failure_lines(ghost_alice_root: Path, platform: str) -> list[
         f"last {failure['last_at']}: {failure['detail']}" for failure in failures)]
 
 
+def _read_install_record(ghost_alice_root: Path) -> dict | None:
+    """The install record, or None when there is none or it cannot be read; the hook findings then say so."""
+    import installed_payload
+    try:
+        return installed_payload.read(ghost_alice_root.expanduser())
+    except installed_payload.RecordError:
+        return None
+
+
 def _runtime_core_audit(
     source_shared: Path,
     runtime_shared: Path | None,
     hook_config: Path | None,
     platform: str,
+    *,
+    record: dict | None = None,
 ) -> tuple[str, list[dict[str, str]]]:
     if runtime_shared is None:
         return STATUS_OK, [{
@@ -1060,7 +1124,7 @@ def _runtime_core_audit(
             "reason": "missing-or-invalid",
         })
     else:
-        findings.extend(_runtime_hook_config_audit(commands, runtime_shared))
+        findings.extend(_runtime_hook_config_audit(commands, runtime_shared, record=record))
 
     golden_status, golden_detail = _runtime_validator_golden_status(runtime_shared)
     findings.append({
@@ -1074,6 +1138,7 @@ def _runtime_core_audit(
         platform,
         repo_root=source_shared.parent,
         hook_commands=commands,
+        record=record,
     )
     findings.append({
         "status": session_status,
@@ -1231,6 +1296,7 @@ def run(args: argparse.Namespace) -> int:
         args.runtime_shared,
         args.hook_config,
         args.platform,
+        record=_read_install_record(ghost_alice_root),
     )
     statuses.append(runtime_status)
     print(f"runtime-core: {runtime_status}")

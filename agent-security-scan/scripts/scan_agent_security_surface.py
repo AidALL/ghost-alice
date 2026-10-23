@@ -148,8 +148,11 @@ def is_shell_command(command: str) -> bool:
 
 
 def is_profiled(command: str) -> bool:
+    """A command the Core hook runner gates: the launcher `bin/hook-launcher` the installer registers now, the
+    runner `hook_profile_gate.py` an older installer registered, or the `ghost-alice-hook.mjs` dispatcher."""
     lowered = command.lower()
-    return "profile-gate" in lowered or "hook_profile_gate.py" in lowered or "ghost-alice-hook.mjs" in lowered
+    return ("profile-gate" in lowered or "hook_profile_gate.py" in lowered or "hook-launcher" in lowered
+            or "ghost-alice-hook.mjs" in lowered)
 
 
 def has_ghost_alice_marker(command: str) -> bool:

@@ -16,6 +16,10 @@
   fingerprints (`launch_agent_digest`, `state_digest`, `config_block_digest` of the
   provider blocks, None until a registration recorded it), `config_backup`,
   `registered_at`, `restarted_at` and `listener_ready`.
+- `hooks` (optional): the hook registrations the hosts carry, written by
+  `hook_launcher`: `launcher` (`path`, `python`, `digest`, `written_at` of the launcher
+  file) and per host (`claude`, `codex`) `hook_file`, `destination`, `entries` (per
+  hook id: `event`, `marker`, `command`, `provider`) and `registered_at`.
 
 `update` is the one writer of record sections and `restore` puts back a copy a
 publish saved; both write through a temporary file and a rename, and refuse unless
@@ -43,13 +47,17 @@ import install_lock
 SCHEMA_VERSION = 1
 FILENAME = "installed-payload.json"
 LOCK_FILENAME = "install.lock"
-SECTIONS = ("installer", "source", "last_transaction", "targets", "service")
+SECTIONS = ("installer", "source", "last_transaction", "targets", "service", "hooks")
 KINDS = ("skill", "support", "runtime", "command", "resource")
 MODES = ("link", "copy")
 BASELINES = ("recorded", "migrated", "unknown")
 SERVICE_KEYS = ("label", "runtime_root", "program", "launch_agent", "launch_agent_digest", "state_path",
                 "state_digest", "config_path", "config_block_digest", "config_backup", "registered_at",
                 "restarted_at", "listener_ready")
+HOOK_HOSTS = ("claude", "codex")
+HOOK_HOST_KEYS = ("hook_file", "destination", "entries", "registered_at")
+HOOK_ENTRY_KEYS = ("event", "marker", "command", "provider")
+HOOK_LAUNCHER_KEYS = ("path", "python", "digest", "written_at")
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
 # The gateway's own installation receipt and binding, read once by `migrate_service`.
 BINDING_FILENAME = "context-gateway-binding.json"
@@ -166,13 +174,62 @@ def _check_service(section: object) -> dict:
     return dict(section)
 
 
+def _check_keys(what: str, value: object, keys: tuple[str, ...]) -> dict:
+    if not isinstance(value, Mapping):
+        raise RecordError(f"{what} is not an object")
+    missing = [key for key in keys if key not in value]
+    unknown = sorted(set(value) - set(keys))
+    if missing or unknown:
+        raise RecordError(f"{what} needs exactly {', '.join(keys)}; missing {missing}, unknown {unknown}")
+    return dict(value)
+
+
+def _check_hooks(patch: object) -> dict:
+    """The `hooks` patch: `launcher` and the hosts, each an object of the documented keys, or None to delete it."""
+    if not isinstance(patch, Mapping):
+        raise RecordError("section hooks is not an object")
+    checked: dict = {}
+    for key, value in patch.items():
+        if key not in (*HOOK_HOSTS, "launcher"):
+            raise RecordError(f"unknown hooks key: {key}")
+        if value is None:
+            checked[key] = None
+            continue
+        if key == "launcher":
+            launcher = _check_keys("hooks launcher", value, HOOK_LAUNCHER_KEYS)
+            if not _absolute(launcher["path"]):
+                raise RecordError("hooks launcher path must be an absolute path")
+            if any(not isinstance(launcher[field], str) for field in ("python", "written_at")):
+                raise RecordError("hooks launcher python and written_at must be strings")
+            if not isinstance(launcher["digest"], str) or not _DIGEST.fullmatch(launcher["digest"]):
+                raise RecordError("hooks launcher digest must be sha256:<hex>")
+            checked[key] = launcher
+            continue
+        host = _check_keys(f"hooks {key}", value, HOOK_HOST_KEYS)
+        if not _absolute(host["hook_file"]):
+            raise RecordError(f"hooks {key} hook_file must be an absolute path")
+        if not isinstance(host["destination"], Mapping):
+            raise RecordError(f"hooks {key} destination is not an object")
+        if not isinstance(host["entries"], Mapping) or not isinstance(host["registered_at"], str):
+            raise RecordError(f"hooks {key} needs entries as an object and registered_at as a string")
+        entries = {}
+        for hook_id, entry in host["entries"].items():
+            fields = _check_keys(f"hooks {key} entry {hook_id}", entry, HOOK_ENTRY_KEYS)
+            if not isinstance(hook_id, str) or any(not isinstance(fields[field], str) for field in HOOK_ENTRY_KEYS):
+                raise RecordError(f"hooks {key} entry {hook_id} needs string fields")
+            entries[hook_id] = fields
+        checked[key] = {**host, "destination": dict(host["destination"]), "entries": entries}
+    return checked
+
+
 def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None]) -> dict:
     """Write the given sections in one replacement of the record and return the record.
 
     `targets` changes only the entries it names, and an entry keeps every host its
-    path already had in `used_by`; `installer`, `source`, `last_transaction` and
-    `service` replace their section, and `service` None deletes it. Sections that
-    are not given stay as they are.
+    path already had in `used_by`; `hooks` changes only the keys it names (`launcher`
+    and the hosts), a key given as None goes, and the section goes with its last key;
+    `installer`, `source`, `last_transaction` and `service` replace their section, and
+    `service` None deletes it. Sections that are not given stay as they are.
     """
     _require_lock(ghost_root)
     unknown = sorted(set(patches) - set(SECTIONS))
@@ -189,6 +246,18 @@ def update(ghost_root: Path | str, patches: Mapping[str, Mapping | None]) -> dic
             continue
         if not isinstance(patch, Mapping):
             raise RecordError(f"section {section} is not an object")
+        if section == "hooks":
+            hooks = dict(record.get("hooks") or {})
+            for key, value in _check_hooks(patch).items():
+                if value is None:
+                    hooks.pop(key, None)
+                else:
+                    hooks[key] = value
+            if hooks:
+                record["hooks"] = hooks
+            else:
+                record.pop("hooks", None)
+            continue
         if section != "targets":
             record[section] = dict(patch)
             continue

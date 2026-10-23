@@ -53,21 +53,6 @@ from typing import Any, Callable, Optional, Tuple
 
 MIN_PYTHON_VERSION = (3, 11)
 HOOK_PYTHON_SENTINEL = "__GHOST_ALICE_HOOK_PYTHON__"
-PYTHON_VERSION_CHECK_CODE = (
-    "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"
-)
-POSIX_HOOK_PYTHON_LAUNCHER = (
-    'for py in "${GHOST_ALICE_PYTHON:-}" python3 python '
-    "/opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3 /bin/python3 "
-    "/opt/homebrew/bin/python3.[0-9]* /usr/local/bin/python3.[0-9]* "
-    "/usr/bin/python3.[0-9]* /bin/python3.[0-9]* __GHOST_ALICE_INSTALL_PYTHON__; do "
-    '[ -n "$py" ] || continue; '
-    'if command -v "$py" >/dev/null 2>&1 || [ -x "$py" ]; then '
-    f'"$py" -c "{PYTHON_VERSION_CHECK_CODE}" >/dev/null 2>&1 && exec "$py" "$@"; '
-    "fi; "
-    "done; "
-    'echo "Ghost-ALICE hook requires Python 3.11+" >&2; exit 127'
-)
 
 if sys.version_info < MIN_PYTHON_VERSION:
     detected = ".".join(str(part) for part in sys.version_info[:3])
@@ -79,6 +64,9 @@ import hook_definitions
 from hook_definitions import normalize_hook_id, resolve_hook_event
 import runtime_config
 import install_destination
+import hook_launcher
+# The Python discovery loop an older installer embedded in every registration; the launcher file owns it now.
+from hook_launcher import POSIX_HOOK_PYTHON_LAUNCHER, PYTHON_VERSION_CHECK_CODE
 import state_retention
 import addon_installer
 from addon_installer import AddonManifestError, load_addon_targets
@@ -89,7 +77,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() not in ("utf-8", "utf8"):
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 HOOK_SHARED_DIR_ENV = "GHOST_ALICE_HOOK_SHARED_DIR"
 NODE_JS_DOWNLOAD_URL = "https://nodejs.org/en/download"
 STALE_LEGACY_CHECKOUT_NAMES = ("Ghost-ALICE", "Ghost-ALICE")
@@ -228,8 +216,11 @@ def _session_intent_root(platform: str | None = None) -> Path:
 def _default_destination(platform_key: str) -> install_destination.InstallDestination:
     source = Path(os.environ.get("GHOST_ALICE_CORE_ROOT") or _repo_root_from_this_file())
     ghost = install_destination.ghost_root(_home())
-    retained = runtime_config.load_config(home=_home()).get("install_locations", {}).get(platform_key, {})
-    ledger = os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT") or retained.get("ledger_root") or _retained_installed_ledger(platform_key) or str(source / ".tmp/session-intent")
+    # The ledger root an installation already uses stays: the record's registration first, then the copy an
+    # older installer kept in config.json, then the binding of an older installer's long registration.
+    ledger = (os.environ.get("GHOST_ALICE_SESSION_INTENT_ROOT") or _recorded_ledger_root(platform_key, ghost)
+              or _earlier_config_ledger_root(platform_key) or _retained_installed_ledger(platform_key)
+              or str(source / ".tmp/session-intent"))
     return install_destination.InstallDestination.parse(dict(mode="normal", owned_root=str(_home()),
         platform_dir=str(_resolve_codex_dir() if platform_key == "codex" else _resolve_claude_dir()),
         skills_dir=str(_home()/".agents/skills" if platform_key == "codex" else _resolve_claude_dir()/"skills"),
@@ -237,11 +228,29 @@ def _default_destination(platform_key: str) -> install_destination.InstallDestin
         runtime_shared_dir=str(os.environ.get(HOOK_SHARED_DIR_ENV) or os.environ.get("GHOST_ALICE_RUNTIME_SHARED_DIR") or ghost/"runtime/current/_shared")))
 
 
-def _retained_installed_ledger(platform_key):
-    """Retain a single explicit authority from the selected installed hook chain.
+def _recorded_ledger_root(platform_key: str, ghost: Path) -> str | None:
+    """The ledger root of the destination the install record registers for this host."""
+    destination = hook_launcher.recorded_destination(ghost, platform_key)
+    root = destination.get("ledger_root") if destination else None
+    return root if isinstance(root, str) and Path(root).is_absolute() else None
 
-    Reads only the chosen platform settings, never discovery/latest-checkout state.
-    Multiple managed roots require an explicit choice instead of mixed authority.
+
+def _earlier_config_ledger_root(platform_key: str) -> str | None:
+    """The ledger root an older installer kept in config.json `install_locations`; the record owns it now."""
+    try:
+        loaded = json.loads(runtime_config.config_path(_home()).read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    locations = loaded.get("install_locations") if isinstance(loaded, dict) else None
+    entry = locations.get(platform_key) if isinstance(locations, dict) else None
+    root = entry.get("ledger_root") if isinstance(entry, dict) else None
+    return root if isinstance(root, str) and Path(root).is_absolute() else None
+
+
+def _retained_installed_ledger(platform_key):
+    """The ledger root the long registrations of an older installer carry, from the chosen platform's settings.
+
+    Multiple roots require an explicit choice instead of mixed authority; launcher registrations carry none.
     """
     import shlex
     path=(_resolve_codex_dir()/"hooks.json" if platform_key=="codex" else _resolve_claude_dir()/"settings.json")
@@ -254,7 +263,7 @@ def _retained_installed_ledger(platform_key):
         for group in groups if isinstance(groups,list) else []:
             for hook in group.get("hooks",[]):
                 command=hook.get("command","")
-                if not any((globals().get("_hook_runner_id_match") or (lambda *_: False))(command,identity) for identity in ("session-intent","tool-checkpoint","session-start","session-receipt")):
+                if _long_registration_hook_id(command) not in ("session-intent","tool-checkpoint","session-start","session-receipt"):
                     continue
                 outer=shlex.split(command,comments=True)
                 if "--binding-b64" in outer:
@@ -582,6 +591,11 @@ def _hook_runner_command(
     *,
     platform_key: str | None = None,
 ) -> str:
+    """The host registration of `command` for `hook_id`: the launcher, the id, the platform and the marker.
+
+    The inner `command` and the destination go to the install record (`_sync_registration`), where the launcher
+    reads them at hook time. Without the runner in the runtime, the command is registered as it is.
+    """
     script = _resolve_hook_runner_script()
     if not script:
         if runtime_config.HOOK_NODE_SENTINEL in command:
@@ -589,24 +603,13 @@ def _hook_runner_command(
                 "dynamic Node hook command requires hook_profile_gate.py"
             )
         return command
-    payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
     normalized = normalize_hook_id(hook_id)
-    runner_args = ["run", normalized]
-    if platform_key is not None:
-        platform = platform_key.strip().lower()
-        if platform not in {"claude", "codex"}:
-            raise ValueError(f"unsupported hook runner platform: {platform_key}")
-        runner_args.append(platform)
-    runner_args.append(payload)
-    binding_platform = platform_key or os.environ.get("GHOST_ALICE_PLATFORM") or "codex"
-    destination = install_destination.current() or _default_destination(binding_platform)
-    binding = destination.binding()
-    runner_args.extend(["--binding-b64", install_destination.encode_binding(binding)])
-    visible_hint = " ghost-alice-hook.mjs" if "ghost-alice-hook.mjs" in command else ""
-    return (
-        f"{_hook_python_invocation(script, *runner_args)} "
-        f"# {marker} [hook-runner:{normalized}]{visible_hint}"
-    )
+    platform = (platform_key or os.environ.get("GHOST_ALICE_PLATFORM") or "codex").strip().lower()
+    if platform not in {"claude", "codex"}:
+        raise ValueError(f"unsupported hook runner platform: {platform_key}")
+    destination = install_destination.current() or _default_destination(platform)
+    launcher = hook_launcher.launcher_path(destination.ghost_root)
+    return hook_launcher.registration_command(launcher, normalized, platform, marker)
 
 def _hook_runner_command_entry(
     hook_id: str,
@@ -831,12 +834,69 @@ def _command_entry(command: str) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class HookRegistration:
+    """One hook the installer registers on a host: its id, host event, ownership marker, inner command, provider."""
+    hook_id: str
+    event: str
+    marker: str
+    command: str
+    provider: str = "core"
+
+    @property
+    def label(self) -> str:
+        return "session-intent-analyzer" if self.hook_id == "session-intent" else f"{self.event} {self.hook_id}"
+
+
+# Markers an older installer put on the same core hooks; a registration carrying one is stale.
+_EARLIER_MARKERS = {"session-intent": LEGACY_SESSION_INTENT_MARKERS, "tool-checkpoint": LEGACY_TOOL_CHECKPOINT_MARKERS}
+
+
+def _core_registrations(
+    platform_key: str,
+    node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
+) -> list[HookRegistration]:
+    """The core hooks of a host in `hook_definitions.CORE_HOOK_IDS` order; io-trace only while its script exists."""
+    platform = "codex" if platform_key == "codex" else "claude"
+    intake = _session_intent_analyzer_command(platform=platform, output_format="json", payload_mode=True)
+    receipt = _session_intent_analyzer_command(platform=platform, output_format="json", payload_mode=True,
+                                               context="session_start")
+    pre_tool = resolve_hook_event("pre_tool_use", platform_key)
+    session_start = resolve_hook_event("on_session_start", platform_key)
+    commands = {
+        "session-intent": (resolve_hook_event("on_user_prompt", platform_key), SESSION_INTENT_MARKER,
+                           f"{intake} # {SESSION_INTENT_MARKER}"),
+        "tool-checkpoint": (pre_tool, TOOL_CHECKPOINT_MARKER, _dispatcher_hook_command(platform_key, pre_tool, node_runtime)),
+        "completion": (resolve_hook_event("on_agent_stop", platform_key), STOP_HOOK_MARKER,
+                       _stop_hook_command(platform, payload_mode=True)),
+        "session-start": (session_start, SESSION_START_MARKER,
+                          _session_start_command(platform=platform, output_format="json", payload_mode=True)),
+        "session-receipt": (session_start, SESSION_RECEIPT_MARKER, f"{receipt} # {SESSION_RECEIPT_MARKER}"),
+        "io-trace": (resolve_hook_event("post_tool_use", platform_key), IO_TRACE_MARKER,
+                     _io_trace_hook_command(payload_mode=True)),
+    }
+    return [HookRegistration(hook_id, *commands[hook_id])
+            for hook_id in hook_definitions.CORE_HOOK_IDS if commands[hook_id][2]]
+
+
+def _core_registration(platform_key: str, hook_id: str,
+                       node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED) -> HookRegistration | None:
+    return next((item for item in _core_registrations(platform_key, node_runtime) if item.hook_id == hook_id), None)
+
+
+def _registration_entry(registration: HookRegistration, platform_key: str) -> dict[str, Any]:
+    return _hook_runner_command_entry(registration.hook_id, registration.command, registration.marker,
+                                      platform_key=platform_key)
+
+
+def _record_entries(registrations: list[HookRegistration]) -> dict[str, dict[str, str]]:
+    """The record's `hooks.<platform>.entries` for these registrations."""
+    return {item.hook_id: {"event": item.event, "marker": item.marker, "command": item.command, "provider": item.provider}
+            for item in registrations}
+
+
 def _platform_session_intent_entry(platform_key: str, event: str) -> dict[str, Any]:
-    if platform_key == "codex":
-        command = _session_intent_analyzer_command(platform="codex", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
-    else:
-        command = _session_intent_analyzer_command(platform="claude", output_format="json", payload_mode=True) + f" # {SESSION_INTENT_MARKER}"
-    return _hook_runner_command_entry("session-intent", command, SESSION_INTENT_MARKER, platform_key=platform_key)
+    return _registration_entry(_core_registration(platform_key, "session-intent"), platform_key)
 
 
 def _platform_tool_checkpoint_entry(
@@ -844,41 +904,19 @@ def _platform_tool_checkpoint_entry(
     event: str,
     node_runtime: str | Path | None | object = _NODE_RUNTIME_OMITTED,
 ) -> dict[str, Any]:
-    if platform_key in {"claude", "codex"}:
-        command = _dispatcher_hook_command(platform_key, event, node_runtime)
-        return _hook_runner_command_entry(
-            "tool-checkpoint",
-            command,
-            TOOL_CHECKPOINT_MARKER,
-            platform_key=platform_key,
-        )
-    return _hook_runner_command_entry("tool-checkpoint", TOOL_CHECKPOINT_COMMAND, TOOL_CHECKPOINT_MARKER)
+    return _registration_entry(_core_registration(platform_key, "tool-checkpoint", node_runtime), platform_key)
 
 
 def _platform_stop_hook_entry(platform_key: str, event: str) -> dict[str, Any]:
-    if platform_key == "codex":
-        return _hook_runner_command_entry(
-            "completion", _stop_hook_command("codex", payload_mode=True), STOP_HOOK_MARKER, platform_key=platform_key,
-        )
-    return _hook_runner_command_entry(
-        "completion", _stop_hook_command("claude", payload_mode=True), STOP_HOOK_MARKER, platform_key=platform_key,
-    )
+    return _registration_entry(_core_registration(platform_key, "completion"), platform_key)
 
 
 def _platform_session_receipt_entry(platform_key: str, event: str) -> dict[str, Any]:
-    platform = "codex" if platform_key == "codex" else "claude"
-    command = _session_intent_analyzer_command(
-        platform=platform, output_format="json", payload_mode=True, context="session_start",
-    ) + f" # {SESSION_RECEIPT_MARKER}"
-    return _hook_runner_command_entry("session-receipt", command, SESSION_RECEIPT_MARKER, platform_key=platform_key)
+    return _registration_entry(_core_registration(platform_key, "session-receipt"), platform_key)
 
 
 def _platform_session_start_entry(platform_key: str, event: str) -> dict[str, Any]:
-    if platform_key == "codex":
-        command = _session_start_command(platform="codex", output_format="json", payload_mode=True)
-    else:
-        command = _session_start_command(platform="claude", output_format="json", payload_mode=True)
-    return _hook_runner_command_entry("session-start", command, SESSION_START_MARKER, platform_key=platform_key)
+    return _registration_entry(_core_registration(platform_key, "session-start"), platform_key)
 
 
 def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[str, str, str, str]]:
@@ -904,10 +942,8 @@ def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[st
 
 
 def _platform_io_trace_entry(platform_key: str, event: str) -> Optional[dict[str, Any]]:
-    io_command = _io_trace_hook_command(payload_mode=True)
-    if not io_command:
-        return None
-    return _command_entry(_hook_runner_command("io-trace", io_command, IO_TRACE_MARKER, platform_key=platform_key))
+    registration = _core_registration(platform_key, "io-trace")
+    return _registration_entry(registration, platform_key) if registration else None
 
 
 def _ensure_hook_dispatcher_installed(dry_run: bool = False) -> bool:
@@ -1714,82 +1750,56 @@ def _io_trace_hook_command(*, payload_mode: bool = False) -> str:
     return f'{_hook_python_command(io_script, payload=payload_mode)} # {IO_TRACE_MARKER}'
 
 
-def _hook_runner_id_match(command: str, hook_id: str | None, *, decode_binding: bool = True) -> bool:
-    """Recognize the actual managed outer argv, including serialized binding.
+def _long_registration_hook_id(command: str, *, decode_binding: bool = True) -> str | None:
+    """The hook id of a registration in the long runner form an older installer wrote; None for any other command.
 
-    Marker text and a lookalike filename do not establish runner ownership.
-    Commands without an outer binding are removable without granting v2 capability.
-    A retired adapter registration carries a binding this Core rejects; `decode_binding=False`
-    recognizes its argv for removal only, never for execution.
+    That form is the Python discovery loop or a Python interpreter, the runner `hook_profile_gate.py` by its
+    absolute path, `run <id> [platform] <payload-b64>` and, at the end, `--binding-b64 <binding>`. Marker text and
+    a lookalike filename do not make it one. A retired adapter registration carries a binding this Core rejects;
+    `decode_binding=False` reads its argv for removal only, never for execution.
     """
-    if not hook_id:
-        return False
     import shlex
     try:
         argv = shlex.split(command,comments=True)
         if argv[:2] == ["/bin/sh","-c"]:
             if len(argv)<7 or argv[3]!="ghost-alice-python":
-                return False
-            prefix,suffix=POSIX_HOOK_PYTHON_LAUNCHER.split("__GHOST_ALICE_INSTALL_PYTHON__")
+                return None
+            prefix,suffix=POSIX_HOOK_PYTHON_LAUNCHER.split(hook_launcher.INSTALL_PYTHON_PLACEHOLDER)
             if not argv[2].startswith(prefix) or not argv[2].endswith(suffix):
-                return False
+                return None
             middle=shlex.split(argv[2][len(prefix):-len(suffix)])
             if len(middle)!=1 or not Path(middle[0]).is_absolute():
-                return False
+                return None
             script_index=4
         else:
             if len(argv)<4 or not re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?(?:\.exe)?",Path(argv[0]).name):
-                return False
+                return None
             script_index=1
         if not Path(argv[script_index]).is_absolute() or Path(argv[script_index]).name!="hook_profile_gate.py":
-            return False
+            return None
         args=argv[script_index+1:]
         if len(args) in {5,6} and args[-2]=="--binding-b64":
             if decode_binding:
                 install_destination.decode_binding(args[-1])
             args=args[:-2]
-        if len(args) not in {3,4} or args[:2] != ["run",normalize_hook_id(hook_id)]:
-            return False
+        if len(args) not in {3,4} or args[0] != "run" or not args[1]:
+            return None
         base64.urlsafe_b64decode(args[-1]).decode('utf-8')
-        return True
+        return args[1]
     except (ValueError,UnicodeError,IndexError):
+        return None
+
+
+def _hook_runner_id_match(command: str, hook_id: str | None, *, decode_binding: bool = True) -> bool:
+    """Whether `command` is Ghost-ALICE's registration of `hook_id`: the launcher form, or the long runner form
+    an older installer wrote. Marker text alone does not establish ownership."""
+    if not hook_id:
         return False
-
-
-def _managed_session_intent_options(command: str):
-    """Return the options of the current managed session-intent registration, or None for any other form."""
-    import shlex
-    if not _hook_runner_id_match(command, "session-intent"):
-        return None
-    try:
-        outer = shlex.split(command, comments=True)
-        script_index = 4 if outer[:2] == ["/bin/sh", "-c"] else 1
-        args = outer[script_index + 1:]
-        if len(args) != 6 or args[:2] != ["run", "session-intent"] or args[2] not in {"codex", "claude"} or args[4] != "--binding-b64":
-            return None
-        binding = install_destination.decode_binding(args[5])
-        if set(binding) != {"schema_version", "destination"}:
-            return None
-        destination = install_destination.InstallDestination.parse(binding["destination"])
-        if Path(outer[script_index]) != Path(destination.runtime_shared_dir) / "hook_profile_gate.py":
-            return None
-        inner = base64.urlsafe_b64decode(args[3]).decode("utf-8")
-        argv = shlex.split(inner, comments=True)
-        if (len(argv) < 4 or argv[0] != HOOK_PYTHON_SENTINEL
-                or Path(argv[1]) != Path(destination.runtime_shared_dir) / "session_intent_analyzer_hook.py"
-                or len(argv[2:]) % 2):
-            return None
-        options = dict(zip(argv[2::2], argv[3::2]))
-        if (set(options) != {"--platform", "--format", "--root", "--context"}
-                or len(options) != len(argv[2:]) // 2
-                or options["--platform"] != args[2]
-                or options["--format"] not in {"json", "text"}
-                or options["--root"] != destination.ledger_root
-                or options["--context"] != "prompt_submit"):
-            return None
-        return options
-    except (ValueError, UnicodeError, IndexError, KeyError, TypeError):
-        return None
+    normalized = normalize_hook_id(hook_id)
+    short = hook_launcher.parse_registration(command)
+    if short is not None:
+        return short.hook_id == normalized
+    return _long_registration_hook_id(command, decode_binding=decode_binding) == normalized
 
 
 # Markers an older installer put on the retired core hooks (hook_definitions.RETIRED_CORE_HOOK_IDS).
@@ -1810,10 +1820,12 @@ def _is_retired_adapter_command(command: str) -> bool:
 
 
 def _is_retired_hook_command(command: str) -> bool:
-    """Recognize every installed form of a retired hook by its marker or its runner id."""
+    """Recognize every installed form of a retired hook by its marker or its runner id, and the long runner form
+    of a core hook, which the launcher registration replaced."""
     return (any(marker in command for marker in RETIRED_HOOK_MARKERS)
             or _is_retired_adapter_command(command)
-            or any(_hook_runner_id_match(command, hook_id) for hook_id in hook_definitions.RETIRED_CORE_HOOK_IDS))
+            or any(_hook_runner_id_match(command, hook_id) for hook_id in hook_definitions.RETIRED_CORE_HOOK_IDS)
+            or _long_registration_hook_id(command, decode_binding=False) in hook_definitions.CORE_HOOK_IDS)
 
 
 def _remove_retired_hooks(hooks_obj) -> int:
@@ -1893,6 +1905,38 @@ def _ensure_claude_ghost_alice_skill_permissions(
 
 # ── Install ───────────────────────────────────────────────
 
+def _sync_registration(platform_key: str, settings_file: Path, registrations: list[HookRegistration]) -> bool:
+    """Write the launcher file and the record's `hooks.<platform>` for these registrations; True when one changed."""
+    destination = install_destination.current()
+    return hook_launcher.write_registration(
+        destination.ghost_root, platform_key, hook_file=settings_file, destination=destination,
+        entries=_record_entries(registrations), runtime_shared_dir=destination.runtime_shared_dir,
+        install_python=sys.executable)
+
+
+def _drop_registration(platform_key: str, *, dry_run: bool) -> None:
+    """Drop the record's `hooks.<platform>` and, after the last host, the launcher; a failure is reported, not fatal."""
+    if dry_run:
+        return
+    try:
+        result = hook_launcher.remove_registration(install_destination.ghost_root(_home()), platform_key)
+    except hook_launcher.RegistrationError as error:
+        _log(f"  WARNING: the install record keeps the {platform_key} hook registration: {error}")
+        return
+    if result["section"]:
+        _log(f"  Removed the install record's {platform_key} hook registration")
+    if result["launcher"]:
+        _log("  Removed the hook launcher")
+
+
+def _drop_recorded_entries(platform_key: str, hook_ids: list[str]) -> None:
+    """Drop hook ids from the record's `hooks.<platform>.entries`; a failure is reported, not fatal."""
+    try:
+        hook_launcher.remove_entries(install_destination.ghost_root(_home()), platform_key, hook_ids)
+    except hook_launcher.RegistrationError as error:
+        _log(f"  WARNING: the install record keeps the removed {platform_key} hook registration(s): {error}")
+
+
 def install_hook(
     platform_key: str,
     dry_run: bool = False,
@@ -1920,10 +1964,7 @@ def install_hook(
         with install_destination.use(resolved):
             if PLATFORMS[platform_key]["detect"]() or resolved.mode == "isolated":
                 _prepare_destination_runtime(resolved,dry_run=dry_run)
-            result = install_hook(platform_key,dry_run,addon_sources,resolved.skills_dir,node_runtime)
-            if not dry_run and result in {"installed","already"}:
-                runtime_config.save_config({"install_locations":{platform_key: __import__('dataclasses').asdict(resolved)}},home=_home())
-            return result
+            return install_hook(platform_key,dry_run,addon_sources,resolved.skills_dir,node_runtime)
     platform = PLATFORMS[platform_key]
     name = platform["name"]
     settings_file = platform["hook_file"]()
@@ -1994,186 +2035,36 @@ def install_hook(
         _log(f"  Removed {removed} retired hook(s)")
         changed = True
 
-    # Install the session-intent-analyzer hook (updates the session intent ledger for every user input).
-    session_intent_entry = _platform_session_intent_entry(platform_key, hook_key)
-    session_intent_command = _entry_command(session_intent_entry)
-    removed = _remove_stale_hook_entries(
-        hook_list,
-        SESSION_INTENT_MARKER,
-        session_intent_command,
-        require_dispatcher=require_dispatcher,
-        extra_markers=LEGACY_SESSION_INTENT_MARKERS,
-        hook_id="session-intent",
-    )
-    if removed:
-        _log(_t(f"  Removed {removed} stale session-intent-analyzer hook(s)", f"  Removed {removed} stale session-intent-analyzer hook(s)"))
-        changed = True
-
-    if _hook_already_exists(
-        hook_list,
-        SESSION_INTENT_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=session_intent_command,
-    ):
-        _log(_t("  session-intent-analyzer hook already exists. Skipping", "  session-intent-analyzer hook already exists. Skipping"))
-    else:
-        hook_list.append(session_intent_entry)
-        _log(_t("  session-intent-analyzer hook added", "  session-intent-analyzer hook added"))
-        changed = True
-
-    # Install the pre_tool_use hook (tool-checkpoint: enforce narration before tool calls).
-    tool_checkpoint_key = resolve_hook_event("pre_tool_use", platform_key)
-    tool_checkpoint_entry = _platform_tool_checkpoint_entry(
-        platform_key,
-        tool_checkpoint_key,
-        selected_node_runtime,
-    )
-    tool_checkpoint_command = _entry_command(tool_checkpoint_entry)
-    if tool_checkpoint_key not in hooks_obj:
-        hooks_obj[tool_checkpoint_key] = []
-    tool_checkpoint_list = hooks_obj[tool_checkpoint_key]
-    removed = _remove_stale_hook_entries(
-        tool_checkpoint_list,
-        TOOL_CHECKPOINT_MARKER,
-        tool_checkpoint_command,
-        require_dispatcher=require_dispatcher,
-        extra_markers=LEGACY_TOOL_CHECKPOINT_MARKERS,
-        hook_id="tool-checkpoint",
-    )
-    if removed:
-        _log(_t(f"  Removed {removed} stale {tool_checkpoint_key} tool-checkpoint hook(s)", f"  Removed {removed} stale {tool_checkpoint_key} tool-checkpoint hook(s)"))
-        changed = True
-
-    if _hook_already_exists(
-        tool_checkpoint_list,
-        TOOL_CHECKPOINT_MARKER,
-        require_dispatcher=require_dispatcher,
-        expected_command=tool_checkpoint_command,
-    ):
-        _log(_t(f"  {tool_checkpoint_key} tool-checkpoint hook already exists. Skipping", f"  {tool_checkpoint_key} tool-checkpoint hook already exists. Skipping"))
-    else:
-        tool_checkpoint_list.append(tool_checkpoint_entry)
-        _log(_t(f"  {tool_checkpoint_key} tool-checkpoint hook added", f"  {tool_checkpoint_key} tool-checkpoint hook added"))
-        changed = True
-
-    # Install the on_agent_stop hook (verification-before-completion reminder).
-    stop_intent = platform.get("stop_hook_intent")
-    if stop_intent and platform.get("stop_hook_entry"):
-        stop_key = resolve_hook_event(stop_intent, platform_key)
-        stop_entry = _platform_stop_hook_entry(platform_key, stop_key)
-        stop_command = _entry_command(stop_entry)
-        if stop_key not in hooks_obj:
-            hooks_obj[stop_key] = []
-        stop_list = hooks_obj[stop_key]
-        removed = _remove_stale_hook_entries(
-            stop_list,
-            STOP_HOOK_MARKER,
-            stop_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="completion",
-        )
-        if removed:
-            _log(_t(f"  Removed {removed} stale {stop_key} completion hook(s)", f"  Removed {removed} stale {stop_key} completion hook(s)"))
-            changed = True
-        if _hook_already_exists(
-            stop_list,
-            STOP_HOOK_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=stop_command,
-        ):
-            _log(_t(f"  {stop_key} completion hook already exists. Skipping", f"  {stop_key} completion hook already exists. Skipping"))
-        else:
-            stop_list.append(stop_entry)
-            _log(_t(f"  {stop_key} completion hook added", f"  {stop_key} completion hook added"))
-            changed = True
-
-        # Install the SessionStart hook (pending-merge-session-start layer: automatic merge-companion check).
-    ss_intent = platform.get("session_start_intent")
-    if ss_intent and platform.get("session_start_entry"):
-        ss_key = resolve_hook_event(ss_intent, platform_key)
-        ss_entry = _platform_session_start_entry(platform_key, ss_key)
-        ss_command = _entry_command(ss_entry)
-        if ss_key not in hooks_obj:
-            hooks_obj[ss_key] = []
-        ss_list = hooks_obj[ss_key]
-        removed = _remove_stale_hook_entries(
-            ss_list,
-            SESSION_START_MARKER,
-            ss_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="session-start",
-        )
-        if removed:
-            _log(_t(f"  Removed {removed} stale {ss_key} session-start hook(s)", f"  Removed {removed} stale {ss_key} session-start hook(s)"))
-            changed = True
-        if _hook_already_exists(
-            ss_list,
-            SESSION_START_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=ss_command,
-        ):
-            _log(_t(f"  {ss_key} session-start hook already exists. Skipping", f"  {ss_key} session-start hook already exists. Skipping"))
-        else:
-            ss_list.append(ss_entry)
-            _log(_t(f"  {ss_key} session-start hook added", f"  {ss_key} session-start hook added"))
-            changed = True
-
-        # Install the session receipt hook: the host repeats session start after resume, clear and compaction.
-        receipt_entry = _platform_session_receipt_entry(platform_key, ss_key)
-        receipt_command = _entry_command(receipt_entry)
-        removed = _remove_stale_hook_entries(
-            ss_list,
-            SESSION_RECEIPT_MARKER,
-            receipt_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="session-receipt",
-        )
-        if removed:
-            _log(f"  Removed {removed} stale {ss_key} session-receipt hook(s)")
-            changed = True
-        if _hook_already_exists(
-            ss_list,
-            SESSION_RECEIPT_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=receipt_command,
-        ):
-            _log(f"  {ss_key} session-receipt hook already exists. Skipping")
-        else:
-            ss_list.append(receipt_entry)
-            _log(f"  {ss_key} session-receipt hook added")
-            changed = True
-
-    # Install the io-trace tool-use audit hook.
-    post_tool_key = resolve_hook_event("post_tool_use", platform_key)
-    io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
-    if io_entry:
-        io_command = _entry_command(io_entry)
-        if post_tool_key not in hooks_obj:
-            hooks_obj[post_tool_key] = []
-        pt_list = hooks_obj[post_tool_key]
-        removed = _remove_stale_hook_entries(
-            pt_list,
-            IO_TRACE_MARKER,
-            io_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="io-trace",
-        )
-        if removed:
-            _log(_t(f"  Removed {removed} stale {post_tool_key} io-trace hook(s)", f"  Removed {removed} stale {post_tool_key} io-trace hook(s)"))
-            changed = True
-        if not _hook_already_exists(
-            pt_list,
-            IO_TRACE_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=io_command,
-        ):
-            pt_list.append(io_entry)
-            _log(_t(f"  {post_tool_key} io-trace hook added", f"  {post_tool_key} io-trace hook added"))
-            changed = True
-        else:
-            _log(_t(f"  {post_tool_key} io-trace hook already exists. Skipping", f"  {post_tool_key} io-trace hook already exists. Skipping"))
-    elif platform_key in {"claude", "codex"}:
+    # The core hooks, one registration each: stale forms of the same hook go, the current command stays or is added.
+    registrations = _core_registrations(platform_key, selected_node_runtime)
+    if "io-trace" not in {registration.hook_id for registration in registrations}:
         _log(_t("  io_trace_hook.py not found. Skipping io-trace hook", "  io_trace_hook.py not found. Skipping io-trace hook"))
+    for registration in registrations:
+        event_list = hooks_obj.setdefault(registration.event, [])
+        entry = _registration_entry(registration, platform_key)
+        expected_command = _entry_command(entry)
+        removed = _remove_stale_hook_entries(
+            event_list,
+            registration.marker,
+            expected_command,
+            require_dispatcher=require_dispatcher,
+            extra_markers=_EARLIER_MARKERS.get(registration.hook_id, ()),
+            hook_id=registration.hook_id,
+        )
+        if removed:
+            _log(_t(f"  Removed {removed} stale {registration.label} hook(s)", f"  Removed {removed} stale {registration.label} hook(s)"))
+            changed = True
+        if _hook_already_exists(
+            event_list,
+            registration.marker,
+            require_dispatcher=require_dispatcher,
+            expected_command=expected_command,
+        ):
+            _log(_t(f"  {registration.label} hook already exists. Skipping", f"  {registration.label} hook already exists. Skipping"))
+        else:
+            event_list.append(entry)
+            _log(_t(f"  {registration.label} hook added", f"  {registration.label} hook added"))
+            changed = True
 
     # Trust only exact event/command pairs produced by verified addon sources in
     # this install; marker text in pre-existing user hooks is not authority.
@@ -2185,6 +2076,8 @@ def install_hook(
         # The generated command embeds "{marker} [hook-runner:...]", so the marker is always followed by a space. Matching on "marker " makes removal exact and prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
         match_marker = marker + " "
         inner = _hook_python_command(script_path, payload=True)
+        registrations.append(HookRegistration(_managed_addon_runner_id(addon_id, hook_id), event_name, marker, inner,
+                                              f"addon:{addon_id}"))
         entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker, platform_key=platform_key)
         command = _entry_command(entry)
         verified_addon_commands.add((event_name, command))
@@ -2221,6 +2114,13 @@ def install_hook(
             verified_addon_commands=verified_addon_commands,
         ):
             changed = True
+
+    # The launcher and the record's registration come before the host file names them; a record that cannot be
+    # written stops the install here, so a host never carries a registration the launcher would reject.
+    if dry_run:
+        _log(f"DRY-RUN: Would write the hook launcher and the install record's {platform_key} hook registration")
+    elif _sync_registration(platform_key, settings_file, registrations):
+        _log(_t("  Hook launcher and install record registration written", "  Hook launcher and install record registration written"))
 
     if not changed:
         if not dry_run and selected_node_runtime is not None:
@@ -2504,7 +2404,8 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     trailing-space match boundary keeps removal exact across hook ids that are
     prefixes of one another. Returns the number of hooks removed.
     """
-    if not isinstance(marker, str) or not _ADDON_HOOK_MARKER_RE.fullmatch(marker):
+    match = _ADDON_HOOK_MARKER_RE.fullmatch(marker) if isinstance(marker, str) else None
+    if match is None:
         return 0
     platform = PLATFORMS.get(platform_key)
     if platform is None:
@@ -2521,6 +2422,7 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     total = _remove_hook_settings_commands(hooks_obj, lambda command: _is_exact_addon_hook_command(command, marker))
     if total and not dry_run:
         _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj))
+        _drop_recorded_entries(platform_key, [_managed_addon_runner_id(match.group("addon_id"), match.group("hook_id"))])
     return total
 
 
@@ -2646,6 +2548,7 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
 
     if total_removed == 0:
         _log(_t("  No hooks found. Nothing to remove", "  No hooks found. Nothing to remove"))
+        _drop_registration(platform_key, dry_run=dry_run)
         return "not_found"
 
     _remove_empty_hook_groups(hooks_obj)
@@ -2654,11 +2557,26 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     else:
         _write_removed_hook_settings(settings_file, settings, platform_key,
                                      _trust_moves(hooks_before, settings_file, hooks_obj))
+    # The host file stops naming the launcher first; then the record's registration and, after the last host, the
+    # launcher go. The other order would have a host call a launcher that is already gone.
+    _drop_registration(platform_key, dry_run=dry_run)
     _log(_t(f"  Removed {total_removed} hook(s)", f"  Removed {total_removed} hook(s)"))
     return "removed"
 
 
 # ── Status Check ──────────────────────────────────────────
+
+def _registration_status(platform_key: str, settings_file: Path, node_runtime, addon_sources: Any) -> tuple[bool, bool]:
+    """`(present, ok)` of the record's registration against the core and verified addon hooks of this install."""
+    destination = install_destination.current()
+    registrations = _core_registrations(platform_key, node_runtime)
+    for addon_id, hook_id, event_intent, script_path in _resolve_addon_hooks(addon_sources, platform_key):
+        registrations.append(HookRegistration(
+            _managed_addon_runner_id(addon_id, hook_id), resolve_hook_event(event_intent, platform_key),
+            f"[addon:{addon_id}] {hook_id}", _hook_python_command(script_path, payload=True), f"addon:{addon_id}"))
+    return hook_launcher.registration_status(destination.ghost_root, platform_key, hook_file=settings_file,
+                                             destination=destination, entries=_record_entries(registrations))
+
 
 def check_status_detail(
     platform_key: str,
@@ -2800,6 +2718,11 @@ def check_status_detail(
             details={"reason": "feature_flag_disabled"},
         )
 
+    # The host commands are short, so whether the hooks run the current inner commands is a question to the
+    # record's registration and the launcher file.
+    registration_present, registration_ok = _registration_status(
+        platform_key, settings_file, selected_node_runtime, addon_sources)
+
     required = {
         "session-intent": (session_intent_present, session_intent_ok),
         "tool-checkpoint": (tool_checkpoint_present, tool_checkpoint_ok),
@@ -2807,6 +2730,7 @@ def check_status_detail(
         "session-start": (session_start_present, session_start_ok),
         "session-receipt": (session_receipt_present, session_receipt_ok),
         "io-trace": (io_trace_present, io_trace_ok),
+        "registration": (registration_present, registration_ok),
     }
     if platform_key == "claude":
         permissions = settings.get("permissions")
