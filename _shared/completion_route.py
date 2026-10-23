@@ -4,7 +4,7 @@ Input contracts (JSON-compatible dictionaries):
 * context: platform, session_id, input_event_id, response_route (the existing
   read_response_route projection), verification_plan.checks. Each planned check
   has check_id, work_unit_id, contract_revision, criterion_id.
-* claim_scope: text, phase (final/before_tool/publication), optional work_unit_ids narrowing
+* claim_scope: text, phase (final/before_tool), optional work_unit_ids narrowing
   the current selection, optional consequential (the assistant's claim-scope judgment).
 * evidence_state: failure_kind (none/recording/authority/integrity/contract/
   unknown), criteria. Each assessment has the same qualified criterion key,
@@ -12,17 +12,16 @@ Input contracts (JSON-compatible dictionaries):
   check_ids (planned checks covered), proof_ref, verified_at, core_receipt. The
   caller supplies these assessments. This selector checks their structure;
   completion_assessment.py authenticates recorded assistant judgments separately.
-* autopilot_state: enabled, publication_status (unprepared/prepared/published).
 
-Output completion-route.v1 contains evidence_route, publication_route, frozen
-selected units/criteria, per-unit/criterion decisions, required_completion_check,
+Output completion-route.v1 contains evidence_route, frozen selected
+units/criteria, per-unit/criterion decisions, required_completion_check,
 route_binding and reason. Per-criterion decisions are authoritative; aggregate
 priority is reopen_cause > fresh_affected > owner_verification >
 recording_repair_only > reuse > no_external_check. The aggregate is a summary,
-never an instruction to rerun every unit. Publication routes are none, prepare,
-publish, blocked. ``check_ids`` is affected work to run; ``required_check_ids``
-preserves the supplied verification_plan.checks for that criterion. Missing administrative receipts retain valid
-business proof with no business checks selected, while publication is blocked.
+never an instruction to rerun every unit. ``check_ids`` is affected work to run;
+``required_check_ids`` preserves the supplied verification_plan.checks for that
+criterion. Missing administrative receipts retain valid business proof with no
+business checks selected.
 No result grants permission, marks a criterion met, or verifies domain truth.
 Evidence dates are retained verbatim and are never compared with input age.
 """
@@ -208,29 +207,15 @@ def _criterion_decision(criterion, checks, assessments, failure, malformed_conta
                 reason="The current-session assistant runs only the checks listed in check_ids, within the user's authorization.")
 
 
-def select_completion_route(context, claim_scope, evidence_state, autopilot_state):
-    """Select evidence and publication independently, without I/O or permission."""
-    context, claim_scope = _mapping(context), _mapping(claim_scope)
-    evidence_state, autopilot_state = _mapping(evidence_state), _mapping(autopilot_state)
+def select_completion_route(context, claim_scope, evidence_state):
+    """Select the evidence route for the delivered text, without I/O or permission."""
+    context, claim_scope, evidence_state = _mapping(context), _mapping(claim_scope), _mapping(evidence_state)
     text = claim_scope.get("text", "")
-    # native_completion.assess_native_completion supplies the resolved claim report.
-    # Response JSON supplies references, not its own validity verdict.
-    report = _mapping(claim_scope.get("claim_report"))
-    report_issue = report.get("issue") if report.get("present") else None
-    retained = report.get("present") is True and report.get("valid") is True
-    if report.get("present") and not retained:
-        report_issue = report_issue or "claim-evidence-invalid"
-    if retained:
-        text = report["residual_text"]
     partial_evidence = (bool(extract_all_control_blocks(text, "partial-check")) and
                         validate_completion_text(text) is None)
     # The assistant records completion intent through the owned route or an
     # explicit control block. Prose words cannot supply that judgment.
     completion_submission = looks_like_completion_claim(text)
-    # Additional prose needs its own recorded review; it does not declare a
-    # new completion or turn a retained report into a Ghost-ALICE Autopilot publication.
-    unbound_report_text = retained and bool(text.strip())
-    report_only = retained and not unbound_report_text
     binding, units, criteria = _bound_selection(context, claim_scope)
     purpose = response_purpose(context["response_route"]) if binding == "current" else None
     phase = claim_scope.get("phase", "final")
@@ -241,11 +226,11 @@ def select_completion_route(context, claim_scope, evidence_state, autopilot_stat
             and all(route.get(k) == context.get(k) for k in ("platform", "session_id"))
             and route.get("current_input_event_id") == input_id
             and route.get("input_event_id") != input_id)))
-    completion_submission = completion_submission or (phase == "final" and purpose == "completion" and not report_only)
+    completion_submission = completion_submission or (phase == "final" and purpose == "completion")
     # A selected execution unit is work context, not a final-response claim.
-    # Only structured completion/partial submissions activate final publication.
-    nonclosing_response = (not completion_submission and not partial_evidence and phase != "publication"
-                           and (phase == "final" or purpose in NONCLOSING_PURPOSES or report_only))
+    # Only a structured completion or partial submission closes a response.
+    nonclosing_response = (not completion_submission and not partial_evidence
+                           and (phase == "final" or purpose in NONCLOSING_PURPOSES))
     checks = _mapping(context.get("verification_plan")).get("checks", [])
     malformed_plan = not isinstance(checks, list) or any(not isinstance(c, dict) or not _qualified_key_valid(c)
                                                        or not isinstance(c.get("check_id"), str) or not c["check_id"] for c in checks)
@@ -273,47 +258,19 @@ def select_completion_route(context, claim_scope, evidence_state, autopilot_stat
         evidence_route = "reopen_cause"
     elif (completion_submission or claim_scope.get("consequential") is True) and evidence_route == "no_external_check":
         evidence_route = "owner_verification"
-    if report_only:
-        # This response reports accepted records; it neither advances nor
-        # discharges any currently selected execution criteria.
-        evidence_route = "reuse"
-    selected_execution = any(u["kind"] == "execution" for u in units)
-    publication = "none"
-    if autopilot_state.get("enabled") is True and not nonclosing_response:
-        if binding != "current" and (completion_submission or partial_evidence
-                or phase == "publication" or (phase == "before_tool" and not awaiting_route)):
-            publication = "blocked"
-        elif selected_execution:
-            status = autopilot_state.get("publication_status", "unprepared")
-            if evidence_route == "reopen_cause":
-                publication = "blocked"
-            elif status == "unprepared":
-                publication = "prepare"
-            elif claim_scope.get("phase", "final") == "before_tool":
-                publication = "none" if status in ("prepared", "published") else "blocked"
-            elif evidence_route not in ("reuse", "recording_repair_only"):
-                publication = "blocked"
-            elif status == "prepared" or (status == "published" and failure == "recording"):
-                publication = "publish"
-            elif status != "published":
-                publication = "blocked"
-    if report_issue:
-        evidence_route = "reopen_cause"
-        publication = "blocked" if autopilot_state.get("enabled") is True else "none"
-    reason = f"Evidence: {evidence_route}; publication: {publication}. Preserve owner verification requirements."
+    reason = f"Evidence: {evidence_route}. Preserve owner verification requirements."
     if nonclosing_response:
-        reason += " No completion submission is registered for this response; preserve unfinished work without requesting publication."
+        reason += " No completion submission is registered for this response; preserve unfinished work."
     if awaiting_route:
-        reason += " The current input awaits route registration; no preparation or application is requested."
+        reason += " The current input awaits route registration."
     elif binding != "current":
-        reason += " Missing or stale response binding requires route repair for capture or advancement; authorized continuation and tool permission are unchanged."
+        reason += " Missing or stale response binding requires route repair; authorized continuation and tool permission are unchanged."
     if failure == "recording":
         reason += " Mandatory closure pending; recording alone cannot justify rerunning unchanged business checks."
     if evidence_route == "reopen_cause":
         reason += " Reopen the smallest cause and use fuller reasoning for unknown or conflicting evidence."
-    return dict(schema_version=SCHEMA_VERSION, evidence_route=evidence_route, publication_route=publication,
+    return dict(schema_version=SCHEMA_VERSION, evidence_route=evidence_route,
                 selected_work_unit_ids=[u["work_unit_id"] for u in units], selected_criteria=criteria,
                 unit_decisions=unit_decisions, required_completion_check=completion_submission,
                 required_partial_check=partial_evidence,
-                report_only=report_only, unbound_report_text=unbound_report_text, claim_report_issue=report_issue,
                 route_binding=binding, response_purpose=purpose, reason=reason)

@@ -314,7 +314,7 @@ class SessionIntentLedgerTests(unittest.TestCase):
     def test_intent_delta_updates_events_and_current_session_discovery(self) -> None:
         root = self.tmpdir / "ledger"
         delta = {
-            "current_goal": "bridge session intent to approved autopilot run state",
+            "current_goal": "bridge session intent to the approved run state",
             "acceptance_criteria": [
                 {
                     "id": "bridge-jsonl",

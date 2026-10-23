@@ -15,7 +15,15 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from native_completion import assess_native_completion
 from native_transcript import assistant_text_this_turn as _assistant_text_this_turn, stop_response_text
-from claim_evidence_runtime import native_claim_source
+
+NATIVE_SESSION_KEYS = ('session_id', 'sessionId', 'thread_id', 'threadId')
+
+
+def _native_source(platform: str, hook_input: dict[str, Any]) -> dict[str, str]:
+    """Bind the assessment to the session the host named; an unnamed session stays empty, never guessed."""
+    session = next((hook_input[key] for key in NATIVE_SESSION_KEYS
+                    if isinstance(hook_input.get(key), str) and hook_input[key].strip()), '')
+    return dict(os.environ, GHOST_ALICE_PLATFORM=platform, GHOST_ALICE_SESSION_ID=session)
 
 
 def _read_hook_input() -> dict[str, Any]:
@@ -47,10 +55,7 @@ def main() -> int:
     if not text.strip():
         print(json.dumps({'continue': True}))
         return 0
-    try:
-        source = native_claim_source(args.platform, native_input)
-    except ValueError:
-        source = dict(os.environ, GHOST_ALICE_PLATFORM=args.platform, GHOST_ALICE_SESSION_ID='')
+    source = _native_source(args.platform, native_input)
     assessment = assess_native_completion(source, text=text, phase='final', native_input=native_input)
     # The wrapper retains this structured result in its strict audit and sends
     # only the native envelope to the host. No response is promoted by this log.

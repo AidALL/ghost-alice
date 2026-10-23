@@ -1,14 +1,11 @@
-"""Core owns native assessment inputs; Ghost-ALICE Autopilot receives decisions, not policy knobs."""
+"""Core owns native assessment inputs; the Stop observer reads only its decisions."""
 import hashlib
 import importlib
 import json
 import os
-from contextlib import contextmanager
 from pathlib import Path
-import sqlite3
 import subprocess
 import sys
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -18,21 +15,21 @@ from test_completion_skill_evidence import assert_stop_observation
 
 # The actual status response rejected by the native Stop hook. This is a
 # historical report, not a request to rerun the business checks described here.
-REJECTED_STATUS_REPORT = """제가 한 일은 근거 검증·접수·정정 코드 수정과 설치, 그리고 그 오류들의 재발 검사였습니다. 사용자 목적을 받아 Core와 AP가 판단하고 다음 업무까지 이어가는 전체 동작을 확인한 것은 아니었습니다. 그 차이를 분명하게 보고하지 않았습니다. 죄송합니다.
+REJECTED_STATUS_REPORT = """제가 한 일은 근거 검증·접수·정정 코드 수정과 설치, 그리고 그 오류들의 재발 검사였습니다. 사용자 목적을 받아 Core가 판단하고 다음 업무까지 이어가는 전체 동작을 확인한 것은 아니었습니다. 그 차이를 분명하게 보고하지 않았습니다. 죄송합니다.
 
 실제로 실행한 검사는 다음과 같습니다.
 
 | 검사 | 확인한 내용과 결과 |
 |---|---|
 | Core 8건 | 근거의 원본·세션 소유권·재사용·정정 조건을 검사했습니다. 통과했습니다. |
-| AP 17건 | 원래 검증 시각 보존, 같은 초에 기록된 근거의 순서 구분, 정정 이력 보존, 영향 없는 항목 유지, 새 근거에 과거 시각을 붙이는 시도 거부 등을 검사했습니다. 통과했습니다. |
+| 기록 17건 | 원래 검증 시각 보존, 같은 초에 기록된 근거의 순서 구분, 정정 이력 보존, 영향 없는 항목 유지, 새 근거에 과거 시각을 붙이는 시도 거부 등을 검사했습니다. 통과했습니다. |
 | 설치본 1건 | 같은 초에 기록된 근거를 실제 설치본에 접수하고, 격리된 Stop 호출로 최종 적용하는 경로를 검사했습니다. 통과했습니다. |
 | 과거 차단 응답 3개 | 설치본 Stop에 재입력했습니다. 세 응답 모두 `route-unavailable`로 차단됐습니다. 필요한 경로 등록을 먼저 요구하는지 확인했을 뿐, 정상 보고가 끝까지 통과한 검사가 아닙니다. |
 | 문구·문서 검사 | 행동 주체를 명시했는지, 안내 문구와 문서·다이어그램이 맞는지 검사했습니다. 마지막 수정은 주로 문구·주석 변경이며 실행 로직은 그대로였습니다. |
 
 앞의 검사들은 [실행 기록](/tmp/ghost-alice-test-evidence/final-verification.json), 차단 응답 결과는 [재생 기록](/tmp/ghost-alice-test-evidence/replay.json)에 남아 있습니다.
 
-핵심 코드도 수정했습니다. AP가 Core 평가를 받아 조건을 적용하도록 연결했고, 부분 완료와 실패 보고를 구분했으며, 정정 시 원본과 영향 없는 항목을 보존하도록 했습니다. 정밀한 타임스탬프 대신 인증된 기록 순서로 구분하는 수정도 설치했습니다.
+핵심 코드도 수정했습니다. Core 평가 결과에 따라 조건을 적용하도록 연결했고, 부분 완료와 실패 보고를 구분했으며, 정정 시 원본과 영향 없는 항목을 보존하도록 했습니다. 정밀한 타임스탬프 대신 인증된 기록 순서로 구분하는 수정도 설치했습니다.
 
 하지만 제가 작업을 개별 접수·차단 오류의 수정에 집중하면서, 그 검사 결과를 전체 작동 수준으로 확대해 보고했습니다. 현재 도달한 곳은 ‘검증·기록·적용 기능을 수정하고 해당 사례를 확인한 단계’입니다. 사용자께서 요구한 ‘목적에 맞는 판단과 자동 후속 수행이 함께 돌아가는 단계’까지 해결했다는 결과는 내놓지 못했습니다.
 
@@ -49,7 +46,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.fixture.event = self.fixture.intake()
         fixtures.ledger.record_turn(**self.fixture.coords,
             expected_input_event_id=self.fixture.event, intent_delta={'acceptance_criteria': [
-                self.fixture.criterion(summary='Report the existing Core/AP checks and their limits.')]})
+                self.fixture.criterion(summary='Report the existing Core checks and their limits.')]})
         self.fixture.record()
         self.source = dict(GHOST_ALICE_CORE_ROOT=str(fixtures.ROOT),
             GHOST_ALICE_SESSION_INTENT_ROOT=str(self.fixture.root),
@@ -57,11 +54,11 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.api = importlib.import_module('completion_assessment')
         self.time = '2026-10-10T20:47:11+00:00'
         self.observation = Path(self.fixture.tmp.name) / 'original-observation.json'
-        self.observation.write_text(json.dumps(dict(core_cases=8, ap_cases=17,
-            installed_case='publication and isolated Stop application passed',
+        self.observation.write_text(json.dumps(dict(core_cases=8, record_cases=17,
+            installed_case='the isolated Stop observation passed',
             replay=['route-unavailable'] * 3, real_business_continuation='not observed')))
         self.proof = '\n'.join(['[completion-check]', '- acceptance-criteria:',
-            '  - AC1: Report the existing Core/AP checks and their limits. [source: user-said]',
+            '  - AC1: Report the existing Core checks and their limits. [source: user-said]',
             '- claim-evidence-map:', '  - claim: Existing tests cover recording, not complete business continuation.',
             '    criterion: AC1', '    evidence: ' + str(self.observation), '    verdict: pass',
             '- unverified:', '  - none', '- evidence: ' + str(self.observation)])
@@ -115,34 +112,12 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         reviewed = self.review_report()
         result = self.assess()
         self.assertIsNone(result['body_issue'])
-        self.assertTrue(result['completion_route']['report_only'])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
-        self.assertEqual(result['completion_route']['publication_criteria'], [])
+        self.assertFalse(result['completion_route']['required_completion_check'])
+        self.assertEqual(result['validation_text'], REJECTED_STATUS_REPORT)
         assert_stop_observation(self, self.run_stop(REJECTED_STATUS_REPORT))
         self.assertEqual(fixtures.ledger.read_session_state(**self.fixture.coords)['acceptance_criteria'], before)
         self.assertEqual(reviewed['verified_at'], self.time)
         self.assertEqual(reviewed['sources'], self.original['sources'])
-        # An already authenticated original paragraph must not hide the newer
-        # whole-response review from either native consumer.
-        matched_original = dict(present=True, valid=True, residual_text='Additional historical context.',
-            claims=[], issue=None, automatic=True)
-        with patch('native_completion.evaluate_runtime_claim_report', return_value=matched_original):
-            self.assertIsNone(self.assess()['body_issue'])
-        ap_root = os.environ.get('GHOST_ALICE_TEST_AP_SKILL_ROOT')
-        if ap_root:
-            sys.path.insert(0, str(Path(ap_root) / 'adapters'))
-            try:
-                from autopilot_intent_recovery import current_execution_projection
-                state = fixtures.ledger.read_session_state(**self.fixture.coords)
-                material = dict(state_path=str(self.fixture.root / 'codex/current/intent-state.json'),
-                    platform='codex', session_id='current', intent_state=state)
-                source = dict(self.source, GHOST_ALICE_COMPLETION_SCHEMA='autopilot-completion-receipt.v2')
-                projected = current_execution_projection(material, source, Path(self.fixture.tmp.name) / 'ap',
-                    claim_scope=dict(text=REJECTED_STATUS_REPORT, phase='final'))
-                self.assertEqual(projected['reason'], 'response-no-publication')
-                self.assertEqual(projected['completion_route']['publication_criteria'], [])
-            finally:
-                sys.path.pop(0)
 
     def test_report_review_cannot_cover_changed_body_source_or_current_input(self):
         self.review_report()
@@ -159,8 +134,9 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.review_report()
         self.assertIsNone(self.assess()['body_issue'])
 
-    def test_registered_review_owns_the_response_instead_of_automatic_claim_discovery(self):
+    def test_registered_review_owns_the_response(self):
         body = 'Existing tests cover recording, not complete business continuation.'
+        self.assertIsNotNone(self.assess(body)['body_issue'])
         candidate = self.api.prepare_response_review(self.source, response_text=body, source_paths=[],
             reuse_candidate=self.original['candidate_reference'])
         self.api.record_response_review(self.source, candidate['candidate_reference'], dict(
@@ -168,16 +144,9 @@ class HistoricalResponseReviewTests(unittest.TestCase):
                 binding_id=candidate['response_binding']['binding_id'], verdict='supported',
                 source_ids=[candidate['sources'][0]['source_id']],
                 rationale='The complete response preserves the original observation and its limits.')))
-        claim = dict(statement=body, work_unit_id='first', contract_revision=1,
-            criterion_id='AC1', proof_digest='sha256:' + 'a' * 64)
-        with patch('original_claim_evidence.list_retained_claim_candidates',
-                return_value=dict(status='candidates', claims=[claim])), patch(
-                'original_claim_evidence.resolve_retained_claims',
-                return_value=dict(status='unavailable', claims=[])):
-            result = self.assess(body)
+        result = self.assess(body)
         self.assertIsNone(result['body_issue'])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
-        self.assertEqual(result['completion_route']['publication_criteria'], [])
+        self.assertFalse(result['completion_route']['required_completion_check'])
 
     def test_explanation_source_failure_requests_source_status_before_affected_review(self):
         self.review_report()
@@ -221,7 +190,8 @@ class UnroutedNativeWorkTests(unittest.TestCase):
                 side_effect=ValueError('selected execution work needs an admitted owned criterion')):
             rejected_route = native.assess_native_completion(source, phase='before_tool')
         self.assertEqual(rejected_route['input_event_id'], fixture.event)
-        self.assertEqual(rejected_route['completion_route']['publication_route'], 'none')
+        self.assertIsNone(rejected_route['response_route'])
+        self.assertEqual(rejected_route['completion_route']['route_binding'], 'missing')
         transcript = Path(fixture.tmp.name) / 'native.jsonl'
         entries = [dict(type='user', sessionId='current', message=dict(role='user', content='Create the memo.')),
             dict(type='assistant', sessionId='current', message=dict(role='assistant', content=[
@@ -283,37 +253,30 @@ class NativeActivityTests(unittest.TestCase):
             self.source, phase='final', text=self.payload['last_assistant_message'],
             native_input=self.payload if payload is None else payload)
 
-    def test_conversation_explanation_does_not_submit_an_incidental_retained_claim(self):
+    def test_conversation_explanation_passes_without_a_retained_claim_archive(self):
         body = '''네. 검토한 최종본은 모두 문서 본문에 들어가 있습니다.
 
 - Core 한·영 아키텍처·웹페이지·스킬 참고자료: Mermaid로 반영했습니다.
-- Ghost-ALICE Autopilot README·위키·설치 문서: 이미 본문에 있던 최종 Mermaid 다이어그램을 유지했습니다.
+- 설치 문서: 이미 본문에 있던 최종 Mermaid 다이어그램을 유지했습니다.
 
 19개 다이어그램을 Mermaid로 통일하고 SVG 자산과 생성 스크립트를 제거했습니다.
 
 [한국어 아키텍처 최종본 보기](https://aidall.github.io/ghost-alice/architecture_ko.html)'''
+        self.write_rows()
+        self.payload['last_assistant_message'] = body
+        ordinary = self.assess()
+        self.assertIsNone(ordinary['body_issue'])
+        self.assertEqual(ordinary['validation_text'], body)
+        self.assertFalse(ordinary['completion_route']['required_completion_check'])
+        self.assertEqual(ordinary['native_activity']['status'], 'absent')
+        # A pasted evidence-report envelope is ordinary text; Core resolves no claim archive behind it.
         claim = dict(statement=body.split('\n\n')[2], work_unit_id='diagrams',
             contract_revision=1, criterion_id='format', proof_digest='sha256:' + 'a' * 64)
-        accepted = dict(status='valid', claims=[dict(claim, validity='valid',
-            original_claims=[claim['statement']], original_verified_at='2026-10-11T20:11:49Z',
-            evidence_reference='original-evidence', application_reference='accepted-application')])
-        self.write_rows()
-        with patch('original_claim_evidence.list_retained_claim_candidates',
-                return_value=dict(status='candidates', claims=[claim])), patch(
-                'original_claim_evidence.resolve_retained_claims', return_value=accepted):
-            self.payload['last_assistant_message'] = body
-            ordinary = self.assess()
-            self.assertIsNone(ordinary['body_issue'])
-            self.assertEqual(ordinary['validation_text'], body)
-            self.assertFalse(ordinary['completion_route']['report_only'])
-            self.assertEqual(ordinary['completion_route']['publication_route'], 'none')
-            self.assertEqual(ordinary['native_activity']['status'], 'absent')
-            self.payload['last_assistant_message'] = body + '\n\n[evidence-report]\n' + json.dumps(
-                dict(schema_version='claim-evidence.v1', claims=[claim])) + '\n[/evidence-report]'
-            explicit = self.assess()
-            self.assertIn('claim-evidence-unbound', explicit['body_issue'])
-            self.assertFalse(explicit['completion_route']['report_only'])
-            self.assertEqual(explicit['completion_route']['publication_route'], 'none')
+        self.payload['last_assistant_message'] = body + '\n\n[evidence-report]\n' + json.dumps(
+            dict(schema_version='claim-evidence.v1', claims=[claim])) + '\n[/evidence-report]'
+        explicit = self.assess()
+        self.assertIsNone(explicit['body_issue'])
+        self.assertEqual(explicit['validation_text'], self.payload['last_assistant_message'])
 
     def test_codex_native_stop_requires_route_for_typed_current_tool_calls(self):
         hook = Path(__file__).with_name('claude_stop_verification_hook.py')
@@ -362,7 +325,6 @@ class NativeActivityTests(unittest.TestCase):
         assessed = self.assess()
         self.assertEqual(assessed['native_activity']['status'], 'absent')
         self.assertIsNone(assessed['body_issue'])
-        self.assertEqual(assessed['completion_route']['publication_route'], 'none')
 
         hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
@@ -454,7 +416,6 @@ class NativeCompletionTests(unittest.TestCase):
         result = self.service()(self.source, text=body, phase='final')
         self.assertIsNone(result['body_issue'])
         self.assertFalse(result['completion_route']['required_completion_check'])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
         hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
         executed = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(dict(session_id='current', last_assistant_message=body)),
@@ -473,13 +434,9 @@ class NativeCompletionTests(unittest.TestCase):
         self.assertEqual(result['input_event_id'], self.fixture.event)
         self.assertEqual(result['body_digest'], 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
 
-    def test_report_only_keeps_selected_work_for_ap_followup_judgment(self):
-        assess = self.service()
-        report = dict(present=True, valid=True, residual_text='', claims=[], issue=None)
-        with patch('native_completion.evaluate_runtime_claim_report', return_value=report):
-            result = assess(self.source, text='Saved report matches input', phase='final')
-        self.assertTrue(result['completion_route']['report_only'])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
+    def test_plain_progress_text_keeps_selected_work_without_a_completion_check(self):
+        result = self.service()(self.source, text='Saved report matches input', phase='final')
+        self.assertFalse(result['completion_route']['required_completion_check'])
         self.assertEqual(result['completion_route']['selected_work_unit_ids'], ['first'])
         self.assertIsNone(result['body_issue'])
 
@@ -487,9 +444,8 @@ class NativeCompletionTests(unittest.TestCase):
         self.fixture.intake('New current input')
         result = self.service()(self.source, phase='before_tool')
         self.assertEqual(result['completion_route']['route_binding'], 'stale')
-        # Canonical intake precedes route registration. Waiting requests no
-        # publication and cannot reuse the previous input's selected authority.
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
+        # Canonical intake precedes route registration. Waiting cannot reuse
+        # the previous input's selected authority.
         self.assertEqual(result['completion_route']['selected_work_unit_ids'], [])
         self.assertEqual(result['completion_route']['selected_criteria'], [])
         self.assertIn('awaits route registration', result['completion_route']['reason'])
@@ -515,41 +471,21 @@ class NativeCompletionTests(unittest.TestCase):
         event = fixtures.ledger.read_session_state(**coords)['latest_input_event_id']
         assess = self.service()
         source = dict(self.source, GHOST_ALICE_SESSION_ID='unrouted')
-        report = dict(present=True, valid=True, residual_text='', claims=[], issue=None)
-        with patch('native_completion.evaluate_runtime_claim_report', return_value=report):
-            result = assess(source, text='Original accepted result', phase='final')
+        result = assess(source, text='Original accepted result', phase='final')
         self.assertEqual(result['input_event_id'], event)
         self.assertIsNone(result['response_route'])
         self.assertEqual(result['completion_route']['selected_work_unit_ids'], [])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
+        self.assertEqual(result['completion_route']['route_binding'], 'missing')
 
-    def test_pretool_never_runs_final_body_or_original_evidence_assessment(self):
+    def test_pretool_never_runs_final_body_assessment(self):
         assess = self.service()
-        with patch('native_completion.evaluate_runtime_claim_report', side_effect=AssertionError('unexpected proof lookup')):
+        with patch('completion_assessment.lookup_current_response', side_effect=AssertionError('unexpected review lookup')):
             result = assess(self.source, phase='before_tool')
-        self.assertEqual(result['completion_route']['publication_route'], 'prepare')
+        self.assertEqual(result['completion_route']['route_binding'], 'current')
+        self.assertFalse(result['completion_route']['required_completion_check'])
         self.assertIsNone(result['body_issue'])
-
-    def test_runtime_mirror_resolves_ledger_from_trusted_installation_binding(self):
-        import original_claim_evidence as original
-        @contextmanager
-        def archive(source):
-            connection = sqlite3.connect((self.fixture.root / 'ghost-state.sqlite3').as_uri() + '?mode=ro',
-                uri=True, isolation_level=None)
-            try:
-                connection.execute('BEGIN')
-                yield SimpleNamespace(connection=connection, root=self.fixture.root,
-                    owner=dict(platform='codex', session_id='current'))
-            finally:
-                connection.close()
-        claim = dict(statement='Original result', work_unit_id='first', contract_revision=1,
-            criterion_id='AC1', proof_digest='sha256:' + 'a' * 64)
-        mirror = Path(self.fixture.tmp.name) / 'runtime/current/_shared/original_claim_evidence.py'
-        with patch.object(original, '__file__', str(mirror)):
-            result = original.resolve_retained_claims(self.source, [claim],
-                archive_provider=SimpleNamespace(open_claim_archive=archive))
-        self.assertEqual(result['claims'][0]['reason'], 'current-proof-mismatch')
-        self.assertEqual(result['status'], 'invalid')
+        with self.assertRaises(ValueError):
+            assess(self.source, phase='publication')
 
 
 class NativeProofBindingTests(unittest.TestCase):
@@ -594,7 +530,6 @@ class NativeProofBindingTests(unittest.TestCase):
         self.api.lookup_current_response(self.owner.source, body)
         delivered = body
         self.assertIsNone(self.assess(delivered)['body_issue'])
-        self.assertEqual(self.assess(delivered)['completion_route']['publication_route'], 'none')
         stopped = subprocess.run([sys.executable, '-B', str(shared / 'claude_stop_verification_hook.py'),
             '--platform', 'codex'], input=json.dumps(dict(session_id='current', last_assistant_message=delivered)),
             env=env, text=True, capture_output=True, check=True)
@@ -719,7 +654,6 @@ class NativeProofBindingTests(unittest.TestCase):
         self.assertIn('original proof, source references and verification time', result['body_issue'])
         self.assertIn('Do not replay business work or expand unrelated review', result['body_issue'])
         self.assertEqual(result['repair_target'], 'source_status')
-        self.assertIsNone(result['completion_route']['publication_criteria'])
 
     def test_source_failure_before_review_resolution_preserves_original_proof(self):
         candidate = self.review_response(self.proof)
@@ -820,27 +754,28 @@ class NativeProofBindingTests(unittest.TestCase):
             self.fail('A supported fail verdict must reach native final delivery: ' + str(exc))
         result = self.assess(self.proof)
         self.assertIsNone(result['body_issue'])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
-        self.assertEqual(result['completion_route']['publication_criteria'], [])
+        self.assertTrue(result['completion_route']['required_completion_check'])
         self.assertEqual(fixtures.ledger.read_session_state(**self.owner.fixture.coords), before)
 
-    def test_reviewed_partial_with_only_unverified_criteria_needs_no_publication(self):
+    def test_reviewed_partial_with_only_unverified_criteria_is_deliverable(self):
         self.proof = self.proof.replace('[completion-check]', '[partial-check]\n- scope: partial')
         self.proof = self.proof.replace('  - none', '  - AC1: The bounded observation does not establish all requested behavior')
         self.review()
         result = self.assess(self.proof)
         self.assertIsNone(result['body_issue'])
-        self.assertEqual(result['completion_route']['publication_route'], 'none')
-        self.assertEqual(result['completion_route']['publication_criteria'], [])
+        self.assertTrue(result['completion_route']['required_partial_check'])
         self.assertEqual(result['completion_route']['selected_work_unit_ids'], ['first'])
 
-    def test_reviewed_success_exposes_qualified_publication_coverage(self):
+    def test_reviewed_success_is_deliverable_without_marking_the_criterion_met(self):
+        before = fixtures.ledger.read_session_state(**self.owner.fixture.coords)
         self.review()
         result = self.assess(self.proof)
         self.assertIsNone(result['body_issue'])
-        self.assertNotEqual(result['completion_route']['publication_route'], 'none')
-        self.assertEqual(result['completion_route']['publication_criteria'], [
-            dict(work_unit_id='first', contract_revision=1, criterion_id='AC1')])
+        self.assertTrue(result['completion_route']['required_completion_check'])
+        reviewed = self.api.lookup_current_response(self.owner.source, self.proof)
+        self.assertEqual(self.api.assessment_coverage(reviewed, reviewed.candidate['contract'], self.proof,
+            self.owner.time), {('first', 1, 'AC1')})
+        self.assertEqual(fixtures.ledger.read_session_state(**self.owner.fixture.coords), before)
 
 
 class RuntimeInstallationIsolationTests(unittest.TestCase):
@@ -918,6 +853,40 @@ print(json.dumps({
                 self.assertEqual(Path(loaded[key]).resolve(), runtime / '_shared' / filename)
             self.assertEqual(loaded['ledger_root'], destination.ledger_root)
             self.assertEqual(loaded['source_root'], destination.core_source_root)
+
+    def test_runtime_snapshot_drops_modules_removed_from_the_source(self):
+        import shutil
+        import tempfile
+        import install_destination
+        import install_hooks
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'source'
+            source_shared = source / '_shared'
+            source_shared.mkdir(parents=True)
+            for name in ('native_completion.py', 'completion_route.py'):
+                shutil.copy2(Path(__file__).with_name(name), source_shared / name)
+            ledger_relative = Path('session-intent-analyzer/scripts/session_intent_ledger.py')
+            (source / ledger_relative).parent.mkdir(parents=True)
+            shutil.copy2(fixtures.ROOT / ledger_relative, source / ledger_relative)
+            destination = install_destination.InstallDestination(
+                mode='isolated', owned_root=str(root), platform_dir=str(root / 'platform'),
+                skills_dir=str(root / 'skills'), ghost_root=str(root / 'ghost'),
+                ledger_root=str(root / 'ledger'), project_root=str(root / 'project'),
+                core_source_root=str(source))
+            with install_destination.use(destination):
+                install_hooks._prepare_destination_runtime(destination)
+                runtime = Path(destination.runtime_shared_dir)
+                retired = runtime / 'retired_module.py'
+                retired.write_text('raise AssertionError("a module removed from the source was imported")\n')
+                (runtime / '__pycache__').mkdir()
+                (runtime / 'notes.txt').write_text('not a runtime module\n')
+                install_hooks._prepare_destination_runtime(destination)
+            self.assertFalse(retired.exists())
+            self.assertTrue((runtime / 'native_completion.py').is_file())
+            self.assertTrue((runtime / '__pycache__').is_dir())
+            self.assertTrue((runtime / 'notes.txt').is_file())
 
 
 if __name__ == '__main__':
