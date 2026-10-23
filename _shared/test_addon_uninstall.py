@@ -309,14 +309,27 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         self._install("demo-addon", ["pilot-skill"])
         record = reg.read_record("demo-addon", addons_dir=self.addons)
         record["hooks"] = [{"hook_id": "obs", "event": "post_tool_use"}]
+        # An older installer recorded an adapter hook under the retired kind; its registration must go too.
+        record["provided"].append({
+            "kind": "adapter", "name": "demo-addon",
+            "target": str(self.skills / "pilot-skill" / "adapters" / "stop.py"),
+            "ownership": "addon", "install_mode": "copy", "content_hash": "recorded",
+            "marker": "[adapter:demo-addon] stop", "metadata": {"hook_id": "stop"},
+        })
         reg.write_record(record, addons_dir=self.addons)
         observer = install_hooks._hook_runner_command_entry(
             "obs", "echo observer", "[addon:demo-addon] obs", platform_key="claude",
         )
+        retired_script = self.src / "demo-addon" / "pilot-skill" / "adapters" / "stop.py"
+        retired_script.parent.mkdir(parents=True)
+        retired_script.write_text("# fixture adapter\n", encoding="utf-8")
+        retired = install_hooks._hook_runner_command_entry(
+            "adapter-demo-addon-stop", f'{sys.executable} "{retired_script}"', "[adapter:demo-addon] stop", platform_key="claude",
+        )
         self.retained_commands = ["echo core-completion # [completion]", "echo user-hook"]
         self.settings.write_text(json.dumps({"hooks": {
             "PostToolUse": [observer],
-            "Stop": [{"hooks": [{"type": "command", "command": c}
+            "Stop": [retired, {"hooks": [{"type": "command", "command": c}
                                          for c in self.retained_commands]}],
         }}), encoding="utf-8")
 
@@ -324,7 +337,7 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         settings = json.loads(self.settings.read_text(encoding="utf-8"))
         commands = [hook["command"] for groups in settings["hooks"].values()
                     for group in groups for hook in group.get("hooks", [])]
-        self.assertFalse(any("[addon:demo-addon]" in c for c in commands))
+        self.assertFalse(any("[addon:demo-addon]" in c or "[adapter:demo-addon]" in c for c in commands))
         for command in self.retained_commands:
             self.assertIn(command, commands)
 

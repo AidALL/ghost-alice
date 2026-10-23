@@ -186,7 +186,7 @@ def _removed_file_targets(provided: list[dict[str, Any]]) -> list[tuple[str, str
     targets: list[tuple[str, str, Path]] = []
     for entry in provided:
         if entry.get("kind") == "adapter":
-            # Retired kind: the script lives inside the owning skill; the installer removes the registration as a retired hook.
+            # Retired kind: the script lives inside the owning skill; _retired_hook_items detaches the registration.
             continue
         kind = entry.get("kind")
         name = entry.get("name")
@@ -350,6 +350,36 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -
     return out
 
 
+def _retired_hook_items(provided: list[dict[str, Any]], *, platform: str, confirm: bool) -> list[dict[str, Any]]:
+    """Detach the registrations an older installer recorded under the retired kind "adapter" before any file goes.
+
+    The installer removes every retired hook as one rule (install_hooks.remove_retired_hooks); this item names the
+    sidecar entries so the uninstall report says what was detached. A registration already gone is "missing".
+    """
+    out: list[dict[str, Any]] = []
+    removed = None
+    for entry in provided:
+        if not isinstance(entry, dict) or entry.get("kind") != "adapter":
+            continue
+        name = entry.get("name")
+        metadata = entry.get("metadata")
+        hook_id = metadata.get("hook_id") if isinstance(metadata, dict) else None
+        if not isinstance(name, str) or not addon_registry.ADDON_ID_RE.fullmatch(name):
+            continue
+        if not isinstance(hook_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(hook_id):
+            continue
+        item: dict[str, Any] = {"kind": "adapter", "name": name, "marker": f"[adapter:{name}] {hook_id}"}
+        if not confirm:
+            item["action"] = "would-remove"
+        else:
+            if removed is None:
+                import install_hooks
+                removed = install_hooks.remove_retired_hooks(platform_key=platform, dry_run=False)
+            item["action"] = "removed" if removed else "missing"
+        out.append(item)
+    return out
+
+
 def _managed_executable_items(
     record: dict[str, Any],
     provided: list[dict[str, Any]],
@@ -359,6 +389,7 @@ def _managed_executable_items(
 ) -> list[dict[str, Any]]:
     return (
         _addon_hook_items(record, platform=platform, confirm=confirm)
+        + _retired_hook_items(provided, platform=platform, confirm=confirm)
         + _skill_permission_items(record, platform=platform, confirm=confirm)
     )
 

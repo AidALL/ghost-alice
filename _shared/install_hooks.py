@@ -2510,6 +2510,29 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     return total
 
 
+def remove_retired_hooks(*, platform_key: str, dry_run: bool = False) -> int:
+    """Remove every retired hook registration from one platform's hook file.
+
+    One rule (`_is_retired_hook_command`) for the retired core markers, the retired runner ids and the adapter
+    registrations an older installer wrote; Codex trust tables follow their handlers. Returns the number of hooks removed.
+    """
+    platform = PLATFORMS.get(platform_key)
+    if platform is None:
+        return 0
+    settings_file = platform["hook_file"]()
+    if not settings_file.exists():
+        return 0
+    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
+    hooks_obj = settings.get("hooks", {})
+    if not isinstance(hooks_obj, dict):
+        return 0
+    before = _hook_positions(settings_file, hooks_obj)
+    total = _remove_retired_hooks(hooks_obj)
+    if total and not dry_run:
+        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj))
+    return total
+
+
 def _is_managed_addon_command(command: str) -> bool:
     """True for a Ghost-ALICE managed addon hook command.
 
