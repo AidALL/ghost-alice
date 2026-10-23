@@ -2076,9 +2076,10 @@ def install_hook(
         # The generated command embeds "{marker} [hook-runner:...]", so the marker is always followed by a space. Matching on "marker " makes removal exact and prevents a hook id that is a prefix of another (obs vs obs2) from colliding.
         match_marker = marker + " "
         inner = _hook_python_command(script_path, payload=True)
-        registrations.append(HookRegistration(_managed_addon_runner_id(addon_id, hook_id), event_name, marker, inner,
-                                              f"addon:{addon_id}"))
-        entry = _hook_runner_command_entry(f"addon:{addon_id}:{hook_id}", inner, marker, platform_key=platform_key)
+        # One provider-qualified id names the registration, the record entry and the strict log rows of this hook.
+        runner_id = _managed_addon_runner_id(addon_id, hook_id)
+        registrations.append(HookRegistration(runner_id, event_name, marker, inner, f"addon:{addon_id}"))
+        entry = _hook_runner_command_entry(runner_id, inner, marker, platform_key=platform_key)
         command = _entry_command(entry)
         verified_addon_commands.add((event_name, command))
         if event_name not in hooks_obj:
@@ -2186,24 +2187,40 @@ def install_hook(
 _ADDON_HOOK_MARKER_RE = re.compile(
     r"^\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] (?P<hook_id>[a-z][a-z0-9-]*)$"
 )
+# The comment of a managed addon registration: the marker and the runner token, `addon-<addon id>-<hook id>` now,
+# the bare hook id in the registrations an older installer wrote.
 _MANAGED_ADDON_HOOK_COMMENT_RE = re.compile(
     r"\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] "
     r"(?P<hook_id>[a-z][a-z0-9-]*) "
-    r"\[hook-runner:(?P=hook_id)\]"
+    r"\[hook-runner:(?P<runner_id>addon-(?P=addon_id)-(?P=hook_id)|(?P=hook_id))\]"
 )
 
 
 def _addon_runner_token(addon_id: str, hook_id: str) -> str:
-    _ = addon_id  # marker carries addon ownership; hook runner normalizes to hook_id.
-    return f"[hook-runner:{normalize_hook_id(hook_id)}]"
+    return f"[hook-runner:{_managed_addon_runner_id(addon_id, hook_id)}]"
 
 
 def _managed_addon_runner_id(addon_id: str, hook_id: str) -> str:
-    _ = addon_id
-    return normalize_hook_id(hook_id)
+    """The runner id of an addon's hook: `addon-<addon id>-<hook id>`.
+
+    The id names the registration in the host file, the record's `hooks.<platform>.entries` key and the strict
+    log, so two addons that declare the same hook id keep separate registrations and entries, and no addon hook
+    takes a core hook id. An older installer registered the bare hook id; `_is_exact_addon_hook_command` and
+    `_is_managed_addon_command` still recognize that form for removal.
+    """
+    return normalize_hook_id(f"addon-{addon_id}-{hook_id}")
+
+
+def _older_addon_registration(command: str, marker: str, hook_id: str) -> bool:
+    """The long runner form an older installer wrote for an addon hook, with the bare hook id as its runner id."""
+    bare = normalize_hook_id(hook_id)
+    return (f"{marker} [hook-runner:{bare}]" in command
+            and _long_registration_hook_id(command, decode_binding=False) == bare)
 
 
 def _is_exact_addon_hook_command(command: str, marker: str) -> bool:
+    """This addon hook's own registration: the exact marker and runner token, and a runner argv with the same id;
+    or the long form an older installer wrote for it with the bare hook id."""
     match = _ADDON_HOOK_MARKER_RE.fullmatch(marker)
     if not match:
         return False
@@ -2211,7 +2228,9 @@ def _is_exact_addon_hook_command(command: str, marker: str) -> bool:
     hook_id = match.group("hook_id")
     runner_id = _managed_addon_runner_id(addon_id, hook_id)
     exact_comment = f"{marker} {_addon_runner_token(addon_id, hook_id)}"
-    return exact_comment in command and _hook_runner_id_match(command, runner_id)
+    if exact_comment in command and _hook_runner_id_match(command, runner_id):
+        return True
+    return _older_addon_registration(command, marker, hook_id)
 
 
 def _hook_positions(settings_file: Path, hooks_obj) -> list[tuple[dict[str, Any], str]]:
@@ -2460,8 +2479,11 @@ def _is_managed_addon_command(command: str) -> bool:
     match = _MANAGED_ADDON_HOOK_COMMENT_RE.search(command)
     if not match:
         return False
-    runner_id = _managed_addon_runner_id(match.group("addon_id"), match.group("hook_id"))
-    return _hook_runner_id_match(command, runner_id)
+    addon_id, hook_id = match.group("addon_id"), match.group("hook_id")
+    runner_id = _managed_addon_runner_id(addon_id, hook_id)
+    if match.group("runner_id") == runner_id:
+        return _hook_runner_id_match(command, runner_id)
+    return _older_addon_registration(command, f"[addon:{addon_id}] {hook_id}", hook_id)
 
 
 def _remove_managed_addon_entries(hooks_list: list) -> int:
