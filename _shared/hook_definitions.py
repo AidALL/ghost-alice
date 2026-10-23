@@ -17,7 +17,9 @@ from typing import Any
 PROVIDER = 'ghost_alice_context'
 
 # Addon ids and hook ids share one safe-name rule.
-SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")
+# Lowercase letters and digits with single inner hyphens: the id's own `normalize_hook_id` form, which keeps an
+# addon hook's registration id `addon-<n>-<addon id>-<hook id>` unambiguous and stable under normalization.
+SAFE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 # Semantic hook intent → concrete host event name.
 #   - claude/codex: UserPromptSubmit fires once when user input is submitted.

@@ -2187,12 +2187,12 @@ def install_hook(
 _ADDON_HOOK_MARKER_RE = re.compile(
     r"^\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] (?P<hook_id>[a-z][a-z0-9-]*)$"
 )
-# The comment of a managed addon registration: the marker and the runner token, `addon-<addon id>-<hook id>` now,
-# the bare hook id in the registrations an older installer wrote.
+# The comment of a managed addon registration: the marker and the runner token, `addon-<n>-<addon id>-<hook id>`
+# now, the bare hook id in the registrations an older installer wrote.
 _MANAGED_ADDON_HOOK_COMMENT_RE = re.compile(
     r"\[addon:(?P<addon_id>[a-z][a-z0-9-]*)\] "
     r"(?P<hook_id>[a-z][a-z0-9-]*) "
-    r"\[hook-runner:(?P<runner_id>addon-(?P=addon_id)-(?P=hook_id)|(?P=hook_id))\]"
+    r"\[hook-runner:(?P<runner_id>addon-[0-9]+-(?P=addon_id)-(?P=hook_id)|(?P=hook_id))\]"
 )
 
 
@@ -2201,14 +2201,16 @@ def _addon_runner_token(addon_id: str, hook_id: str) -> str:
 
 
 def _managed_addon_runner_id(addon_id: str, hook_id: str) -> str:
-    """The runner id of an addon's hook: `addon-<addon id>-<hook id>`.
+    """The runner id of an addon's hook: `addon-<n>-<addon id>-<hook id>`, `n` the length of the addon id.
 
     The id names the registration in the host file, the record's `hooks.<platform>.entries` key and the strict
     log, so two addons that declare the same hook id keep separate registrations and entries, and no addon hook
-    takes a core hook id. An older installer registered the bare hook id; `_is_exact_addon_hook_command` and
-    `_is_managed_addon_command` still recognize that form for removal.
+    takes a core hook id. The length marks the boundary between the two ids, which both may contain hyphens, so
+    different pairs never form the same id. An older installer registered the bare hook id;
+    `_is_exact_addon_hook_command` and `_is_managed_addon_command` still recognize that form for removal.
     """
-    return normalize_hook_id(f"addon-{addon_id}-{hook_id}")
+    addon, hook = normalize_hook_id(addon_id), normalize_hook_id(hook_id)
+    return f"addon-{len(addon)}-{addon}-{hook}"
 
 
 def _older_addon_registration(command: str, marker: str, hook_id: str) -> bool:
