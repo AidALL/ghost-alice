@@ -1060,7 +1060,7 @@ class TempHomeTestCase(unittest.TestCase):
         )
         return node
 
-    def _create_addon_source(self, skill_name: str = "autopilot-mode") -> Path:
+    def _create_addon_source(self, skill_name: str = "demo-addon") -> Path:
         """Create a manifest-verified addon source with one Claude skill target."""
         source = self.fake_home / "addon-source"
         addon_dir = source / "addons" / skill_name
@@ -2547,10 +2547,10 @@ class TestInstallHook(TempHomeTestCase):
         self.assertEqual(result, "installed")
         allow = self._read_settings("claude")["permissions"]["allow"]
         self.assertIn("Skill(verification-before-completion)", allow)
-        self.assertIn("Skill(autopilot-mode)", allow)
+        self.assertIn("Skill(demo-addon)", allow)
         self.assertIn("Skill(custom-local-skill)", allow)
         self.assertNotIn("Skill(unverified-addon)", allow)
-        self.assertEqual(allow.count("Skill(autopilot-mode)"), 1)
+        self.assertEqual(allow.count("Skill(demo-addon)"), 1)
 
         self.assertEqual(
             install_hooks.install_hook("claude", addon_sources=[addon_source]),
@@ -2562,7 +2562,7 @@ class TestInstallHook(TempHomeTestCase):
         )
         self.assertEqual(status.status_token, "HOOK_INSTALLED_OK")
         self.assertIn(
-            "skill-permission:autopilot-mode",
+            "skill-permission:demo-addon",
             status.details["installed"],
         )
 
@@ -2582,7 +2582,7 @@ class TestInstallHook(TempHomeTestCase):
                 [addon_source]
             )
 
-        self.assertEqual(permissions, ["Skill(autopilot-mode)"])
+        self.assertEqual(permissions, ["Skill(demo-addon)"])
 
     def test_install_preserves_non_managed_bash_permissions(self):
         """The installer does not remove unmanaged Bash allow rules."""
@@ -2755,8 +2755,7 @@ class TestUninstallHook(TempHomeTestCase):
 
 class TestAddonHookRemovalWithoutHooks(TempHomeTestCase):
     def test_missing_hook_object_is_idempotent_and_preserves_settings(self):
-        removers = ((install_hooks.remove_addon_hook, '[addon:hookaddon] obs'),
-                    (install_hooks.remove_adapter_hook, '[adapter:autopilot-mode] stop'))
+        removers = ((install_hooks.remove_addon_hook, '[addon:hookaddon] obs'),)
         for platform in ('claude', 'codex'):
             for settings in ({}, {'theme': 'dark', 'permissions': {'allow': ['Read']}}):
                 for remove, marker in removers:
@@ -2798,7 +2797,7 @@ class TestCheckStatus(TempHomeTestCase):
 
         self.assertEqual(status.status_token, "HOOK_MISSING")
         self.assertEqual(status.legacy_status, "missing")
-        self.assertIn("skill-permission:autopilot-mode", status.details["missing"])
+        self.assertIn("skill-permission:demo-addon", status.details["missing"])
 
     def test_status_detail_reports_drift_when_marker_exists_but_command_differs(self):
         """Marker presence with command mismatch is command drift, not absence."""
@@ -3064,15 +3063,16 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
 
     def test_install_codex_trusts_verified_addons_without_trusting_marker_lookalikes(self):
         from test_addon_hooks import _make_addon
-        from test_addon_hooks_install import _make_autopilot_adapter_addon
 
         self._create_platform_dir("codex")
-        adapter = _make_autopilot_adapter_addon(self.fake_home)
+        watcher = _make_addon(self.fake_home / "watcher", [{
+            "id": "watch", "event": "on_session_start", "script": "hooks/obs.py",
+        }], addon_id="watcher")
         observer = _make_addon(self.fake_home, [{
             "id": "obs", "event": "post_tool_use", "script": "hooks/obs.py",
         }])
         user_commands = {
-            "Stop": "echo user # [adapter:autopilot-mode] continue [hook-runner:adapter-autopilot-mode-continue]",
+            "SessionStart": "echo user # [addon:watcher] watch [hook-runner:watch]",
             "PostToolUse": "echo user # [addon:hookaddon] obs [hook-runner:obs]",
         }
         settings_file = self._write_settings("codex", {"hooks": {
@@ -3080,18 +3080,18 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             for event, command in user_commands.items()
         }})
         with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            install_hooks.install_hook("codex", addon_sources=[str(adapter), str(observer)])
+            install_hooks.install_hook("codex", addon_sources=[str(watcher), str(observer)])
         settings = self._read_settings("codex")
         state = tomllib.loads(self._codex_config_toml().read_text())["hooks"]["state"]
         verified_count = 0
-        for event, label in (("Stop", "stop"), ("PostToolUse", "post_tool_use")):
+        for event, label in (("SessionStart", "session_start"), ("PostToolUse", "post_tool_use")):
             for group_index, group in enumerate(settings["hooks"][event]):
                 for handler_index, hook in enumerate(group["hooks"]):
                     key = f"{settings_file.as_posix()}:{label}:{group_index}:{handler_index}"
                     command = hook["command"]
                     if command == user_commands[event]:
                         self.assertNotIn(key, state, "marker text is not installation authority")
-                    elif "[adapter:" in command or "[addon:" in command:
+                    elif "[addon:" in command:
                         verified_count += 1
                         self.assertIn(key, state, "installed addon hook must be runnable without trust bypass")
                         self.assertEqual(state[key]["trusted_hash"],
@@ -3099,15 +3099,15 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         self.assertEqual(verified_count, 2)
 
     def test_codex_addon_reinstall_repairs_missing_trust_without_rewriting_hooks(self):
-        from test_addon_hooks_install import _make_autopilot_adapter_addon
+        from test_addon_hooks import _make_addon
 
         self._create_platform_dir("codex")
-        adapter = _make_autopilot_adapter_addon(self.fake_home)
+        adapter = _make_addon(self.fake_home, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
         with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
             install_hooks.install_hook("codex", addon_sources=[str(adapter)])
             hooks_file = self._config_file("codex")
             settings_bytes = hooks_file.read_bytes()
-            key = f"{hooks_file.as_posix()}:stop:1:0"
+            key = f"{hooks_file.as_posix()}:post_tool_use:1:0"
             config_file = self._codex_config_toml()
             header = f"[hooks.state.{json.dumps(key)}]"
             config_file.write_text(re.sub(

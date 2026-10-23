@@ -186,6 +186,7 @@ def _removed_file_targets(provided: list[dict[str, Any]]) -> list[tuple[str, str
     targets: list[tuple[str, str, Path]] = []
     for entry in provided:
         if entry.get("kind") == "adapter":
+            # Retired kind: the script lives inside the owning skill; the installer removes the registration as a retired hook.
             continue
         kind = entry.get("kind")
         name = entry.get("name")
@@ -349,35 +350,6 @@ def _addon_hook_items(record: dict[str, Any], *, platform: str, confirm: bool) -
     return out
 
 
-def _adapter_hook_items(provided: list[dict[str, Any]], *, platform: str, confirm: bool) -> list[dict[str, Any]]:
-    """Remove core-owned privileged adapter hooks recorded in provided[]."""
-    out: list[dict[str, Any]] = []
-    remover = None
-    for entry in provided:
-        if entry.get("kind") != "adapter":
-            continue
-        adapter_id = entry.get("name")
-        metadata = entry.get("metadata")
-        hook_id = metadata.get("hook_id") if isinstance(metadata, dict) else None
-        if not isinstance(adapter_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(adapter_id):
-            continue
-        if not isinstance(hook_id, str) or not addon_registry.ADDON_ID_RE.fullmatch(hook_id):
-            continue
-        marker_str = f"[adapter:{adapter_id}] {hook_id}"
-        item: dict[str, Any] = {"kind": "adapter", "name": adapter_id, "marker": marker_str}
-        if not confirm:
-            item["action"] = "would-remove"
-            out.append(item)
-            continue
-        if remover is None:
-            import install_hooks
-            remover = install_hooks.remove_adapter_hook
-        removed = remover(marker_str, platform_key=platform, dry_run=False)
-        item["action"] = "removed" if removed else "missing"
-        out.append(item)
-    return out
-
-
 def _managed_executable_items(
     record: dict[str, Any],
     provided: list[dict[str, Any]],
@@ -387,7 +359,6 @@ def _managed_executable_items(
 ) -> list[dict[str, Any]]:
     return (
         _addon_hook_items(record, platform=platform, confirm=confirm)
-        + _adapter_hook_items(provided, platform=platform, confirm=confirm)
         + _skill_permission_items(record, platform=platform, confirm=confirm)
     )
 
@@ -446,7 +417,8 @@ def uninstall_addon(
     # write failure leaves the targets and sidecar intact for a later resume.
     hook_items = _managed_executable_items(record, provided, platform=platform, confirm=confirm)
 
-    # Adapter entries are intentionally excluded from the hash-gated file removal below. A privileged adapter's script lives inside its owning skill directory, so the skill target is the file deletion unit and the adapter entry is an install-time integrity/ownership snapshot, not a second uninstall-time delete gate. If the skill target is fully removable, its own hash gate covers the adapter script along with the rest of the skill tree. If the skill target is blocked for manual review, the script stays with it. In both cases only the adapter HOOK is removed here, by exact marker, via _adapter_hook_items.
+    # Entries of the retired kind "adapter" have no file of their own: the script lives inside the owning skill
+    # directory, and the installer removes the hook registration as a retired hook.
     file_targets = [entry for entry in provided if entry.get("kind") != "adapter"]
     if confirm and any(item["action"] in _BLOCKED_ACTIONS for item in hook_items):
         return {"addon_id": addon_id, "status": "partial", "items": hook_items}

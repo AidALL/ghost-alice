@@ -60,6 +60,17 @@ class AddonHookParseTest(unittest.TestCase):
         targets = ai.load_addon_targets([src], platform="claude")
         self.assertEqual(targets[0].hooks[0][1], "on_session_start")
 
+    def test_manifest_with_a_retired_field_is_rejected(self):
+        src = _make_addon(self.tmp, [])
+        manifest = src / "addons" / "hookaddon" / "addon.json"
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        data["privileged_adapters"] = ["hookaddon"]
+        manifest.write_text(json.dumps(data), encoding="utf-8")
+        with self.assertRaises(ai.AddonManifestError) as caught:
+            ai.load_addon_targets([src], platform="claude")
+        self.assertIn("privileged_adapters", str(caught.exception))
+        self.assertIn("retired", str(caught.exception))
+
     def test_missing_hooks_defaults_empty(self):
         noop = REPO_ROOT / "_shared" / "tests" / "fixtures" / "dummy-addon"
         self.assertEqual(ai.load_addon_targets([noop], platform="claude")[0].hooks, ())

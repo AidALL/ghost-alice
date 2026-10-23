@@ -107,7 +107,7 @@ class LayerRuleTests(unittest.TestCase):
 class HookNameTests(unittest.TestCase):
     def test_normalize_hook_id_lowercases_and_keeps_the_last_namespace_part(self):
         self.assertEqual(hook_profile_gate_free_normalize("Session_Intent"), "session-intent")
-        self.assertEqual(hook_profile_gate_free_normalize("adapter:autopilot-mode:Stop Hook"), "stop-hook")
+        self.assertEqual(hook_profile_gate_free_normalize("addon:demo:Stop Hook"), "stop-hook")
         self.assertEqual(hook_profile_gate_free_normalize("  --Tool  Checkpoint-- "), "tool-checkpoint")
         self.assertEqual(hook_profile_gate_free_normalize(""), "")
 
@@ -130,77 +130,6 @@ class HookNameTests(unittest.TestCase):
 
 def hook_profile_gate_free_normalize(value):
     return hook_definitions.normalize_hook_id(value)
-
-
-def _spec(adapter_id="demo", addon_id="demo-addon"):
-    return {
-        "adapter_id": adapter_id, "allowed_addon_id": addon_id, "expected_skill_name": addon_id,
-        "events": ["on_agent_stop"], "script_rel_by_event": {"on_agent_stop": "adapters/stop.py"},
-        "hook_id_by_event": {"on_agent_stop": "continue"}, "args_policy": "no_args",
-        "marker_template": "[adapter:{adapter_id}] {hook_id}", "runner_namespace": "adapter-{adapter_id}-{hook_id}",
-        "source_policy": "expected_skill_source", "hash_policy": "content_hash",
-        "uninstall_matcher": "exact_marker_runner",
-    }
-
-
-def _write_allowlist(path: Path, adapters: dict, *, trust_owner: str) -> Path:
-    path.write_text(json.dumps({"schema_version": 1, "trust_owner": trust_owner, "adapters": adapters}), encoding="utf-8")
-    return path
-
-
-class PrivilegedAdapterAllowlistTests(unittest.TestCase):
-    def test_official_and_user_files_merge_and_duplicates_are_rejected(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            official = _write_allowlist(root / "official.json", {"demo": _spec()}, trust_owner="core")
-            user = _write_allowlist(root / "user.json", {"mine": _spec("mine", "mine-addon")}, trust_owner="machine-owner")
-            merged = hook_definitions.load_privileged_adapter_allowlist(official_path=official, user_path=user)
-            self.assertEqual(sorted(merged), ["demo", "mine"])
-            duplicate = _write_allowlist(root / "dup.json", {"demo": _spec()}, trust_owner="machine-owner")
-            with self.assertRaises(hook_definitions.AddonManifestError):
-                hook_definitions.load_privileged_adapter_allowlist(official_path=official, user_path=duplicate)
-
-    def test_wrong_trust_owner_or_schema_is_rejected_and_missing_files_are_skipped(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            wrong_owner = _write_allowlist(root / "wrong.json", {"demo": _spec()}, trust_owner="machine-owner")
-            with self.assertRaises(hook_definitions.AddonManifestError):
-                hook_definitions.load_privileged_adapter_allowlist(official_path=wrong_owner, user_path=None)
-            (root / "schema.json").write_text(json.dumps({"schema_version": 2, "trust_owner": "core", "adapters": {}}))
-            with self.assertRaises(hook_definitions.AddonManifestError):
-                hook_definitions.load_privileged_adapter_allowlist(official_path=root / "schema.json", user_path=None)
-            self.assertEqual(hook_definitions.load_privileged_adapter_allowlist(official_path=root / "absent.json", user_path=None), {})
-
-    def test_user_allowlist_defaults_to_the_ghost_root(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _write_allowlist(root / "privileged-adapters.json", {"mine": _spec("mine", "mine-addon")}, trust_owner="machine-owner")
-            original = os.environ.get("GHOST_ALICE_GHOST_ROOT")
-            os.environ["GHOST_ALICE_GHOST_ROOT"] = str(root)
-            try:
-                merged = hook_definitions.load_privileged_adapter_allowlist(official_path=None)
-            finally:
-                if original is None:
-                    os.environ.pop("GHOST_ALICE_GHOST_ROOT", None)
-                else:
-                    os.environ["GHOST_ALICE_GHOST_ROOT"] = original
-            self.assertEqual(list(merged), ["mine"])
-
-    def test_runner_id_is_one_rule_with_and_without_a_spec(self):
-        self.assertEqual(hook_definitions.privileged_adapter_runner_id("demo", "continue"), "adapter-demo-continue")
-        self.assertEqual(hook_definitions.privileged_adapter_runner_id("demo", "continue", _spec()), "adapter-demo-continue")
-        bad = dict(_spec(), runner_namespace="other-{adapter_id}")
-        with self.assertRaises(hook_definitions.AddonManifestError):
-            hook_definitions.privileged_adapter_runner_id("demo", "continue", bad)
-
-    def test_spec_validation_rejects_escaping_scripts_and_unknown_events(self):
-        escaping = dict(_spec(), script_rel_by_event={"on_agent_stop": "../outside.py"})
-        with self.assertRaises(hook_definitions.AddonManifestError):
-            hook_definitions.privileged_adapter_spec("demo", allowlist={"demo": escaping})
-        unknown = dict(_spec(), events=["on_coffee"], script_rel_by_event={"on_coffee": "a.py"}, hook_id_by_event={"on_coffee": "x"})
-        with self.assertRaises(hook_definitions.AddonManifestError):
-            hook_definitions.privileged_adapter_spec("demo", allowlist={"demo": unknown})
-        self.assertEqual(hook_definitions.privileged_adapter_spec("demo", allowlist={"demo": _spec()})["adapter_id"], "demo")
 
 
 if __name__ == "__main__":

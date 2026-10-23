@@ -12,7 +12,7 @@ Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층�
 
 [웹사이트](https://aidall.github.io/ghost-alice/index_ko.html) · [아키텍처](./architecture_ko.md)
 
-Core 0.5.1과 Ghost-ALICE Autopilot 0.5.1은 현재 response-route와 완료 계약을 사용합니다. Ghost-ALICE Autopilot에는 Core 0.5.1 이상이 필요합니다. 두 프로젝트 모두 Apache-2.0으로 제공됩니다.
+Core 0.5.1은 현재 response-route와 완료 계약을 사용합니다. Apache-2.0으로 제공됩니다.
 
 ## 승인된 작업의 진행과 복구
 
@@ -25,23 +25,27 @@ Core 0.5.1과 Ghost-ALICE Autopilot 0.5.1은 현재 response-route와 완료 계
 
 경로나 저장된 계획이 권한을 만들지는 않습니다. 근거가 있는 답변도 미완료 작업을 정확히 보고할 수 있습니다. 새 입력은 라우팅을 다시 열지만 변하지 않은 근거를 무효화하지 않으며, 기록 오류 때문에 같은 업무를 재실행하지 않습니다.
 
-단독 흐름은 [Core 아키텍처](./architecture_ko.md), 상세 계약은 [세션 게이트 매트릭스](./docs/ko/policies/session-gate-matrix.md)를 참고해 주세요. Autopilot 설치로 추가되는 근거 반영과 승인 계획의 계속 작업은 [Autopilot 아키텍처](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README_ko.md#autopilot-설치로-확장되는-core-흐름)에서 설명합니다.
+단독 흐름은 [Core 아키텍처](./architecture_ko.md), 상세 계약은 [세션 게이트 매트릭스](./docs/ko/policies/session-gate-matrix.md)를 참고해 주세요.
 
 ## 빠른 시작
 
-복제한 Ghost-ALICE 저장소 폴더에서 Core와 공식 Ghost-ALICE Autopilot을 한 번에 설치해 주세요. 인스톨러가 사용 가능한 에이전트 플랫폼을 자동으로 감지합니다.
+복제한 Ghost-ALICE 저장소 폴더에서 Core를 설치해 주세요. 인스톨러가 사용 가능한 에이전트 플랫폼을 자동으로 감지합니다:
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 ```
 
 저장소 복제, 운영체제별 실행 명령, 플랫폼 선택, 업데이트와 문제 해결은 [상세 설치 안내](./docs/ko/getting-started/installation.md)를 확인해 주세요.
 
-## 공식 애드온
+## 애드온
 
-Ghost-ALICE Autopilot은 명시적으로 승인된 작업을 해당 세션의 범위와 예산 안에서 항목 단위로 이어갑니다. 설치 자체가 실행 승인을 부여하지는 않습니다. 별도 저장소인 [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot)에서 관리합니다.
+애드온은 자체 저장소나 로컬 경로에서 설치합니다:
 
-운영체제별 명령, 사용자 정의 애드온, 플랫폼 선택과 제거는 [설치 안내](./docs/ko/getting-started/installation.md)와 [공식 애드온 참조](./docs/ko/reference/official-addons.md)를 확인해 주세요.
+```bash
+bash install.sh --addon-source <저장소-또는-경로>
+```
+
+운영체제별 명령, 사용자 정의 애드온, 플랫폼 선택과 제거는 [설치 안내](./docs/ko/getting-started/installation.md)와 [애드온 참조](./docs/ko/reference/official-addons.md)를 확인해 주세요.
 
 ## 문서 안내
 
@@ -55,7 +59,7 @@ Ghost-ALICE Autopilot은 명시적으로 승인된 작업을 해당 세션의 �
 | 세션 처리 단계와 필수 검사 규칙 | [세션 게이트 매트릭스](./docs/ko/policies/session-gate-matrix.md) |
 | 인스톨러의 플랫폼별 호환성 기준 | [인스톨러 플랫폼 호환성](./docs/ko/policies/installer-platform-compatibility-matrix.md) |
 | 설계 원칙과 아키텍처 | [GitHub 위키](https://github.com/AidALL/ghost-alice/wiki/홈) |
-| 공식 애드온 사용법 | [공식 애드온 참조](./docs/ko/reference/official-addons.md) |
+| 공식 애드온 사용법 | [애드온 참조](./docs/ko/reference/official-addons.md) |
 | 애드온 제작 방법 | [위키: 애드온 작성](https://github.com/AidALL/ghost-alice/wiki/애드온-작성) |
 
 ## 프로젝트가 지키는 기준

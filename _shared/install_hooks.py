@@ -10,7 +10,7 @@ Install behavior:
   1. Read each framework's hook config file, creating it when absent.
   2. Merge the managed prompt, tool, completion, session-start and audit hooks.
   3. Replace stale managed entries and retain matching entries.
-  4. Preserve unrelated settings and register approved privileged adapters.
+  4. Preserve unrelated settings and register addon observational hooks.
   5. For Codex, install `hooks.json` and ensure `[features] hooks = true` in `config.toml`.
 
 Uninstall behavior:
@@ -305,7 +305,6 @@ def _prepare_destination_runtime(destination, *, dry_run=False):
             shutil.copy2(source, output)
 
 
-
 def _pending_merge_precheck_command(
     *,
     platform: str,
@@ -595,14 +594,6 @@ def _hook_runner_command(
     binding_platform = platform_key or os.environ.get("GHOST_ALICE_PLATFORM") or "codex"
     destination = install_destination.current() or _default_destination(binding_platform)
     binding = destination.binding()
-    if normalized.startswith("adapter-autopilot-mode-"):
-        inner_argv = __import__('shlex').split(command,comments=True)
-        if len(inner_argv) != 2:
-            raise ValueError("registered privileged adapter requires no arguments")
-        adapter_script = Path(inner_argv[1])
-        binding["adapter"] = dict(adapter_id="autopilot-mode", runner_id=normalized,
-            script=str(adapter_script), content_hash=hashlib.sha256(adapter_script.read_bytes()).hexdigest(),
-            event="Stop" if normalized.endswith("-continue") else "PreToolUse")
     runner_args.extend(["--binding-b64", install_destination.encode_binding(binding)])
     visible_hint = " ghost-alice-hook.mjs" if "ghost-alice-hook.mjs" in command else ""
     return (
@@ -903,19 +894,6 @@ def _resolve_addon_hooks(addon_sources: Any, platform_key: str) -> list[tuple[st
         for hook_id, event_intent, script_path in target.hooks:
             out.append((target.addon_id, hook_id, event_intent, script_path))
     return out
-
-
-def _resolve_privileged_adapter_hooks(
-    addon_sources: Any,
-    platform_key: str,
-    *,
-    skills_dir: str | Path | None = None,
-) -> list[dict[str, Any]]:
-    """Resolve core-owned privileged adapter hooks for one platform."""
-    if not addon_sources:
-        return []
-    targets = addon_installer.load_addon_targets(list(addon_sources), platform=platform_key)
-    return addon_installer.iter_privileged_adapter_hook_specs(targets, skills_dir=skills_dir)
 
 
 def _platform_io_trace_entry(platform_key: str, event: str) -> Optional[dict[str, Any]]:
@@ -1805,11 +1783,22 @@ def _managed_session_intent_options(command: str):
 
 # Markers an older installer put on the retired core hooks (hook_definitions.RETIRED_CORE_HOOK_IDS).
 RETIRED_HOOK_MARKERS = (HOOK_MARKER, PROMPT_PENDING_MERGE_MARKER, WEB_SEARCH_FIRST_MARKER)
+# An older installer registered addon adapter hooks with this comment; Core has none, so every such
+# registration is a retired hook too.
+RETIRED_ADAPTER_COMMENT_RE = re.compile(
+    r"\[adapter:[a-z][a-z0-9-]*\] [a-z][a-z0-9-]* \[hook-runner:(?P<runner_id>adapter-[a-z0-9-]+)\]")
+
+
+def _is_retired_adapter_command(command: str) -> bool:
+    """A managed adapter registration: the retired comment and a runner call with the same id."""
+    match = RETIRED_ADAPTER_COMMENT_RE.search(command)
+    return match is not None and _hook_runner_id_match(command, match.group("runner_id"))
 
 
 def _is_retired_hook_command(command: str) -> bool:
     """Recognize every installed form of a retired hook by its marker or its runner id."""
     return (any(marker in command for marker in RETIRED_HOOK_MARKERS)
+            or _is_retired_adapter_command(command)
             or any(_hook_runner_id_match(command, hook_id) for hook_id in hook_definitions.RETIRED_CORE_HOOK_IDS))
 
 
@@ -2201,39 +2190,6 @@ def install_hook(
         else:
             _log(_t(f"  {event_name} addon hook already exists: {marker}", f"  {event_name} addon hook already exists: {marker}"))
 
-    # Privileged adapters are core-owned: manifests request adapter ids only, while the concrete event/script/marker/runner namespace comes from the privileged adapter allowlist in hook_definitions.
-    privileged_adapter_specs = _resolve_privileged_adapter_hooks(addon_sources, platform_key, skills_dir=skills_dir)
-    if platform_key == "claude" and any(spec.get("adapter_id") == "autopilot-mode" for spec in privileged_adapter_specs):
-        removed = _remove_legacy_autopilot_hook_entries(hooks_obj)
-        if removed:
-            _log(_t(
-                f"  Removed {removed} legacy Claude autopilot hook(s)",
-                f"  Removed {removed} legacy Claude autopilot hook(s)",
-            ))
-            changed = True
-    for spec in privileged_adapter_specs:
-        event_name = resolve_hook_event(spec["event"], platform_key)
-        marker = spec["marker"]
-        match_marker = marker + " "
-        inner = _hook_python_command(spec["script"], payload=True)
-        entry = _hook_runner_command_entry(spec["runner_id"], inner, marker, platform_key=platform_key)
-        command = _entry_command(entry)
-        verified_addon_commands.add((event_name, command))
-        if event_name not in hooks_obj:
-            hooks_obj[event_name] = []
-        ev_list = hooks_obj[event_name]
-        if _remove_hook_commands_by_command(
-            ev_list,
-            lambda cmd, m=marker, exp=command: cmd != exp and _is_exact_adapter_hook_command(cmd, m),
-        ):
-            changed = True
-        if not _hook_already_exists(ev_list, match_marker, expected_command=command):
-            ev_list.append(entry)
-            _log(_t(f"  {event_name} adapter hook added: {marker}", f"  {event_name} adapter hook added: {marker}"))
-            changed = True
-        else:
-            _log(_t(f"  {event_name} adapter hook already exists: {marker}", f"  {event_name} adapter hook already exists: {marker}"))
-
     removed = _remove_empty_hook_groups(hooks_obj)
     if removed:
         _log(f"  Removed {removed} hook group(s) without hooks")
@@ -2321,18 +2277,6 @@ _MANAGED_ADDON_HOOK_COMMENT_RE = re.compile(
     r"(?P<hook_id>[a-z][a-z0-9-]*) "
     r"\[hook-runner:(?P=hook_id)\]"
 )
-_ADAPTER_HOOK_MARKER_RE = re.compile(
-    r"^\[adapter:(?P<adapter_id>[a-z][a-z0-9-]*)\] (?P<hook_id>[a-z][a-z0-9-]*)$"
-)
-_MANAGED_ADAPTER_HOOK_COMMENT_RE = re.compile(
-    r"\[adapter:(?P<adapter_id>[a-z][a-z0-9-]*)\] "
-    r"(?P<hook_id>[a-z][a-z0-9-]*) "
-    r"\[hook-runner:(?P<runner_id>[a-z0-9-]+)\]"
-)
-_LEGACY_AUTOPILOT_HOOKS = (
-    ("[autopilot] reset-count", "reset_inject_count.py"),
-    ("[autopilot] stop-inject", "autopilot_stop_hook.py"),
-)
 
 
 def _addon_runner_token(addon_id: str, hook_id: str) -> str:
@@ -2354,24 +2298,6 @@ def _is_exact_addon_hook_command(command: str, marker: str) -> bool:
     runner_id = _managed_addon_runner_id(addon_id, hook_id)
     exact_comment = f"{marker} {_addon_runner_token(addon_id, hook_id)}"
     return exact_comment in command and _hook_runner_id_match(command, runner_id)
-
-
-def _is_exact_adapter_hook_command(command: str, marker: str) -> bool:
-    match = _ADAPTER_HOOK_MARKER_RE.fullmatch(marker)
-    if not match:
-        return False
-    adapter_id = match.group("adapter_id")
-    hook_id = match.group("hook_id")
-    runner_id = hook_definitions.privileged_adapter_runner_id(adapter_id, hook_id)
-    exact_comment = f"{marker} [hook-runner:{runner_id}]"
-    return exact_comment in command and _hook_runner_id_match(command, runner_id)
-
-
-def _is_legacy_autopilot_hook_command(command: str) -> bool:
-    normalized = command.replace("\\", "/")
-    if "/autopilot-mode/scripts/" not in normalized:
-        return False
-    return any(marker in normalized and script in normalized for marker, script in _LEGACY_AUTOPILOT_HOOKS)
 
 
 def _hook_positions(settings_file: Path, hooks_obj) -> list[tuple[dict[str, Any], str]]:
@@ -2555,10 +2481,6 @@ def _remove_hook_settings_commands(hooks_obj, predicate) -> int:
                for groups in hooks_obj.values() if isinstance(groups, list))
 
 
-def _remove_legacy_autopilot_hook_entries(hooks_obj: dict[str, Any]) -> int:
-    return _remove_hook_settings_commands(hooks_obj, _is_legacy_autopilot_hook_command)
-
-
 def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
     """Remove one addon's observational hook entries by exact marker.
 
@@ -2588,27 +2510,6 @@ def remove_addon_hook(marker: str, *, platform_key: str, dry_run: bool = False) 
     return total
 
 
-def remove_adapter_hook(marker: str, *, platform_key: str, dry_run: bool = False) -> int:
-    """Remove one core-owned privileged adapter hook by exact marker."""
-    if not isinstance(marker, str) or not _ADAPTER_HOOK_MARKER_RE.fullmatch(marker):
-        return 0
-    platform = PLATFORMS.get(platform_key)
-    if platform is None:
-        return 0
-    settings_file = platform["hook_file"]()
-    if not settings_file.exists():
-        return 0
-    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
-    hooks_obj = settings.get("hooks", {})
-    if not isinstance(hooks_obj, dict):
-        return 0
-    before = _hook_positions(settings_file, hooks_obj)
-    total = _remove_hook_settings_commands(hooks_obj, lambda command: _is_exact_adapter_hook_command(command, marker))
-    if total and not dry_run:
-        _write_removed_hook_settings(settings_file, settings, platform_key, _trust_moves(before, settings_file, hooks_obj))
-    return total
-
-
 def _is_managed_addon_command(command: str) -> bool:
     """True for a Ghost-ALICE managed addon hook command.
 
@@ -2624,49 +2525,8 @@ def _is_managed_addon_command(command: str) -> bool:
     return _hook_runner_id_match(command, runner_id)
 
 
-def _is_managed_adapter_command(command: str) -> bool:
-    match = _MANAGED_ADAPTER_HOOK_COMMENT_RE.search(command)
-    if not match:
-        return False
-    expected = hook_definitions.privileged_adapter_runner_id(match.group("adapter_id"), match.group("hook_id"))
-    if match.group("runner_id") != expected:
-        return False
-    return _hook_runner_id_match(command, expected)
-
-
 def _remove_managed_addon_entries(hooks_list: list) -> int:
     return _remove_hook_commands_by_command(hooks_list, _is_managed_addon_command)
-
-
-def _remove_managed_adapter_entries(hooks_list: list) -> int:
-    return _remove_hook_commands_by_command(hooks_list, _is_managed_adapter_command)
-
-
-def remove_all_addon_hooks(*, platform_key: str, dry_run: bool = False) -> int:
-    """Remove every owned addon hook entry during full uninstall.
-
-    Removes only entries that are both ``[addon:`` and ``[hook-runner:`` (managed),
-    so a full uninstall cleans addon hooks even when a per-addon uninstall left a
-    partial (e.g. the addon's skill drifted) -- without touching a non-managed hook.
-    """
-    platform = PLATFORMS.get(platform_key)
-    if platform is None:
-        return 0
-    settings_file = platform["hook_file"]()
-    if not settings_file.exists():
-        return 0
-    settings = _read_settings(settings_file, backup_corrupt=not dry_run)
-    hooks_obj = settings.get("hooks", {})
-    if not isinstance(hooks_obj, dict):
-        return 0
-    total = 0
-    for event_list in hooks_obj.values():
-        if isinstance(event_list, list):
-            total += _remove_managed_addon_entries(event_list)
-            total += _remove_managed_adapter_entries(event_list)
-    if total and not dry_run:
-        _write_settings(settings_file, settings, dry_run=False)
-    return total
 
 
 def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None) -> str:
@@ -2741,11 +2601,11 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
     total_removed += _remove_hook_commands_by_command(
         hooks_obj.get(resolve_hook_event("post_tool_use", platform_key), []), marked(IO_TRACE_MARKER))
 
-    # Full uninstall also strips every MANAGED addon observational hook and every MANAGED privileged adapter hook, so neither a drifted addon hook nor an adapter hook is ever left firing live after a full uninstall.
+    # Full uninstall also strips every MANAGED addon observational hook, so a drifted addon hook is never left firing
+    # live after a full uninstall.
     for ev_list in hooks_obj.values():
         if isinstance(ev_list, list):
             total_removed += _remove_managed_addon_entries(ev_list)
-            total_removed += _remove_managed_adapter_entries(ev_list)
 
     if total_removed == 0:
         _log(_t("  No hooks found. Nothing to remove", "  No hooks found. Nothing to remove"))
@@ -3107,8 +2967,8 @@ def main() -> int:
     parser.add_argument(
         "--skills-dir",
         help=_t(
-            "Installed skills directory used to resolve privileged adapter scripts in copy installs",
-            "Installed skills directory used to resolve privileged adapter scripts in copy installs",
+            "Installed skills directory of the destination",
+            "Installed skills directory of the destination",
         ),
     )
     parser.add_argument(

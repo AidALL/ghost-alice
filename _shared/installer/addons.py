@@ -23,15 +23,7 @@ if TYPE_CHECKING:
     from installer.cli import Context
     from installer.selection import Target
 
-OFFICIAL_AUTOPILOT_SOURCE = "https://github.com/AidALL/ghost-alice-autopilot.git"
 _SAFE_ID = re.compile(r"^[a-z][a-z0-9-]*$")
-
-
-def official_addon_source(name: str) -> str | None:
-    """`autopilot`/`autopilot-mode` → `$GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE` or the GitHub URL; else None."""
-    if name in ("autopilot", "autopilot-mode"):
-        return os.environ.get("GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE") or OFFICIAL_AUTOPILOT_SOURCE
-    return None
 
 
 def source_is_git_url(source: str) -> bool:

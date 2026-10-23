@@ -12,7 +12,7 @@ It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It
 
 [Website](https://aidall.github.io/ghost-alice/) · [Architecture](./architecture.md)
 
-Core 0.5.1 and Ghost-ALICE Autopilot 0.5.1 use the current response-route and completion contract. Ghost-ALICE Autopilot requires Core 0.5.1 or later. Both projects use Apache-2.0.
+Core 0.5.1 uses the current response-route and completion contract. Apache-2.0.
 
 ## How governed work proceeds
 
@@ -25,23 +25,27 @@ The responding model keeps the user's objective and constraints, performs author
 
 A route or saved plan does not grant permission. A supported answer can accurately report unfinished work. New input reopens routing without invalidating unchanged evidence; recording errors do not require replaying the business operation.
 
-See the [Core architecture](./architecture.md) for the standalone flow and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract. Installing Autopilot adds proof application and approved-plan continuation, as described in the [Autopilot architecture](https://github.com/AidALL/ghost-alice-autopilot/blob/main/README.md#how-autopilot-extends-core).
+See the [Core architecture](./architecture.md) for the standalone flow and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract.
 
 ## Quick Start
 
-From the cloned Ghost-ALICE repository, install Core and the official Ghost-ALICE Autopilot addon together. The installer automatically detects the available agent platforms:
+From the cloned Ghost-ALICE repository, install Core. The installer automatically detects the available agent platforms:
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 ```
 
 See the [detailed installation guide](./docs/getting-started/installation.md) for cloning, OS-native entrypoints, platform selection, updates and troubleshooting.
 
-## Official Addons
+## Addons
 
-Ghost-ALICE Autopilot continues explicitly approved work one item at a time within its session, scope and budget. Installation does not grant run approval. It is maintained in [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot).
+An addon is installed from its own repository or a local path:
 
-For native commands, custom addon sources, platform selection and removal, use the [installation guide](./docs/getting-started/installation.md) and [official addon reference](./docs/reference/official-addons.md).
+```bash
+bash install.sh --addon-source <repository-or-path>
+```
+
+For native commands, custom addon sources, platform selection and removal, use the [installation guide](./docs/getting-started/installation.md) and [addon reference](./docs/reference/official-addons.md).
 
 ## Documentation Map
 

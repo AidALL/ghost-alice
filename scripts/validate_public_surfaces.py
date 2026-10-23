@@ -136,9 +136,9 @@ def check_readme(repo: Path, top_level: list[str], coding: list[str], findings: 
     )
     compact_entrypoint = (
         "## Quick Start" in text
-        and "## Official Addons" in text
+        and "## Addons" in text
         and "## Documentation Map" in text
-        and "bash install.sh --addon autopilot" in text
+        and "bash install.sh --addon-source" in text
         and has_validation_command
     )
 

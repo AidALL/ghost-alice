@@ -288,26 +288,26 @@ class CollisionTest(unittest.TestCase):
 
     def test_legacy_same_addon_symlink_without_sidecar_is_not_a_collision(self):
         # An addon symlink without a sidecar requires target addon.json evidence of the same addon id and skill mapping to establish ownership.
-        old_addon = self.root / "old-autopilot" / "addons" / "autopilot-mode"
-        new_addon = self.root / "new-autopilot" / "addons" / "autopilot-mode"
+        old_addon = self.root / "old-demo" / "addons" / "demo-addon"
+        new_addon = self.root / "new-demo" / "addons" / "demo-addon"
         old_skill = old_addon / "skill"
         new_skill = new_addon / "skill"
         old_skill.mkdir(parents=True)
         new_skill.mkdir(parents=True)
         (old_skill / "SKILL.md").write_text(
-            "---\nname: autopilot-mode\ndescription: old local addon\n---\n",
+            "---\nname: demo-addon\ndescription: old local addon\n---\n",
             encoding="utf-8",
         )
         (new_skill / "SKILL.md").write_text(
-            "---\nname: autopilot-mode\ndescription: new addon source\n---\n",
+            "---\nname: demo-addon\ndescription: new addon source\n---\n",
             encoding="utf-8",
         )
         addon_json = """
 {
   "addon_version": "0.1.0",
-  "addon_id": "autopilot-mode",
+  "addon_id": "demo-addon",
   "skills": [
-    { "name": "autopilot-mode", "source": "skill", "skill_dir": "skill" }
+    { "name": "demo-addon", "source": "skill", "skill_dir": "skill" }
   ],
   "platforms": ["claude", "codex"],
   "depends_on_core": ["task-router"],
@@ -317,17 +317,17 @@ class CollisionTest(unittest.TestCase):
         (old_addon / "addon.json").write_text(addon_json + "\n", encoding="utf-8")
         (new_addon / "addon.json").write_text(addon_json + "\n", encoding="utf-8")
         target = ai.AddonTarget(
-            name="autopilot-mode",
+            name="demo-addon",
             source=new_skill,
-            addon_id="autopilot-mode",
+            addon_id="demo-addon",
             addon_version="0.1.0",
-            origin="addon:autopilot-mode",
+            origin="addon:demo-addon",
             platforms=("claude", "codex"),
             depends_on_core=("task-router",),
             secrets=(),
             tags=(),
         )
-        dest = self.skills / "autopilot-mode"
+        dest = self.skills / "demo-addon"
         _create_test_directory_link(self, old_skill, dest)
         try:
             self.assertEqual(

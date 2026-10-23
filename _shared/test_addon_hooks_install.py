@@ -25,34 +25,6 @@ import install_destination  # noqa: E402
 from test_addon_hooks import _make_addon  # noqa: E402
 
 
-def _make_autopilot_adapter_addon(tmp: Path) -> Path:
-    src = tmp / "autopilot-src"
-    addon = src / "addons" / "autopilot-mode"
-    skill = addon / "skill"
-    (skill / "adapters").mkdir(parents=True)
-    (skill / "SKILL.md").write_text(
-        "---\nname: autopilot-mode\ndescription: Use when testing adapter install.\n---\n# x\n",
-        encoding="utf-8",
-    )
-    (skill / "adapters" / "autopilot_mode.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
-    (skill / "adapters" / "autopilot_pretool.py").write_text("import sys; sys.exit(0)\n", encoding="utf-8")
-    (addon / "addon.json").write_text(json.dumps({
-        "addon_version": "0.1.0",
-        "addon_id": "autopilot-mode",
-        "skills": [{"name": "autopilot-mode", "source": "skill", "skill_dir": "skill"}],
-        "privileged_adapters": ["autopilot-mode"],
-        "platforms": ["claude", "codex"],
-        "depends_on_core": [],
-        "secrets": [],
-    }), encoding="utf-8")
-    (src / "addons-manifest.json").write_text(json.dumps({
-        "manifest_version": 1,
-        "addons": [{"id": "autopilot-mode", "path": "addons/autopilot-mode",
-                    "min_core_version": "0.1.0", "tags": []}],
-    }), encoding="utf-8")
-    return src
-
-
 class AddonHookInstallTest(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
@@ -193,40 +165,29 @@ class AddonHookInstallTest(unittest.TestCase):
         self.assertEqual(len(self._addon_entries("PostToolUse", "[addon:aone] obs")), 1)
         self.assertEqual(len(self._addon_entries("PostToolUse", "[addon:atwo] obs2")), 1)
 
-    def test_autopilot_adapter_install_prunes_legacy_claude_autopilot_hooks(self):
-        legacy_reset = (
-            "/usr/bin/python3 /Users/example/.claude/skills/autopilot-mode/scripts/"
-            "reset_inject_count.py # [autopilot] reset-count"
-        )
-        legacy_stop = (
-            "/usr/bin/python3 /Users/example/.claude/skills/autopilot-mode/scripts/"
-            "autopilot_stop_hook.py --platform claude # [autopilot] stop-inject"
-        )
-        user_audit = "echo user audit '[autopilot] stop-inject' >> ~/audit.log"
+    def test_install_removes_a_retired_adapter_registration(self):
+        # An older installer registered addon adapter hooks through the runner with this comment; this Core has no
+        # adapters, so install removes the registration and keeps a user command that only quotes the comment.
+        script = self.tmp / "old-adapter.py"
+        script.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
+        retired = install_hooks._entry_command(install_hooks._hook_runner_command_entry(
+            "adapter-demo-continue", install_hooks._hook_python_command(script, payload=True),
+            "[adapter:demo] continue", platform_key="claude"))
+        user_audit = "echo user audit '[adapter:demo] continue [hook-runner:adapter-demo-continue]' >> ~/audit.log"
         (self.claude / "settings.json").write_text(json.dumps({
-            "hooks": {
-                "UserPromptSubmit": [{"matcher": "", "hooks": [
-                    {"type": "command", "command": legacy_reset},
-                ]}],
-                "Stop": [{"matcher": "", "hooks": [
-                    {"type": "command", "command": legacy_stop},
-                    {"type": "command", "command": user_audit},
-                ]}],
-            }
+            "hooks": {"Stop": [{"matcher": "", "hooks": [
+                {"type": "command", "command": retired},
+                {"type": "command", "command": user_audit},
+            ]}]}
         }), encoding="utf-8")
-
-        src = _make_autopilot_adapter_addon(self.tmp)
-        install_hooks.install_hook("claude", addon_sources=[str(src)])
-
+        install_hooks.install_hook("claude", addon_sources=[])
         commands = [
             h.get("command", "")
             for ev in self._settings()["hooks"].values() if isinstance(ev, list)
             for e in ev for h in e.get("hooks", [])
         ]
-        self.assertFalse(any("reset_inject_count.py" in command for command in commands))
-        self.assertFalse(any("autopilot_stop_hook.py" in command for command in commands))
-        self.assertTrue(any(user_audit == command for command in commands))
-        self.assertTrue(any("[adapter:autopilot-mode] continue" in command for command in commands))
+        self.assertNotIn(retired, commands)
+        self.assertIn(user_audit, commands)
 
 
 class AddonHookSecurityTest(AddonHookInstallTest):
@@ -318,68 +279,6 @@ class AddonHookSecurityTest(AddonHookInstallTest):
                         msg="remove_addon_hook deleted a user command in the same entry")
         self.assertFalse(any("[addon:hookaddon] obs [hook-runner:obs]" in command for command in commands),
                          msg="remove_addon_hook failed to delete the managed addon hook")
-
-    def test_remove_all_addon_hooks_ignores_non_managed_entry(self):
-        install_hooks.install_hook("claude", addon_sources=[])
-        s = self._settings()
-        s["hooks"].setdefault("PostToolUse", []).append(
-            {"matcher": "", "hooks": [{"type": "command", "command": "echo '[addon:x] y user hook'"}]})
-        (self.tmp / ".claude" / "settings.json").write_text(json.dumps(s), encoding="utf-8")
-        install_hooks.remove_all_addon_hooks(platform_key="claude")
-        present = any("user hook" in h.get("command", "")
-                     for ev in self._settings()["hooks"].values() if isinstance(ev, list)
-                     for e in ev for h in e.get("hooks", []))
-        self.assertTrue(present, msg="remove_all_addon_hooks deleted a non-managed hook")
-
-    def test_remove_all_addon_hooks_ignores_fake_runner_non_managed_entry(self):
-        src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
-        install_hooks.install_hook("claude", addon_sources=[str(src)])
-        s = self._settings()
-        s["hooks"].setdefault("PostToolUse", []).append(
-            {"matcher": "", "hooks": [{"type": "command",
-                                       "command": "echo user # [addon:hookaddon] obs [hook-runner:not-addon]"}]})
-        (self.tmp / ".claude" / "settings.json").write_text(json.dumps(s), encoding="utf-8")
-
-        removed = install_hooks.remove_all_addon_hooks(platform_key="claude")
-
-        commands = [h.get("command", "")
-                    for ev in self._settings()["hooks"].values() if isinstance(ev, list)
-                    for e in ev for h in e.get("hooks", [])]
-        self.assertEqual(removed, 1)
-        self.assertTrue(any("[hook-runner:not-addon]" in command for command in commands),
-                        msg="remove_all_addon_hooks deleted a fake-runner non-managed hook")
-        self.assertFalse(any("[addon:hookaddon] obs [hook-runner:obs]" in command for command in commands),
-                         msg="remove_all_addon_hooks failed to delete the managed addon hook")
-
-    def test_remove_all_addon_hooks_preserves_user_command_in_same_entry(self):
-        src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
-        install_hooks.install_hook("claude", addon_sources=[str(src)])
-        s = self._settings()
-        for entry in s["hooks"]["PostToolUse"]:
-            if any("[addon:hookaddon] obs" in h.get("command", "") for h in entry.get("hooks", [])):
-                entry["hooks"].append({"type": "command", "command": "echo user sibling hook"})
-                break
-        (self.tmp / ".claude" / "settings.json").write_text(json.dumps(s), encoding="utf-8")
-
-        removed = install_hooks.remove_all_addon_hooks(platform_key="claude")
-
-        commands = [h.get("command", "")
-                    for ev in self._settings()["hooks"].values() if isinstance(ev, list)
-                    for e in ev for h in e.get("hooks", [])]
-        self.assertEqual(removed, 1)
-        self.assertTrue(any("user sibling hook" in command for command in commands),
-                        msg="remove_all_addon_hooks deleted a user command in the same entry")
-        self.assertFalse(any("[addon:hookaddon] obs [hook-runner:obs]" in command for command in commands),
-                         msg="remove_all_addon_hooks failed to delete the managed addon hook")
-
-    def test_remove_all_addon_hooks_sweep(self):
-        src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
-        install_hooks.install_hook("claude", addon_sources=[str(src)])
-        self.assertEqual(len(self._addon_entries("PostToolUse")), 1)
-        removed = install_hooks.remove_all_addon_hooks(platform_key="claude")
-        self.assertGreaterEqual(removed, 1)
-        self.assertEqual(len(self._addon_entries("PostToolUse")), 0)
-        self.assertTrue(self._core_completion_present())  # core suite untouched
 
 
 if __name__ == "__main__":

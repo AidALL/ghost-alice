@@ -497,40 +497,6 @@ class TestHookRunnerExecutionGate(unittest.TestCase):
 
 
 class TestHookCommandAllowlist(unittest.TestCase):
-    def test_stale_adapter_hash_uses_only_current_exact_registration(self):
-        import install_destination
-        import addon_installer
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            script = root / 'adapters/demo.py'
-            script.parent.mkdir()
-            script.write_text('print("{}")\n')
-            destination = install_destination.InstallDestination(mode='normal', owned_root=str(root),
-                platform_dir=str(root / '.codex'), skills_dir=str(root / 'skills'),
-                ghost_root=str(root / '.ghost-alice'), ledger_root=str(root / 'intent'),
-                project_root=str(root), core_source_root=str(Path(__file__).resolve().parents[1]))
-            binding = destination.binding()
-            runner = 'adapter-demo-continue'
-            binding['adapter'] = dict(adapter_id='demo', runner_id=runner, script=str(script),
-                event='Stop', content_hash='0' * 64)
-            current = json.loads(json.dumps(binding))
-            current['adapter']['content_hash'] = hashlib.sha256(script.read_bytes()).hexdigest()
-            payload = base64.urlsafe_b64encode(shlex.join([sys.executable, str(script)]).encode()).decode()
-            command = shlex.join([sys.executable, str(Path(hook_profile_gate.__file__)), 'run',
-                runner, 'codex', payload, '--binding-b64', install_destination.encode_binding(current)])
-            config = root / '.codex/hooks.json'; config.parent.mkdir()
-            config.write_text(json.dumps({'hooks': {'Stop': [{'hooks': [{'type': 'command', 'command': command}]}]}}))
-            spec = dict(args_policy='no_args', hook_id_by_event={'on_agent_stop': 'continue'},
-                script_rel_by_event={'on_agent_stop': 'adapters/demo.py'})
-            with (mock.patch.dict(os.environ, {'HOME': directory}, clear=True),
-                  mock.patch.object(hook_definitions, 'load_privileged_adapter_allowlist', return_value={'demo': spec}),
-                  mock.patch.object(hook_profile_gate, '_read_stdin', return_value=json.dumps(
-                      dict(session_id='current', hook_event_name='Stop'))),
-                  mock.patch.object(hook_profile_gate, '_validate_shell_command', return_value=[sys.executable, str(script)])):
-                self.assertEqual(hook_profile_gate._run(runner, payload, platform='codex', binding=binding), 0)
-                script.write_text('print("unregistered replacement")\n')
-                with self.assertRaises(hook_profile_gate.HookCommandRejected):
-                    hook_profile_gate._run(runner, payload, platform='codex', binding=binding)
 
     def setUp(self):
         # These synthetic sessions must not inherit the test runner's native Codex ID.
@@ -1950,75 +1916,6 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertNotIn("stdin", row)
         self.assertNotIn("must-not-be-stored", row_text)
 
-    def test_consumed_adapter_payload_rejection_audits_original_session_once(self):
-        import addon_installer
-        import install_destination
-        for mismatch in ("hash", "event", "source"):
-            with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory() as temp_home:
-                root = Path(temp_home) / "isolated"
-                root.mkdir()
-                script = root / "adapters" / "demo.py"
-                script.parent.mkdir()
-                script.write_text("# original adapter bytes\n", encoding="utf-8")
-                actual_hash = hashlib.sha256(script.read_bytes()).hexdigest()
-                destination = install_destination.InstallDestination(
-                    mode="isolated", owned_root=str(root), platform_dir=str(root / ".codex"),
-                    skills_dir=str(root / "skills"), ghost_root=str(root / ".ghost-alice"),
-                    ledger_root=str(root / "intent"), project_root=str(root),
-                    core_source_root=str(Path(__file__).resolve().parents[1]))
-                binding = destination.binding()
-                runner = addon_installer.privileged_adapter_runner_id("demo", "continue")
-                binding["adapter"] = dict(adapter_id="demo", runner_id=runner,
-                    script=str(script), event="Stop", content_hash="0" * 64 if mismatch == "hash" else actual_hash)
-                spec = dict(args_policy="no_args", hook_id_by_event={"on_agent_stop": "continue"},
-                    script_rel_by_event={"on_agent_stop": "adapters/other.py" if mismatch == "source" else "adapters/demo.py"})
-                native_event = "PreToolUse" if mismatch == "event" else "Stop"
-                stdin_text = json.dumps(dict(session_id="actual-native-session", hook_event_name=native_event,
-                    tool_input=dict(secret="must-not-be-stored")))
-                command = shlex.join([sys.executable, str(script)])
-                payload = base64.urlsafe_b64encode(command.encode()).decode()
-                stdout, stderr = io.StringIO(), io.StringIO()
-                with (mock.patch.dict(os.environ, {"HOME": temp_home}, clear=True),
-                      mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
-                      mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr),
-                      mock.patch.object(hook_profile_gate, "_read_stdin", wraps=hook_profile_gate._read_stdin) as read_stdin,
-                      mock.patch.object(hook_profile_gate, "_validate_shell_command", return_value=[sys.executable, str(script)]),
-                      mock.patch.object(hook_definitions, "load_privileged_adapter_allowlist", return_value={"demo": spec}),
-                      mock.patch.object(hook_profile_gate.subprocess, "run") as child,
-                      self.assertRaises(SystemExit) as rejected):
-                    hook_profile_gate.main(["run", runner, "codex", payload,
-                        "--binding-b64", install_destination.encode_binding(binding)])
-                self.assertEqual(rejected.exception.code, 126)
-                self.assertEqual(stdout.getvalue(), "")
-                self.assertIn(f"registered adapter {mismatch} mismatch", stderr.getvalue())
-                self.assertIn("Adapter was not executed", stderr.getvalue())
-                if mismatch == "hash":
-                    self.assertIn("Check the installed adapter and current registration", stderr.getvalue())
-                    self.assertIn("refresh the host's loaded hook commands", stderr.getvalue())
-                    self.assertIn("Do not bypass hash validation", stderr.getvalue())
-                    self.assertIn("expected=" + "0" * 64, stderr.getvalue())
-                    self.assertIn("actual=" + actual_hash, stderr.getvalue())
-                else:
-                    self.assertIn("Repair the registered adapter event/source", stderr.getvalue())
-                child.assert_not_called()
-                expected = _strict_log_path(root, "codex", "actual-native-session")
-                self.assertTrue(expected.is_file(), "consumed native session was lost from rejection audit")
-                self.assertFalse((Path(temp_home) / ".ghost-alice").exists(),
-                                 "bound rejection wrote to the ambient home")
-                self.assertEqual(read_stdin.call_count, 1)
-                logs = list((root / ".ghost-alice/session-logs").rglob("strict-hook-output.jsonl"))
-                self.assertEqual(logs, [expected])
-                rows = expected.read_text().splitlines()
-                self.assertEqual(len(rows), 1)
-                row = json.loads(rows[0])
-                self.assertEqual(row["event"], native_event)
-                self.assertEqual(row["exit_code"], 126)
-                self.assertNotIn("must-not-be-stored", rows[0])
-                details = row["surface_item"]["rejection_diagnostic"]
-                self.assertEqual(details["mismatch"], mismatch)
-                if mismatch == "hash":
-                    self.assertEqual(details["expected_hash"], "0" * 64)
-                    self.assertEqual(details["actual_hash"], actual_hash)
 
     def test_rejection_audit_failure_keeps_original_error_and_exit_code(self):
         stdin_text = json.dumps(
@@ -2200,7 +2097,7 @@ class TestHookCommandAllowlist(unittest.TestCase):
             with self.subTest(surface=surface):
                 self.assertEqual(
                     hook_profile_gate._render_user_surface(
-                        {"user_surface": surface, "value_key": "adapter-autopilot-mode-continue"},
+                        {"user_surface": surface, "value_key": "envelope-fixture"},
                         message,
                         "debug-only diagnostic\n",
                     ),
@@ -2414,40 +2311,6 @@ class TestHookCommandAllowlist(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(row["exit_code"], 2)
 
-    def test_adapter_exit_2_does_not_block_the_host(self):
-        # Core does not know add-ons, so the runner keeps no blocking exception for an adapter binding.
-        import addon_installer
-        import install_destination
-        with tempfile.TemporaryDirectory() as temp_home:
-            root = Path(temp_home) / "isolated"
-            root.mkdir()
-            script = root / "adapters" / "demo.py"
-            script.parent.mkdir()
-            script.write_text("# adapter bytes\n", encoding="utf-8")
-            destination = install_destination.InstallDestination(
-                mode="isolated", owned_root=str(root), platform_dir=str(root / ".codex"),
-                skills_dir=str(root / "skills"), ghost_root=str(root / ".ghost-alice"),
-                ledger_root=str(root / "intent"), project_root=str(root),
-                core_source_root=str(Path(__file__).resolve().parents[1]))
-            binding = destination.binding()
-            runner = addon_installer.privileged_adapter_runner_id("demo", "continue")
-            binding["adapter"] = dict(adapter_id="demo", runner_id=runner, script=str(script), event="Stop",
-                                      content_hash=hashlib.sha256(script.read_bytes()).hexdigest())
-            spec = dict(args_policy="no_args", hook_id_by_event={"on_agent_stop": "continue"},
-                        script_rel_by_event={"on_agent_stop": "adapters/demo.py"})
-            payload = base64.urlsafe_b64encode(shlex.join([sys.executable, str(script)]).encode()).decode()
-            child = subprocess.CompletedProcess([sys.executable, str(script)], 2, stdout="", stderr="adapter refused\n")
-            stdin_text = json.dumps(dict(session_id="s-adapter", hook_event_name="Stop"))
-            with (mock.patch.dict(os.environ, {"HOME": temp_home}, clear=True),
-                  mock.patch.object(sys, "stdin", io.StringIO(stdin_text)),
-                  mock.patch.object(sys, "stdout", io.StringIO()), mock.patch.object(sys, "stderr", io.StringIO()),
-                  mock.patch.object(hook_profile_gate, "_validate_shell_command", return_value=[sys.executable, str(script)]),
-                  mock.patch.object(hook_definitions, "load_privileged_adapter_allowlist", return_value={"demo": spec}),
-                  mock.patch.object(hook_profile_gate.subprocess, "run", return_value=child),
-                  self.assertRaises(SystemExit) as ran):
-                hook_profile_gate.main(["run", runner, "codex", payload,
-                                        "--binding-b64", install_destination.encode_binding(binding)])
-            self.assertEqual(ran.exception.code, 1)
 
     def test_runner_usage_error_does_not_block_the_host(self):
         result = subprocess.run([sys.executable, str(Path(__file__).with_name("hook_profile_gate.py")), "run"],

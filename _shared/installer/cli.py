@@ -116,7 +116,6 @@ HELP_SECTIONS = (COMMON, REMOVAL, ADVANCED)
 # The usage examples: arguments after the install command, and the comment.
 HELP_USAGE = (
     ("", "Install to detected AI tools"),
-    (" --addon autopilot", "Install official autopilot addon to detected AI tools"),
     (" --platform claude", "Install only to Claude Code"),
     (" --platform codex", "Install to Codex"),
 )
@@ -141,7 +140,6 @@ COMMAND_LINE: tuple[HelpRow, ...] = (
     Command(COMMON, "--repair", "Re-provision missing managed targets (never overwrites user-owned slots)",
             names=("--repair",), run=lambda ctx: lifecycle.run_repair(ctx), lock="repair", checks_source=True),
     HelpRow(COMMON, "--verbose, -v", "Show per-target install details"),
-    HelpRow(COMMON, "--addon autopilot", "Install official autopilot addon; --platform is optional"),
     UNINSTALL,
     HelpRow(REMOVAL, "--platform PLAT --uninstall SKILL_NAMES", "Remove selected skills from one platform"),
     INSTALL,
@@ -262,29 +260,6 @@ def reject_isolated_destination(argv: list[str]) -> None:
 def args_request_uninstall(args: list[str]) -> bool:
     """Any name of the uninstall command in args (`install.sh:215-225`)."""
     return any(arg in UNINSTALL.names for arg in args)
-
-
-def normalize_official_addon_shortcuts(options: Options) -> None:
-    """`--addon NAME` pairs become addon sources unless an uninstall is requested;
-    a missing or unknown name is an error exit 1 (`install.sh:227-253`)."""
-    if args_request_uninstall(options.args):
-        return
-    normalized: list[str] = []
-    index = 0
-    while index < len(options.args):
-        if options.args[index] == "--addon":
-            index += 1
-            if index >= len(options.args):
-                _fail("--addon requires a value (autopilot)")
-            name = options.args[index]
-            addon_source = addons.official_addon_source(name)
-            if addon_source is None:
-                _fail(f"Unknown official addon: {name} (supported: autopilot)")
-            options.addon_sources.append(addon_source)
-        else:
-            normalized.append(options.args[index])
-        index += 1
-    options.args = normalized
 
 
 def find_command(options: Options) -> Command | None:
@@ -609,7 +584,6 @@ def dispatch(options: Options) -> int:
     (`install.sh:253-562`). A command that `checks_source` compares the install
     source first, before the addon sources are prepared; the auto mode compares
     it once, in the parent."""
-    normalize_official_addon_shortcuts(options)
     command = find_command(options)
     if command is None:
         report.error(f"Unknown option: {options.args[0]}")

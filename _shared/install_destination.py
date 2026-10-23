@@ -105,12 +105,10 @@ def binding_environment(destination, env):
     result['PYTHONDONTWRITEBYTECODE'] = '1'
     result['GHOST_ALICE_GOVERNANCE_EVENTS'] = str(Path(destination.ghost_root)/'governance-events.jsonl')
     if destination.mode == 'isolated':
-        result['GHOST_ALICE_AUTOPILOT_CWD'] = destination.project_root
-        result.pop('GHOST_ALICE_AUTOPILOT_RUN_DIR',None)
         result['GHOST_ALICE_OWNED_ROOT'] = destination.owned_root
         result['GHOST_ALICE_TEMP_ROOT'] = str(Path(destination.owned_root)/'tmp')
     else:
-        # Normal transport preserves caller targets; Ghost-ALICE Autopilot owns native discovery.
+        # Normal transport preserves the caller's own targets.
         result.pop('GHOST_ALICE_OWNED_ROOT',None)
     return result
 
@@ -123,7 +121,7 @@ def use(destination, *, reject_legacy=False):
             if os.environ.get(key):
                 raise ValueError(f'isolated destination conflicts with explicit override {key}')
     token = _ACTIVE.set(resolved)
-    keys = set(COORDINATES) | set(LEGACY_OVERRIDES) | {'GHOST_ALICE_OWNED_ROOT','GHOST_ALICE_TEMP_ROOT','PYTHONDONTWRITEBYTECODE','GHOST_ALICE_AUTOPILOT_CWD','GHOST_ALICE_AUTOPILOT_RUN_DIR','GHOST_ALICE_GOVERNANCE_EVENTS'}
+    keys = set(COORDINATES) | set(LEGACY_OVERRIDES) | {'GHOST_ALICE_OWNED_ROOT','GHOST_ALICE_TEMP_ROOT','PYTHONDONTWRITEBYTECODE','GHOST_ALICE_GOVERNANCE_EVENTS'}
     before = {key:os.environ.get(key) for key in keys}
     replacement = binding_environment(resolved,os.environ)
     for key in keys:
@@ -147,7 +145,7 @@ def decode_binding(value):
         data = json.loads(base64.urlsafe_b64decode(value).decode())
     except Exception as error:
         raise ValueError('invalid hook binding encoding') from error
-    if (not isinstance(data,dict) or set(data)-{'schema_version','destination','adapter'}
+    if (not isinstance(data,dict) or set(data)-{'schema_version','destination'}
             or data.get('schema_version') != 'ghost-alice-hook-binding.v1'):
         raise ValueError('invalid hook binding schema')
     InstallDestination.parse(data.get('destination'))

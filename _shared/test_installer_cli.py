@@ -26,7 +26,6 @@ from installer_testing import FakeRunner, make_context, make_source, quiet, use_
 
 HELP = """Usage:
   bash install.sh                              # Install to detected AI tools
-  bash install.sh --addon autopilot            # Install official autopilot addon to detected AI tools
   bash install.sh --platform claude            # Install only to Claude Code
   bash install.sh --platform codex             # Install to Codex
 
@@ -41,7 +40,6 @@ Common commands:
   --doctor               Run install diagnostics
   --repair               Re-provision missing managed targets (never overwrites user-owned slots)
   --verbose, -v          Show per-target install details
-  --addon autopilot      Install official autopilot addon; --platform is optional
 
 Removal commands:
   --uninstall, -u        Full uninstall: remove managed hooks, bootstrap, support state, and install targets
@@ -92,7 +90,7 @@ class CliCase(unittest.TestCase):
         self.env = mock.patch.dict(os.environ, {"HOME": str(self.home)}, clear=False)
         self.env.start()
         for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME", "GHOST_ALICE_INSTALL_REPORT_CHILD", "GHOST_ALICE_INSTALL_LOG_FILE",
-                    "GHOST_ALICE_INSTALL_EVENT_FILE", "GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE"):
+                    "GHOST_ALICE_INSTALL_EVENT_FILE"):
             os.environ.pop(key, None)
         quiet(self.home)
         self.patches = contextlib.ExitStack()
@@ -189,26 +187,10 @@ class OptionTests(CliCase):
         self.assertEqual(cli.build_context(cli.parse_options([])).visibility, "dynamic")
         self.assertEqual(cli.build_context(cli.parse_options(["--visibility", "strict"])).visibility, "strict")
 
-    def test_official_addon_shortcuts(self):
-        # install.sh:203-253
-        options = cli.parse_options(["--addon", "autopilot", "task-router"])
-        cli.normalize_official_addon_shortcuts(options)
-        self.assertEqual(options.addon_sources, ["https://github.com/AidALL/ghost-alice-autopilot.git"])
-        self.assertEqual(options.args, ["task-router"])
-        with mock.patch.dict(os.environ, {"GHOST_ALICE_OFFICIAL_ADDON_AUTOPILOT_SOURCE": "/local/autopilot"}):
-            options = cli.parse_options(["--addon", "autopilot-mode"])
-            cli.normalize_official_addon_shortcuts(options)
-        self.assertEqual(options.addon_sources, ["/local/autopilot"])
-        kept = cli.parse_options(["--uninstall", "--addon", "autopilot"])
-        cli.normalize_official_addon_shortcuts(kept)
-        self.assertEqual(kept.args, ["--uninstall", "--addon", "autopilot"])
-        self.assertEqual(kept.addon_sources, [])
+
+    def test_args_request_uninstall_sees_every_name_of_the_uninstall_command(self):
         self.assertTrue(cli.args_request_uninstall(["x", "-u"]))
         self.assertFalse(cli.args_request_uninstall(["x"]))
-        self.assertIn("[ERROR] --addon requires a value (autopilot)",
-                      self.expect_exit(1, cli.normalize_official_addon_shortcuts, cli.parse_options(["--addon"])))
-        self.assertIn("[ERROR] Unknown official addon: other (supported: autopilot)",
-                      self.expect_exit(1, cli.normalize_official_addon_shortcuts, cli.parse_options(["--addon", "other"])))
 
     def test_auto_detect_matrix(self):
         # Install without a platform is auto mode; every table command runs once, never per platform.
@@ -232,7 +214,7 @@ class OptionTests(CliCase):
         self.assertIs(cli.find_command(cli.parse_options([])), cli.INSTALL)
         self.assertIs(cli.find_command(cli.parse_options(["task-router", "--bogus"])), cli.INSTALL)
         # A token that starts with "-" and names no command is never a skill name.
-        for argv in (["--bogus"], ["-Offboard"], ["-x"], ["--addon", "autopilot", "--uninstall"]):
+        for argv in (["--bogus"], ["-Offboard"], ["-x"], ["--addon", "demo-addon", "--uninstall"]):
             self.assertIsNone(cli.find_command(cli.parse_options(argv)), argv)
         # A flag command is selected wherever it appears and before an args[0] command; flags follow table order.
         self.assertIs(cli.find_command(cli.parse_options(["--status", "--list-addons"])),
@@ -291,11 +273,10 @@ class OptionTests(CliCase):
         with mock.patch.dict(os.environ, {"GHOST_ALICE_INSTALL_COMMAND": ".\\install.cmd"}):
             _, out = self.captured(cli.print_help)
         lines = HELP.splitlines(keepends=True)
-        for index in range(1, 5):
+        for index in range(1, 4):
             usage, comment = lines[index].split("#", 1)
             lines[index] = f"  {usage.strip().replace('bash install.sh', '.' + chr(92) + 'install.cmd'):<45}#{comment}"
         self.assertEqual(out, "".join(lines))
-        self.assertIn("  .\\install.cmd --addon autopilot              # Install official", out)
 
     def test_help_text(self):
         # install.sh:508-545; every row comes from the table, in table order under its section.

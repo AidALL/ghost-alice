@@ -20,7 +20,7 @@ from typing import Any
 from session_intent_analyzer_hook import bound_session_identity, _safe_component
 import state_retention
 
-# Best-effort neutral extraction of a shell row's operation + file target, so the autopilot continuation signal can render it platform-neutrally (e.g. "read <path>") instead of leaking a per-runtime command string. The raw command is still stored in `pattern` (the audit log is never reduced); `op`/`path` are an additive structured view. Extraction is conservative and never executes input.
+# Best-effort neutral extraction of a shell row's operation + file target, so a reader can render it platform-neutrally (e.g. "read <path>") instead of leaking a per-runtime command string. The raw command is still stored in `pattern` (the audit log is never reduced); `op`/`path` are an additive structured view. Extraction is conservative and never executes input.
 _SHELL_READ_VERBS = {"cat", "less", "more", "head", "tail", "type", "get-content", "gc"}
 _SHELL_WRITE_VERBS = {"tee", "set-content", "out-file", "add-content"}
 _SHELL_SEARCH_VERBS = {"grep", "rg", "egrep", "fgrep", "select-string", "findstr", "sls"}
