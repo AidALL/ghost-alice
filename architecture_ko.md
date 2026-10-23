@@ -86,7 +86,7 @@ flowchart LR
 
 모델은 각 주장을 원본 근거와 비교하는 판단과 답변 전체를 사용자 목적·제약에 비추어 평가하는 판단을 구분하여 수행합니다. Core는 소유권·입력 연결·출처 무결성을 인증하며, 식별자와 해시가 의미적 진실을 결정하지는 않습니다. 네이티브 호스트가 모델의 답변을 표시합니다. Core의 Stop 가드는 제출된 검토 기록을 검사하며 누락된 판단을 만들거나 다음 작업을 예약하지 않습니다.
 
-[검증 절차](coding-convention/verification-before-completion/SKILL.md)는 근거 선택과 완료 주장을 소유합니다. 그 [답변 검토 절차](coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review)는 기록의 인계를 소유합니다. 다른 문서는 명령을 복제하지 않고 해당 절차를 참조합니다.
+[검증 절차](coding-convention/verification-before-completion/SKILL.md)는 근거 선택과 완료 주장을 소유합니다. 그 [답변 검토 절차](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review)는 기록의 인계를 소유합니다. 다른 문서는 명령을 복제하지 않고 해당 절차를 참조합니다.
 
 지원된 결과는 원본 근거·검증 시각·정정 연결을 유지합니다. 기준·관련 산출물의 변경이나 반대 관찰은 영향받는 근거만 다시 검토하게 합니다. 기록·표시 결함 때문에 변하지 않은 실제 업무를 다시 실행하지 않습니다. 정확한 부분 답변은 답변으로서 인정될 수 있지만 필수 작업은 여전히 미완료일 수 있습니다. 위키의 [판단 범위와 복구](https://github.com/AidALL/ghost-alice/wiki/판단-범위와-복구) 페이지가 미해결 조건과 모델의 다음 판단을 다룹니다.
 

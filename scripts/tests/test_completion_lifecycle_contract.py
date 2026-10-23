@@ -5,7 +5,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / 'coding-convention/verification-before-completion/SKILL.md'
-OWNER = SKILL.parent / 'references/autopilot-publication.md'
+OWNER = SKILL.parent / 'references/response-review.md'
 sys.path.insert(0, str(ROOT / '_shared'))
 from global_rule_blocks import platform_contract_text
 
@@ -23,7 +23,8 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         self.assertLess(claim, whole)
         self.assertLess(whole, record)
         self.assertIn('code does not decide their meaning', finalization)
-        self.assertIn('references/autopilot-publication.md#prepare-and-record-the-response-review', finalization)
+        self.assertIn('references/response-review.md#prepare-and-record-the-response-review', finalization)
+        self.assertTrue(OWNER.is_file())
 
     def test_claim_review_precedes_whole_answer_review_and_recording(self):
         self.assert_review_contract(SKILL.read_text())
@@ -54,7 +55,7 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         self.assertIn('verification-before-completion', entry)
         self.assertNotIn('--receipt-token', entry)
         architecture = (ROOT / 'architecture.md').read_text()
-        self.assertIn('coding-convention/verification-before-completion/references/autopilot-publication.md#prepare-and-record-the-response-review', architecture)
+        self.assertIn('coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review', architecture)
         self.assertNotIn('--receipt-token', architecture)
 
     def test_common_contracts_keep_routing_independent_of_proof(self):

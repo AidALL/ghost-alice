@@ -70,7 +70,7 @@ SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니�
 
 설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core는 모델의 서로 다른 주장·출처 판단과 응답 전체 판단을 인증하며, 스킬 로드나 화면 감사 필드는 별도의 수락 조건이 아닙니다. 독립 등록된 Core 가드와 Ghost-ALICE Autopilot 어댑터는 호출 순서를 가정하지 않고 같은 평가를 사용해야 합니다.
 
-Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토·접수 참조](../../../coding-convention/verification-before-completion/references/autopilot-publication.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
+Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
 
 ## Shell Matrix
 

@@ -227,7 +227,7 @@ class SkillGateContractTest(unittest.TestCase):
             "platforms/common-governance.md": "## Session Intent\n`user-said: ` `interpreted-as: `\n## Work Selection\n`task-router` decides between a direct answer and work.\n## io-trace Transparency Rule\n`intent` `why` `stage: before-tool` `contract-ref` `contract-check`\n",
             "session-intent-analyzer/references/ledger-schema.md": "## Core Response Projection\nresponse-route.v1 record_response_route\n",
             "coding-convention/using-coding-convention/SKILL.md": "[Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse)\n",
-            "coding-convention/verification-before-completion/SKILL.md": "session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection\n[Apply and deliver](references/autopilot-publication.md#apply-and-deliver)\n",
+            "coding-convention/verification-before-completion/SKILL.md": "session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection\n[Deliver](references/response-review.md#deliver)\n",
         }
         for relative, body in additions.items():
             path = root / relative
@@ -235,8 +235,8 @@ class SkillGateContractTest(unittest.TestCase):
             path.write_text((path.read_text(encoding="utf-8") if path.exists() else "") + "\n" + body, encoding="utf-8")
         self._write_file(root, "coding-convention/verification-before-completion/references/verify-or-reuse.md",
                          "## Instruction Body Reuse\nsession_check_cache.py --body-retained\n")
-        self._write_file(root, "coding-convention/verification-before-completion/references/autopilot-publication.md",
-                         "## Apply and deliver\ncontinue: true response_assessment.body_issue strict audit does not hold or replace desktop output\n")
+        self._write_file(root, "coding-convention/verification-before-completion/references/response-review.md",
+                         "## Deliver\ncontinue: true response_assessment.body_issue strict audit does not hold or replace desktop output\n")
         claude = root / "platforms/claude/CLAUDE.md"
         claude.write_text(
             "{{COMMON_GOVERNANCE}}\n\n"
@@ -258,7 +258,7 @@ class SkillGateContractTest(unittest.TestCase):
         cases = (
             ("coding-convention/using-coding-convention/SKILL.md", "#instruction-body-reuse"),
             ("coding-convention/verification-before-completion/SKILL.md", "Core Response Projection"),
-            ("coding-convention/verification-before-completion/SKILL.md", "#apply-and-deliver"),
+            ("coding-convention/verification-before-completion/SKILL.md", "#deliver"),
         )
         for relative, anchor in cases:
             with self.subTest(anchor=anchor), tempfile.TemporaryDirectory() as tmpdir:
@@ -285,7 +285,7 @@ class SkillGateContractTest(unittest.TestCase):
             ("platforms/common-governance.md", "## io-trace Transparency Rule"),
             ("session-intent-analyzer/references/ledger-schema.md", "## Core Response Projection"),
             ("coding-convention/verification-before-completion/references/verify-or-reuse.md", "## Instruction Body Reuse"),
-            ("coding-convention/verification-before-completion/references/autopilot-publication.md", "## Apply and deliver"),
+            ("coding-convention/verification-before-completion/references/response-review.md", "## Deliver"),
         )
         for relative, heading in cases:
             for mutation in ("file", "section"):
@@ -305,7 +305,7 @@ class SkillGateContractTest(unittest.TestCase):
             ("platforms/common-governance.md", ("why", "contract-ref", "contract-check")),
             ("session-intent-analyzer/references/ledger-schema.md", ("record_response_route", "response-route.v1")),
             ("coding-convention/verification-before-completion/references/verify-or-reuse.md", ("session_check_cache.py", "--body-retained")),
-            ("coding-convention/verification-before-completion/references/autopilot-publication.md", ("continue: true", "response_assessment.body_issue", "strict audit", "does not hold or replace desktop output")),
+            ("coding-convention/verification-before-completion/references/response-review.md", ("continue: true", "response_assessment.body_issue", "strict audit", "does not hold or replace desktop output")),
         )
         for relative, fields in cases:
             for field in fields:

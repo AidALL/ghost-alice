@@ -162,9 +162,9 @@ OWNER_SECTIONS = (
     ),
     OwnerSection(
         "coding-convention/verification-before-completion/SKILL.md",
-        "references/autopilot-publication.md#apply-and-deliver",
-        "coding-convention/verification-before-completion/references/autopilot-publication.md",
-        "Apply and deliver",
+        "references/response-review.md#deliver",
+        "coding-convention/verification-before-completion/references/response-review.md",
+        "Deliver",
         ("continue: true", "response_assessment.body_issue", "strict audit", "does not hold or replace desktop output"),
     ),
 )
