@@ -100,15 +100,15 @@ class InstallCmdWrapperTest(unittest.TestCase):
 
     def test_install_and_uninstall_docs_put_command_choices_before_runtime_detail(self) -> None:
         install_docs = {
-            INSTALLATION_DOC: ("## Quick Install", "## Install Official Addons", "## Runtime And Platform Reference"),
-            INSTALLATION_DOC_KO: ("## Quick Install", "## Install Official Addons", "## Runtime And Platform Reference"),
+            INSTALLATION_DOC: ("## Quick Install", "## Install Addons", "## Runtime And Platform Reference"),
+            INSTALLATION_DOC_KO: ("## Quick Install", "## Install Addons", "## Runtime And Platform Reference"),
         }
         for path, markers in install_docs.items():
             with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
                 text = path.read_text(encoding="utf-8-sig")
                 positions = [text.index(marker) for marker in markers]
                 self.assertEqual(positions, sorted(positions))
-                self.assertLess(text.index("## Install Official Addons"), text.index("## Install One Platform"))
+                self.assertLess(text.index("## Install Addons"), text.index("## Install One Platform"))
                 self.assertLess(text.index("## Common Commands"), text.index("## Runtime And Platform Reference"))
 
         uninstall_docs = [

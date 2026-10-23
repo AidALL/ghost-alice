@@ -11,23 +11,20 @@ On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+ installer 
 
 The Windows installer needs PowerShell 7.6 or newer. Windows PowerShell 5.1 is retired: under an older PowerShell the installer prints the requirement and stops. Install PowerShell with `winget install --id Microsoft.PowerShell --exact`, then rerun `.\install.cmd`.
 
-## Core and Ghost-ALICE Autopilot together
+## Install Core
 
 After cloning this repository, use the platform-auto-detect installation:
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 ```
 
-For Windows Command Prompt or PowerShell, use `.\install.cmd --addon autopilot`. The detailed options below let you select a specific agent platform or manage each installation separately.
+For Windows Command Prompt or PowerShell, use `.\install.cmd`. The detailed options below let you select a specific agent platform or manage each installation separately.
 
 ## Contents
 
 - [Quick Install](#quick-install)
-- [Install Official Addons](#install-official-addons)
-- [Official Addon List](#official-addon-list)
-- [Install One Official Addon To One Platform](#install-one-official-addon-to-one-platform)
-- [Install Custom Addons](#install-custom-addons)
+- [Install Addons](#install-addons)
 - [Install One Platform](#install-one-platform)
 - [Check Status](#check-status)
 - [Update](#update)
@@ -43,7 +40,7 @@ macOS, Linux, WSL, or Git Bash:
 ```bash
 git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice
 cd ~/ghost-alice
-bash install.sh --addon autopilot
+bash install.sh
 ```
 
 Windows Command Prompt:
@@ -51,54 +48,12 @@ Windows Command Prompt:
 ```cmd
 git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice
 cd %USERPROFILE%\ghost-alice
-.\install.cmd --addon autopilot
+.\install.cmd
 ```
 
-## Install Official Addons
+## Install Addons
 
-Official addons use short aliases and install from the Ghost-ALICE core checkout.
-
-macOS, Linux, WSL, or Git Bash:
-
-```bash
-bash install.sh --addon autopilot
-```
-
-Windows Command Prompt or PowerShell:
-
-```cmd
-.\install.cmd --addon autopilot
-```
-
-Windows Command Prompt and PowerShell use the same official alias through `.\install.cmd --addon autopilot`.
-
-Run this from the Ghost-ALICE core checkout. Normal users do not clone the autopilot addon repository or run an installer inside that repository; the core installer fetches the official addon package. This install example is not a full runtime compatibility claim; read the addon repository `compatibility-matrix.json` before making one.
-
-For platform-specific commands, see [Install one official addon to one platform](#install-one-official-addon-to-one-platform).
-
-Addon-specific behavior, state files, pause/resume controls, and removal details live in each addon repository. The core checkout owns the common install command.
-
-## Official Addon List
-
-| Addon | Purpose | macOS / Linux / WSL | Windows Command Prompt / PowerShell | Details |
-| --- | --- | --- | --- | --- |
-| autopilot | Continue explicitly approved autonomous runs one work item at a time | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` | [AidALL/ghost-alice-autopilot](https://github.com/AidALL/ghost-alice-autopilot) |
-
-Core `0.5.1` and Ghost-ALICE Autopilot `0.5.1` use the routing and managed completion APIs. Ghost-ALICE Autopilot requires Core `0.5.1` or later. Source checks, native runtime validation and publication establish separate evidence.
-
-## Install One Official Addon To One Platform
-
-```bash
-bash install.sh --platform codex --addon autopilot
-```
-
-```cmd
-.\install.cmd --platform codex --addon autopilot
-```
-
-## Install Custom Addons
-
-Custom, tenant, or local development addons use `--addon-source PATH|URL`.
+An addon is installed from its own repository or a local path with `--addon-source PATH|URL`; add `--platform` to install it to one platform.
 
 ```bash
 bash install.sh --addon-source /path/to/addon-repo
@@ -112,7 +67,7 @@ For git URL addon sources, `--addon-tag` selects the branch or tag to clone into
 
 ## Install One Platform
 
-The following commands install Core only. Add `--addon autopilot` to include Ghost-ALICE Autopilot for the selected platform.
+The following commands install Core only. Add `--addon-source PATH|URL` to include an addon for the selected platform.
 
 | Target | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |
@@ -165,16 +120,16 @@ If the local installer lacks the update option, follow [bootstrap update recover
 
 If source update stops with conflicts, divergent branches, or non-fast-forward state, do not rerun the installer repeatedly. Follow [troubleshooting](./troubleshooting.md) first.
 
-`--update-source` updates the Core source checkout; it does not update the addon package. Reinstall Core and Ghost-ALICE Autopilot together, then check the installed state. The bootstrap updater may reinstall Core only, so follow it with this same paired command.
+`--update-source` updates the Core source checkout; it does not update an addon package. Reinstall Core (with `--addon-source` for an installed addon), then check the installed state. The bootstrap updater may reinstall Core only, so follow it with these commands.
 
 ```bash
-bash install.sh --addon autopilot
+bash install.sh
 bash install.sh --doctor
 bash install.sh --status
 ```
 
 ```cmd
-.\install.cmd --addon autopilot
+.\install.cmd
 .\install.cmd --doctor
 .\install.cmd --status
 ```
@@ -203,8 +158,7 @@ The installer sets the repository's git hook path (`core.hooksPath`, which every
 | Show install state | `bash install.sh --status` | `.\install.cmd --status` |
 | Run protected diagnostic | `bash install.sh --doctor` | `.\install.cmd --doctor` |
 | Safe source update | `bash install.sh --update-source` | `.\install.cmd --update-source` |
-| Install official autopilot addon | `bash install.sh --addon autopilot` | `.\install.cmd --addon autopilot` |
-| Install custom addon source | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd --addon-source C:\path\to\addon-repo` |
+| Install an addon | `bash install.sh --addon-source /path/to/addon-repo` | `.\install.cmd --addon-source C:\path\to\addon-repo` |
 | Selective core install | `bash install.sh task-router verification-before-completion` | `.\install.cmd task-router verification-before-completion` |
 | Full uninstall | `bash install.sh --uninstall` | `.\install.cmd --uninstall` |
 | Selective uninstall | `bash install.sh --platform codex --uninstall task-router` | `.\install.cmd --platform codex --uninstall task-router` |
@@ -266,18 +220,18 @@ Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `
 
 Installation on disk and adoption by a running host are separate. After a hook command changes, confirm its native trust entry and observe a subsequent native callback; use the host's reload or full restart controls if it retains the previous registration. See [native hook trust and reload](./troubleshooting.md#native-hook-trust-and-reload). Do not repeat unchanged business verification to check host adoption.
 
-### Core and optional Autopilot transitions
+### Core and addon transitions
 
-Core installation and addon removal are separate operations. A fresh Core installation supplies the instructions, input/source bindings, work and review records, and Core hooks. It does not register Autopilot continuation. Updating Core without an addon option preserves an already installed addon; `--addon-skip` skips addon installation and does not request its removal.
+Core installation and addon removal are separate operations. A fresh Core installation supplies the instructions, input/source bindings, work and review records, and Core hooks. Updating Core without an addon option preserves an already installed addon; `--addon-skip` skips addon installation and does not request its removal.
 
 | Operation | Example for Codex | Managed scope |
 | --- | --- | --- |
 | Fresh Core install or Core update | `bash install.sh --platform codex` | Core; preserve existing addon files and registrations on update |
-| Add or update Autopilot | `bash install.sh --platform codex --addon autopilot` | Core plus manifest-selected addon skill and privileged adapters |
-| Remove Autopilot while retaining Core | `bash install.sh --platform codex --uninstall --addon autopilot-mode` | Detach recorded addon/adapter hooks before removing verified addon targets |
+| Add or update an addon | `bash install.sh --platform codex --addon-source /path/to/addon-repo` | Core plus the addon's manifest-selected skills and observational hooks |
+| Remove an addon while retaining Core | `bash install.sh --platform codex --uninstall --addon <addon-id>` | Detach recorded addon hooks before removing verified addon targets |
 | Remove one platform | `bash install.sh --platform codex --uninstall` | That platform's addons and Core; retain shared assets needed by other installed platforms |
 
-Core authenticates the model's recommended follow-up work independently of Autopilot. Only the optional approved continuation path requests another host invocation. Removing Autopilot retains Core records and does not turn unmet criteria into completed criteria. Per-addon removal keeps modified files and its sidecar/removal marker for review or retry, while detaching its managed executable registrations. This is a configuration/file operation; ongoing-host adoption and cancellation of already delivered work are separate observations.
+Removing an addon retains Core records and does not turn unmet criteria into completed criteria. Per-addon removal keeps modified files and its sidecar/removal marker for review or retry, while detaching its managed executable registrations. This is a configuration/file operation; ongoing-host adoption and cancellation of already delivered work are separate observations.
 
 Full/platform removal archives pending merge originals and last-platform installation recovery copies under unique `~/.ghost-alice/uninstall-backup/<platform>/support-state/` directories. It keeps previous archives, source checkouts, conversation/session evidence, intent ledgers, audit traces and secrets. See [uninstall cleanup](./uninstall.md) for ownership and shared-file rules.
 
@@ -289,7 +243,7 @@ A full install deploys:
 
 - core skills from `skill-catalog/skills.json`
 - coding-convention workflow skills
-- optional addon skills through official `--addon` aliases or custom `--addon-source`
+- optional addon skills through `--addon-source`
 - `_shared/` utilities
 - platform hook settings
 - Node-backed hook dispatcher assets under `~/.ghost-alice/hooks/`
