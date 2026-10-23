@@ -572,8 +572,9 @@ class NativeIntakeWaitsTest(unittest.TestCase):
             ledger.reconcile_native_inputs(**coords, record_wait=True)
             ghost = root / ".ghost-alice"
             ghost.mkdir()
-            (ghost / "config.json").write_text(json.dumps(
-                {"install_locations": {"claude": {"ledger_root": str(ledger_root)}}}), encoding="utf-8")
+            # The record's hook registration names the ledger root the installed hooks run with.
+            (ghost / "installed-payload.json").write_text(json.dumps({"schema_version": 1, "targets": {}, "hooks": {
+                "claude": {"destination": {"ledger_root": str(ledger_root)}}}}), encoding="utf-8")
             lines = install_doctor._native_intake_wait_lines(ghost, "claude")
             codex = install_doctor._native_intake_wait_lines(ghost, "codex")
         self.assertEqual(lines[0], "native-intake-waits: 1")
@@ -592,8 +593,8 @@ class NativeIntakeWaitsTest(unittest.TestCase):
                 ledger.record_native_intake_failure(**coords, error=sqlite3.OperationalError("database is locked"))
             ghost = root / ".ghost-alice"
             ghost.mkdir()
-            (ghost / "config.json").write_text(json.dumps(
-                {"install_locations": {"claude": {"ledger_root": str(ledger_root)}}}), encoding="utf-8")
+            (ghost / "installed-payload.json").write_text(json.dumps({"schema_version": 1, "targets": {}, "hooks": {
+                "claude": {"destination": {"ledger_root": str(ledger_root)}}}}), encoding="utf-8")
             lines = install_doctor._native_intake_failure_lines(ghost, "claude")
         self.assertEqual(lines[0], "native-intake-failures: 1")
         self.assertIn("claude/failure-session: OperationalError x2", lines[1])
@@ -605,6 +606,7 @@ class NativeIntakeWaitsTest(unittest.TestCase):
             broken = Path(tmp) / "intent"
             broken.mkdir()
             (broken / "ghost-state.sqlite3").write_text("not a database", encoding="utf-8")
+            # An older installer's config.json copy of the ledger root still counts while the record names none.
             (ghost / "config.json").write_text(json.dumps(
                 {"install_locations": {"claude": {"ledger_root": str(broken)}}}), encoding="utf-8")
             lines = install_doctor._native_intake_wait_lines(ghost, "claude")
@@ -1233,7 +1235,9 @@ class RuntimeCoreAuditTest(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def _bound_session_intent_command(self, platform="claude", *, inner=None, **locations):
+    def _bound_session_intent(self, platform="claude", *, inner=None, **locations):
+        """The installed session-intent registration and the record it runs through: `(command, record)`."""
+        import hook_launcher
         import install_destination
         import install_hooks
 
@@ -1250,12 +1254,14 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             for name in ("session_intent_analyzer_hook.py", "hook_profile_gate.py"):
                 (shared / name).write_text("# bound hook fixture\n", encoding="utf-8")
         with install_destination.use(destination):
-            if inner is not None:
-                return install_hooks._hook_runner_command(
-                    "session-intent", inner, install_hooks.SESSION_INTENT_MARKER,
-                    platform_key=platform)
-            return install_hooks._entry_command(
+            command = install_hooks._entry_command(
                 install_hooks._platform_session_intent_entry(platform, "UserPromptSubmit"))
+            intake = inner or install_hooks._core_registration(platform, "session-intent").command
+        record = {"schema_version": 1, "targets": {}, "hooks": {platform: hook_launcher.host_section(
+            hook_file=Path(destination.platform_dir) / "settings.json", destination=destination,
+            entries={"session-intent": {"event": "UserPromptSubmit", "marker": install_hooks.SESSION_INTENT_MARKER,
+                                        "command": intake, "provider": "core"}})}}
+        return command, record
 
     def _write_runtime_files(self):
         files = {
@@ -1367,44 +1373,50 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             skills_dir=str(self.root / "skills"), ghost_root=str(self.root / "ghost"),
             ledger_root=str(self.root / "installed-ledger"), project_root=str(source_shared.parent),
             core_source_root=str(source_shared.parent), runtime_shared_dir=str(self.runtime))
-        with install_destination.use(destination):
-            install_hooks._prepare_destination_runtime(destination)
-            entry = install_hooks._platform_session_intent_entry("claude", "UserPromptSubmit")
-        self.config.write_text(json.dumps({"hooks": {"UserPromptSubmit": [entry]}}))
+        import installed_payload
+        # The install writes the launcher registration into the host file and its inner command into the record.
+        Path(destination.platform_dir).mkdir(parents=True, exist_ok=True)
+        self.assertEqual(install_hooks.install_hook("claude", destination=destination), "installed")
+        record = installed_payload.read(destination.ghost_root)
         with mock.patch.dict(os.environ, {"HOME": str(self.root),
                                           "GHOST_ALICE_CORE_ROOT": str(self.root / "foreign-provider")}):
             status, findings = install_doctor._runtime_core_audit(
-                source_shared, self.runtime, self.config, "claude")
+                source_shared, self.runtime, Path(destination.platform_dir) / "settings.json", "claude",
+                record=record)
         self.assertEqual(status, install_doctor.STATUS_OK, findings)
         self.assertFalse(Path(destination.ledger_root).exists(), "golden wrote the installed ledger")
+        # Without the record the same host file is a registration the launcher would reject.
+        _, findings = install_doctor._runtime_core_audit(
+            source_shared, self.runtime, Path(destination.platform_dir) / "settings.json", "claude")
+        self.assertIn("registration-missing", {finding["reason"] for finding in findings})
+        self.assertIn("session-intent-registration-missing", {finding["reason"] for finding in findings})
 
     def test_session_intent_golden_rejects_binding_mismatch(self):
-        for overrides in (
-            {"platform": "codex"},
-            {"runtime_shared_dir": str(self.root / "foreign-runtime")},
-            {"core_source_root": str(self.root / "foreign-provider")},
+        for overrides, reason in (
+            ({"platform": "codex"}, "session-intent-registration-missing"),
+            ({"runtime_shared_dir": str(self.root / "foreign-runtime")}, "session-intent-binding-mismatch"),
+            ({"core_source_root": str(self.root / "foreign-provider")}, "session-intent-binding-mismatch"),
         ):
             with self.subTest(overrides=overrides):
-                command = self._bound_session_intent_command(**overrides)
+                command, record = self._bound_session_intent(**overrides)
                 self.assertEqual(
                     install_doctor._runtime_session_intent_golden_status(
-                        self.runtime, "claude", hook_commands=[command]),
-                    (install_doctor.STATUS_ERROR, "session-intent-binding-mismatch"))
+                        self.runtime, "claude", hook_commands=[command], record=record),
+                    (install_doctor.STATUS_ERROR, reason))
 
-    def test_session_intent_golden_rejects_ambiguous_installed_bindings(self):
-        commands = [self._bound_session_intent_command(ledger_root=str(self.root / name))
-                    for name in ("ledger-a", "ledger-b")]
-        self.assertEqual(
-            install_doctor._runtime_session_intent_golden_status(
-                self.runtime, "claude", hook_commands=commands),
-            (install_doctor.STATUS_ERROR, "session-intent-binding-missing-or-ambiguous"))
-
-    def test_session_intent_golden_rejects_runner_without_valid_intake_executor(self):
-        command = self._bound_session_intent_command(inner="echo intake-lookalike")
+    def test_session_intent_golden_rejects_a_registration_the_record_does_not_carry(self):
+        command, _ = self._bound_session_intent()
         self.assertEqual(
             install_doctor._runtime_session_intent_golden_status(
                 self.runtime, "claude", hook_commands=[command]),
-            (install_doctor.STATUS_ERROR, "session-intent-binding-missing-or-ambiguous"))
+            (install_doctor.STATUS_ERROR, "session-intent-registration-missing"))
+
+    def test_session_intent_golden_rejects_runner_without_valid_intake_executor(self):
+        command, record = self._bound_session_intent(inner="echo intake-lookalike")
+        self.assertEqual(
+            install_doctor._runtime_session_intent_golden_status(
+                self.runtime, "claude", hook_commands=[command], record=record),
+            (install_doctor.STATUS_ERROR, "session-intent-registration-invalid"))
 
     def test_session_intent_golden_uses_repo_local_child_temp(self):
         source_shared = Path(__file__).resolve().parent

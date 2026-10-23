@@ -41,7 +41,10 @@ from typing import Any
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hook_launcher
 import hook_profile_gate
+import installed_payload
+import registration_testing
 import hook_definitions
 import install_hooks
 from test_completion_skill_evidence import assert_stop_observation
@@ -180,6 +183,9 @@ def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claud
             with patch.dict(os.environ, hook_env, clear=True), patch.object(
                 install_hooks, '_home', return_value=Path(temporary)
             ):
+                # The registration runs through the launcher and the record the install writes.
+                (Path(temporary) / ('.codex' if platform == 'codex' else '.claude')).mkdir(exist_ok=True)
+                install_hooks.install_hook(platform)
                 command = command()
         result = _run_hook_command(command, json.dumps(payload), env=hook_env)
         log = Path(temporary) / '.ghost-alice/session-logs' / platform / payload['session_id'] / 'strict-hook-output.jsonl'
@@ -348,8 +354,20 @@ def _minimal_visibility_env(extra: dict[str, str] | None = None) -> dict[str, st
 
 
 def _visible_and_runner_payload_text(command: str) -> str:
-    """Return visible command text plus one decoded hook_profile_gate payload."""
+    """Return visible command text plus what it runs: for a launcher registration the record's inner command and
+    the launcher file, for the long form one decoded hook_profile_gate payload."""
     texts = [command]
+    registration = hook_launcher.parse_registration(command)
+    if registration is not None:
+        record = registration.launcher.parent.parent / installed_payload.FILENAME
+        try:
+            _, entry = hook_launcher.read_registration(record, registration.platform, registration.hook_id)
+            texts.append(entry["command"])
+        except hook_launcher.RegistrationError:
+            pass
+        if registration.launcher.is_file():
+            texts.append(registration.launcher.read_text(encoding="utf-8"))
+        return "\n".join(texts)
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -619,11 +637,7 @@ class TestMessageLanguage(unittest.TestCase):
     def test_claude_codex_tool_checkpoint_entries_use_dispatcher(self):
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
-                command = _visible_and_runner_payload_text(
-                    install_hooks._entry_command(
-                        install_hooks._platform_tool_checkpoint_entry(platform, "PreToolUse")
-                    )
-                )
+                command = install_hooks._core_registration(platform, "tool-checkpoint").command
                 self.assertIn("ghost-alice-hook.mjs", command)
                 self.assertIn("--event PreToolUse", command)
                 self.assertIn(f"--platform {platform}", command)
@@ -1124,9 +1138,9 @@ class TestInstallHook(TempHomeTestCase):
                     install_hooks.install_hook(platform, destination=destination)
                     current = intake_commands()
                     command = install_hooks._session_intent_analyzer_command(platform=platform, output_format='json', payload_mode=True)
-                    entry = install_hooks._hook_runner_command_entry('session-intent',
+                    entry = registration_testing.long_runner_entry('session-intent',
                         command + ' --internal-b64 ' + base64.urlsafe_b64encode(b'Old instruction').decode(),
-                        install_hooks.SESSION_INTENT_MARKER, platform_key=platform)
+                        install_hooks.SESSION_INTENT_MARKER, platform=platform, destination=destination)
                     settings = json.loads(path.read_text())
                     for row in settings['hooks']['UserPromptSubmit']:
                         row['hooks'] = [h for h in row['hooks'] if '[hook-runner:session-intent]' not in h['command']]
@@ -2659,8 +2673,9 @@ class TestIdempotency(TempHomeTestCase):
         dispatcher = install_hooks._resolve_installed_hook_dispatcher()
         pinned = (f'"/opt/homebrew/Cellar/node/20.0.0/bin/node" "{dispatcher}" --platform claude --event PreToolUse '
                   '--hook tool-checkpoint --marker "[tool-checkpoint] pre-tool-check" --session-intent-root "/tmp/ledger"')
-        old = install_hooks._hook_runner_command_entry(
-            "tool-checkpoint", pinned, install_hooks.TOOL_CHECKPOINT_MARKER, platform_key="claude")
+        old = registration_testing.long_runner_entry(
+            "tool-checkpoint", pinned, install_hooks.TOOL_CHECKPOINT_MARKER, platform="claude",
+            destination=install_hooks._default_destination("claude"))
         self._write_settings("claude", {"hooks": {"PreToolUse": [old]}})
         install_hooks.install_hook("claude")
         commands = [hook["command"] for group in self._read_settings("claude")["hooks"]["PreToolUse"]
@@ -3453,7 +3468,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             commands = [h["command"] for entry in settings["hooks"][event] for h in entry["hooks"]]
             self.assertEqual(len(commands), len(markers), event)
             self.assertFalse(
-                any("hook_profile_gate.py run" in cmd and "[hook-runner:" not in cmd for cmd in commands),
+                any(hook_launcher.parse_registration(cmd) is not None and "[hook-runner:" not in cmd for cmd in commands),
                 event,
             )
             for marker in markers:
@@ -3825,10 +3840,9 @@ class TestSessionStartHook(unittest.TestCase):
         cmds = [h["command"] for entry in settings["hooks"][ss_key] for h in entry["hooks"]]
         self.assertEqual(sum(SESSION_RECEIPT_MARKER in c for c in cmds), 1)
         for platform in ("claude", "codex"):
-            command = _platform_session_receipt_entry(platform, "SessionStart")["hooks"][0]["command"]
-            encoded_args = re.findall(r'"([A-Za-z0-9_-]{40,}=*)"', command)
-            self.assertTrue(encoded_args, msg=command)
-            wrapped = base64.urlsafe_b64decode(encoded_args[0]).decode("utf-8")
+            self.assertIsNotNone(hook_launcher.parse_registration(
+                _platform_session_receipt_entry(platform, "SessionStart")["hooks"][0]["command"]))
+            wrapped = install_hooks._core_registration(platform, "session-receipt").command
             self.assertIn("session_intent_analyzer_hook.py", wrapped)
             self.assertIn(f"--platform {platform}", wrapped)
             self.assertIn("--context session_start", wrapped)
@@ -3879,12 +3893,13 @@ class TestSessionStartHook(unittest.TestCase):
             _platform_session_intent_entry("claude", "UserPromptSubmit"),
             _platform_session_start_entry("claude", "SessionStart"),
         ]
-        commands = [hook["command"] for entry in entries for hook in entry["hooks"]]
+        for entry in entries:
+            self.assertIsNotNone(hook_launcher.parse_registration(entry["hooks"][0]["command"]))
+        # The record carries the inner command the launcher hands the runner.
+        commands = [install_hooks._core_registration("claude", hook_id).command
+                    for hook_id in ("session-receipt", "session-intent", "session-start")]
 
-        for command in commands:
-            encoded_args = re.findall(r'"([A-Za-z0-9_-]{40,}=*)"', command)
-            self.assertTrue(encoded_args, msg=command)
-            wrapped_command = base64.urlsafe_b64decode(encoded_args[0]).decode("utf-8")
+        for wrapped_command in commands:
             self.assertNotIn("--format text", wrapped_command)
             if "--format" in wrapped_command:
                 self.assertIn("--format json", wrapped_command)
@@ -4199,10 +4214,9 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         self.assertNotIn("systemMessage", payload)
 
     def test_claude_io_trace_hook_does_not_depend_on_bare_bash(self):
-        command = install_hooks._entry_command(
-            install_hooks._platform_io_trace_entry("claude", "PostToolUse")
-        )
-        payload_text = _visible_and_runner_payload_text(command)
+        self.assertIsNotNone(hook_launcher.parse_registration(
+            install_hooks._entry_command(install_hooks._platform_io_trace_entry("claude", "PostToolUse"))))
+        payload_text = install_hooks._core_registration("claude", "io-trace").command
 
         self.assertIn("io_trace_hook.py", payload_text)
         self.assertNotIn("bash ", payload_text)

@@ -20,19 +20,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "_shared"))
 
 import install_hooks  # noqa: E402
+import hook_launcher  # noqa: E402
 import hook_profile_gate  # noqa: E402
 import install_destination  # noqa: E402
+import installed_payload  # noqa: E402
+import registration_testing  # noqa: E402
 from test_addon_hooks import _make_addon  # noqa: E402
 
 
-def _with_old_adapter_binding(command: str) -> str:
-    """The registration an older installer wrote: its binding carries the adapter key this Core rejects."""
-    outer = shlex.split(command, comments=True)
-    encoded = outer[outer.index("--binding-b64") + 1]
-    binding = json.loads(base64.urlsafe_b64decode(encoded))
-    binding["adapter"] = {"adapter_id": "demo", "runner_id": "adapter-demo-continue", "script": "/x/adapters/demo.py",
-                          "content_hash": "0" * 64, "event": "Stop"}
-    return command.replace(encoded, install_destination.encode_binding(binding))
+def _old_adapter_registration(script: Path) -> str:
+    """The registration an older installer wrote for an addon adapter: the long runner form, with the adapter key
+    in its binding that this Core rejects."""
+    return registration_testing.long_runner_command(
+        "adapter-demo-continue", install_hooks._hook_python_command(script, payload=True), "[adapter:demo] continue",
+        platform="claude", destination=install_hooks._default_destination("claude"),
+        adapter={"adapter_id": "demo", "runner_id": "adapter-demo-continue", "script": "/x/adapters/demo.py",
+                 "content_hash": "0" * 64, "event": "Stop"})
 
 
 class AddonHookInstallTest(unittest.TestCase):
@@ -79,18 +82,16 @@ class AddonHookInstallTest(unittest.TestCase):
         src = _make_addon(self.tmp, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
         install_hooks.install_hook("claude", addon_sources=[str(src)])
         cmd = self._addon_entries("PostToolUse")[0]
-        # The public runner argv carries command and transport separately:
-        # run ID [PLATFORM] COMMAND_B64 --binding-b64 BINDING_B64.
-        outer = shlex.split(cmd, comments=True)
-        run = outer.index("run")
-        payload_index = run + 3 if outer[run + 2] in {"claude", "codex"} else run + 2
-        payload = outer[payload_index]
-        self.assertEqual(outer[payload_index + 1], "--binding-b64")
-        binding = install_destination.decode_binding(outer[payload_index + 2])
-        self.assertEqual(binding["destination"]["platform_dir"], str(self.claude))
-        inner = base64.urlsafe_b64decode(payload.encode("ascii")).decode("utf-8")
-        env = install_destination.binding_environment(binding["destination"], os.environ)
-        argv = hook_profile_gate._validate_shell_command(inner, env=env)  # raises if outside allowlist
+        # The host carries the launcher registration; the record carries the inner command and the destination
+        # the launcher hands the runner.
+        registration = hook_launcher.parse_registration(cmd)
+        self.assertIsNotNone(registration, cmd)
+        destination, entry = hook_launcher.read_registration(
+            registration.launcher.parent.parent / installed_payload.FILENAME, "claude", "obs")
+        self.assertEqual(destination["platform_dir"], str(self.claude))
+        self.assertEqual(entry["provider"], "addon:hookaddon")
+        env = install_destination.binding_environment(destination, os.environ)
+        argv = hook_profile_gate._validate_shell_command(entry["command"], env=env)  # raises if outside allowlist
         self.assertTrue(argv[0].endswith("python") or "python" in argv[0])
         self.assertTrue(argv[-1].endswith("hooks/obs.py"))
 
@@ -180,9 +181,7 @@ class AddonHookInstallTest(unittest.TestCase):
         # adapters, so install removes the registration and keeps a user command that only quotes the comment.
         script = self.tmp / "old-adapter.py"
         script.write_text("import sys; sys.exit(0)\n", encoding="utf-8")
-        retired = _with_old_adapter_binding(install_hooks._entry_command(install_hooks._hook_runner_command_entry(
-            "adapter-demo-continue", install_hooks._hook_python_command(script, payload=True),
-            "[adapter:demo] continue", platform_key="claude")))
+        retired = _old_adapter_registration(script)
         self.assertTrue(install_hooks._is_retired_hook_command(retired))
         user_audit = "echo user audit '[adapter:demo] continue [hook-runner:adapter-demo-continue]' >> ~/audit.log"
         (self.claude / "settings.json").write_text(json.dumps({

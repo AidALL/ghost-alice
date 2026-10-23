@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import hook_launcher
 import install_hooks
 
 ENTRIES = {
@@ -20,7 +21,6 @@ ENTRIES = {
     "completion": (install_hooks._platform_stop_hook_entry, "Stop"),
     "session-start": (install_hooks._platform_session_start_entry, "SessionStart"),
 }
-RUNNER_ARGS = re.compile(r'hook_profile_gate\.py"?\s+"run"\s+"([^"]+)"\s+"([^"]+)"')
 
 
 class HookRunnerPlatformTests(unittest.TestCase):
@@ -28,10 +28,10 @@ class HookRunnerPlatformTests(unittest.TestCase):
         for platform in ("claude", "codex"):
             for hook_id, (build, event) in ENTRIES.items():
                 with self.subTest(platform=platform, hook=hook_id):
-                    match = RUNNER_ARGS.search(install_hooks._entry_command(build(platform, event)))
-                    self.assertIsNotNone(match)
-                    self.assertEqual(match.group(1), hook_id)
-                    self.assertEqual(match.group(2), platform)
+                    registration = hook_launcher.parse_registration(install_hooks._entry_command(build(platform, event)))
+                    self.assertIsNotNone(registration)
+                    self.assertEqual(registration.hook_id, hook_id)
+                    self.assertEqual(registration.platform, platform)
 
     @unittest.skipIf(os.name == "nt", "POSIX shell launcher")
     def test_intake_hook_strict_log_lands_in_the_platform_folder(self):

@@ -137,6 +137,9 @@ class HooksDeclareOnlyRoutineStateTests(unittest.TestCase):
                 ledger_root=str(root / "ledger"), project_root=str(source_shared.parent),
                 core_source_root=str(source_shared.parent), runtime_shared_dir=str(source_shared))
             with install_destination.use(destination):
+                # The registration runs through the launcher and the record the install writes.
+                Path(destination.platform_dir).mkdir()
+                install_hooks.install_hook("codex", destination=destination)
                 command = install_hooks._entry_command(
                     install_hooks._platform_session_intent_entry("codex", "UserPromptSubmit"))
             env = install_destination.binding_environment(destination, {

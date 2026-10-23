@@ -25,6 +25,7 @@ sys.path.insert(0, str(REPO_ROOT / "merge-companion" / "scripts"))
 
 import addon_registry as reg  # noqa: E402
 import install_hooks  # noqa: E402
+import registration_testing  # noqa: E402
 import install_transaction  # noqa: E402
 import addon_uninstall as un  # noqa: E402
 import hash_utils  # noqa: E402
@@ -298,16 +299,6 @@ class CoreUninstallTest(UninstallTestBase):
         self.assertFalse(self._marker("alpha").exists())  # dry-run persists no marker
 
 
-def _with_old_adapter_binding(command: str) -> str:
-    """The registration an older installer wrote: its binding carries the adapter key this Core rejects."""
-    outer = shlex.split(command, comments=True)
-    encoded = outer[outer.index("--binding-b64") + 1]
-    binding = json.loads(base64.urlsafe_b64decode(encoded))
-    binding["adapter"] = {"adapter_id": "demo-addon", "runner_id": "adapter-demo-addon-stop", "script": "/x/adapters/stop.py",
-                          "content_hash": "0" * 64, "event": "Stop"}
-    return command.replace(encoded, install_destination.encode_binding(binding))
-
-
 class ExecutableDetachmentOrderTest(UninstallTestBase):
     """Detach real temporary hook registrations before changing addon files."""
 
@@ -335,10 +326,13 @@ class ExecutableDetachmentOrderTest(UninstallTestBase):
         retired_script = self.src / "demo-addon" / "pilot-skill" / "adapters" / "stop.py"
         retired_script.parent.mkdir(parents=True)
         retired_script.write_text("# fixture adapter\n", encoding="utf-8")
-        retired = install_hooks._hook_runner_command_entry(
-            "adapter-demo-addon-stop", f'{sys.executable} "{retired_script}"', "[adapter:demo-addon] stop", platform_key="claude",
-        )
-        retired["hooks"][0]["command"] = _with_old_adapter_binding(retired["hooks"][0]["command"])
+        # The registration an older installer wrote for an addon adapter: the long runner form, with the adapter
+        # key in its binding that this Core rejects.
+        retired = registration_testing.long_runner_entry(
+            "adapter-demo-addon-stop", f'{sys.executable} "{retired_script}"', "[adapter:demo-addon] stop",
+            platform="claude", destination=install_hooks._default_destination("claude"),
+            adapter={"adapter_id": "demo-addon", "runner_id": "adapter-demo-addon-stop",
+                     "script": "/x/adapters/stop.py", "content_hash": "0" * 64, "event": "Stop"})
         self.retained_commands = ["echo core-completion # [completion]", "echo user-hook"]
         self.settings.write_text(json.dumps({"hooks": {
             "PostToolUse": [observer],

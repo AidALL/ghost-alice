@@ -22,6 +22,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hook_definitions
+import hook_launcher
 import hook_profile_gate
 import install_hooks
 
@@ -2361,7 +2362,9 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         for entry, hook_id, marker in cases:
             with self.subTest(hook_id=hook_id):
                 command = install_hooks._entry_command(entry)
-                self.assertIn("hook_profile_gate.py", command)
+                registration = hook_launcher.parse_registration(command)
+                self.assertIsNotNone(registration, command)
+                self.assertEqual((registration.hook_id, registration.platform), (hook_id, "claude"))
                 self.assertIn(f"[hook-runner:{hook_id}]", command)
                 self.assertNotIn('"strict,dynamic,minimal"', command)
                 self.assertIn(marker, command)
@@ -2376,7 +2379,11 @@ class TestInstallHooksRunnerIntegration(unittest.TestCase):
         isolated_home = tempfile.TemporaryDirectory()
         self.addCleanup(isolated_home.cleanup)
         env["HOME"] = isolated_home.name
-        with mock.patch.dict(os.environ,{"HOME":isolated_home.name}):
+        # The registration runs through the launcher and the record the install writes into that home.
+        (Path(isolated_home.name) / ".claude").mkdir()
+        with mock.patch.dict(os.environ, {"HOME": isolated_home.name}), \
+                mock.patch.object(install_hooks, "_home", return_value=Path(isolated_home.name)):
+            install_hooks.install_hook("claude")
             session_entry = install_hooks._platform_session_start_entry("claude", "SessionStart")
 
         def run(entry):

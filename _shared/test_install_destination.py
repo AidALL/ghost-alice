@@ -265,8 +265,12 @@ def test_normal_upgrade_retains_ledger_after_source_relocation(tmp_path):
     import install_destination
     root=tmp_path/'owned';root.mkdir()
     value=destination_fixture(root); value['mode']='normal'
-    with install_destination.use(value):
-        runtime_config.save_config({'install_locations':{'codex':{'ledger_root':str(root/'authority')}}})
+    with install_destination.use(value),patch.object(install_hooks,'_home',return_value=root):
+        # An older installer kept the destination in config.json; the record owns it now and reads that copy once.
+        config=runtime_config.config_path(root)
+        config.parent.mkdir(parents=True,exist_ok=True)
+        config.write_text(json.dumps({'schema_version':'ghost-alice-config.v1',
+            'install_locations':{'codex':{'ledger_root':str(root/'authority')}}}))
         os.environ.pop('GHOST_ALICE_SESSION_INTENT_ROOT',None)
         resolved=install_hooks._default_destination('codex')
         assert resolved.ledger_root==str(root/'authority')
@@ -295,14 +299,18 @@ def test_normal_generated_chain_keeps_authority_across_source_and_runtime_reloca
             patch.object(install_hooks,'_resolve_codex_dir',return_value=root/'.codex'):
         install_hooks.install_hook('codex')
     hooks=json.loads((root/'.codex/hooks.json').read_text())['hooks']
+    import hook_launcher
+    import installed_payload
     for groups in hooks.values():
         for group in groups:
             for hook in group['hooks']:
-                args=shlex.split(hook['command'],comments=True)
-                binding=install_destination.decode_binding(args[args.index('--binding-b64')+1])
-                assert binding['destination']['ledger_root']==value['ledger_root']
-                assert binding['destination']['core_source_root']==str(source)
-                assert binding['destination']['runtime_shared_dir']==str(relocated_runtime)
+                registration=hook_launcher.parse_registration(hook['command'])
+                assert registration is not None,hook['command']
+                destination,_=hook_launcher.read_registration(
+                    Path(value['ghost_root'])/installed_payload.FILENAME,'codex',registration.hook_id)
+                assert destination['ledger_root']==value['ledger_root']
+                assert destination['core_source_root']==str(source)
+                assert destination['runtime_shared_dir']==str(relocated_runtime)
     command=next(h['command'] for row in hooks['UserPromptSubmit'] for h in row['hooks'] if '[hook-runner:session-intent]' in h['command'])
     result=subprocess.run(['/bin/sh','-c',command],env=env,cwd=root/'project',
         input=json.dumps(dict(hook_event_name='UserPromptSubmit',session_id='relocation-source-fixture',

