@@ -59,34 +59,30 @@ class StopRetrySurfaceTests(unittest.TestCase):
         HISTORICAL_CONVERSATION_SUMMARY = "The retained records cover targeted checks; overall verification remains unresolved."
         entries = [prompt("앞서 검증한 결과로 두 문제가 마무리됐는지 설명해 주세요."),
                    reply(HISTORICAL_CONVERSATION_SUMMARY)]
-        assert_stop_observation(self, self.run_hook(entries, platform="codex",
-            response_purpose="explanation", record_review=False), issue="response-assessment-required",
-            repair_target="response_review")
+        assert_stop_observation(self, self.run_hook(entries, platform="codex", record_review=False))
         assert_stop_observation(self, self.run_hook(entries + [reply(HISTORICAL_CONVERSATION_SUMMARY +
-            "\n\n별도 버그도 수정했습니다.")], platform="codex"), issue="requires a [completion-check]")
+            "\n\n별도 버그도 수정했습니다.")], platform="codex", record_review=False))
 
-    def test_historical_install_assertion_requires_runtime_proof(self):
+    def test_historical_closure_prose_is_not_a_submission(self):
         historical = "기존 검증 기록에 따르면 로컬 설치 수정을 완료했습니다. 원래 근거와 시각을 설명합니다."
         for platform in ("claude", "codex"):
             with self.subTest(platform=platform):
                 entries = [prompt("Explain the prior installation result without new work."), reply(historical)]
-                assert_stop_observation(self, self.run_hook(entries, platform=platform),
-                    issue="requires a [completion-check]")
+                assert_stop_observation(self, self.run_hook(entries, platform=platform, record_review=False))
                 entries.append(reply(historical + " 이번 수정도 완료했습니다."))
-                assert_stop_observation(self, self.run_hook(entries, platform=platform),
-                    issue="requires a [completion-check]")
+                assert_stop_observation(self, self.run_hook(entries, platform=platform, record_review=False))
 
     def test_partial_withdrawal_requires_review_and_cannot_supply_false_pass(self):
         partial = ("앞선 [completion-check]의 최종화 형식을 철회합니다. 상태는 부분 완료입니다. "
                    "일반 DBCS 자동 교정과 명시된 미검증 항목이 남아 있으며, 기존 검증 근거·시각·결론은 유지합니다. "
                    "추가 검증은 실행하지 않았습니다.")
         history = [prompt("Report the current result."), reply(DEFECTIVE), stop_feedback("Invalid evidence"), reply(partial)]
-        payload = self.run_hook(history, platform="codex", response_purpose="explanation", record_review=False)
-        assert_stop_observation(self, payload, issue="response-assessment-required", repair_target="response_review")
-        payload = self.run_hook(history, platform="codex", response_purpose="explanation")
+        payload = self.run_hook(history, platform="codex", record_review=False)
+        assert_stop_observation(self, payload)
+        payload = self.run_hook(history, platform="codex")
         assert_stop_observation(self, payload)
         payload = self.run_hook(history + [reply(partial + " 수정은 완료했습니다.")], platform="codex",
-                                response_purpose="explanation", review_verdict="unsupported")
+                                review_verdict="unsupported")
         assert_stop_observation(self, payload, issue="response-unsupported:")
 
     def test_metadata_repair_reports_each_format_defect_once(self):
@@ -99,7 +95,7 @@ class StopRetrySurfaceTests(unittest.TestCase):
             self.assertEqual(observed["body_issue"].count(expected), 1)
 
     def run_hook(self, entries, entrypoint=None, platform="claude", host_context=None, claims_changed=False, scratchpad_dir=None,
-                 response_purpose="completion", record_review=True, review_verdict="supported", stop_hook_active=False):
+                 record_review=True, review_verdict="supported", stop_hook_active=False):
         env = {k: v for k, v in os.environ.items()
                if k not in {"CLAUDE_CODE_ENTRYPOINT", "CODEX_THREAD_ID"}
                and not k.startswith("GHOST_ALICE_")}
@@ -113,8 +109,7 @@ class StopRetrySurfaceTests(unittest.TestCase):
                         for part in entry.get('message', {}).get('content', [])
                         if isinstance(part, dict) and part.get('type') == 'text')
             StopHookSkillEvidenceTests._review_format_fixture(
-                Path(temp_dir), platform, text, env, review_verdict,
-                response_purpose=response_purpose, record_review=record_review)
+                Path(temp_dir), platform, text, env, review_verdict, record_review=record_review)
             hook_input = {"session_id": "fixture-stop", "transcript_path": str(transcript),
                           "stop_hook_active": stop_hook_active, "last_assistant_message": text}
             if host_context is not None:
@@ -162,10 +157,10 @@ class StopRetrySurfaceTests(unittest.TestCase):
                         self.assertNotIn("delivery-route:", observed["body_issue"])
                         self.assertNotIn("prior_answer_ref", observed)
 
-    def test_unmarked_completion_stays_unaccepted_without_a_retry(self):
-        payload = self.run_hook([prompt("Fix it."), reply(UNMARKED_CLOSURE)], "claude-desktop")
-        observed = assert_stop_observation(self, payload, issue="requires a [completion-check]")
-        self.assertNotIn("Invoke the Claude Code Skill tool", observed["body_issue"])
+    def test_unmarked_closure_prose_is_not_a_submission(self):
+        payload = self.run_hook([prompt("Fix it."), reply(UNMARKED_CLOSURE)], "claude-desktop", record_review=False)
+        assert_stop_observation(self, payload)
+        self.assertNotIn("response_assessment", json.dumps(payload).replace('"response_assessment": {"input_event_id"', ''))
 
     def test_repeated_defects_remain_unaccepted_without_retry_notice_or_replay(self):
         for platform in ("claude", "codex"):

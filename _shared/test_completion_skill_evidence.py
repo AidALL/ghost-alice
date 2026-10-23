@@ -85,7 +85,7 @@ class ValidatorOptionTests(unittest.TestCase):
 class StopHookSkillEvidenceTests(unittest.TestCase):
     def run_hook(self, entries=None, *, platform="claude", message=None,
                  review_verdict="supported", mutate_source=False, append_text="",
-                 response_purpose=None, record_review=True):
+                 record_review=True):
         env = {k: v for k, v in os.environ.items()
                if k not in {"CLAUDE_CODE_ENTRYPOINT", "CODEX_THREAD_ID"}
                and not k.startswith('GHOST_ALICE_')}
@@ -104,7 +104,7 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
                 if isinstance(part, dict) and part.get('type') == 'text'), '')
             observation = StopHookSkillEvidenceTests._review_format_fixture(
                 Path(temp_dir), platform, text, env, review_verdict,
-                response_purpose=response_purpose, record_review=record_review)
+                record_review=record_review)
             if mutate_source:
                 observation.write_text("The original observation changed.", encoding="utf-8")
             if append_text:
@@ -116,8 +116,7 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
     @staticmethod
     def _review_format_fixture(root, platform, text, env, review_verdict="supported", *,
                                session_id="fixture-stop", ledger_root=None, core_root=None,
-                               response_purpose=None, record_review=True,
-                               input_text='Synthetic protocol fixture'):
+                               record_review=True, input_text='Synthetic protocol fixture'):
         """Give native protocol cases explicit synthetic reviewed observations.
 
         These cases isolate host protocol, not semantic review quality. Missing,
@@ -142,8 +141,6 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
         fixtures.ledger.record_turn(**coords, expected_input_event_id=event,
             intent_delta={'acceptance_criteria': criteria})
         route = fixtures.ResponseRouteTests().candidate()
-        if response_purpose is not None:
-            route['response_purpose'] = response_purpose
         route['work_units'][0]['owner'] = owner
         route['selected_criteria'] = [dict(work_unit_id='first', contract_revision=1,
                                           criterion_id=key) for key in ids]
@@ -153,7 +150,8 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
             GHOST_ALICE_SESSION_INTENT_ROOT=str(coords['root']),
             GHOST_ALICE_PLATFORM=platform, GHOST_ALICE_SESSION_ID=owner['session_id'])
         env.update(source)
-        if not record_review or (parsed is None and response_purpose != 'explanation'):
+        if not record_review or (parsed is None and validator.looks_like_evidence_claim(text)):
+            # A malformed control block has no reviewable proof; an answer without a block is an explanation.
             return None
         observation = root / 'synthetic-observations.txt'
         observation.write_text(json.dumps(parsed['claims']) if parsed is not None else text, encoding='utf-8')

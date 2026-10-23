@@ -68,9 +68,9 @@ Tool-checkpoint는 도구 호출 전 단계(호스트의 `PreToolUse`/`BeforeToo
 
 ## Routing Surface Contract
 
-현재 세션 어시스턴트는 session-intent-analyzer를 적용하여 의미 사실과 누적 결정을 Python 원장 기록기에 제출합니다. 현재 대화의 응답 모델은 task-router를 적용하여 작업을 판단합니다. 응답 모델은 routing-surface의 기존 change-depth·focus-layer·verification-complexity 값을 사용하고 별도 척도를 만들지 않습니다. 알 수 없거나 모순되는 값은 영향받은 선택을 다시 판단합니다.
+현재 세션 어시스턴트는 session-intent-analyzer를 적용하여 의미 사실과 누적 결정을 Python 원장 기록기에 제출합니다. 현재 대화의 응답 모델은 task-router를 적용하여 작업을 판단합니다. routing-surface는 응답 모드, 경계 계약 제어, 선택적 이유만 담고, 깊이나 복잡도 값은 담지 않습니다. 알 수 없거나 모순되는 값은 영향받은 선택을 다시 판단합니다.
 
-task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 목적을 보존합니다. 조사나 worktree 확인은 사용자가 산출물로 요구하지 않았다면 수단입니다. Accepted-continuation에는 기록된 수락이 필요하며 근거 요구를 낮추지 않습니다.
+task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 목적을 보존합니다. 조사나 worktree 확인은 사용자가 산출물로 요구하지 않았다면 수단입니다.
 
 [경로 세부](../../../task-router/references/routing-details.md)는 바로 답하기(`direct-response`)와 확인 질문(`clarification-only`)을 작업과 구별합니다. 일반적인 이유·방법 질문의 전제나 열린 작업 공간만으로 로컬 진단을 승인하지 않습니다. 상태 질문이나 정정은 보통 미완료 승인 작업을 조정하며, 명시적 중단·일시정지는 계속 여부를 바꿉니다. 바로 답하기는 제공된 대화를 사용하고 에이전트 측 도구나 메타데이터 복구 없이 답변만 반환합니다. 확인 질문은 공통 계약의 Session Intent 절이 정한 형식을 따릅니다. 이 조건은 작업 완료 경로의 승인된 경로 등록을 금지하지 않습니다.
 

@@ -101,24 +101,30 @@ consumers obtain it directly from this Core API and check their input binding.
         context_issue = str(exc)
     marker = looks_like_evidence_claim(text)
     review_issue, review_target = None, 'response_review'
-    if phase == 'final' and text.strip() and not marker:
-        explanation = (isinstance(route, dict) and route.get('status') == 'ready'
-            and route.get('response_purpose') == 'explanation')
-        if explanation:
-            # A registered explanation belongs to its exact current review. Neither
-            # a historical phrase nor the explanation label authenticates its claims.
-            from completion_assessment import CompletionAssessmentError, lookup_current_response
-            try:
-                lookup_current_response(source, text, transaction=transaction)
-            except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error) as exc:
-                reason = getattr(exc, 'reason', 'response-assessment-required')
-                if reason in {'source-changed', 'source-unavailable'}:
-                    review_issue = _source_status_issue([reason], explanation=True)
-                    review_target = 'source_status'
-                else:
-                    review_issue = (f'{reason}: '
-                        'The current-session assistant follows verification-before-completion, section Prepare and record the response review, for this exact explanation and its original sources. '
-                        'Keep the review internal; do not submit completion controls for this explanation.')
+    if phase == 'final' and text.strip() and not marker and context_status == 'available':
+        # An answer without a control block is judged only when a recorded review
+        # binds this exact text; an unrecorded explanation is an ordinary answer.
+        from completion_assessment import CompletionAssessmentError, lookup_current_response
+        try:
+            lookup_current_response(source, text, transaction=transaction)
+        except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error) as exc:
+            reason = getattr(exc, 'reason', None)
+            if reason in {'source-changed', 'source-unavailable'}:
+                review_issue = _source_status_issue([reason], explanation=True)
+                review_target = 'source_status'
+            elif reason in {'response-unbound', 'response-unsupported', 'criterion-unbound'}:
+                review_issue = (f'{reason}: '
+                    'The current-session assistant follows verification-before-completion, section Prepare and record the response review, for this exact explanation and its original sources. '
+                    'Keep the review internal; do not submit completion controls for this explanation.')
+            elif reason in {'response-assessment-required', 'route-unavailable'}:
+                # A review recorded for this input must cover the delivered text;
+                # an input with no recorded review is an ordinary answer.
+                from completion_assessment import reviewed_for_input
+                if event is not None and reviewed_for_input(source, event, transaction=transaction):
+                    review_issue = (f'{reason}: A recorded review binds this input but not this exact answer. '
+                        'The current-session assistant follows verification-before-completion, section Prepare and record the response review, for the delivered text.')
+            elif reason is None and context_issue is None:
+                context_issue = str(exc)
     selected = select_completion_route(context, dict(text=text, phase=phase),
         {'failure_kind': 'none', 'criteria': []})
     issue = None
@@ -126,27 +132,15 @@ consumers obtain it directly from this Core API and check their input binding.
     native_activity = (native_tool_activity(platform, session, native_input, input_observation=input_observation)
         if phase == 'final' and native_input is not None else None)
     if phase == 'final':
-        if selected['route_binding'] != 'current' and native_activity is not None:
-            if native_activity['status'] == 'observed':
-                issue = ('route-unavailable: This input contains native tool calls but has no current Core response-route. '
-                    'The current-session assistant follows task-router to register this input\'s work and response purpose. '
-                    'Retain the tool results; route registration does not require repeating the work.')
-            elif native_activity['status'] == 'unavailable':
-                issue = ('native-activity-unavailable: Native current-turn activity could not be established '
-                    f"({native_activity['reason']}); this is not evidence of a tool-free input. "
-                    'Register the current Core response-route through task-router or repair the native transcript binding. '
-                    'Retain existing results; do not repeat the work.')
-            if issue is not None:
-                repair_target = 'response_route'
-        if issue is None and review_issue:
+        if review_issue:
             issue = review_issue
             repair_target = review_target
-        # Review needs the current owned contract before it can interpret proof
-        # fields. Report that prerequisite once, not after formatting retries.
+        # A completion or partial claim is judged against the current owned contract.
         if issue is None and (marker or selected['required_completion_check']) and selected['route_binding'] != 'current':
             issue = ('route-unavailable: The current-session assistant must use task-router to register the current '
                 'response-route through Core before submitting evidence. Retain existing proof; '
                 'a missing route does not invalidate the business result.')
+            repair_target = 'response_route'
         if issue is None:
             issue = validate_completion_text(text, require_completion_check=selected['required_completion_check'])
         if issue is None and marker:

@@ -129,9 +129,9 @@ class PartialCompletionTests(unittest.TestCase):
 class SuppliedKoreanAnswerTests(unittest.TestCase):
     run_hook = skill_evidence.StopHookSkillEvidenceTests.run_hook
 
-    def test_literal_first_answer_requires_evidence_without_demanding_full_success(self):
-        result = self.run_hook(platform='codex', message=SUPPLIED_KOREAN_ANSWER, response_purpose='completion')
-        assert_stop_observation(self, result, issue='[partial-check]', repair_target='completion_metadata')
+    def test_literal_first_answer_without_a_control_block_is_not_a_submission(self):
+        result = self.run_hook(platform='codex', message=SUPPLIED_KOREAN_ANSWER, record_review=False)
+        assert_stop_observation(self, result)
 
     def test_literal_answer_with_qualified_partial_evidence_accepts_retained_results(self):
         result = self.run_hook(platform='codex', message=SUPPLIED_KOREAN_ANSWER + '\n\n' + SUPPLIED_PARTIAL_EVIDENCE)

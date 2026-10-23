@@ -2,7 +2,7 @@
 
 언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/evaluator-artifact-contract.md)
 
-This artifact contract applies to verification-complexity-level-3-plus work, intake of external agent-governance logic, and RAG/evaluator-driven improvement candidates. Its purpose is not to produce more reports; it is to preserve promotable evidence together with rejected candidates.
+This artifact contract applies to verification-complexity-level-3-plus work, intake of external agent-governance logic, and RAG/evaluator-driven improvement candidates. It preserves promotable evidence together with rejected candidates.
 ## Contents
 
 - [Applicability](#applicability)
@@ -37,7 +37,6 @@ The evaluation workflow supplies the scenario, execution trace, report and candi
 - Do not promote `candidate-playbook.md` without an accepted verifier-result (`verifier-result.json`).
 - Required verification includes at least one candidate rejected for invalid input or missing evidence. That result supports refusal for that candidate and condition only; it does not establish the verifier’s general ability or overall quality. Reuse valid unchanged case evidence; every edit does not require a new rejected candidate.
 - If `verifier-result.json` has `accepted: false`, stop installed asset changes.
-- This artifact contract is for high-risk work. Do not use it to manufacture reports for low-complexity tasks.
 
 ## Minimum verifier-result.json Shape
 

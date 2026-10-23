@@ -68,9 +68,9 @@ When work selection must change, the current-session assistant applies task-rout
 
 ## Routing Surface Contract
 
-The current-session assistant applies session-intent-analyzer to express semantic facts and decisions and submits them to the Python ledger writer. It applies task-router to make the reusable work judgment. It uses the resulting routing-surface values for change-depth, focus-layer and verification-complexity instead of inventing another scale. Unknown or conflicting values require reconsideration of the affected selection.
+The current-session assistant applies session-intent-analyzer to express semantic facts and decisions and submits them to the Python ledger writer. It applies task-router to make the reusable work judgment. The routing surface carries only the response mode, the boundary-contract control and an optional reason; it carries no depth or complexity value. Unknown or conflicting values require reconsideration of the affected selection.
 
-The current-session assistant applying task-router preserves the primary request and terminal objective. Investigation and worktree inspection remain means unless requested as deliverables. Accepted-continuation requires recorded acceptance and does not lower proof requirements.
+The current-session assistant applying task-router preserves the primary request and terminal objective. Investigation and worktree inspection remain means unless requested as deliverables.
 
 [Routing details](../../task-router/references/routing-details.md) separate a direct answer (`direct-response`) and a confirmation question (`clarification-only`) from work. A general why/how premise and ambient workspace do not authorize local diagnosis. A status question or correction normally steers unfinished authorized work; an explicit stop/pause governs continuation. A direct answer uses supplied conversation, performs no agent-side tools or metadata repair and emits only resolved content; a confirmation question takes the form the common contract's Session Intent section sets. That condition does not prohibit authorized route registration on a work completion path.
 

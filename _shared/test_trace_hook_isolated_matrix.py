@@ -148,7 +148,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         review_root = ledger_root or root / 'ledger'
         skill_fixture.StopHookSkillEvidenceTests._review_format_fixture(root, platform, reviewed, env,
             session_id=session, ledger_root=review_root, core_root=self.source,
-            response_purpose='completion', input_text='Synthetic matrix request.')
+            input_text='Synthetic matrix request.')
         if marked and purpose != 'completion':
             return
         import test_response_route as fixtures
@@ -157,13 +157,12 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
         state = fixtures.ledger.read_session_state(**coords)
         route = fixtures.ResponseRouteTests().candidate()
         if purpose == 'completion':
-            route['response_purpose'] = 'completion'
             route['work_units'][0]['owner'] = dict(platform=platform, session_id=session)
             route['selected_criteria'][0]['criterion_id'] = 'calculation'
             fixtures.ledger.record_response_route(**coords, expected_input_event_id=state['latest_input_event_id'],
                 candidate=route, boundary_ref='synthetic-protocol')
             return
-        route.update(response_purpose='explanation', work_units=[], selected_work_unit_ids=[], selected_criteria=[])
+        route.update(work_units=[], selected_work_unit_ids=[], selected_criteria=[])
         fixtures.ledger.record_response_route(**coords, expected_input_event_id=state['latest_input_event_id'],
             candidate=route, boundary_ref='synthetic-protocol')
         observation = root / 'explanation.txt'
@@ -249,15 +248,6 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 self.assert_allow(self.stop(platform, text, entries=[prompt(), reply(text)], profile=profile))
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
             self.assert_allow(self.stop(platform, valid_text(verdict="fail"), profile=profile))
-
-    def test_response_purpose_not_prose_selects_completion_gate(self):
-        for platform, profile, text in itertools.product(PLATFORMS, PROFILES,
-                ('Tests pass.', '작업을 완료했습니다.', 'A bounded explanation.')):
-            with self.subTest(platform=platform, profile=profile, text=text):
-                self.assert_allow(self.stop(platform, text, entries=[prompt(), reply(text)], profile=profile))
-                rejected = self.stop(platform, text, profile=profile, purpose='completion')
-                self.assert_unaccepted(rejected)
-                self.assertIn('[completion-check]', rejected['response_assessment']['body_issue'])
 
 
     def test_empty_and_non_object_stop_payloads_are_protocol_noops(self):
@@ -349,14 +339,12 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
 
     def test_recovery_never_forces_business_replay_for_any_configured_host(self):
         for platform, profile, host, defect in itertools.product(PLATFORMS, PROFILES, HOSTS,
-                                                                ("missing-evidence", "bad-verdict", "missing-marker")):
+                                                                ("missing-evidence", "bad-verdict")):
             text = valid_text()
             if defect == "missing-evidence":
                 text = text.replace("    evidence: synthetic calculation subprocess exited 0\n", "")
-            elif defect == "bad-verdict":
-                text = text.replace("verdict: pass", "verdict: pass.")
             else:
-                text = "The requested work is complete."
+                text = text.replace("verdict: pass", "verdict: pass.")
             with self.subTest(platform=platform, profile=profile, host=host, defect=defect):
                 self.assert_diagnostic(self.stop(platform, text, profile=profile, host=host, purpose="completion"))
 
@@ -482,11 +470,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                                                 "acceptance_criteria":[criterion]})])
                 protected = json.loads(self.run_process(state_command).stdout)
                 candidate = dict(schema_version="response-route.v1", routing_surface={
-                    "intent_relation":"continuation", "primary_request":"Protected work",
-                    "causal_axis":"n/a", "response_mode":"normal",
-                    "response_order":"imperative-result-first-after-necessary-work", "change_depth":"structural",
-                    "focus_layer":"macro", "verification_complexity":"level-2", "boundary_contract":"required",
-                    "forced_visibility":"no", "reason":"Focus cannot grant resource authority"},
+                    "response_mode":"normal", "boundary_contract":"required",
+                    "reason":"Focus cannot grant resource authority"},
                     work_units=[dict(work_unit_id="protected-unit", contract_revision=1, kind="execution", admitted=True,
                                      owner=dict(platform=platform, session_id=session))],
                     selected_work_unit_ids=["protected-unit"],

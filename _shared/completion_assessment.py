@@ -391,12 +391,12 @@ def _response_review_context(route):
 
     The full original route remains immutable in the candidate. Current route
     validation still authenticates admission, ownership and the input before
-    this projection is compared; focus and burden do not change answer bytes.
+    this projection is compared; the optional reason does not change answer bytes.
     """
     selected = set(route['selected_work_unit_ids'])
     return dict(
         **{key: route.get(key) for key in ('schema_version', 'platform', 'session_id',
-            'input_event_id', 'boundary_ref', 'response_purpose')},
+            'input_event_id', 'boundary_ref')},
         routing_surface={key: route['routing_surface'][key]
             for key in ('response_mode', 'boundary_contract')},
         work_units=sorted((unit for unit in route['work_units']
@@ -405,6 +405,27 @@ def _response_review_context(route):
         selected_criteria=sorted(({key: row[key] for key in _DEFINITION}
             for row in route['selected_criteria']),
             key=lambda row: (row['work_unit_id'], row['contract_revision'], row['id'])))
+
+
+def reviewed_for_input(source, input_event_id, *, transaction=None):
+    """True when a recorded review already binds this owner and input."""
+    core, root, owner = _coordinates(source)
+    with core._read_connection(root, transaction) as connection:
+        if connection is None or not connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone():
+            return False
+        row = connection.execute('''SELECT 1 FROM core_completion_responses r
+            JOIN core_completion_candidates c ON c.reference=json_extract(r.payload_json, '$.candidate_reference')
+            WHERE json_extract(c.payload_json, '$.intent_root')=?
+            AND (json_extract(c.payload_json, '$.input_event_id')=?
+                 OR json_extract(c.payload_json, '$.route.input_event_id')=?)
+            AND coalesce(json_extract(c.payload_json, '$.owner.platform'),
+                         json_extract(c.payload_json, '$.contract.owner.platform'))=?
+            AND coalesce(json_extract(c.payload_json, '$.owner.session_id'),
+                         json_extract(c.payload_json, '$.contract.owner.session_id'))=?
+            LIMIT 1''', (str(root), input_event_id, input_event_id,
+                         owner['platform'], owner['session_id'])).fetchone()
+        return row is not None
 
 
 def _source_response_records(connection, root, owner, route, text):
@@ -511,8 +532,6 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
             if scope_reference is not None else None)
         route = scope['route'] if scope is not None else _current_response_context(core, root, owner, connection)[1]
         _require(isinstance(route, dict), 'route-unavailable', 'Original owned route snapshot is required')
-        _require(route.get('response_purpose') == 'explanation', 'response-unbound',
-            'Register the current explanation route before reviewing its sources')
         response = dict(text=response_text, purpose='explanation')
         response['binding_id'] = _reference(response)
         candidate = dict(kind=_SOURCE_RESPONSE_KIND, intent_root=str(root), owner=owner,
@@ -535,8 +554,7 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
 def _validate_response_review(candidate, root, owner, route):
     _require(candidate.get('kind') == _SOURCE_RESPONSE_KIND
         and candidate.get('intent_root') == str(root) and candidate.get('owner') == owner
-        and _response_review_context(candidate['route']) == _response_review_context(route)
-        and route.get('response_purpose') == 'explanation',
+        and _response_review_context(candidate['route']) == _response_review_context(route),
         'response-unbound', 'Explanation review must retain its exact owner, input and selected contract')
 
 
@@ -694,8 +712,7 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
             response = dict(text=response_text, proof_digest=_digest(proof))
             if report_only:
                 route = scope['route'] if scope is not None else core.read_response_route(root=root, **owner, transaction=connection)
-                _require(route.get('response_purpose') == 'explanation' and bool(reuse_candidate)
-                    and old['proof'] == proof and old['contract'] == contract,
+                _require(bool(reuse_candidate) and old['proof'] == proof and old['contract'] == contract,
                     'response-unbound', 'An explanation must reuse an original reviewed proof under its current owned contract')
                 original = lookup_assessment(source, contract, proof, verified_at, transaction=connection,
                     historical=scope is not None)
@@ -890,8 +907,6 @@ def lookup_current_response(source, text, *, transaction=None):
             if reviewed_source is not None:
                 return reviewed_source
             _, route = _current_response_context(core, root, owner, connection)
-            _require(route.get('response_purpose') == 'explanation', 'response-unbound',
-                'A retained explanation requires the current explanation route')
             rows = connection.execute('''SELECT r.reference FROM core_completion_responses r
                 JOIN core_completion_candidates c ON c.reference=json_extract(r.payload_json, '$.candidate_reference')
                 WHERE trim(json_extract(c.payload_json, '$.response_binding.text'), ?)=?

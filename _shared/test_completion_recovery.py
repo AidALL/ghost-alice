@@ -32,16 +32,14 @@ class CompletionRecoveryTests(unittest.TestCase):
     def check(self, text):
         return validator.validate_completion_text(text, require_completion_check=True)
 
-    def hook(self, text, *, retry=False, platform="codex", response_purpose="completion",
-             record_review=True, review_verdict="supported"):
+    def hook(self, text, *, retry=False, platform="codex", record_review=True, review_verdict="supported"):
         from test_completion_skill_evidence import StopHookSkillEvidenceTests
         env = {key: value for key, value in os.environ.items()
                if not key.startswith('GHOST_ALICE_')
                and key not in {'CODEX_THREAD_ID', 'CLAUDE_CODE_ENTRYPOINT'}}
         with tempfile.TemporaryDirectory() as temporary:
             StopHookSkillEvidenceTests._review_format_fixture(
-                Path(temporary), platform, text, env, review_verdict,
-                response_purpose=response_purpose, record_review=record_review)
+                Path(temporary), platform, text, env, review_verdict, record_review=record_review)
             result = subprocess.run(
                 [sys.executable, "-B", str(HOOK), "--platform", platform],
                 input=json.dumps({"session_id": "fixture-stop", "last_assistant_message": text,
@@ -50,13 +48,12 @@ class CompletionRecoveryTests(unittest.TestCase):
             )
         return json.loads(result.stdout)
 
-    def test_declared_completion_requires_proof_independent_of_prose(self):
+    def test_closure_prose_without_a_block_is_not_a_submission(self):
         for text in ('The task is complete.', '작업을 완료했습니다.',
                      'The review is not complete.', '작업 완료 여부를 설명합니다.'):
             for platform in ('codex', 'claude'):
                 with self.subTest(text=text, platform=platform):
-                    payload = self.hook(text, platform=platform)
-                    assert_stop_observation(self, payload, issue='requires a [completion-check]')
+                    assert_stop_observation(self, self.hook(text, platform=platform, record_review=False))
 
     def test_reviewed_explanation_does_not_infer_completion_from_prose(self):
         for text in ('The retained record says the review is complete.',
@@ -64,15 +61,12 @@ class CompletionRecoveryTests(unittest.TestCase):
                      'The review is not complete.', '작업 완료 여부를 설명합니다.'):
             for platform in ('codex', 'claude'):
                 with self.subTest(text=text, platform=platform):
-                    assert_stop_observation(self, self.hook(text, platform=platform,
-                        response_purpose='explanation'))
+                    assert_stop_observation(self, self.hook(text, platform=platform))
 
-    def test_unreviewed_explanation_is_not_accepted_from_nonclosure_wording(self):
+    def test_unreviewed_explanation_passes_without_inferring_completion(self):
         for text in ('No work has been executed. Here are the tradeoffs.',
                      '검증은 미완료이며 결과의 한계를 설명합니다.'):
-            payload = self.hook(text, response_purpose='explanation', record_review=False)
-            assert_stop_observation(self, payload, issue='response-assessment-required',
-                repair_target='response_review')
+            assert_stop_observation(self, self.hook(text, record_review=False))
 
     def test_readonly_completion_retains_proof_and_review_validation(self):
         supported = VALID.replace('Business result: 82 hours 40 minutes.',
@@ -224,7 +218,7 @@ class CompletionRecoveryTests(unittest.TestCase):
 
     def test_reviewed_unresolved_report_can_end_without_false_success(self):
         text = "I have not verified that the tests pass. Verification remains unresolved."
-        assert_stop_observation(self, self.hook(text, retry=True, response_purpose='explanation'))
+        assert_stop_observation(self, self.hook(text, retry=True))
 
     def test_skill_self_report_does_not_replace_authenticated_review(self):
         for platform in ('claude', 'codex'):
@@ -234,12 +228,12 @@ class CompletionRecoveryTests(unittest.TestCase):
                 self.assertNotIn('Invoke the Claude Code Skill tool', payload['response_assessment']['body_issue'])
                 assert_stop_observation(self, self.hook(VALID, platform=platform))
 
-    def test_explanation_label_never_bypasses_actual_closure_validation(self):
+    def test_closure_prose_under_a_label_is_not_a_completion_submission(self):
         payload = self.hook("[task-router]\n- work-kind: nonexecution\n\nExplanation: the task is complete.")
-        assert_stop_observation(self, payload, issue="requires a [completion-check]")
+        assert_stop_observation(self, payload)
 
     def test_fenced_completion_example_needs_no_recovery(self):
-        payload = self.hook("Example:\n```text\n[completion-check]\n- claim-evidence-map:\n```\nUse that shape.", response_purpose="explanation")
+        payload = self.hook("Example:\n```text\n[completion-check]\n- claim-evidence-map:\n```\nUse that shape.")
         assert_stop_observation(self, payload)
         self.assertNotIn("systemMessage", payload)
 
@@ -248,29 +242,28 @@ class CompletionRecoveryTests(unittest.TestCase):
                      "    [completion-check]\n    The task is complete.\n",
                      "> Quoted example:\nThe task is complete.\n[completion-check]\n"):
             with self.subTest(text=text):
-                payload = self.hook(text, response_purpose='explanation')
+                payload = self.hook(text)
                 assert_stop_observation(self, payload)
                 self.assertNotIn("systemMessage", payload)
 
-    def test_long_example_preserves_stop_validation_of_outside_closure(self):
+    def test_long_example_followed_by_closure_prose_is_not_a_submission(self):
         text = "````text\n```\n[completion-check]\n```\n````\n\nThe task is complete."
         payload = self.hook(text)
-        assert_stop_observation(self, payload, issue="requires a [completion-check]")
+        assert_stop_observation(self, payload)
 
     def test_balanced_explicit_multiline_quote_needs_no_stop_recovery(self):
         for opening, closing in (("“", "”"), ('"', '"')):
             text = "A sample response is:\n" + opening + "The task is complete.\n[completion-check]\n- claim-evidence-map:\n" + closing
             with self.subTest(text=text):
-                payload = self.hook(text, response_purpose='explanation')
+                payload = self.hook(text)
                 assert_stop_observation(self, payload)
                 self.assertNotIn("systemMessage", payload)
 
-    def test_inline_quote_boundaries_cannot_bypass_stop_validation(self):
+    def test_inline_quotes_around_closure_prose_are_not_a_submission(self):
         for literal in ("OK.", "pending.", "(Next section)"):
             text = f'The command returned "{literal}"\n\nThe task is complete.\n\n"[boundary-contract]"'
             with self.subTest(text=text):
-                payload = self.hook(text)
-                assert_stop_observation(self, payload, issue="requires a [completion-check]")
+                assert_stop_observation(self, self.hook(text, record_review=False))
 
     def test_inline_quotes_cannot_hide_a_malformed_unquoted_control_block(self):
         text = 'The command returned "OK."\n\n[completion-check]\n- claim-evidence-map:\n\n"[boundary-contract]"'
@@ -281,7 +274,7 @@ class CompletionRecoveryTests(unittest.TestCase):
         for prefix in ("> - ", "> 1. ", "> 1. > "):
             text = prefix + "Example output:\nThe task is complete.\n[completion-check]\n"
             with self.subTest(text=text):
-                payload = self.hook(text, response_purpose='explanation')
+                payload = self.hook(text)
                 assert_stop_observation(self, payload)
                 self.assertNotIn("systemMessage", payload)
 
@@ -289,7 +282,7 @@ class CompletionRecoveryTests(unittest.TestCase):
         prefix = "> - > ```\n>   > code\n>   > ```\n>\n> A quoted paragraph.\n"
         for tail in ("The task is complete.\n[completion-check]\n", "> The task is complete.\n> [completion-check]\n"):
             with self.subTest(tail=tail):
-                payload = self.hook(prefix + tail, response_purpose='explanation')
+                payload = self.hook(prefix + tail)
                 assert_stop_observation(self, payload)
                 self.assertNotIn("systemMessage", payload)
 

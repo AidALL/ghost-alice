@@ -155,7 +155,7 @@ The current-session assistant applies task-router to form the current semantic r
 
 A new input marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap, intake or security. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
 
-The optional response_purpose is `execution | explanation | approval-wait | partial | completion`; legacy v1 defaults to execution. Changing purpose neither revises the contract nor marks a criterion met. An actual completion/partial control marker or registered purpose `completion` declares a completion submission; prose and selected execution work alone do not. Explanatory, waiting or partial responses can retain continuing selected work without a new completion submission. The current-session assistant explicitly routes and verifies new completion claims under the owning workflow.
+An actual completion or partial control block in the answer declares a completion submission; prose and selected execution work alone do not. An answer without a control block retains continuing selected work without a new completion submission. When the user has requested an authenticated review of such an answer, the recorded review binds that exact text, and the Stop observer judges the answer against that record. The current-session assistant explicitly routes and verifies new completion claims under the owning workflow.
 
 A direct answer or a confirmation question follows the common contract without agent-side ledger access or route registration. Hook observation still stales the prior projection, and semantic persistence waits for the next authorized normal route. An already supplied internal host handoff may carry a terminal projection; without it the projection remains absent. These restrictions do not prohibit authorized Core recording repair on a normal route.
 
@@ -167,15 +167,8 @@ Each owned criterion carries both work_unit_id and contract_revision; a partial/
 {
   "schema_version": "response-route.v1",
   "routing_surface": {
-    "intent_relation": "continuation",
-    "primary_request": "implement the approved contract",
     "response_mode": "normal",
-    "response_order": "imperative-result-first-after-necessary-work",
-    "change_depth": "structural",
-    "focus_layer": "meso",
-    "verification_complexity": "level-2",
     "boundary_contract": "required",
-    "forced_visibility": "no",
     "reason": "continuing authorized work"
   },
   "work_units": [{
@@ -190,18 +183,7 @@ Each owned criterion carries both work_unit_id and contract_revision; a partial/
 }
 ```
 
-The routing_surface requires response_mode (`normal | direct-response | clarification-only`) and boundary_contract (`required | n/a`). The other fields in the example and causal_axis are optional work judgments: the assistant supplies them when they affect the downstream decision, and Core validates supplied values without inventing omitted judgments. Supplied primary_request, causal_axis and reason are compressed nonempty summaries of at most 500 characters; an inapplicable causal_axis is omitted. Optional enum values are:
-
-| Field | Values |
-| --- | --- |
-| intent_relation | new, continuation, accepted-continuation, changed, correction, ambiguous |
-| response_order | causal-answer-first-after-necessary-evidence, imperative-result-first-after-necessary-work, clarification-question-only, resolved-intent-first |
-| change_depth | minimal, localized, structural, systemic |
-| focus_layer | micro, meso, macro, meta |
-| verification_complexity | level-1, level-2, level-3 |
-| forced_visibility | yes, no |
-
-A supplied terminal response_order must agree with response_mode. Focus layer and verification complexity are independent. Unknown fields/schema/enums, malformed supplied values, duplicate references, inconsistent owners, unadmitted selection and unbound references raise RouteSchemaError with code route-schema. Optional explanations do not relax current input, boundary reference, owner, admission or criterion/source validation.
+The routing_surface requires response_mode (`normal | direct-response | clarification-only`) and boundary_contract (`required | n/a`). The optional reason is a compressed nonempty summary of at most 500 characters. Unknown fields/schema/enums, malformed supplied values, duplicate references, inconsistent owners, unadmitted selection and unbound references raise RouteSchemaError with code route-schema. The optional reason does not relax current input, boundary reference, owner, admission or criterion/source validation.
 
 Selection covers only this response and may be empty. Terminal direct-response/clarification-only projections cannot select execution units; writer and reader reject that contradiction, and completion selection never publishes it. Unselected execution units may remain without activating work. A requested lookup selects normal execution; a terminal explanation or explicit stop clears execution selection while retaining backlog/proof. An invalid route does not exempt an actual closure claim from proof.
 

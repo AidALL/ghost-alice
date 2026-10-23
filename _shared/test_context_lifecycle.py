@@ -502,7 +502,7 @@ class ContextLifecycleTests(unittest.TestCase):
 
     def test_source_backed_explanation_requires_no_artificial_execution_unit(self):
         candidate = self.fixture.candidate()
-        candidate.update(work_units=[], selected_work_unit_ids=[], selected_criteria=[], response_purpose='explanation')
+        candidate.update(work_units=[], selected_work_unit_ids=[], selected_criteria=[])
         self.fixture.record(candidate)
         self.record()
         self.assertEqual(len(self.select()[1]), 1)

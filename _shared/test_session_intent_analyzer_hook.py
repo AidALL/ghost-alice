@@ -110,11 +110,8 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         coords = dict(root=self.ledger_root, platform='claude', session_id=session)
         ledger_api.record_turn(**coords, raw_user_input='Do the authorized work.', source='hook')
         before = ledger_api.read_session_state(**coords)
-        candidate = dict(schema_version='response-route.v1', response_purpose='explanation',
-            routing_surface=dict(intent_relation='continuation', primary_request='Explain the work',
-                causal_axis='n/a', response_mode='normal', response_order='resolved-intent-first',
-                change_depth='localized', focus_layer='meso', verification_complexity='level-1',
-                boundary_contract='n/a', forced_visibility='no', reason='Existing human request'),
+        candidate = dict(schema_version='response-route.v1',
+            routing_surface=dict(response_mode='normal', boundary_contract='n/a', reason='Existing human request'),
             work_units=[], selected_work_unit_ids=[], selected_criteria=[])
         ledger_api.record_response_route(**coords, expected_input_event_id=before['latest_input_event_id'],
             candidate=candidate, boundary_ref=None)

@@ -76,17 +76,9 @@
       "clarification-only",
       "direct-response"
     ],
-    "response_order": [
-      "causal-answer-first-after-necessary-evidence",
-      "imperative-result-first-after-necessary-work",
-      "clarification-question-only",
-      "resolved-intent-first"
-    ],
-    "next_required": [
-      "boundary-contract",
-      "skill",
-      "none",
-      "user-input"
+    "boundary_contract": [
+      "required",
+      "n/a"
     ]
   },
   "terminal_routes": {

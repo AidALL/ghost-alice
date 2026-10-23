@@ -51,7 +51,7 @@ For a new current-turn closure:
 4. Compare each claim with its original sources and criterion, then separately judge the complete draft against the user's objective and constraints. Follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) to submit both judgments to Core. Core authenticates and stores them; code does not decide their meaning.
 5. Deliver the supported reviewed answer with its applicable completion or partial control under the owner reference's delivery procedure.
 
-Explaining an unchanged prior result is not a new completion submission and does not refresh its evidence time. Core selects completion processing from an actual completion/partial control marker or registered `response_purpose=completion`; it does not infer completion from prose or selected execution work. The current-session assistant identifies and explicitly routes its new completion claims through this workflow. Never describe an old check as freshly executed.
+Explaining an unchanged prior result is not a new completion submission and does not refresh its evidence time. Core selects completion processing from an actual completion/partial control marker; it does not infer completion from prose or selected execution work. The current-session assistant identifies and explicitly routes its new completion claims through this workflow. Never describe an old check as freshly executed.
 
 ## Retained original results and delivery
 
@@ -69,7 +69,7 @@ Copying proof preserves its source and original time. For recording, follow the 
 
 ## Completion-Check Format
 
-The control's `scope` describes completion evidence coverage. In `[partial-check]`, `scope: partial` means that declared required criteria remain unresolved. It is independent of the response-route's `focus_layer`, which selects the judgment target (`micro`, `meso`, `macro` or `meta`). A macro judgment can therefore have partial evidence coverage. The assistant preserves both meanings when preparing the answer; it does not substitute a focus value for the required partial control.
+The control's `scope` describes completion evidence coverage. In `[partial-check]`, `scope: partial` means that declared required criteria remain unresolved. It is independent of the focus named in the answer's `[focus: …]` line, which selects the judgment target (`micro`, `meso`, `macro` or `meta`). A macro judgment can therefore have partial evidence coverage. The assistant preserves both meanings when preparing the answer; it does not substitute a focus value for the required partial control.
 
 For a new full closure, place `[completion-check]` before the supported summary. Declare every acceptance criterion and map each claim to its criterion, evidence and bare `pass` or `fail` verdict. Put `claim`, `criterion`, `evidence` and `verdict` on separate physical lines. A full block requires `unverified: none`; a failed verdict proves failure, not overall success.
 
