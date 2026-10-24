@@ -53,6 +53,13 @@ All proposed gateway modules remain under `_shared/`, beside the existing entryp
 `context_gateway_transaction` consumes the effects interface in `context_gateway_model`; the entrypoint supplies `context_gateway_platform`. The transaction therefore does not import the concrete platform adapter. `context_gateway_plan` imports only the model and standard-library parsing/rendering utilities. Lower modules never import the entrypoint or their callers.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
     CLI["Gateway CLI / Python API"] --> ENTRY["context_gateway_install: composition"]
     INSTALL["General installer / managed source update: affected replacement"] --> ENTRY
@@ -103,6 +110,13 @@ The plan's permission to mutate is operation-specific. It is not a general infer
 `context_gateway_model.py` declares data types; it does not invoke an AI model and is not an execution stage. The other modules import those types. The arrows below identify the values actually passed between modules:
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
     E["install: normalize arguments"] -->|"Request: operation + exact paths"| I["inventory: read through platform"]
     I -->|"Inventory: snapshots + service observations"| P["plan: compare ownership and M against D"]
@@ -116,6 +130,13 @@ An independent result is available only to the general update/removal guard rout
 ## Common entry order
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
     R["Request: operation and exact target set"] --> L["Acquire / reuse shared installer operation lock"]
     L --> I["Read inventory: files, binding, state, service"]
@@ -152,6 +173,13 @@ Every error includes its phase, stable identifier and concise cause. "Held" is a
 ## Installation and refresh order
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
     P["Approved plan and unchanged inputs"] --> S{"Prior service present?"}
     S -->|"Owned and present"| STOP["Stop prior service; confirm absence"]
@@ -179,6 +207,13 @@ First install and refresh share the execution engine. Their differences are expl
 ## Detachment and removal order
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
     TARGETS["Preview actual Core deletion targets"] --> INVENTORY["Inspect gateway and complete dependency set"]
     INVENTORY --> AFFECTED{"Selected deletion affects gateway?"}
@@ -216,6 +251,13 @@ An argv-only check is insufficient because the ledger and native directories are
 ## Single recovery order
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
     F["Failure after execution starts"] --> C{"Candidate could be present?"}
     C -->|"Yes"| STOP["Stop candidate and confirm absence"]

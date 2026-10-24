@@ -17,6 +17,13 @@ Counts retain their declared unit. A unique finding count differs from physical 
 The responding model judges each claim against original evidence, then judges the complete answer against the user's objective. Core authenticates those judgments and source bindings. A review receipt returns status and references; it does not repeat the answer body. The model submits its reviewed draft through native output. An unfavorable review or missing prerequisite remains unresolved under the [review procedure](../../coding-convention/verification-before-completion/references/response-review.md).
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
   M["Responding model: claims and whole-answer judgments"] --> C["Core: authenticate bindings"]
   C -->|Status and references| M

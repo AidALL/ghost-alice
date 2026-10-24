@@ -263,6 +263,13 @@ Claude 인스톨러는 매니페스트가 선택한 애드온의 `Skill(...)` �
 Ghost-ALICE 공통 거버넌스는 프로젝트와 업무 분야에 관계없이 적용됩니다. 정상 작업 경로에서 현재 세션 어시스턴트는 관리되는 `~/.codex/AGENTS.md` 로더가 지정한 공통 계약 파일을 읽습니다. 인스톨러는 같은 디렉터리의 `ghost-alice-governance.md`에 그 계약을 기록합니다. Claude Code에는 `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`의 관리 블록으로 공통 계약을 직접 제공합니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 추가하며, 공통 절차의 복사본을 별도로 제공하지 않습니다. 사용자 지시와 프로젝트 고유 제약이 우선합니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
     S["플랫폼 공통 계약 소스"] --> I["인스톨러가 소유한 블록 갱신"]
     I --> C["Codex 로더 + 공통 계약 파일"]

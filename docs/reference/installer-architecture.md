@@ -108,6 +108,13 @@ A copy's `files` maps each relative path to `sha256:<hex>` of its bytes, and a c
 `installed_payload.update` is the one writer of record sections and `installed_payload.restore` puts back a copy a publish saved. Both write through a temporary file and a rename, and refuse unless the install lock belongs to the calling process or its parent. A record this installer cannot read, such as another schema version, stays unchanged while the files still publish. `--status` and `--doctor` print one summary line of the platform's targets in the record and one line per target that differs from it. Targets without a baseline are counted and not compared, and a match is reported only for the targets that were compared; the record does not change their result.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TB
     REQ["installer.transaction builds one publish request and calls publish with the participants the record names"]
     JR["publish writes rollbacks/txid/journal.json (prepare) and a copy of the record"]
@@ -135,6 +142,13 @@ Gateway registration, refresh and detachment use six `_shared/context_gateway_*`
 The registration reads the runtime target the latest publish wrote from the install record and writes only the three service files: the launch agent, `state.json` and the provider blocks in Codex `config.toml`. It copies no module: the service runs the runtime `_shared` and the companion script the installer publishes, and the record's `targets` say which bytes those are, so Core must be installed first. The state directory must lie outside that runtime, links followed. Without a `service` section the command registers a new listener and refuses an existing launch agent, state directory entry or provider block the record does not name. With one, it refreshes with the same port and scope when the three files are as the section records them, and stops before any change when one of them changed outside the installer (exit 2): review the file, then run the command again.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
     REC[("install record: targets and service")]
     PUB["publish (installer.transaction)"]

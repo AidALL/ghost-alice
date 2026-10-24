@@ -263,6 +263,13 @@ The installer owns only the marked Ghost-ALICE block in each global rule file. I
 Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the current-session assistant reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. User instructions and project-specific constraints retain precedence.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
     S["Platform common-contract source"] --> I["Installer replaces owned block"]
     I --> C["Codex loader + common-contract file"]

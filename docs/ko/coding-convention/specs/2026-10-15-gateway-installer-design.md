@@ -28,6 +28,13 @@ Language: [🇺🇸 English](../../../coding-convention/specs/2026-10-15-gateway
 `model.py`는 실행 단계가 아니라 다른 모듈이 사용하는 자료형의 정의입니다. AI 모델이나 별도 판단 모델을 추가하지 않습니다. `plan`은 model과 표준 파서만 참조합니다. 관측과 실행 모듈은 model의 인터페이스를 통해 전달받은 어댑터를 사용하며, 구체적인 platform 모듈은 진입점이 조립합니다. 하위 모듈은 진입점이나 호출자를 다시 참조하지 않습니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
     CALL["일반 설치·관리형 소스 갱신·Core 제거"] --> E["install: 진입·조립"]
     E --> I["inventory: 관측"]
@@ -43,6 +50,13 @@ flowchart TD
 위 화살표는 코드 의존관계와 조립 관계입니다. 실제 자료 전달 순서는 다음과 같습니다. 계획 모듈이 조사 모듈을 호출하거나 실행 모듈이 계획 모듈을 재호출하지 않습니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
     E["진입점"] -->|"Request: 작업·정확한 경로"| I["조사"]
     I -->|"Inventory: 원본·서비스 관측값"| P["판단·계획"]
@@ -90,6 +104,13 @@ flowchart LR
 ## 설치·갱신 순서
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
     P["계획과 원본 재확인"] --> S{"소유한 이전 서비스가 존재하는가"}
     S -->|"예"| STOP["중지·부재 확인"]

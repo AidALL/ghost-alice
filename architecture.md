@@ -7,6 +7,13 @@ Ghost-ALICE Core is the collection of how the generative backend works under thi
 ## Structure and boundaries
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TB
   subgraph GA["Ghost-ALICE"]
     C["Core: how the generative backend works under this philosophy<br/>common contract, skills, Core code"]
@@ -47,6 +54,13 @@ While a request runs, each participant has one responsibility.
 | Core code | Binds work, sources and both judgments to the exact native input, and records and authenticates them. |
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
   U["User purpose and authority"] --> M["Responding model: select and perform work"]
   M -->|Authorized tool requests| T["Native host: tools and permissions"]
@@ -69,6 +83,13 @@ The model chooses the next judgment target: micro for an individual result, meso
 The model performs the work already authorized by the current request before final delivery. At the response boundary, the model asks whether a currently actionable required follow-up remains. No means an answer with the supported result and any unresolved conditions. Yes means that answer plus recommended additional work, its reason and the next needed information. Core can authenticate this feedback but does not schedule a new request or return from answer delivery to work selection. No actionable follow-up does not establish whole completion: required conditions may still depend on missing authority or external support.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
   R["Current requested work performed and results assessed"] --> N{"Currently actionable required follow-up?"}
   N -->|No| A["Answer: supported result and unresolved conditions"]
@@ -84,6 +105,13 @@ A later user request starts the next native model invocation; Core schedules non
 Use existing originals through their source locations. Preserve a separate body only when a required comparison or recovery depends on it and its original may change or disappear. Long passages, answers and tool results are retrieved when their contents are needed. Ghost-ALICE selects information for the recipient's current decision. Once that decision is made, later handoffs carry the current conclusion, uncertainty, unresolved work and source locations. Current summaries replace obsolete summaries. The audit history stays in separate records for the period each record's rule sets: [Runtime State Retention](docs/reference/repository-structure.md#runtime-state-retention) lists the rules, such as 14 days for hook session logs, and the Core ledger keeps its rows without a time limit.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
   U["Purpose and unresolved conditions"] --> D["Select information"]
   O["Original sources"] -->|Needed content| D
@@ -104,6 +132,13 @@ The gateway records why it leaves a request unchanged: no authenticated supporte
 Installation preserves the listener binding, confirms service shutdown before replacing files and enables the provider after readiness. A failed candidate is recovered from preserved artifacts and service state.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
   P["Retrieval purpose"] --> M["Model: read and judge remaining need"]
   M --> C["Core code: authenticate the post-use judgment"]

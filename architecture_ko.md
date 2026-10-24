@@ -7,6 +7,13 @@ Ghost-ALICE Core는 생성 백엔드가 이 철학대로 동작하는 방식의 
 ## 구조와 경계
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TB
   subgraph GA["Ghost-ALICE"]
     C["Core: 생성 백엔드가 이 철학대로 동작하는 방식<br/>공용 계약, 스킬, Core 코드"]
@@ -47,6 +54,13 @@ Core와 어댑터가 Ghost-ALICE이고, 호스트와 생성 백엔드는 그 밖
 | Core 코드 | 작업·출처·두 판단을 정확한 네이티브 입력에 연결하고 기록·인증합니다. |
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
   U["사용자 목적과 권한"] --> M["응답 모델: 작업 선택과 수행"]
   M -->|승인된 도구 요청| T["네이티브 호스트: 도구와 권한"]
@@ -69,6 +83,13 @@ flowchart TD
 모델은 현재 요청에서 이미 승인된 작업을 수행한 뒤 최종 답변을 전달합니다. 답변 종료 시점에 모델은 지금 진행 가능한 필수 후속 작업이 있는지 판단합니다. 아니오이면 지원되는 결과와 미해결 조건을 답변하고, 예이면 그 답변에 추천하는 추가 작업·이유·다음 필요 정보를 포함합니다. Core는 이 피드백을 인증할 수 있지만 새 요청을 예약하거나 답변 표시에서 작업 선택으로 되돌아가지 않습니다. 진행 가능한 후속 작업이 없다는 판단만으로 전체 완료가 성립하지는 않습니다. 필수 조건이 권한이나 외부 지원을 기다리고 있을 수 있습니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TD
   R["현재 요청의 작업 수행과 결과 판단"] --> N{"지금 진행 가능한 필수 후속 작업이 있는가?"}
   N -->|아니오| A["답변: 지원되는 결과와 미해결 조건"]
@@ -84,6 +105,13 @@ flowchart TD
 기존 원본은 출처 위치로 참조합니다. 별도 본문은 필요한 비교나 복구가 그 내용에 의존하고 원본이 바뀌거나 사라질 수 있을 때 보존합니다. 긴 원문·답변·도구 결과도 내용이 필요한 경우에 조회합니다. Ghost-ALICE는 수신자의 현재 판단에 필요한 정보를 선택합니다. 해당 판단이 끝나면 이후 인계에는 현재 결론·불확실성·미해결 작업·출처 위치를 전달합니다. 현재 요약은 이전 요약을 교체합니다. 감사 이력은 별도 기록에 남고, 각 기록의 규칙이 정한 기간만큼 보존됩니다. [런타임 상태 보존](docs/ko/reference/repository-structure.md#runtime-state-retention)이 그 규칙을 나열합니다. 예를 들어 훅 세션 로그는 14일 보존하고, Core 원장은 행을 기한 없이 유지합니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
   U["목적과 미해결 조건"] --> D["필요한 정보 선택"]
   O["원본 자료"] -->|필요한 본문| D
@@ -104,6 +132,13 @@ Claude의 클라이언트 측 치환에는 서명 없는 내용과 명시적으�
 설치 과정은 연결 정보를 유지하고, 파일 교체 전에 서비스 종료를 확인하며, 준비가 확인된 뒤 공급자를 활성화합니다. 설치 후보가 실패하면 보존한 파일과 서비스 상태로 복구합니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
   P["조회 목적"] --> M["모델: 읽고 남은 필요 판단"]
   M --> C["Core 코드: 사용 후 판단 인증"]

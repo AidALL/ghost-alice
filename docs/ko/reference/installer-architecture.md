@@ -108,6 +108,13 @@ git 훅 단계(2단계)는 저장소의 `core.hooksPath`를 `git config --local`
 `installed_payload.update`는 기록 섹션을 작성하는 유일한 함수이고, `installed_payload.restore`는 게시가 보관한 사본으로 기록을 복원합니다. 두 함수는 임시 파일에 작성한 뒤 이름을 변경하여 교체하며, 설치 잠금이 호출한 프로세스나 그 부모 프로세스의 것이 아니면 거부합니다. 다른 schema version처럼 이 인스톨러가 읽을 수 없는 기록은 변경하지 않고, 파일 게시는 계속합니다. `--status`와 `--doctor`는 기록에서 해당 플랫폼의 대상을 요약한 줄 하나와, 기록과 다른 대상마다 줄 하나를 출력합니다. 기준값이 없는 대상은 개수만 알리고 비교하지 않으며, 일치는 비교한 대상에 대해서만 보고합니다. 기록은 두 명령의 결과를 변경하지 않습니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart TB
     REQ["installer.transaction이 게시 요청 하나를 작성하고, 기록이 지정한 참여자와 함께 publish를 호출"]
     JR["publish가 rollbacks/txid/journal.json(prepare)과 기록 사본을 작성"]
@@ -135,6 +142,13 @@ flowchart TB
 등록 명령은 설치 기록에서 가장 최근 게시가 작성한 런타임 대상을 조회하고 서비스 파일 세 개만 작성합니다. launch agent, `state.json`, Codex `config.toml`의 provider 블록입니다. 모듈을 복사하지 않습니다. 서비스는 인스톨러가 게시한 런타임 `_shared`와 동반 스크립트를 실행하며, 어느 바이트인지는 기록의 `targets`가 말합니다. 그래서 Core를 먼저 설치합니다. 상태 디렉터리는 링크를 따라간 경로로도 그 런타임 밖에 있어야 합니다. `service` 섹션이 없으면 명령은 새 리스너를 등록하며, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록이 있으면 거부합니다. 섹션이 있으면 서비스 파일 세 개가 섹션의 기록과 같을 때 같은 포트와 scope로 갱신하고, 어느 하나가 인스톨러 밖에서 바뀌었으면 아무것도 바꾸기 전에 종료합니다(종료 코드 2). 사용자가 그 파일을 검토한 뒤 명령을 다시 실행합니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
     REC[("설치 기록: targets와 service")]
     PUB["게시(installer.transaction)"]

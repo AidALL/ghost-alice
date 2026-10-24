@@ -17,6 +17,13 @@ Language: [🇺🇸 English](../../policies/tool-output-semantics.md) | 🇰🇷
 응답 모델은 각 주장을 원본 근거와 비교한 뒤 답변 전체를 사용자 목적과 비교합니다. Core는 두 판단과 출처 연결을 인증합니다. 검토 영수증은 상태와 참조를 반환하며 답변 본문을 반복하지 않습니다. 모델은 검토한 원고를 네이티브 출력으로 제출합니다. 부정적인 검토나 누락된 선행 조건은 [검토 절차](../../../coding-convention/verification-before-completion/references/response-review.md)에 따라 미해결로 남습니다.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
   M["응답 모델: 주장과 답변 전체 판단"] --> C["Core: 연결 인증"]
   C -->|상태와 참조| M

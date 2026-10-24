@@ -7,6 +7,13 @@ The optional macOS gateway installer requires Python 3.14 or newer with `compres
 The gateway keeps native headers within each configured provider origin. Unambiguous same-origin redirects retain the existing transport behavior; cross-origin, HTTPS-to-HTTP, or ambiguous native redirect targets return HTTP 502 without forwarding credentials or an unsafe redirect to the native client. The gateway forwards every path of a configured provider; it reduces only the known request endpoints of clients in its installation scope. An unknown provider path returns 404, and an unreachable model server or refused redirect returns 502 with the reason in the provider's error format. Validated redirect headers are relayed as absolute URLs resolved against the upstream base, so the native client cannot reinterpret them against the HTTP loopback address. Successful upstream response bytes remain unchanged.
 
 ```mermaid
+---
+config:
+  look: classic
+  layout: dagre
+  flowchart:
+    curve: linear
+---
 flowchart LR
     W[Core work] --> N[Information needed by actual next work]
     N --> D[Needed original details]
