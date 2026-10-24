@@ -169,7 +169,9 @@ class TransactionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "admitted"):
             self.mark(expected_criterion=self.criterion())
 
-    def test_concurrent_subprocess_updates_retain_all_fields(self):
+    def test_concurrent_subprocess_updates_lose_no_write(self):
+        # A list update carries the complete current list, so each writer extends the list it read inside the
+        # transaction. A writer that read a stale state would rebuild the list without the others' values.
         self.write()
         worker = '''import importlib.util, pathlib, sys, time
 spec=importlib.util.spec_from_file_location("ledger", sys.argv[1])
@@ -177,7 +179,7 @@ m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
 apply=m.apply_delta
 def slow(state, delta):
     time.sleep(0.08)
-    return apply(state, delta)
+    return apply(state, {"constraints": state.get("constraints", []) + delta["constraints"]})
 m.apply_delta=slow
 root=pathlib.Path(sys.argv[2])
 (root / ("ready-" + sys.argv[3])).touch()
@@ -228,7 +230,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertTrue(reads)
         self.assertEqual(failures, [])
 
-    def test_semantic_history_preserves_corrections_without_raw_extra_fields(self):
+    def test_semantic_history_records_corrections_as_digests_without_raw_fields(self):
         self.write(raw_user_input="RAW_USER_PROMPT", intent_delta={"current_goal": "Inspect configuration"})
         anchor = self.observed_id()
         self.write(expected_input_event_id=anchor, intent_delta={
@@ -240,9 +242,15 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         })
         rows = self.events()
         changes = rows[-1]["semantic_changes"]
-        self.assertEqual(changes["current_goal"], {"before": "Inspect configuration", "after": "Repair the diagnosed configuration"})
-        self.assertEqual(changes["latest_scope"]["after"], {"allowed": ["configuration"], "prohibited": ["publish"]})
-        self.assertEqual(changes["decisions"]["after"][0]["summary"], "Repair authorized")
+        digest = self.ledger.json_digest
+        # History keeps digests of the allowlisted projection; security reasons and hints are not semantic fields.
+        self.assertEqual(set(changes), {"current_goal", "latest_scope", "decisions"})
+        self.assertEqual(changes["current_goal"], {"before_digest": digest("Inspect configuration"),
+                                                   "after_digest": digest("Repair the diagnosed configuration")})
+        self.assertEqual(changes["latest_scope"]["after_digest"],
+                         digest({"allowed": ["configuration"], "prohibited": ["publish"]}))
+        self.assertEqual(changes["decisions"]["after_digest"],
+                         digest([{"id": "repair", "summary": "Repair authorized", "superseded": False}]))
         self.assertEqual(rows[-1]["input_event_id"], anchor)
         self.assertEqual(rows[-1]["ledger_revision"], 2)
         for raw in ("RAW_USER_PROMPT", "RAW_SCOPE", "RAW_TOOL_OUTPUT", "RAW_REASON", "RAW_HINT"):
