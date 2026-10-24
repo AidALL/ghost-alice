@@ -31,7 +31,7 @@ class OperatingRuleContractTest(unittest.TestCase):
                        'execute the applicable workflow for the current input'):
             self.assertIn(phrase, reference)
 
-    def test_scope_depth_and_sufficient_change_are_distinct_decisions(self):
+    def test_focus_further_checks_and_sufficient_correction_are_distinct_decisions(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         for term in ('micro', 'meso', 'macro', 'meta', 'runs a further check only when'):
             self.assertIn(term, common)

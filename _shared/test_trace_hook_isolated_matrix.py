@@ -238,12 +238,12 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             with self.subTest(platform=platform, form=form):
                 self.assert_allow(self.stop(platform, text))
 
-    def test_purposes_without_screen_trace(self):
-        purposes = ("Here is why the hook requests that evidence.",
-                    "What missing input determines the next action?", "A bounded general explanation.",
-                    "I have not verified that the tests pass. Verification remains unresolved.",
-                    "The unsupported completion claim is withdrawn; calculation remains unverified.")
-        for platform, profile, text in itertools.product(PLATFORMS, PROFILES, purposes):
+    def test_answers_that_claim_no_success_pass_without_screen_trace(self):
+        answers = ("Here is why the hook requests that evidence.",
+                   "What missing input determines the next action?", "A bounded general explanation.",
+                   "I have not verified that the tests pass. Verification remains unresolved.",
+                   "The unsupported completion claim is withdrawn; calculation remains unverified.")
+        for platform, profile, text in itertools.product(PLATFORMS, PROFILES, answers):
             with self.subTest(platform=platform, profile=profile, text=text):
                 self.assert_allow(self.stop(platform, text, entries=[prompt(), reply(text)], profile=profile))
         for platform, profile in itertools.product(PLATFORMS, PROFILES):

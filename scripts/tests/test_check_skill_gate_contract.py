@@ -765,7 +765,7 @@ class SkillGateContractTest(unittest.TestCase):
         self.assertIn("Hash/provenance evidence establishes identity, drift and merge safety", merge)
         self.assertIn("current contract and behavior evidence determine which semantics to retain", merge)
 
-    def test_korean_routing_docs_preserve_primary_request_and_terminal_objective(self) -> None:
+    def test_korean_session_gate_matrix_points_to_the_english_owners(self) -> None:
         for relative in ("docs/ko/policies/session-gate-matrix.md",):
             text = (REPO_ROOT / relative).read_text()
             # Korean aid points to the English canonical owner instead of duplicating rules.
