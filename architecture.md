@@ -2,16 +2,49 @@
 
 언어: 🇺🇸 English | [🇰🇷 한국어](architecture_ko.md)
 
-Core supplies shared instructions, native input bindings and authenticated work and evidence records for the model responding in a conversation. The responding model performs authorized work and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/Design-Principles) makes the user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
+Ghost-ALICE Core is the collection of how the generative backend works under this philosophy: the common contract, the skills, and the Core code (hooks, ledger and context gateway). An adapter translates Core for one host, such as Claude Code or Codex: the instruction template, hook event names, transcript format and configuration. The host runs the generative backend and its tools, and the responding model follows Core's instructions, performs authorized work and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/Design-Principles) makes the user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
+
+## Structure and boundaries
+
+```mermaid
+flowchart TB
+  subgraph GA["Ghost-ALICE"]
+    C["Core: how the generative backend works under this philosophy<br/>common contract, skills, Core code"]
+    AC["Claude Code adapter<br/>instruction template, hook events, transcript format, settings"]
+    AX["Codex adapter<br/>instruction template, hook events, transcript format, config"]
+  end
+  subgraph OUT["Outside Ghost-ALICE, not enforceable"]
+    HC["Host: Claude Code"]
+    HX["Host: Codex"]
+    BC["Generative backend: Claude"]
+    BX["Generative backend: GPT"]
+  end
+  U["User: objective and authority"]
+  AD["Add-on, such as Autopilot"]
+  C -->|translated for Claude Code| AC
+  C -->|translated for Codex| AX
+  AC -->|installed into| HC
+  AX -->|installed into| HX
+  HC -->|model requests| BC
+  HX -->|model requests through the context gateway| BX
+  U -->|input| HC
+  U -->|input| HX
+  C -.->|Stop notice anyone can read| AD
+```
+
+Core and the adapters are Ghost-ALICE; the hosts and the generative backends are not, so Ghost-ALICE instructs and records but cannot force them. The user and the add-ons also stand outside. Host formats that still sit in Core code, such as Codex configuration, Claude tool names and the Codex patch format, belong to the adapters. The wiki's [design principles: structure boundaries](https://github.com/AidALL/ghost-alice/wiki/Design-Principles#structure-boundaries) explains why each boundary sits where it does.
 
 ## Responsibilities and flow
+
+While a request runs, each participant has one responsibility.
 
 | Participant | Responsibility |
 | --- | --- |
 | User | Supplies the objective, constraints and authority. |
-| Responding model | Selects and performs work, compares claims with originals, then judges the complete answer. |
+| Responding model | Follows Core's instructions: selects and performs work, compares claims with originals, then judges the complete answer. |
+| Adapter | Translates Core's instructions, hook events, transcripts and configuration for its host. |
 | Native host | Executes tools, enforces permissions, constructs model requests and displays answers. |
-| Core | Supplies the shared procedure, binds work, sources and both judgments to the exact native input, and authenticates their records. |
+| Core code | Binds work, sources and both judgments to the exact native input, and records and authenticates them. |
 
 ```mermaid
 flowchart TD
@@ -23,7 +56,7 @@ flowchart TD
   J --> W["Judge the complete answer against the objective"]
   W -->|Correction or needed investigation within the current request| M
   W --> R{"Completion claims or requested authenticated review"}
-  R -->|Required| C["Core: authenticate both judgments and source bindings"]
+  R -->|Required| C["Core code: authenticate both judgments and source bindings"]
   R -->|Routine explanation| D["Responding model: submit the answer"]
   C -->|Status and references| D
   D --> H["Native host: display the answer"]
@@ -62,19 +95,19 @@ Healthy hooks supply current receipts and changed decision-relevant conditions. 
 
 The native host independently retains conversation history and builds model requests. Selecting a concise Ghost-ALICE handoff does not remove earlier native messages. Prompt caching, compaction and lower token counts do not by themselves demonstrate that obsolete source bodies have been excluded. Usage observations and native display checks establish only what their original records show.
 
-A configured request adapter applies supported explicit content choices at the server boundary. When actual continued work requires changing the input representation of used material, the model compares that material with the next decision. It does not predict a lifetime or add a judgment call to every lookup. Core authenticates the native session, current input and original material independently of work authority. The adapter substitutes explicitly judged bodies with conclusions, unresolved conditions and an original retrieval reference when the protocol supports that change. It preserves needed or unjudged general source bodies and sends server answers unchanged. Original history remains available for explicit retrieval.
+The context gateway applies supported explicit content choices at the server boundary. When actual continued work requires changing the input representation of used material, the model compares that material with the next decision. It does not predict a lifetime or add a judgment call to every lookup. Core code authenticates the native session, current input and original material independently of work authority. The gateway substitutes explicitly judged bodies with conclusions, unresolved conditions and an original retrieval reference when the protocol supports that change. It preserves needed or unjudged general source bodies and sends server answers unchanged. Original history remains available for explicit retrieval.
 
 Claude client substitution requires unsigned content and explicitly disabled thinking. Editing preceding messages would break their signed reasoning prefix. With an existing native context-management capability, the gateway can instead request server clearing for authenticated whole tool-result omissions that the provider's tool-name policy represents exactly. It preserves signed history and reasoning settings, protects necessary results of the same tool, and observes provider application separately from the request. Arbitrary text and producer-subbody replacement remain unsupported under signed thinking. The [native context procedure](_shared/context_lifecycle.md#apply-and-observe) owns these support conditions. Source conformance, installation and actual native adoption remain distinct observations.
 
-The adapter records why it leaves a request unchanged: no authenticated supported input change, a failed read, or an unexpected processing error. In each case it forwards the original request. Selection only removes material, so a selection the adapter cannot complete never stops transmission. A request from outside the installation scope or for an endpoint without reduction support also goes upstream unchanged. Only an unknown provider path or an unreachable model server returns an error, and the error carries its reason.
+The gateway records why it leaves a request unchanged: no authenticated supported input change, a failed read, or an unexpected processing error. In each case it forwards the original request. Selection only removes material, so a selection the gateway cannot complete never stops transmission. A request from outside the installation scope or for an endpoint without reduction support also goes upstream unchanged. Only an unknown provider path or an unreachable model server returns an error, and the error carries its reason.
 
 Installation preserves the listener binding, confirms service shutdown before replacing files and enables the provider after readiness. A failed candidate is recovered from preserved artifacts and service state.
 
 ```mermaid
 flowchart LR
   P["Retrieval purpose"] --> M["Model: read and judge remaining need"]
-  M --> C["Core: authenticate the post-use judgment"]
-  H["Native history"] --> A["Request adapter"]
+  M --> C["Core code: authenticate the post-use judgment"]
+  H["Native history"] --> A["Context gateway"]
   C --> A
   A -->|Supported selected input| S["Model server"]
   A -->|No authenticated supported change, or a read or processing failure: original request and recorded reason| S
@@ -84,7 +117,7 @@ flowchart LR
 
 ## Evidence and native delivery
 
-The model makes two distinct judgments: each claim against original evidence, and the complete answer against the user's objective and constraints. Core authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The native host displays the model's answer. Core's Stop guard checks the submitted review records; it does not generate missing judgments or schedule another task.
+The model makes two distinct judgments: each claim against original evidence, and the complete answer against the user's objective and constraints. Core code authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The native host displays the model's answer. Core code's Stop hook checks the submitted review records; it does not generate missing judgments or schedule another task.
 
 The [verification procedure](coding-convention/verification-before-completion/SKILL.md) owns evidence selection and completion claims. Its [response review procedure](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review) owns the recording handoff. Other documents refer to that procedure rather than duplicating its commands.
 
@@ -92,4 +125,4 @@ Supported results retain their original evidence, verification times and correct
 
 ## Necessary-work declaration
 
-The responding model declares current necessary unprocessed work, its reason and the next needed information in Core's existing route. Core authenticates the selected criteria, current human, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core records this declaration and schedules none of the work it names; only a later user request starts that work.
+The responding model declares current necessary unprocessed work, its reason and the next needed information in the route that Core code stores. Core code authenticates the selected criteria, current human, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core code records this declaration and schedules none of the work it names; only a later user request starts that work.

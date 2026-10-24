@@ -62,7 +62,7 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         for phrase in ('Reuse unchanged evidence at its original time and source',
                        'A recording error does not refute the business result or authorize replay',
-                       'Core authenticates records and source bindings',
+                       'Core code authenticates records and source bindings',
                        '`verification-before-completion` owns evidence selection, the per-claim and whole-answer judgments'):
             self.assertIn(phrase, common)
         verification = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
