@@ -62,6 +62,26 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
         _py("-m", "unittest", "discover", "-s", "merge-companion/scripts"),
     ),
     TestGroup(
+        "session-intent-ledger",
+        "session-intent ledger, transaction, criterion revision and SQLite authority tests",
+        _py("-m", "unittest", "discover", "-s", "session-intent-analyzer/scripts", "-p", "test_*.py"),
+    ),
+    TestGroup(
+        "agent-security-scan",
+        "agent security surface scan tests",
+        _py("-m", "unittest", "discover", "-s", "agent-security-scan/scripts", "-p", "test_*.py"),
+    ),
+    TestGroup(
+        "compact-handoff",
+        "compaction handoff record tests",
+        _py("-m", "unittest", "discover", "-s", "compact-handoff/scripts", "-p", "test_*.py"),
+    ),
+    TestGroup(
+        "skill-evolution",
+        "io-trace analysis, recommendation aggregation and session monitor tests",
+        _py("-m", "unittest", "discover", "-s", "skill-evolution/scripts", "-p", "test_*.py"),
+    ),
+    TestGroup(
         "installer-runtime-detection",
         "thin shells: PowerShell 7.6 guard, Python 3.11+ runtime lookup and the cli call",
         _py(

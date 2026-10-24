@@ -1,4 +1,5 @@
 import contextlib
+import fnmatch
 import io
 import os
 import runpy
@@ -153,6 +154,10 @@ class InstallerCompatMatrixTest(unittest.TestCase):
             "shared-all",
             "scripts-all",
             "skill-gate-contract",
+            "session-intent-ledger",
+            "agent-security-scan",
+            "compact-handoff",
+            "skill-evolution",
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, output)
@@ -188,6 +193,40 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         for name in ("shared-all", "scripts-all"):
             with self.subTest(name=name):
                 self.assertIn("-v", groups[name].command)
+
+    def test_every_tracked_test_file_runs_in_a_group(self) -> None:
+        # CI runs only what a group reaches; a test file outside every group drifts from the code it tests unseen.
+        listed = subprocess.run(["git", "ls-files", "-z", "--", "*test_*.py"], cwd=REPO_ROOT,
+                                capture_output=True, check=True).stdout.decode("utf-8")
+        test_files = {Path(path) for path in listed.split("\0") if path and Path(path).name.startswith("test_")}
+        namespace = runpy.run_path(str(RUNNER))
+        reached = set()
+        for group in namespace["TEST_GROUPS"]:
+            command = list(group.command)
+            reached.update(Path(*argument.split(".")).with_suffix(".py") for argument in command
+                           if argument.startswith(("scripts.tests.", "_shared.")))
+            if "discover" not in command:
+                continue
+            start = Path(command[command.index("-s") + 1])
+            pattern = command[command.index("-p") + 1] if "-p" in command else "test*.py"
+            for path in test_files:
+                if not (path.is_relative_to(start) and fnmatch.fnmatch(path.name, pattern)):
+                    continue
+                # Python 3.11 discovers tests in a subfolder only when every folder below the start is a package.
+                folders = path.parent.relative_to(start).parts
+                if all((REPO_ROOT / start / Path(*folders[:depth]) / "__init__.py").is_file()
+                       for depth in range(1, len(folders) + 1)):
+                    reached.add(path)
+        runner = RUNNER.read_text(encoding="utf-8")
+        unrun = []
+        for path in sorted(test_files):
+            if "TestCase" in (REPO_ROOT / path).read_text(encoding="utf-8"):
+                if path not in reached:
+                    unrun.append(str(path))
+            elif str(path) not in runner:
+                # unittest discovery imports a pytest-only file without running it; the runner must name it.
+                unrun.append(str(path))
+        self.assertEqual(unrun, [])
 
     def test_runner_replaces_hostile_temp_env_only_for_its_child_process(self) -> None:
         namespace = runpy.run_path(str(RUNNER))
