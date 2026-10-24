@@ -70,7 +70,6 @@ class HistoricalResponseReviewTests(unittest.TestCase):
 
     def explanation_route(self):
         route = self.fixture.candidate()
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
 
     def judgments(self, candidate):
@@ -105,9 +104,8 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         return json.loads(result.stdout)
 
     def test_actual_report_reuses_review_through_stop_without_new_completion(self):
-        self.assertIsNotNone(self.assess()['body_issue'])
-        diagnostic = self.run_stop(REJECTED_STATUS_REPORT)
-        assert_stop_observation(self, diagnostic, issue='response-assessment-required', repair_target='response_review')
+        self.assertIsNone(self.assess()['body_issue'])
+        assert_stop_observation(self, self.run_stop(REJECTED_STATUS_REPORT))
         before = fixtures.ledger.read_session_state(**self.fixture.coords)['acceptance_criteria']
         reviewed = self.review_report()
         result = self.assess()
@@ -130,13 +128,13 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         self.observation.write_text(original)
         self.fixture.event = self.fixture.intake('A different status question')
         self.explanation_route()
-        self.assertIsNotNone(self.assess()['body_issue'])
+        self.assertIsNone(self.assess()['body_issue'])
         self.review_report()
         self.assertIsNone(self.assess()['body_issue'])
 
     def test_registered_review_owns_the_response(self):
         body = 'Existing tests cover recording, not complete business continuation.'
-        self.assertIsNotNone(self.assess(body)['body_issue'])
+        self.assertIsNone(self.assess(body)['body_issue'])
         candidate = self.api.prepare_response_review(self.source, response_text=body, source_paths=[],
             reuse_candidate=self.original['candidate_reference'])
         self.api.record_response_review(self.source, candidate['candidate_reference'], dict(
@@ -176,7 +174,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
 
 
 class UnroutedNativeWorkTests(unittest.TestCase):
-    def test_claude_file_write_requires_route_without_inventing_completion(self):
+    def test_claude_file_write_without_route_passes_without_inventing_completion(self):
         fixture = fixtures.ResponseRouteTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
@@ -205,8 +203,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
                     last_assistant_message=body)), text=True, capture_output=True, check=True,
                 env=dict(os.environ, **source, CLAUDE_CODE_ENTRYPOINT='claude-desktop', PYTHONDONTWRITEBYTECODE='1'))
             return json.loads(result.stdout)
-        rejected = stop()
-        assert_stop_observation(self, rejected, issue='route-unavailable', repair_target='response_route')
+        assert_stop_observation(self, stop())
         candidate = fixture.candidate()
         candidate['work_units'][0]['owner']['platform'] = 'claude'
         candidate['selected_criteria'] = []
@@ -278,7 +275,7 @@ class NativeActivityTests(unittest.TestCase):
         self.assertIsNone(explicit['body_issue'])
         self.assertEqual(explicit['validation_text'], self.payload['last_assistant_message'])
 
-    def test_codex_native_stop_requires_route_for_typed_current_tool_calls(self):
+    def test_codex_native_stop_passes_typed_current_tool_calls_without_route(self):
         hook = Path(__file__).with_name('claude_stop_verification_hook.py')
         for kind in ('custom_tool_call', 'function_call'):
             with self.subTest(kind=kind):
@@ -286,10 +283,10 @@ class NativeActivityTests(unittest.TestCase):
                 result = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
                     input=json.dumps(self.payload), text=True, capture_output=True, check=True,
                     env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
-                rejected = json.loads(result.stdout)
-                assert_stop_observation(self, rejected, issue='route-unavailable', repair_target='response_route')
+                assert_stop_observation(self, json.loads(result.stdout))
                 assessed = self.assess()
                 self.assertEqual(assessed.get('native_activity', {}).get('status'), 'observed')
+                self.assertIsNone(assessed['body_issue'])
                 self.assertFalse(assessed['has_evidence_marker'])
 
     def test_codex_tool_activity_reads_complete_records_only(self):
@@ -332,17 +329,19 @@ class NativeActivityTests(unittest.TestCase):
             env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
         assert_stop_observation(self, json.loads(stopped.stdout))
 
-        # Tool use after the new question still requires the current route.
+        # Tool use after the new question is current activity; a plain answer needs no route.
         rows.append(self.item('function_call', 'followup', name='exec', call_id='current-work'))
         self.write_rows(rows)
-        self.assertTrue(self.assess()['body_issue'].startswith('route-unavailable:'))
+        assessed = self.assess()
+        self.assertEqual(assessed['native_activity']['status'], 'observed')
+        self.assertIsNone(assessed['body_issue'])
 
         # Native hook feedback is not a new human input boundary.
         feedback = self.item('message', 'followup', role='user',
             content=[dict(type='input_text', text=question)])
         feedback['payload']['internal_chat_message_metadata_passthrough']['content_item_kinds'] = ['unknown']
         self.write_rows(rows + [feedback])
-        self.assertTrue(self.assess()['body_issue'].startswith('route-unavailable:'))
+        self.assertEqual(self.assess()['native_activity']['status'], 'observed')
 
         # A different observed input cannot borrow the earlier human boundary.
         self.fixture.event = self.fixture.intake('A different current input.')
@@ -359,8 +358,7 @@ class NativeActivityTests(unittest.TestCase):
             with self.subTest(payload=payload):
                 assessed = self.assess(payload)
                 self.assertEqual(assessed.get('native_activity', {}).get('status'), 'unavailable')
-                self.assertTrue(assessed['body_issue'].startswith('native-activity-unavailable:'))
-                self.assertEqual(assessed['repair_target'], 'response_route')
+                self.assertIsNone(assessed['body_issue'])
         self.write_rows([dict(type='session_meta', payload=dict(id='foreign'))] + self.rows[1:])
         self.assertEqual(self.assess().get('native_activity', {}).get('status'), 'unavailable')
         self.transcript.write_text('{"type":')
@@ -379,7 +377,7 @@ class NativeActivityTests(unittest.TestCase):
                 message=dict(role='user', content='The helper finished.'))])
         assessed = self.assess()
         self.assertEqual(assessed.get('native_activity', {}).get('status'), 'observed')
-        self.assertTrue(assessed['body_issue'].startswith('route-unavailable:'))
+        self.assertIsNone(assessed['body_issue'])
 
 
 class NativeCompletionTests(unittest.TestCase):
@@ -423,14 +421,12 @@ class NativeCompletionTests(unittest.TestCase):
             env=dict(os.environ, **self.source, CODEX_THREAD_ID='current', PYTHONDONTWRITEBYTECODE='1'))
         assert_stop_observation(self, json.loads(executed.stdout))
 
-    def test_canonical_completion_purpose_requires_proof_without_lexical_hint(self):
-        candidate = self.fixture.candidate()
-        candidate['response_purpose'] = 'completion'
-        self.fixture.record(candidate)
+    def test_prose_without_a_control_block_is_not_a_completion_submission(self):
+        self.fixture.record(self.fixture.candidate())
         text = 'Everything requested is represented here.'
         result = self.service()(self.source, text=text, phase='final')
-        self.assertTrue(result['completion_route']['required_completion_check'])
-        self.assertIsNotNone(result['body_issue'])
+        self.assertFalse(result['completion_route']['required_completion_check'])
+        self.assertIsNone(result['body_issue'])
         self.assertEqual(result['input_event_id'], self.fixture.event)
         self.assertEqual(result['body_digest'], 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
 

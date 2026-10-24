@@ -34,7 +34,6 @@ from completion_check_validator import (
     looks_like_completion_claim, extract_all_control_blocks,
     validate_completion_text,
 )
-from response_purpose import NONCLOSING_PURPOSES, response_purpose
 from response_route import RouteSchemaError, validate_routing_surface
 
 SCHEMA_VERSION = "completion-route.v1"
@@ -89,10 +88,6 @@ def _bound_selection(context, claim_scope):
     if route is None:
         return "missing", [], []
     if not isinstance(route, dict) or route.get("schema_version") != "response-route.v1":
-        return "invalid", [], []
-    try:
-        response_purpose(route)
-    except ValueError:
         return "invalid", [], []
     if route.get("status") != "ready":
         return "stale", [], []
@@ -213,11 +208,9 @@ def select_completion_route(context, claim_scope, evidence_state):
     text = claim_scope.get("text", "")
     partial_evidence = (bool(extract_all_control_blocks(text, "partial-check")) and
                         validate_completion_text(text) is None)
-    # The assistant records completion intent through the owned route or an
-    # explicit control block. Prose words cannot supply that judgment.
+    # Only an explicit control block declares a completion claim; prose words cannot supply it.
     completion_submission = looks_like_completion_claim(text)
     binding, units, criteria = _bound_selection(context, claim_scope)
-    purpose = response_purpose(context["response_route"]) if binding == "current" else None
     phase = claim_scope.get("phase", "final")
     route = _mapping(context.get("response_route"))
     input_id = context.get("input_event_id")
@@ -226,11 +219,9 @@ def select_completion_route(context, claim_scope, evidence_state):
             and all(route.get(k) == context.get(k) for k in ("platform", "session_id"))
             and route.get("current_input_event_id") == input_id
             and route.get("input_event_id") != input_id)))
-    completion_submission = completion_submission or (phase == "final" and purpose == "completion")
     # A selected execution unit is work context, not a final-response claim.
     # Only a structured completion or partial submission closes a response.
-    nonclosing_response = (not completion_submission and not partial_evidence
-                           and (phase == "final" or purpose in NONCLOSING_PURPOSES))
+    nonclosing_response = not completion_submission and not partial_evidence and phase == "final"
     checks = _mapping(context.get("verification_plan")).get("checks", [])
     malformed_plan = not isinstance(checks, list) or any(not isinstance(c, dict) or not _qualified_key_valid(c)
                                                        or not isinstance(c.get("check_id"), str) or not c["check_id"] for c in checks)
@@ -273,4 +264,4 @@ def select_completion_route(context, claim_scope, evidence_state):
                 selected_work_unit_ids=[u["work_unit_id"] for u in units], selected_criteria=criteria,
                 unit_decisions=unit_decisions, required_completion_check=completion_submission,
                 required_partial_check=partial_evidence,
-                route_binding=binding, response_purpose=purpose, reason=reason)
+                route_binding=binding, reason=reason)

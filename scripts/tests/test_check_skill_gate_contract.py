@@ -65,13 +65,7 @@ CONTRACT = {
     "on_task_definition": ["necessity-gate"],
     "routing_surface": {
         "response_mode": ["normal", "clarification-only", "direct-response"],
-        "response_order": [
-            "causal-answer-first-after-necessary-evidence",
-            "imperative-result-first-after-necessary-work",
-            "clarification-question-only",
-            "resolved-intent-first",
-        ],
-        "next_required": ["boundary-contract", "skill", "none", "user-input"],
+        "boundary_contract": ["required", "n/a"],
     },
     "terminal_routes": {
         "clarification-only": {
@@ -128,6 +122,28 @@ class SkillGateContractTest(unittest.TestCase):
             issues = run_contract_checks(root)
             messages = "\n".join(issue.message for issue in issues)
             self.assertIn("clarification-only terminal route", messages)
+
+    def test_routing_surface_field_outside_the_route_schema_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            contract_path = root / "skill-catalog" / "session-gates.json"
+            contract = json.loads(contract_path.read_text(encoding="utf-8"))
+            contract["routing_surface"]["next_required"] = ["user-input"]
+            contract_path.write_text(json.dumps(contract), encoding="utf-8")
+
+            messages = "\n".join(issue.message for issue in run_contract_checks(root))
+            self.assertIn("routing_surface.next_required is not a response-route control", messages)
+
+    def test_catalog_routing_surface_matches_the_route_schema(self) -> None:
+        sys.path.insert(0, str(REPO_ROOT / "_shared"))
+        import response_route
+
+        catalog = json.loads((REPO_ROOT / "skill-catalog" / "session-gates.json").read_text(encoding="utf-8"))
+        surface = catalog["routing_surface"]
+        self.assertEqual(set(surface), response_route.ROUTING_CONTROLS)
+        for field, values in surface.items():
+            self.assertEqual(set(values), response_route.ROUTING_ENUMS[field])
 
     def test_missing_direct_response_machine_route_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -724,15 +740,18 @@ class SkillGateContractTest(unittest.TestCase):
                          "_shared/blind_behavior.py", "_shared/fresh_agent_session.py"):
             self.assertIn(fragment, record)
 
-    def test_task_router_preserves_primary_request_axis(self) -> None:
+    def test_route_surface_carries_only_controls_and_reason(self) -> None:
         router = (REPO_ROOT / "task-router/SKILL.md").read_text()
         schema = (REPO_ROOT / "session-intent-analyzer/references/ledger-schema.md").read_text()
         self.assertIn('user objective', router)
         self.assertIn('Do not replace a requested repair with a report', router)
         self.assertIn('ledger-schema.md#core-response-projection', router)
-        for field in ('primary_request', 'causal_axis', 'response_order'):
+        for field in ('response_mode', 'boundary_contract', '"reason"'):
             self.assertIn(field, schema)
-        self.assertIn('optional', schema)
+        for field in ('primary_request', 'causal_axis', 'response_order', 'change_depth', 'focus_layer',
+                      'verification_complexity', 'intent_relation', 'forced_visibility', 'verification depth'):
+            self.assertNotIn(field, schema)
+            self.assertNotIn(field, router)
 
     def test_purpose_and_evidence_selection_contract_has_owner_and_consumers(self) -> None:
         boundary = (REPO_ROOT / "boundary-contract/SKILL.md").read_text()
@@ -746,7 +765,7 @@ class SkillGateContractTest(unittest.TestCase):
         self.assertIn("Hash/provenance evidence establishes identity, drift and merge safety", merge)
         self.assertIn("current contract and behavior evidence determine which semantics to retain", merge)
 
-    def test_korean_routing_docs_preserve_primary_request_and_terminal_objective(self) -> None:
+    def test_korean_session_gate_matrix_points_to_the_english_owners(self) -> None:
         for relative in ("docs/ko/policies/session-gate-matrix.md",):
             text = (REPO_ROOT / relative).read_text()
             # Korean aid points to the English canonical owner instead of duplicating rules.

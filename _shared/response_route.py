@@ -14,9 +14,6 @@ import sqlite3
 import sys
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from response_purpose import response_purpose
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "session-intent-analyzer" / "scripts"))
 try:
     import session_intent_ledger as ledger
@@ -27,16 +24,10 @@ except ModuleNotFoundError as exc:
 
 SCHEMA_VERSION = "response-route.v1"
 ROUTING_ENUMS = {
-    "intent_relation": {"new", "continuation", "accepted-continuation", "changed", "correction", "ambiguous"},
     "response_mode": {"normal", "clarification-only", "direct-response"},
-    "response_order": {"causal-answer-first-after-necessary-evidence", "imperative-result-first-after-necessary-work",
-                       "clarification-question-only", "resolved-intent-first"},
-    "change_depth": {"minimal", "localized", "structural", "systemic"},
-    "focus_layer": {"micro", "meso", "macro", "meta"},
-    "verification_complexity": {"level-1", "level-2", "level-3"},
-    "boundary_contract": {"required", "n/a"}, "forced_visibility": {"yes", "no"},
+    "boundary_contract": {"required", "n/a"},
 }
-ROUTING_TEXT = {"primary_request", "causal_axis", "reason"}
+ROUTING_TEXT = {"reason"}
 ROUTING_CONTROLS = {"response_mode", "boundary_contract"}
 CANDIDATE_KEYS = {"schema_version", "routing_surface", "work_units", "selected_work_unit_ids", "selected_criteria"}
 UNIT_KEYS = {"work_unit_id", "contract_revision", "kind", "admitted", "owner"}
@@ -111,20 +102,14 @@ def _unique(values, label):
 
 
 def validate_routing_surface(value):
-    """Validate route controls and supplied judgments without filling omissions."""
-    surface = _object(value, ROUTING_CONTROLS, "routing_surface",
-                      optional=set(ROUTING_ENUMS) | ROUTING_TEXT)
-    for key in set(surface) & set(ROUTING_ENUMS):
-        choices = ROUTING_ENUMS[key]
-        if not isinstance(surface[key], str) or surface[key] not in choices:
+    """Validate the route controls and the optional reason."""
+    surface = _object(value, ROUTING_CONTROLS, "routing_surface", optional=ROUTING_TEXT)
+    for key in ROUTING_CONTROLS:
+        if not isinstance(surface[key], str) or surface[key] not in ROUTING_ENUMS[key]:
             raise RouteSchemaError(f"unknown routing_surface.{key}")
     for key in set(surface) & ROUTING_TEXT:
         if not isinstance(surface[key], str) or not surface[key].strip() or len(surface[key]) > 500:
             raise RouteSchemaError(f"routing_surface.{key} must be a compressed nonempty summary")
-    required_order = {"clarification-only": "clarification-question-only", "direct-response": "resolved-intent-first"}
-    if ("response_order" in surface and surface["response_mode"] in required_order
-            and surface["response_order"] != required_order[surface["response_mode"]]):
-        raise RouteSchemaError("terminal response mode and response order disagree")
     return surface
 
 
@@ -294,11 +279,7 @@ def refresh_continuation_feedback(projection, root, connection):
 def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
                             boundary_ref: str | None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Validate current selection against owned criteria and immutable contracts."""
-    _object(candidate, CANDIDATE_KEYS, "candidate", optional={"response_purpose", "continuation_feedback"})
-    try:
-        purpose = response_purpose(candidate)
-    except ValueError as exc:
-        raise RouteSchemaError(str(exc)) from exc
+    _object(candidate, CANDIDATE_KEYS, "candidate", optional={"continuation_feedback"})
     if candidate["schema_version"] != SCHEMA_VERSION:
         raise RouteSchemaError("unsupported response route schema")
     surface = validate_routing_surface(candidate["routing_surface"])
@@ -374,7 +355,6 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         "schema_version": SCHEMA_VERSION, "status": "ready", "platform": state["platform"],
         "session_id": state["session_id"], "input_event_id": state["latest_input_event_id"],
         "boundary_ref": boundary_ref, "routing_surface": deepcopy(surface),
-        "response_purpose": purpose,
         "work_units": list(units.values()), "selected_work_unit_ids": deepcopy(selected_ids),
         "selected_criteria": resolved,
     }
@@ -396,11 +376,7 @@ def project_stored_response_route(state, expected_input_event_id=None):
             or stored.get("platform") != state.get("platform") or stored.get("session_id") != state.get("session_id")):
         raise RouteSchemaError("stored response route schema or owner is invalid")
     _object(stored, CANDIDATE_KEYS | {"status", "platform", "session_id", "input_event_id", "boundary_ref"},
-            "stored response route", optional={"response_purpose", "continuation_feedback"})
-    try:
-        purpose = response_purpose(stored)
-    except ValueError as exc:
-        raise RouteSchemaError(str(exc)) from exc
+            "stored response route", optional={"continuation_feedback"})
     validate_routing_surface(stored["routing_surface"])
     if not isinstance(stored["input_event_id"], str) or not stored["input_event_id"]:
         raise RouteSchemaError("stored route input event is invalid")
@@ -440,7 +416,6 @@ def project_stored_response_route(state, expected_input_event_id=None):
     if 'continuation_feedback' in stored:
         _validate_continuation_feedback(stored['continuation_feedback'], stored['selected_criteria'], resolved=True)
     route = deepcopy(stored)
-    route["response_purpose"] = purpose
     if (route.get("input_event_id") != current or state.get("canonical_input_event_id") != current
         or state.get('current_context_input_event_id')):
         route["status"] = "stale"

@@ -22,9 +22,7 @@ class CriterionInvalidationTests(unittest.TestCase):
                 expected_criterion=row,completion_check_digest='a'*64)
 
     def route(self,selected=('one','two')):
-        surface=dict(intent_relation='continuation',primary_request='Verify owned outputs',causal_axis='n/a',
-            response_mode='normal',response_order='imperative-result-first-after-necessary-work',change_depth='localized',
-            focus_layer='meso',verification_complexity='level-2',boundary_contract='required',forced_visibility='no',reason='Test')
+        surface=dict(response_mode='normal',boundary_contract='required',reason='Test')
         ledger.record_response_route(**self.coords,expected_input_event_id=self.event,boundary_ref='test',candidate=dict(
             schema_version='response-route.v1',routing_surface=surface,selected_work_unit_ids=list(selected),
             work_units=[dict(work_unit_id=u,contract_revision=1,kind='execution',admitted=True,

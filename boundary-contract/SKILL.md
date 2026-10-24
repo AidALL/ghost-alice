@@ -42,16 +42,17 @@ Human explanations follow the current user language. Keep field names in English
   - <criterion-id>: <verifiable outcome> [source: user-said | interpreted-as | previous-tool | system-doc]
 - open-questions:
   - <unresolved question>
-- test-purpose: none | smoke | regression | contract | domain-rule | visual | integration
 - stop-conditions:
   - <condition stopping dependent work>
 - next-allowed-actions:
   - <permitted next action>
 ```
 
-The current-session assistant includes stop conditions in every contract and classifies tests by the risk they reduce. Before using an additional surface, it applies Authority and renewal above.
+The current-session assistant includes stop conditions in every contract. Before using an additional surface, it applies Authority and renewal above.
 
 ## Phase rules
+
+The phase names the current authority state. The targets known at that moment determine it; it is not a planned sequence.
 
 | Phase | Entry condition | Permitted work |
 | --- | --- | --- |

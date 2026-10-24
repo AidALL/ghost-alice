@@ -84,7 +84,6 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                 'locked-decisions',
                                 'acceptance-criteria',
                                 'open-questions',
-                                'test-purpose',
                                 'stop-conditions',
                                 'next-allowed-actions',
                                 'human-owned',
@@ -544,9 +543,16 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
         routing_surface = {}
     required_routing_values = {
         "response_mode": ("normal", "clarification-only", "direct-response"),
-        "response_order": ("clarification-question-only", "resolved-intent-first"),
-        "next_required": ("user-input",),
+        "boundary_contract": ("required", "n/a"),
     }
+    for field in sorted(set(routing_surface) - set(required_routing_values)):
+        issues.append(
+            ContractIssue(
+                "ERROR",
+                str(contract_path),
+                f"routing_surface.{field} is not a response-route control",
+            )
+        )
     for field, required_values in required_routing_values.items():
         values = routing_surface.get(field, [])
         for required_value in required_values:

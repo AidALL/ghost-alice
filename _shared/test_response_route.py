@@ -36,21 +36,23 @@ class ResponseRouteTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 candidate = self.candidate(units=units)
                 candidate["routing_surface"] = dict(response_mode=mode, boundary_contract=boundary)
-                candidate["response_purpose"] = "explanation" if not units else "execution"
                 self.record(candidate)
                 route = self.api.read_response_route(**self.coords)
                 self.assertEqual(route["routing_surface"], candidate["routing_surface"])
                 self.assertEqual(route["selected_work_unit_ids"], list(units))
                 self.assertEqual([c["work_unit_id"] for c in route["selected_criteria"]], list(units))
 
-    def test_minimal_surface_keeps_controls_and_validates_supplied_judgments(self):
+    def test_surface_accepts_only_controls_and_reason(self):
         self.event = self.setup_owned()
         minimal = dict(response_mode="normal", boundary_contract="required")
-        invalid = [dict(minimal, focus_layer="wide"), dict(minimal, causal_axis=None),
-                   dict(minimal, verification_complexity=[]), dict(minimal, reason=" "),
-                   dict(minimal, unexpected="value"), {"response_mode": "normal"},
-                   {"boundary_contract": "required"}, dict(minimal, response_mode="direct-response",
-                    response_order="imperative-result-first-after-necessary-work")]
+        invalid = [dict(minimal, reason=" "), dict(minimal, unexpected="value"),
+                   {"response_mode": "normal"}, {"boundary_contract": "required"}]
+        for field, value in (("focus_layer", "meso"), ("verification_complexity", "level-2"),
+                             ("change_depth", "localized"),
+                             ("response_order", "imperative-result-first-after-necessary-work"),
+                             ("intent_relation", "continuation"), ("primary_request", "implement"),
+                             ("causal_axis", "n/a"), ("forced_visibility", "no")):
+            invalid.append(dict(minimal, **{field: value}))
         before = ledger.read_session_state(**self.coords)
         for surface in invalid:
             with self.subTest(surface=surface):
@@ -67,7 +69,7 @@ class ResponseRouteTests(unittest.TestCase):
         runtime = Path(self.tmp.name) / "runtime" / "_shared"
         runtime.mkdir(parents=True)
         installed = Path(os.environ.get("GHOST_ALICE_TEST_SHARED_ROOT", ROOT / "_shared"))
-        for name in ("response_route.py", "response_purpose.py"):
+        for name in ("response_route.py",):
             shutil.copy2(installed / name, runtime / name)
         ghost = Path(self.tmp.name) / "ghost"
         manifest = ghost / "install-state" / "codex.json"
@@ -84,27 +86,33 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["status"], "ready")
         self.assertEqual(self.api.read_response_route(**self.coords)["input_event_id"], self.event)
 
-    def test_purpose_changes_without_rewriting_work_contract_or_proof(self):
+    def test_reregistration_does_not_rewrite_work_contract_or_proof(self):
         before = self.legacy_registered()
         self.bind_legacy(before)
         self.record()
         before = ledger.read_session_state(**self.coords)
-        for purpose in ("explanation", "approval-wait", "partial", "completion", "execution"):
-            with self.subTest(purpose=purpose):
-                candidate = self.candidate(); candidate["response_purpose"] = purpose
+        for reason in ("continuing authorized work", "registering the same selection again"):
+            with self.subTest(reason=reason):
+                candidate = self.candidate(); candidate["routing_surface"]["reason"] = reason
                 self.record(candidate)
                 route = self.api.read_response_route(**self.coords)
-                self.assertEqual(route["response_purpose"], purpose)
+                self.assertEqual(route["routing_surface"]["reason"], reason)
                 after = ledger.read_session_state(**self.coords)
                 self.assertEqual(after["work_units"], before["work_units"])
                 self.assertEqual(after["acceptance_criteria"], before["acceptance_criteria"])
                 self.assertEqual(route["selected_work_unit_ids"], ["first"])
 
-    def test_legacy_route_defaults_to_execution_and_unknown_purpose_is_rejected(self):
+    def test_route_rejects_any_response_purpose(self):
         self.event = self.setup_owned()
         self.record()
-        self.assertEqual(self.api.read_response_route(**self.coords)["response_purpose"], "execution")
+        self.assertNotIn("response_purpose", self.api.read_response_route(**self.coords))
         before = ledger.read_session_state(**self.coords)
+        for value in ("completion", "explanation", "skip-checks"):
+            with self.subTest(value=value):
+                candidate = self.candidate(); candidate["response_purpose"] = value
+                with self.assertRaises(self.api.RouteSchemaError):
+                    self.record(candidate)
+                self.assertEqual(ledger.read_session_state(**self.coords), before)
         candidate = self.candidate(); candidate["response_purpose"] = "skip-checks"
         with self.assertRaises(self.api.RouteSchemaError):
             self.record(candidate)
@@ -129,12 +137,8 @@ class ResponseRouteTests(unittest.TestCase):
         return {
             "schema_version": "response-route.v1",
             "routing_surface": {
-                "intent_relation": "continuation", "primary_request": "implement the contract",
-                "causal_axis": "n/a", "response_mode": "normal",
-                "response_order": "imperative-result-first-after-necessary-work",
-                "change_depth": "structural", "focus_layer": "meso",
-                "verification_complexity": "level-2", "boundary_contract": "required",
-                "forced_visibility": "no", "reason": "current authorized implementation",
+                "response_mode": "normal", "boundary_contract": "required",
+                "reason": "current authorized implementation",
             },
             "work_units": [dict(work_unit_id=u, contract_revision=1, kind="execution", admitted=True,
                                 owner={"platform": "codex", "session_id": "current"}) for u in units],
@@ -443,11 +447,10 @@ class ResponseRouteTests(unittest.TestCase):
     def test_terminal_route_rejects_selected_execution_without_mutating_ledger(self):
         self.event = self.setup_owned()
         before = ledger.read_session_state(**self.coords)
-        for mode, order in (("direct-response", "resolved-intent-first"),
-                            ("clarification-only", "clarification-question-only")):
+        for mode in ("direct-response", "clarification-only"):
             with self.subTest(mode=mode):
                 candidate = self.candidate()
-                candidate["routing_surface"].update(response_mode=mode, response_order=order)
+                candidate["routing_surface"].update(response_mode=mode)
                 with self.assertRaisesRegex(self.api.RouteSchemaError, "terminal.*execution"):
                     self.record(candidate)
                 self.assertEqual(ledger.read_session_state(**self.coords), before)
@@ -455,7 +458,7 @@ class ResponseRouteTests(unittest.TestCase):
     def test_terminal_route_may_retain_unselected_execution_backlog(self):
         self.event = self.setup_owned()
         candidate = self.candidate()
-        candidate["routing_surface"].update(response_mode="direct-response", response_order="resolved-intent-first")
+        candidate["routing_surface"].update(response_mode="direct-response")
         candidate["selected_work_unit_ids"] = []
         candidate["selected_criteria"] = []
         route = self.record(candidate)
@@ -467,8 +470,7 @@ class ResponseRouteTests(unittest.TestCase):
         self.event = self.setup_owned()
         self.record()
         state = ledger.read_session_state(**self.coords)
-        state["response_route"]["routing_surface"].update(
-            response_mode="direct-response", response_order="resolved-intent-first")
+        state["response_route"]["routing_surface"].update(response_mode="direct-response")
         with self.assertRaisesRegex(self.api.RouteSchemaError, "terminal.*execution"):
             self.api.project_stored_response_route(state)
 
@@ -486,7 +488,7 @@ class ResponseRouteTests(unittest.TestCase):
                 event = self.intake(request)
                 self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
                 candidate = self.candidate(units=())
-                candidate["routing_surface"].update(response_mode="direct-response", response_order="resolved-intent-first")
+                candidate["routing_surface"].update(response_mode="direct-response")
                 self.record(candidate, event=event)
                 route = self.api.read_response_route(**self.coords)
                 result = select_completion_route(
@@ -503,7 +505,7 @@ class ResponseRouteTests(unittest.TestCase):
         ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
             "acceptance_criteria": [self.criterion(summary="Identify the requested file from the directory lookup")]})
         candidate = self.candidate()
-        candidate["routing_surface"].update(primary_request="find the requested file", reason="authorized directory lookup")
+        candidate["routing_surface"].update(reason="authorized directory lookup")
         self.record(candidate)
         route = self.api.read_response_route(**self.coords)
         key = dict(work_unit_id="first", contract_revision=1, criterion_id="AC1")
@@ -723,7 +725,6 @@ class ResponseRouteTests(unittest.TestCase):
         shutil.copy2(ROOT / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py",
                      install / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py")
         shutil.copy2(ROOT / "_shared" / "response_route.py", install / "_shared" / "response_route.py")
-        shutil.copy2(ROOT / "_shared" / "response_purpose.py", install / "_shared" / "response_purpose.py")
         script = install / "_shared" / "response_route.py"
         import os
         env = dict(os.environ, CODEX_THREAD_ID="current", GHOST_ALICE_SESSION_ID="")

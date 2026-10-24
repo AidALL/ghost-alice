@@ -199,7 +199,6 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_original_scope_survives_nomination_input_and_source_changes(self):
         api = self.api()
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         event = self.fixture.event
         scope = api.prepare_response_scope(self.source, expected_input_event_id=event,
@@ -247,7 +246,6 @@ class CompletionAssessmentTests(unittest.TestCase):
             source_paths=[str(self.observation)])
         self.fixture.event = self.fixture.intake('A later request')
         changed = self.fixture.candidate(units=())
-        changed['response_purpose'] = 'explanation'
         self.fixture.record(changed)
         recovered = api.prepare_response_scope(self.source, expected_input_event_id=event,
             source_paths=[str(self.observation)])
@@ -333,7 +331,6 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_explanation_api_receipts_preserve_explicit_original_retrieval(self):
         api = self.api()
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         claim = 'The captured result shows the footer clear of the list.'
         body = claim + '\n' + ('Long explanation retained for a later comparison.\n' * 2000)
@@ -349,7 +346,6 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_exact_response_record_exposes_native_reuse_reference_without_trim_substitution(self):
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         api = self.api()
         text = 'The captured result shows the footer clear of the list.'
@@ -374,7 +370,6 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_missing_explanation_review_does_not_require_a_completion_contract(self):
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         api = self.api()
         body = 'The retained email requests an invention proposal.'
@@ -397,7 +392,6 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_explanation_requires_claim_review_as_well_as_response_review(self):
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         api = self.api()
         body = 'The captured result shows the footer clear of the list.'
@@ -418,7 +412,6 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_explanation_claims_must_identify_actual_draft_statements(self):
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         api = self.api()
         for claims in (None, [], ['not in the draft'], ['footer', 'footer']):
@@ -429,7 +422,6 @@ class CompletionAssessmentTests(unittest.TestCase):
     def test_explanation_review_survives_planning_changes_on_the_same_owned_input(self):
         api = self.api()
         route = self.fixture.candidate()
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         body = 'The retained observation shows the footer clear of the list.'
         candidate = api.prepare_response_review(self.source, response_text=body,
@@ -440,11 +432,11 @@ class CompletionAssessmentTests(unittest.TestCase):
         original = api.record_response_review(self.source, candidate['candidate_reference'],
             dict(claims=self.claim_judgments(candidate), response=judgment))
 
-        for focus, burden in (('micro', 'level-3'), ('macro', 'level-1'), ('meta', 'level-2')):
-            with self.subTest(focus=focus, burden=burden):
+        for reason in ('Reconsider the next work decision while retaining the same reviewed result.',
+                       'Register the same selection again with another reason.'):
+            with self.subTest(reason=reason):
                 changed = copy.deepcopy(route)
-                changed['routing_surface'].update(focus_layer=focus, verification_complexity=burden,
-                    reason='Reconsider the next work decision while retaining the same reviewed result.')
+                changed['routing_surface'].update(reason=reason)
                 self.fixture.record(changed)
                 import native_completion
                 result = native_completion.assess_native_completion(self.source, text=body, phase='final')
@@ -474,7 +466,6 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_changed_explanation_source_appends_review_without_replacing_original(self):
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         api = self.api()
         body = 'The captured result shows the footer clear of the list.'
@@ -522,7 +513,6 @@ class CompletionAssessmentTests(unittest.TestCase):
 
     def test_fresh_explanation_review_without_completion_contract(self):
         route = self.fixture.candidate(units=())
-        route['response_purpose'] = 'explanation'
         self.fixture.record(route)
         api = self.api()
         body = 'The retained log shows the adapter was rejected before execution.'

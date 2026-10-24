@@ -146,8 +146,7 @@ def _run_hook_command(
     )
 
 
-def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claude",
-                               response_purpose="completion", record_review=True):
+def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claude", record_review=True):
     """Exercise generated commands against explicitly owned synthetic evidence."""
     from claude_stop_verification_hook import _assistant_text_this_turn
     from test_completion_skill_evidence import StopHookSkillEvidenceTests
@@ -174,8 +173,7 @@ def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claud
                 for row in entries))
             payload['transcript_path'] = str(transcript)
         StopHookSkillEvidenceTests._review_format_fixture(Path(temporary), platform, text, hook_env,
-            session_id=payload["session_id"], response_purpose=response_purpose,
-            record_review=record_review)
+            session_id=payload["session_id"], record_review=record_review)
         if callable(command):
             with patch.dict(os.environ, hook_env, clear=True), patch.object(
                 install_hooks, '_home', return_value=Path(temporary)
@@ -893,7 +891,6 @@ class TestMessageLanguage(unittest.TestCase):
             )
             result = _run_reviewed_stop_command(
                 install_hooks.STOP_HOOK_COMMAND,
-                response_purpose="explanation",
                 input_text=json.dumps({"transcript_path": str(transcript)}),
             )
 
@@ -901,7 +898,7 @@ class TestMessageLanguage(unittest.TestCase):
         payload = json.loads(result.stdout)
         assert_stop_observation(self, payload)
 
-    def test_claude_stop_keeps_declared_completion_without_proof_unaccepted(self):
+    def test_claude_stop_passes_closure_prose_without_a_control_block(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             transcript = Path(temp_dir) / "transcript.jsonl"
             transcript.write_text(
@@ -915,11 +912,12 @@ class TestMessageLanguage(unittest.TestCase):
             result = _run_reviewed_stop_command(
                 install_hooks.STOP_HOOK_COMMAND,
                 input_text=json.dumps({"transcript_path": str(transcript)}),
+                record_review=False,
             )
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        assert_stop_observation(self, payload, issue='[completion-check]', repair_target='completion_metadata')
+        assert_stop_observation(self, payload)
 
     def test_internal_instruction_lines_are_english_only(self):
         for command in (
@@ -4011,7 +4009,6 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         result = _run_reviewed_stop_command(
             command,
             platform="codex",
-            response_purpose="explanation",
             input_text=json.dumps({
                 "session_id": "s-codex-wrapped-stop",
                 "hook_event_name": "Stop",
@@ -4027,10 +4024,11 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         self.assertIsNotNone(result.stop_observation)
         assert_stop_observation(self, {'continue': True, 'response_assessment': result.stop_observation})
 
-    def test_codex_stop_keeps_declared_completion_without_proof_unaccepted(self):
+    def test_codex_stop_passes_closure_prose_without_a_control_block(self):
         result = _run_reviewed_stop_command(
             install_hooks.STOP_HOOK_COMMAND_CODEX,
             platform="codex",
+            record_review=False,
             input_text=json.dumps({
                 "hook_event_name": "Stop",
                 "last_assistant_message": "The requested change is complete and tests pass.",
@@ -4039,7 +4037,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
 
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         payload = json.loads(result.stdout)
-        assert_stop_observation(self, payload, issue='[completion-check]', repair_target='completion_metadata')
+        assert_stop_observation(self, payload)
         self.assertNotIn("systemMessage", payload)
 
     def test_wrapped_stop_logs_unaccepted_body_without_native_continuation(self):
@@ -4047,22 +4045,19 @@ class TestForegroundHookPayloads(TempHomeTestCase):
             with self.subTest(platform=platform):
                 command = lambda: install_hooks._entry_command(
                     install_hooks._platform_stop_hook_entry(platform, 'Stop'))
-                result = _run_reviewed_stop_command(command, platform=platform,
-                    response_purpose='explanation', record_review=False,
+                result = _run_reviewed_stop_command(command, platform=platform, record_review=False,
                     input_text=json.dumps(dict(session_id='unreviewed-' + platform,
                         hook_event_name='Stop', last_assistant_message='The source contains two options.')))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout), {'continue': True})
                 self.assertIsNotNone(result.stop_observation)
                 assert_stop_observation(self,
-                    {'continue': True, 'response_assessment': result.stop_observation},
-                    issue='response-assessment-required', repair_target='response_review')
+                    {'continue': True, 'response_assessment': result.stop_observation})
 
     def test_codex_stop_hook_allows_explanatory_response_without_completion_check(self):
         result = _run_reviewed_stop_command(
             install_hooks.STOP_HOOK_COMMAND_CODEX,
             platform="codex",
-            response_purpose="explanation",
             input_text=json.dumps({
                 "hook_event_name": "Stop",
                 "last_assistant_message": "Here is why that hook behavior repeated too much.",

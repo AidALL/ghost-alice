@@ -21,7 +21,7 @@ class OperatingRuleContractTest(unittest.TestCase):
         self.assertIn('stored result or available tool grants no authority', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('Work Selection section', router)
-        self.assertIn('register the Core response-route using the session-start receipt', router)
+        self.assertIn('register the Core response-route at that point, using the session-start receipt', router)
         self.assertIn('the input ID that `--read-intent` returned when this input', router)
 
     def test_reuse_instruction_contract_stays_at_its_owner(self):
@@ -31,9 +31,9 @@ class OperatingRuleContractTest(unittest.TestCase):
                        'execute the applicable workflow for the current input'):
             self.assertIn(phrase, reference)
 
-    def test_scope_depth_and_sufficient_change_are_distinct_decisions(self):
+    def test_focus_further_checks_and_sufficient_correction_are_distinct_decisions(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
-        for term in ('micro', 'meso', 'macro', 'meta', 'Verification depth is a separate choice'):
+        for term in ('micro', 'meso', 'macro', 'meta', 'runs a further check only when'):
             self.assertIn(term, common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('sufficient correction depth', router)
@@ -42,7 +42,7 @@ class OperatingRuleContractTest(unittest.TestCase):
     def test_focus_changes_are_shown_with_a_reason(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         operating = common.split('## Operating Model\n', 1)[1].split('\n## ', 1)[0]
-        for phrase in ('the focus of the next judgment', 'When the focus differs from the last one shown',
+        for phrase in ('the object of the current judgment', 'When the focus differs from the last one shown',
                        '`[focus: micro -> meta]`', 'with a one-phrase reason'):
             self.assertIn(phrase, operating)
         selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]

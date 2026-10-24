@@ -12,10 +12,7 @@ def context():
              for u, k in (("fix", "execution"), ("explain", "nonexecution"), ("backlog", "execution"))]
     criteria = [dict(work_unit_id="fix", contract_revision=1, criterion_id="AC1", id="AC1",
                      summary="Repair the original failure", source="user-said", admitted=True, status="unmet")]
-    surface = dict(intent_relation="continuation", response_mode="normal",
-                   response_order="imperative-result-first-after-necessary-work", change_depth="localized",
-                   focus_layer="micro", verification_complexity="level-2", boundary_contract="n/a",
-                   forced_visibility="no", primary_request="repair", causal_axis="failure", reason="approved")
+    surface = dict(response_mode="normal", boundary_contract="n/a", reason="approved")
     route = dict(schema_version="response-route.v1", status="ready", platform="claude", session_id="session",
                  input_event_id="input-new", current_input_event_id="input-new", boundary_ref=None,
                  routing_surface=surface, work_units=units,
@@ -35,7 +32,7 @@ def evidence(**updates):
 
 class PartialEvidenceRouteTests(unittest.TestCase):
     def test_partial_evidence_is_not_whole_completion(self):
-        ctx = context(); ctx['response_route']['response_purpose'] = 'partial'
+        ctx = context()
         text = '''[partial-check]
 - scope: partial
 - acceptance-criteria:
@@ -55,11 +52,6 @@ class PartialEvidenceRouteTests(unittest.TestCase):
         self.assertTrue(result.get('required_partial_check'))
         self.assertEqual(result['selected_criteria'], ctx['response_route']['selected_criteria'])
 
-    def test_partial_marker_cannot_erase_registered_completion_intent(self):
-        ctx = context(); ctx['response_route']['response_purpose'] = 'completion'
-        result = select_completion_route(ctx, dict(text='[partial-check]\n- scope: partial', phase='final'), {})
-        self.assertTrue(result['required_completion_check'])
-
 
 class CompletionRouteTests(unittest.TestCase):
     def test_minimal_surface_preserves_owned_verification_and_original_proof(self):
@@ -74,8 +66,8 @@ class CompletionRouteTests(unittest.TestCase):
         proof = retained["unit_decisions"][0]["criteria"][0]
         self.assertEqual((proof["proof_ref"], proof["verified_at"]), ("tool-result-old", "2026-10-01T12:00:00Z"))
 
-    def test_supplied_invalid_judgment_cannot_authorize_completion(self):
-        for field, value in (("verification_complexity", []), ("focus_layer", "wide"), ("causal_axis", None)):
+    def test_removed_or_malformed_surface_fields_cannot_authorize_completion(self):
+        for field, value in (("verification_complexity", "level-2"), ("focus_layer", "micro"), ("reason", " ")):
             with self.subTest(field=field):
                 ctx = context(); ctx["response_route"]["routing_surface"][field] = value
                 result = self.select(ctx)
@@ -84,7 +76,7 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertEqual(result["selected_criteria"], [])
 
     def test_prior_result_explanation_preserves_proof(self):
-        ctx = context(); ctx["response_route"]["response_purpose"] = "explanation"
+        ctx = context()
         before = deepcopy(ctx)
         proof = evidence()
         result = self.select(ctx, dict(text="기존 검증 기록에 따르면 로컬 설치 수정을 완료했습니다.",
@@ -95,7 +87,7 @@ class CompletionRouteTests(unittest.TestCase):
         self.assertEqual(ctx, before)
 
     def test_nonclosing_final_preserves_work(self):
-        ctx = context(); ctx["response_route"]["response_purpose"] = "approval-wait"
+        ctx = context()
         for text in ("Here is why the pending change needs approval.", "Please choose the proposed direction."):
             with self.subTest(text=text):
                 result = self.select(ctx, claims=dict(text=text, phase="final"), proof={})
@@ -103,32 +95,17 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertIn("No completion submission", result["reason"])
                 self.assertEqual(result["selected_criteria"], context()["response_route"]["selected_criteria"])
 
-    def test_response_purpose_never_excuses_actual_closure(self):
-        for purpose in ("explanation", "approval-wait", "partial"):
-            ctx = context(); ctx["response_route"]["response_purpose"] = purpose
-            for phase in ("before_tool", "final"):
-                with self.subTest(purpose=purpose, phase=phase):
-                    result = self.select(ctx, dict(text="", phase=phase), {})
-                    self.assertFalse(result["required_completion_check"])
-                    self.assertEqual(result["response_purpose"], purpose)
-                    self.assertEqual(result["selected_work_unit_ids"], ["fix", "explain"])
-            result = self.select(ctx, proof={})
-            self.assertTrue(result["required_completion_check"])
-            self.assertEqual(result["evidence_route"], "fresh_affected")
-
-    def test_unknown_purpose_cannot_authorize_closure(self):
-        ctx = context(); ctx["response_route"]["response_purpose"] = "skip-checks"
-        result = self.select(ctx)
-        self.assertEqual(result["route_binding"], "invalid")
-        self.assertTrue(result["required_completion_check"])
-
-    def test_declared_completion_requires_verification_even_without_prose_match(self):
-        ctx = context(); ctx["response_route"]["response_purpose"] = "completion"
-        claims = dict(text="The checks are green.", phase="final")
-        result = self.select(ctx, claims, {})
+    def test_text_without_a_control_block_never_excuses_actual_closure(self):
+        ctx = context()
+        for phase in ("before_tool", "final"):
+            with self.subTest(phase=phase):
+                result = self.select(ctx, dict(text="", phase=phase), {})
+                self.assertFalse(result["required_completion_check"])
+                self.assertNotIn("response_purpose", result)
+                self.assertEqual(result["selected_work_unit_ids"], ["fix", "explain"])
+        result = self.select(ctx, proof={})
         self.assertTrue(result["required_completion_check"])
         self.assertEqual(result["evidence_route"], "fresh_affected")
-        self.assertEqual(self.select(ctx, claims)["evidence_route"], "reuse")
 
     def test_execution_selection_does_not_infer_completion_from_prose(self):
         for text in ("Saved requested report", "I saved the requested report."):
@@ -199,8 +176,8 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertEqual(self.select(proof=proof).get("evidence_route"), "reopen_cause")
         self.assertEqual(self.select(proof=evidence(relevant_change="unknown")).get("evidence_route"), "reopen_cause")
 
-    def test_owner_check_is_not_downgraded_by_short_explanation_or_level_one(self):
-        ctx = context(); ctx["response_route"]["routing_surface"]["verification_complexity"] = "level-1"
+    def test_owner_check_is_not_downgraded_by_short_explanation(self):
+        ctx = context()
         result = self.select(ctx, dict(text="Yes.", phase="final", consequential=True), dict(criteria=[]))
         self.assertEqual(result.get("evidence_route"), "fresh_affected")
         self.assertEqual(result["unit_decisions"][0]["criteria"][0]["check_ids"], ["original-failure"])
@@ -309,25 +286,22 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertTrue(result["required_completion_check"])
                 self.assertIn("authorized continuation", result["reason"])
 
-    def test_normal_execution_closure_requires_missing_owner_proof(self):
+    def test_closure_wording_without_a_control_block_is_not_a_submission(self):
         for text in ("The fix is complete.", "I reviewed the requested files."):
             with self.subTest(text=text):
                 ctx = context()
-                ctx["response_route"]["response_purpose"] = "completion"
                 result = self.select(ctx, claims=dict(text=text, phase="final"), proof={})
                 self.assertEqual(result["route_binding"], "current")
-                self.assertTrue(result["required_completion_check"])
-                self.assertEqual(result["evidence_route"], "fresh_affected")
-                self.assertEqual(result["unit_decisions"][0]["criteria"][0]["check_ids"], ["original-failure"])
+                self.assertFalse(result["required_completion_check"])
+                self.assertIn("No completion submission", result["reason"])
                 self.assertEqual(result["selected_criteria"][0]["status"], "unmet")
 
     def test_terminal_response_rejects_inconsistent_selected_execution(self):
-        for mode, order in (("direct-response", "resolved-intent-first"),
-                            ("clarification-only", "clarification-question-only")):
+        for mode in ("direct-response", "clarification-only"):
             for phase in ("final", "before_tool"):
                 with self.subTest(mode=mode, phase=phase):
                     ctx = context()
-                    ctx["response_route"]["routing_surface"].update(response_mode=mode, response_order=order)
+                    ctx["response_route"]["routing_surface"].update(response_mode=mode)
                     result = self.select(ctx, dict(text="The fix is complete.\n[completion-check]", phase=phase))
                     self.assertEqual(result["route_binding"], "invalid")
                     self.assertEqual(result["selected_criteria"], [])
@@ -336,7 +310,7 @@ class CompletionRouteTests(unittest.TestCase):
 
     def test_terminal_explanation_does_not_replay_unselected_execution(self):
         ctx = context()
-        ctx["response_route"]["routing_surface"].update(response_mode="direct-response", response_order="resolved-intent-first")
+        ctx["response_route"]["routing_surface"].update(response_mode="direct-response")
         ctx["response_route"]["selected_work_unit_ids"] = ["explain"]
         ctx["response_route"]["selected_criteria"] = []
         result = self.select(ctx, dict(text="The earlier path output identifies the working directory.", phase="final"))

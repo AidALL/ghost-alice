@@ -156,7 +156,7 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 
 ## Retired Adapter Registration
 
-An older installer registered addon adapters with a binding that carried an `adapter` key. The current Core hook runner accepts a binding with `schema_version` and `destination` only, so such an invocation ends with `hook binding rejected` and exit 126 before any module is imported; the strict hook log retains the rejection with its original native session. Every install and uninstall removes those retired registrations from the host's hook settings.
+An older installer registered add-on hook scripts with a binding that carried an `adapter` key. The current Core hook runner accepts a binding with `schema_version` and `destination` only, so such an invocation ends with `hook binding rejected` and exit 126 before any module is imported; the strict hook log retains the rejection with its original native session. Every install and uninstall removes those retired registrations from the host's hook settings.
 
 Run the Core installer to remove a retired registration, then reload the host as described below. A registration-file update alone is not evidence that a running host consumed it. Do not edit the binding by hand or repeat unchanged business verification to repair registration.
 
