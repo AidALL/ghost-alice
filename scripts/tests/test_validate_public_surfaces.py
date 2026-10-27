@@ -66,21 +66,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
             - coding-convention family 1 sub-skill (using-coding-convention)
             """,
         )
-        write_text(
-            tmp / "docs" / "index.html",
-            """
-            <section id="whats-inside">
-              <div class="stat-cell">
-                <div class="stat-num">3</div>
-                <div class="stat-label">Skills across 6 domains</div>
-              </div>
-              <div class="stat-cell">
-                <div class="stat-num">1</div>
-                <div class="stat-label">Coding-convention sub-skills</div>
-              </div>
-            </section>
-            """,
-        )
         for skill in skills:
             name = skill["name"]
             path = skill["path"]
@@ -162,7 +147,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         self.assertEqual(data["error_count"], 0, msg=result.stdout)
 
     def test_homepage_has_public_metadata_without_internal_badges(self) -> None:
-        text = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
 
         self.assertIn(
             'content="Ghost-ALICE OS makes AI agent work more inspectable by governing intent, '
@@ -180,7 +165,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
     def test_public_docs_do_not_render_legacy_intent_guard_label(self) -> None:
         public_paths = [
             REPO_ROOT / "README.md",
-            REPO_ROOT / "docs" / "index.html",
+            REPO_ROOT / "index.html",
             REPO_ROOT / "docs" / "reference" / "repository-structure.md",
             REPO_ROOT / "docs" / "ko" / "README.md",
         ]
@@ -202,7 +187,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
 
     def test_public_docs_do_not_render_stale_design_data_residue(self) -> None:
         public_paths = [
-            REPO_ROOT / "docs" / "index.html",
+            REPO_ROOT / "index.html",
             REPO_ROOT / "docs" / "reference" / "repository-structure.md",
             REPO_ROOT / "docs" / "ko" / "reference" / "repository-structure.md",
         ]
@@ -254,46 +239,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         self.assertIn('href="./index.html"', korean)
         self.assertIn('href="./index_ko.html"', english)
         self.assertEqual(re.findall(r'\bid="([^"]+)"', english), re.findall(r'\bid="([^"]+)"', korean))
-        self.assertEqual((REPO_ROOT / "docs/index_ko.html").read_bytes(), (REPO_ROOT / "index_ko.html").read_bytes())
-        self.assertIn('docs/index_ko.html', (REPO_ROOT / "_config.yml").read_text())
-
-    def test_docs_homepage_matches_root_pages_entry(self) -> None:
-        self.assertEqual((REPO_ROOT / "docs" / "index.html").read_bytes(),
-                         (REPO_ROOT / "index.html").read_bytes())
-
-    def test_validator_detects_homepage_copy_drift(self) -> None:
-        with tempfile.TemporaryDirectory() as td:
-            repo = self.make_fixture(Path(td))
-            text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
-            write_text(repo / "index.html", text)
-            write_text(repo / "docs" / "index.html", text + "<!-- drift -->")
-            result = self.run_validator(repo)
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("homepage-copy-parity", result.stdout)
-
-    def test_validator_rejects_broken_navigation_in_identical_homepage_copies(self) -> None:
-        text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
-        normalizer = re.search(r"<script>.*?</script>", text, re.DOTALL).group(0)
-        candidates = {
-            "missing": text.replace(normalizer, ""),
-            "wrong_base": text.replace("new URL('../', location.href)", "new URL('./', location.href)"),
-            "wrong_scope": text.replace(r"/\/docs\/(?:index(?:_ko)?\.html)?$/", r"/./"),
-            "comment_only": text.replace(normalizer, "<!--" + normalizer + "-->"),
-        }
-        for case, candidate in candidates.items():
-            with self.subTest(case=case), tempfile.TemporaryDirectory() as td:
-                repo = self.make_fixture(Path(td))
-                write_text(repo / "index.html", candidate)
-                write_text(repo / "docs" / "index.html", candidate)
-                (repo / "imgs").mkdir()
-                (repo / "imgs" / "Ghost-ALICE_logo.png").touch()
-                result = self.run_validator(repo)
-                self.assertEqual(result.returncode, 2, msg=result.stdout)
-                data = self.load_json_output(result)
-                self.assertTrue(any(f["check"] == "homepage-base-resolution"
-                                    for f in data["findings"]), msg=result.stdout)
-                self.assertFalse(any(f["check"] == "homepage-copy-parity"
-                                     for f in data["findings"]), msg=result.stdout)
 
     def test_validator_detects_repo_root_homepage_link_drift(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -392,11 +337,6 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
                 .replace("- top-level skills 2", "- top-level skills 3")
                 .replace("total 3", "total 4")
                 .replace("(alpha, beta)", "(alpha, beta, skill-evolution)"),
-                encoding="utf-8",
-            )
-            docs_index = repo / "docs" / "index.html"
-            docs_index.write_text(
-                docs_index.read_text(encoding="utf-8").replace('<div class="stat-num">3</div>', '<div class="stat-num">4</div>'),
                 encoding="utf-8",
             )
             write_text(

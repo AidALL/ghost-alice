@@ -2,8 +2,8 @@
 """
 validate_public_surfaces.py. Public surface and skill-catalog parity checks.
 
-Verifies that README, docs/index.html, and workspace command wrappers keep the
-public command surface aligned with skill-catalog/skills.json.
+Verifies that README and workspace command wrappers keep the public command
+surface aligned with skill-catalog/skills.json.
 """
 
 from __future__ import annotations
@@ -13,8 +13,6 @@ import json
 import re
 import sys
 from pathlib import Path
-from html.parser import HTMLParser
-from urllib.parse import urljoin, urlsplit
 from typing import Any
 
 
@@ -226,134 +224,6 @@ def check_readme(repo: Path, top_level: list[str], coding: list[str], findings: 
         )
 
 
-def extract_stat_number(html: str, label_pattern: str) -> int | None:
-    pattern = re.compile(
-        r'<div\s+class="stat-cell">\s*'
-        r'<div\s+class="stat-num">\s*(\d+)\s*</div>\s*'
-        r'<div\s+class="stat-label">\s*'
-        + label_pattern,
-        re.IGNORECASE | re.DOTALL,
-    )
-    match = pattern.search(html)
-    if not match:
-        return None
-    return int(match.group(1))
-
-
-class HomepageNavigation(HTMLParser):
-    """Read executable scripts and URL attributes; comments cannot supply a base."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.scripts: list[str] = []
-        self.references: list[str] = []
-        self.has_static_base = False
-        self.in_script = False
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "script":
-            self.in_script = not attrs  # The owned normalizer is an inline classic script.
-            if self.in_script:
-                self.scripts.append("")
-        if tag == "base":
-            self.has_static_base = True
-        for key, value in attrs:
-            if key in ("src", "href") and value and not value.startswith("#"):
-                if not urlsplit(value).scheme and not value.startswith("//"):
-                    self.references.append(value)
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag == "script":
-            self.in_script = False
-
-    def handle_data(self, data: str) -> None:
-        if self.in_script:
-            self.scripts[-1] += data
-
-
-def check_homepage_base_resolution(text: str, findings: list[Finding]) -> None:
-    """Resolve actual href/src values at both entrypoints and Pages base paths.
-
-    This recognizes the small owned normalizer, not arbitrary JavaScript. A new
-    implementation requires updating this model and its navigation regression;
-    unknown code fails closed instead of claiming browser execution.
-    """
-    html = HomepageNavigation()
-    html.feed(text)
-    normalizer = re.compile(
-        r"if\s*\(\s*/(?P<scope>(?:\\.|[^/])*)/\.test\(location\.pathname\)\s*\)\s*\{\s*"
-        r"const\s+base\s*=\s*document\.createElement\(['\"]base['\"]\);\s*"
-        r"base\.href\s*=\s*new\s+URL\(['\"](?P<relative>[^'\"]+)['\"],\s*location\.href\)\.href;\s*"
-        r"document\.head\.appendChild\(base\);\s*\}\s*"
-    )
-    script = re.sub(r"//[^\n]*", "", html.scripts[0]).strip() if html.scripts else ""
-    match = normalizer.fullmatch(script)
-    problem = None
-    if match is None or html.has_static_base:
-        problem = "Missing or unrecognized executable homepage base normalizer."
-    else:
-        try:
-            scope = re.compile(match["scope"].replace(r"\/", "/"))
-            for prefix in ("/", "/ghost-alice/"):
-                root_url = "https://pages.example" + prefix
-                for entry in ("", "index.html", "index_ko.html", "docs/", "docs/index.html", "docs/index_ko.html"):
-                    page_url = urljoin(root_url, entry)
-                    base_url = (urljoin(page_url, match["relative"])
-                                if scope.search(urlsplit(page_url).path) else page_url)
-                    for reference in html.references:
-                        actual = urljoin(base_url, reference)
-                        expected = urljoin(root_url, reference)
-                        if actual != expected:
-                            problem = f"{page_url} resolves {reference!r} to {actual}; expected {expected}."
-                            break
-                    if problem:
-                        break
-                if problem:
-                    break
-        except re.error:
-            problem = "Homepage base normalizer has an unsupported pathname expression."
-    if problem:
-        findings.append(Finding("ERROR", "docs/index.html", "homepage-base-resolution", problem))
-
-
-def check_docs_index(repo: Path, top_level: list[str], coding: list[str], findings: list[Finding]) -> None:
-    path = repo / "docs" / "index.html"
-    if not path.is_file():
-        findings.append(Finding("ERROR", "docs/index.html", "exist", "docs/index.html is missing."))
-        return
-    text = path.read_text(encoding="utf-8")
-    expected_total = len(top_level) + len(coding)
-    legacy_stats = {
-        "Skills across": (extract_stat_number(text, r"Skills\s+across"), expected_total),
-        "Coding-convention sub-skills": (
-            extract_stat_number(text, r"Coding-convention\s+sub-skills"),
-            len(coding),
-        ),
-    }
-    has_legacy_skill_stats = all(actual is not None for actual, _ in legacy_stats.values())
-    if has_legacy_skill_stats:
-        for label, (actual, expected) in legacy_stats.items():
-            if actual != expected:
-                findings.append(
-                    Finding(
-                        "ERROR",
-                        "docs/index.html",
-                        "skill-stat",
-                        f"docs/index.html '{label}' stat drift. expected {expected}, actual {actual}.",
-                    )
-                )
-        return
-
-    # Review actor responsibilities and diagram edges against their actual
-    # callers and consumers. Exact prose matches cannot perform that review.
-    # This checker owns navigation, asset resolution and site-copy consistency.
-    check_homepage_base_resolution(text, findings)
-    root = repo / "index.html"
-    if root.is_file() and path.read_bytes() != root.read_bytes():
-        findings.append(Finding("ERROR", "docs/index.html", "homepage-copy-parity",
-                                "docs/index.html must byte-match the repository-root Pages entry."))
-
-
 def check_repo_index(repo: Path, findings: list[Finding]) -> None:
     path = repo / "index.html"
     if not path.is_file():
@@ -498,7 +368,6 @@ def run(repo: Path) -> tuple[list[Finding], dict[str, Any]]:
     if skills:
         check_readme(repo, top_level, coding, findings)
         check_repo_index(repo, findings)
-        check_docs_index(repo, top_level, coding, findings)
         command_wrappers = check_command_wrappers(repo, paths, descriptions, findings)
     else:
         command_wrappers = "skipped-no-catalog"
@@ -539,7 +408,7 @@ def main() -> int:
         )
     else:
         print(f"Public surface parity check: repo={repo}")
-        surfaces = ["README.md", "index.html", "docs/index.html"]
+        surfaces = ["README.md", "index.html"]
         if checked["command_wrappers"] == "checked":
             surfaces.append(".claude/commands")
         else:
