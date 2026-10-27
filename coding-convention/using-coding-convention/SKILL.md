@@ -7,7 +7,7 @@ compatibility:
 
 # Using Coding Convention
 
-The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again. A direct answer or a confirmation question ends before this development workflow.
+The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation. A direct answer or a confirmation question ends before this development workflow.
 
 ## Priority and loading
 

@@ -18,7 +18,7 @@ The response model replaces `routing_summary` with a short current objective, re
 
 ## intent-state.json
 
-The Python ledger writer replaces scalar goal/summary fields with the latest semantic delta. Constraints and non-goals retain active authority until explicitly superseded. Supplied questions, risk flags, routing keywords and consumer hints replace their current values. Omitted fields remain unchanged. Owned criteria merge by `(work_unit_id, contract_revision, id)`; ownerless criteria merge by stable ID. Decisions merge by stable ID and may supersede prior decisions with `supersedes`. The state is not a transcript.
+The Python ledger writer replaces scalar goal/summary fields with the latest semantic delta. A supplied `constraints`, `non_goals`, `open_questions`, `risk_flags`, `routing_keywords` or `consumer_hints` value replaces that field as a whole, so an empty list or object clears it. Omitted fields remain unchanged. Owned criteria merge by `(work_unit_id, contract_revision, id)`; ownerless criteria merge by stable ID. Decisions merge by stable ID and may supersede prior decisions with `supersedes`. The state is not a transcript.
 
 ```json
 {

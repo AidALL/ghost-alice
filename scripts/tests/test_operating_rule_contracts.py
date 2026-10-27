@@ -11,10 +11,10 @@ class OperatingRuleContractTest(unittest.TestCase):
         intent = common.split('## Session Intent\n', 1)[1].split('\n## ', 1)[0]
         selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]
         for term in ('does not cancel authorized work',
-                     'When your interpretation changes the next action',
+                     "When the user's words leave more than one reasonable reading",
                      'ask the user before that action'):
             self.assertIn(term, intent)
-        for term in ('`task-router` decides between a direct answer and work',
+        for term in ('`task-router` owns this rule and this section carries it, so applying it loads no skill',
                      'A direct answer reads no skills, accesses no ledger, registers no route'):
             self.assertIn(term, selection)
         self.assertIn('Do not substitute another session', common)
@@ -23,6 +23,25 @@ class OperatingRuleContractTest(unittest.TestCase):
         self.assertIn('Work Selection section', router)
         self.assertIn('register the Core response-route at that point, using the session-start receipt', router)
         self.assertIn('the input ID that `--read-intent` returned when this input', router)
+
+    def test_intake_and_work_selection_name_the_light_path_and_the_delegate(self):
+        common = (ROOT / 'platforms/common-governance.md').read_text()
+        intent = common.split('## Session Intent\n', 1)[1].split('\n## ', 1)[0]
+        selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]
+        for term in ('`user-said`, `interpreted-as`, `previous-tool` or `system-doc`',
+                     'a light-path lookup records none',
+                     'Calls that load this contract, `session-intent-analyzer` or its references'):
+            self.assertIn(term, intent)
+        for term in ('takes the light path',
+                     'leaves the light path: it records `interpreted-as` before its next tool call',
+                     'Any other request that needs inspection, execution, modification or fresh verification is work',
+                     "When the user's own direct input arrives in that session after the handoff"):
+            self.assertIn(term, selection)
+        intake = (ROOT / 'session-intent-analyzer/SKILL.md').read_text()
+        self.assertIn('The ledger stores a condition labeled `interpreted-as` as unadmitted', intake)
+        schema = (ROOT / 'session-intent-analyzer/references/ledger-schema.md').read_text()
+        self.assertIn('replaces that field as a whole, so an empty list or object clears it', schema)
+        self.assertNotIn('retain active authority until explicitly superseded', schema)
 
     def test_reuse_instruction_contract_stays_at_its_owner(self):
         reference = (ROOT / 'coding-convention/verification-before-completion/references/verify-or-reuse.md').read_text()
