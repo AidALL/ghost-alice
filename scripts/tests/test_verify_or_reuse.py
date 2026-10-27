@@ -297,6 +297,20 @@ class LostEvidenceTests(_ModuleTestCase):
         self.assertEqual(result["verdict"], "unverified")
         self.assertIn("current-copy-is-not-authored-state", result["reasons"])
 
+    def test_new_triggers_cannot_recover_a_replaced_authored_state(self) -> None:
+        for flag in ("contrary_observation", "materially_broader_claim"):
+            with self.subTest(flag=flag):
+                data = facts(
+                    retained_evidence={"present": False, "copy": None, "origin": "authored"},
+                    events_since_evidence=["agent-write-succeeded"],
+                    **{flag: True},
+                )
+                result = VOR.decide(data)
+                self.assertEqual(result["verdict"], "unverified")
+                self.assertIn("current-copy-is-not-authored-state", result["reasons"])
+                audit = VOR.audit_trace("claude", data, [{"tool": "Read", "copy": "chat-sandbox:plan.md"}])
+                self.assertEqual([item["finding"] for item in audit["findings"]], ["non-evidential-inspection"])
+
 
 class FlawPropagationTests(_ModuleTestCase):
     BASE = {

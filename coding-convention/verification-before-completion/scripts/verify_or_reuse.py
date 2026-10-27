@@ -221,14 +221,16 @@ def decide(facts: Mapping[str, Any]) -> dict[str, Any]:
 
     covers_claim = f["evidence_present"] and f["evidence_copy"] == f["claim_copy"]
     evidence_gap = "retained-evidence-lost" if not f["evidence_present"] else "evidence-covers-different-copy"
+    # A read of the current copy cannot recover an authored state that a later mutation replaced.
+    authored_state_replaced = f["claim_time"] == "authored-at" and not covers_claim and bool(mutations)
     trigger: str | None = None
     verdict = "reuse"
 
     if f["explicit_recheck_request"]:
         verdict, trigger = "verify", "explicit-recheck-request"
-    elif f["contrary_observation"]:
+    elif f["contrary_observation"] and not authored_state_replaced:
         verdict, trigger = "verify", "contrary-observation"
-    elif f["materially_broader_claim"]:
+    elif f["materially_broader_claim"] and not authored_state_replaced:
         verdict, trigger = "verify", "materially-broader-claim"
     elif f["claim_time"] == "authored-at":
         if not covers_claim:
