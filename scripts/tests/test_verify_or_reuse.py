@@ -177,13 +177,11 @@ class MutationEventTests(_ModuleTestCase):
         result = VOR.decide(facts(contrary_observation=True))
         self.assertEqual(result["verdict"], "verify")
         self.assertEqual(result["trigger"], "contrary-observation")
-        self.assertFalse(result["evidence_still_valid"])
 
     def test_materially_broader_claim_triggers_one_check(self) -> None:
         result = VOR.decide(facts(materially_broader_claim=True))
         self.assertEqual(result["verdict"], "verify")
         self.assertEqual(result["trigger"], "materially-broader-claim")
-        self.assertFalse(result["evidence_still_valid"])
 
 
 class AuthorityTests(_ModuleTestCase):

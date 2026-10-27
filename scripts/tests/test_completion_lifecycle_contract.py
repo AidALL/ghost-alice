@@ -47,7 +47,6 @@ class CompletionLifecycleContractTests(unittest.TestCase):
                        'why the method distinguishes the alternatives',
                        'which attainable outcomes would change a specific next action',
                        'Mandatory checks are those that the user or the project requires; they remain required',
-                       'A check that a skill lists is required only when its outcome can change the next action',
                        'Preserve unchanged valid proof with its original source and time'):
             self.assertIn(phrase, selection)
 

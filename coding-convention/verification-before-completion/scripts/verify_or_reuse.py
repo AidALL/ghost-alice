@@ -256,9 +256,7 @@ def decide(facts: Mapping[str, Any]) -> dict[str, Any]:
     if f["writer_confirmed_unchanged"] and not mutations:
         reasons.append("writer-confirmed-unchanged")
     # Later mutations change the current copy, not the state a claim about the authored version refers to.
-    # A contrary observation disputes the evidence; a materially broader claim exceeds what it covered.
-    disputed = f["contrary_observation"] or f["materially_broader_claim"]
-    evidence_still_valid = covers_claim and not disputed and (
+    evidence_still_valid = covers_claim and (
         f["claim_time"] == "authored-at" or (not mutations and confirmed_closed)
     )
     if verdict == "reuse":
