@@ -121,7 +121,7 @@ flowchart LR
 
 [검증 절차](coding-convention/verification-before-completion/SKILL.md)는 근거 선택과 완료 주장을 소유합니다. 그 [답변 검토 절차](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review)는 기록의 인계를 소유합니다. 다른 문서는 명령을 복제하지 않고 해당 절차를 참조합니다.
 
-지원된 결과는 원본 근거·검증 시각·정정 연결을 유지합니다. 기준·관련 산출물의 변경이나 반대 관찰은 영향받는 근거만 다시 검토하게 합니다. 기록·표시 결함 때문에 변하지 않은 실제 업무를 다시 실행하지 않습니다. 정확한 부분 답변은 답변으로서 인정될 수 있지만 필수 작업은 여전히 미완료일 수 있습니다. 위키의 [판단 범위와 복구](https://github.com/AidALL/ghost-alice/wiki/판단-범위와-복구) 페이지가 미해결 조건과 모델의 다음 판단을 다룹니다.
+지원된 결과는 원본 근거·검증 시각·정정 연결을 유지합니다. 기준·관련 산출물의 변경, 반대 관찰, 명시적인 재검사 요청, 실질적으로 넓어진 주장은 영향받는 근거만 다시 검토하게 합니다. 기록·표시 결함 때문에 변하지 않은 실제 업무를 다시 실행하지 않습니다. 정확한 부분 답변은 답변으로서 인정될 수 있지만 필수 작업은 여전히 미완료일 수 있습니다. 위키의 [판단 범위와 복구](https://github.com/AidALL/ghost-alice/wiki/판단-범위와-복구) 페이지가 미해결 조건과 모델의 다음 판단을 다룹니다.
 
 ## 필요한 작업의 선언
 

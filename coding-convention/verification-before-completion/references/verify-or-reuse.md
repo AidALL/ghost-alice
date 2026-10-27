@@ -26,7 +26,7 @@ This reference is the canonical semantic contract for deciding whether a claim a
 
 Verification is decided by actual mutation authority and observed mutation events, not by the theoretical possibility that something changed. The agent usually already holds every fact the decision needs: what it wrote, who else can write, and which write events happened afterward. A re-read that cannot produce new information or change the answer is redundant verification, not diligence.
 
-For an agent-mediated artifact, retained authored content answers an authored-at claim. When no successful edit or other observed mutation followed, it also answers a current-state claim. A user question or objection does not create a mutation event or justify a speculative re-read.
+For an agent-mediated artifact, retained authored content answers an authored-at claim. When no successful edit or other observed mutation followed, it also answers a current-state claim. A user question, or an objection that reports no observation, does not create a mutation event or justify a speculative re-read. A reported failure or mismatch is a contrary observation and justifies one check (`contrary-observation`).
 
 ## Decision Flow
 
@@ -63,7 +63,7 @@ Signals that are recorded but never count as mutations: `user-message`, `edit-in
 
 Verdicts: `reuse`, `verify`, `wrong-copy`, `unverified`.
 
-Triggers that justify one check: `explicit-recheck-request`, each observed mutation event, `last-writer-changed`, `externally-writable-current-state`, `retained-evidence-lost`, `evidence-covers-different-copy`.
+Triggers that justify one check: `explicit-recheck-request`, each observed mutation event, `last-writer-changed`, `externally-writable-current-state`, `retained-evidence-lost`, `evidence-covers-different-copy`, `contrary-observation`, `materially-broader-claim`.
 
 Claim scopes for a `reuse` answer: `authored-at`, `current`, `last-known`; other verdicts use `n/a`. A `last-known` answer states the basis and time of the evidence and never presents itself as a freshly verified current state.
 
@@ -72,6 +72,8 @@ Claim scopes for a `reuse` answer: `authored-at`, `current`, `last-known`; other
 | Situation | Verdict | Tool call |
 | --- | --- | --- |
 | The user explicitly asks to re-inspect the current artifact | `verify` (`explicit-recheck-request`) | one minimal check |
+| The user or a tool reports a failure or mismatch observed in the artifact | `verify` (`contrary-observation`) | one minimal check of the target copy |
+| The claim states materially more than the retained evidence covers | `verify` (`materially-broader-claim`) | one minimal check of the part the evidence does not cover |
 | `authored-at` claim, retained evidence covers the target copy | `reuse` with scope `authored-at`, even if the artifact changed later | none |
 | `authored-at` claim, evidence lost, no mutation since authoring | `verify` (`retained-evidence-lost`) | read once |
 | `authored-at` claim, evidence lost, mutation since authoring | `unverified`; the current copy is not the authored state | none |
@@ -101,7 +103,7 @@ The pending-merge hook uses the same session-bound store: unchanged manifest ver
 
 - A collaborator, automation, synchronization, or external edit that might have happened without evidence that the path was open.
 - The artifact being remote, shared-drive, or local by storage type alone.
-- A new user message, including a question about the artifact.
+- A new user message, including a question about the artifact. A message that reports an observed failure or mismatch is the `contrary-observation` trigger instead.
 - Writing a `[completion-check]` or copying an existing successful result into a variable, file, or store.
 - The wish to feel certain; confidence gaps are resolved by the flow above, not by another read.
 

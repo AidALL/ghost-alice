@@ -17,7 +17,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from _shared.global_rule_blocks import platform_contract_text
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -33,7 +32,6 @@ FLOW = (
     "decision-impact -> verify-or-reuse"
 )
 VERIFY_OR_REUSE_PRECHECK = "Reuse unchanged evidence at its original time and source."
-CHANGE_DEFINITION = "A recording error does not refute the business result or authorize replay."
 
 # Current scenario: an agent-authored Markdown file has agent-mediated mutation
 # authority. No mutation instruction or write event follows; a content question
@@ -174,6 +172,18 @@ class MutationEventTests(_ModuleTestCase):
         result = VOR.decide(facts(explicit_recheck_request=True))
         self.assertEqual(result["verdict"], "verify")
         self.assertEqual(result["trigger"], "explicit-recheck-request")
+
+    def test_contrary_observation_triggers_one_check(self) -> None:
+        result = VOR.decide(facts(contrary_observation=True))
+        self.assertEqual(result["verdict"], "verify")
+        self.assertEqual(result["trigger"], "contrary-observation")
+        self.assertFalse(result["evidence_still_valid"])
+
+    def test_materially_broader_claim_triggers_one_check(self) -> None:
+        result = VOR.decide(facts(materially_broader_claim=True))
+        self.assertEqual(result["verdict"], "verify")
+        self.assertEqual(result["trigger"], "materially-broader-claim")
+        self.assertFalse(result["evidence_still_valid"])
 
 
 class AuthorityTests(_ModuleTestCase):
@@ -525,13 +535,9 @@ class RuntimeSurfaceTests(unittest.TestCase):
         context = payload.get("hookSpecificOutput", {}).get("additionalContext", "")
         self.assertEqual(context, '')
         self.assertNotIn("permissionDecision", payload.get("hookSpecificOutput", {}))
-        port = platform_contract_text(REPO_ROOT / 'platforms/codex/AGENTS.md')
-        self.assertIn(VERIFY_OR_REUSE_PRECHECK, port)
 
-    def test_claude_pretool_allow_carries_no_context_so_rule_blocks_carry_the_contract(self) -> None:
+    def test_claude_pretool_allow_carries_no_context(self) -> None:
         self.assertEqual(self._run_pretool("claude"), {})
-        port = " ".join(platform_contract_text(REPO_ROOT / "platforms/claude/CLAUDE.md").split())
-        self.assertIn(VERIFY_OR_REUSE_PRECHECK, port)
 
     def _merge(self, command: str, source: Path, dest: Path) -> str:
         result = subprocess.run(
@@ -555,11 +561,11 @@ class RuntimeSurfaceTests(unittest.TestCase):
             "claude-merge": (REPO_ROOT / "platforms" / "claude" / "CLAUDE.md", blocks.CLAUDE_SPEC),
             "codex-merge": (REPO_ROOT / "platforms" / "codex" / "AGENTS.md", blocks.CODEX_SPEC),
         }
+        common = " ".join((REPO_ROOT / "platforms" / "common-governance.md").read_text(encoding="utf-8").split())
         for command, (source, block_spec) in targets.items():
             with self.subTest(command=command, case="fresh-install"), tempfile.TemporaryDirectory() as temp_dir:
                 merged = self._merge(command, source, Path(temp_dir) / "rules.md")
-                self.assertIn(VERIFY_OR_REUSE_PRECHECK, merged)
-                self.assertIn(CHANGE_DEFINITION, merged)
+                self.assertEqual(merged.count(common), 1)
             with self.subTest(command=command, case="refresh-managed-block"), tempfile.TemporaryDirectory() as temp_dir:
                 dest = Path(temp_dir) / "rules.md"
                 dest.write_text(
@@ -569,8 +575,7 @@ class RuntimeSurfaceTests(unittest.TestCase):
                 merged = self._merge(command, source, dest)
                 self.assertIn("User-owned note stays.", merged)
                 self.assertNotIn("stale managed text", merged)
-                self.assertIn(VERIFY_OR_REUSE_PRECHECK, merged)
-                self.assertIn(CHANGE_DEFINITION, merged)
+                self.assertEqual(merged.count(common), 1)
 
 
 class InstalledCopyTests(unittest.TestCase):

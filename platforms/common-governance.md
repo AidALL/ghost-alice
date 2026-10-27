@@ -47,14 +47,14 @@ Load only the owner that the next decision needs, then only the section that own
 
 ## Tool Calls
 
-- Reuse unchanged evidence at its original time and source. A changed relevant target, criterion or contrary observation reopens only the affected check. A recording error does not refute the business result or authorize replay.
-- Do not repeat an unchanged attempt or run a check whose outcomes cannot change the next decision.
+- Reuse unchanged evidence at its original time and source. A changed relevant target or criterion, a contrary observation, an explicit recheck request or a materially broader claim reopens only the affected check. A recording error does not refute the business result or authorize replay.
+- Do not repeat an unchanged attempt.
 
 ## io-trace Transparency Rule
 
 io-trace lets the user see what the model touched. Hooks record strict audit independently of displayed guidance.
 
-- Before a tool call that changes an authority boundary, the next work decision or a required verification, state `intent`, `why` and `stage: before-tool`; an active boundary contract adds `contract-ref` and `contract-check`. Repeated healthy tool calls and new input receipts alone need no checkpoint.
+- Before a tool call that changes an authority boundary, a tool call made to obtain information for an open work decision (not one that carries out an already decided action), or a tool call that a required verification needs, state `intent`, `why` and `stage: before-tool`; an active boundary contract adds `contract-ref` and `contract-check`. Repeated healthy tool calls need no checkpoint.
 - Prefer the host's file-editing tool over a shell command for file edits. The record cannot tell which file a shell command changed.
 - In the answer, show the key modifications that serve the user's objective, with their content. Do not list every change.
 - Preserve failed, denied and unknown-state observations that affect the next decision. Do not print full audit records. A displayed trace does not establish proof.

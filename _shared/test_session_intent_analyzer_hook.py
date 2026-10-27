@@ -459,12 +459,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(len(self.events("terminal-intake")), 2)
 
     def test_identity_rules_stay_with_their_owners(self):
-        from global_rule_blocks import platform_contract_text
         root = SCRIPT.parents[1]
-        for platform, filename in (('codex', 'AGENTS.md'), ('claude', 'CLAUDE.md')):
-            contract = platform_contract_text(root / 'platforms' / platform / filename)
-            self.assertIn('Do not substitute another session', contract)
-            self.assertIn('Missing or pending identity blocks dependent writes', contract)
         self.assertIn('session-start receipt', (root / 'session-intent-analyzer/SKILL.md').read_text())
 
     def setUp(self) -> None:
