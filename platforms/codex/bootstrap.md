@@ -8,4 +8,4 @@ Common Ghost-ALICE governance comes from `{{GOVERNANCE_PATH}}` for every project
 
 For a question answerable entirely from supplied conversation, the current-session assistant returns the bounded answer without reading the common governance file or using tools, even when a hook message points to its sections.
 
-If the common governance file cannot be read, the current-session assistant reports the missing contract and does not perform work that requires it. It does not substitute another session, repository or installation.
+If the common governance file cannot be read, the response model tells the user once that the Ghost-ALICE contract is missing and continues the user's work without writing Ghost-ALICE ledger records. It does not substitute another session, repository, installation or discovery pointer.

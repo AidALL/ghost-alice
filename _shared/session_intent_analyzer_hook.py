@@ -76,9 +76,9 @@ TERMINAL_ROUTING_INSTRUCTION = reminder_text('terminal-routing')
 
 
 DEFAULT_INTERNAL = reminder_text('session-intent')
-LEDGER_UNAVAILABLE_DEGRADE = 'The intake hook cannot load the ledger dependency. The current-session assistant must not claim intake was recorded or substitute another ledger. Authorized ledger repair and a tool-free explanation remain possible.'
-LEDGER_WRITE_FAILED_DEGRADE = 'The intake hook could not write this input to the ledger. The current-session assistant must not claim persistence or use an old input binding. Authorized ledger repair and a tool-free explanation remain possible.'
-LEDGER_BROKEN_DEGRADE = 'The ledger module exists but the intake hook could not load it. The current-session assistant must not claim intake was recorded or substitute another ledger. Authorized module repair and a tool-free explanation remain possible.'
+LEDGER_UNAVAILABLE_DEGRADE = "The intake hook cannot load the ledger dependency, so Ghost-ALICE cannot record this input. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
+LEDGER_WRITE_FAILED_DEGRADE = "The intake hook could not write this input to the ledger, so Ghost-ALICE cannot record it. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim persistence and does not use an old input binding."
+LEDGER_BROKEN_DEGRADE = "The ledger module exists but the intake hook could not load it, so Ghost-ALICE cannot record this input. The response model continues the user's work without recording it and tells the user once per session and cause that Ghost-ALICE is not recording inputs. It does not claim intake was recorded and does not substitute another ledger."
 DEGRADE_MARKER_FILE = "ledger-degraded.json"
 _SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9_.=-]+")
 
