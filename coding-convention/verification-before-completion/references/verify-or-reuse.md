@@ -72,8 +72,6 @@ Claim scopes for a `reuse` answer: `authored-at`, `current`, `last-known`; other
 | Situation | Verdict | Tool call |
 | --- | --- | --- |
 | The user explicitly asks to re-inspect the current artifact | `verify` (`explicit-recheck-request`) | one minimal check |
-| The user or a tool reports a failure or mismatch observed in the artifact, except for an `authored-at` claim whose evidence was lost after a mutation | `verify` (`contrary-observation`) | one minimal check of the target copy |
-| The claim states materially more than the retained evidence covers, except for an `authored-at` claim whose evidence was lost after a mutation | `verify` (`materially-broader-claim`) | one minimal check of the part the evidence does not cover |
 | `authored-at` claim, retained evidence covers the target copy | `reuse` with scope `authored-at`, even if the artifact changed later | none |
 | `authored-at` claim, evidence lost, no mutation since authoring | `verify` (`retained-evidence-lost`) | read once |
 | `authored-at` claim, evidence lost, mutation since authoring | `unverified`; the current copy is not the authored state | none |

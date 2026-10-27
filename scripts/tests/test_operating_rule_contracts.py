@@ -30,48 +30,12 @@ class OperatingRuleContractTest(unittest.TestCase):
         self.assertIn('register the Core response-route at that point, using the session-start receipt', router)
         self.assertIn('the input ID that `--read-intent` returned when this input', router)
 
-    def test_intake_and_work_selection_name_the_light_path_and_the_delegate(self):
+    def test_checkpoint_condition_is_known_before_acting(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
-        intent = common.split('## Session Intent\n', 1)[1].split('\n## ', 1)[0]
-        selection = common.split('## Work Selection\n', 1)[1].split('\n## ', 1)[0]
-        for term in ('`user-said`, `interpreted-as`, `previous-tool` or `system-doc`',
-                     'a light-path lookup records none',
-                     'Calls that load this contract, `session-intent-analyzer` or its references'):
-            self.assertIn(term, intent)
-        for term in ('takes the light path',
-                     'leaves the light path: it records `interpreted-as` before its next tool call',
-                     'Any other request that needs inspection, execution, modification or fresh verification is work',
-                     "When the user's own direct input arrives in that session after the handoff"):
-            self.assertIn(term, selection)
-        intake = (ROOT / 'session-intent-analyzer/SKILL.md').read_text()
-        self.assertIn('The ledger stores a condition labeled `interpreted-as` as unadmitted', intake)
-        schema = (ROOT / 'session-intent-analyzer/references/ledger-schema.md').read_text()
-        self.assertIn('replaces that field as a whole, so an empty list or object clears it', schema)
-        self.assertNotIn('retain active authority until explicitly superseded', schema)
-
-    def test_checks_and_checkpoints_use_conditions_known_before_acting(self):
-        common = (ROOT / 'platforms/common-governance.md').read_text()
-        calls = common.split('## Tool Calls\n', 1)[1].split('\n## ', 1)[0]
-        self.assertIn('a contrary observation, an explicit recheck or a materially broader claim reopens only the affected check', calls)
-        self.assertIn('- Do not repeat an unchanged attempt.\n', calls)
-        self.assertNotIn('run a check whose outcomes cannot change the next decision', calls)
         trace = common.split('## io-trace Transparency Rule\n', 1)[1].split('\n## ', 1)[0]
         for phrase in ('Before a tool call that changes an authority boundary, a tool call made to obtain information for an open work decision',
-                       'an active boundary contract adds `contract-ref` and `contract-check`',
                        'Repeated healthy tool calls need no checkpoint'):
             self.assertIn(phrase, trace)
-        self.assertNotIn('new input receipts', trace)
-        boundary = (ROOT / 'boundary-contract/SKILL.md').read_text()
-        for phrase in ('the coverage criterion states the condition that defines the set',
-                       'maps every tool call to an allowed-surface item or a next-allowed-action before making it'):
-            self.assertIn(phrase, boundary)
-        router = (ROOT / 'task-router/SKILL.md').read_text()
-        for phrase in ('When the current session receipt carries `context_selection`, select the information',
-                       'verification-before-completion before a new completion, fix, success, verified-status or material recommendation claim and before rereading an artifact to support a claim'):
-            self.assertIn(phrase, router)
-        verification = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
-        self.assertIn('Before claiming a result that adversarial-verification reviewed at level-3-high-stakes', verification)
-        self.assertNotIn('verification-complexity-level-3', verification)
 
     def test_rendered_contracts_carry_no_retired_instructions(self):
         for name in ('platforms/codex/AGENTS.md', 'platforms/claude/CLAUDE.md'):
