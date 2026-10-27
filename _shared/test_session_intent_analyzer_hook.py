@@ -617,6 +617,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("could not write this input to the ledger", message)
+        self.assertIn("continues the user's work without recording it", message)
         self.assertNotIn(RECEIPT_START, message)
 
     def test_hook_decodes_utf8_stdin_before_hashing_korean_prompt(self) -> None:
@@ -886,6 +887,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("cannot load the ledger dependency", message)
+        self.assertIn("continues the user's work without recording it", message)
         self.assertNotIn("module exists but the intake hook could not load it", message)
         self.assertNotIn(RECEIPT_START, message)
 
@@ -895,6 +897,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         message = json.loads(result.stdout)["systemMessage"]
         self.assertIn("module exists but the intake hook could not load it", message)
+        self.assertIn("continues the user's work without recording it", message)
         self.assertNotIn("cannot load the ledger dependency", message)
         self.assertNotIn(RECEIPT_START, message)
 

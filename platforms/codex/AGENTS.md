@@ -8,4 +8,4 @@ The current-session assistant uses the tools actually exposed by this host. A Cl
 
 Installed skills are under `~/.agents/skills/`; Claude-only `${CLAUDE_SKILL_DIR}` is not a Codex path. Resolve `scripts/` and `references/` from the selected installed skill. Native hook configuration is `~/.codex/hooks.json`; provenance coordinates come from the current hook receipt, not these default locations.
 
-When hooks are unavailable, the current-session assistant performs the required intake, routing and audit steps manually for work. The current-session assistant does not claim native hook execution or invent a session receipt.
+When this session's context carries no Ghost-ALICE session receipt, Ghost-ALICE cannot record this session. The response model then follows the contract without writing ledger records, tells the user once that this session is not recorded, does not invent a receipt, and does not claim intake, routing, Stop or audit records.

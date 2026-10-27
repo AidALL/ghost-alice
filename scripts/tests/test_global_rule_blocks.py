@@ -260,9 +260,8 @@ class GlobalRuleBlockTest(unittest.TestCase):
         body = blocks.render_codex_bootstrap(source)
 
         self.assert_intake_routing_authority(body)
-        self.assertEqual(body.count("When hooks are unavailable"), 1)
-        self.assertIn("manual", body)
-        self.assertIn("does not claim native hook execution or invent a session receipt", body)
+        self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session receipt"), 1)
+        self.assertIn("does not invent a receipt, and does not claim intake, routing, Stop or audit records", body)
         self.assertIn("Repeated healthy tool calls and new input receipts alone need no checkpoint", body)
         self.assertIn("Before a tool call that changes an authority boundary, the next work decision or a required verification", body)
         self.assertIn("strict audit", body)
@@ -289,8 +288,8 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         body = blocks.render_claude_bootstrap(source)
 
-        self.assertEqual(body.count("When hooks are disabled, unavailable, or not trusted"), 1)
-        self.assertIn("does not claim native intake, routing, Stop or audit observations", body)
+        self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session receipt"), 1)
+        self.assertIn("does not claim intake, routing, Stop or audit records", body)
         self.assert_intake_routing_authority(body)
         self.assertIn("task-router", body)
         self.assertIn("verification-before-completion", body)
