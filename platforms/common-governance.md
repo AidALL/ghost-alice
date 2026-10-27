@@ -13,17 +13,19 @@ User instructions take precedence over this contract. Project instructions add p
 On every input, interpret what the user wants before choosing work or calling tools.
 
 - `user-said: ` is the user's input as is. Intake records only its fingerprint; the original stays in the host transcript.
-- `interpreted-as: ` is your interpretation of that input: the objective, constraints and done conditions. Label each done condition `user-said` when the user stated it and `interpreted-as` when you inferred it.
+- `interpreted-as: ` is your interpretation of that input: the objective, constraints and done conditions. Label each done condition with its source, `user-said`, `interpreted-as`, `previous-tool` or `system-doc`, as the Source rules of `boundary-contract` define them.
 - A status question does not cancel authorized work; an explicit stop, pause or replacement does.
-- When your interpretation changes the next action, including a decision that only the user can make, ask the user before that action. In that question, state in one line the assumption you made where the user's words were silent, and what changes if it is wrong. End your answer with that question.
-- For work that needs tools, record a new or changed `interpreted-as: ` before the first tool call; an unchanged interpretation keeps its record. Calls that read, write or repair the intent record are exempt.
+- When the user's words leave more than one reasonable reading and the next action differs between those readings, ask the user before that action; a decision that only the user can make is such a case. In that question, state in one line the assumption you made where the user's words were silent, and what changes if it is wrong. End your answer with that question.
+- For work that needs tools, record a new or changed `interpreted-as: ` before the first tool call; an unchanged interpretation keeps its record, and a light-path lookup records none. Calls that load this contract, `session-intent-analyzer` or its references, and calls that read, write or repair the intent record, are exempt.
 
 ## Work Selection
 
-When the intent is clear, `task-router` decides between a direct answer and work.
+When the intent is clear, apply the direct-answer rule below. `task-router` owns this rule and this section carries it, so applying it loads no skill.
 
-- Answer directly when the supplied content supports the answer without external lookup or execution. A direct answer reads no skills, accesses no ledger, registers no route and prints no governance block other than a focus line.
-- Inspection, execution, modification or fresh verification is work. Follow `task-router` to select the work, skills, criteria and boundary.
+- Answer directly when no tool is needed: the supplied content or general knowledge supports the answer, and the answer needs no inspection, execution, modification or fresh verification. When it is unclear whether a tool is needed, treat the request as work. A direct answer reads no skills, accesses no ledger, registers no route and prints no governance block other than a focus line.
+- A level-1 lookup that only reads local files, folders, the conversation transcript or repository state — no modification, no external source and no analysis beyond reporting what it found — takes the light path. The response model runs the lookup and answers with the locations it found, without recording `interpreted-as`, registering a response route or reading skills, and makes no completion, fix, success or verification claim in that answer. When the lookup shows that a modification, an external source, an analysis or such a claim is needed, the response model leaves the light path: it records `interpreted-as` before its next tool call and follows `task-router`.
+- Any other request that needs inspection, execution, modification or fresh verification is work. For work, follow `task-router` to select the work, skills, criteria and boundary.
+- When the response model works as a delegate that a parent session or parent agent started for one bounded task, it follows the workflow and interpretation the parent supplied instead of routing the whole conversation again. When the user's own direct input arrives in that session after the handoff, the response model follows that input wherever it differs from the parent's workflow or interpretation, because the parent's `interpreted-as` can be wrong.
 
 ## Prohibitions
 

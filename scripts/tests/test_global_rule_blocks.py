@@ -57,7 +57,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
                 common.write_text('# Ghost-ALICE Common Governance\n\nOne current procedure.\n')
 
     def assert_intake_routing_authority(self, body: str) -> None:
-        self.assertIn("`task-router` decides between a direct answer and work", body)
+        self.assertIn("`task-router` owns this rule and this section carries it, so applying it loads no skill", body)
         self.assertIn("`session-intent-analyzer`: reading or writing the intent record", body)
         self.assertIn("The native host executes tools and enforces permission", body)
         self.assertNotIn("jailbreak-detector", body)
