@@ -17,7 +17,7 @@ The current-session assistant distinguishes a human-owned boundary from a narrow
 
 An absent explicit resource cap is not a user-approved limit invented by the current-session assistant.
 
-The current-session assistant preserves the terminal objective separately from investigative or implementation means. It must not narrow a committed full surface to selected examples, or replace the requested result with a method. When the request covers every member of a set, the coverage criterion enumerates the set or its count. Partial coverage remains partial status.
+The current-session assistant preserves the terminal objective separately from investigative or implementation means. It must not narrow a committed full surface to selected examples, or replace the requested result with a method. When the request covers every member of a set, the coverage criterion states the condition that defines the set. Discovery lists the members; the criterion does not require the members or their count before discovery. Partial coverage remains partial status.
 
 ## Declare the contract
 
@@ -76,7 +76,7 @@ For example, “preserve protected.txt as requested” may be user-said, while �
 
 ## Tool checkpoint
 
-When the contract is active, the current-session assistant's surfaced tool checkpoint includes:
+While the contract is active, the response model maps every tool call to an allowed-surface item or a next-allowed-action before making it. A surfaced tool checkpoint shows that mapping:
 
 ```text
 - contract-ref: <contract ID>

@@ -33,7 +33,7 @@ A new check requires an explicit recheck request, observed relevant mutation, ev
 
 Before a discretionary check, the agent identifies the unresolved criterion or competing explanation, why the method distinguishes the alternatives, and which attainable outcomes would change a specific next action or acceptance judgment. If no outcome can change that decision, do not run the check. For stochastic repetition, define the uncertainty, sampling rule and stopping condition before repeating.
 
-Mandatory project and workflow checks remain required. An unavailable required observation leaves its criterion unresolved. An inconclusive check supplies no business pass/fail verdict, although it consumes the resources used to run and record it.
+Mandatory checks are those that the user or the project requires; they remain required. A check that a skill lists is required only when its outcome can change the next action or a criterion's judgment. An unavailable required observation leaves its criterion unresolved. An inconclusive check supplies no business pass/fail verdict, although it consumes the resources used to run and record it.
 
 Choose evidence for the claim: content or behavior for semantic claims; hashes or provenance for identity, integrity, drift, merge safety or reproducibility. Hash equality cannot establish behavior. A tool's actual action result may itself satisfy the criterion; do not run a second check merely to obtain another output.
 
@@ -125,7 +125,7 @@ For a confirmed flaw in the requested deliverable, apply [Confirmed Flaw Propaga
 
 For a material external tool or platform claim, apply [references/external-tool-evidence.md](references/external-tool-evidence.md), including its specification/runtime distinction, source locators and explicit exemptions. Do not invent an external-tool claim to justify web searches in a local-only task.
 
-Before claiming verification-complexity-level-3 completion, external governance absorption or evaluator promotion, apply [references/evaluator-artifacts.md](references/evaluator-artifacts.md). Missing or rejected required evaluator proof blocks that claim or promotion.
+Before claiming a result that adversarial-verification reviewed at level-3-high-stakes, or claiming external governance absorption or evaluator promotion, apply [references/evaluator-artifacts.md](references/evaluator-artifacts.md). Missing or rejected required evaluator proof blocks that claim or promotion.
 
 ## Failure modes and partial continuation
 

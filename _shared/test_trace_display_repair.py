@@ -11,7 +11,6 @@ from pathlib import Path
 from test_completion_recovery import VALID
 from test_completion_skill_evidence import assert_stop_observation, skill_call, user
 import test_completion_skill_evidence as skill_fixture
-import global_rule_blocks
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
 
@@ -85,25 +84,6 @@ class TraceDisplayRepairTests(unittest.TestCase):
                         issue='must include evidence', repair_target='completion_metadata')
                     self.assertNotIn('delivery-route:', observed['body_issue'])
                     self.assertNotIn('response_text', result)
-
-    def test_generated_platform_contracts_do_not_require_trace_output(self):
-        repo = HOOK.parents[1]
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            codex = root / "codex" / "AGENTS.md"
-            claude = root / "claude" / "CLAUDE.md"
-            global_rule_blocks.apply_codex_bootstrap(
-                repo / "platforms/codex/AGENTS.md", codex,
-                loader_path=repo / "platforms/codex/bootstrap.md",
-            )
-            global_rule_blocks.apply_claude_bootstrap(repo / "platforms/claude/CLAUDE.md", claude)
-            for path in (root / "codex/ghost-alice-governance.md", claude):
-                body = path.read_text()
-                self.assertIn("A displayed trace does not establish proof", body)
-                self.assertNotIn("End every normal response with `[io-trace]`", body)
-                self.assertNotIn("Output an `[io-trace]` block at the end of every normal response", body)
-                self.assertIn("Hooks record strict audit independently of displayed guidance", body)
-                self.assertIn("verification-before-completion", body)
 
     def test_new_turn_without_reply_cannot_revalidate_old_completion(self):
         for platform in ("codex", "claude"):

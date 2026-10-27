@@ -1,6 +1,5 @@
 import importlib.util
 import inspect
-import re
 import sys
 import tempfile
 import unittest
@@ -55,22 +54,6 @@ class GlobalRuleBlockTest(unittest.TestCase):
                 with self.assertRaises(blocks.GlobalRuleBlockError):
                     apply(source, dest)
                 common.write_text('# Ghost-ALICE Common Governance\n\nOne current procedure.\n')
-
-    def assert_intake_routing_authority(self, body: str) -> None:
-        self.assertIn("`task-router` owns this rule and this section carries it, so applying it loads no skill", body)
-        self.assertIn("`session-intent-analyzer`: reading or writing the intent record", body)
-        self.assertIn("The native host executes tools and enforces permission", body)
-        self.assertNotIn("jailbreak-detector", body)
-
-    def test_rendered_fallback_rejects_classifier_or_audit_authority(self) -> None:
-        blocks = _load_global_rule_blocks()
-        for rel, render in (("platforms/codex/AGENTS.md", blocks.render_codex_bootstrap),
-                            ("platforms/claude/CLAUDE.md", blocks.render_claude_bootstrap)):
-            body = render(blocks.platform_contract_text(REPO_ROOT / rel))
-            for old, new in (("`session-intent-analyzer`: reading or writing the intent record", "Session intake requires jailbreak-detector permission before task-router"),
-                             ("The native host executes tools and enforces permission", "Audit records grant execution permission")):
-                with self.subTest(path=rel, change=old), self.assertRaises(AssertionError):
-                    self.assert_intake_routing_authority(body.replace(old, new))
 
     def test_claude_bootstrap_is_created_when_destination_is_missing(self) -> None:
         blocks = _load_global_rule_blocks()
@@ -259,23 +242,13 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         body = blocks.render_codex_bootstrap(source)
 
-        self.assert_intake_routing_authority(body)
         self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session receipt"), 1)
         self.assertIn("does not invent a receipt, and does not claim intake, routing, Stop or audit records", body)
-        self.assertIn("Repeated healthy tool calls and new input receipts alone need no checkpoint", body)
-        self.assertIn("Before a tool call that changes an authority boundary, the next work decision or a required verification", body)
-        self.assertIn("strict audit", body)
 
-    def test_claude_source_owns_the_common_contract_and_one_hookless_fallback(self) -> None:
+    def test_claude_source_owns_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
-        ssot = (REPO_ROOT / "platforms/common-governance.md").read_text(encoding="utf-8")
         source = blocks.platform_contract_text(REPO_ROOT / "platforms/claude/CLAUDE.md")
 
-        heading_pattern = re.compile(r"(?m)^###\s*(\d+)\.\s*(.+)$")
-        self.assertEqual(
-            {int(number): title.strip() for number, title in heading_pattern.findall(ssot)},
-            {int(number): title.strip() for number, title in heading_pattern.findall(source)},
-        )
         self.assertTrue(source.startswith(blocks.CLAUDE_BOOTSTRAP_MARKER))
         self.assertFalse(hasattr(blocks, "CLAUDE_HOOKLESS_FALLBACK_BLOCK"))
         for renderer in (
@@ -290,10 +263,6 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session receipt"), 1)
         self.assertIn("does not claim intake, routing, Stop or audit records", body)
-        self.assert_intake_routing_authority(body)
-        self.assertIn("task-router", body)
-        self.assertIn("verification-before-completion", body)
-        self.assertIn("## io-trace Transparency Rule", body)
 
     def test_installers_route_global_rule_files_through_block_helper(self) -> None:
         hosts_py = (REPO_ROOT / "_shared" / "installer" / "hosts.py").read_text(encoding="utf-8")

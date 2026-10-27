@@ -1,8 +1,11 @@
 """Operating model responsibilities and the procedures that own their detail."""
 from pathlib import Path
+import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / '_shared'))
+from global_rule_blocks import platform_contract_text
 
 
 class OperatingRuleContractTest(unittest.TestCase):
@@ -18,7 +21,10 @@ class OperatingRuleContractTest(unittest.TestCase):
                      'A direct answer reads no skills, accesses no ledger, registers no route'):
             self.assertIn(term, selection)
         self.assertIn('Do not substitute another session', common)
+        self.assertIn('Missing or pending identity blocks dependent writes', common)
         self.assertIn('stored result or available tool grants no authority', common)
+        self.assertIn('The native host executes tools and enforces permission', common)
+        self.assertIn('`session-intent-analyzer`: reading or writing the intent record', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('Work Selection section', router)
         self.assertIn('register the Core response-route at that point, using the session-start receipt', router)
@@ -42,6 +48,39 @@ class OperatingRuleContractTest(unittest.TestCase):
         schema = (ROOT / 'session-intent-analyzer/references/ledger-schema.md').read_text()
         self.assertIn('replaces that field as a whole, so an empty list or object clears it', schema)
         self.assertNotIn('retain active authority until explicitly superseded', schema)
+
+    def test_checks_and_checkpoints_use_conditions_known_before_acting(self):
+        common = (ROOT / 'platforms/common-governance.md').read_text()
+        calls = common.split('## Tool Calls\n', 1)[1].split('\n## ', 1)[0]
+        self.assertIn('a contrary observation, an explicit recheck or a materially broader claim reopens only the affected check', calls)
+        self.assertIn('- Do not repeat an unchanged attempt.\n', calls)
+        self.assertNotIn('run a check whose outcomes cannot change the next decision', calls)
+        trace = common.split('## io-trace Transparency Rule\n', 1)[1].split('\n## ', 1)[0]
+        for phrase in ('Before a tool call that changes an authority boundary, a tool call made to obtain information for an open work decision',
+                       'an active boundary contract adds `contract-ref` and `contract-check`',
+                       'Repeated healthy tool calls need no checkpoint'):
+            self.assertIn(phrase, trace)
+        self.assertNotIn('new input receipts', trace)
+        boundary = (ROOT / 'boundary-contract/SKILL.md').read_text()
+        for phrase in ('the coverage criterion states the condition that defines the set',
+                       'maps every tool call to an allowed-surface item or a next-allowed-action before making it'):
+            self.assertIn(phrase, boundary)
+        router = (ROOT / 'task-router/SKILL.md').read_text()
+        for phrase in ('When the current session receipt carries `context_selection`, select the information',
+                       'verification-before-completion before a new completion, fix, success, verified-status or material recommendation claim and before rereading an artifact to support a claim'):
+            self.assertIn(phrase, router)
+        verification = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
+        self.assertIn('Before claiming a result that adversarial-verification reviewed at level-3-high-stakes', verification)
+        self.assertNotIn('verification-complexity-level-3', verification)
+
+    def test_rendered_contracts_carry_no_retired_instructions(self):
+        for name in ('platforms/codex/AGENTS.md', 'platforms/claude/CLAUDE.md'):
+            body = platform_contract_text(ROOT / name)
+            for retired in ('jailbreak-detector',
+                            'End every normal response with `[io-trace]`',
+                            'Output an `[io-trace]` block at the end of every normal response'):
+                with self.subTest(path=name, retired=retired):
+                    self.assertNotIn(retired, body)
 
     def test_reuse_instruction_contract_stays_at_its_owner(self):
         reference = (ROOT / 'coding-convention/verification-before-completion/references/verify-or-reuse.md').read_text()

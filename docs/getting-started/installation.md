@@ -273,7 +273,7 @@ flowchart LR
     U["User objective and instructions"] --> M
 ```
 
-If Codex cannot read the named common file, the assistant reports that missing input and stops only work that requires it. Answers fully supported by supplied conversation can use the loader's no-tool rule. Status and doctor check the loader and its declared companion together. The installer preserves adjacent user text and markerless user-owned rule files; it refuses to replace a Codex common contract through a symlink. A proposal is not an installed contract. The installer does not change unrelated projects' instruction budgets or rewrite their local rules.
+If Codex cannot read the named common file, the model tells the user once that the Ghost-ALICE contract is missing and continues the user's work without writing Ghost-ALICE ledger records. On Codex, when no tool is needed, the model answers directly without reading the common file; when it is unclear whether a tool is needed, it treats the request as work and reads the common file first. Status and doctor check the loader and its declared companion together. The installer preserves adjacent user text and markerless user-owned rule files; it refuses to replace a Codex common contract through a symlink. A proposal is not an installed contract. The installer does not change unrelated projects' instruction budgets or rewrite their local rules.
 
 
 ### merge-companion

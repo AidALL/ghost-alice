@@ -64,6 +64,8 @@ TRIGGERS = (
     "externally-writable-current-state",
     "retained-evidence-lost",
     "evidence-covers-different-copy",
+    "contrary-observation",
+    "materially-broader-claim",
 )
 CLAIM_SCOPES = ("authored-at", "current", "last-known", "n/a")
 COPY_BASES = ("user-designated", "dated-version", "content-compared", "folder-name", "familiarity", "none")
@@ -110,6 +112,8 @@ _FACT_KEYS = {
     "hypothetical_changes",
     "artifact_accessible",
     "explicit_recheck_request",
+    "contrary_observation",
+    "materially_broader_claim",
     "planned_check_copy",
     "related_copies",
     "writer_confirmed_unchanged",
@@ -179,6 +183,8 @@ def _normalize_facts(facts: Mapping[str, Any]) -> dict[str, Any]:
         "hypothetical_changes": _strings(facts, "hypothetical_changes"),
         "artifact_accessible": _flag(facts, "artifact_accessible", True),
         "explicit_recheck_request": _flag(facts, "explicit_recheck_request", False),
+        "contrary_observation": _flag(facts, "contrary_observation", False),
+        "materially_broader_claim": _flag(facts, "materially_broader_claim", False),
         "planned_check_copy": None if planned is None else _text(planned, "planned_check_copy"),
         "related_copies": _strings(facts, "related_copies"),
         "writer_confirmed_unchanged": _flag(facts, "writer_confirmed_unchanged", False),
@@ -215,11 +221,17 @@ def decide(facts: Mapping[str, Any]) -> dict[str, Any]:
 
     covers_claim = f["evidence_present"] and f["evidence_copy"] == f["claim_copy"]
     evidence_gap = "retained-evidence-lost" if not f["evidence_present"] else "evidence-covers-different-copy"
+    # A read of the current copy cannot recover an authored state that a later mutation replaced.
+    authored_state_replaced = f["claim_time"] == "authored-at" and not covers_claim and bool(mutations)
     trigger: str | None = None
     verdict = "reuse"
 
     if f["explicit_recheck_request"]:
         verdict, trigger = "verify", "explicit-recheck-request"
+    elif f["contrary_observation"] and not authored_state_replaced:
+        verdict, trigger = "verify", "contrary-observation"
+    elif f["materially_broader_claim"] and not authored_state_replaced:
+        verdict, trigger = "verify", "materially-broader-claim"
     elif f["claim_time"] == "authored-at":
         if not covers_claim:
             if mutations:
@@ -244,7 +256,9 @@ def decide(facts: Mapping[str, Any]) -> dict[str, Any]:
     if f["writer_confirmed_unchanged"] and not mutations:
         reasons.append("writer-confirmed-unchanged")
     # Later mutations change the current copy, not the state a claim about the authored version refers to.
-    evidence_still_valid = covers_claim and (
+    # A contrary observation disputes the evidence; a materially broader claim exceeds what it covered.
+    disputed = f["contrary_observation"] or f["materially_broader_claim"]
+    evidence_still_valid = covers_claim and not disputed and (
         f["claim_time"] == "authored-at" or (not mutations and confirmed_closed)
     )
     if verdict == "reuse":
