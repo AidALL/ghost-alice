@@ -25,7 +25,7 @@ This document is the repository map. The README stays a concise public entry poi
 | [AGENTS.md](../../AGENTS.md) | Project loader for the current host contract |
 | [Common governance](../../platforms/common-governance.md) | Shared contract source composed with host-specific rules |
 | [CLAUDE.md](https://github.com/AidALL/ghost-alice/blob/main/CLAUDE.md) | Claude Code project rule entrypoint |
-| [docs/index.html](../index.html) | GitHub Pages homepage |
+| [index.html](../../index.html) | GitHub Pages homepage |
 
 ## Installer And Platforms
 

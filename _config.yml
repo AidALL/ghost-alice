@@ -11,11 +11,7 @@ defaults:
     values: { layout: default }
   - scope: { path: "index.html" }
     values: { layout: none }
-  - scope: { path: "docs/index.html" }
-    values: { layout: none }
   - scope: { path: "index_ko.html" }
-    values: { layout: none }
-  - scope: { path: "docs/index_ko.html" }
     values: { layout: none }
 include:
   - "README.md"

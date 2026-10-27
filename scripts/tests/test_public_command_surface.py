@@ -54,7 +54,6 @@ class PublicCommandSurfaceTest(unittest.TestCase):
         REPO_ROOT / "README.md",
         REPO_ROOT / "README_ko.md",
         REPO_ROOT / "index.html",
-        REPO_ROOT / "docs" / "index.html",
         *_markdown_files(REPO_ROOT / "docs"),
     ]
     WINDOWS_NATIVE_WRAPPER_REQUIREMENTS = {

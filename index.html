@@ -1,14 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <script>
-    // Both byte-identical entry files resolve assets and links from the Pages root.
-    if (/\/docs\/(?:index(?:_ko)?\.html)?$/.test(location.pathname)) {
-      const base = document.createElement('base');
-      base.href = new URL('../', location.href).href;
-      document.head.appendChild(base);
-    }
-  </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ghost-ALICE OS</title>
