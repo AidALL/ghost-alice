@@ -52,7 +52,7 @@ class OperatingRuleContractTest(unittest.TestCase):
     def test_checks_and_checkpoints_use_conditions_known_before_acting(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         calls = common.split('## Tool Calls\n', 1)[1].split('\n## ', 1)[0]
-        self.assertIn('a contrary observation, an explicit recheck request or a materially broader claim reopens only the affected check', calls)
+        self.assertIn('a contrary observation, an explicit recheck or a materially broader claim reopens only the affected check', calls)
         self.assertIn('- Do not repeat an unchanged attempt.\n', calls)
         self.assertNotIn('run a check whose outcomes cannot change the next decision', calls)
         trace = common.split('## io-trace Transparency Rule\n', 1)[1].split('\n## ', 1)[0]

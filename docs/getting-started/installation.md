@@ -260,7 +260,7 @@ The installer owns only the marked Ghost-ALICE block in each global rule file. I
 
 ### Common Governance and Project Instructions
 
-Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the response model reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. User instructions and project-specific constraints retain precedence.
+Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the current-session assistant reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. User instructions and project-specific constraints retain precedence.
 
 ```mermaid
 flowchart LR
@@ -273,7 +273,7 @@ flowchart LR
     U["User objective and instructions"] --> M
 ```
 
-If Codex cannot read the named common file, the response model tells the user once that the Ghost-ALICE contract is missing and continues the user's work without writing Ghost-ALICE ledger records. On Codex, when no tool is needed, the response model answers directly without reading the common file; when it is unclear whether a tool is needed, it treats the request as work and reads the common file first. Status and doctor check the loader and its declared companion together. The installer preserves adjacent user text and markerless user-owned rule files; it refuses to replace a Codex common contract through a symlink. A proposal is not an installed contract. The installer does not change unrelated projects' instruction budgets or rewrite their local rules.
+If Codex cannot read the named common file, the model tells the user once that the Ghost-ALICE contract is missing and continues the user's work without writing Ghost-ALICE ledger records. On Codex, when no tool is needed, the model answers directly without reading the common file; when it is unclear whether a tool is needed, it treats the request as work and reads the common file first. Status and doctor check the loader and its declared companion together. The installer preserves adjacent user text and markerless user-owned rule files; it refuses to replace a Codex common contract through a symlink. A proposal is not an installed contract. The installer does not change unrelated projects' instruction budgets or rewrite their local rules.
 
 
 ### merge-companion

@@ -47,7 +47,7 @@ Load only the owner that the next decision needs, then only the section that own
 
 ## Tool Calls
 
-- Reuse unchanged evidence at its original time and source. A changed relevant target or criterion, a contrary observation, an explicit recheck request or a materially broader claim reopens only the affected check. A recording error does not refute the business result or authorize replay.
+- Reuse unchanged evidence at its original time and source. A changed relevant target or criterion, a contrary observation, an explicit recheck or a materially broader claim reopens only the affected check. A recording error does not refute the business result or authorize replay.
 - Do not repeat an unchanged attempt.
 
 ## io-trace Transparency Rule

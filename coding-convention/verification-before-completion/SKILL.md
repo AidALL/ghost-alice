@@ -27,7 +27,7 @@ Before inspecting an artifact again, apply [references/verify-or-reuse.md](refer
 
 Reuse retained evidence for an unchanged criterion and target. Another user input, a different execution-local variable or a recording failure is not an artifact mutation. An authored-at claim uses retained authored content even if a later version exists. For a current-state claim, assess actual mutation authority and observed events, not storage location or hypothetical edits. Unknown authority supports a last-known statement; it does not justify speculative inspection.
 
-A new check requires an explicit recheck request, observed relevant mutation, evidenced externally writable current-state target, lost evidence, a different target copy, a contrary observation or a materially broader claim. Check only the affected target and keep the returned result. When the writer confirms nothing relevant changed, reuse the evidence unless an observed mutation contradicts that confirmation.
+A new check requires an explicit recheck request, observed relevant mutation, evidenced externally writable current-state target, lost evidence or a different target copy. Check only the affected target and keep the returned result. When the writer confirms nothing relevant changed, reuse the evidence unless an observed mutation contradicts that confirmation.
 
 ## Evidence selection and stop gate
 
