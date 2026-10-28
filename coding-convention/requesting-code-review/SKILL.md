@@ -1,6 +1,6 @@
 ---
 name: requesting-code-review
-description: Dispatches a code-reviewer subagent to review a commit range and confirms a pull request's reviews and CI cover its current head, after a major feature is built, before merging, or when a pull request has new commits, findings or unresolved threads.
+description: Dispatches the code-reviewer subagent after a major feature is built or before a merge into main, and checks that a pull request's reviews finished and CI passed on its latest commit before merging it.
 compatibility:
   - "Python 3.11+ standard library"
 ---

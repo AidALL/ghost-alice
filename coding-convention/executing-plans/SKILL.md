@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Executes an accepted plan inline in the authorized checkout when inline execution is chosen.
+description: Executes an accepted plan with the assistant doing every task itself, when inline execution is chosen.
 calls:
   - "hard:finishing-a-development-branch"
   - "hard:using-git-worktrees"

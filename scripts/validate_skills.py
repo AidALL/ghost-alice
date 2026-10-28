@@ -39,7 +39,6 @@ from check_skill_gate_contract import run_contract_checks  # noqa: E402
 
 NAME_PATTERN = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 DESCRIPTION_HARD_LIMIT = 1024
-DESCRIPTION_SOFT_LIMIT = 250
 BODY_SOFT_LIMIT = 500
 BODY_TOKEN_SOFT_LIMIT = 5000  # Phase 2-2: rough line count x 10 estimate.
 INLINE_CODE_BLOCK_SOFT_LIMIT = 50  # Phase 2-5: a larger SKILL.md body code block suggests progressive disclosure drift.
@@ -108,10 +107,6 @@ def validate_phase1_frontmatter(skill_md: Path, fm: dict[str, Any], issues: list
         if desc_len > DESCRIPTION_HARD_LIMIT:
             issues.append(
                 Issue("ERROR", skill_name, "1", "1-5", f"description length {desc_len} > 1024 hard limit")
-            )
-        elif desc_len > DESCRIPTION_SOFT_LIMIT:
-            issues.append(
-                Issue("WARNING", skill_name, "1", "1-5", f"description length {desc_len} > 250 recommendation")
             )
 
     compat = fm.get("compatibility")

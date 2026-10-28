@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-description: Writes an implementation plan that breaks accepted requirements into tasks an implementer without project context can execute, when a multi-step task's requirements are settled and before implementation, not while design decisions remain open.
+description: Writes an implementation plan that breaks accepted requirements into tasks a newcomer to the project can carry out, after design decisions are settled and before implementation.
 calls:
   - "union:subagent-driven-development:plan-execution"
   - "union:executing-plans:plan-execution"

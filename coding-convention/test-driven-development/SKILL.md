@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Writes a failing test first for a feature or bug fix whose expected behavior is known and automatically testable. Not for configuration, generated-output or instruction changes without a meaningful behavioral test.
+description: Writes a failing test before the code that makes it pass, for a feature or bug fix whose expected behavior is known and testable through the production code.
 compatibility:
   - "Python 3.11+ standard library"
 ---

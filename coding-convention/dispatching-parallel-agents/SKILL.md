@@ -1,6 +1,6 @@
 ---
 name: dispatching-parallel-agents
-description: Delegates independent tasks to parallel agents, one self-contained assignment each, then reviews and integrates their results, when two or more tasks share no edited file, exclusive resource or mutable state and none waits on another task's result.
+description: Delegates two or more tasks to parallel agents and combines their outputs, when no task edits a file another task reads or edits, no two share mutable state or an exclusive resource, and none needs another's output.
 compatibility:
   - "Python 3.11+ standard library"
 ---

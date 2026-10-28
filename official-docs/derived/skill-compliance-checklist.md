@@ -29,7 +29,7 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 | 1-2 | `name` format | 1-64 chars, lowercase + digits + hyphens only, cannot start/end with or repeat a hyphen | regex: `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, length ≤64; separately check that `--` is absent | automatic + manual |
 | 1-3 | `name` = directory name | must exactly match the parent directory name | `basename $(dirname SKILL.md)` == name value | automatic |
 | 1-4 | `description` field exists | required | check whether the description key is present in frontmatter | automatic |
-| 1-5 | `description` length | maximum 1024 chars, recommended within 250 chars | measured as Unicode characters (`len(description)`), not bytes. WARNING when over 250 chars, ERROR when over 1024 chars | automatic |
+| 1-5 | `description` length | maximum 1024 chars, with the key use case first: Claude Code truncates a listed description at 1,536 chars, and both hosts shorten or drop descriptions when their skill listing exceeds its budget ([Claude Code](https://code.claude.com/docs/en/skills), [Codex](https://learn.chatgpt.com/docs/build-skills)) | measured as Unicode characters (`len(description)`), not bytes. ERROR when over 1024 chars. The position of the key use case is a meaning judgment | automatic + manual |
 | 1-6 | `description` content | includes both "what it does" and "when it triggers" | a meaning judgment, so it cannot be automated | manual |
 | 1-7 | `compatibility` field | required when there is an environment dependency (Python, CUDA, etc.) | whether it exceeds 500 chars is automatic, whether it is "needed but missing" is manual | partially automatic |
 
@@ -103,5 +103,5 @@ This phase applies to canonical skill instructions and their accessory guidance.
 | Severity | Definition | Example | Action |
 |--------|------|------|------|
 | ERROR | violation of a required spec condition | name mismatch, description missing, over 1024 chars | immediate fix required |
-| WARNING | violation of a recommendation | description over 250 chars, body over 500 lines | fix recommended, exception allowed when there is a reason |
+| WARNING | violation of a recommendation | body over 500 lines | fix required: `scripts/tests/test_skill_structure_cleanliness.py` fails when `scripts/validate_skills.py` reports any WARNING |
 | INFO | improvement possible | optional explanatory example could be clearer | supplement in the next iteration |

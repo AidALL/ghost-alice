@@ -1,6 +1,6 @@
 ---
 name: necessity-gate
-description: "Approves, modifies or rejects proposed new work (a task, skill, file, tool, audit or verification cycle, follow-up or production skill edit) when the current-session assistant defines it, not substeps or checks inside already approved work."
+description: "Approves, rescopes or rejects new work (a task, follow-up, skill, file, tool, audit or verification cycle, or skill edit) when the assistant proposes it or the user asks whether to do it."
 compatibility:
   - "Python 3.11+ standard library"
 ---
