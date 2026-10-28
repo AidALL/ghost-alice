@@ -1,6 +1,6 @@
 ---
 name: subagent-driven-development
-description: "Executes an accepted plan of independent tasks in the current session, with a fresh implementer for each task."
+description: "Executes an accepted plan in the current session, one task at a time through a fresh implementer, when subagent execution is chosen and each task can be assigned independently."
 compatibility:
   - "Python 3.11+ standard library"
 ---

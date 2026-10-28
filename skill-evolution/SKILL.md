@@ -1,6 +1,6 @@
 ---
 name: skill-evolution
-description: "Recommends skill changes from repeated tool/workflow patterns and supported conduct corrections when the user asks about skill upgrades, update recommendations or an evolution backlog."
+description: "Recommends skill changes from repeated tool/workflow patterns and supported conduct corrections when the user asks about skill upgrades, update recommendations or an evolution backlog, or authorizes an analysis of those patterns."
 compatibility:
   - "Python 3.11+ standard library"
 ---

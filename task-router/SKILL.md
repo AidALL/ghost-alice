@@ -1,6 +1,6 @@
 ---
 name: task-router
-description: "Selects the work, skills, criteria and boundary for a request that needs or may need a tool, other than a light-path lookup. Not for a direct answer."
+description: "Selects the work, skills, criteria and boundary for a request that needs or may need a tool, other than a light-path lookup. Not for a direct answer or a confirmation question."
 calls:
   - "meta:*"
 compatibility:

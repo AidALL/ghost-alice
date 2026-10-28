@@ -1,6 +1,6 @@
 ---
 name: compact-handoff
-description: "Records the objective, boundary, evidence and next action in a handoff when long context, an agent transfer or compaction could lose them, before the transfer or the compaction request."
+description: "Records the objective, boundary, evidence and next action in a handoff when long context, a task transfer to another session or agent, or compaction could lose them, before that transfer or compaction, and resumes work from the handoff."
 compatibility:
   - "Python 3.11+ standard library"
   - "Ghost-ALICE _shared/text_lines.py, installed beside the skill"

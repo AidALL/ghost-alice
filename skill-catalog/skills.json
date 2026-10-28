@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-10-28T06:33:17Z",
+  "generated_at": "2026-10-28T07:42:34Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -28,7 +28,7 @@
     {
       "name": "agent-security-scan",
       "path": "agent-security-scan/SKILL.md",
-      "description": "Use for report-only static scans of settings, hooks, skills, Model Context Protocol config, credential surfaces, remote fetches, shell side effects, and broad exposure risks.",
+      "description": "Scans settings, hooks, skills, Model Context Protocol config and credential files for exposure, remote-fetch and shell side-effect risks after any of them or governance logic changes, or when the user asks to inspect suspicious commands.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -48,7 +48,7 @@
     {
       "name": "brainstorming",
       "path": "coding-convention/brainstorming/SKILL.md",
-      "description": "Resolves design decisions and expected behavior still unsettled before implementation. Not for decisions already settled.",
+      "description": "Resolves open design decisions, including expected behavior, before implementation.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -64,7 +64,7 @@
     {
       "name": "compact-handoff",
       "path": "compact-handoff/SKILL.md",
-      "description": "Records the objective, boundary, evidence and next action in a handoff when long context, an agent transfer or compaction could lose them, before the transfer or the compaction request.",
+      "description": "Records the objective, boundary, evidence and next action in a handoff when long context, a task transfer to another session or agent, or compaction could lose them, before that transfer or compaction, and resumes work from the handoff.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -125,7 +125,7 @@
     {
       "name": "merge-companion",
       "path": "merge-companion/SKILL.md",
-      "description": "Reviews the user changes that a skill installer backed up, before the selected work modifies, replaces or installs an installed skill and when the user asks for that review. Not for an unrelated read-only lookup.",
+      "description": "Reviews the user changes that a skill installer backed up, before the selected work modifies, replaces or installs an installed skill and when the user asks for that review. Not for a read-only lookup unrelated to those changes.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -165,7 +165,7 @@
     {
       "name": "session-intent-analyzer",
       "path": "session-intent-analyzer/SKILL.md",
-      "description": "Writes a new or changed interpreted-as record before the first tool call of work, and reads stored intent when it can change work selection.",
+      "description": "Writes a new or changed interpreted-as record before the first tool call of work, and reads stored intent when it can affect the objective, constraints, authorized continuation or work selection.",
       "family": "system",
       "governance_class": "intent-state-producer",
       "compatibility": [
@@ -182,7 +182,7 @@
     {
       "name": "skill-evolution",
       "path": "skill-evolution/SKILL.md",
-      "description": "Recommends skill changes from repeated tool/workflow patterns and supported conduct corrections when the user asks about skill upgrades, update recommendations or an evolution backlog.",
+      "description": "Recommends skill changes from repeated tool/workflow patterns and supported conduct corrections when the user asks about skill upgrades, update recommendations or an evolution backlog, or authorizes an analysis of those patterns.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -192,7 +192,7 @@
     {
       "name": "subagent-driven-development",
       "path": "coding-convention/subagent-driven-development/SKILL.md",
-      "description": "Executes an accepted plan of independent tasks in the current session, with a fresh implementer for each task.",
+      "description": "Executes an accepted plan in the current session, one task at a time through a fresh implementer, when subagent execution is chosen and each task can be assigned independently.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -202,7 +202,7 @@
     {
       "name": "systematic-debugging",
       "path": "coding-convention/systematic-debugging/SKILL.md",
-      "description": "For a failure whose cause and sufficient correction depth need investigation, tests causal hypotheses, corrects the supported cause and counts failed repair rounds.",
+      "description": "Before a fix is proposed for a failure whose cause and sufficient correction depth need investigation, tests causal hypotheses and corrects the supported cause; also counts failed repair rounds against the repair limit.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -212,7 +212,7 @@
     {
       "name": "task-router",
       "path": "task-router/SKILL.md",
-      "description": "Selects the work, skills, criteria and boundary for a request that needs or may need a tool, other than a light-path lookup. Not for a direct answer.",
+      "description": "Selects the work, skills, criteria and boundary for a request that needs or may need a tool, other than a light-path lookup. Not for a direct answer or a confirmation question.",
       "family": "system",
       "governance_class": "core-gate",
       "compatibility": [
@@ -238,7 +238,7 @@
     {
       "name": "using-coding-convention",
       "path": "coding-convention/using-coding-convention/SKILL.md",
-      "description": "Selects the coding-convention family skill for development work before its first read, command, edit, plan or review. A direct answer or a confirmation question ends before this workflow.",
+      "description": "Selects the coding-convention family skill before development work's first file read, command, edit, plan or review. Not for a direct answer or a confirmation question.",
       "family": "coding-convention",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -259,7 +259,7 @@
     {
       "name": "verification-before-completion",
       "path": "coding-convention/verification-before-completion/SKILL.md",
-      "description": "Checks a new completion, fix, success, verified-status or material recommendation claim against its criterion and evidence before it is made, and decides whether an artifact must be reread to support a claim.",
+      "description": "Checks each new completion, fix, success, verified-status or material recommendation claim against its criterion and evidence before the claim is made, and decides whether an artifact must be reread to support a claim.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [
@@ -291,7 +291,7 @@
     {
       "name": "writing-skills",
       "path": "coding-convention/writing-skills/SKILL.md",
-      "description": "Writes, changes or verifies a skill package and validates the decision it affects.",
+      "description": "Writes a new skill or changes or tests an existing one, in its SKILL.md, references and scripts. Not for documents outside a skill package.",
       "family": "coding-convention",
       "governance_class": "governance-subskill",
       "compatibility": [

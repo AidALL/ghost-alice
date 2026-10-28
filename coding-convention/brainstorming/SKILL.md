@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "Resolves design decisions and expected behavior still unsettled before implementation. Not for decisions already settled."
+description: "Resolves open design decisions, including expected behavior, before implementation."
 calls:
   - "hard:writing-plans"
 compatibility:

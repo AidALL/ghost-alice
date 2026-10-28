@@ -1,6 +1,6 @@
 ---
 name: agent-security-scan
-description: "Use for report-only static scans of settings, hooks, skills, Model Context Protocol config, credential surfaces, remote fetches, shell side effects, and broad exposure risks."
+description: "Scans settings, hooks, skills, Model Context Protocol config and credential files for exposure, remote-fetch and shell side-effect risks after any of them or governance logic changes, or when the user asks to inspect suspicious commands."
 compatibility:
   - "Python 3.11+ standard library"
 ---

@@ -1,6 +1,6 @@
 ---
 name: merge-companion
-description: Reviews the user changes that a skill installer backed up, before the selected work modifies, replaces or installs an installed skill and when the user asks for that review. Not for an unrelated read-only lookup.
+description: Reviews the user changes that a skill installer backed up, before the selected work modifies, replaces or installs an installed skill and when the user asks for that review. Not for a read-only lookup unrelated to those changes.
 type: lifecycle-gate
 compatibility:
   - "Python 3.11+ standard library"

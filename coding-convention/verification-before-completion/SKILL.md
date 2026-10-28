@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: Checks a new completion, fix, success, verified-status or material recommendation claim against its criterion and evidence before it is made, and decides whether an artifact must be reread to support a claim.
+description: Checks each new completion, fix, success, verified-status or material recommendation claim against its criterion and evidence before the claim is made, and decides whether an artifact must be reread to support a claim.
 compatibility:
   - "Python 3.11+ standard library"
 ---
