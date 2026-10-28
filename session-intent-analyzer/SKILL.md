@@ -1,6 +1,6 @@
 ---
 name: session-intent-analyzer
-description: "Writes a new or changed interpreted-as record before the first tool call of work, and reads stored intent when it can affect the objective, constraints, authorized continuation or work selection."
+description: "Records the assistant's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues."
 compatibility:
   - "Python 3.11+ standard library"
   - "hook-capable environments plus hookless/manual fallback"

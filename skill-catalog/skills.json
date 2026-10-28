@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-10-28T12:32:18Z",
+  "generated_at": "2026-10-28T23:07:16Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -18,7 +18,7 @@
     {
       "name": "adversarial-verification",
       "path": "adversarial-verification/SKILL.md",
-      "description": "Assigns independent agents to attack a claim and its evidence and returns a verdict with the surviving claim, when the user or a calling procedure asks for adversarial review or fact-checking of a numeric, legal, novelty or prior-art claim.",
+      "description": "Assigns independent agents to try to refute a claim and its evidence and returns a verdict with the part that survives, when the user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim.",
       "family": "domain",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -28,7 +28,7 @@
     {
       "name": "agent-security-scan",
       "path": "agent-security-scan/SKILL.md",
-      "description": "Scans settings, hooks, skills, Model Context Protocol config and credential files for exposure, remote-fetch and shell side-effect risks after any of them or governance logic changes, or when the user asks to inspect suspicious commands.",
+      "description": "Scans the assistant's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the user asks to check them.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -38,7 +38,7 @@
     {
       "name": "boundary-contract",
       "path": "boundary-contract/SKILL.md",
-      "description": "Declares the objective, allowed and prohibited surfaces, criteria, phase and stop conditions of work for which task-router requires a boundary contract.",
+      "description": "Writes a boundary contract listing the work's objective, allowed and prohibited paths and actions, acceptance criteria, phase and stop conditions, when task-router requires one.",
       "family": "system",
       "governance_class": "boundary-gate",
       "compatibility": [
@@ -48,7 +48,7 @@
     {
       "name": "brainstorming",
       "path": "coding-convention/brainstorming/SKILL.md",
-      "description": "Resolves open design decisions, including expected behavior, before implementation.",
+      "description": "Resolves open design decisions, including expected behavior, with the user and writes the accepted design before implementation.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -64,7 +64,7 @@
     {
       "name": "compact-handoff",
       "path": "compact-handoff/SKILL.md",
-      "description": "Records the objective, boundary, evidence and next action in a handoff when long context, a task transfer to another session or agent, or compaction could lose them, before that transfer or compaction, and resumes work from the handoff.",
+      "description": "Writes a handoff of the task's objective, scope, evidence and next action when a long conversation, compaction or handover to another session or agent could lose them, and resumes the task from it afterwards.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -75,7 +75,7 @@
     {
       "name": "dispatching-parallel-agents",
       "path": "coding-convention/dispatching-parallel-agents/SKILL.md",
-      "description": "Delegates independent tasks to parallel agents, one self-contained assignment each, then reviews and integrates their results, when two or more tasks share no edited file, exclusive resource or mutable state and none waits on another task's result.",
+      "description": "Delegates two or more tasks to parallel agents and combines their outputs, when no task edits a file another task reads or edits, no two share mutable state or an exclusive resource, and none needs another's output.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -85,7 +85,7 @@
     {
       "name": "executing-plans",
       "path": "coding-convention/executing-plans/SKILL.md",
-      "description": "Executes an accepted plan inline in the authorized checkout when inline execution is chosen.",
+      "description": "Executes an accepted plan with the assistant doing every task itself, when inline execution is chosen.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -105,7 +105,7 @@
     {
       "name": "finishing-a-development-branch",
       "path": "coding-convention/finishing-a-development-branch/SKILL.md",
-      "description": "Runs applicable CI checks locally before a push or merge and executes the user's chosen path (local merge, pull request, keep or discard), when work is ready to integrate or the user asks to push, merge, open a pull request or discard a branch.",
+      "description": "For a branch ready to integrate, runs its locally runnable CI jobs before any push or merge and carries out the user's choice, asking if undecided: merge locally, open or merge a pull request, keep, or delete the branch.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [
@@ -125,7 +125,7 @@
     {
       "name": "merge-companion",
       "path": "merge-companion/SKILL.md",
-      "description": "Reviews the user changes that a skill installer backed up, before the selected work modifies, replaces or installs an installed skill and when the user asks for that review. Not for a read-only lookup unrelated to those changes.",
+      "description": "Reviews the user's backed-up edits to installed skills and merges each into the new skill version, discards or defers it as the user chooses, before a task changes or reinstalls an installed skill, or when the user asks for that review.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -135,7 +135,7 @@
     {
       "name": "necessity-gate",
       "path": "necessity-gate/SKILL.md",
-      "description": "Approves, modifies or rejects proposed new work (a task, skill, file, tool, audit or verification cycle, follow-up or production skill edit) when the current-session assistant defines it, not substeps or checks inside already approved work.",
+      "description": "Approves, rescopes or rejects new work (a task, follow-up, skill, file, tool, audit or verification cycle, or skill edit) when the assistant proposes it or the user asks whether to do it.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -145,7 +145,7 @@
     {
       "name": "receiving-code-review",
       "path": "coding-convention/receiving-code-review/SKILL.md",
-      "description": "Judges each code review finding against the user's requirements, the current code and tests, then fixes it if valid and authorized, rejects it with evidence or reports it unresolved, when review feedback arrives and before any code is changed.",
+      "description": "When code review findings arrive, judges each against the requirements, code and tests before changing code, then fixes valid ones, rejects incorrect ones with evidence and reports the rest as unresolved.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -155,7 +155,7 @@
     {
       "name": "requesting-code-review",
       "path": "coding-convention/requesting-code-review/SKILL.md",
-      "description": "Dispatches a code-reviewer subagent to review a commit range and confirms a pull request's reviews and CI cover its current head, after a major feature is built, before merging, or when a pull request has new commits, findings or unresolved threads.",
+      "description": "Dispatches the code-reviewer subagent after a major feature is built or before a merge into main, and checks that a pull request's reviews finished and CI passed on its latest commit before merging it.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -165,7 +165,7 @@
     {
       "name": "session-intent-analyzer",
       "path": "session-intent-analyzer/SKILL.md",
-      "description": "Writes a new or changed interpreted-as record before the first tool call of work, and reads stored intent when it can affect the objective, constraints, authorized continuation or work selection.",
+      "description": "Records the assistant's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues.",
       "family": "system",
       "governance_class": "intent-state-producer",
       "compatibility": [
@@ -182,7 +182,7 @@
     {
       "name": "skill-evolution",
       "path": "skill-evolution/SKILL.md",
-      "description": "Recommends skill changes from repeated tool/workflow patterns and supported conduct corrections when the user asks about skill upgrades, update recommendations or an evolution backlog, or authorizes an analysis of those patterns.",
+      "description": "Recommends skill changes from recorded tool-call patterns and corrections of the assistant's behavior, when the user asks for such recommendations or their pending backlog, or authorizes that analysis.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -192,7 +192,7 @@
     {
       "name": "subagent-driven-development",
       "path": "coding-convention/subagent-driven-development/SKILL.md",
-      "description": "Executes an accepted plan in the current session, one task at a time through a fresh implementer, when subagent execution is chosen and each task can be assigned independently.",
+      "description": "Executes an accepted plan in this session by giving each task, one at a time, to a new subagent and reviewing the result, when the user chose subagent execution and each task is self-contained.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -202,7 +202,7 @@
     {
       "name": "systematic-debugging",
       "path": "coding-convention/systematic-debugging/SKILL.md",
-      "description": "Before a fix is proposed for a failure whose cause and sufficient correction depth need investigation, tests causal hypotheses and corrects the supported cause; also counts failed repair rounds against the repair limit.",
+      "description": "Before a fix is proposed for a failure with an unclear cause, tests hypotheses, fixes the supported cause and counts failed fix attempts, reassessing the hypothesis after five.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -212,7 +212,7 @@
     {
       "name": "task-router",
       "path": "task-router/SKILL.md",
-      "description": "Selects the work, skills, criteria and boundary for a request that needs or may need a tool, other than a light-path lookup. Not for a direct answer or a confirmation question.",
+      "description": "Selects the work, skills, acceptance criteria and boundary contract for a request that needs or may need a tool to change, run, analyze or verify something, or to read a remote source.",
       "family": "system",
       "governance_class": "core-gate",
       "compatibility": [
@@ -228,7 +228,7 @@
     {
       "name": "test-driven-development",
       "path": "coding-convention/test-driven-development/SKILL.md",
-      "description": "Writes a failing test first for a feature or bug fix whose expected behavior is known and automatically testable. Not for configuration, generated-output or instruction changes without a meaningful behavioral test.",
+      "description": "Writes a failing test before the code that makes it pass, for a feature or bug fix whose expected behavior is known and testable through the production code.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -238,7 +238,7 @@
     {
       "name": "using-coding-convention",
       "path": "coding-convention/using-coding-convention/SKILL.md",
-      "description": "Selects the coding-convention family skill before development work's first file read, command, edit, plan or review. Not for a direct answer or a confirmation question.",
+      "description": "Before each step of development work (file read, command, edit, plan or review), loads the coding-convention skill that fits it, such as writing-plans or test-driven-development.",
       "family": "coding-convention",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -249,7 +249,7 @@
     {
       "name": "using-git-worktrees",
       "path": "coding-convention/using-git-worktrees/SKILL.md",
-      "description": "Selects or creates an isolated checkout, only when the authorized development task requires isolation.",
+      "description": "Reuses or creates a git worktree when an authorized development task must run separately from the current checkout.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -259,7 +259,7 @@
     {
       "name": "verification-before-completion",
       "path": "coding-convention/verification-before-completion/SKILL.md",
-      "description": "Checks each new completion, fix, success, verified-status or material recommendation claim against its criterion and evidence before the claim is made, and decides whether an artifact must be reread to support a claim.",
+      "description": "Before a new completion, working-fix, success or verified-status claim or a recommendation the user will act on, checks it against its criterion and evidence and decides whether evidence must be reread.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [
@@ -269,7 +269,7 @@
     {
       "name": "writing-plans",
       "path": "coding-convention/writing-plans/SKILL.md",
-      "description": "Writes an implementation plan that breaks accepted requirements into tasks an implementer without project context can execute, when a multi-step task's requirements are settled and before implementation, not while design decisions remain open.",
+      "description": "Writes an implementation plan that breaks accepted requirements into tasks a newcomer to the project can carry out, after design decisions are settled and before implementation.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -291,7 +291,7 @@
     {
       "name": "writing-skills",
       "path": "coding-convention/writing-skills/SKILL.md",
-      "description": "Writes a new skill or changes or tests an existing one, in its SKILL.md, references and scripts. Not for documents outside a skill package.",
+      "description": "Writes a new skill or changes an existing one in its folder (SKILL.md, references and scripts) and tests it.",
       "family": "coding-convention",
       "governance_class": "governance-subskill",
       "compatibility": [

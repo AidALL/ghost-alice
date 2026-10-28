@@ -1,6 +1,6 @@
 ---
 name: using-git-worktrees
-description: Selects or creates an isolated checkout, only when the authorized development task requires isolation.
+description: Reuses or creates a git worktree when an authorized development task must run separately from the current checkout.
 compatibility:
   - "Python 3.11+ standard library"
 ---

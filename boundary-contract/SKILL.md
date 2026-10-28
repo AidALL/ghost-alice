@@ -1,6 +1,6 @@
 ---
 name: boundary-contract
-description: "Declares the objective, allowed and prohibited surfaces, criteria, phase and stop conditions of work for which task-router requires a boundary contract."
+description: "Writes a boundary contract listing the work's objective, allowed and prohibited paths and actions, acceptance criteria, phase and stop conditions, when task-router requires one."
 compatibility:
   - "Python 3.11+ standard library"
 ---

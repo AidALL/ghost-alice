@@ -1,6 +1,6 @@
 ---
 name: using-coding-convention
-description: Selects the coding-convention family skill before development work's first file read, command, edit, plan or review. Not for a direct answer or a confirmation question.
+description: Before each step of development work (file read, command, edit, plan or review), loads the coding-convention skill that fits it, such as writing-plans or test-driven-development.
 compatibility:
   - "Python 3.11+ standard library"
 ---

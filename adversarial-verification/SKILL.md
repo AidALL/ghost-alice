@@ -1,6 +1,6 @@
 ---
 name: adversarial-verification
-description: "Assigns independent agents to attack a claim and its evidence and returns a verdict with the surviving claim, when the user or a calling procedure asks for adversarial review or fact-checking of a numeric, legal, novelty or prior-art claim."
+description: "Assigns independent agents to try to refute a claim and its evidence and returns a verdict with the part that survives, when the user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim."
 calls:
 compatibility:
   - "Python 3.11+ standard library"

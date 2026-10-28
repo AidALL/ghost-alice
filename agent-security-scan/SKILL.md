@@ -1,6 +1,6 @@
 ---
 name: agent-security-scan
-description: "Scans settings, hooks, skills, Model Context Protocol config and credential files for exposure, remote-fetch and shell side-effect risks after any of them or governance logic changes, or when the user asks to inspect suspicious commands."
+description: "Scans the assistant's settings, hooks, skills, Model Context Protocol config and credential files for exposed secrets, remote fetches and side-effecting shell commands, after any of them changes or governance rules from another project are adopted, or when the user asks to check them."
 compatibility:
   - "Python 3.11+ standard library"
 ---

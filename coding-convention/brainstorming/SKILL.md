@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "Resolves open design decisions, including expected behavior, before implementation."
+description: "Resolves open design decisions, including expected behavior, with the user and writes the accepted design before implementation."
 calls:
   - "hard:writing-plans"
 compatibility:

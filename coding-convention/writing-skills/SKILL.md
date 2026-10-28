@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Writes a new skill or changes or tests an existing one, in its SKILL.md, references and scripts. Not for documents outside a skill package.
+description: "Writes a new skill or changes an existing one in its folder (SKILL.md, references and scripts) and tests it."
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -23,7 +23,7 @@ Define the affected evaluation before editing. Include only cases whose outcomes
 
 Use `SKILL.md` for core guidance, conditionally loaded `references/` for detail, and `scripts/` for executable support. At an operational handoff, write enough for a reader without prior conversation to act: identify the caller and trigger, the authoritative origin and required shape of transferred values, the exposed tool or actual API/CLI invocation, the result and its storage owner, and the conditional next action. Distinguish the assistant's meaning judgment from code that authenticates its recorded judgment. Put a shared procedure in one owning reference and link callers to its section; do not repeat this field list in every sentence or replace an executable transfer with an actor label. Mark illustrative prompts, schemas and data as examples rather than ambient task authority.
 
-The frontmatter must contain a directory-matching lowercase-hyphen name and a description of trigger conditions. Keep descriptions within 1024 characters, preferably 250; state compatibility when the workflow depends on an environment. Trigger descriptions help discovery but do not replace the body procedure.
+The frontmatter must contain a directory-matching lowercase-hyphen name and a description of trigger conditions. Keep descriptions within 1024 characters; state compatibility when the workflow depends on an environment. Trigger descriptions help discovery but do not replace the body procedure.
 
 In the body, state the workflow's purpose, applicability, procedure, output and failure modes. Use a quick-reference table when it improves selection. Prefer one complete relevant example over multiple shallow language variants. Long code and reference tables belong in supporting files; every reference in the package needs a clear loading condition.
 

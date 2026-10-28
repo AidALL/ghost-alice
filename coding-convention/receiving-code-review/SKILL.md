@@ -1,6 +1,6 @@
 ---
 name: receiving-code-review
-description: Judges each code review finding against the user's requirements, the current code and tests, then fixes it if valid and authorized, rejects it with evidence or reports it unresolved, when review feedback arrives and before any code is changed.
+description: When code review findings arrive, judges each against the requirements, code and tests before changing code, then fixes valid ones, rejects incorrect ones with evidence and reports the rest as unresolved.
 compatibility:
   - "Python 3.11+ standard library"
 ---
