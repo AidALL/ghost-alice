@@ -1,6 +1,6 @@
 ---
 name: writing-plans
-description: Use when requirements for a multi-step task are known and before touching code. Documents everything as bite-sized tasks for an engineer with zero codebase context. Use for implementation plans, task decomposition, and planning before TDD.
+description: Writes an implementation plan that breaks accepted requirements into tasks an implementer without project context can execute, when a multi-step task's requirements are settled and before implementation, not while design decisions remain open.
 calls:
   - "union:subagent-driven-development:plan-execution"
   - "union:executing-plans:plan-execution"

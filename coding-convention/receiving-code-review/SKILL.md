@@ -1,6 +1,6 @@
 ---
 name: receiving-code-review
-description: Use when receiving code review feedback before implementing suggestions, especially when feedback is ambiguous or technically questionable. Enforces technical rigor and verification instead of performative agreement or blind implementation.
+description: Judges each code review finding against the user's requirements, the current code and tests, then fixes it if valid and authorized, rejects it with evidence or reports it unresolved, when review feedback arrives and before any code is changed.
 compatibility:
   - "Python 3.11+ standard library"
 ---

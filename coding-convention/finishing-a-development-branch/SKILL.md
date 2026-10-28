@@ -1,6 +1,6 @@
 ---
 name: finishing-a-development-branch
-description: Use when implementation is ready for integration, when the user asks to merge or publish a pull request, or when the branch finishing path remains undecided.
+description: Runs applicable CI checks locally before a push or merge and executes the user's chosen path (local merge, pull request, keep or discard), when work is ready to integrate or the user asks to push, merge, open a pull request or discard a branch.
 calls:
   - "soft:using-git-worktrees"
   - "soft:requesting-code-review"

@@ -1,6 +1,6 @@
 ---
 name: adversarial-verification
-description: "Use when claims or evidence need adversarial validation by 3-5 independent agents. Requires unanimous convergence. Triggers: patents, papers, grants, investor relations, legal docs, numeric claims, novelty, prior-art, and fact-checking."
+description: "Assigns independent agents to attack a claim and its evidence and returns a verdict with the surviving claim, when the user or a calling procedure asks for adversarial review or fact-checking of a numeric, legal, novelty or prior-art claim."
 calls:
 compatibility:
   - "Python 3.11+ standard library"
