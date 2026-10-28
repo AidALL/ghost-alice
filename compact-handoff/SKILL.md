@@ -1,6 +1,6 @@
 ---
 name: compact-handoff
-description: "Use during long tasks when evidence, state, and next actions must survive context compaction. Handles compaction judgment and handoff records only; no automatic hook behavior."
+description: "Records the objective, boundary, evidence and next action in a handoff when long context, a task transfer to another session or agent, or compaction could lose them, before that transfer or compaction, and resumes work from the handoff."
 compatibility:
   - "Python 3.11+ standard library"
   - "Ghost-ALICE _shared/text_lines.py, installed beside the skill"

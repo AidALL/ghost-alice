@@ -1,6 +1,6 @@
 ---
 name: task-router
-description: "Use after session-intent intake to decompose requests and route output, verification, lifecycle, and boundary skills without owning intake, raw intent inference, or native tool permission."
+description: "Selects the work, skills, criteria and boundary for a request that needs or may need a tool, other than a light-path lookup. Not for a direct answer or a confirmation question."
 calls:
   - "meta:*"
 compatibility:

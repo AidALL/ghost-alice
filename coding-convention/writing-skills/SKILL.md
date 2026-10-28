@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Use when writing a new skill or modifying/verifying an existing skill. Confirms the skill works under pressure scenarios before distribution.
+description: Writes a new skill or changes or tests an existing one, in its SKILL.md, references and scripts. Not for documents outside a skill package.
 compatibility:
   - "Python 3.11+ standard library"
 ---

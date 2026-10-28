@@ -12,6 +12,8 @@ Dispatch the `code-reviewer` subagent to catch issues before they accumulate. Th
 The parent assistant requests review at required milestones and when a specific unresolved concern warrants independent inspection.
 ## When to Request a Review
 
+A review listed below is required, or worth requesting, only when its outcome can change the next action or a criterion's judgment.
+
 □ Required
 
 - After each task in subagent-driven-development

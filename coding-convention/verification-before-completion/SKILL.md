@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: Use before claiming completion, fixes, passes, commits, or PR creation, and before re-reading an artifact to support a claim. Evidence always comes before claims; reuse unchanged evidence and check only when the result can change.
+description: Checks each new completion, fix, success, verified-status or material recommendation claim against its criterion and evidence before the claim is made, and decides whether an artifact must be reread to support a claim.
 compatibility:
   - "Python 3.11+ standard library"
 ---
