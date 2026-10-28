@@ -1,6 +1,6 @@
 ---
 name: subagent-driven-development
-description: "Use when executing an implementation plan composed of independent tasks in the current session. Dispatch a fresh subagent per task and run a two-stage review after each task: spec compliance, then code quality."
+description: "Use when executing an implementation plan composed of independent tasks in the current session."
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -11,7 +11,7 @@ The parent assistant executes an accepted plan through a fresh implementer for e
 
 ## Preconditions and procedure
 
-Use this workflow when the plan's tasks can be assigned independently and execution remains in the current session. Use executing-plans for the accepted inline or separate-session workflow. Apply using-git-worktrees before implementation to establish the authorized checkout; do not edit main/master without explicit user consent.
+Use this workflow when the plan's tasks can be assigned independently and execution remains in the current session. Use executing-plans for the accepted inline or separate-session workflow. Use the authorized checkout and apply using-git-worktrees only when isolation is needed; do not edit main/master without explicit user consent.
 
 1. Read the plan once, retain every task's text and shared dependencies, and create the task tracker.
 2. Select a ready task. Supply its full text, exact allowed paths, relevant context, constraints and required evidence using [references/implementer-prompt.md](references/implementer-prompt.md). The implementer need not reread the plan.
@@ -19,7 +19,7 @@ Use this workflow when the plan's tasks can be assigned independently and execut
 4. When implementation is ready, dispatch the specification reviewer using [references/spec-reviewer-prompt.md](references/spec-reviewer-prompt.md). That reviewer checks actual code against requirements; the implementer's report is not proof.
 5. Return valid specification defects to the implementer. Re-review the changed condition before code-quality review. Reject incorrect findings with evidence instead of implementing them blindly.
 6. After specification compliance, dispatch the code-quality reviewer using [references/code-quality-reviewer-prompt.md](references/code-quality-reviewer-prompt.md) and requesting-code-review.
-7. Have the implementer fix valid blocking quality findings, then re-review affected changes. Mark the task complete only after both required reviews have evidence.
+7. Have the implementer fix valid blocking quality findings, then re-review affected changes. Mark the task complete only after each review whose outcome can change the next action or a criterion's judgment has evidence.
 8. Repeat for remaining tasks. Dispatch a final review of the combined implementation, then invoke finishing-a-development-branch.
 
 Do not run multiple implementers concurrently in this workflow. For explicitly independent concurrent assignments, use dispatching-parallel-agents and its conflict boundaries.

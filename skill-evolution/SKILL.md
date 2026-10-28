@@ -1,6 +1,6 @@
 ---
 name: skill-evolution
-description: "Use when the user asks about skill upgrades, update recommendations, or an evolution backlog; analyze io-trace and conduct_feedback to produce report-only evolution candidates. No automatic edits."
+description: "Use when the user asks about skill upgrades, update recommendations, or an evolution backlog."
 compatibility:
   - "Python 3.11+ standard library"
 ---

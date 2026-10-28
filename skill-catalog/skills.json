@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-10-16T16:41:45Z",
+  "generated_at": "2026-10-28T03:51:39Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -28,7 +28,7 @@
     {
       "name": "agent-security-scan",
       "path": "agent-security-scan/SKILL.md",
-      "description": "Use for report-only static scans of settings, hooks, skills, Model Context Protocol config, credential surfaces, remote fetches, shell side effects, and broad exposure risks. Do not print raw secrets or apply automatic fixes.",
+      "description": "Use for report-only static scans of settings, hooks, skills, Model Context Protocol config, credential surfaces, remote fetches, shell side effects, and broad exposure risks.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -38,7 +38,7 @@
     {
       "name": "boundary-contract",
       "path": "boundary-contract/SKILL.md",
-      "description": "Use when task-router requires a boundary contract. The current-session assistant declares objective, allowed/prohibited surfaces, criteria and stop conditions before dependent work; this declaration step does not perform that work.",
+      "description": "Use when task-router requires a boundary contract.",
       "family": "system",
       "governance_class": "boundary-gate",
       "compatibility": [
@@ -48,7 +48,7 @@
     {
       "name": "brainstorming",
       "path": "coding-convention/brainstorming/SKILL.md",
-      "description": "Turn vague ideas into concrete design specifications. Identify user intent, constraints, and success criteria, then propose a design for approval. Required before creative work such as feature additions, component builds, or behavior changes.",
+      "description": "Use when design or expected behavior remains unresolved before implementation. Not for re-approving settled decisions.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -64,7 +64,7 @@
     {
       "name": "compact-handoff",
       "path": "compact-handoff/SKILL.md",
-      "description": "Use during long tasks when evidence, state, and next actions must survive context compaction. Handles compaction judgment and handoff records only; no automatic hook behavior.",
+      "description": "Use when long context, an agent transfer or session compaction could lose evidence, state and next actions; before transferring a task to another session or agent, or before requesting compaction.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -85,7 +85,7 @@
     {
       "name": "executing-plans",
       "path": "coding-convention/executing-plans/SKILL.md",
-      "description": "Use when an accepted implementation plan is ready for inline execution in the authorized checkout, with required review checkpoints.",
+      "description": "Use when an accepted implementation plan is ready for inline execution in the authorized checkout.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -125,7 +125,7 @@
     {
       "name": "merge-companion",
       "path": "merge-companion/SKILL.md",
-      "description": "Use after skill updates to protect, classify, merge, discard, or defer local user changes. Handles undecided pending-merges manifest entries, install backups, a six-step UX, adversarial verification, and cross-platform decision propagation.",
+      "description": "Use before the selected work modifies, replaces or installs an installed skill, and when the user asks to review backed-up changes. Not for a bounded read-only lookup unrelated to those changes.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -165,7 +165,7 @@
     {
       "name": "session-intent-analyzer",
       "path": "session-intent-analyzer/SKILL.md",
-      "description": "Use when stored intent affects work selection or a semantic update is needed. Native intake records every input; this procedure resolves current state without storing raw prompts.",
+      "description": "Use when stored intent affects work selection or a semantic update is needed.",
       "family": "system",
       "governance_class": "intent-state-producer",
       "compatibility": [
@@ -182,7 +182,7 @@
     {
       "name": "skill-evolution",
       "path": "skill-evolution/SKILL.md",
-      "description": "Use when the user asks about skill upgrades, update recommendations, or an evolution backlog; analyze io-trace and conduct_feedback to produce report-only evolution candidates. No automatic edits.",
+      "description": "Use when the user asks about skill upgrades, update recommendations, or an evolution backlog.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -192,7 +192,7 @@
     {
       "name": "subagent-driven-development",
       "path": "coding-convention/subagent-driven-development/SKILL.md",
-      "description": "Use when executing an implementation plan composed of independent tasks in the current session. Dispatch a fresh subagent per task and run a two-stage review after each task: spec compliance, then code quality.",
+      "description": "Use when executing an implementation plan composed of independent tasks in the current session.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -202,7 +202,7 @@
     {
       "name": "systematic-debugging",
       "path": "coding-convention/systematic-debugging/SKILL.md",
-      "description": "Use when facing bugs, test failures, or unexpected behavior before proposing fixes. Enforces root-cause investigation, pattern analysis, hypothesis/verification, and correction. Symptom-only fixes are failures.",
+      "description": "Use for a failure whose cause and sufficient correction depth need investigation, and for repair limits.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -212,7 +212,7 @@
     {
       "name": "task-router",
       "path": "task-router/SKILL.md",
-      "description": "Use after session-intent intake to decompose requests and route output, verification, lifecycle, and boundary skills without owning intake, raw intent inference, or native tool permission.",
+      "description": "Use for work: a request that needs inspection, execution, modification or fresh verification, or one where it is unclear whether a tool is needed. Not for a direct answer or a light-path lookup.",
       "family": "system",
       "governance_class": "core-gate",
       "compatibility": [
@@ -228,7 +228,7 @@
     {
       "name": "test-driven-development",
       "path": "coding-convention/test-driven-development/SKILL.md",
-      "description": "Use when implementing a known feature, bug fix, or refactor with a resolved behavior contract. Requires a failing test before production code; use discovery first when the target or premise is unknown.",
+      "description": "Use when implementing a feature or bug fix whose expected behavior is known and testable by an automated test. Not for changes without a meaningful behavioral test, such as configuration or instruction edits; discover an unknown target first.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -238,7 +238,7 @@
     {
       "name": "using-coding-convention",
       "path": "coding-convention/using-coding-convention/SKILL.md",
-      "description": "Use at the start of every coding or development conversation. Defines how to find and invoke coding-convention family skills.",
+      "description": "Use when routing selects development work. A direct answer or a confirmation question ends before this development workflow.",
       "family": "coding-convention",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -249,7 +249,7 @@
     {
       "name": "using-git-worktrees",
       "path": "coding-convention/using-git-worktrees/SKILL.md",
-      "description": "Use when starting feature work or before executing an implementation plan. Reuses a suitable isolated worktree or creates one with directory and boundary checks.",
+      "description": "Use only when the authorized development task requires an isolated checkout.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -259,7 +259,7 @@
     {
       "name": "verification-before-completion",
       "path": "coding-convention/verification-before-completion/SKILL.md",
-      "description": "Use before claiming completion, fixes, passes, commits, or PR creation, and before re-reading an artifact to support a claim. Evidence always comes before claims; reuse unchanged evidence and check only when the result can change.",
+      "description": "Use before a new completion, fix, success, verified-status or material recommendation claim and before rereading an artifact to support a claim.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [
@@ -291,7 +291,7 @@
     {
       "name": "writing-skills",
       "path": "coding-convention/writing-skills/SKILL.md",
-      "description": "Use when writing a new skill or modifying/verifying an existing skill. Confirms the skill works under pressure scenarios before distribution.",
+      "description": "Use when writing a new skill or modifying/verifying an existing skill.",
       "family": "coding-convention",
       "governance_class": "governance-subskill",
       "compatibility": [

@@ -103,7 +103,7 @@ class OperatingRuleContractTest(unittest.TestCase):
         entry = (ROOT / 'coding-convention/using-coding-convention/SKILL.md').read_text()
         tdd = (ROOT / 'coding-convention/test-driven-development/SKILL.md').read_text()
         self.assertIn('test-driven-development', entry)
-        self.assertIn('behavior contract', tdd)
+        self.assertIn('expected behavior is known', tdd)
         self.assertIn('observe this intended failure before writing production code', tdd)
         self.assertIn('Run the same relevant target and inspect its result', tdd)
         self.assertIn('affected additional checks', tdd)

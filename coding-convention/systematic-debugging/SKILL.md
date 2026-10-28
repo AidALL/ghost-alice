@@ -1,13 +1,13 @@
 ---
 name: systematic-debugging
-description: Use when facing bugs, test failures, or unexpected behavior before proposing fixes. Enforces root-cause investigation, pattern analysis, hypothesis/verification, and correction. Symptom-only fixes are failures.
+description: Use for a failure whose cause and sufficient correction depth need investigation, and for repair limits.
 compatibility:
   - "Python 3.11+ standard library"
 ---
 
 # Systematic Debugging
 
-The implementing agent investigates an observed failure, tests a causal hypothesis and corrects the supported cause. Apply this workflow to test, production, performance, build and integration failures before proposing a fix. A symptom alone does not identify its cause.
+The implementing agent investigates an observed failure, tests a causal hypothesis and corrects the supported cause. Apply this workflow before proposing a fix for a failure whose cause and sufficient correction depth need investigation, and for repair limits. A symptom alone does not identify its cause.
 
 ## Investigation
 

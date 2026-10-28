@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "Turn vague ideas into concrete design specifications. Identify user intent, constraints, and success criteria, then propose a design for approval. Required before creative work such as feature additions, component builds, or behavior changes."
+description: "Use when design or expected behavior remains unresolved before implementation. Not for re-approving settled decisions."
 calls:
   - "hard:writing-plans"
 compatibility:

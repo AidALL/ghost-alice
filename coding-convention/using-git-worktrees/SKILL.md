@@ -1,6 +1,6 @@
 ---
 name: using-git-worktrees
-description: Use when starting feature work or before executing an implementation plan. Reuses a suitable isolated worktree or creates one with directory and boundary checks.
+description: Use only when the authorized development task requires an isolated checkout.
 compatibility:
   - "Python 3.11+ standard library"
 ---

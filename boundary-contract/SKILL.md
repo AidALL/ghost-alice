@@ -1,6 +1,6 @@
 ---
 name: boundary-contract
-description: "Use when task-router requires a boundary contract. The current-session assistant declares objective, allowed/prohibited surfaces, criteria and stop conditions before dependent work; this declaration step does not perform that work."
+description: "Use when task-router requires a boundary contract."
 compatibility:
   - "Python 3.11+ standard library"
 ---

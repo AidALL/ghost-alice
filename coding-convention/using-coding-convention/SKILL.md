@@ -1,13 +1,13 @@
 ---
 name: using-coding-convention
-description: Use at the start of every coding or development conversation. Defines how to find and invoke coding-convention family skills.
+description: Use when routing selects development work. A direct answer or a confirmation question ends before this development workflow.
 compatibility:
   - "Python 3.11+ standard library"
 ---
 
 # Using Coding Convention
 
-The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation. A direct answer or a confirmation question ends before this development workflow.
+The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation.
 
 ## Priority and loading
 

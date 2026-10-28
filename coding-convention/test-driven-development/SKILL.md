@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing a known feature, bug fix, or refactor with a resolved behavior contract. Requires a failing test before production code; use discovery first when the target or premise is unknown.
+description: Use when implementing a feature or bug fix whose expected behavior is known and testable by an automated test. Not for changes without a meaningful behavioral test, such as configuration or instruction edits; discover an unknown target first.
 compatibility:
   - "Python 3.11+ standard library"
 ---

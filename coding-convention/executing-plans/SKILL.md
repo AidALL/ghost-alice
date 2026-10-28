@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Use when an accepted implementation plan is ready for inline execution in the authorized checkout, with required review checkpoints.
+description: Use when an accepted implementation plan is ready for inline execution in the authorized checkout.
 calls:
   - "hard:finishing-a-development-branch"
   - "hard:using-git-worktrees"
@@ -15,7 +15,7 @@ The implementing agent executes an accepted plan inline, updates tasks when evid
 ## Procedure
 
 1. Read the accepted plan and its requirements. Identify missing prerequisites, contradictions and human-owned decisions before starting dependent tasks. Resolve implementation details within existing authority; ask only for a decision the user must supply.
-2. Apply using-git-worktrees to reuse or establish the authorized checkout. Do not implement on main/master without explicit user consent.
+2. Use the authorized checkout and apply using-git-worktrees only when isolation is needed. Do not implement on main/master without explicit user consent.
 3. Create or update the host's task tracker from the plan. For each ready task, mark it in progress, execute its steps and required skills, obtain the specified evidence, then mark only the supported task complete.
 4. When an observation contradicts the plan's order, commands, behavior or file mapping, edit the affected task and update the tracker before continuing. Keep the plan as current execution instructions, without appended attempt histories. A change to the user's objective or explicit boundary requires that user's decision; an implementation correction inside the boundary does not.
 5. After all required tasks and checks satisfy the plan, invoke finishing-a-development-branch and follow the already authorized integration choice.
