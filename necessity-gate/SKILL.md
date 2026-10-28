@@ -1,6 +1,6 @@
 ---
 name: necessity-gate
-description: "Task-justification gate for new tasks, skills, files, audit cycles, or follow-ups. Compares problem evidence, regression risk, and recovery benefit; decides approve, reject, or modify. Blocks speculative work."
+description: "Approves, modifies or rejects proposed new work (a task, skill, file, tool, audit or verification cycle, follow-up or production skill edit) when the current-session assistant defines it, not substeps or checks inside already approved work."
 compatibility:
   - "Python 3.11+ standard library"
 ---

@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-10-28T07:42:34Z",
+  "generated_at": "2026-10-28T12:32:18Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -18,7 +18,7 @@
     {
       "name": "adversarial-verification",
       "path": "adversarial-verification/SKILL.md",
-      "description": "Use when claims or evidence need adversarial validation by 3-5 independent agents. Requires unanimous convergence. Triggers: patents, papers, grants, investor relations, legal docs, numeric claims, novelty, prior-art, and fact-checking.",
+      "description": "Assigns independent agents to attack a claim and its evidence and returns a verdict with the surviving claim, when the user or a calling procedure asks for adversarial review or fact-checking of a numeric, legal, novelty or prior-art claim.",
       "family": "domain",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -75,7 +75,7 @@
     {
       "name": "dispatching-parallel-agents",
       "path": "coding-convention/dispatching-parallel-agents/SKILL.md",
-      "description": "Use when two or more independent tasks can be handled in parallel. Each task must be able to proceed without shared state or sequential dependency.",
+      "description": "Delegates independent tasks to parallel agents, one self-contained assignment each, then reviews and integrates their results, when two or more tasks share no edited file, exclusive resource or mutable state and none waits on another task's result.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -105,7 +105,7 @@
     {
       "name": "finishing-a-development-branch",
       "path": "coding-convention/finishing-a-development-branch/SKILL.md",
-      "description": "Use when implementation is ready for integration, when the user asks to merge or publish a pull request, or when the branch finishing path remains undecided.",
+      "description": "Runs applicable CI checks locally before a push or merge and executes the user's chosen path (local merge, pull request, keep or discard), when work is ready to integrate or the user asks to push, merge, open a pull request or discard a branch.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [
@@ -135,7 +135,7 @@
     {
       "name": "necessity-gate",
       "path": "necessity-gate/SKILL.md",
-      "description": "Task-justification gate for new tasks, skills, files, audit cycles, or follow-ups. Compares problem evidence, regression risk, and recovery benefit; decides approve, reject, or modify. Blocks speculative work.",
+      "description": "Approves, modifies or rejects proposed new work (a task, skill, file, tool, audit or verification cycle, follow-up or production skill edit) when the current-session assistant defines it, not substeps or checks inside already approved work.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -145,7 +145,7 @@
     {
       "name": "receiving-code-review",
       "path": "coding-convention/receiving-code-review/SKILL.md",
-      "description": "Use when receiving code review feedback before implementing suggestions, especially when feedback is ambiguous or technically questionable. Enforces technical rigor and verification instead of performative agreement or blind implementation.",
+      "description": "Judges each code review finding against the user's requirements, the current code and tests, then fixes it if valid and authorized, rejects it with evidence or reports it unresolved, when review feedback arrives and before any code is changed.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -155,7 +155,7 @@
     {
       "name": "requesting-code-review",
       "path": "coding-convention/requesting-code-review/SKILL.md",
-      "description": "Use after completing major functionality, before merging, or when a pull request has new commits, automated findings, or unresolved review threads.",
+      "description": "Dispatches a code-reviewer subagent to review a commit range and confirms a pull request's reviews and CI cover its current head, after a major feature is built, before merging, or when a pull request has new commits, findings or unresolved threads.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -269,7 +269,7 @@
     {
       "name": "writing-plans",
       "path": "coding-convention/writing-plans/SKILL.md",
-      "description": "Use when requirements for a multi-step task are known and before touching code. Documents everything as bite-sized tasks for an engineer with zero codebase context. Use for implementation plans, task decomposition, and planning before TDD.",
+      "description": "Writes an implementation plan that breaks accepted requirements into tasks an implementer without project context can execute, when a multi-step task's requirements are settled and before implementation, not while design decisions remain open.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
