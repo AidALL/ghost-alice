@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing a feature or bug fix whose expected behavior is known and testable by an automated test. Not for changes without a meaningful behavioral test, such as configuration or instruction edits; discover an unknown target first.
+description: Writes a failing test first for a feature or bug fix whose expected behavior is known and automatically testable. Not for configuration, generated-output or instruction changes without a meaningful behavioral test.
 compatibility:
   - "Python 3.11+ standard library"
 ---

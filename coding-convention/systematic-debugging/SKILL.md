@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Use for a failure whose cause and sufficient correction depth need investigation, and for repair limits.
+description: For a failure whose cause and sufficient correction depth need investigation, tests causal hypotheses, corrects the supported cause and counts failed repair rounds.
 compatibility:
   - "Python 3.11+ standard library"
 ---

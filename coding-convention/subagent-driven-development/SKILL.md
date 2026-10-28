@@ -1,6 +1,6 @@
 ---
 name: subagent-driven-development
-description: "Use when executing an implementation plan composed of independent tasks in the current session."
+description: "Executes an accepted plan of independent tasks in the current session, with a fresh implementer for each task."
 compatibility:
   - "Python 3.11+ standard library"
 ---

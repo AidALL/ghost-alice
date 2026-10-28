@@ -1,6 +1,6 @@
 ---
 name: compact-handoff
-description: "Use when long context, an agent transfer or session compaction could lose evidence, state and next actions; before transferring a task to another session or agent, or before requesting compaction."
+description: "Records the objective, boundary, evidence and next action in a handoff when long context, an agent transfer or compaction could lose them, before the transfer or the compaction request."
 compatibility:
   - "Python 3.11+ standard library"
   - "Ghost-ALICE _shared/text_lines.py, installed beside the skill"

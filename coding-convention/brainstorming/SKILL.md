@@ -1,6 +1,6 @@
 ---
 name: brainstorming
-description: "Use when design or expected behavior remains unresolved before implementation. Not for re-approving settled decisions."
+description: "Resolves design decisions and expected behavior still unsettled before implementation. Not for decisions already settled."
 calls:
   - "hard:writing-plans"
 compatibility:

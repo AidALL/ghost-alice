@@ -1,6 +1,6 @@
 ---
 name: using-coding-convention
-description: Use when routing selects development work. A direct answer or a confirmation question ends before this development workflow.
+description: Selects the coding-convention family skill for development work before its first read, command, edit, plan or review. A direct answer or a confirmation question ends before this workflow.
 compatibility:
   - "Python 3.11+ standard library"
 ---

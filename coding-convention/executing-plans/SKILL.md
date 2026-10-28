@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Use when an accepted implementation plan is ready for inline execution in the authorized checkout.
+description: Executes an accepted plan inline in the authorized checkout when inline execution is chosen.
 calls:
   - "hard:finishing-a-development-branch"
   - "hard:using-git-worktrees"

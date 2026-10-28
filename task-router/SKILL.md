@@ -1,6 +1,6 @@
 ---
 name: task-router
-description: "Use for work: a request that needs inspection, execution, modification or fresh verification, or one where it is unclear whether a tool is needed. Not for a direct answer or a light-path lookup."
+description: "Selects the work, skills, criteria and boundary for a request that needs or may need a tool, other than a light-path lookup. Not for a direct answer."
 calls:
   - "meta:*"
 compatibility:

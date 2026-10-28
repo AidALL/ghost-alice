@@ -1,6 +1,6 @@
 ---
 name: session-intent-analyzer
-description: "Use when stored intent affects work selection or a semantic update is needed."
+description: "Writes a new or changed interpreted-as record before the first tool call of work, and reads stored intent when it can change work selection."
 compatibility:
   - "Python 3.11+ standard library"
   - "hook-capable environments plus hookless/manual fallback"

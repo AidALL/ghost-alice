@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Use when writing a new skill or modifying/verifying an existing skill.
+description: Writes, changes or verifies a skill package and validates the decision it affects.
 compatibility:
   - "Python 3.11+ standard library"
 ---
