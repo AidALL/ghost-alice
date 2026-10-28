@@ -3,8 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Ghost-ALICE OS</title>
-  <meta name="description" content="Ghost-ALICE OS makes AI agent work more inspectable by governing intent, scope, evidence, and runtime state across agent runtimes.">
+  <title>Ghost-ALICE OS: a governance layer for Claude Code and Codex</title>
+  <meta name="description" content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs your coding agent to keep your objective, check each claim against its original evidence and show what it touched.">
+  <link rel="alternate" hreflang="en" href="https://aidall.github.io/ghost-alice/">
+  <link rel="alternate" hreflang="ko" href="https://aidall.github.io/ghost-alice/index_ko.html">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Ghost-ALICE OS">
+  <meta property="og:title" content="Ghost-ALICE OS">
+  <meta property="og:description" content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs your coding agent to keep your objective, check each claim against its original evidence and show what it touched.">
+  <meta property="og:url" content="https://aidall.github.io/ghost-alice/">
+  <meta property="og:image" content="https://aidall.github.io/ghost-alice/imgs/Ghost-ALICE_logo.png">
+  <meta property="og:image:alt" content="Ghost-ALICE OS logo">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:locale:alternate" content="ko_KR">
+  <meta name="twitter:card" content="summary">
   <script>
     (() => {
       try {
@@ -90,6 +102,7 @@
       line-height: 1.55;
       transition: background-color 160ms ease, color 160ms ease;
     }
+    html[lang="ko"] body { word-break: keep-all; }
     a { color: inherit; }
     .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
     .topbar {
@@ -328,48 +341,28 @@
       font-weight: 720;
       text-decoration: none;
     }
-    .addon-table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--surface);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      overflow: hidden;
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .eyebrow a { color: inherit; }
+    .panel-note {
+      margin: 0;
+      padding: 0 18px 16px;
+      color: #c9d4ce;
+      font-size: 13px;
     }
-    .addon-table th,
-    .addon-table td {
-      padding: 14px 16px;
-      border-bottom: 1px solid var(--line);
-      text-align: left;
-      vertical-align: top;
-      font-size: 14px;
+    .panel-note a { color: #7ee0d2; }
+    .section-text {
+      max-width: 46rem;
+      margin: 0 0 18px;
+      color: var(--muted);
+      font-size: 18px;
     }
-    .addon-table th { background: var(--surface-2); color: var(--accent-3); }
-    .addon-table tr:last-child td { border-bottom: 0; }
-    .gate-flow-diagram {
-      padding: 18px;
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      background: var(--surface);
-    }
-
-
-
-    .gate-flow-diagram { margin: 0 0 24px; }
-    figcaption { color: var(--muted); font-size: 14px; margin-top: 14px; }
+    .section-text a { color: var(--accent); font-weight: 720; }
+    .actions.start { justify-content: flex-start; inline-size: auto; }
 
     a:focus-visible, button:focus-visible { outline: 3px solid var(--accent-2); outline-offset: 4px; }
     .skip-link { position: absolute; top: -80px; left: 12px; padding: 12px; background: var(--surface); z-index: 30; }
     .skip-link:focus { top: 8px; }
-    .addon-table-scroll { overflow-x: auto; }
-    .addon-table { min-width: 560px; }
-    @media (max-width: 560px) { .gate-flow-diagram { padding: 12px; } }
     .support-section { background: var(--support-bg); }
-    .support-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 14px;
-    }
     footer {
       padding: 28px 0;
       border-top: 1px solid var(--line);
@@ -379,8 +372,7 @@
     @media (max-width: 900px) {
       .hero-grid { grid-template-columns: 1fr; }
       .hero-visual { justify-content: center; }
-      .grid, .support-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 680px) {
       .hero {
@@ -389,7 +381,6 @@
       }
       .nav { display: flex; width: 100%; order: 3; justify-content: flex-start; flex-wrap: wrap; gap: 10px 16px; font-size: 13px; }
       .topbar-inner { gap: 12px; flex-wrap: wrap; padding-block: 12px; }
-      .github-link { display: none; }
       .hero { padding-top: 48px; }
       h2 { font-size: 32px; }
       .lead { font-size: 17px; }
@@ -411,7 +402,8 @@
         overflow-wrap: anywhere;
         word-break: break-all;
       }
-      .grid, .support-grid { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: 1fr; }
+      .section-text { font-size: 17px; }
       .section-head { display: block; }
       .section-note { margin-top: 10px; }
     }
@@ -420,20 +412,16 @@
       .brand span { max-width: 150px; }
       .theme-option { padding: 0 7px; }
       h2 { font-size: 28px; }
-
-      .addon-table th,
-      .addon-table td { padding: 12px; }
     }
-    h3[id] { scroll-margin-top: 112px; }
+    section[id] { scroll-margin-top: 112px; }
   </style>
-  <link rel="stylesheet" href="./docs/assets/mermaid.css">
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <header class="topbar"><div class="wrap topbar-inner">
     <a class="brand" href="./"><img src="icon.png" alt="" aria-hidden="true"><span>Ghost-ALICE OS</span></a>
     <nav class="nav" aria-label="Primary">
-      <a href="#get-started">Get started</a><a href="#how-it-works">How it works</a><a href="#routes">Docs</a><a href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a>
+      <a href="#why">Why</a><a href="#features">Features</a><a href="#how-it-works">How it works</a><a href="#routes">Docs</a><a href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a>
     </nav>
     <div class="topbar-actions">
       <a class="btn language-link" href="./index_ko.html" lang="ko" hreflang="ko">한국어</a>
@@ -445,58 +433,54 @@
     </div>
   </div></header>
   <main id="main" tabindex="-1">
-    <section class="hero" id="get-started"><div class="wrap hero-grid">
+    <section class="hero" id="get-started" aria-labelledby="hero-heading"><div class="wrap hero-grid">
       <div class="hero-copy">
-        <div class="eyebrow">Agent governance layer · 0.5.1</div>
-        <h1 class="sr-only">Ghost-ALICE OS</h1>
+        <div class="eyebrow">Agent governance layer · <a href="https://github.com/AidALL/ghost-alice/releases">Core 0.5.1</a></div>
+        <h1 class="sr-only" id="hero-heading">Ghost-ALICE OS</h1>
         <div class="hero-logo-lockup"><img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS"></div>
-        <p class="lead">Keep the user's goal, repair affected work, and connect each claim to its original evidence.</p>
-        <div class="actions"><a class="btn primary" href="./README.html">Read the docs</a><a class="btn" href="./docs/getting-started/installation.html">Install</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki">Wiki</a></div>
+        <p class="lead">A governance layer for Claude Code and Codex. It instructs your coding agent to keep your objective, check each claim against its original evidence and show what it touched.</p>
+        <div class="actions"><a class="btn primary" href="./docs/getting-started/installation.html">Get started</a><a class="btn" href="https://github.com/AidALL/ghost-alice">View on GitHub</a></div>
       </div>
       <div class="hero-visual"><div class="quick-panel">
-        <div class="panel-head"><span>Quick start · Core</span><button class="copy-btn" type="button" data-copy="bash install.sh">Copy</button></div>
-        <pre><code>bash install.sh</code></pre>
-        <p class="muted">Run from the cloned repository. The installer detects available agent platforms. <a href="./docs/getting-started/installation.html">See OS-native commands and platform options.</a></p>
+        <div class="panel-head"><span>Quick start · Core</span><button class="copy-btn" type="button" data-copy="git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice &amp;&amp; cd ~/ghost-alice &amp;&amp; bash install.sh">Copy</button></div>
+        <pre><code>git clone https://github.com/AidALL/ghost-alice.git ~/ghost-alice &amp;&amp; cd ~/ghost-alice &amp;&amp; bash install.sh</code></pre>
+        <p class="panel-note">Runs in macOS, Linux, WSL and Git Bash. The installer adds Core to each of Claude Code and Codex that it finds on this computer. <a href="./docs/getting-started/installation.html">Windows and other options</a></p>
       </div></div>
     </div></section>
-    <section id="latest-release"><div class="wrap">
-      <div class="section-head"><h2>Core 0.5.1</h2><p class="section-note">This documentation describes Core 0.5.1. A local installation is separate from a published release.</p></div>
-      <div class="actions"><a class="btn" href="https://github.com/AidALL/ghost-alice/releases">Core releases</a></div>
+    <section class="support-section" id="why" aria-labelledby="why-heading"><div class="wrap">
+      <div class="section-head"><h2 id="why-heading">Floor, not ceiling</h2></div>
+      <p class="section-text">Coding agents fail in ordinary ways: a constraint set early in a long session drops out, the agent reports success before checking, and the work grows past the request. You cannot easily see what the agent touched. Ghost-ALICE is built to keep agent work above an acceptable quality floor in unfamiliar code, long documents, complex verification and lost session context. It does not try to raise what the most skilled user can already do. <a href="https://github.com/AidALL/ghost-alice/wiki/Design-Principles">Read the design principles</a></p>
     </div></section>
-    <section id="how-it-works"><div class="wrap"><div class="section-head"><h2 id="flow-heading">Core operation</h2><p class="section-note">The response model compares the objective with original sources and selects the needed work. Judgment focus can be micro, meso, macro or meta. The work's verification burden sets its complexity level; beyond the level's own check, another check runs only when its outcome can change the next action.</p></div>
-<figure class="diagram-block" aria-labelledby="flow-heading"><pre class="mermaid">flowchart TD
- U[&quot;User objective and authorization&quot;] --&gt; M[&quot;Response model&quot;]
- O[&quot;Original sources and tool observations&quot;] --&gt; M
- M --&gt; V[&quot;Compare each claim with originals&quot;]
- V --&gt; W[&quot;Compare the whole answer with the objective&quot;]
- W --&gt; R{&quot;Completion claim or requested authenticated review&quot;}
- R --&gt;|Required| C[&quot;Core authenticates records and source bindings&quot;]
- C --&gt; M
- R --&gt;|Routine explanation| M
- M --&gt; H[&quot;Native host displays the answer&quot;]
- H --&gt; U
-</pre><figcaption>The response model separately judges individual claims and the complete answer. Core authenticates records and source bindings; the native host displays the answer.</figcaption></figure>
-<p>Necessary long originals and answers remain available. Ghost-ALICE handoffs carry the current conclusion, unresolved conditions and original location needed for the next decision. The model retrieves the original when required. Earlier native messages can still enter subsequent requests; the installed context gateway applies supported content selections. Original retention, handoff selection and actual request changes are separate.</p>
-<p>When evidence conflicts with a required result, the response model selects a needed correction or investigation. It exposes unresolved conditions and reuses unchanged evidence at its original verification time.</p>
-<p><a href="./architecture.html">Read the Core architecture</a></p>
+    <section id="features" aria-labelledby="features-heading"><div class="wrap">
+      <div class="section-head"><h2 id="features-heading">What Ghost-ALICE instructs the agent to do</h2></div>
+      <div class="grid grid-4">
+<div class="card"><h3>Writes down how it read your request</h3><p>Before using tools, the agent records its reading of your request: the objective, constraints and done conditions. If your words leave a gap and its guess would change the next step, it asks you first.</p><a href="https://github.com/AidALL/ghost-alice/wiki/Design-Principles#comparison-and-feedback">Design principles</a></div>
+<div class="card"><h3>Checks claims against evidence</h3><p>It compares each claim with its original evidence and the whole answer with your objective. When it cannot support a required criterion, it reports that criterion as unresolved instead of claiming completion.</p><a href="https://github.com/AidALL/ghost-alice/wiki/Verification-and-Evidence">Verification and evidence</a></div>
+<div class="card"><h3>Works inside a declared boundary</h3><p>Before implementation work, it declares what it may and may not touch, the done criteria and when it stops.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/boundary-contract/SKILL.md">Boundary contract</a></div>
+<div class="card"><h3>Shows what it touched</h3><p>Before a tool call that gathers information for a pending decision, it says what it is doing and why. Its answer shows the key changes with their content, and hooks log each tool call for audit.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#io-trace-transparency-rule">io-trace rule</a></div>
+      </div>
+    </div></section>
+    <section id="how-it-works" aria-labelledby="how-heading"><div class="wrap">
+      <div class="section-head"><h2 id="how-heading">How it works</h2></div>
+      <p class="section-text">Ghost-ALICE Core is a common contract, a set of skills and Core code (hooks, a ledger and a context gateway). An adapter translates Core for Claude Code or for Codex, and the installer installs the result into that host. The agent follows Core's instructions and judges its own results; Core code records the agent's submissions and authenticates the records and their source bindings. Ghost-ALICE is designed for a cooperative model that follows your instructions and the installed contract: it instructs and records, and its Core code blocks no tool or answer.</p>
+      <div class="actions start"><a class="btn" href="./architecture.html">Read the Core architecture</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/Design-Principles#structure-boundaries">Structure boundaries</a></div>
+    </div></section>
+    <section id="official-addons" aria-labelledby="addons-heading"><div class="wrap"><div class="section-head"><h2 id="addons-heading">Addons</h2><p class="section-note">An addon is installed from its own repository or a local path with <code>bash install.sh --addon-source &lt;repository-or-path&gt;</code>. Core registers the addon's skills and observational hooks; those hooks never block the host, and installation grants no run authority. The addon's own documentation describes what it adds.</p></div>
+<div class="actions start"><a class="btn" href="./docs/reference/official-addons.html">Addon sources</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring">Addon authoring</a></div>
 </div></section>
-    <section id="official-addons"><div class="wrap"><div class="section-head"><h2 id="addons-heading">Addons</h2><p class="section-note">An addon is installed from its own repository or a local path with <code>bash install.sh --addon-source &lt;repository-or-path&gt;</code>. Core registers the addon's skills and observational hooks; those hooks never block the host, and installation grants no run authority. The addon's own documentation describes what it adds.</p></div>
-<div class="actions"><a class="btn" href="./docs/reference/official-addons.html">Addon sources</a><a class="btn" href="https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring">Addon authoring</a></div>
-</div></section>
-    <section id="routes"><div class="wrap">
-      <div class="section-head"><h2>Documentation</h2><p class="section-note">Practical commands live in repository guides; Wiki provides onboarding and background. English and Korean pages describe the same behavior.</p></div>
+    <section id="routes" aria-labelledby="docs-heading"><div class="wrap">
+      <div class="section-head"><h2 id="docs-heading">Documentation</h2><p class="section-note">To learn the design, read the <a href="https://github.com/AidALL/ghost-alice/wiki">wiki</a> in order. To install and run Ghost-ALICE, start from the <a href="./docs/README.html#start-here">documentation index</a>. English and Korean pages describe the same behavior.</p></div>
       <div class="grid">
-<div class="card"><h3><a href="./docs/getting-started/installation.html">Installation and updates</a></h3><p>Platform selection, official/custom addons and managed installation.</p></div>
+<div class="card"><h3><a href="./docs/getting-started/installation.html">Installation and updates</a></h3><p>Install, update, check and repair Ghost-ALICE, and select a platform.</p></div>
 <div class="card"><h3><a href="./docs/getting-started/troubleshooting.html">Troubleshooting</a></h3><p>Status, doctor, pending merges and hook loading.</p></div>
 <div class="card"><h3><a href="./docs/getting-started/uninstall.html">Uninstall</a></h3><p>Remove owned install surfaces while preserving user files.</p></div>
 <div class="card"><h3><a href="./docs/policies/session-gate-matrix.html">Session contracts</a></h3><p>Intent, work selection, completion evidence and response scope.</p></div>
 <div class="card"><h3><a href="./docs/policies/installer-platform-compatibility-matrix.html">Platform compatibility</a></h3><p>Installer entrypoints and current platform boundaries.</p></div>
 <div class="card"><h3><a href="./docs/reference/skills.html">Skill catalog</a></h3><p>Available workflows and their owning references.</p></div>
       </div>
-      <p>Strict audit records access metadata. Skill-evolution reports improvement candidates; applying them requires authorized work. Merge-companion handles preserved local edits.</p>
     </div></section>
   </main>
-  <footer><div class="wrap">Ghost-ALICE OS · Agent governance layer · <a href="https://github.com/AidALL/ghost-alice/blob/main/LICENSE">Apache-2.0</a></div></footer>
+  <footer><div class="wrap">Released under the <a href="https://github.com/AidALL/ghost-alice/blob/main/LICENSE">Apache-2.0 license</a>.</div></footer>
   <script>
     const themeButtons = Array.from(document.querySelectorAll("[data-theme-choice]"));
     const validThemes = new Set(["system", "light", "dark"]);
@@ -541,6 +525,5 @@
       });
     });
   </script>
-  <script type="module" src="./docs/assets/mermaid.js"></script>
 </body>
 </html>

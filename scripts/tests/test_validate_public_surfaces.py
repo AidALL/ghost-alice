@@ -150,8 +150,9 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         text = (REPO_ROOT / "index.html").read_text(encoding="utf-8")
 
         self.assertIn(
-            'content="Ghost-ALICE OS makes AI agent work more inspectable by governing intent, '
-            'scope, evidence, and runtime state across agent runtimes."',
+            'content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs '
+            'your coding agent to keep your objective, check each claim against its original '
+            'evidence and show what it touched."',
             text,
         )
         self.assertNotIn("session-intent-" + "guard", text)
@@ -209,7 +210,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         ids = re.findall(r'\bid="([^"]+)"', text)
         self.assertEqual(len(ids), len(set(ids)), "HTML IDs must be unique")
         labels = re.findall(r'aria-labelledby="([^"]+)"', text)
-        self.assertTrue(labels, "The workflow figure needs an accessible name")
+        self.assertTrue(labels, "Homepage sections need accessible names")
         for label in labels:
             self.assertTrue(set(label.split()) <= set(ids), label)
         self.assertIn('href="#main"', text)
@@ -223,7 +224,7 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
         candidates = (
             text.replace('href="#main"', 'href="#missing"'),
             text.replace('id="main"', 'id="missing"'),
-            text.replace('id="flow-heading"', 'id="unrelated-description"'),
+            text.replace('id="why-heading"', 'id="unrelated-description"'),
             text + '<div id="main"></div>',
         )
         for number, candidate in enumerate(candidates):
