@@ -7,7 +7,7 @@ compatibility:
 
 # Necessity Gate
 
-The current-session assistant applies this gate when defining a new task, skill, file, audit/verification cycle, follow-up, tool, script or reference, including production skill edits and task-plan registration. It determines whether proposed work is justified; it does not grant human authority or native tool permission. A subagent assigned only a specific subtask skips this gate.
+The current-session assistant applies this gate when defining a new task, skill, file, audit/verification cycle, follow-up, tool, script or reference, including production skill edits and task-plan registration. It determines whether proposed work is justified. A subagent assigned only a specific subtask skips this gate.
 
 ## Entry and existing authority
 

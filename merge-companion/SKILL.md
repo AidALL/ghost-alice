@@ -42,4 +42,4 @@ The current-session assistant marks an entry merged or discarded only after the 
 
 The current-session assistant retains manifest operations, backup reads/copies, staged writes and confirmation evidence internally.
 
-The current-session assistant must not overwrite live files before required approval, merge the three choices into one default, bypass adversarial verification or propagate without authority. Already supplied authorization applies to its actual scope and does not require redundant confirmation.
+The current-session assistant must not overwrite live files before required approval, merge the three choices into one default, bypass adversarial verification or propagate without authority.

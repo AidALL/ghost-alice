@@ -12,7 +12,7 @@ For local originals, `python3 <installed-shared-directory>/source_lookup.py <pat
 
 ## After use
 
-After using a source body or tool result, the responding model updates the current summary with the conclusion, uncertainty, unresolved condition and source locator. Later Ghost-ALICE handoffs pass that current state and locator, without replaying the body. A subsequent decision that needs the original wording retrieves the relevant source again. Strict audit retains the original observation and correction links; neither a summary nor a keyword replaces proof or permission. Core keeps work, authorization and proof records for its own decisions, separately from model input.
+After using a source body or tool result, the responding model updates the current summary with the conclusion, uncertainty, unresolved condition and source locator. Later Ghost-ALICE handoffs pass that current state and locator, without replaying the body. A subsequent decision that needs the original wording retrieves the relevant source again. Strict audit retains the original observation and correction links; neither a summary nor a keyword replaces proof. Core keeps work, authorization and proof records for its own decisions, separately from model input.
 
 ## Change the input representation
 

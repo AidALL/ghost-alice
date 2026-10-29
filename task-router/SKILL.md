@@ -9,7 +9,7 @@ compatibility:
 
 # Task Router
 
-The response model selects work and skills from the supplied request and applicable current intent. It retrieves a stored summary or referenced detail only when that value can change the selection. Core validates the submitted response-route. Routing neither performs native tool permission checks nor repeats intake's semantic analysis.
+The response model selects work and skills from the supplied request and applicable current intent. It retrieves a stored summary or referenced detail only when that value can change the selection. Core validates the submitted response-route. Routing does not repeat intake's semantic analysis.
 
 ## Select the next action
 
@@ -30,4 +30,4 @@ The response model names the user objective and the reason for the chosen work. 
 
 ## Failure modes
 
-Do not infer execution authority from stored unfinished work, ambient paths, tools, or routing keywords. Do not replace a requested repair with a report. Preserve the distinctions between source change, checks, installation, native adoption, completion acceptance and actual continuation. The owning skills determine correction and stopping conditions; routing does not invent another recovery loop.
+Do not infer execution authority from stored unfinished work or ambient paths. Do not replace a requested repair with a report. Preserve the distinctions between source change, checks, installation, native adoption, completion acceptance and actual continuation. The owning skills determine correction and stopping conditions; routing does not invent another recovery loop.

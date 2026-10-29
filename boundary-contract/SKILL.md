@@ -83,7 +83,7 @@ While the contract is active, the response model maps every tool call to an allo
 - contract-check: <allowed-surface item or next-allowed-action>
 ```
 
-If the proposed call maps to neither field, the current-session assistant keeps that call closed and applies Authority and renewal. The checkpoint does not independently grant native tool permission.
+If the proposed call maps to neither field, the current-session assistant keeps that call closed and applies Authority and renewal.
 
 ## Exact protected-file evidence
 
