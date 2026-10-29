@@ -108,6 +108,6 @@ Preserve original business proof after a binding or recording failure. The curre
 
 When a required dependency needs correction, repair only that record: task-router for the current route, Core assessment for a source-to-claim judgment. Retain the original receipt/reference. An identical unchanged failure suspends that attempt until a relevant state change; independent authorized work continues. Do not fabricate origin, permission, admission, approval, run state or source authority.
 
-When the selected criterion or relevant artifact actually changes, observe only the affected behavior. Otherwise do not generate a later timestamp through business replay. If additional task files are prohibited, use permitted stdin or runtime scratch rather than creating them.
+If additional task files are prohibited, use permitted stdin or runtime scratch rather than creating them.
 
 Systematic-debugging owns [incident accounting](../../systematic-debugging/SKILL.md#incident-accounting-and-continuation); verification-before-completion owns [useful checks](../SKILL.md#evidence-selection-and-stop-gate); boundary-contract owns authority. Recording-specific suspension does not reset those limits. Preserve strict hook execution and audit.

@@ -37,7 +37,7 @@ Before requesting voluntary compaction or transferring a task, preserve the unre
 1. The sending assistant passes the validated block through the host's actual context-handoff facility, or retains it in the existing authorized task context when no explicit facility exists. This skill cannot force or defer automatic host compaction. After compaction, the receiving current-session assistant reads objective, in-progress and next-step from that supplied block. A delegated assistant receives only the context needed for its explicitly assigned subtask.
 2. It compares the actual diff for files-changed with the handoff.
 3. If the most recent test failed, it follows systematic-debugging for that failure.
-4. Before a closure claim, it follows verification-before-completion. Unchanged valid evidence keeps its original source/time; only an affected change or evidence gap requires a new check.
+4. Before a closure claim, it follows verification-before-completion.
 
 ## Validator and warnings
 

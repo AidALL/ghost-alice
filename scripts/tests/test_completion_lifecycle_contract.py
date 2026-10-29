@@ -40,8 +40,11 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         body = SKILL.read_text()
         reuse = section(body, 'Verify-or-reuse gate')
         self.assertIn('references/verify-or-reuse.md', reuse)
-        self.assertIn('Another user input', reuse)
-        self.assertIn('is not an artifact mutation', reuse)
+        self.assertNotIn('is not an artifact mutation', reuse)
+        reference = (SKILL.parent / 'references/verify-or-reuse.md').read_text()
+        for phrase in ('A new user message, including a question about the artifact',
+                       'A different execution-local variable or a recording failure'):
+            self.assertIn(phrase, reference)
         selection = section(body, 'Evidence selection and stop gate')
         for phrase in ('unresolved criterion or competing explanation',
                        'why the method distinguishes the alternatives',

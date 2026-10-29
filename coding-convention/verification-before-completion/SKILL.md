@@ -25,10 +25,6 @@ A verdict you endorse is your claim, including a reviewer's verdict. A new absen
 
 Before inspecting an artifact again, apply [references/verify-or-reuse.md](references/verify-or-reuse.md). The executable helper is `scripts/verify_or_reuse.py`, resolved relative to this skill.
 
-Reuse retained evidence for an unchanged criterion and target. Another user input, a different execution-local variable or a recording failure is not an artifact mutation. An authored-at claim uses retained authored content even if a later version exists. For a current-state claim, assess actual mutation authority and observed events, not storage location or hypothetical edits. Unknown authority supports a last-known statement; it does not justify speculative inspection.
-
-A new check requires an explicit recheck request, observed relevant mutation, evidenced externally writable current-state target, lost evidence or a different target copy. Check only the affected target and keep the returned result. When the writer confirms nothing relevant changed, reuse the evidence unless an observed mutation contradicts that confirmation.
-
 ## Evidence selection and stop gate
 
 Before a discretionary check, the agent identifies the unresolved criterion or competing explanation, why the method distinguishes the alternatives, and which attainable outcomes would change a specific next action or acceptance judgment. If no outcome can change that decision, do not run the check. For stochastic repetition, define the uncertainty, sampling rule and stopping condition before repeating.
@@ -51,11 +47,11 @@ For a new current-turn closure:
 4. Compare each claim with its original sources and criterion, then separately judge the complete draft against the user's objective and constraints. Follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) to submit both judgments to Core. Core authenticates and stores them; code does not decide their meaning.
 5. Deliver the supported reviewed answer with its applicable completion or partial control under the owner reference's delivery procedure.
 
-Explaining an unchanged prior result is not a new completion submission and does not refresh its evidence time. Core selects completion processing from an actual completion/partial control marker; it does not infer completion from prose or selected execution work. The current-session assistant identifies and explicitly routes its new completion claims through this workflow. Never describe an old check as freshly executed.
+Explaining an unchanged prior result is not a new completion submission. Core selects completion processing from an actual completion/partial control marker; it does not infer completion from prose or selected execution work. The current-session assistant identifies and explicitly routes its new completion claims through this workflow. Never describe an old check as freshly executed.
 
 ## Retained original results and delivery
 
-Routine explanation from supplied conversation remains tool-free. For a source-backed explanation, the assistant compares each claim with the relevant originals, then separately judges the whole answer against the user's objective and constraints. Reuse available source passages and their original locators; this judgment requires neither a new route write nor a separate preparation or recording call. When the user explicitly requests an authenticated explanation review, follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). An explanation does not refresh prior evidence time or declare completion. The native host displays the answer without another model call. The answer-end hook records assessment outcomes; it does not create missing judgments or request another answer. New completion and partial-completion claims follow the finalization sequence above.
+Routine explanation from supplied conversation remains tool-free. For a source-backed explanation, the assistant compares each claim with the relevant originals, then separately judges the whole answer against the user's objective and constraints. Reuse available source passages and their original locators; this judgment requires neither a new route write nor a separate preparation or recording call. When the user explicitly requests an authenticated explanation review, follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). An explanation does not declare completion. The native host displays the answer without another model call. The answer-end hook records assessment outcomes; it does not create missing judgments or request another answer. New completion and partial-completion claims follow the finalization sequence above.
 
 For a correction to an already submitted answer, follow the review reference's [Deliver](references/response-review.md#deliver) procedure using the host's supplied visibility context. That procedure owns delivery of the reviewed answer and the Stop observation; the assistant does not infer visibility from an unrelated tool result.
 
@@ -65,7 +61,7 @@ Before a necessary action or check, arrange to retain its original result, exit 
 
 If the result is already available, cite it or copy its unchanged contents into permitted storage. Do not rerun the action to populate a variable, add redirection, create an evidence file or repair recording metadata. Missing storage is not missing verification. If the original result is lost or incomplete, state that gap and use verify-or-reuse to decide the affected observation.
 
-Copying proof preserves its source and original time. For recording, follow the review reference's [Proof bytes and time](references/response-review.md#proof-bytes-and-time); a later clock reading cannot supply a missing original observation time.
+To record proof, follow the review reference's [Proof bytes and time](references/response-review.md#proof-bytes-and-time).
 
 ## Completion-Check Format
 

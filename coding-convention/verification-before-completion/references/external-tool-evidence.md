@@ -4,13 +4,13 @@ The current-session assistant applies this reference when endorsing a material f
 
 ## Select evidence for the claim
 
-Identify the criterion, claimed behavior and unresolved uncertainty from the actual task. Reuse unchanged valid evidence with its original source and verification time. Stable, low-risk explanations answerable from supplied content need no fresh search. A local-only task does not require an invented external-tool claim or web lookup. Honor the user's explicit search request or restriction within its stated scope.
+Identify the criterion, claimed behavior and unresolved uncertainty from the actual task. Stable, low-risk explanations answerable from supplied content need no fresh search. A local-only task does not require an invented external-tool claim or web lookup. Honor the user's explicit search request or restriction within its stated scope.
 
 For a claim about what a specification requires, inspect the relevant official source; limit the claim to that definition. For current, version-specific, disputed or high-risk behavior, obtain evidence applicable to the claimed version and environment. Official documentation establishes intended behavior, not successful runtime execution. Use an authorized direct observation, reproducible result or relevant primary report to establish observed behavior. Preserve the distinction when the specification and observation disagree.
 
 Choose a search or runtime check to resolve a named uncertainty that can change the conclusion or next action. Relevant issue reports and community observations can expose regressions or competing explanations; use them when they bear on that uncertainty, and inspect their original evidence before relying on them. No query count, mandatory site list or search-result total establishes support. Repeated descriptions of the same report are not independent observations.
 
-Expand the investigation when contrary evidence challenges the current interpretation; narrow or qualify the claim when the necessary observation is unavailable. Stop when the required criterion is supported and no decision-relevant uncertainty remains, or retain the unresolved criterion when the permitted evidence cannot settle it. Do not run another search solely to complete a checklist or fill an evidence block.
+Expand the investigation when contrary evidence challenges the current interpretation; narrow or qualify the claim when the necessary observation is unavailable. Keep the criterion unresolved when the permitted evidence cannot settle it.
 
 ## Original sources and locators
 

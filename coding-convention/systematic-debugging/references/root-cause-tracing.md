@@ -14,7 +14,7 @@ If the existing trace cannot identify the caller, add bounded diagnostics immedi
 
 When a test creates an artifact in the wrong location, identify the triggering test before changing shared setup. The bundled `find-polluter.sh` sequentially invokes `npm test` for candidate files, ignores test exit statuses and stops at the first observed artifact. Use it only for an authorized compatible runner and isolated target; its result concerns artifact creation, not passing tests. Resolve it relative to this reference's directory; otherwise use the project's actual runner for the same bounded observation.
 
-A bisection or sequential test run is justified only when its possible result changes the causal decision. Systematic-debugging and verification-before-completion own retry bounds and evidence reuse.
+Systematic-debugging and verification-before-completion own retry bounds and evidence reuse.
 
 ## Correct the source and verify
 

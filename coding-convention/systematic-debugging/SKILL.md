@@ -11,7 +11,7 @@ The implementing agent investigates an observed failure, tests a causal hypothes
 
 ## Investigation
 
-Read the complete error and relevant trace. Retain the failure's command or trigger, target, source locator and observed result. Reproduce only when the existing evidence cannot settle the next causal decision; verification-before-completion owns the useful-check decision.
+Read the complete error and relevant trace. Retain the failure's command or trigger, target, source locator and observed result. Whether to reproduce follows verification-before-completion's [evidence selection gate](../verification-before-completion/SKILL.md#evidence-selection-and-stop-gate).
 
 Inspect changes and dependencies that could produce the observed result. Give the largest supported cause priority without declaring other plausible causes resolved. In a multi-component system, inspect the input, output and configuration at the relevant component boundaries. Record presence or safe metadata for credentials; never print secrets.
 
@@ -23,7 +23,7 @@ State the proposed cause and the observation supporting it. Choose a discriminat
 
 Once expected behavior and the production path are known, use test-driven-development to reproduce the failure before editing production code. Correct the identified cause to sufficient depth, including structural changes when the causal evidence requires them. Exclude unrelated refactoring.
 
-Verify the original failure and affected adjacent behavior. Preserve passing evidence for unaffected criteria. If the correction fails, identify which causal assumption, artifact mapping or design decision the result challenges and return to that point of investigation.
+Verify the original failure and affected adjacent behavior. If the correction fails, identify which causal assumption, artifact mapping or design decision the result challenges and return to that point of investigation.
 
 If evidence identifies an environmental or external failure that cannot be removed within this task, record the observed limitation and implement only authorized handling justified by that failure. An unexplained failure does not justify adding retries, monitoring or logging indiscriminately.
 

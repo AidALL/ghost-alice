@@ -25,7 +25,7 @@ The shell operation is `git worktree add <absolute-target> -b <new-branch> <star
 
 Follow the project's declared package manager and setup instructions. Do not run every example package manager or install dependencies merely because a file exists. A task prohibition on network, installation or setup overrides the default preparation.
 
-Apply verification-before-completion to the relevant baseline. Reuse unchanged evidence; run affected checks when a new checkout or observed dependency change leaves an unresolved condition. Distinguish a pre-existing failure from the proposed change and correct it only within the authorized task.
+Apply verification-before-completion to the selected checkout's relevant baseline. Distinguish a pre-existing failure from the proposed change and correct it only within the authorized task.
 
 ## Result and cleanup
 

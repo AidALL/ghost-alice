@@ -15,7 +15,7 @@ Supply the implemented behavior, accepted plan/requirements, source checkout, ba
 3. Review correctness, error handling, interfaces, type behavior, security and changed performance where the diff affects them.
 4. Inspect whether tests exercise production behavior, required errors and integrations. Use actual test output for pass claims; a test's presence does not prove it ran.
 5. Review applicable migration and documentation requirements. Judge the changed scope, not speculative future features or pre-existing size alone.
-6. Return each actionable finding with file/line, trigger, consequence and evidence. Run only checks that required validation or a live review uncertainty justifies.
+6. Return each actionable finding with file/line, trigger, consequence and evidence.
 
 ## Result format
 
