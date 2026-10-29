@@ -17,7 +17,7 @@ The agent resolves unsettled product or technical design decisions before implem
 2. Decompose a request containing independent subsystems into independently understandable specifications. Preserve the complete objective and the relationships and execution order between subsystems.
 3. Ask one decisive question at a time for missing human-owned decisions. Prefer concise choices when useful. A user example supplies evidence about desired behavior; resolve the criterion it illustrates rather than making the example the whole contract.
 4. For a live design choice, compare two or three alternatives, explain the trade-offs and recommend one. Do not reopen settled choices without contrary evidence.
-5. Present a concrete design covering components, interfaces, data flow, error handling and verification. Use enough detail to resolve the uncertainty. Request only decisions that remain the user's to make.
+5. Present a concrete design covering components, interfaces, data flow, error handling and verification. Use enough detail to resolve the uncertainty.
 6. Save the accepted design to `docs/coding-convention/specs/YYYY-MM-DD-<topic>-design.md`, unless the user specified another location or prohibited an artifact. Follow the task's commit policy.
 7. Review the specification for missing requirements, contradictions, ambiguous behavior, unnecessary features and boundaries too broad for one plan. Correct in-scope defects, retaining already accepted decisions.
 8. Invoke writing-plans to turn the accepted design into implementation tasks. Brainstorming itself does not invoke an implementation skill.

@@ -1,6 +1,6 @@
 # Routing Details
 
-The current-session assistant uses this reference when boundary reconciliation is uncertain or a supplied phrase leaves unclear whether it calls for a direct answer, a confirmation question or work. `../SKILL.md` owns the route procedure and schemas.
+The current-session assistant uses this reference when boundary reconciliation is uncertain or a supplied phrase leaves the next action uncertain. `../SKILL.md` owns the route procedure and schemas.
 
 ## Boundary reconciliation
 
@@ -10,7 +10,7 @@ If only conflicting snapshot fields remain, the current-session assistant leaves
 
 ## Direct answer and confirmation conditions
 
-The common contract's Work Selection section carries task-router's direct-answer rule and its no-tool action; its Session Intent section owns confirmation questions. Use the examples below when a supplied phrase leaves the intended work uncertain.
+The common contract's Work Selection section carries task-router's direct-answer rule and its no-tool action; its Session Intent section owns confirmation questions. Use the examples below when a supplied phrase leaves the next action uncertain.
 
 A general why/how premise remains an explanation topic unless the user identifies a workspace, supplies workspace evidence, requests exact diagnosis, or the conversation establishes the inspected referent. First-person wording, past tense, technical-state vocabulary and an open project do not independently establish inspection authority. An established referent permits inspection but does not require it when retained evidence answers the question.
 
