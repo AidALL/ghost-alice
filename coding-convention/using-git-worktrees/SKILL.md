@@ -29,7 +29,7 @@ Apply verification-before-completion to the selected checkout's relevant baselin
 
 ## Result and cleanup
 
-Report the absolute checkout, branch/ref and actual baseline result or remaining gap. Do not claim all tests passed from a selected subset. Finish branch integration and cleanup through finishing-a-development-branch.
+Report the absolute checkout, branch/ref and actual baseline result or remaining gap. Finish branch integration and cleanup through finishing-a-development-branch.
 
 For managed worktrees, use the host's attach/archive lifecycle. Never delete an active task's checkout or discard uncommitted work. A successful PR does not by itself authorize cleanup.
 

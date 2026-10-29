@@ -13,7 +13,7 @@ The current-session assistant follows this instruction document to judge claims 
 
 ## Acceptance criteria and claim scope
 
-Extract the requested result and accepted constraints from user intent and the active contract. Compare the proposed result with the original sources and required criteria, including how the verified parts support the whole requested outcome. Reconsider a selected reference or interpretation when contrary evidence challenges it; do not rewrite the source or user criterion to make the result pass. A diagnostic or matching review record cannot complete an implementation request.
+Extract the requested result and accepted constraints from user intent and the active contract. Compare the proposed result with the original sources and required criteria, including how the verified parts support the whole requested outcome. Reconsider a selected reference or interpretation when contrary evidence challenges it; do not rewrite the source or user criterion to make the result pass.
 
 For each proposed claim, identify the criterion, checked target and failure context, observation method, source locator and original verification time. Distinguish source conformance, executable regression, installed-copy delivery and behavior in an ongoing conversation. Evidence for one stage supports only that stage. A source edit or installation does not demonstrate behavioral improvement; a case passed by both baseline and candidate does not establish that the candidate caused improvement.
 
@@ -125,7 +125,7 @@ Before claiming a result that adversarial-verification reviewed at level-3-high-
 
 ## Failure modes and partial continuation
 
-A changed diff is not proof of a fix; lint is not proof of a build; a passing subset is not proof of all requirements. A subagent report needs the underlying artifact and relevant evidence. [references/verification-detail.md](references/verification-detail.md) gives criterion-specific examples.
+A changed diff is not proof of a fix; lint is not proof of a build. [references/verification-detail.md](references/verification-detail.md) gives criterion-specific examples.
 
 While supported authorized work remains, report partial status in commentary and continue it. A failed provider, recording or review branch does not complete independent implementation. Stop dependent work for an explicit stop, missing required decision, exhausted resources or unavailable prerequisite, and report that precise limitation.
 

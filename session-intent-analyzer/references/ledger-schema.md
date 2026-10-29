@@ -149,7 +149,7 @@ Migration validates and atomically imports normalized JSON state plus ordered ev
 
 `read_session_state(..., recover_audit=False)` and `--read-state` are read-only; they do not reconcile staged native input. Unimported JSON preserves missing metadata and pending markers instead of manufacturing intake proof. recover_audit=True explicitly imports/reconciles validated JSON. read_session_events returns ordered authority; list_session_states includes database and unimported JSON identities. load_state and consumer_snapshot resolve compatibility paths through the authority API. Callers report API failures rather than returning a false successful empty snapshot.
 
-For live backup, the operator uses SQLite backup or a quiescent consistent copy with journal state. Copying only a live main file may omit WAL commits. JSON exports are inspection artifacts, not transactional backups. Stored summaries do not prove semantic truth or prevent tampering by a process with write access.
+For live backup, the operator uses SQLite backup or a quiescent consistent copy with journal state. Copying only a live main file may omit WAL commits. JSON exports are inspection artifacts, not transactional backups. Stored summaries do not prevent tampering by a process with write access.
 
 ## Core Response Projection
 

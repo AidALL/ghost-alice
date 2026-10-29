@@ -40,4 +40,4 @@ If the user accepts, read [references/visual-companion.md](references/visual-com
 
 Do not treat a simple task as exemption from a real unresolved design decision. Do not require repeated approval of settled decisions, ask the user to choose routine implementation details, or silently narrow the objective.
 
-The output is the accepted specification and any exact unresolved decision, followed by writing-plans when its prerequisites are available. Verification-before-completion governs claims that the specification is complete; the design file alone does not prove implementation.
+The output is the accepted specification and any exact unresolved decision, followed by writing-plans when its prerequisites are available. Verification-before-completion governs claims that the specification is complete.

@@ -42,7 +42,6 @@ The example is an assignment, not executable tool syntax. Map it to the active h
 
 ## Failure modes
 
-- An agent's success report is not independent proof of task completion.
 - Parallel dispatch does not authorize shared-file edits or a broader objective.
 - A repeated failure needs a revised hypothesis or new evidence; follow systematic-debugging's incident limits.
 - Do not increase a timeout without evidence that the original bound caused the failure.

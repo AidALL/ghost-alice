@@ -24,7 +24,7 @@ The implementing agent executes an accepted plan inline, updates tasks when evid
 
 A missing dependency, failed check or unclear instruction stops only tasks that depend on it. Use systematic-debugging to investigate a failure; use boundary-contract for an unresolved authority decision. Continue independent authorized tasks.
 
-Do not execute example commands as though they were the actual plan, add unrelated refactors, bypass a required check, or declare the whole plan complete from a successful subset. Preserve valid evidence through verification-before-completion; do not rerun successful task actions to correct a tracker entry.
+Do not execute example commands as though they were the actual plan, add unrelated refactors, or bypass a required check. Preserve valid evidence through verification-before-completion; do not rerun successful task actions to correct a tracker entry.
 
 ## Output and integration
 

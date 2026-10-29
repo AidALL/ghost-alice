@@ -58,7 +58,6 @@ For repair attempts, follow systematic-debugging's [Incident accounting and cont
 - A small change does not excuse skipping an applicable required workflow.
 - Tool availability does not grant authority to use the tool.
 - An agent's plan cannot weaken the user's acceptance criteria.
-- A passed diagnostic or report cannot complete an implementation request.
 - Repeating a check requires the evidence trigger defined by verification-before-completion.
 
 Write prose paragraphs on one physical source line unless Markdown, syntax or protocol fields require separate lines.
