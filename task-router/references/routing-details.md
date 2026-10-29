@@ -36,6 +36,6 @@ The examples illustrate classification, not findings about any current tool or w
 
 ## Failure modes and repair
 
-The current-session assistant must not infer authorization from metadata, use no-work labels to abandon implementation, or claim an untested branch passed because another branch passed. It must not repeat an unchanged failure merely because the branch is still open.
+The current-session assistant must not infer authorization from metadata, use no-work labels to abandon implementation, or claim an untested branch passed because another branch passed.
 
 Authority and renewal belong to `../../boundary-contract/SKILL.md#authority-and-renewal`. Incident accounting belongs to `../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation`. Proof reuse, discretionary checks and native delivery belong to `../../coding-convention/verification-before-completion/SKILL.md`. A new input or route error reopens the affected binding, not unrelated business proof. A genuinely expanded release-readiness claim requires evidence for the added conditions.

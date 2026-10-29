@@ -1,5 +1,5 @@
 {
-  "tool-checkpoint": "tool-checkpoint: Follow the common contract's io-trace Transparency Rule for a decision-relevant checkpoint before this tool call. Native checks and strict audit run independently.",
-  "terminal-routing": "Interpret this input under the common contract's Session Intent section, then decide under its Work Selection section. The intake hook and strict audit still run.",
+  "tool-checkpoint": "tool-checkpoint: Follow the common contract's io-trace Transparency Rule for a decision-relevant checkpoint before this tool call.",
+  "terminal-routing": "Interpret this input under the common contract's Session Intent section, then decide under its Work Selection section.",
   "session-intent": "session-intent-analyzer: The hook records digest-only intake for the native session. The current-session assistant retrieves stored intent only when it affects a decision or a semantic update, using the exact receipt. Core validates canonical state for dependent writes and authority. Intent records must exclude raw prompts, conversation/tool output, system instructions and secrets."
 }

@@ -98,7 +98,7 @@ The helper captures content, exact timestamp, identity and mode without writing 
 
 The current-session assistant captures once before the protected operation, checks immediately before a dependent write, and checks afterward when preservation is an acceptance condition. A failed comparison stops the dependent write; the current-session assistant investigates against the original baseline rather than replacing it. If the helper is unavailable, capture and comparison use one exact-integer process or original integer strings.
 
-The helper observes regular files at one point in time; it is neither an atomic lock nor authorization or completion proof. It rejects symlinks and parent traversal and does not cover directory membership. The current-session assistant retains other contract-specific checks. A bookkeeping-only failure does not invalidate an unchanged guard result or business check.
+The helper observes regular files at one point in time; it is neither an atomic lock nor authorization or completion proof. It rejects symlinks and parent traversal and does not cover directory membership. The current-session assistant retains other contract-specific checks.
 
 ## Failure modes and proof
 

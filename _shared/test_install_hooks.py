@@ -943,7 +943,6 @@ class TestMessageLanguage(unittest.TestCase):
         """The hook points to one field owner and still runs through its host command."""
         instruction = install_hooks.TOOL_CHECKPOINT_INTERNAL
         self.assertIn("common contract's io-trace Transparency Rule", instruction)
-        self.assertIn('Native checks and strict audit run independently', instruction)
         self.assertNotIn('rejected-alternatives', instruction)
         contract = (Path(__file__).resolve().parents[1] / 'platforms/common-governance.md').read_text()
         for field in ('intent', 'why', 'stage: before-tool', 'contract-ref', 'contract-check'):

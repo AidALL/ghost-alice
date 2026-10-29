@@ -16,7 +16,7 @@ Follow writing-skills' [Author the package](../SKILL.md#author-the-package) requ
 
 ## Workflow and output examples
 
-For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package): the reader must know where the input comes from, its required shape, the actual call or transport, the returned result, its owner and the next decision. For example, the assistant filling a form reads the actual field schema from the exposed form tool, maps user-supplied values into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping; it does not justify replaying unrelated completed actions.
+For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package): the reader must know where the input comes from, its required shape, the actual call or transport, the returned result, its owner and the next decision. For example, the assistant filling a form reads the actual field schema from the exposed form tool, maps user-supplied values into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping.
 
 Use an exact template when an output consumer requires a schema. For narrative work, give a default structure with the conditions under which the agent may adapt it. One complete input/output example should demonstrate the expected content and level of detail.
 

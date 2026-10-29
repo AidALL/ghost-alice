@@ -20,4 +20,4 @@ The responding model selects the next work and the information that work needs t
 
 ## Host history, compaction and caching
 
-The native host serializes retained conversation messages and loaded tool definitions into model requests. Ghost-ALICE handoff selection does not remove earlier messages from that native history. Native compaction and prompt caching are separate host functions: caching reuses part of the request, and compaction changes retained history. Neither demonstrates decision-based exclusion of an obsolete source body. Core authenticates original sources separately from their retrieval. Ghost-ALICE does not insert another review-model call or intercept native answer display.
+The native host serializes retained conversation messages and loaded tool definitions into model requests. Ghost-ALICE handoff selection does not remove earlier messages from that native history. Native compaction and prompt caching are separate host functions: caching reuses part of the request, and compaction changes retained history. Neither demonstrates decision-based exclusion of an obsolete source body. Core authenticates original sources separately from their retrieval.
