@@ -10,4 +10,4 @@ Assert objective conditions directly, such as required fields, prohibited output
 
 ## Result and limits
 
-The author retains the supported contradiction or unresolved interpretation in existing task context and corrects the affected instruction under the parent procedure. A reviewer preference alone does not demonstrate a defect. Verification-before-completion owns evidence scope and stopping; systematic-debugging owns failed repair rounds.
+The author retains the supported contradiction or unresolved interpretation in existing task context and corrects the affected instruction under the parent procedure. A reviewer preference alone does not demonstrate a defect. Verification-before-completion owns evidence scope and stopping.

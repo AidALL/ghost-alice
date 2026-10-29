@@ -13,7 +13,7 @@ The implementing agent investigates an observed failure, tests a causal hypothes
 
 Read the complete error and relevant trace. Retain the failure's command or trigger, target, source locator and observed result. Whether to reproduce follows verification-before-completion's [evidence selection gate](../verification-before-completion/SKILL.md#evidence-selection-and-stop-gate).
 
-Inspect changes and dependencies that could produce the observed result. Give the largest supported cause priority without declaring other plausible causes resolved. In a multi-component system, inspect the input, output and configuration at the relevant component boundaries. Record presence or safe metadata for credentials; never print secrets.
+Inspect changes and dependencies that could produce the observed result. Give the largest supported cause priority without declaring other plausible causes resolved. In a multi-component system, inspect the input, output and configuration at the relevant component boundaries. Record presence or safe metadata for credentials.
 
 Trace a wrong value backward to the caller or source that created it. Use [references/root-cause-tracing.md](references/root-cause-tracing.md) for this technique. Compare the failing path with a relevant working implementation, including its dependencies and preconditions. Read enough of the reference to understand the behavior being adopted; do not copy a fragment whose contract remains unknown.
 
@@ -41,14 +41,13 @@ To continue after reassessment, identify a distinguishable hypothesis, the obser
 
 Boundary-contract owns authorization and the renewal of agent-declared implementation limits. Verification-before-completion owns useful checks, required evidence and proof reuse. Its response review reference owns recording-specific recovery: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
 
-Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation; keep independent authorized work running. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
+Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
 
 ## Failure modes
 
 - Do not treat time pressure, familiarity or repeated error text as causal evidence.
 - Do not add several speculative fixes and infer that the passing result identifies their cause.
 - Do not call a correction successful from a changed diff or passing lint.
-- Do not reset an incident count when handing the task to another agent.
 - When the user challenges an assumption, compare that assumption with the recorded evidence and inspect only the affected uncertainty.
 
 ## Output and supporting techniques

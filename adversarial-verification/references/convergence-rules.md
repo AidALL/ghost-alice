@@ -33,6 +33,6 @@ An agent may change its verdict. The change justifies another round only when it
 
 After cumulative audit failure over three rounds, the coordinating assistant replaces the violating agent. It retains the old utterances, voids that agent's verdict and reruns the replaced axis against current evidence. Replacement alone does not extend unaffected axes.
 
-The 50-round safety cap cannot be increased. At the cap, or earlier no-delta disagreement, the coordinating assistant invokes the meta-judge defined in ../SKILL.md. The meta-judge reports the dispute, unresolved evidence and any missing user-owned decision; it does not decide the claim. The coordinating assistant follows that skill's conditional handoff, preserves the unmet convergence requirement and continues independent authorized work. Factual disagreement alone does not require a human accept/reject decision.
+The 50-round safety cap cannot be increased. At the cap, or earlier no-delta disagreement, the coordinating assistant invokes the meta-judge defined in ../SKILL.md. The meta-judge reports the dispute, unresolved evidence and any missing user-owned decision; it does not decide the claim. The coordinating assistant follows that skill's conditional handoff and preserves the unmet convergence requirement. Factual disagreement alone does not require a human accept/reject decision.
 
 For simultaneous claims, the coordinating assistant keeps independent rounds and logs per claim. Agents may be reused across claims, but cross-claim attacks are excluded.

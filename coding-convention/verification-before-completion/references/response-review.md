@@ -104,7 +104,7 @@ Do not invoke Stop to obtain a read-only status. For current criterion state, us
 
 Preserve original business proof after a binding or recording failure. The current-session assistant first identifies whether the missing record prevents a required claim or an authorized dependent task. If it does not, retain the recording gap without another command or user-facing repair response. An unmet required recording condition stays unresolved.
 
-When a required dependency needs correction, repair only that record: task-router for the current route, Core assessment for a source-to-claim judgment. Retain the original receipt/reference. An identical unchanged failure suspends that attempt until a relevant state change; independent authorized work continues. Do not fabricate origin, permission, admission, approval, run state or source authority.
+When a required dependency needs correction, repair only that record: task-router for the current route, Core assessment for a source-to-claim judgment. Retain the original receipt/reference. An identical unchanged failure suspends that attempt until a relevant state change. Do not fabricate origin, permission, admission, approval, run state or source authority.
 
 If additional task files are prohibited, use permitted stdin or runtime scratch rather than creating them.
 

@@ -41,7 +41,7 @@ Tests failing (<N> failures). Must fix before completing:
 Cannot push or integrate until runnable checks pass.
 ```
 
-Suspend the push or integration that depends on those checks. Correct the observed failure within existing authority; independent authorized work may continue.
+Suspend the push or integration that depends on those checks. Correct the observed failure within existing authority.
 
 When runnable checks pass and runner gaps are recorded: proceed to Step 2. After pushing, require successful applicable remote CI for the exact head before integration. A green older SHA, local pass, clean code review, pending job, or silently skipped required job does not satisfy that condition.
 

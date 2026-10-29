@@ -22,7 +22,7 @@ The implementing agent executes an accepted plan inline, updates tasks when evid
 
 ## Failure modes and continuation
 
-A missing dependency, failed check or unclear instruction stops only tasks that depend on it. Use systematic-debugging to investigate a failure; use boundary-contract for an unresolved authority decision. Continue independent authorized tasks.
+Use systematic-debugging to investigate a failure; use boundary-contract for an unresolved authority decision.
 
 Do not execute example commands as though they were the actual plan, add unrelated refactors, or bypass a required check. Preserve valid evidence through verification-before-completion.
 

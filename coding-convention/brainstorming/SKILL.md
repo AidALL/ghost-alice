@@ -9,7 +9,7 @@ compatibility:
 
 # Turning Ideas into Designs
 
-The agent resolves unsettled product or technical design decisions before implementation. Reuse accepted requirements, design and authority. An unresolved human-owned decision blocks only the implementation that depends on it.
+The agent resolves unsettled product or technical design decisions before implementation. Reuse accepted requirements, design and authority.
 
 ## Design procedure
 

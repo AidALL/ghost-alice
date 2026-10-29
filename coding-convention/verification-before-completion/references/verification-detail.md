@@ -14,4 +14,4 @@ Use these patterns after applying the main skill's evidence selection and reuse 
 
 Do not reverse a valid fix solely to recreate existing RED evidence. If the required original failure proof is unavailable, follow test-driven-development’s applicability and RED-evidence instructions within the authorized target, and report which required observation is missing.
 
-The main skill owns [useful-check selection](../SKILL.md#evidence-selection-and-stop-gate). Systematic-debugging owns [incident accounting](../../systematic-debugging/SKILL.md#incident-accounting-and-continuation). A failed diagnostic or unavailable infrastructure does not itself count as a failed corrective round.
+The main skill owns [useful-check selection](../SKILL.md#evidence-selection-and-stop-gate).

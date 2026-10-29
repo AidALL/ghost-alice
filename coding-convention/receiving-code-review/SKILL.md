@@ -12,7 +12,7 @@ The implementing agent evaluates each review suggestion against the user's requi
 ## Evaluate feedback
 
 1. Read all findings and identify their dependencies.
-2. State the requested behavior precisely. Resolve ambiguity from supplied context, or ask for the exact missing human decision. Continue independent fixes while dependent items wait.
+2. State the requested behavior precisely. Resolve ambiguity from supplied context, or ask for the exact missing human decision.
 3. Check each finding against current code, relevant tests, supported platforms and the reason for the existing behavior. Use retained evidence where verification-before-completion permits it.
 4. Accept a valid finding, reject an incorrect one with evidence, or report the specific observation still unavailable. A reviewer cannot override a user's accepted architecture or compatibility requirement.
 5. Implement valid authorized fixes in dependency order: blocking correctness/security issues first, then small corrections and more complex changes. Test the affected behavior for each correction and required interactions.
@@ -32,6 +32,6 @@ A reviewer proposes removing a compatibility fallback. The agent checks the acce
 
 ## Failure modes and result
 
-Do not infer that an external review is correct because it is confident, change expected test values to silence a valid failure, block unrelated work on one ambiguous item, or call a fix complete without observing its relevant result.
+Do not infer that an external review is correct because it is confident, change expected test values to silence a valid failure, or call a fix complete without observing its relevant result.
 
 Return each finding's accepted/rejected/unresolved disposition, reason, changed target and evidence.
