@@ -43,7 +43,7 @@ For a new current-turn closure:
 
 1. Load this skill through the host's real mechanism, or validly reuse its body under [Instruction Body Reuse](references/verify-or-reuse.md#instruction-body-reuse), and apply the workflow to this input.
 2. Map each claim to its criterion and actual evidence. A successful result already returned in this turn can supply fresh evidence; run a further check only for a criterion it does not cover. Read the result, source locator, exit status and failures before judging it.
-3. Follow session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection, for the exact current binding. Resolve that reference from the selected installed session-intent-analyzer directory. A missing route blocks dependent recording, not the original business evidence.
+3. Follow session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection, for the exact current binding. Resolve that reference from the selected installed session-intent-analyzer directory.
 4. Compare each claim with its original sources and criterion, then separately judge the complete draft against the user's objective and constraints. Follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) to submit both judgments to Core. Core authenticates and stores them; code does not decide their meaning.
 5. Deliver the supported reviewed answer with its applicable completion or partial control under the owner reference's delivery procedure.
 
@@ -51,7 +51,7 @@ Explaining an unchanged prior result is not a new completion submission. Core se
 
 ## Retained original results and delivery
 
-For a source-backed explanation, [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) owns both judgments; record them only when the user explicitly requests an authenticated explanation review. The native host displays the answer without another model call. The answer-end hook records assessment outcomes; it does not create missing judgments or request another answer. New completion and partial-completion claims follow the finalization sequence above.
+For a source-backed explanation, [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) owns both judgments; record them only when the user explicitly requests an authenticated explanation review. New completion and partial-completion claims follow the finalization sequence above.
 
 For a correction to an already submitted answer, follow the review reference's [Deliver](references/response-review.md#deliver) procedure using the host's supplied visibility context. That procedure owns delivery of the reviewed answer and the Stop observation; the assistant does not infer visibility from an unrelated tool result.
 
@@ -59,7 +59,7 @@ For a correction to an already submitted answer, follow the review reference's [
 
 Before a necessary action or check, arrange to retain its original result, exit status, source locator and verification time. Keep an orchestrated tool result in session state when later steps need the original object.
 
-If the result is already available, cite it or copy its unchanged contents into permitted storage. Do not rerun the action to populate a variable, add redirection, create an evidence file or repair recording metadata. Missing storage is not missing verification. If the original result is lost or incomplete, state that gap and use verify-or-reuse to decide the affected observation.
+If the result is already available, cite it or copy its unchanged contents into permitted storage. Do not rerun the action to populate a variable, add redirection or create an evidence file. Missing storage is not missing verification. If the original result is lost or incomplete, state that gap and use verify-or-reuse to decide the affected observation.
 
 To record proof, follow the review reference's [Proof bytes and time](references/response-review.md#proof-bytes-and-time).
 
@@ -127,6 +127,6 @@ Before claiming a result that adversarial-verification reviewed at level-3-high-
 
 A changed diff is not proof of a fix; lint is not proof of a build. [references/verification-detail.md](references/verification-detail.md) gives criterion-specific examples.
 
-While supported authorized work remains, report partial status in commentary and continue it. A failed provider, recording or review branch does not complete independent implementation. Stop dependent work for an explicit stop, missing required decision, exhausted resources or unavailable prerequisite, and report that precise limitation.
+While supported authorized work remains, report partial status in commentary and continue it. Stop dependent work for an explicit stop, missing required decision, exhausted resources or unavailable prerequisite, and report that precise limitation.
 
 Before finalizing, verify that every claimed result has a criterion and evidence, every unresolved required criterion remains visible, no claim exceeds its checked stage, and no unchanged action was replayed merely for recording.

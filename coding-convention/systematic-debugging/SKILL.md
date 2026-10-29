@@ -41,7 +41,7 @@ To continue after reassessment, identify a distinguishable hypothesis, the obser
 
 Boundary-contract owns authorization and the renewal of agent-declared implementation limits. Verification-before-completion owns useful checks, required evidence and proof reuse. Its response review reference owns recording-specific recovery: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
 
-Preserve already-supported business proof while recording is unavailable. Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation; keep independent authorized work running. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
+Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation; keep independent authorized work running. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
 
 ## Failure modes
 

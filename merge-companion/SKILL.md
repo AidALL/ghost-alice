@@ -28,7 +28,7 @@ The session-start hook, installer tail, pending-merges READ-ME-FIRST and session
 3. It presents a natural-language diff and workflow impact, with raw diff on request. Hash/provenance evidence establishes identity, drift and merge safety; current contract and behavior evidence determine which semantics to retain.
 4. It offers integrate, discard or later. Later is the default and leaves the entry pending. An advanced flow may offer a partial merge.
 5. For integration, it prepares the proposed result under `~/.ghost-alice/staged/<entry-id>/` without changing the live file.
-6. After approval of the staged result, it follows [Apply and record a decision](references/manifest-schema.md#apply-and-record-a-decision): apply the live change through the host file tool, then record the exact manifest entry through the importable helper. If the user rejects the proposal, it removes the staged result and leaves the entry undecided. A recording failure does not justify applying the live change again.
+6. After approval of the staged result, it follows [Apply and record a decision](references/manifest-schema.md#apply-and-record-a-decision): apply the live change through the host file tool, then record the exact manifest entry through the importable helper. If the user rejects the proposal, it removes the staged result and leaves the entry undecided.
 
 All AI decision-aid content in steps 3–5 passes adversarial-verification before presentation or application. Low impact and cost do not waive that requirement. The current-session assistant must not use a tier as verification evidence.
 
@@ -40,6 +40,6 @@ The current-session assistant marks an entry merged or discarded only after the 
 
 ## Audit and warnings
 
-The current-session assistant retains manifest operations, backup reads/copies, staged writes and confirmation evidence internally. After-tool audit stays active.
+The current-session assistant retains manifest operations, backup reads/copies, staged writes and confirmation evidence internally.
 
 The current-session assistant must not overwrite live files before required approval, merge the three choices into one default, bypass adversarial verification or propagate without authority. Already supplied authorization applies to its actual scope and does not require redundant confirmation.
