@@ -40,7 +40,7 @@ The claim-card includes claim-id, claim-text, claim-type (`empirical | theoretic
 
 The coordinating assistant rejects an empty evidence-list, removes inaccessible evidence and rejects if none remains. For theoretical/composition/prior-art claims, missing guarantees, non-guarantees or assumptions requires escalation. An unclear abstraction level also requires escalation.
 
-Every web source includes accessible_url, the supported finding/value and source-locator.source_type=web. Local/attached sources include file_path or filename, page, region (`top | middle | bottom | n/a`) and locator_note when needed. Numbers, tables, figures and source claims require exact locators.
+Every source follows the source-locator contract in verification-before-completion's `references/external-tool-evidence.md`.
 
 ## Assign independent agents
 
@@ -80,7 +80,7 @@ For reject, include rejection reasons and retracted claims. For escalate, identi
 
 For material external-tool claims, the coordinating assistant loads verification-before-completion's `references/external-tool-evidence.md` from the installed skill and supplies its applicable category, evidence requirements and exact claim scope in each reviewer assignment. That reference owns query patterns and source-locator fields.
 
-For level-3 evaluation, external governance absorption or evaluator candidate promotion, follow `docs/policies/evaluator-artifact-contract.md` for its required artifacts and accepted result. The coordinating assistant retains the returned verifier result and its supported scope; this skill does not redefine the evaluation protocol.
+For a claim reviewed at level-3-high-stakes, external governance absorption or evaluator-candidate promotion, follow `docs/policies/evaluator-artifact-contract.md` for its required artifacts and accepted result. The coordinating assistant retains the returned verifier result and its supported scope; this skill does not redefine the evaluation protocol.
 
 ## Gotchas
 

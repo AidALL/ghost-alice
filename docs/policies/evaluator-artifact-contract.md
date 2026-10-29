@@ -2,7 +2,7 @@
 
 언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/evaluator-artifact-contract.md)
 
-This artifact contract applies to verification-complexity-level-3-plus work, intake of external agent-governance logic, and RAG/evaluator-driven improvement candidates. It preserves promotable evidence together with rejected candidates.
+This artifact contract applies to claims that adversarial-verification reviewed at level-3-high-stakes, intake of external agent-governance logic, and RAG/evaluator-driven improvement candidates. It preserves promotable evidence together with rejected candidates.
 ## Contents
 
 - [Applicability](#applicability)
@@ -14,7 +14,7 @@ This artifact contract applies to verification-complexity-level-3-plus work, int
 
 ## Applicability
 
-- verification-complexity-level-3-plus work
+- Claims that adversarial-verification reviewed at level-3-high-stakes
 - Intake of external agent-governance logic
 - RAG or evaluator output that proposes playbook, rule, skill, or hook changes
 - Promotion decisions before installed assets change

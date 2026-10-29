@@ -1,6 +1,6 @@
 # Response Review
 
-Core Python code selects admitted execution criteria from the current route, owner, work-unit ID and contract revision. Core records the current-session assistant's review of a response against those criteria and its original sources; the Stop observer validates the delivered text against that record. An existing run, cumulative history, missing route, planning reply or explanation does not create a completion claim.
+Core Python code selects admitted execution criteria from the current route, owner, work-unit ID and contract revision. Core records the current-session assistant's review of a response against those criteria and its original sources; the Stop observer validates the delivered text against that record.
 
 ## Authority and route prerequisites
 
@@ -12,7 +12,7 @@ Keep Core APIs, runtime modules, ledger, project checkout and installed skills a
 
 ## Prepare and record the response review
 
-Core records original locations, byte ranges and digests. The current-session assistant compares claims with the relevant originals and separately checks the complete answer against the user's objective. For new completion or partial-completion claims, or an authenticated explanation review explicitly requested by the user, it records those judgments through the Core APIs below. Routine source-backed explanations perform the two judgments using available original passages and locators, without these preparation and recording calls. A changed or missing original cannot support a new judgment; the original recorded judgment remains a historical fact. An idempotent recording call reuses its original judgment without repeating business verification.
+Core records original locations, byte ranges and digests. For new completion or partial-completion claims, or an authenticated explanation review explicitly requested by the user, the current-session assistant records its per-claim and whole-answer judgments through the Core APIs below. Routine source-backed explanations perform the two judgments using available original passages and locators, without these preparation and recording calls. A changed or missing original cannot support a new judgment; the original recorded judgment remains a historical fact. An idempotent recording call reuses its original judgment without repeating business verification.
 
 The CLI returns references and status, not copies of source bodies or the complete answer. Use `_shared/source_lookup.py` with a literal search, line selection or JSON pointer to retrieve only the passages needed for the judgment; task-router's `references/context-selection.md` defines that reader. Ordinary replies supported entirely by supplied conversation do not require an execution criterion, verification timestamp or separate review process. The host displays answers through its native output path. Stop observes completion evidence without creating another model review or intercepting display.
 

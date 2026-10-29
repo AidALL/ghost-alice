@@ -4,7 +4,7 @@ The current-session assistant applies this reference when endorsing a material f
 
 ## Select evidence for the claim
 
-Identify the criterion, claimed behavior and unresolved uncertainty from the actual task. Stable, low-risk explanations answerable from supplied content need no fresh search. A local-only task does not require an invented external-tool claim or web lookup. Honor the user's explicit search request or restriction within its stated scope.
+Identify the criterion, claimed behavior and unresolved uncertainty from the actual task. Stable, low-risk explanations answerable from supplied content need no fresh search. In a local-only task, do not invent an external-tool claim to justify a web lookup. Honor the user's explicit search request or restriction within its stated scope.
 
 For a claim about what a specification requires, inspect the relevant official source; limit the claim to that definition. For current, version-specific, disputed or high-risk behavior, obtain evidence applicable to the claimed version and environment. Official documentation establishes intended behavior, not successful runtime execution. Use an authorized direct observation, reproducible result or relevant primary report to establish observed behavior. Preserve the distinction when the specification and observation disagree.
 
@@ -19,7 +19,7 @@ The assistant binds quoted sources, numeric claims, original evidence, tables/fi
 Source-locator contract:
 
 - Web evidence includes `accessible_url` and the relevant section or observation when needed to locate the claim.
-- Attached or local file evidence includes `file_path`, `page` and `region`.
+- Attached or local file evidence includes `file_path` or `filename`, `page` and `region`.
 - `region` values are `top`, `middle`, `bottom` or `n/a`.
 - Materials without pages use `page: n/a` plus an equivalent locator such as section, row, slide or sheet in `locator_note`.
 - Numeric claims, original sources, tables and figures bind the specific value to its source location.
