@@ -17,7 +17,7 @@ The current-session assistant distinguishes a human-owned boundary from a narrow
 
 An absent explicit resource cap is not a user-approved limit invented by the current-session assistant.
 
-The current-session assistant preserves the terminal objective separately from investigative or implementation means. It must not narrow a committed full surface to selected examples, or replace the requested result with a method. When the request covers every member of a set, the coverage criterion states the condition that defines the set. Discovery lists the members; the criterion does not require the members or their count before discovery. Partial coverage remains partial status.
+The current-session assistant preserves the terminal objective separately from investigative or implementation means. It must not narrow a committed full surface to selected examples. When the request covers every member of a set, the coverage criterion states the condition that defines the set. Discovery lists the members; the criterion does not require the members or their count before discovery.
 
 ## Declare the contract
 
@@ -102,6 +102,6 @@ The helper observes regular files at one point in time; it is neither an atomic 
 
 ## Failure modes and proof
 
-The current-session assistant must not label an interpretation user-said, perform implementation under discovery, omit coverage from a full-set objective, or report a successful subset as the whole outcome. Peripheral checks support only criteria they actually measure.
+The current-session assistant must not label an interpretation user-said, perform implementation under discovery, or omit coverage from a full-set objective. Peripheral checks support only criteria they actually measure.
 
 The current-session assistant following the selected procedure executes the action and judges its returned evidence against the criteria. For discretionary checks, evidence source/time reuse and native completion, apply `../coding-convention/verification-before-completion/SKILL.md`. The incident workflow in `../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation` preserves cumulative attempts and user resources across agents and handoffs. Contract renewal does not reset those limits or require replay of completed business work.

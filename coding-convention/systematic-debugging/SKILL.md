@@ -49,7 +49,6 @@ Preserve already-supported business proof while recording is unavailable. Exclud
 - Do not add several speculative fixes and infer that the passing result identifies their cause.
 - Do not call a correction successful from a changed diff or passing lint.
 - Do not reset an incident count when handing the task to another agent.
-- Do not replace the requested implementation with a diagnostic report.
 - When the user challenges an assumption, compare that assumption with the recorded evidence and inspect only the affected uncertainty.
 
 ## Output and supporting techniques

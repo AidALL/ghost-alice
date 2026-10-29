@@ -46,4 +46,4 @@ Continue the already authorized execution choice after saving or correcting the 
 
 ## Failure modes and result
 
-A detailed plan does not prove that implementation ran. The planning assistant follows verification-before-completion before claiming that the plan satisfies its specification. The assistant that later executes the plan supplies the evidence for implementation claims. Do not replace a requested implementation with a completed planning report.
+The planning assistant follows verification-before-completion before claiming that the plan satisfies its specification. The assistant that later executes the plan supplies the evidence for implementation claims.

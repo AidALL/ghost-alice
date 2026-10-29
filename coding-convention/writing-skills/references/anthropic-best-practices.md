@@ -40,4 +40,4 @@ When layout matters, render the output and inspect the relevant pages or regions
 
 Do not copy time-sensitive support claims, host tool names or installation instructions into canonical guidance without their applicability conditions. Keep historical examples clearly historical. Do not claim that stronger wording, a script, a checklist or a passing example guarantees compliance.
 
-Before distributing a package, complete the project's required validation and the affected evaluation. Preserve actual source and time; distinguish source correctness, installed copy and demonstrated host behavior.
+Before distributing a package, complete the project's required validation and the affected evaluation.

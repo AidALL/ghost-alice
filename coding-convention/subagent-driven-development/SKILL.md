@@ -16,7 +16,7 @@ Use this workflow when the plan's tasks can be assigned independently and execut
 1. Read the plan once, retain every task's text and shared dependencies, and create the task tracker.
 2. Select a ready task. Supply its full text, exact allowed paths, relevant context, constraints and required evidence using [references/implementer-prompt.md](references/implementer-prompt.md). The implementer need not reread the plan.
 3. Answer the implementer's questions from available authority and context. A missing human-owned decision pauses only its dependent work.
-4. When implementation is ready, dispatch the specification reviewer using [references/spec-reviewer-prompt.md](references/spec-reviewer-prompt.md). That reviewer checks actual code against requirements; the implementer's report is not proof.
+4. When implementation is ready, dispatch the specification reviewer using [references/spec-reviewer-prompt.md](references/spec-reviewer-prompt.md). That reviewer checks actual code against requirements.
 5. Return valid specification defects to the implementer. Re-review the changed condition before code-quality review. Reject incorrect findings with evidence instead of implementing them blindly.
 6. After specification compliance, dispatch the code-quality reviewer using [references/code-quality-reviewer-prompt.md](references/code-quality-reviewer-prompt.md) and requesting-code-review.
 7. Have the implementer fix valid blocking quality findings, then re-review affected changes. Mark the task complete only after each review whose outcome can change the next action or a criterion's judgment has evidence.

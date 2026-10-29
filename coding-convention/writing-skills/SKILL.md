@@ -38,7 +38,7 @@ Do not add hypothetical defenses or repeat a prohibition merely to increase emph
 5. If an observation contradicts a requirement, correct the implicated instruction and repeat only the affected checks.
 6. Distribute or commit only under the user's existing authorization and after required validation succeeds.
 
-Coordinated changes may span packages; each changed package still needs its own disposition. A source check proves source conformance, not host adoption. Two passing variants prove their checked behavior, not causal improvement.
+Coordinated changes may span packages; each changed package still needs its own disposition.
 
 Verification-before-completion owns useful-check selection, evidence reuse, original source/time and completion claims. Systematic-debugging owns failed-round accounting and bounded continuation. Do not duplicate either policy in a skill under repair.
 
@@ -46,7 +46,6 @@ Verification-before-completion owns useful-check selection, evidence reuse, orig
 
 - Do not relabel a passing baseline as a failure.
 - Do not backdate missing baseline evidence or delete inconvenient results.
-- Do not infer native behavior from formatting or source validation.
 - Do not add a new report, hook or mandatory record when existing task context already preserves the evidence.
 
 ## Conditional references

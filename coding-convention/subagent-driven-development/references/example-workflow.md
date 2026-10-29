@@ -11,4 +11,4 @@ This illustrative sequence shows evidence handoffs. Its labels and numbers are n
 7. A quality reviewer suggests extracting the reporting interval. The parent assistant evaluates whether this is a real requirement or advisory style preference rather than treating every suggestion as blocking.
 8. After all tasks satisfy their criteria, the parent assistant obtains combined review and invokes finishing-a-development-branch for the authorized integration choice.
 
-Verification-before-completion governs final claims. Neither the implementer's “done” nor the final review's “approved” proves remote CI, merge, installation or delivery.
+Verification-before-completion governs final claims.

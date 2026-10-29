@@ -34,4 +34,4 @@ A reviewer proposes removing a compatibility fallback. The agent checks the acce
 
 Do not infer that an external review is correct because it is confident, change expected test values to silence a valid failure, block unrelated work on one ambiguous item, or call a fix complete without observing its relevant result.
 
-Return each finding's accepted/rejected/unresolved disposition, reason, changed target and evidence. Keep an unresolved criterion visible; a disposition list does not prove the requested implementation is complete.
+Return each finding's accepted/rejected/unresolved disposition, reason, changed target and evidence.
