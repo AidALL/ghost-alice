@@ -9,7 +9,7 @@ compatibility:
 
 A delegated assistant reviews its assigned evidence and returns the result to its parent. The assistant answering the current conversation performs route registration, response review and final delivery.
 
-The current-session assistant follows this instruction document to judge claims before a new completion, fix, success, verified-status or material recommendation claim, and before rereading an artifact to support an answer. Match every claim to the user's actual criterion and evidence. A printed success label, another agent's report or a control block is not proof.
+The current-session assistant follows this instruction document to judge claims before a new completion, fix, success, verified-status or material recommendation claim, and before rereading an artifact to support a claim. Match every claim to the user's actual criterion and evidence. A printed success label, another agent's report or a control block is not proof.
 
 ## Acceptance criteria and claim scope
 
@@ -51,7 +51,7 @@ Explaining an unchanged prior result is not a new completion submission. Core se
 
 ## Retained original results and delivery
 
-For a source-backed explanation, the assistant compares each claim with the relevant originals, then separately judges the whole answer against the user's objective and constraints. Reuse available source passages and their original locators; this judgment requires neither a new route write nor a separate preparation or recording call. When the user explicitly requests an authenticated explanation review, follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). An explanation does not declare completion. The native host displays the answer without another model call. The answer-end hook records assessment outcomes; it does not create missing judgments or request another answer. New completion and partial-completion claims follow the finalization sequence above.
+For a source-backed explanation, [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) owns both judgments; record them only when the user explicitly requests an authenticated explanation review. The native host displays the answer without another model call. The answer-end hook records assessment outcomes; it does not create missing judgments or request another answer. New completion and partial-completion claims follow the finalization sequence above.
 
 For a correction to an already submitted answer, follow the review reference's [Deliver](references/response-review.md#deliver) procedure using the host's supplied visibility context. That procedure owns delivery of the reviewed answer and the Stop observation; the assistant does not infer visibility from an unrelated tool result.
 
@@ -71,7 +71,7 @@ For a new full closure, place `[completion-check]` before the supported summary.
 
 For supported partial success, use `[partial-check]` with `scope: partial`, the same criterion/claim mapping and a nonempty `unverified` list. Each unresolved entry names a declared criterion as `criterion-id: reason`. Preserve all required criteria instead of narrowing the contract to the passing subset. Plain partial status without a successful-work claim does not need a success proof block.
 
-The same proof format applies on every host. The assistant first judges each claim against its original sources, then uses those judgments to review the complete answer against the user's objective and constraints. Core completion acceptance authenticates both distinct judgments under the current owned route, as specified in [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). Skill loading and reuse remain workflow and audit facts; a Skill invocation or self-report field is neither completion evidence nor a separate acceptance prerequisite.
+The same proof format applies on every host. Core completion acceptance authenticates the per-claim and whole-answer judgments under the current owned route, as specified in [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). Skill loading and reuse remain workflow and audit facts; a Skill invocation or self-report field is neither completion evidence nor a separate acceptance prerequisite.
 
 The examples below illustrate serialization only; replace their claims and source locators with actual results. They do not assert that any example check ran.
 
@@ -119,9 +119,9 @@ For a confirmed flaw in the requested deliverable, apply [Confirmed Flaw Propaga
 
 ## External evidence and evaluator requirements
 
-For a material external tool or platform claim, apply [references/external-tool-evidence.md](references/external-tool-evidence.md), including its specification/runtime distinction, source locators and explicit exemptions. Do not invent an external-tool claim to justify web searches in a local-only task.
+For a material external tool or platform claim, apply [references/external-tool-evidence.md](references/external-tool-evidence.md), including its specification/runtime distinction, source locators and explicit exemptions.
 
-Before claiming a result that adversarial-verification reviewed at level-3-high-stakes, or claiming external governance absorption or evaluator promotion, apply [references/evaluator-artifacts.md](references/evaluator-artifacts.md). Missing or rejected required evaluator proof blocks that claim or promotion.
+Before claiming a result that adversarial-verification reviewed at level-3-high-stakes, or claiming external governance absorption or evaluator-candidate promotion, apply [references/evaluator-artifacts.md](references/evaluator-artifacts.md). Missing or rejected required evaluator proof blocks that claim or promotion.
 
 ## Failure modes and partial continuation
 

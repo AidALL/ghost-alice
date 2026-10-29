@@ -2,7 +2,7 @@
 
 Language: [🇺🇸 English](../../policies/evaluator-artifact-contract.md) | 🇰🇷 한국어
 
-이 산출물 계약은 verification-complexity-level-3-plus 작업, 외부 에이전트 거버넌스 논리 도입, RAG·평가 도구를 통한 개선 후보에 적용됩니다. 평가 담당자는 채택 가능한 근거와 거부된 후보를 함께 보존합니다.
+이 산출물 계약은 adversarial-verification이 level-3-high-stakes로 검토한 주장, 외부 에이전트 거버넌스 논리 도입, RAG·평가 도구를 통한 개선 후보에 적용됩니다. 평가 담당자는 채택 가능한 근거와 거부된 후보를 함께 보존합니다.
 
 ## Contents
 
@@ -15,7 +15,7 @@ Language: [🇺🇸 English](../../policies/evaluator-artifact-contract.md) | �
 
 ## Applicability
 
-- verification-complexity-level-3-plus work
+- adversarial-verification이 level-3-high-stakes로 검토한 주장
 - external agent-governance logic intake
 - playbook, rule, skill, hook 변경을 제안하는 RAG 또는 evaluator output
 - installed assets가 바뀌기 전의 promotion decision

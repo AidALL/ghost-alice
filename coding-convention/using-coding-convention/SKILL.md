@@ -42,13 +42,13 @@ Before the next file read, command, edit, plan, review or development-status cla
 | A reviewer proposes changes | receiving-code-review |
 | A skill or its references need authoring | writing-skills |
 | The branch is ready for its authorized integration choice | finishing-a-development-branch |
-| The answer claims verified work, completion, or rereads evidence | verification-before-completion |
+| A new completion, fix, success, verified-status or material recommendation claim, or rereading an artifact to support a claim | verification-before-completion |
 
 Use the selected skill's body for its procedure, required calls and output format. Do not infer its procedure from this table.
 
 ## Final claims
 
-Verification-before-completion owns evidence reuse, completion and partial-control formats, and the finalization sequence. Invoke it before a new completion, fix, success, verified-status or material recommendation claim.
+Verification-before-completion owns evidence reuse, completion and partial-control formats, and the finalization sequence.
 
 For repair attempts, follow systematic-debugging's [Incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). For authorization, follow boundary-contract. Do not copy either procedure into a task-specific plan.
 
