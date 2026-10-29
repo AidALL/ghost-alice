@@ -56,7 +56,6 @@ For repair attempts, follow systematic-debugging's [Incident accounting and cont
 
 - Familiarity with a skill name does not satisfy body loading.
 - A small change does not excuse skipping an applicable required workflow.
-- Tool availability does not grant authority to use the tool.
 - An agent's plan cannot weaken the user's acceptance criteria.
 - Repeating a check requires the evidence trigger defined by verification-before-completion.
 

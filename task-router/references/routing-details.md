@@ -6,7 +6,7 @@ The current-session assistant uses this reference when boundary reconciliation i
 
 The current-session assistant compares current human instructions and supplied event/conversation evidence with retained goals, scope, decisions and constraints. A clear current instruction can authorize a bounded change without formal revocation wording. A decision timestamp does not date an undated restriction; admission, prior edits or a compressed goal do not establish replacement chronology.
 
-If only conflicting snapshot fields remain, the current-session assistant leaves the conflict unresolved and asks for the exact contested decision. It must not call one field obsolete without evidence. Missing task files do not resolve authority. Existing authority that already resolves the conflict requires no new approval.
+If only conflicting snapshot fields remain, the current-session assistant leaves the conflict unresolved and asks for the exact contested decision. It must not call one field obsolete without evidence. Missing task files do not resolve authority.
 
 ## Direct answer and confirmation conditions
 

@@ -6,7 +6,7 @@ Core Python code selects admitted execution criteria from the current route, own
 
 When a review or completion claim depends on a missing or stale Core route, the current-session assistant loads `task-router` from the current host's skill catalog and follows the route-registration step in its `Select the next action` section, submitting `response-route.v1` through `_shared/response_route.py` or `record_response_route` with the exact current receipt binding. The [source-tree navigation link](../../../task-router/SKILL.md#select-the-next-action) does not identify an installed filesystem path: installed family skills may be flattened.
 
-Keep Core APIs, runtime modules, ledger, project checkout and installed skills as separate exact locations. A transported path or available protocol does not establish admission, origin, approval or native permission.
+Keep Core APIs, runtime modules, ledger, project checkout and installed skills as separate exact locations. A transported path or available protocol does not establish admission, origin or approval.
 
 ## Prepare and record the response review
 

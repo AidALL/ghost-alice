@@ -12,7 +12,7 @@ The current-session assistant requests portable exports with `--export-to <separ
 
 ## Routing input and selective lookup
 
-`--read-intent` returns the current `routing_keywords`, `routing_summary`, input identity, revision and detail pointers. Keywords select procedures; they do not replace authority or proof. The model uses `--read-state --pointer /constraints/0` (or another returned pointer) only when that detail is needed. `--expected-input-event-id` and `--expected-revision` reject a stale lookup. Unqualified `--read-state` returns the same compact references as `--read-intent`. Use `--export-to` when an authorized diagnostic requires a complete file export; the CLI returns its paths.
+`--read-intent` returns the current `routing_keywords`, `routing_summary`, input identity, revision and detail pointers. Keywords select procedures; they do not replace proof. The model uses `--read-state --pointer /constraints/0` (or another returned pointer) only when that detail is needed. `--expected-input-event-id` and `--expected-revision` reject a stale lookup. Unqualified `--read-state` returns the same compact references as `--read-intent`. Use `--export-to` when an authorized diagnostic requires a complete file export; the CLI returns its paths.
 
 `keywords_input_event_id` identifies the input that supplied the keywords, so an unchanged retained keyword is not mistaken for a fresh interpretation.
 
@@ -131,7 +131,7 @@ All canonical receipt coordinates and the event ID come from the same successful
 
 Semantic writers pass receipt root/platform/session and the canonical input-event ID used for the decision, obtained directly from an observed receipt or from the authoritative state after trusted Claude reconciliation. A new ID cannot be substituted onto an old judgment. Codex mutation binds to native CODEX_THREAD_ID, then GHOST_ALICE_SESSION_ID when native identity is absent; a conflict fails before a write. Without either binding, the caller explicitly selects session-id. Hook intake uses payload then environment identity and degrades when both are absent.
 
-Explicit historical read-only snapshots and the library's explicit-session record_turn remain available for adapters/offline inspection. The guard prevents accidental session mixing; it is not a sandbox against a process that can change its environment or write storage directly. The receipt grants no write permission and proves no semantic update. The current-session assistant reports a write failure instead of changing root, identity or permissions to bypass it.
+Explicit historical read-only snapshots and the library's explicit-session record_turn remain available for adapters/offline inspection. The guard prevents accidental session mixing; it is not a sandbox against a process that can change its environment or write storage directly. The receipt proves no semantic update. The current-session assistant reports a write failure instead of changing root, identity or permissions to bypass it.
 
 ## Mutation Contract and Recovery
 

@@ -9,7 +9,7 @@ compatibility:
 
 # Turning Ideas into Designs
 
-The agent resolves unsettled product or technical design decisions before implementation. Reuse accepted requirements, design and authority; a correction within that design does not need renewed approval. An unresolved human-owned decision blocks only the implementation that depends on it.
+The agent resolves unsettled product or technical design decisions before implementation. Reuse accepted requirements, design and authority. An unresolved human-owned decision blocks only the implementation that depends on it.
 
 ## Design procedure
 
@@ -38,6 +38,6 @@ If the user accepts, read [references/visual-companion.md](references/visual-com
 
 ## Failure modes and output
 
-Do not treat a simple task as exemption from a real unresolved design decision. Do not require repeated approval of settled decisions, ask the user to choose routine implementation details, or silently narrow the objective.
+Do not treat a simple task as exemption from a real unresolved design decision. Do not silently narrow the objective.
 
 The output is the accepted specification and any exact unresolved decision, followed by writing-plans when its prerequisites are available. Verification-before-completion governs claims that the specification is complete.

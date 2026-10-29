@@ -42,7 +42,7 @@ Use [references/plan-document-reviewer-prompt.md](references/plan-document-revie
 
 ## Execution handoff
 
-Continue the already authorized execution choice after saving or correcting the plan. When the choice is genuinely unresolved, present subagent-driven-development for task-specific agents and executing-plans for inline execution. Invoke the selected skill; do not ask the user to choose again after authorization.
+Continue the already authorized execution choice after saving or correcting the plan. When the choice is genuinely unresolved, present subagent-driven-development for task-specific agents and executing-plans for inline execution. Invoke the selected skill.
 
 ## Failure modes and result
 

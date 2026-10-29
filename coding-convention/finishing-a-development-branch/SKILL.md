@@ -51,7 +51,7 @@ Use the PR target, user's specified target or inspected repository default. A me
 
 ### Step 3: Resolve the integration path
 
-First use the user's existing instruction. If they already authorized merging, pushing a PR, or retaining the branch, carry out that path after its checks; do not ask them to choose again. Authorization to merge does not imply permission to skip review.
+First use the user's existing instruction. If they already authorized merging, pushing a PR, or retaining the branch, carry out that path after its checks. Authorization to merge does not imply permission to skip review.
 
 Only when the integration path remains undecided, present the following 4 options:
 
@@ -74,7 +74,7 @@ Keep the options concise and explain only a concrete blocker or consequence the 
 
 The current-session assistant follows requesting-code-review's [Remote Pull Request Review Gate](../requesting-code-review/SKILL.md#remote-pull-request-review-gate). That procedure returns the reconciled head, required review/CI results and finding dispositions. Integrate only the head those results support. A purely local integration without a PR has no invented remote-review dependency.
 
-When the user requests one commit, consolidate the unmerged work before the final review. An authorized replacement of a published PR branch uses `--force-with-lease` with the expected prior head and targets only that PR branch. A one-commit request alone does not authorize rewriting published `main` or another shared base branch. Work already merged needs a follow-up commit unless the user specifically authorizes replacing an identified published range. With that separate authorization, preserve recovery refs, verify that the replacement contains exactly the authorized work without dropping unrelated changes, and use an explicit expected-head lease on the authorized target ref. If the remote head moves or the range cannot be reconciled, stop the push and inspect; do not broaden the authorization or overwrite the new work. Do not re-ask for permission already granted for that exact operation. A rewritten head invalidates the prior review's freshness even when tests remain green.
+When the user requests one commit, consolidate the unmerged work before the final review. An authorized replacement of a published PR branch uses `--force-with-lease` with the expected prior head and targets only that PR branch. A one-commit request alone does not authorize rewriting published `main` or another shared base branch. Work already merged needs a follow-up commit unless the user specifically authorizes replacing an identified published range. With that separate authorization, preserve recovery refs, verify that the replacement contains exactly the authorized work without dropping unrelated changes, and use an explicit expected-head lease on the authorized target ref. If the remote head moves or the range cannot be reconciled, stop the push and inspect; do not broaden the authorization or overwrite the new work. A rewritten head invalidates the prior review's freshness even when tests remain green.
 
 #### Option 1: Local merge
 
