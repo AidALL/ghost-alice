@@ -30,6 +30,6 @@ For a discovery failure, revise the description. For a misapplied rule, revise t
 
 ## Evidence limits
 
-The parent assistant returns the subject's actual actions, source locators and configuration to the author, preserving the distinction between a supplied instruction and native host loading. Use verification-before-completion for claim scope and systematic-debugging for bounded correction.
+The parent assistant returns the subject's actual actions, source locators and configuration to the author, preserving the distinction between a supplied instruction and native host loading. Use verification-before-completion for claim scope.
 
 The optional scenarios in [examples/CLAUDE_MD_TESTING.md](examples/CLAUDE_MD_TESTING.md) illustrate distinct discovery pressures; select them only when the discovery uncertainty requires them.

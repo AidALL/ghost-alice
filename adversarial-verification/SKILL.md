@@ -60,7 +60,7 @@ After collecting the required submissions, apply [convergence-rules.md](referenc
 
 ## Deadlock and output
 
-At deadlock, including the cap, the coordinating assistant delegates the dispute-summary subtask to a review assistant called the meta-judge. The meta-judge does not decide the claim. It reports agreed and unresolved subclaims, each issue, supporting evidence and final attack by side, deadlock cause, and missing information or user-owned decisions. The coordinating assistant retains a factual disagreement as unresolved with verdict `escalate`; lack of convergence cannot become acceptance. It asks the user only when the next action needs missing human authorization or a user-owned choice, using `escalate-human` for that condition. A human choice determines authorized action or scope, not factual support. The assistant preserves unmet claim criteria and continues independent authorized work.
+At deadlock, including the cap, the coordinating assistant delegates the dispute-summary subtask to a review assistant called the meta-judge. The meta-judge does not decide the claim. It reports agreed and unresolved subclaims, each issue, supporting evidence and final attack by side, deadlock cause, and missing information or user-owned decisions. The coordinating assistant retains a factual disagreement as unresolved with verdict `escalate`; lack of convergence cannot become acceptance. It asks the user only when the next action needs missing human authorization or a user-owned choice, using `escalate-human` for that condition. A human choice determines authorized action or scope, not factual support. The assistant preserves unmet claim criteria.
 
 The returned record uses:
 

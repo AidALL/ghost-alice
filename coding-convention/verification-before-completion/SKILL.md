@@ -35,7 +35,7 @@ Choose evidence for the claim: content or behavior for semantic claims; hashes o
 
 When an already-executed action has an unknown outcome, inspect the affected result under a bounded observation contract instead of automatically executing the action again. Required work that has not run still needs its actual execution. Preserve unchanged valid proof with its original source and time.
 
-Systematic-debugging owns [incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). Boundary-contract owns authority and resource boundaries. This skill does not reset either one.
+Systematic-debugging owns [incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). Boundary-contract owns authority and resource boundaries.
 
 ## Finalization sequence
 

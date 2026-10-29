@@ -23,7 +23,7 @@ Write a focused test with a descriptive name and an assertion about required beh
 
 Invoke the project's actual runner with the exact test target. Retain the original command, output, status and evidence locator. Judge whether the failure demonstrates the missing behavior rather than an invalid fixture, syntax error or unavailable dependency.
 
-If the test passes, determine whether the behavior already exists or the test misses the intended condition. If the test errors, correct the fixture or prerequisite and observe the affected result. Systematic-debugging owns failed-round accounting; a diagnostic error is not automatically a failed production repair.
+If the test passes, determine whether the behavior already exists or the test misses the intended condition. If the test errors, correct the fixture or prerequisite and observe the affected result. Systematic-debugging owns failed-round accounting.
 
 For applicable work, observe this intended failure before writing production code. If the current assistant prematurely wrote production code, remove only its own authorized premature change before rebuilding from the test. Preserve pre-existing user changes and retained original failure evidence.
 

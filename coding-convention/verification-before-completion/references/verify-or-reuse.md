@@ -204,4 +204,4 @@ Follow [response-review.md](response-review.md) for current receipt binding, ret
 
 ## Discriminating checks and required evidence
 
-Apply the main skill's [Evidence selection and stop gate](../SKILL.md#evidence-selection-and-stop-gate) before a discretionary observation. Systematic-debugging owns [incident accounting](../../systematic-debugging/SKILL.md#incident-accounting-and-continuation); boundary-contract owns authorization and resources. The main skill and its response-review reference define the separate claim and whole-answer judgments.
+Apply the main skill's [Evidence selection and stop gate](../SKILL.md#evidence-selection-and-stop-gate) before a discretionary observation. The main skill and its response-review reference define the separate claim and whole-answer judgments.

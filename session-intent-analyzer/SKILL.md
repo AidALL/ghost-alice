@@ -38,4 +38,4 @@ A material conduct correction can be recorded as one compressed `conduct_feedbac
 
 ## Failure modes
 
-Do not accumulate routing keywords, obsolete summaries or resolved questions. Do not copy full state into model input. Do not substitute another session on failure, or equate successful persistence with completed work. Missing state remains a named dependency; independent authorized work can continue.
+Do not accumulate routing keywords, obsolete summaries or resolved questions. Do not copy full state into model input. Do not substitute another session on failure, or equate successful persistence with completed work. Missing state remains a named dependency.
