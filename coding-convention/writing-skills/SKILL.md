@@ -47,7 +47,6 @@ Verification-before-completion owns useful-check selection, evidence reuse, orig
 - Do not relabel a passing baseline as a failure.
 - Do not backdate missing baseline evidence or delete inconvenient results.
 - Do not infer native behavior from formatting or source validation.
-- Do not run an unchanged evaluation without a named uncertainty and stopping rule.
 - Do not add a new report, hook or mandatory record when existing task context already preserves the evidence.
 
 ## Conditional references

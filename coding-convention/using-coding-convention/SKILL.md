@@ -48,7 +48,7 @@ Use the selected skill's body for its procedure, required calls and output forma
 
 ## Final claims
 
-Verification-before-completion owns evidence reuse, completion and partial-control formats, and the finalization sequence. Invoke it before a new completion, fix, success, verified-status or material recommendation claim. Explaining an unchanged prior result preserves its original evidence and time; another input alone does not authorize repeating its check.
+Verification-before-completion owns evidence reuse, completion and partial-control formats, and the finalization sequence. Invoke it before a new completion, fix, success, verified-status or material recommendation claim.
 
 For repair attempts, follow systematic-debugging's [Incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). For authorization, follow boundary-contract. Do not copy either procedure into a task-specific plan.
 

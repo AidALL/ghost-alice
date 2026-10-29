@@ -26,7 +26,7 @@ This reference is the canonical semantic contract for deciding whether a claim a
 
 Verification is decided by actual mutation authority and observed mutation events, not by the theoretical possibility that something changed. The agent usually already holds every fact the decision needs: what it wrote, who else can write, and which write events happened afterward. A re-read that cannot produce new information or change the answer is redundant verification, not diligence.
 
-For an agent-mediated artifact, retained authored content answers an authored-at claim. When no successful edit or other observed mutation followed, it also answers a current-state claim. A user question, or an objection that reports no observation, does not create a mutation event or justify a speculative re-read. A reported failure or mismatch is a contrary observation and justifies one check (`contrary-observation`).
+For an agent-mediated artifact, retained authored content answers an authored-at claim. When no successful edit or other observed mutation followed, it also answers a current-state claim.
 
 ## Decision Flow
 
@@ -100,8 +100,8 @@ The pending-merge hook uses the same session-bound store: unchanged manifest ver
 ## Signals That Are Not Triggers
 
 - A collaborator, automation, synchronization, or external edit that might have happened without evidence that the path was open.
-- The artifact being remote, shared-drive, or local by storage type alone.
 - A new user message, including a question about the artifact. A message that reports an observed failure or mismatch is the `contrary-observation` trigger instead.
+- A different execution-local variable or a recording failure.
 - Writing a `[completion-check]` or copying an existing successful result into a variable, file, or store.
 - The wish to feel certain; confidence gaps are resolved by the flow above, not by another read.
 
@@ -185,7 +185,6 @@ Use this template to review a finished turn without storing raw conversation tex
 | --- | --- | --- |
 | Retained authored content | `authored-at`, retained, `agent-mediated`, only `user-message` | `reuse`, no tool call |
 | Instructed edit executed | `current`, `agent-write-succeeded` after the evidence | `verify` once |
-| Drive or local storage only | `externally-writable` on `storage-location`, possibility of edits | authority `unknown`, `reuse` as `last-known` |
 | Observed external revision | `current`, `external-revision` | `verify` the authoritative copy |
 | Requirement added after authoring | `authored-at` question about inclusion | `reuse` from chronology |
 | Evidence lost to compaction | nothing retained, no mutation | read once, or `unverified` if unreachable |
@@ -197,7 +196,7 @@ Use this template to review a finished turn without storing raw conversation tex
 
 ## Out Of Scope
 
-This contract does not track theoretical external changes, hash every artifact, or query a remote store solely because of its location. When the change path is closed, retained conversation evidence accounts for mutations. When the path is open, an agent-only hook registry cannot establish the external writes needed for a current-state claim. Additional tracking is justified only by an observed missing mutation fact that can change the next decision.
+This contract does not track theoretical external changes or hash every artifact. When the change path is closed, retained conversation evidence accounts for mutations. When the path is open, an agent-only hook registry cannot establish the external writes needed for a current-state claim. Additional tracking is justified only by an observed missing mutation fact that can change the next decision.
 
 ## Recording Binding And Evidence Time
 
