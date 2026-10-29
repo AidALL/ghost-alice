@@ -39,7 +39,7 @@ After five failed repair rounds and before another correction attempt, the agent
 
 To continue after reassessment, identify a distinguishable hypothesis, the observation that can discriminate it, an explicit additional-attempt or resource allowance, and a stopping condition. The allowance must fit the user’s remaining resource limit and, for a delegated task, the parent assistant’s remaining allocation to that task. Reassessment resets neither attempts nor consumed resources. Exhaustion suspends that incident's further attempts. Five failures alone do not require a human decision.
 
-Boundary-contract owns authorization and renewal of agent-declared implementation limits. Ask the user only when continuation requires a human-owned decision or exceeds actual authority. Verification-before-completion owns useful checks, required evidence and proof reuse. Its response review reference owns recording-specific recovery: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
+Boundary-contract owns authorization and the renewal of agent-declared implementation limits. Verification-before-completion owns useful checks, required evidence and proof reuse. Its response review reference owns recording-specific recovery: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
 
 Preserve already-supported business proof while recording is unavailable. Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation; keep independent authorized work running. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
 
