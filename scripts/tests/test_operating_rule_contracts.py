@@ -17,7 +17,7 @@ class OperatingRuleContractTest(unittest.TestCase):
                      "When the user's words leave more than one reasonable reading",
                      'ask the user before that action'):
             self.assertIn(term, intent)
-        for term in ('`task-router` owns this rule and this section carries it, so applying it loads no skill',
+        for term in ('apply the direct-answer rule below; applying it loads no skill',
                      'A direct answer reads no skills, accesses no ledger, registers no route'):
             self.assertIn(term, selection)
         self.assertIn('Do not substitute another session', common)
