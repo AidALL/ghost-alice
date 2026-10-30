@@ -8,7 +8,7 @@ compatibility:
 
 # Compact Handoff
 
-The current-session assistant uses this skill when long context, an agent transfer or session compaction could lose task state. The handoff preserves the objective, authorized boundary, evidence and next action. This skill does not trigger compaction, install hooks or create background summaries.
+The current-session assistant uses this skill when long context, an agent transfer or session compaction could lose task state. This skill does not trigger compaction, install hooks or create background summaries.
 
 ## Record the handoff
 
@@ -30,11 +30,11 @@ For an unresolved repair, the current-session assistant carries the failure, aff
 
 ## Pause compaction
 
-Before requesting voluntary compaction or transferring a task, preserve the unresolved RED cause, rollback path, pending human decision and safe context the receiver needs. If a required item is missing, resolve that handoff dependency. The native host controls automatic compaction.
+Before requesting voluntary compaction or transferring a task, preserve the unresolved RED cause, rollback path and safe context the receiver needs. If a required item is missing, resolve that handoff dependency.
 
 ## Resume
 
-1. The sending assistant passes the validated block through the host's actual context-handoff facility, or retains it in the existing authorized task context when no explicit facility exists. This skill cannot force or defer automatic host compaction. After compaction, the receiving current-session assistant reads objective, in-progress and next-step from that supplied block. A delegated assistant receives only the context needed for its explicitly assigned subtask.
+1. The sending assistant passes the validated block through the host's actual context-handoff facility, or retains it in the existing authorized task context when no explicit facility exists. After compaction, the receiving current-session assistant reads objective, in-progress and next-step from that supplied block. A delegated assistant receives only the context needed for its explicitly assigned subtask.
 2. It compares the actual diff for files-changed with the handoff.
 3. If the most recent test failed, it follows systematic-debugging for that failure.
 4. Before a closure claim, it follows verification-before-completion.
@@ -43,4 +43,4 @@ Before requesting voluntary compaction or transferring a task, preserve the unre
 
 All eight fields are required. The validator rejects secret-like values without printing them. A handoff involving live config, such as platform settings/hooks or installed skill directories, requires a concrete rollback path. A tests-run value of not run or pending produces a warning: compaction may proceed, but completion is not established.
 
-The current-session assistant must not invoke /compact automatically, create extra reports solely for compaction, hide uncertainty in the handoff or present the handoff as completion evidence. Proof decisions belong to `../coding-convention/verification-before-completion/SKILL.md`.
+The current-session assistant must not invoke /compact automatically, create extra reports solely for compaction or present the handoff as completion evidence. Proof decisions belong to `../coding-convention/verification-before-completion/SKILL.md`.

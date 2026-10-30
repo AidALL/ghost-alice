@@ -8,7 +8,7 @@ The description tells the router when to load the skill. Use concrete task purpo
 
 For example, “Use when a test has a race condition, timing dependency or inconsistent pass/fail result” identifies a trigger. “Test first, implement, refactor” describes a workflow and leaves its trigger unclear.
 
-Keep the complete procedure in the body. A router selecting a skill from metadata has not executed that procedure.
+Keep the complete procedure in the body.
 
 ## Body and references
 

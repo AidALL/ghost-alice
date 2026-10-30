@@ -23,6 +23,7 @@ class OperatingRuleContractTest(unittest.TestCase):
         self.assertIn('Do not substitute another session', common)
         self.assertIn('Missing or pending identity blocks dependent writes', common)
         self.assertIn('stored result or available tool grants no authority', common)
+        self.assertIn('Do not derive installation or write authority from default paths; explicit paths and the current host receipt identify the installation and session', common)
         self.assertIn('The native host executes tools and enforces permission', common)
         self.assertIn('`session-intent-analyzer`: reading or writing the intent record', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()

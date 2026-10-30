@@ -14,13 +14,13 @@ The native intake hook records input identity without retaining raw prompt text.
 
 ## Current intent and references
 
-First identify the stored fact that can change the next decision. The supplied request and the session-start receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update; do not query the ledger merely because a tool will execute or a new input arrived. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work.
+First identify the stored fact that can change the next decision. The supplied request and the session-start receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work.
 
 For a required intent lookup, use the exact receipt coordinates with `scripts/session_intent_ledger.py --read-intent`. The result contains routing keywords, their original input binding, the current input/revision, and JSON pointers to detailed state. Keywords do not establish work completion or current applicability by themselves.
 
 The `interpreted-as: ` record is a semantic update: `current_goal` holds the objective, `constraints` and `non_goals` hold the constraints, and `acceptance_criteria` holds the done conditions, each with the source label that the common contract's Session Intent section names. The ledger stores a condition labeled `interpreted-as` as unadmitted, so it cannot be marked met; report such a condition as an assumption together with the result. When the user approves it, update that condition with `admitted: true`. The response model writes `routing_keywords` and `routing_summary` as replacements: short selection terms and a concise current objective, relevant constraints, decision and next action. Neither field contains raw prompts, tool output, full documents or repeated history. Omit an unchanged update. `constraints`, `non_goals`, `open_questions`, `risk_flags` and `consumer_hints` describe current conditions. Supply a field's complete current value only when it changes, and an empty list to remove all of its entries. Preserve applicable user restrictions when preparing a replacement.
 
-Detailed work, authority and evidence records remain available to their owning code. When the next decision needs a stored detail, select its pointer instead of dumping the entire state:
+Detailed work, authority and evidence records remain available to their owning code. When the next decision needs a stored detail, select its pointer:
 
 ```bash
 session_intent_ledger.py --root "<receipt root>" --platform "<receipt platform>" --session-id "<receipt session>" --read-state --pointer /latest_scope --expected-input-event-id "<current input>"
@@ -38,4 +38,4 @@ A material conduct correction can be recorded as one compressed `conduct_feedbac
 
 ## Failure modes
 
-Do not accumulate routing keywords, obsolete summaries or resolved questions. Do not copy full state into model input. Do not substitute another session on failure, or equate successful persistence with completed work. Missing state remains a named dependency.
+Do not accumulate routing keywords, obsolete summaries or resolved questions. Do not equate successful persistence with completed work. Missing state remains a named dependency.
