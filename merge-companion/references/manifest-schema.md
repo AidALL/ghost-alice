@@ -57,6 +57,6 @@ The helper writes through a temporary file and os.replace. POSIX uses flock; the
 
 ## Safety boundary
 
-Before applying the approved change, the current-session assistant verifies resolved path containment: `backup_path` belongs to the actual current-platform pending-merge directory, and `source_path` belongs to the installed skills root supplied by trusted installation context or a platform-config root the user authorized. `SKILLS_DIR` is that resolved installation root, not a guessed working directory. Example platform roots are `~/.codex/` and `~/.claude/`; their existence alone grants no write authority. The entry ID uses timestamp-skill-safe_filename; safe_filename removes slash, backslash and double-dot traversal components.
+Before applying the approved change, the current-session assistant verifies resolved path containment: `backup_path` belongs to the actual current-platform pending-merge directory, and `source_path` belongs to the installed skills root supplied by trusted installation context or a platform-config root the user authorized. `SKILLS_DIR` is that resolved installation root, not a guessed working directory. Example platform roots are `~/.codex/` and `~/.claude/`. The entry ID uses timestamp-skill-safe_filename; safe_filename removes slash, backslash and double-dot traversal components.
 
 The snapshot_hash and current_hash fields identify artifacts. They do not determine which behavior is correct or authorize applying a result.

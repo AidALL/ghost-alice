@@ -14,7 +14,7 @@ Core records original locations, byte ranges and digests. For new completion or 
 
 The CLI returns references and status, not copies of source bodies or the complete answer. Use `_shared/source_lookup.py` with a literal search, line selection or JSON pointer to retrieve only the passages needed for the judgment; task-router's `references/context-selection.md` defines that reader. Ordinary replies supported entirely by supplied conversation do not require an execution criterion, verification timestamp or separate review process.
 
-Establish the following values before constructing the call. Use the current trusted runtime binding and the same receipt used for route registration; an ambient checkout, a cached variable or another session is not a substitute.
+Establish the following values before constructing the call. Use the current trusted runtime binding and the same receipt used for route registration.
 
 | Value | Authoritative origin and meaning |
 | --- | --- |
@@ -26,7 +26,7 @@ Establish the following values before constructing the call. Use the current tru
 | `ORIGINAL_TIME` | The original timezone-bearing verification timestamp for a completion claim. Omit it for an explanation prepared from new source paths; retained completion proof keeps its original time. A later clock reading cannot supply a missing original time. |
 | `CLAIMS` | For an explanation prepared from new source paths, an absolute permitted scratch path containing a JSON string array of the exact draft sentences or phrases the assistant will verify. The assistant selects these claims from the complete draft; Core does not infer them from prose. Completion/partial candidates instead obtain their claims from the control block. |
 
-If a required binding or original observation is unavailable, report that recording dependency as unresolved; do not infer a module root from the ledger directory or invent a receipt. An explicitly requested authenticated explanation review needs the current route but not an execution criterion or a previous completion record.
+If a required binding or original observation is unavailable, report that recording dependency as unresolved; do not infer a module root from the ledger directory. An explicitly requested authenticated explanation review needs the current route but not an execution criterion or a previous completion record.
 
 The assistant runs the following form through its exposed shell tool after binding every variable above. Each environment assignment applies to this process only. Repeat the same three assignments for `record-response`; do not change the native thread identity.
 

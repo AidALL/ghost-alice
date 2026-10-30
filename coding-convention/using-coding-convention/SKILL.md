@@ -15,12 +15,10 @@ User instructions and project rules govern the task; family skills govern the im
 
 Use the host's actual skill mechanism:
 
-- Claude Code: invoke the visible Skill tool and follow the returned body.
-- Codex: read or validly reuse the body, then perform its workflow for the current input. Metadata and a prior verdict cannot substitute for that workflow.
 - Copilot CLI: use its exposed skill capability and [references/copilot-tools.md](references/copilot-tools.md).
 - Other hosts: map operations to the exposed tool schemas; do not invent unavailable tools.
 
-For Codex operations, delegated-task boundaries and checkout selection, use [references/codex-tools.md](references/codex-tools.md). Instruction body reuse is defined in verification-before-completion's [Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse). On a new input, the current-session assistant applies the workflow to that input; it need not reread a valid retained body.
+For Codex operations, delegated-task boundaries and checkout selection, use [references/codex-tools.md](references/codex-tools.md). Instruction body reuse is defined in verification-before-completion's [Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse).
 
 ## Workflow
 
@@ -54,7 +52,6 @@ For repair attempts, follow systematic-debugging's [Incident accounting and cont
 
 ## Failure modes
 
-- Familiarity with a skill name does not satisfy body loading.
 - A small change does not excuse skipping an applicable required workflow.
 - An agent's plan cannot weaken the user's acceptance criteria.
 - Repeating a check requires the evidence trigger defined by verification-before-completion.

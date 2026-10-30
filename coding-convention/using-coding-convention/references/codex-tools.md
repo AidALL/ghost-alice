@@ -16,13 +16,12 @@ Skills describe operations using familiar Claude Code tool names. Resolve each o
 | `Task` | Use the available agent-dispatch API when delegation is authorized. |
 | Task results and lifecycle | Use that API's documented result, wait, message and cleanup operations. |
 | `TodoWrite` | Use an exposed plan tool or maintain the authorized plan in the current task. |
-| `Skill` | Invoke the host's Skill tool when present; otherwise read or validly reuse the instruction body and perform its current workflow. Metadata alone does not complete a gate. |
 | `Read`, `Write`, `Edit` | Use exposed file tools or the approved file-editing mechanism. |
 | `Bash` | Use the host's shell tool with the required working directory. |
 
-Do not call tools or parameters from another host's examples when they are absent from the current tool schema. A missing delegation capability is a workflow limitation, not permission to edit configuration or pretend another agent ran.
+A missing delegation capability is a workflow limitation, not permission to edit configuration or pretend another agent ran.
 
-Load another skill by its name and exact path in the current host's skill catalog. Markdown links between source packages are navigation aids; the installer may flatten `coding-convention/<skill>` into `<installed-skills>/<skill>`, so a source-relative cross-package link is not a runtime path recipe. Resolve a skill's own `scripts/` and `references/` from its actual loaded directory. Obtain Core module roots and current-session coordinates from trusted runtime/receipt context separately; the skills directory, task checkout and ledger root are not interchangeable.
+Load another skill by its name and exact path in the current host's skill catalog. Markdown links between source packages are navigation aids; the installer may flatten `coding-convention/<skill>` into `<installed-skills>/<skill>`, so a source-relative cross-package link is not a runtime path recipe. Obtain Core module roots and current-session coordinates from trusted runtime/receipt context separately; the skills directory, task checkout and ledger root are not interchangeable.
 
 ## Install and bootstrap locations
 
