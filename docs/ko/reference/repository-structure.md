@@ -2,7 +2,7 @@
 
 Language: [🇺🇸 English](../../reference/repository-structure.md) | 🇰🇷 한국어
 
-README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는 각 구성 요소의 파일 위치와 역할을 자세히 안내합니다.
+이 문서는 각 구성 요소의 파일 위치와 역할을 자세히 안내합니다.
 ## Contents
 
 - [Top-Level Documents](#top-level-documents)
@@ -12,15 +12,14 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 - [Official Docs And Policies](#official-docs-and-policies)
 - [Installed Runtime State](#installed-runtime-state)
 - [Runtime State Retention](#runtime-state-retention)
-- [Documentation Responsibility](#documentation-responsibility)
 
 
 ## Top-Level Documents
 
 | Path | Role |
 | --- | --- |
-| [README.md](../../../README.md) | 프로젝트 소개·빠른 시작과 문서 목록 |
-| [README_ko.md](../../../README_ko.md) | 한국어 프로젝트 소개와 문서 목록 |
+| [README.md](../../../README.md) | 프로젝트 소개·빠른 시작 |
+| [README_ko.md](../../../README_ko.md) | 한국어 프로젝트 소개 |
 | [architecture.md](../../../architecture.md), [architecture_ko.md](../../../architecture_ko.md) | 양 언어 Core 책임·데이터 흐름 안내 |
 | [AGENTS.md](../../../AGENTS.md) | 현재 호스트 계약의 프로젝트 로더 |
 | [공통 거버넌스](../../../platforms/common-governance.md) | 호스트별 규칙과 결합하는 공통 계약 원본 |
@@ -101,11 +100,3 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | 호스트 폴더의 `settings.json.bak*`, `hooks.json.bak*` | 최근 3개 | 훅 설정을 작성할 때마다 |
 
 한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 게이트웨이는 요청 필드를 항목 수, 바이트 합, 종류·역할별 개수로 기록하고, 사용량 이벤트마다 사용량 값을 하나만 기록합니다. `response-end`에는 응답이 끝난 방식을 `completed`, `client-closed`, `upstream-closed` 중 하나로 기록합니다. 클라이언트가 연결을 닫으면 `service.log`에 traceback 대신 이 결과가 남습니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본, 병합 대기 사본, 은퇴 백업에는 사용자 변경분이 들어 있을 수 있으므로 프로그램이 삭제하지 않습니다. 영수증의 저장소 루트에 있는 Core 원장 데이터베이스 `.tmp/session-intent/ghost-state.sqlite3`는 이 표 밖에 있으며 행을 기한 없이 유지합니다.
-
-## Documentation Responsibility
-
-- README는 프로젝트 소개와 빠른 시작을 담습니다.
-- 자세한 설치·업데이트 안내는 [installation guide](../getting-started/installation.md)에 둡니다.
-- 기여자용 설치 흐름과 보호 규칙은 [installer architecture](./installer-architecture.md)에 둡니다.
-- 정책과 실행 환경별 계약 표는 [docs/ko/policies](https://github.com/AidALL/ghost-alice/tree/main/docs/ko/policies)에 둡니다.
-- 장문 철학과 결과를 판단에 다시 반영하는 작업 흐름은 [Wiki](https://github.com/AidALL/ghost-alice/wiki/홈)에 두며 [official-docs/derived](https://github.com/AidALL/ghost-alice/tree/main/official-docs/derived)는 공개 기여자 절차를 담습니다.

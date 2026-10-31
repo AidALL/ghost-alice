@@ -100,7 +100,7 @@ bash install.sh --status
 
 정상 목표는 `overall: ok`입니다.
 
-Doctor는 `overall`에 영향을 주지 않는 Core 정보 줄 두 개도 출력합니다. `native-intake-waits`는 Core가 최근 입력의 출처를 확인하지 못한 Claude 세션을 보이며, 각 세션은 사용자가 다음에 직접 친 입력을 기다립니다. `native-intake-failures`는 Core의 입력 판정이 실패한 세션을 보입니다. 훅은 그대로 계속되었고, 이 줄은 예외 종류·횟수·마지막 시각을 보입니다. [입력 경고](troubleshooting.md#intake-warning-and-doctor-lists)를 참고해 주세요.
+Doctor는 `overall`에 영향을 주지 않는 Core 정보 줄 `native-intake-waits`와 `native-intake-failures`도 출력합니다. [입력 경고와 doctor 목록](troubleshooting.md#intake-warning-and-doctor-lists)을 참고해 주세요.
 
 ## Update
 
@@ -168,9 +168,9 @@ cd C:\path\to\new-checkout
 
 ### Agent Visibility Profile
 
-기본 표시 프로필은 `dynamic`입니다. 사용자에게 보이는 거버넌스 메시지의 양만 조절하며 훅, 엄격한 감사 로그와 Work-Impact Projection은 끄지 않습니다.
+기본 표시 프로필은 `dynamic`입니다. 사용자에게 보이는 거버넌스 메시지의 양만 조절하며 훅 설치·실행, 엄격한 감사 로그와 Work-Impact Projection은 축소하지 않습니다.
 
-확인된 입력이 필요한 기록이 멈췄다고 알리는 Ghost-ALICE 입력 경고는 어느 프로필에서나 같은 세션·같은 원인으로 한 번 표시됩니다. 프로필에 따라 훅의 빈 결과가 일반 텍스트 줄로 바뀔 수 있습니다. 그 훅은 경고를 싣지 못하므로, 경고는 다음 PreToolUse 또는 Stop에 표시됩니다.
+[Ghost-ALICE 입력 경고](./troubleshooting.md#intake-warning-and-doctor-lists)는 어느 프로필에서나 표시됩니다.
 
 | 프로필 | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |
@@ -182,7 +182,7 @@ cd C:\path\to\new-checkout
 
 ### Slash Commands By Platform
 
-Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynamic|minimal`을 설치합니다. Codex를 비롯한 다른 플랫폼에서는 `_shared/agent_visibility_cli.py`로 같은 프로필을 확인하거나 변경해 주세요.
+Ghost-ALICE는 Claude Code 작업 공간 명령으로 `/visibility strict|dynamic|minimal`을 설치합니다. Codex를 포함한 모든 플랫폼에서 `_shared/agent_visibility_cli.py`로 같은 프로필 값을 확인하고 변경하실 수 있습니다. Codex에는 `/visibility` 명령이 없습니다.
 
 ### Python Contract
 
@@ -303,5 +303,3 @@ bash install.sh --uninstall
 ## Troubleshooting
 
 `git pull`, 병합 충돌이나 재설치 중 업데이트가 막히면 [문제 해결](./troubleshooting.md)을 먼저 확인해 주세요.
-
-GitHub Wiki `install-troubleshooting_ko` 페이지는 로컬 저장소를 갱신하지 않고도 읽을 수 있는 온라인 소스 안내로 연결합니다.

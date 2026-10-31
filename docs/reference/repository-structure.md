@@ -2,7 +2,7 @@
 
 언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/repository-structure.md)
 
-This document is the repository map. The README stays a concise public entry point; this page carries the detailed structure.
+This document is the repository map.
 ## Contents
 
 - [Top-Level Documents](#top-level-documents)
@@ -12,14 +12,13 @@ This document is the repository map. The README stays a concise public entry poi
 - [Official Docs And Policies](#official-docs-and-policies)
 - [Installed Runtime State](#installed-runtime-state)
 - [Runtime State Retention](#runtime-state-retention)
-- [Documentation Responsibility](#documentation-responsibility)
 
 
 ## Top-Level Documents
 
 | Path | Role |
 | --- | --- |
-| [README.md](../../README.md) | Concise public entry point and documentation hub |
+| [README.md](../../README.md) | Concise public entry point |
 | [README_ko.md](../../README_ko.md) | Korean paired public entry point |
 | [architecture.md](../../architecture.md), [architecture_ko.md](../../architecture_ko.md) | Paired Core responsibility and data-flow map |
 | [AGENTS.md](../../AGENTS.md) | Project loader for the current host contract |
@@ -100,11 +99,3 @@ The platform installation supplies common governance for every project. The Code
 | `settings.json.bak*` and `hooks.json.bak*` in the host folders | The newest 3 | Each hook settings write |
 
 A file far past its limit keeps only its newest part, up to the limit, as the previous file. The gateway records each request field as its item count, byte total and counts by type and role, records one usage value per usage event, and names in `response-end` how the response ended: `completed`, `client-closed` or `upstream-closed`. A client that closes its connection leaves that result instead of a traceback in `service.log`. Install records, host settings, installed skills and the runtime are overwritten in place. The program never removes the uninstall backups under `~/.ghost-alice/uninstall-backup/<host>/support-state/`, pending merge copies or retirement backups, because they can hold the user's changes. The Core ledger database `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root is outside this table and keeps its rows without a time limit.
-
-## Documentation Responsibility
-
-- README holds the public description and quick start only.
-- Detailed installation and update guidance lives in [installation guide](../getting-started/installation.md).
-- Contributor-facing installer flow and safety model live in [installer architecture](./installer-architecture.md).
-- Policy and runtime matrices live in [docs/policies](https://github.com/AidALL/ghost-alice/tree/main/docs/policies).
-- Long-form philosophy and closed-loop reasoning live in the [Wiki](https://github.com/AidALL/ghost-alice/wiki); [official-docs/derived](https://github.com/AidALL/ghost-alice/tree/main/official-docs/derived) holds public contributor procedures.

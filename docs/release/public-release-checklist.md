@@ -23,7 +23,7 @@ Use this checklist to release the current Ghost-ALICE Core repository and its pu
 ## Documentation And Public Surfaces
 
 - Synchronize `README.md`/`README_ko.md`, architecture, paired `docs/`/`docs/ko/`, Wiki pages and the English/Korean GitHub Pages entrypoints in the same release scope.
-- Describe current responsibilities, commands and limits in documentation, Wiki and Pages. Record what changed and how only in commit messages; omit change histories, before/after comparisons and upgrade narratives from active documentation.
+- Describe current responsibilities, commands and limits in documentation, Wiki and Pages. The [pull request expectations](../../CONTRIBUTING.md#pull-request-expectations) keep change history in commit messages only.
 - Preserve literal command, path, hook, schema and enum tokens across languages. Check counterpart links and generated public surfaces against their owning catalogs.
 - Keep repository docs authoritative for implementation contracts. The Wiki provides paired explanation and recovery guidance; Pages provides the public entrypoint. Publish their current meaning consistently.
 - Keep `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, the code of conduct and issue/PR templates consistent with actual project policy.
@@ -32,14 +32,10 @@ Use this checklist to release the current Ghost-ALICE Core repository and its pu
 
 Build the verification plan from the candidate's affected contracts. Reuse unchanged proof under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery). Missing required coverage remains unresolved.
 
-Available source checks include:
+The [validation commands](../../CONTRIBUTING.md#validation-commands) and the [CI commands](../policies/installer-platform-compatibility-matrix.md#ci-commands) list the source checks. Also run the prose wrapping check on the candidate:
 
 ```bash
-python3 scripts/validate_public_surfaces.py
-python3 scripts/check_skill_gate_contract.py
 python3 scripts/check_prose_wrapping.py
-python3 scripts/validate_platform_adapters.py
-python3 scripts/run_installer_compat_tests.py --list
 ```
 
 Use the focused compatibility groups for affected installer behavior. A release that changes shared runtime or scripts needs the applicable coverage from `shared-all` and `scripts-all`; use the full compatibility matrix when the change spans its contracts. Consult the [installer compatibility matrix](../policies/installer-platform-compatibility-matrix.md) for test owners. Passing static checks does not establish native firing or model behavior.
@@ -69,7 +65,7 @@ Required records must have exit code zero, `verdict=pass`, the intended installe
 
 1. Integrate only the reviewed release scope through the repository's existing branch and review process. Do not initialize a replacement repository or rewrite history as a release step.
 2. Confirm the required source, installation and behavior evidence covers the candidate and record any unsupported platform or scope explicitly.
-3. Publish the authorized commit, version tag and release artifact. Release and pull request descriptions state the current package behavior, installation, validation and limitations; change history belongs only in commit messages.
+3. Publish the authorized commit, version tag and release artifact. Release descriptions state the current package behavior, installation, validation and limitations; [change history](../../CONTRIBUTING.md#pull-request-expectations) belongs only in commit messages.
 4. Publish the paired Wiki and GitHub Pages content from their reviewed sources and confirm that the published pages match the intended candidate.
 5. Check the actual CI and publication results. A local commit, queued deployment or successful upload request is not proof of visible publication.
 6. When distribution or installer paths changed, use a clean clone in a disposable account or machine for the affected public-install check. Preserve unrelated development installations.

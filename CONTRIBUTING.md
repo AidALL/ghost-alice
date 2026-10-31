@@ -31,10 +31,8 @@ Do not submit private company data, local user runtime state, production secrets
 
 ## Community Contact
 
-- Maintainer: [@garlicvread](https://github.com/garlicvread)
+- Maintainer and private project contact: [SUPPORT.md](./SUPPORT.md#maintainer-and-contact).
 - Public questions, bugs, feature requests, and workflow feedback should use GitHub Issues.
-- Private project contact and private security fallback: `aidall_manager@aidall.tech`
-- Personal email addresses are not monitored for this project.
 
 ## Feedback We Want Most
 
@@ -131,14 +129,9 @@ python3 scripts/audit_wiki_integrity.py --wiki /tmp/ga-wiki
 
 ## Pull Request Expectations
 
-Each pull request should include:
+Fill in the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md) for each pull request: summary, changed surfaces, verification, boundary check and remaining risk.
 
-- Current behavior and public surfaces within the scope
-- Verification commands and results
-- Any third-party material, generated content, or provenance notes involved
-- Any remaining risk or follow-up work
-
-Record what changed and how only in commit messages. Pull request descriptions state current behavior, verification and limitations without a changelog, before/after comparison or upgrade narrative.
+Record what changed and how only in commit messages. Pull request descriptions, release descriptions and active documentation, including the Wiki and GitHub Pages, state current behavior, verification and limitations without a changelog, before/after comparison or upgrade narrative.
 
 For governance behavior changes, include the relevant gate or hook surface, such as `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, or `SessionStart`.
 
@@ -163,7 +156,7 @@ When adding or modifying a skill:
 1. Keep `SKILL.md` focused and under the project disclosure limit.
 2. Put long details in `references/`.
 3. Put executable checks in `scripts/`.
-4. Run the skill compliance checklist referenced from [README.md](./README.md).
+4. Run the [skill compliance checklist](./official-docs/derived/skill-compliance-checklist.md).
 5. Update `skill-catalog/skills.json` and public docs when the public surface changes.
 
 For an addon, which is a third-party skill bundle installed with `--addon-source`, author it in your own repository against the `addons-manifest.json` and `addon.json` format, keep its skill names from colliding with core skills, and follow the [addon authoring guide](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring). Do not submit private addon skills into this public repository.
