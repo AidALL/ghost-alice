@@ -172,8 +172,8 @@ bash install.sh --status
 
 ## Intake Warning And Doctor Lists
 
-Claude Code에 `Ghost-ALICE intake: records that need a confirmed input (intent, route and completion) are paused in this session because ...`가 표시될 수 있습니다. Core가 이 세션의 최근 입력 출처를 확인하지 못했다는 뜻입니다. 예를 들어 다른 세션이 보낸 메시지이거나 대화 기록에서 행을 찾지 못한 입력이며, 세션은 사용자가 다음에 직접 친 입력을 기다립니다. 작업은 계속되지만, 그때까지 Core는 의도·route·완료를 기록하지 않습니다. 경고는 같은 세션·같은 원인으로 한 번 표시되며, 같은 원인의 이후 대기는 기록만 됩니다.
+Claude Code에 `Ghost-ALICE intake: records that need a confirmed input (intent, route and completion) are paused in this session because ...`가 표시될 수 있습니다. Core가 이 세션의 최근 입력 출처를 확인하지 못했다는 뜻입니다. 예를 들어 다른 세션이 보낸 메시지이거나 대화 기록에서 행을 찾지 못한 입력이며, 세션은 사용자가 다음에 직접 친 입력을 기다립니다. 작업은 계속되지만, 그때까지 Core는 의도·route·완료를 기록하지 않습니다. 경고는 같은 세션·같은 원인으로 한 번 표시되며, 같은 원인의 이후 대기는 기록만 됩니다. [표시 프로필](./installation.md#agent-visibility-profile)에 따라 훅의 빈 결과가 일반 텍스트 줄로 바뀔 수 있습니다. 그 훅은 경고를 싣지 못하므로, 경고는 다음 PreToolUse 또는 Stop에 표시됩니다.
 
 1. 그 세션에서 평소처럼 다음 입력을 보내 주세요. Core가 그 입력을 확인하고 기록을 다시 시작합니다.
-2. `bash install.sh --doctor`(Windows: `.\install.cmd --doctor`)를 실행해 주세요. `native-intake-waits`는 아직 기다리는 세션과 그 원인을 보이고, `native-intake-failures`는 Core의 입력 판정이 실패한 세션을 보입니다. 훅은 각 실패 뒤에도 계속되었습니다.
+2. `bash install.sh --doctor`(Windows: `.\install.cmd --doctor`)를 실행해 주세요. `native-intake-waits`는 아직 기다리는 세션과 그 원인을 보이고, `native-intake-failures`는 Core의 입력 판정이 실패한 세션과 그 예외 종류·횟수·마지막 시각을 보입니다. 훅은 각 실패 뒤에도 계속되었습니다.
 3. 직접 입력을 보낸 뒤에도 세션이 계속 기다리거나 `native-intake-failures`가 계속 늘면, 그 doctor 줄을 관리자에게 전달해 주세요. 원장은 직접 수정하지 마세요.

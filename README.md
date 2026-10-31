@@ -42,18 +42,7 @@ For native commands, custom addon sources, platform selection and removal, use t
 
 ## Documentation Map
 
-| Need | Go to |
-| --- | --- |
-| Full installation and update commands | [Installation and update guide](./docs/getting-started/installation.md) |
-| Uninstall scope and cleanup behavior | [Uninstall cleanup procedure](./docs/getting-started/uninstall.md) |
-| Failed update, merge conflict, or reinstall recovery | [Troubleshooting](./docs/getting-started/troubleshooting.md) |
-| Repository layout | [Repository structure](./docs/reference/repository-structure.md) |
-| Skill catalog reference | [Skill catalog guide](./docs/reference/skills.md) |
-| Session gate contract | [Session gate matrix](./docs/policies/session-gate-matrix.md) |
-| Installer compatibility contract | [Installer platform compatibility](./docs/policies/installer-platform-compatibility-matrix.md) |
-| Design principles and architecture | [GitHub Wiki](https://github.com/AidALL/ghost-alice/wiki) |
-| Official addon usage | [Official addon reference](./docs/reference/official-addons.md) |
-| Addon authoring | [Wiki: Addon Authoring](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring) |
+The [documentation index](./docs/README.md) links the paired English and Korean documents. The [GitHub Wiki](https://github.com/AidALL/ghost-alice/wiki) explains the design principles and architecture, and its [Addon Authoring](https://github.com/AidALL/ghost-alice/wiki/Addon-Authoring) page explains how to write an addon.
 
 ## Project Guarantees
 
@@ -61,13 +50,9 @@ For native commands, custom addon sources, platform selection and removal, use t
 - User intent, boundaries, verification criteria, and install state are first-class surfaces.
 - The installer tracks managed surfaces and avoids broad deletion when ownership cannot be proven.
 
-Agent visibility command surface:
+The [agent visibility profile](./docs/getting-started/installation.md#agent-visibility-profile) controls how much governance output the user sees; the installation guide gives its default and each platform's command.
 
-- Claude Code uses `/visibility strict|dynamic|minimal` as its workspace command.
-- Every platform, including Codex, can inspect and change the same profile value through `_shared/agent_visibility_cli.py`. Codex has no `/visibility` command.
-- The install-time default is `dynamic`. Use `bash install.sh --visibility dynamic` or `.\install.cmd --visibility dynamic` to set the initial profile; `--agent-visibility` remains a compatibility alias.
-- Visibility changes the user-facing governance message surface only. It does not weaken hook execution, strict-grade logs, or Work-Impact Projection.
-- The Ghost-ALICE intake warning appears under every profile, once per session and cause, when Core cannot confirm an input's origin; a profile changes only which hook output carries it. See [troubleshooting](docs/getting-started/troubleshooting.md#intake-warning-and-doctor-lists).
+See [troubleshooting](docs/getting-started/troubleshooting.md#intake-warning-and-doctor-lists) for the Ghost-ALICE intake warning and the doctor's intake lists.
 
 Full uninstall:
 
@@ -81,7 +66,7 @@ bash install.sh --uninstall
 
 ## Contributing And Validation
 
-Before changing skills, installer behavior, or public command surfaces, read [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md). After creating or modifying a skill, pass Phases 1-5 of [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md).
+Before changing skills, installer behavior, or public command surfaces, read [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md). Skill changes follow the [Skill Changes](./CONTRIBUTING.md#skill-changes) steps of the contributing guide.
 
 Public surface validation:
 
@@ -95,12 +80,7 @@ Session gate contract validation checks the repository contract in `skill-catalo
 python scripts/check_skill_gate_contract.py
 ```
 
-Installer compatibility groups:
-
-```bash
-python3 scripts/run_installer_compat_tests.py --list
-python3 scripts/run_installer_compat_tests.py --group public-surface-contract
-```
+The installer compatibility groups and their commands are in the [CI Commands](./docs/policies/installer-platform-compatibility-matrix.md#ci-commands) section of the installer platform compatibility matrix.
 
 ## License
 

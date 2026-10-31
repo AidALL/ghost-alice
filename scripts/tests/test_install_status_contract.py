@@ -680,14 +680,14 @@ class InstallStatusContractTest(unittest.TestCase):
         self.assertIn('"platform": platform', writer_py)
         self.assertIn('"entries": []', writer_py)
 
-    def test_readme_documents_platform_specific_visibility_commands(self) -> None:
-        readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    def test_installation_guide_documents_platform_specific_visibility_commands(self) -> None:
+        guide = (REPO_ROOT / "docs" / "getting-started" / "installation.md").read_text(encoding="utf-8")
 
-        self.assertIn("Claude Code uses `/visibility strict|dynamic|minimal`", readme)
+        self.assertIn("installs `/visibility strict|dynamic|minimal` as a Claude Code workspace command", guide)
         self.assertIn("Every platform, including Codex, can inspect and change the same profile value through "
-                      "`_shared/agent_visibility_cli.py`", readme)
-        self.assertIn("Codex has no `/visibility` command.", readme)
-        self.assertNotIn("Claude workspace command `/visibility", readme)
+                      "`_shared/agent_visibility_cli.py`", guide)
+        self.assertIn("Codex has no `/visibility` command.", guide)
+        self.assertNotIn("Claude workspace command `/visibility", guide)
 
 
 if __name__ == "__main__":

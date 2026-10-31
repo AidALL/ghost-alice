@@ -42,18 +42,7 @@ bash install.sh --addon-source <저장소-또는-경로>
 
 ## 문서 안내
 
-| 필요한 정보 | 안내 문서 |
-| --- | --- |
-| 전체 설치·업데이트 명령 | [설치와 업데이트](./docs/ko/getting-started/installation.md) |
-| 제거 범위와 정리 방식 | [제거와 정리](./docs/ko/getting-started/uninstall.md) |
-| 업데이트 실패, 병합 충돌, 재설치 복구 | [문제 해결](./docs/ko/getting-started/troubleshooting.md) |
-| 저장소 구조 | [저장소 구조](./docs/ko/reference/repository-structure.md) |
-| 스킬 목록과 참조 정보 | [스킬 카탈로그](./docs/ko/reference/skills.md) |
-| 세션 처리 단계와 필수 검사 규칙 | [세션 게이트 매트릭스](./docs/ko/policies/session-gate-matrix.md) |
-| 인스톨러의 플랫폼별 호환성 기준 | [인스톨러 플랫폼 호환성](./docs/ko/policies/installer-platform-compatibility-matrix.md) |
-| 설계 원칙과 아키텍처 | [GitHub 위키](https://github.com/AidALL/ghost-alice/wiki/홈) |
-| 공식 애드온 사용법 | [애드온 참조](./docs/ko/reference/official-addons.md) |
-| 애드온 제작 방법 | [위키: 애드온 작성](https://github.com/AidALL/ghost-alice/wiki/애드온-작성) |
+[문서 목록](./docs/ko/README.md)은 영어·한국어 대응 문서를 모두 연결합니다. [GitHub 위키](https://github.com/AidALL/ghost-alice/wiki/홈)는 설계 원칙과 아키텍처를 설명하고, 위키의 [애드온 작성](https://github.com/AidALL/ghost-alice/wiki/애드온-작성) 페이지는 애드온을 작성하는 방법을 설명합니다.
 
 ## 프로젝트가 지키는 기준
 
@@ -61,13 +50,9 @@ bash install.sh --addon-source <저장소-또는-경로>
 - 사용자의 의도, 작업 범위, 검증 기준, 설치 상태를 핵심 관리 대상으로 다룹니다.
 - 인스톨러는 자신이 관리하는 파일과 설정을 추적하며, 관리 대상임을 입증할 수 없으면 삭제 범위를 넓히지 않습니다.
 
-작업 관리 메시지의 표시 수준은 다음 명령으로 조절하실 수 있습니다.
+[에이전트 표시 프로필](./docs/ko/getting-started/installation.md#agent-visibility-profile)은 사용자에게 보이는 작업 관리 메시지의 양을 정합니다. 기본값과 플랫폼별 명령은 설치 안내에 있습니다.
 
-- Claude Code에서는 작업 공간 명령인 `/visibility strict|dynamic|minimal`을 사용합니다.
-- Codex를 포함한 모든 플랫폼에서 `_shared/agent_visibility_cli.py`를 통해 같은 프로필 값을 확인하고 변경하실 수 있습니다. Codex에는 `/visibility` 명령이 없습니다.
-- 설치 시 기본값은 `dynamic`입니다. 초기 프로필은 `bash install.sh --visibility dynamic` 또는 `.\install.cmd --visibility dynamic`으로 설정하실 수 있습니다. `--agent-visibility`도 호환성을 위한 별칭으로 유지됩니다.
-- 표시 수준은 사용자에게 보이는 작업 관리 메시지만 바꿉니다. 훅 실행, 엄격한 감사 로그, 작업 영향 분류인 Work-Impact Projection은 축소하지 않습니다.
-- Core가 입력 출처를 확인하지 못했을 때 나오는 Ghost-ALICE 입력 경고는 어느 프로필에서나 같은 세션·같은 원인으로 한 번 표시됩니다. 프로필은 그 경고를 싣는 훅 출력만 바꿉니다. [문제 해결](docs/ko/getting-started/troubleshooting.md#intake-warning-and-doctor-lists)을 참고해 주세요.
+Ghost-ALICE 입력 경고와 doctor의 입력 목록은 [문제 해결](docs/ko/getting-started/troubleshooting.md#intake-warning-and-doctor-lists)을 참고해 주세요.
 
 전체 제거가 필요하시면 다음 명령을 사용해 주세요.
 
@@ -81,7 +66,7 @@ bash install.sh --uninstall
 
 ## 기여와 검증
 
-스킬, 인스톨러 동작, 공개 명령을 변경하기 전에는 [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)를 읽어 주세요. 새 스킬을 만들거나 기존 스킬을 수정하신 뒤에는 [official-docs/derived/skill-compliance-checklist.md](https://github.com/AidALL/ghost-alice/blob/main/official-docs/derived/skill-compliance-checklist.md)의 Phase 1-5를 통과해야 합니다.
+스킬, 인스톨러 동작, 공개 명령을 변경하기 전에는 [AGENTS.md](https://github.com/AidALL/ghost-alice/blob/main/AGENTS.md)를 읽어 주세요. 스킬을 추가하거나 수정할 때는 기여 안내의 [Skill Changes](./CONTRIBUTING.md#skill-changes) 단계를 따라 주세요.
 
 공개 문서와 명령 안내의 일관성은 다음 명령으로 검증하실 수 있습니다.
 
@@ -95,12 +80,7 @@ python3 scripts/validate_public_surfaces.py
 python scripts/check_skill_gate_contract.py
 ```
 
-인스톨러 호환성 검사 그룹은 다음 명령으로 조회하고 실행하실 수 있습니다.
-
-```bash
-python3 scripts/run_installer_compat_tests.py --list
-python3 scripts/run_installer_compat_tests.py --group public-surface-contract
-```
+인스톨러 호환성 검사 그룹과 그 명령은 인스톨러 플랫폼 호환성 문서의 [CI Commands](./docs/ko/policies/installer-platform-compatibility-matrix.md#ci-commands) 절에 있습니다.
 
 ## 라이선스
 

@@ -6,8 +6,6 @@ Ghost-ALICE OS documentation is bilingual at the reader-facing documentation lay
 
 Every paired document has a language switch near the top. The [language policy](concepts/language-policy.md) defines its format.
 
-Core `0.5.1` supplies the routing and completion review APIs. Source checks, native runtime validation and a public release establish separate evidence.
-
 ## Quick Install
 
 From the cloned Core repository, install Core with automatic agent-platform detection:
@@ -26,16 +24,6 @@ The [installation guide](./getting-started/installation.md) covers cloning, OS-n
 4. Understand the installer architecture from [reference/installer-architecture.md](./reference/installer-architecture.md).
 5. Use [SUPPORT.md](https://github.com/AidALL/ghost-alice/blob/main/SUPPORT.md) and GitHub Issues for public questions.
 6. Use [SECURITY.md](https://github.com/AidALL/ghost-alice/blob/main/SECURITY.md) for private vulnerability reporting.
-
-## Documentation Layout
-
-| Area | Role | English | Korean |
-| --- | --- | --- | --- |
-| Getting Started | Install, update, recovery, and uninstall procedures | [getting-started/](./getting-started/installation.md) | [ko/getting-started/](./ko/getting-started/installation.md) |
-| Concepts | Project model and documentation language policy | [concepts/](./concepts/language-policy.md) | [ko/concepts/](./ko/concepts/language-policy.md) |
-| Reference | Repository map, public skills, hooks, and command surfaces | [reference/](./reference/repository-structure.md) | [ko/reference/](./ko/reference/repository-structure.md) |
-| Policies | Runtime, platform, and evaluator contracts | [policies/](./policies/session-gate-matrix.md) | [ko/policies/](./ko/policies/session-gate-matrix.md) |
-| Release | Public release checks and validation guidance | [release/](./release/public-release-checklist.md) | [ko/release/](./ko/release/public-release-checklist.md) |
 
 ## Document Map
 
