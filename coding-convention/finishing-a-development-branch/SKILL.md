@@ -159,9 +159,9 @@ For an open PR or keep-as-is choice (options 2 and 3): keep the worktree. A PR m
 
 ## Failure modes
 
-The process above defines each prerequisite once. Do not substitute a representative test subset for required preflight, local review for remote review, or an older successful head for the head being integrated. A new remote head requires its affected checks and review.
+The process above defines each prerequisite once. Do not substitute a representative test subset for required preflight.
 
-A published-history rewrite needs the exact authorization and expected-head lease defined in Step 4. A selected integration path does not authorize unrelated changes or messages. Keep the checkout while an open PR, uncommitted work or active task needs it.
+A published-history rewrite needs the exact authorization and expected-head lease defined in Step 4. A selected integration path does not authorize unrelated changes or messages.
 
 Verification-before-completion owns completion claims and evidence reuse; systematic-debugging owns failed attempts. The output states the actual integration result, verified head, remaining gaps and preserved or removed checkout.
 

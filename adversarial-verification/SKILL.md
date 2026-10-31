@@ -46,15 +46,15 @@ Every source follows the source-locator contract in verification-before-completi
 
 Level 2 uses three agents: internal-logic, external-fact and internal-fact. Level 3 adds two distinct roles selected from external-logic, edge-case, prior-art and incentive according to the claim and domain. `references/agent-roles.md` defines their axes and assignment constraints.
 
-Each assigned review assistant attacks the claim on its assigned axis or explicitly reports no attack point with a reason. It may challenge another agent's prior-round verdict on any axis. Silence is not a verdict. Research review distinguishes guarantees from non-guarantees, tests assumptions and abstraction levels, checks composition interfaces and challenges inflated first/only novelty wording.
+In a research review, the assigned review assistants distinguish guarantees from non-guarantees, test assumptions and abstraction levels, check composition interfaces and challenge inflated first/only novelty wording.
 
 ## Run and judge rounds
 
-The coordinating assistant follows [the round protocol and host dispatch procedure](references/round-protocol.md#dispatch-and-collect-through-the-host), supplying the complete role assignment and retaining each returned agent handle with its axis. The round protocol defines first-cycle participation and affected-axis follow-up. Assigned agents receive the same current claim context without access to peers' current-cycle submissions.
+The coordinating assistant follows [the round protocol and host dispatch procedure](references/round-protocol.md#dispatch-and-collect-through-the-host), supplying the complete role assignment and retaining each returned agent handle with its axis. The round protocol defines first-cycle participation and affected-axis follow-up.
 
-After each cycle, the proponent may supply new evidence. An absent response supplies no new evidence, not automatic rejection. The coordinating assistant runs the mandatory utterance audit and performs a schema/source-of-truth checkpoint only when new evidence, changed schema or an observed mismatch can affect the verdict. The checkpoint supplies factual attack material; it does not mediate.
+After each cycle, the proponent may supply new evidence. The coordinating assistant runs the mandatory utterance audit.
 
-The coordinating assistant retains each locator, assumption and guarantee while updating the claim-card. A response that changes none of the surviving claim, assumptions or evidence is no new evidence. Repeated attacks without a new distinction require claim narrowing or escalation rather than paraphrased no-op rounds. Deleted source evidence or a material schema change produces escalate.
+The coordinating assistant retains each locator, assumption and guarantee while updating the claim-card. Repeated attacks without a new distinction require claim narrowing or escalation.
 
 After collecting the required submissions, apply [convergence-rules.md](references/convergence-rules.md). Return its accepted/rejected boundary, continue only for its decision-relevant partial state, or use the deadlock handoff below.
 
@@ -84,4 +84,4 @@ For a claim reviewed at level-3-high-stakes, external governance absorption or e
 
 ## Gotchas
 
-The coordinating assistant must not skip the entry gate, put level 1 into rounds, duplicate an attack axis, infer truth from unaudited agreement, or merge theory/experiment/system guarantees into one unsupported claim. Concessions must identify which evidence or attack was defeated and how; pressure to finish is not evidence.
+The coordinating assistant must not skip the entry gate, duplicate an attack axis, infer truth from unaudited agreement, or merge theory/experiment/system guarantees into one unsupported claim. Concessions must identify which evidence or attack was defeated and how; pressure to finish is not evidence.

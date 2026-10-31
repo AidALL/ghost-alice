@@ -18,7 +18,7 @@ Use the host's actual skill mechanism:
 - Copilot CLI: use its exposed skill capability and [references/copilot-tools.md](references/copilot-tools.md).
 - Other hosts: map operations to the exposed tool schemas; do not invent unavailable tools.
 
-For Codex operations, delegated-task boundaries and checkout selection, use [references/codex-tools.md](references/codex-tools.md). Instruction body reuse is defined in verification-before-completion's [Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse).
+For Codex operations, use [references/codex-tools.md](references/codex-tools.md). Instruction body reuse is defined in verification-before-completion's [Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse).
 
 ## Workflow
 

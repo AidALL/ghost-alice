@@ -38,7 +38,7 @@ Do not leave placeholder implementation text, unspecified validation, undefined 
 
 Compare the whole plan with the accepted specification. Locate the task satisfying each requirement, check commands and interfaces across tasks, and remove contradictions and unsupported features. When evidence disproves a file mapping or implementation assumption, revise that task within actual authority. Boundary-contract governs a change to the user's objective or explicit constraints.
 
-Use [references/plan-document-reviewer-prompt.md](references/plan-document-reviewer-prompt.md) for an independent review only when it can resolve a remaining planning uncertainty. Retain valid checks after a localized correction rather than repeating the entire review without cause.
+Use brainstorming's [references/document-reviewer-prompt.md](../brainstorming/references/document-reviewer-prompt.md) for an independent plan review only when it can resolve a remaining planning uncertainty. Retain valid checks after a localized correction rather than repeating the entire review without cause.
 
 ## Execution handoff
 

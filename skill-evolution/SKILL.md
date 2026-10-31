@@ -7,7 +7,7 @@ compatibility:
 
 # Skill Evolution
 
-The current-session assistant uses this report-only workflow to identify repeated tool/workflow patterns and supported conduct corrections. It reads io-trace and, when supplied, the exact session-intent ledger. It returns candidate recommendations; it does not edit skills, install hooks, promote memory or create automation.
+The current-session assistant uses this report-only workflow to identify repeated tool/workflow patterns and supported conduct corrections. It reads io-trace and, when supplied, the exact session-intent ledger. It returns candidate recommendations.
 
 ## Inputs and triggers
 
@@ -24,13 +24,13 @@ The current-session assistant interprets intent through the retained current goa
 3. It then considers `quality_summary`, candidate quality and analyzer decision as triage data. Confidence, recency, authorship and artifact preservation do not grant approval.
 4. It assigns every considered candidate a closed disposition: `absorb | project-local | session-only | reject | defer`, with accountable lowercase-hyphenated owner ID, proposed action and rationale. Watch/reject triage candidates still receive this disposition.
 5. If the disposition explicitly proposes follow-up work, that separately authorized task passes necessity-gate before execution. A defer/reject disposition grants no action. Even `decision=route-to-systematic-debugging` remains report context here; the report-only branch does not dispatch implementation.
-6. The current-session assistant performs accepted edits only under the separately authorized editing procedure. They are not an automatic side effect of producing this report.
+6. The current-session assistant performs accepted edits only under the separately authorized editing procedure.
 
 For a full cross-session backlog request, the current-session assistant runs `python3 <loaded-skill-directory>/scripts/aggregate_recommendations.py --root <authorized-ledger-root> --json`; the root comes from the user's selected ledger or trusted receipt/runtime context. For one session, use the analyzer with that exact intent locator. Open entries appear as `conduct:<id>` even without tool activity. Read the actual JSON keys and command status before interpretation; the assistant adds dispositions to its report, not to source state, and does not assume the analyzer generated those meaning judgments. A failed or unreadable result leaves the requested coverage unresolved.
 
 ## Conduct feedback
 
-Session-intent-analyzer owns capture and provenance of corrections. The report reads `conduct_feedback` as a first-class signal. The aggregator groups entries with `pattern_class` by failure family and includes their member IDs; unclassified entries remain grouped by ID. The stored occurrence count preserves repeated supported corrections within a session. A user-said correction or recurring pattern receives high priority, but priority does not authorize implementation.
+Session-intent-analyzer owns capture and provenance of corrections. The report reads `conduct_feedback` as a first-class signal. The aggregator groups entries with `pattern_class` by failure family and includes their member IDs; unclassified entries remain grouped by ID. The stored occurrence count preserves repeated supported corrections within a session. A user-said correction or recurring pattern receives high priority.
 
 The current-session assistant names the contract owner that could prevent the behavior: for example, boundary-contract for scope, using-coding-convention for execution discipline, and verification-before-completion for false completion. It assesses behavior and contract impact before deciding whether a proposed change is justified.
 
@@ -68,7 +68,7 @@ The current-session assistant names the contract owner that could prevent the be
 }
 ```
 
-Quality values have only triage meaning: review indicates possible cross-session generality, watch indicates limited frequency/session evidence, and reject indicates suspected local debugging or noise. The current-session assistant does not convert any value into implementation eligibility.
+Quality values have only triage meaning: review indicates possible cross-session generality, watch indicates limited frequency/session evidence, and reject indicates suspected local debugging or noise.
 
 ## Blind installed-behavior evaluation
 

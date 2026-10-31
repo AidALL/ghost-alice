@@ -19,7 +19,7 @@ This is the trigger evaluation rule used when refining a description.
 
 ## Core principles
 
-- The description is a trigger contract. It is not a summary of the body.
+- The description is not a summary of the body.
 - If you only add positives, you cannot see overtrigger.
 - For negatives, a near-miss matters more than an easy unrelated sentence.
 
@@ -53,7 +53,6 @@ Negatives to avoid:
 
 - First, write the trigger context more clearly.
 - Then reinforce keywords and synonyms.
-- Even to the end, do not include a summary of the workflow steps.
 
 ## Simple result-record example
 

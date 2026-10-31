@@ -2,7 +2,7 @@
 
 The parent assistant assigns this bounded review to a delegated assistant and receives its findings.
 
-The parent assistant fills this assignment with the accepted requirements and exact review target, then sends it through the host's exposed agent API. Do not inherit the entire session history. The reviewer inspects code; the implementer's summary is context, not evidence.
+The parent assistant fills this assignment with the accepted requirements and exact review target, then sends it through the host's exposed agent API. The reviewer inspects code; the implementer's summary is context, not evidence.
 
 ## Assignment inputs
 
