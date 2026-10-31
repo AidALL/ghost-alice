@@ -28,7 +28,7 @@ Each component needs a named responsibility, interface and dependency set. In an
 
 Contrary evidence can require revisiting a requirement, component or data-flow assumption. Identify the affected decision, revise it within existing authority and verify that correction. Boundary-contract owns any change requiring new human authority.
 
-Use [references/spec-document-reviewer-prompt.md](references/spec-document-reviewer-prompt.md) when an independent specification review can resolve an uncertainty the self-review leaves. Do not dispatch a reviewer merely to repeat an unchanged approval.
+Use [references/document-reviewer-prompt.md](references/document-reviewer-prompt.md) when an independent specification review can resolve an uncertainty the self-review leaves. Do not dispatch a reviewer merely to repeat an unchanged approval.
 
 ## Visual companion
 

@@ -8,7 +8,7 @@ The author supplies information the assistant reading the finished skill needs f
 
 Match discretion to the operation. Give judgment-based work an objective and acceptance criteria; give a preferred pattern parameters and boundaries; give a fragile operation an exact sequence with named preconditions. An exact command is appropriate only when its paths, inputs, permissions and environment are established.
 
-Use one term for each concept. State the actor, action and object in procedural prose. Distinguish what the agent must read from what it must execute. A script reference alone must not imply execution.
+Use one term for each concept. Distinguish what the agent must read from what it must execute. A script reference alone must not imply execution.
 
 ## Discovery and package structure
 
@@ -16,7 +16,7 @@ Follow writing-skills' [Author the package](../SKILL.md#author-the-package) requ
 
 ## Workflow and output examples
 
-For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package): the reader must know where the input comes from, its required shape, the actual call or transport, the returned result, its owner and the next decision. For example, the assistant filling a form reads the actual field schema from the exposed form tool, maps user-supplied values into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping.
+For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package). For example, the assistant filling a form reads the actual field schema from the exposed form tool, maps user-supplied values into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping.
 
 Use an exact template when an output consumer requires a schema. For narrative work, give a default structure with the conditions under which the agent may adapt it. One complete input/output example should demonstrate the expected content and level of detail.
 

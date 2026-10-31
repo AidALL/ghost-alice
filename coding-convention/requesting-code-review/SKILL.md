@@ -55,7 +55,7 @@ For publication review, the parent supplies the preflight matrix produced by fin
 
 ## Remote Pull Request Review Gate
 
-A local reviewer and passing CI do not establish that remote review is complete. Conversely, a clean review does not establish successful CI. When the work has a pull request, perform this gate before integration, including a direct fast-forward push to the base branch. Use the provider API or its authenticated CLI (`gh` for GitHub); a checks summary alone is insufficient.
+When the work has a pull request, perform this gate before integration, including a direct fast-forward push to the base branch. Use the provider API or its authenticated CLI (`gh` for GitHub); a checks summary alone is insufficient.
 
 1. Read the PR's current head SHA and the configured or requested review sources. Fetch every page of submitted reviews, inline comments, PR conversation summaries, and review threads with their resolution state. Include automation results delivered as comments or reactions, not only formal approvals. Read relevant outstanding findings from earlier PRs in this change's lineage, including merged PRs, when their affected code is still present; do not turn this into an unrelated repository-wide audit.
 2. Bind the review result to the current head. Record each source's reviewed commit, completion state, and findings. Pending, unavailable, stale, or unidentifiable results are not a clean review. An empty comment list is not proof that a requested reviewer finished. If no remote reviewer is configured or requested, record that fact after inspection rather than inventing a new required service.

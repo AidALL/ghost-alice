@@ -23,7 +23,7 @@ Define the affected evaluation before editing. Include only cases whose outcomes
 
 Use `SKILL.md` for core guidance, conditionally loaded `references/` for detail, and `scripts/` for executable support. At an operational handoff, write enough for a reader without prior conversation to act: identify the caller and trigger, the authoritative origin and required shape of transferred values, the exposed tool or actual API/CLI invocation, the result and its storage owner, and the conditional next action. Distinguish the assistant's meaning judgment from code that authenticates its recorded judgment. Put a shared procedure in one owning reference and link callers to its section; do not repeat this field list in every sentence or replace an executable transfer with an actor label. Mark illustrative prompts, schemas and data as examples rather than ambient task authority.
 
-The frontmatter must contain a directory-matching lowercase-hyphen name and a description of trigger conditions. Keep descriptions within 1024 characters; state compatibility when the workflow depends on an environment.
+The frontmatter must contain a directory-matching lowercase-hyphen name and a description of what the skill does and when it is used. Keep descriptions within 1024 characters; state compatibility when the workflow depends on an environment.
 
 In the body, state the workflow's purpose, applicability, procedure, output and failure modes. Use a quick-reference table when it improves selection. Prefer one complete relevant example over multiple shallow language variants. Long code and reference tables belong in supporting files; every reference in the package needs a clear loading condition.
 
@@ -44,7 +44,6 @@ Verification-before-completion owns useful-check selection, evidence reuse, orig
 
 ## Failure modes
 
-- Do not relabel a passing baseline as a failure.
 - Do not backdate missing baseline evidence or delete inconvenient results.
 - Do not add a new report, hook or mandatory record when existing task context already preserves the evidence.
 

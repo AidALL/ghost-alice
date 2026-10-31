@@ -4,9 +4,9 @@ Use this reference when a skill's description is ambiguous or its body mixes dis
 
 ## Description
 
-The description tells the router when to load the skill. Use concrete task purposes, symptoms and relevant domain terms. State a technology restriction when it actually limits applicability. Write in third person, usually beginning “Use when”.
+Use concrete task purposes, symptoms and relevant domain terms. State a technology restriction when it actually limits applicability. Write in third person.
 
-For example, “Use when a test has a race condition, timing dependency or inconsistent pass/fail result” identifies a trigger. “Test first, implement, refactor” describes a workflow and leaves its trigger unclear.
+For example, “Test first, implement, refactor” summarizes the body's workflow and does not say when the skill is used.
 
 Keep the complete procedure in the body.
 
