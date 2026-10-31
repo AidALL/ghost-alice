@@ -79,7 +79,7 @@ These paths live outside the repository under the user's home directory.
 | `~/.agents/skills/` | Codex user skill copy install target |
 | `~/.claude/skills/` | Claude Code skill install target |
 
-The platform installation supplies common governance for every project. The Codex managed loader names `~/.codex/ghost-alice-governance.md`; Claude's managed global `CLAUDE.md` contains the common contract. Project instruction files supply project-specific constraints. The [installation guide](../getting-started/installation.md#common-governance-and-project-instructions) describes the source, installation and model handoffs. Runtime session state is authoritative in `.tmp/session-intent/ghost-state.sqlite3` at the receipt's repository root; JSON pointers and snapshots are compatibility/export material. Read state through `session_intent_ledger.py --read-state` with the receipt root, platform and session identity.
+The platform installation supplies common governance for every project. The Codex managed loader names `~/.codex/ghost-alice-governance.md`; Claude's managed global `CLAUDE.md` contains the common contract. Project instruction files supply project-specific constraints. The [installation guide](../getting-started/installation.md#common-governance-and-project-instructions) describes the source, installation and model handoffs.
 
 ## Runtime State Retention
 

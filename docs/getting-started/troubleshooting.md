@@ -158,7 +158,7 @@ If `Doctor` or `Status` reports a pending merge warning, the installer created a
 
 An older installer registered add-on hook scripts with a binding that carried an `adapter` key. The current Core hook runner accepts a binding with `schema_version` and `destination` only, so such an invocation ends with `hook binding rejected` and exit 126 before any module is imported; the strict hook log retains the rejection with its original native session. Every install and uninstall removes those retired registrations from the host's hook settings.
 
-Run the Core installer to remove a retired registration, then reload the host as described below. A registration-file update alone is not evidence that a running host consumed it. Do not edit the binding by hand or repeat unchanged business verification to repair registration.
+Run the Core installer to remove a retired registration, then reload the host as described below. A registration-file update alone is not evidence that a running host consumed it. Do not edit the binding by hand; reuse unchanged business verification under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery) instead of repeating it to repair registration.
 
 ## Native Hook Trust And Reload
 
@@ -168,7 +168,7 @@ Check installation, native trust and running-host adoption separately. The insta
 2. Use the host's available reload controls. If the active host still uses an older command or trust entry, fully exit and reopen it; starting another conversation alone is not proof of reload.
 3. Observe the next actual input and routing in that session. Installed files and a separate diagnostic process do not establish what the active host invoked.
 
-Keep strict audit enabled. Restore the affected registration or trust binding without disabling the guard or replaying completed business checks. A remaining recording failure is reported separately from the supported business result.
+Keep strict audit enabled. Restore the affected registration or trust binding without disabling the guard; reuse completed business checks under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery) instead of replaying them.
 
 ## Intake Warning And Doctor Lists
 

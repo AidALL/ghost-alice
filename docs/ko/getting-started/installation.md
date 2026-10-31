@@ -218,7 +218,7 @@ Claude Code와 Codex의 훅 설치에는 사용 가능한 Node.js 실행 환경�
 
 소스 변경의 자동 반영은 `SKILL.md`, `references/`, `scripts/` 같은 스킬 본문에 적용됩니다. 훅, 부트스트랩 파일, 권한 정책과 `_shared/`는 인스톨러가 관리하는 실행 파일이므로 변경 시 다시 설치해 주세요.
 
-디스크의 설치 상태와 실행 중인 호스트의 반영은 별개입니다. 훅 명령을 바꾼 뒤에는 해당 네이티브 신뢰 항목을 확인하고 다음 실제 콜백을 관측해 주세요. 호스트가 이전 등록을 유지하면 재로드 또는 완전한 종료·재시작 절차를 사용합니다. 자세한 내용은 [네이티브 훅 신뢰와 재로드](./troubleshooting.md#native-hook-trust-and-reload)를 확인해 주세요. 호스트 반영을 확인하려고 변경 없는 업무 검증을 반복하지 않습니다.
+디스크의 설치 상태와 실행 중인 호스트의 반영은 별개입니다. 훅 명령을 바꾼 뒤에는 해당 네이티브 신뢰 항목을 확인하고 다음 실제 콜백을 관측해 주세요. 호스트가 이전 등록을 유지하면 재로드 또는 완전한 종료·재시작 절차를 사용합니다. 자세한 내용은 [네이티브 훅 신뢰와 재로드](./troubleshooting.md#native-hook-trust-and-reload)를 확인해 주세요. 호스트 반영을 확인하려고 변경 없는 업무 검증을 반복하지 말고, [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용해 주세요.
 
 ### Core and addon transitions
 
@@ -251,7 +251,7 @@ Claude 인스톨러는 매니페스트가 선택한 애드온의 `Skill(...)` �
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` 전역 부트스트랩
 - Codex `~/.codex/AGENTS.md` 로더와 관리되는 `~/.codex/ghost-alice-governance.md` 공통 계약
 - 설치 기록 `~/.ghost-alice/installed-payload.json`: 두 호스트가 함께 쓰는 파일 하나이며, 배치와 같은 단계에서 설치 위치마다 출처와 복사한 파일의 지문을 기록합니다
-- `~/.ghost-alice/rollbacks/<txid>/`: 배치 한 번이 교체한 원래 파일, 배치 전의 설치 기록, 배치의 저널을 보관합니다. 다음 잠금 명령이 중간에 중지된 배치를 복원하며, 완료된 폴더는 최근 20개를 유지합니다
+- `~/.ghost-alice/rollbacks/<txid>/`: 배치 한 번이 교체한 원래 파일, 배치 전의 설치 기록, 배치의 저널을 보관합니다. 다음 잠금 명령이 중간에 중지된 배치를 복원하며, 완료된 폴더를 남기는 개수는 [런타임 상태 보존](../reference/repository-structure.md#runtime-state-retention)이 정합니다
 - 설치 상태, 미결 병합과 제거 보고서의 지원 상태
 
 선택 컨텍스트 게이트웨이를 등록한 설치본에서는 설치 기록의 `service` 섹션이 서비스의 코드 뿌리 `~/.ghost-alice/runtime/current`와 서비스 파일 세 개를 지정합니다. 런타임 배치(`_shared`와 동반 스크립트 `session-intent-analyzer/scripts/session_intent_ledger.py`)는 파일 교체 전에 서비스를 중지하고 교체 뒤에 시작합니다. Codex 복사본 `~/.agents/skills/_shared`와 Claude 링크는 설치 대상이지 서비스의 코드가 아니므로 그 배치는 서비스 효과를 호출하지 않습니다. 갱신은 `bash install.sh` 한 번이며 게이트웨이 갱신 명령을 먼저 실행하지 않습니다. 인스톨러는 서비스의 런타임 뿌리와 서비스 실행 여부를 `Context gateway:` 한 줄로 출력합니다. 이전 인스톨러가 등록한 설치본은 첫 설치, 복구 또는 제거 때 게이트웨이 설치 영수증에서 `service` 섹션을 한 번 작성합니다.

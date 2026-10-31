@@ -37,9 +37,9 @@ This document is the compatibility test contract for the Ghost-ALICE installer. 
 
 The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. Hook payload and platform permission policy must also be synchronized with the current repo contract. Even if an older hook entry exists, the installer must update managed entries when the runtime payload changes. Hook presence and `agent_visibility.profile` are separate concerns. The profile controls the user-facing message surface; it must not relax missing or drift judgments.
 
-Core Python code stores admitted work units and criteria and authenticates the current-session assistant's claim–evidence judgments. An addon registers observational hooks at its declared native events, and the Core runner never lets them block the host. Addon Python code manages its own records; the current-session assistant follows addon instructions to judge additional work and require evidence for the affected addon behavior.
+[Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns the recording and authentication of work and judgments to Core code. An addon registers observational hooks at its declared native events, and the Core runner never lets them block the host. Addon Python code manages its own records; the current-session assistant follows addon instructions to judge additional work and require evidence for the affected addon behavior.
 
-Runtime live smoke follows `docs/policies/live-smoke-regression.md`. That procedure sends the same README first 10 lines request to the claimed installed Claude Code and Codex targets to observe `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, and skill activation permission behavior.
+Runtime live smoke follows [live-smoke-regression](live-smoke-regression.md#purpose), which runs one small request on each claimed installed target and lists the signals it observes.
 
 | Platform | Runtime surface | Contract | Regression owner |
 | --- | --- | --- | --- |
@@ -52,15 +52,15 @@ The Codex managed loader declares the installed `~/.codex/ghost-alice-governance
 
 ### task-router
 
-Every user input is a `task-router` target. Simple questions, opinions, status comments, follow-up questions, and smoke tests all route before the first tool call. "It was already routed in the previous turn" is not a valid skip reason.
+The common contract's [Work Selection](../../platforms/common-governance.md#work-selection) section sets whether an input gets a direct answer or follows task-router as work.
 
 ### session-intent-analyzer
 
-The installer registers session-intent-analyzer as the single UserPromptSubmit intake owner and as the SessionStart session-receipt hook. Codex commits directly; Claude stages native correlation for trusted PreToolUse/Stop reconciliation. The installed wrapper resolves staged inputs in order: human input, including input typed while Claude works, becomes the canonical input; an SDK-started turn or an app event delivered while Claude works becomes non-human context; task notifications and subagent hand-backs preserve the last human route. A later located human input supersedes an unknown or unlocated one. Without one the input stays pending, dependent writes stay refused, and the wrapper records the wait and warns once per session and cause. A failed reconcile is recorded, and the inner hook still runs. The [intake procedure](../../session-intent-analyzer/SKILL.md) and [ledger schema](../../session-intent-analyzer/references/ledger-schema.md) own identity, compressed deltas, storage and compatibility exports.
+The installer registers session-intent-analyzer as the single UserPromptSubmit intake owner and as the SessionStart session-receipt hook. The session gate matrix's [Session Intent Ledger Contract](session-gate-matrix.md#session-intent-ledger-contract) owns how intake records each input.
 
 ### pending merge precheck
 
-The SessionStart hook checks the current platform's pending-merge manifest at session start and shows the result on the user's screen. Before selected work changes an installed skill, and when the user asks to review backed-up changes, the current-session assistant applies `merge-companion`, which first re-checks the manifest because an installer run can add entries during the session. It reviews an undecided entry that the work affects, or any undecided entry when the user asked; an explicit user defer or skip continues other work with the manifest entry still `decided=false`.
+[merge-companion](../../merge-companion/SKILL.md#entry-and-activation) sets what the SessionStart pending-merge report means and when the current-session assistant checks the manifest and reviews its entries.
 
 ### tool-checkpoint recovery surface
 
@@ -68,7 +68,7 @@ Runtime tool-checkpoint payload does not require routine recovery cost or recove
 
 ### completion-reminder
 
-Installed completion hooks consume Core's current-input and exact-answer assessment. Core authenticates the model's distinct claim/source and whole-response judgments; skill loading and printed audit fields are not separate acceptance prerequisites. Core's Stop observer consumes that assessment and blocks nothing.
+Installed completion hooks consume Core's current-input and exact-answer assessment. [Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the two judgments that Core authenticates. Core's Stop observer consumes that assessment and blocks nothing.
 
 Claude retains its one-retry budget and visible unresolved-defect notice; Codex blocks genuine completion-evidence defects. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check those registered payloads and platform mappings, not the truth of model judgments.
 

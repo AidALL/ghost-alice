@@ -80,7 +80,7 @@ README는 프로젝트 소개와 빠른 시작을 안내합니다. 이 문서는
 | `~/.agents/skills/` | Codex용 사용자 스킬 복사 설치 위치 |
 | `~/.claude/skills/` | Claude Code용 스킬 설치 위치 |
 
-플랫폼 설치본은 모든 프로젝트에 공통 거버넌스를 제공합니다. Codex의 관리 로더는 `~/.codex/ghost-alice-governance.md`를 지정하며, Claude의 관리되는 전역 `CLAUDE.md`는 공통 계약을 담습니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 제공합니다. [설치 안내](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)는 소스·설치본·응답 모델 사이의 전달을 설명합니다. 세션 실행 상태의 기준은 영수증의 저장소 루트에 있는 `.tmp/session-intent/ghost-state.sqlite3`입니다. JSON 포인터와 스냅샷은 호환성·내보내기 자료입니다. 상태를 읽는 구성 요소는 영수증의 root·platform·session identity를 `session_intent_ledger.py --read-state`에 전달하여 해당 세션의 상태를 받습니다.
+플랫폼 설치본은 모든 프로젝트에 공통 거버넌스를 제공합니다. Codex의 관리 로더는 `~/.codex/ghost-alice-governance.md`를 지정하며, Claude의 관리되는 전역 `CLAUDE.md`는 공통 계약을 담습니다. 프로젝트 지침 파일은 프로젝트 고유 제약을 제공합니다. [설치 안내](../getting-started/installation.md#공통-거버넌스와-프로젝트-지침)는 소스·설치본·응답 모델 사이의 전달을 설명합니다.
 
 ## Runtime State Retention
 

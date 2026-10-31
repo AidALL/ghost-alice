@@ -6,7 +6,7 @@ Tool results distinguish an observation, an authenticated review, and an execute
 
 ## Host and hook responsibilities
 
-The native host validates tool arguments and enforces permission. A reported argument error determines the correction to an authorized call. Governance hooks inspect work authority and evidence; they do not infer tool capabilities from serialized text.
+The native host validates tool arguments and enforces permission, the role that [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns to it. A reported argument error determines the correction to an authorized call. Governance hooks inspect work authority and evidence; they do not infer tool capabilities from serialized text.
 
 Hook status distinguishes a matching installation, configuration drift, disabled hooks, missing components and an unsupported platform. Drift requires examining the affected installed binding; it does not mean that every hook is absent. The [platform compatibility contract](installer-platform-compatibility-matrix.md) owns installation decisions.
 
@@ -14,7 +14,7 @@ Counts retain their declared unit. A unique finding count differs from physical 
 
 ## Review, output and continuation
 
-The responding model judges each claim against original evidence, then judges the complete answer against the user's objective. Core authenticates those judgments and source bindings. A review receipt returns status and references; it does not repeat the answer body. The model submits its reviewed draft through native output. An unfavorable review or missing prerequisite remains unresolved under the [review procedure](../../coding-convention/verification-before-completion/references/response-review.md).
+[Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the model's two judgments and Core's authentication. A review receipt returns status and references; it does not repeat the answer body. An unfavorable review or missing prerequisite remains unresolved under the [review procedure](../../coding-convention/verification-before-completion/references/response-review.md).
 
 ```mermaid
 flowchart LR
@@ -24,6 +24,6 @@ flowchart LR
   H -->|Stop observation| S["Core observer: record the assessment"]
 ```
 
-An accepted answer can accurately report incomplete work. Authentication, recording and criterion state are separate results. Original evidence keeps its original verification time during unchanged reuse. A recording failure does not authorize repeating the business operation.
+Authentication, recording and criterion state are separate results.
 
 Native Stop observes the response and permits the native conversation to continue. A diagnostic assessment does not establish answer visibility or create missing judgments. See the [architecture](../../architecture.md) and [session gate owner map](session-gate-matrix.md) for responsibilities.

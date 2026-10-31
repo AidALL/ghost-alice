@@ -15,9 +15,7 @@ This contract records, without exaggeration, which surfaces are actually support
 ## Principles
 
 - A platform whose hook semantics have not been verified by runtime smoke stays `instruction-backed`.
-- `instruction-backed` means policy text, skill placement, and installer onramp exist. It does not mean direct runtime hook equivalence.
 - Even when Codex hook files are written by the installer, their event semantics require smoke evidence before they can be used as gate completion evidence.
-- `terminal-only` is treated as a hookless fallback.
 
 ## Adapter Records
 
@@ -37,7 +35,7 @@ Each record in `skill-catalog/platform-adapters.json` has these fields:
 ## States
 
 - `native`: the platform runtime directly supports installer-managed hooks and skill surfaces.
-- `instruction-backed`: instructions, skill placement, and adapter config exist, but hook/event semantics still require smoke evidence.
+- `instruction-backed`: instructions, skill placement, and installer onramp exist, but hook/event semantics still require smoke evidence.
 - `terminal-only`: humans must follow project policy and skill files as the fallback.
 
 ## Required Adapters

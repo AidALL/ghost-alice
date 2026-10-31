@@ -30,7 +30,7 @@ Use this checklist to release the current Ghost-ALICE Core repository and its pu
 
 ## Source Verification
 
-Build the verification plan from the candidate's affected contracts. Reuse valid unchanged proof with its original source and verification time. Do not repeat already covered business checks because of a new status request, documentation edit or recording repair. Missing required coverage remains unresolved.
+Build the verification plan from the candidate's affected contracts. Reuse unchanged proof under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery). Missing required coverage remains unresolved.
 
 Available source checks include:
 
@@ -48,14 +48,14 @@ Use the focused compatibility groups for affected installer behavior. A release 
 
 For an installed-runtime claim, retain candidate installation provenance and actual native hook observations from the [live smoke procedure](../policies/live-smoke-regression.md). Hook configuration on disk, native trust and the running host's adoption are separate; use the [reload recovery guide](../getting-started/troubleshooting.md#native-hook-trust-and-reload) when needed.
 
-Governance smoke establishes runtime connections and control surfaces. It does not satisfy the separate blind behavior gate. In a disposable environment with the candidate installed through its canonical installer and its installer-owned manifest present, use the fresh-session controller for each claimed installed subject. Replace the placeholders with release-owned case and evaluator paths; keep evaluator-private material outside the subject command and environment.
+The [verification layers](../policies/live-smoke-regression.md#verification-layers) separate governance smoke from the blind behavior gate. In a disposable environment with the candidate installed through its canonical installer and its installer-owned manifest present, use the fresh-session controller for each claimed installed subject. Replace the placeholders with release-owned case and evaluator paths; keep evaluator-private material outside the subject command and environment.
 
 ```bash
 python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform claude --subject-command '["claude"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-claude.json
 python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform codex --subject-command '["codex"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-codex.json
 ```
 
-Required records must have exit code zero, `verdict=pass`, the intended installed platform provenance and the controller-computed suite digest. Store no raw prompt, rubric, expected answer, subject response or evaluator-private text. One platform's pass does not cover another. Automated blind screening does not replace the human-operated clean-terminal acceptance gate. Valid unchanged evidence may be retained; absent or affected evidence must be obtained before making its release claim.
+Required records must have exit code zero, `verdict=pass`, the intended installed platform provenance and the controller-computed suite digest. The [blind behavior record](../policies/live-smoke-regression.md#blind-behavior-record) lists what a record may store. One platform's pass does not cover another. The [automated verification boundary](../policies/live-smoke-regression.md#automated-verification-boundary) sets what automated blind screening cannot replace. Unchanged evidence follows the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery); absent or affected evidence must be obtained before making its release claim.
 
 ## License And Private Material
 

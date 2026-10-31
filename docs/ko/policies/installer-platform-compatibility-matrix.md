@@ -37,9 +37,9 @@ Language: [🇺🇸 English](../../policies/installer-platform-compatibility-mat
 
 인스톨러는 훅 파일의 존재뿐 아니라 훅 입력·출력과 플랫폼 권한 정책이 현재 저장소 계약과 맞는지도 확인합니다. 기존 훅 항목이 있어도 실행 명령이 달라지면 인스톨러는 관리 항목을 갱신합니다. `agent_visibility.profile`은 사용자에게 보이는 메시지만 제어하며 훅 누락·불일치 판정을 완화하지 않습니다.
 
-Core Python 코드는 승인된 작업 단위·기준을 저장하고 현재 세션 어시스턴트의 주장·근거 판단을 인증합니다. 애드온은 선언한 네이티브 이벤트에 관찰 훅을 등록하며, Core 실행기는 그 훅이 호스트를 막지 못하게 합니다. 애드온 Python 코드는 자체 기록을 관리하고, 현재 세션 어시스턴트는 애드온 지침에 따라 추가 작업을 판단하며, 영향받은 애드온 동작의 근거가 필요합니다.
+[책임과 흐름](../../../architecture_ko.md#책임과-흐름)이 작업과 판단의 기록·인증을 Core 코드에 배정합니다. 애드온은 선언한 네이티브 이벤트에 관찰 훅을 등록하며, Core 실행기는 그 훅이 호스트를 막지 못하게 합니다. 애드온 Python 코드는 자체 기록을 관리하고, 현재 세션 어시스턴트는 애드온 지침에 따라 추가 작업을 판단하며, 영향받은 애드온 동작의 근거가 필요합니다.
 
-Runtime live smoke는 `docs/ko/policies/live-smoke-regression.md`를 따릅니다. 이 procedure는 지원할 설치된 Claude Code·Codex 대상에 같은 README first 10 lines request를 보내 `task-router`, `verification-before-completion`, concise tool-checkpoint failure surface, skill activation permission behavior를 관찰합니다.
+Runtime live smoke는 [live-smoke-regression](live-smoke-regression.md#purpose)을 따르며, 이 절차는 지원을 주장하는 설치 대상마다 작은 요청 하나를 실행하고 관찰할 신호를 나열합니다.
 
 | Platform | Runtime surface | Contract | Regression owner |
 | --- | --- | --- | --- |
@@ -52,15 +52,15 @@ Codex의 관리 로더는 설치된 `~/.codex/ghost-alice-governance.md`를 공�
 
 ### task-router
 
-현재 세션 어시스턴트는 모든 사용자 입력을 `task-router`에 연결합니다. 단순 질문, 의견, 상태 확인, 후속 질문과 실행 점검도 첫 도구 호출 전에 라우팅합니다. 이전 턴에서 이미 라우팅했다는 이유로 현재 입력의 라우팅을 생략하지 않습니다.
+입력마다 바로 답할지, 작업으로 task-router를 따를지는 공통 계약의 [Work Selection](../../../platforms/common-governance.md#work-selection) 절이 정합니다.
 
 ### session-intent-analyzer
 
-인스톨러는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. Codex는 직접 확정하며 Claude는 신뢰된 PreToolUse/Stop 대조를 위해 네이티브 연결 정보를 보관합니다. 설치된 래퍼는 임시 기록된 입력을 순서대로 판정합니다. 작업 중에 친 입력을 포함한 사용자 입력은 기준 입력이 되고, SDK가 시작한 턴과 작업 중에 앱이 넣은 이벤트는 비인간 문맥이 되며, 작업 알림과 하위 에이전트 회신은 마지막 사용자 경로를 보존합니다. 출처를 판정하지 못했거나 대화 기록에서 찾지 못한 입력은 뒤에 찾은 사용자 입력이 넘깁니다. 그런 입력이 없으면 그 입력은 pending으로 남고 의존 쓰기는 거부되며, 래퍼가 그 대기를 기록하고 같은 세션·같은 원인으로 한 번 경고합니다. 판정이 실패하면 래퍼가 그 실패를 기록하고 안쪽 훅은 그대로 실행합니다. [접수 절차](../../../session-intent-analyzer/SKILL.md)와 [원장 스키마](../../../session-intent-analyzer/references/ledger-schema.md)가 식별자·압축 변경·저장·호환성 내보내기를 담당합니다.
+인스톨러는 session-intent-analyzer를 단일 UserPromptSubmit 접수 담당자이자 SessionStart 세션 영수증 훅으로 등록합니다. 접수가 입력을 기록하는 방식은 세션 게이트 매트릭스의 [Session Intent Ledger Contract](session-gate-matrix.md#session-intent-ledger-contract)가 정합니다.
 
 ### pending merge precheck
 
-SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니페스트를 확인하고 결과를 사용자 화면에 알립니다. 선택된 작업이 설치된 스킬을 바꾸기 전과 사용자가 백업된 변경의 검토를 요청할 때, 현재 세션 어시스턴트는 `merge-companion`을 적용합니다. `merge-companion`은 세션 중 인스톨러 실행으로 항목이 생길 수 있으므로 매니페스트를 먼저 다시 확인합니다. 작업이 영향을 주는 미결 항목, 또는 사용자가 검토를 요청했을 때의 모든 미결 항목을 검토합니다. 사용자가 명시적으로 미루거나 건너뛰면 해당 항목은 `decided=false`로 유지한 채 다른 승인 작업을 진행할 수 있습니다.
+SessionStart 훅의 병합 대기 알림이 뜻하는 것과, 현재 세션 어시스턴트가 매니페스트를 확인하고 그 항목을 검토하는 때는 [merge-companion](../../../merge-companion/SKILL.md#entry-and-activation)이 정합니다.
 
 ### tool-checkpoint recovery surface
 
@@ -68,7 +68,7 @@ SessionStart 훅은 세션 시작 때 현재 플랫폼의 병합 대기 매니�
 
 ### completion-reminder
 
-설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core는 모델의 서로 다른 주장·출처 판단과 응답 전체 판단을 인증하며, 스킬 로드나 화면 감사 필드는 별도의 수락 조건이 아닙니다. Core의 Stop 관찰자가 그 평가를 사용하며 호스트를 막지 않습니다.
+설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core가 인증하는 두 판단은 [근거와 네이티브 표시](../../../architecture_ko.md#근거와-네이티브-표시)가 설명합니다. Core의 Stop 관찰자가 그 평가를 사용하며 호스트를 막지 않습니다.
 
 Claude는 한 번의 재시도 한도와 미해결 오류 안내를 유지하고 Codex는 실제 완료 근거 오류를 차단합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 제어 형식을 담당합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 입력·출력과 플랫폼 연결을 확인하며 모델 판단의 진실성을 판단하지 않습니다.
 

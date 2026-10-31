@@ -8,8 +8,6 @@ Every paired document has a language switch near the top. The [language policy](
 
 Core `0.5.1` supplies the routing and completion review APIs. Source checks, native runtime validation and a public release establish separate evidence.
 
-The responding model judges claims against original sources and the complete answer against the user objective. Core authenticates the records; the native host displays the answer. The [Core architecture](../architecture.md) describes the flow.
-
 ## Quick Install
 
 From the cloned Core repository, install Core with automatic agent-platform detection:
@@ -18,7 +16,7 @@ From the cloned Core repository, install Core with automatic agent-platform dete
 bash install.sh
 ```
 
-The agent continues approved work across status questions and corrections, retains its authorized boundaries, and connects each completion claim to the relevant item's evidence. The [installation guide](./getting-started/installation.md) covers cloning, OS-native commands and explicit platform selection. An addon is installed from its own repository or a local path; see [Install Addons](./getting-started/installation.md#install-addons).
+The [installation guide](./getting-started/installation.md) covers cloning, OS-native commands and explicit platform selection. An addon is installed from its own repository or a local path; see [Install Addons](./getting-started/installation.md#install-addons).
 
 ## Start Here
 
@@ -63,13 +61,8 @@ The agent continues approved work across status questions and corrections, retai
 
 ## Canonical Contributor Documents
 
-`CONTRIBUTING.md`, `SUPPORT.md` and `official-docs/` use English as the canonical contributor path. Keep control tokens literal; paired reader guides are listed above.
+The [language policy](concepts/language-policy.md#intentionally-unpaired-sources) lists the sources that keep one English original; paired reader guides are listed above.
 
 ## Update Rule
 
-1. Update the English default page first.
-2. Update the Korean counterpart in the same change when the reader-facing meaning, path, command, or policy changes.
-3. Keep CLI flags, paths, hook names, skill names, enum values, and schema fields literal.
-4. Translate the surrounding explanation and preserve executable tokens.
-5. Keep English documents linked to English documents and Korean documents linked to Korean counterparts when a counterpart exists.
-6. Update this map whenever a user-facing document is added, moved, or paired.
+Update this map whenever a user-facing document is added, moved, or paired.

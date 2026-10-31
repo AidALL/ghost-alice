@@ -19,7 +19,7 @@ Language: [🇺🇸 English](../../policies/live-smoke-regression.md) | 🇰🇷
 
 ## Purpose
 
-- 지원을 주장하는 설치된 Claude Code·Codex 대상에서 같은 입력을 실행합니다. 지원 어댑터 집합은 `skill-catalog/platform-adapters.json`을 따르며 `terminal-only`는 수동 대체 경로입니다.
+- 지원을 주장하는 설치된 Claude Code·Codex 대상에서 같은 입력을 실행합니다. 어댑터의 상태는 [플랫폼 어댑터 준수 정책](platform-adapter-compliance.md#states)이 정의합니다.
 - README 첫 10줄 읽기처럼 작고 되돌릴 수 있는 request를 씁니다.
 - summary 품질이 아니라 runtime gate가 관찰되는지를 검증합니다.
 - experiment note는 smoke record로 저장하되 raw prompt, secret, full transcript는 저장하지 않습니다.
@@ -53,9 +53,9 @@ Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one pa
 - `boundary-contract`: 현재 routing-surface의 결정을 따릅니다. 읽기 전용 검증에도 계약이 필요할 수 있으며 해당 경로가 요구하지 않을 때만 `n/a`를 기록합니다.
 - `tool checkpoint`: 공통 계약의 io-trace Transparency Rule을 따릅니다. 일상적인 읽기 전용 호출에는 체크포인트가 필요하지 않습니다.
 - `skill activation permission`: Claude Code가 Core 검사 스킬만 담은 축소된 허용 목록 때문에 막히지 않습니다.
-- `verification-before-completion`: 워크플로가 각 완료 주장을 해당 근거와 연결하며 변경 없는 유효한 근거는 원래 출처와 시각을 유지합니다.
+- `verification-before-completion`: 워크플로가 각 완료 주장을 해당 근거와 연결하고, 변경 없는 근거는 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용합니다.
 - `internal audit`: 화면의 `[io-trace]`를 요구하지 않고도 도구 접근 기록을 감사할 수 있습니다.
-- pending merge precheck: 설치된 스킬을 바꾸기 전에 현재 플랫폼 매니페스트를 다시 확인합니다. 세션 시작 때의 관찰이 그 확인을 대신하지 않습니다.
+- pending merge precheck: 설치된 스킬을 변경하기 전에 [merge-companion](../../../merge-companion/SKILL.md#entry-and-activation)이 요구하는 확인입니다.
 
 ## Verification Layers
 

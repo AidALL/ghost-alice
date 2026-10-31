@@ -5,7 +5,7 @@ This document defines the verification process that must be passed after writing
 Basis documents
 - The installed common contract governs skill writing and modification; `platforms/common-governance.md` owns its source.
 - Each skill's SKILL.md is the actual applied surface for progressive disclosure, frontmatter, and reference structure.
-- external specs are referenced only with an upstream link and a short citation, never by copying the original text
+- external specs follow the [external source policy](../README.md#external-source-policy)
 
 ---
 
@@ -73,7 +73,7 @@ Item 3-5 is a Ghost-ALICE project navigation rule implemented by `validate_phase
 
 ## Phase 5: Language/tone verification (Ghost-ALICE OS project only)
 
-This phase applies to canonical skill instructions and their accessory guidance. Reader-facing Korean project documentation (README files, installation guides, website copy, and release notes) follows the polite documentation register in `AGENTS.md`; it is not rejected for honorific endings. Explicit user tone instructions take precedence over defaults.
+This phase applies to canonical skill instructions and their accessory guidance. Reader-facing Korean project documentation (README files, installation guides, website copy, and release notes) follows the polite documentation register in the common contract's [General Rules](../../platforms/common-governance.md#general-rules); it is not rejected for honorific endings. Explicit user tone instructions take precedence over defaults.
 
 | # | Item | Criterion | Verification method | Automatic |
 | --- | --- | --- | --- | :---: |
