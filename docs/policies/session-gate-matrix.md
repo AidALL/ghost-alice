@@ -78,7 +78,6 @@ The current-session assistant applying task-router preserves the primary request
 
 Hooks classify values by whether they change the work boundary, focus layer, verification burden, or recovery.
 
-- agent_visibility.profile controls display, not hook execution or strict audit.
 - Forced/risk/gate values and failed verification retain full model hints and forced visibility.
 - Routine values remain in the strict log and enter model guidance only when they affect a work decision.
 - Unknown or failed values expose fuller context and reopen the affected judgment.

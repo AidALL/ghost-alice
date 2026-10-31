@@ -35,11 +35,11 @@ Open a public issue for:
 - Reproducible hook or skill routing bugs
 - Public feature requests
 
-Include the platform, operating system, shell, command, expected result, observed result, and any relevant redacted logs.
+Open the issue from its [issue form](https://github.com/AidALL/ghost-alice/issues/new/choose); each form asks for the details its report needs.
 
 ## Security Reports
 
-Do not open public issues for vulnerabilities or secret exposure. Follow [SECURITY.md](./SECURITY.md). If GitHub private vulnerability reporting is unavailable, email `aidall_manager@aidall.tech` with the subject prefix `[ghost-alice security]` and request a private disclosure channel before sending sensitive details.
+Do not open public issues for vulnerabilities or secret exposure. Follow [SECURITY.md](./SECURITY.md).
 
 ## No Private Data
 

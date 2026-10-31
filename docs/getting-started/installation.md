@@ -100,7 +100,7 @@ bash install.sh --status
 
 The healthy target is `overall: ok`.
 
-Doctor also prints two informational Core lines that do not change `overall`. `native-intake-waits` lists Claude sessions whose latest input origin Core could not confirm; each waits for the user's next typed input. `native-intake-failures` lists sessions where Core's intake step failed; the hook continued, and the line shows the error type, the count and the last time. See [the intake warning](troubleshooting.md#intake-warning-and-doctor-lists).
+Doctor also prints two informational Core lines that do not change `overall`: `native-intake-waits` and `native-intake-failures`. See [intake warning and doctor lists](troubleshooting.md#intake-warning-and-doctor-lists).
 
 ## Update
 
@@ -168,9 +168,9 @@ The installer sets the repository's git hook path (`core.hooksPath`, which every
 
 ### Agent Visibility Profile
 
-The default profile is `dynamic`. The profile controls how much governance surface is shown to the user; it does not disable hooks, strict-grade logs, or Work-Impact Projection.
+The default profile is `dynamic`. The profile controls how much governance surface is shown to the user; it does not reduce hook installation or execution, strict-grade logs, or Work-Impact Projection.
 
-The Ghost-ALICE intake warning, which says that records needing a confirmed input are paused, appears once per session and cause under every profile. A profile can turn a hook's empty result into a plain-text line; that hook cannot carry the warning, so the warning appears with the next PreToolUse or Stop.
+The [Ghost-ALICE intake warning](./troubleshooting.md#intake-warning-and-doctor-lists) appears under every profile.
 
 | Profile | macOS / Linux / WSL | Windows Command Prompt / PowerShell |
 | --- | --- | --- |
@@ -182,7 +182,7 @@ The Ghost-ALICE intake warning, which says that records needing a confirmed inpu
 
 ### Slash Commands By Platform
 
-Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code workspace command. On Codex and every other platform, use `_shared/agent_visibility_cli.py` to inspect or change the same profile.
+Ghost-ALICE installs `/visibility strict|dynamic|minimal` as a Claude Code workspace command. Every platform, including Codex, can inspect and change the same profile value through `_shared/agent_visibility_cli.py`. Codex has no `/visibility` command.
 
 ### Python Contract
 
@@ -303,5 +303,3 @@ See [uninstall cleanup](./uninstall.md) for the full cleanup contract.
 ## Troubleshooting
 
 When an update is blocked during `git pull`, a merge conflict, or an installer rerun, start with [troubleshooting](./troubleshooting.md).
-
-The GitHub Wiki `install-troubleshooting` page links to the online source guide, which can be read without updating a local checkout.

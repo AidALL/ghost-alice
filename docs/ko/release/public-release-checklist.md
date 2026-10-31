@@ -23,7 +23,7 @@ Language: [🇺🇸 English](../../release/public-release-checklist.md) | 🇰�
 ## Documentation And Public Surfaces
 
 - 같은 배포 범위에서 `README.md`/`README_ko.md`, 아키텍처, `docs/`/`docs/ko/` 대응 문서, Wiki와 영문·국문 GitHub Pages 진입점을 맞춥니다.
-- 문서·Wiki·Pages에는 현재의 책임, 명령과 한계를 설명합니다. 무엇을 어떻게 바꿨는지는 commit 메시지에만 기록하며, 운영 문서에는 변경 이력·전후 비교·업그레이드 서술을 넣지 않습니다.
+- 문서·Wiki·Pages에는 현재의 책임, 명령과 한계를 설명합니다. 변경 이력은 [pull request 기대 사항](../../../CONTRIBUTING.md#pull-request-expectations)에 따라 commit 메시지에만 기록합니다.
 - 언어가 달라도 명령·경로·훅·스키마·열거 토큰은 유지합니다. 대응 문서 링크와 생성되는 공개 안내를 담당 카탈로그와 대조합니다.
 - 구현 계약의 기준은 저장소 문서입니다. Wiki는 양 언어 설명·복구 안내를, Pages는 공개 진입점을 제공합니다. 현재 의미가 일치하도록 게시합니다.
 - `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md`, 행동 강령과 이슈·PR 양식을 실제 정책과 일치시킵니다.
@@ -32,14 +32,10 @@ Language: [🇺🇸 English](../../release/public-release-checklist.md) | 🇰�
 
 배포 담당자는 후보가 영향을 주는 계약으로 검증 계획을 구성합니다. 변경 없는 근거는 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용합니다. 필수 검증이 없으면 해당 기준은 미해결로 남습니다.
 
-사용 가능한 소스 검사는 다음과 같습니다.
+소스 검사 명령은 [검증 명령](../../../CONTRIBUTING.md#validation-commands)과 [CI Commands](../policies/installer-platform-compatibility-matrix.md#ci-commands)에 있습니다. 배포 담당자는 후보 commit에 문장 줄바꿈 검사도 실행합니다.
 
 ```bash
-python3 scripts/validate_public_surfaces.py
-python3 scripts/check_skill_gate_contract.py
 python3 scripts/check_prose_wrapping.py
-python3 scripts/validate_platform_adapters.py
-python3 scripts/run_installer_compat_tests.py --list
 ```
 
 인스톨러 동작에 영향이 있으면 해당 호환성 그룹을 사용합니다. 공용 실행 코드나 스크립트를 바꾸는 배포에는 `shared-all`과 `scripts-all`의 관련 검증이 필요하며, 변경이 여러 호환성 계약에 걸치면 전체 호환성 검사를 사용합니다. 담당 테스트는 [인스톨러 호환성 계약](../policies/installer-platform-compatibility-matrix.md)을 확인합니다. 정적 검사 통과는 실제 네이티브 호출이나 모델 행동의 근거가 아닙니다.
@@ -69,7 +65,7 @@ python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform 
 
 1. 기존 브랜치·검토 절차를 통해 검토된 배포 범위만 통합합니다. 배포를 위해 저장소를 새로 초기화하거나 이력을 재작성하지 않습니다.
 2. 필수 소스·설치·행동 근거가 후보에 적용되는지 확인하고 지원 근거가 없는 플랫폼이나 범위를 명시합니다.
-3. 승인된 commit·버전 tag·배포 산출물을 게시합니다. 배포와 pull request 설명에는 현재 패키지 동작·설치·검증·한계를 담으며 변경 이력은 commit 메시지에만 기록합니다.
+3. 승인된 commit·버전 tag·배포 산출물을 게시합니다. 배포 설명에는 현재 패키지 동작·설치·검증·한계를 담으며, [변경 이력](../../../CONTRIBUTING.md#pull-request-expectations)은 commit 메시지에만 기록합니다.
 4. 검토된 소스에서 양 언어 Wiki와 GitHub Pages를 게시하고 공개된 페이지가 의도한 후보와 일치하는지 확인합니다.
 5. 실제 CI와 게시 결과를 확인합니다. 로컬 commit, 대기 중인 배포나 접수된 업로드 요청은 공개 게시의 증거가 아닙니다.
 6. 배포·설치 경로가 바뀌었다면 임시 계정이나 컴퓨터의 새 복제본에서 영향받은 공개 설치 경로를 확인합니다. 무관한 개발 설치본은 보존합니다.
