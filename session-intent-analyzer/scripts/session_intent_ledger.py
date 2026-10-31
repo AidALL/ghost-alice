@@ -1476,6 +1476,8 @@ def reconcile_native_inputs(*, root: Path = DEFAULT_ROOT, platform: str, session
             if actor in CONTEXT_ACTORS:
                 context_event = json_digest(dict(event='context-input-resolved', platform=platform,
                     session_id=session_id, transport_observation_id=observation['transport_observation_id']))
+            # An app event delivered while Claude works keeps the human input and route, as a notification does.
+            if actor == 'sdk':
                 state['current_context_input_event_id'] = context_event
                 if isinstance(state.get('response_route'),dict):
                     state['response_route']['status'] = 'stale'

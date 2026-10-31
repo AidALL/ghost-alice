@@ -209,6 +209,19 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         self.assertEqual(self.binding(), first)
         with self.assertRaises(ValueError): core.record_turn(**self.coords, raw_user_input='Not a human transition', source='hook')
 
+    def test_app_event_does_not_clear_current_sdk_or_create_human_authority(self):
+        self.stage(); self.reconcile(); first = self.binding()
+        text = '<ci-monitor-event>Auto-fix enabled.</ci-monitor-event>'
+        core.stage_native_input(**self.coords, raw_input=text, prompt_id=None, transcript_path=str(self.log))
+        with self.log.open('a') as stream:
+            stream.write(json.dumps(dict(type='attachment', sessionId='current', entrypoint='sdk-cli', userType='external',
+                isSidechain=False, attachment=dict(type='queued_command', commandMode='prompt', prompt=text,
+                    source_uuid='source', timestamp='2026-10-31T15:34:35Z', delivery_id='delivery'))) + '\n')
+        state = self.reconcile()
+        self.assertFalse(state['pending_native_inputs'])
+        self.assertEqual(self.binding(), first)
+        with self.assertRaises(ValueError): core.record_turn(**self.coords, raw_user_input='Not a human transition', source='hook')
+
     def test_ambiguous_mismatched_or_changed_append_source_cannot_bind_context(self):
         self.stage(); self.append(copy.deepcopy(self.rows[-1]))
         self.assertTrue(self.reconcile()['pending_native_inputs'])

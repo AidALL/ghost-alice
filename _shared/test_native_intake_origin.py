@@ -226,19 +226,51 @@ class IntakeOriginQueueTests(unittest.TestCase):
                            intent_delta={'current_goal': 'Mid-turn correction'})
 
     def test_queued_app_event_is_context_without_wait_or_original(self):
-        self.human('Typed request.')
+        before = self.human('Typed request.')
         event_text = '<ci-monitor-event>Auto-fix enabled.</ci-monitor-event>'
         self.stage(event_text, shapes.queued_app_event(event_text))
         state = self.reconcile()
         self.assertEqual(state['pending_native_inputs'], [])
         self.assertEqual(state['native_input_waiting'], {})
-        self.assertTrue(state['current_context_input_event_id'])
+        self.assertEqual(state['latest_input_event_id'], before['latest_input_event_id'])
+        self.assertEqual(state['current_context_input_event_id'], '')
+        self.assertEqual(state['intake_status'], 'observed')
         self.assertEqual(self.events('native-input-resolved')[-1]['actor'], 'context')
         self.assertEqual(self.events('native-input-waiting'), [])
         with closing(sqlite3.connect(self.root / 'ghost-state.sqlite3')) as connection:
             self.assertIsNone(connection.execute('SELECT 1 FROM core_context_intakes').fetchone())
-        self.assert_context_refuses_writes(state)
+        ledger.record_turn(**self.coords, expected_input_event_id=state['latest_input_event_id'],
+                           intent_delta={'current_goal': 'The typed request keeps its authority'})
         self.assertIsNone(ledger.claim_native_input_notice(**self.coords))
+
+    def test_queued_app_event_keeps_the_human_route(self):
+        event = self.human('Push the branch and open the pull request.')['latest_input_event_id']
+        ledger.record_turn(**self.coords, expected_input_event_id=event, intent_delta={'acceptance_criteria': [
+            dict(id='AC1', summary='The pull request is open', source='user-said', admitted=True,
+                 work_unit_id='publish', contract_revision=1)]})
+        candidate = {
+            'schema_version': 'response-route.v1',
+            'routing_surface': {'response_mode': 'normal', 'boundary_contract': 'required',
+                                'reason': 'authorized publication'},
+            'work_units': [dict(work_unit_id='publish', contract_revision=1, kind='execution', admitted=True,
+                                owner={'platform': 'claude', 'session_id': SESSION})],
+            'selected_work_unit_ids': ['publish'],
+            'selected_criteria': [dict(work_unit_id='publish', contract_revision=1, criterion_id='AC1')],
+        }
+        ledger.record_response_route(**self.coords, expected_input_event_id=event, candidate=candidate,
+                                     boundary_ref='boundary-1')
+        event_text = '<ci-monitor-event>Auto-fix enabled.</ci-monitor-event>'
+        self.stage(event_text, shapes.queued_app_event(event_text))
+        state = self.reconcile()
+        self.assertEqual(state['response_route']['status'], 'ready')
+        self.assertEqual(ledger.read_response_route(**self.coords)['status'], 'ready')
+        ledger.record_response_route(**self.coords, expected_input_event_id=event, candidate=candidate,
+                                     boundary_ref='boundary-1')
+        criterion = next(c for c in state['acceptance_criteria'] if c['id'] == 'AC1')
+        ledger.mark_acceptance_criterion_met(**self.coords, criterion_id='AC1', expected_criterion=criterion,
+                                             expected_input_event_id=event, completion_check_digest='a' * 64)
+        criteria = ledger.read_session_state(**self.coords)['acceptance_criteria']
+        self.assertEqual(next(c for c in criteria if c['id'] == 'AC1')['status'], 'met')
 
     def test_queued_peer_hand_back_keeps_the_current_human_input(self):
         before = self.human('Typed request.')
