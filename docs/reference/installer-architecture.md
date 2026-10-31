@@ -171,7 +171,7 @@ Claude Code can expose native skill invocation and hook permissions, but those s
 
 Core hook transport preserves the firing native cwd as Core context; installation source and project-trust paths do not replace it.
 
-Managed hook commands and native trust entries must agree with the reviewed installed payload. A running host can retain its previously loaded registration. Verify adoption through an actual native callback after the appropriate reload; refer to [hook trust and reload](../getting-started/troubleshooting.md#native-hook-trust-and-reload). Installation state alone is not native execution evidence.
+Managed hook commands and native trust entries must agree with the reviewed installed payload. A running host can retain its previously loaded registration. Verify adoption through an actual native callback after the appropriate reload; refer to [hook trust and reload](../getting-started/troubleshooting.md#native-hook-trust-and-reload). The [session gate notes](../policies/session-gate-matrix.md#notes) list installed bytes and native execution as separate claims.
 
 ## State And Safety Model
 
@@ -180,10 +180,10 @@ The installer records what it changes instead of guessing during cleanup.
 | State path | Why it exists |
 | --- | --- |
 | `~/.ghost-alice/installed-payload.json` | The install record: every install location of both hosts, its source and the fingerprints of copied files, written in the same step as each placement |
-| `~/.ghost-alice/rollbacks/<txid>/` | What one publish replaced, the record as it was before it, and its journal; the next locked command restores a publish that stopped before its journal said done. The newest 20 finished publishes stay |
+| `~/.ghost-alice/rollbacks/<txid>/` | What one publish replaced, the record as it was before it, and its journal; the next locked command restores a publish that stopped before its journal said done. [Runtime state retention](repository-structure.md#runtime-state-retention) sets how many finished publishes stay |
 | `~/.ghost-alice/install-state/<platform>.json` | Records installer-owned targets and environment changes for status and uninstall |
 | `~/.ghost-alice/pending-merges/<platform>/` | Preserves the user's edits to Ghost-ALICE copy-mode skill files before the installer replaces them. It checks roots with the install marker and every root the current install replaces, even when that root's marker has disappeared; merge-companion and the user decide whether to merge. Folders that Ghost-ALICE does not install, such as the Claude app's `synced`, are never recorded |
-| `~/.ghost-alice/install/` | Keeps the install reports and event traces of the last 30 runs for audit and recovery |
+| `~/.ghost-alice/install/` | Keeps the install reports and event traces for audit and recovery; [runtime state retention](repository-structure.md#runtime-state-retention) sets how many runs stay |
 
 This is why update and uninstall are part of the installer architecture, not separate chores. A change that affects copied assets, hooks, or runtime config usually also affects status, doctor, pending merge behavior, and uninstall rollback.
 

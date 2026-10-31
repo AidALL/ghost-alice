@@ -35,7 +35,7 @@ The evaluation workflow supplies the scenario, execution trace, report and candi
 
 - A read-only evaluator pass must not mutate installed assets.
 - Do not promote `candidate-playbook.md` without an accepted verifier-result (`verifier-result.json`).
-- Required verification includes at least one candidate rejected for invalid input or missing evidence. That result supports refusal for that candidate and condition only; it does not establish the verifier’s general ability or overall quality. Reuse valid unchanged case evidence; every edit does not require a new rejected candidate.
+- Required verification includes at least one candidate rejected for invalid input or missing evidence. That result supports refusal for that candidate and condition only; it does not establish the verifier’s general ability or overall quality. Unchanged case evidence follows the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery).
 - If `verifier-result.json` has `accepted: false`, stop installed asset changes.
 
 ## Minimum verifier-result.json Shape

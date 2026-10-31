@@ -37,7 +37,7 @@ The machine gate index is [skill-catalog/session-gates.json](../../skill-catalog
 
 ## Turn Routing Contract
 
-Native prechecks remain observations. The assistant reuses them, selects the needed work, and applies merge-companion before affected skill changes or an explicitly requested backup review. Unrelated read-only lookup does not load that procedure or inspect the manifest again. A missing manual precheck precedes affected skill changes; an explicit defer leaves the entries undecided.
+[merge-companion](../../merge-companion/SKILL.md#entry-and-activation) sets when the current-session assistant checks the pending-merge manifest and reviews its entries.
 
 The current-session assistant routes every input, including a follow-up or status question, using current intent and continuing authority. A prior route is not the current input's route. The current-session assistant may separately apply skill-evolution to the same exact session for a report; this procedure neither feeds task-router nor dispatches work.
 
@@ -55,16 +55,16 @@ Runtime consumers use the public API with the exact session-receipt root/platfor
 
 1. The session-intent-analyzer SessionStart hook supplies the session receipt. The UserPromptSubmit hook records each input and adds model context only when that receipt was not delivered or intake failed. Core intake establishes exact canonical human input through direct Codex observation or trusted Claude reconciliation. Read-state remains a pure read. The current-session assistant applies task-router to select work; it separately applies skill-evolution when report-only analysis is required.
 2. The current-session assistant submits the normal route candidate to Core. Core Python code validates current input, ownership, admission and selected criteria before storing the ready projection.
-3. The current-session assistant follows any required boundary and owning workflow. The host enforces tool permission and executes permitted calls. PostToolUse retains strict audit.
+3. The current-session assistant follows any required boundary and owning workflow. [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns tool execution and permission enforcement to the native host. PostToolUse retains strict audit.
 4. At completion, the Stop observer calls Core's input/body-bound assessment and records the result; it blocks nothing.
 
-Tool-checkpoint runs at the before-tool stage (host `PreToolUse`/`BeforeTool`) and is not user-input intake. Tool payloads and audit metadata do not grant native permission. Installed configuration proves neither hook firing nor host execution; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
+Tool-checkpoint runs at the before-tool stage (host `PreToolUse`/`BeforeTool`) and is not user-input intake. Tool payloads and audit metadata do not grant native permission. The [Notes](#notes) list installed bytes and native execution as separate claims; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
 
 ## Dynamic Focus Contract
 
-The current-session assistant selects the subject of judgment: micro for an individual result or field; meso for a subtask or source-target mapping; macro for integrated output and cross-document consistency; meta for necessity, task definition or premise. A mismatch's observed location is not necessarily its cause. When investigation is needed, evidence may move focus wider, narrower or to another target at the same scope. Focus is independent of verification burden; these layers are neither an ascending sequence nor an expansion of authority. Meta review does not itself require a user question.
+The current-session assistant selects the subject of judgment from micro, meso, macro and meta as [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) defines them. When investigation is needed, evidence may move focus wider, narrower or to another target at the same scope. Meta review does not itself require a user question.
 
-When work selection must change, the current-session assistant applies task-router again using the affected result and contrary evidence. It compares the result with its relevant reference and investigates the cause far enough to select any needed authorized correction. It can retain an unresolved detail or omit nonessential work when the objective and required dependencies are unaffected; it does not create a recovery task merely because a mismatch exists. Required criteria still need positive support, including for the combined result. Mandatory checks remain required. A discretionary check runs only when its attainable outcomes can change the next decision; the evidence-selection owner below defines the stopping rule. The static calls graph does not prescribe repeated runtime checks.
+When work selection must change, the current-session assistant applies task-router again using the affected result and contrary evidence. It compares the result with its relevant reference and investigates the cause far enough to select any needed authorized correction. It can retain an unresolved detail or omit nonessential work when the objective and required dependencies are unaffected; it does not create a recovery task merely because a mismatch exists. Required criteria still need positive support, including for the combined result. [Evidence selection and stop gate](../../coding-convention/verification-before-completion/SKILL.md#evidence-selection-and-stop-gate) sets which checks are required and when an additional check runs. The static calls graph does not prescribe repeated runtime checks.
 
 ## Routing Surface Contract
 
@@ -72,7 +72,7 @@ The current-session assistant applies session-intent-analyzer to express semanti
 
 The current-session assistant applying task-router preserves the primary request and terminal objective. Investigation and worktree inspection remain means unless requested as deliverables.
 
-[Routing details](../../task-router/references/routing-details.md) separate a direct answer (`direct-response`) and a confirmation question (`clarification-only`) from work. A general why/how premise and ambient workspace do not authorize local diagnosis. A status question or correction normally steers unfinished authorized work; an explicit stop/pause governs continuation. A direct answer uses supplied conversation, performs no agent-side tools or metadata repair and emits only resolved content; a confirmation question takes the form the common contract's Session Intent section sets. That condition does not prohibit authorized route registration on a work completion path.
+[Routing details](../../task-router/references/routing-details.md) separate a direct answer (`direct-response`) and a confirmation question (`clarification-only`) from work. A general why/how premise and ambient workspace do not authorize local diagnosis. A confirmation question takes the form the common contract's Session Intent section sets. The contract's [Work Selection](../../platforms/common-governance.md#work-selection) section sets the direct-answer condition: the answer uses no tool and registers no route. That condition does not prohibit authorized route registration on a work completion path.
 
 ## Work-Impact Projection Contract
 
@@ -91,11 +91,11 @@ Decision-relevant routing guidance is owned by [task-router](../../task-router/S
 
 [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md#completion-check-format) owns the shared completion-check and partial-check formats and their criterion/claim/evidence mapping. Core completion acceptance requires authenticated review of the claims, original sources and complete response under the current owned route. Skill loading remains workflow guidance and audit activity, not a separate acceptance prerequisite. Finalized completion requires supported verdicts with no unverified criteria. A partial-success report retains the full contract and identifies unresolved criteria; it cannot present the successful subset as whole-task completion.
 
-The current-session assistant uses valid unchanged proof at its original source/time. A formatting or route error does not create a new business-verification requirement. A displayed trace does not establish proof; strict internal audit and actual workflow evidence remain required. Control names and enum values stay English in both language editions.
+A displayed trace does not establish proof; strict internal audit and actual workflow evidence remain required.
 
 ## tool-checkpoint Visible Surface
 
-The common contract's io-trace Transparency Rule owns checkpoint visibility. The current-session assistant surfaces a checkpoint when its result changes authority, the next decision or required verification. It reuses unchanged evidence and reads only material that can affect the decision. A receipt or a healthy tool call alone does not require another message.
+The common contract's io-trace Transparency Rule owns checkpoint visibility.
 
 ## tool-checkpoint Batch / Continuation Compression
 

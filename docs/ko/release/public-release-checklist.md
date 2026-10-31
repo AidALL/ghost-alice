@@ -30,7 +30,7 @@ Language: [🇺🇸 English](../../release/public-release-checklist.md) | 🇰�
 
 ## Source Verification
 
-배포 담당자는 후보가 영향을 주는 계약으로 검증 계획을 구성합니다. 변경 없는 유효한 근거는 원래 출처와 검증 시각으로 재사용합니다. 새 상태 질문, 문서 편집이나 기록 복구 때문에 이미 검증한 업무를 반복하지 않습니다. 필수 검증이 없으면 해당 기준은 미해결로 남습니다.
+배포 담당자는 후보가 영향을 주는 계약으로 검증 계획을 구성합니다. 변경 없는 근거는 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)대로 재사용합니다. 필수 검증이 없으면 해당 기준은 미해결로 남습니다.
 
 사용 가능한 소스 검사는 다음과 같습니다.
 
@@ -48,14 +48,14 @@ python3 scripts/run_installer_compat_tests.py --list
 
 설치된 실행 환경을 주장하려면 후보 설치의 출처와 [실행 점검 절차](../policies/live-smoke-regression.md)의 실제 네이티브 훅 관측을 보존합니다. 디스크의 훅 설정, 네이티브 신뢰와 실행 중인 호스트의 반영은 별개입니다. 필요하면 [재로드 복구 안내](../getting-started/troubleshooting.md#native-hook-trust-and-reload)를 따릅니다.
 
-거버넌스 점검은 실행 연결과 제어 표시를 입증하며 별도의 비공개 행동 검사를 대신하지 않습니다. 정규 인스톨러로 후보를 설치하고 인스톨러 소유 매니페스트를 갖춘 임시 환경에서, 지원을 주장하는 각 설치 플랫폼에 새 세션 평가 컨트롤러를 사용합니다. 자리표시자를 배포 담당자의 사례·평가 도구 경로로 바꾸며 평가 전용 비공개 자료는 대상 명령과 환경에 전달하지 않습니다.
+[검증 계층](../policies/live-smoke-regression.md#verification-layers)이 거버넌스 점검과 비공개 행동 검사를 구분합니다. 정규 인스톨러로 후보를 설치하고 인스톨러 소유 매니페스트를 갖춘 임시 환경에서, 지원을 주장하는 각 설치 플랫폼에 새 세션 평가 컨트롤러를 사용합니다. 자리표시자를 배포 담당자의 사례·평가 도구 경로로 바꾸며 평가 전용 비공개 자료는 대상 명령과 환경에 전달하지 않습니다.
 
 ```bash
 python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform claude --subject-command '["claude"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-claude.json
 python3 -m _shared.blind_behavior --case <sealed-held-out-case.json> --platform codex --subject-command '["codex"]' --evaluator-command '["<trusted-evaluator>"]' --record .tmp/release/blind-codex.json
 ```
 
-필수 기록에는 종료 코드 0, `verdict=pass`, 의도한 설치 플랫폼 출처와 컨트롤러가 계산한 suite digest가 있어야 합니다. 요청 원문, rubric, 정답, 대상 응답과 평가 전용 비공개 문구는 저장하지 않습니다. 한 플랫폼의 통과는 다른 플랫폼의 근거가 아닙니다. 자동 비공개 평가는 사람이 깨끗한 새 터미널에서 수행하는 수락 검사를 대신하지 않습니다. 변경 없는 유효한 근거는 유지할 수 있으며, 없거나 변경의 영향을 받은 근거는 해당 배포 주장을 하기 전에 확보합니다.
+필수 기록에는 종료 코드 0, `verdict=pass`, 의도한 설치 플랫폼 출처와 컨트롤러가 계산한 suite digest가 있어야 합니다. 기록에 저장할 수 있는 항목은 [비공개 행동 기록](../policies/live-smoke-regression.md#blind-behavior-record)이 정합니다. 한 플랫폼의 통과는 다른 플랫폼의 근거가 아닙니다. 자동 비공개 평가가 대신하지 못하는 검사는 [자동 검증 경계](../policies/live-smoke-regression.md#automated-verification-boundary)가 정합니다. 변경 없는 근거는 [근거 재사용 규칙](../../../architecture_ko.md#근거와-네이티브-표시)을 따르며, 없거나 변경의 영향을 받은 근거는 해당 배포 주장을 하기 전에 확보합니다.
 
 ## License And Private Material
 

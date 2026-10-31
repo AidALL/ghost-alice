@@ -171,7 +171,7 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 
 일반 Core hook 전달은 실제 native cwd를 Core 맥락으로 유지합니다. 설치 source와 프로젝트 신뢰 경로는 이를 대체하지 않습니다.
 
-관리 훅 명령과 네이티브 신뢰 항목은 검토한 설치 내용과 일치해야 합니다. 실행 중인 호스트가 이전 등록을 유지할 수 있으므로 적절히 재로드한 뒤 실제 네이티브 콜백으로 반영을 확인합니다. [훅 신뢰와 재로드](../getting-started/troubleshooting.md#native-hook-trust-and-reload)를 참고해 주세요. 설치 상태만으로 네이티브 실행을 입증하지 않습니다.
+관리 훅 명령과 네이티브 신뢰 항목은 검토한 설치 내용과 일치해야 합니다. 실행 중인 호스트가 이전 등록을 유지할 수 있으므로 적절히 재로드한 뒤 실제 네이티브 콜백으로 반영을 확인합니다. [훅 신뢰와 재로드](../getting-started/troubleshooting.md#native-hook-trust-and-reload)를 참고해 주세요. [세션 게이트 Notes](../policies/session-gate-matrix.md#notes)는 설치된 바이트와 네이티브 실행을 서로 다른 주장으로 나열합니다.
 
 ## State And Safety Model
 
@@ -180,10 +180,10 @@ Claude Code의 native skill invocation과 hook permission은 저장소 밖의 �
 | State path | Why it exists |
 | --- | --- |
 | `~/.ghost-alice/installed-payload.json` | 설치 기록입니다. 두 호스트의 모든 설치 위치, 출처, 복사한 파일의 지문을 배치와 같은 단계에서 기록합니다 |
-| `~/.ghost-alice/rollbacks/<txid>/` | 게시 한 번이 교체한 원래 파일, 게시 전의 기록, 저널을 보관합니다. 저널이 done을 기록하기 전에 중지된 게시는 다음 잠금 명령이 복원합니다. 끝난 게시는 최근 20개만 남깁니다 |
+| `~/.ghost-alice/rollbacks/<txid>/` | 게시 한 번이 교체한 원래 파일, 게시 전의 기록, 저널을 보관합니다. 저널이 done을 기록하기 전에 중지된 게시는 다음 잠금 명령이 복원합니다. 완료된 게시를 남기는 개수는 [런타임 상태 보존](repository-structure.md#runtime-state-retention)이 정합니다 |
 | `~/.ghost-alice/install-state/<platform>.json` | 인스톨러가 관리한 대상과 환경 변경을 기록하며 상태 조회와 제거 명령이 읽습니다 |
 | `~/.ghost-alice/pending-merges/<platform>/` | 인스톨러가 Ghost-ALICE 복사 설치 스킬 파일을 바꾸기 전에 사용자 수정본을 보존합니다. 설치 표식이 있는 폴더와, 이번 설치가 바꾸는 폴더는 표식이 사라졌어도 확인하며, merge-companion과 사용자가 병합 여부를 결정합니다. Claude 앱의 `synced`처럼 Ghost-ALICE가 설치하지 않는 폴더는 기록하지 않습니다 |
-| `~/.ghost-alice/install/` | 감사와 복구에 필요한 설치 결과와 이벤트를 최근 30회 실행분만 보관합니다 |
+| `~/.ghost-alice/install/` | 감사와 복구에 필요한 설치 결과와 이벤트를 보관하며, 보관하는 실행 수는 [런타임 상태 보존](repository-structure.md#runtime-state-retention)이 정합니다 |
 
 설치된 파일, 훅이나 실행 설정을 바꾸는 개발자는 상태 조회, 진단, 병합 대기 처리와 제거 복원에 미치는 영향도 확인해야 합니다. 이 절차들은 같은 설치 기록에 의존합니다.
 

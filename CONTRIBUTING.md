@@ -94,13 +94,13 @@ bash install.sh --status
 
 Unless you clearly mark a submission as "Not a Contribution", contributions submitted through issues, pull requests, discussions, or other project-managed channels are submitted for inclusion in Ghost-ALICE OS under the Apache License, Version 2.0.
 
-Do not submit code, documentation, images, datasets, generated content, or reference material unless you have the right to contribute it under terms compatible with this project. If your change includes third-party material, identify the source, license, copyright notice, and local path in the pull request.
+Do not submit code, documentation, images, datasets, generated content, or reference material unless you have the right to contribute it under terms compatible with this project. If your change includes third-party material, identify in the pull request the four provenance fields that the [public release checklist](docs/release/public-release-checklist.md#license-and-private-material) requires for included third-party material.
 
 This project does not currently require a separate CLA or DCO sign-off. If that policy changes, it must be documented before maintainers require it for new pull requests.
 
 ## Validation Commands
 
-Run the focused checks that match your change. For a public-readiness or release pull request, account for every required check using fresh results or valid unchanged evidence at its original source and time. Rerun the checks affected by actual changes, contradictions or an explicit recheck request.
+Run the focused checks that match your change. For a public-readiness or release pull request, account for every required check with fresh results or evidence reused under the [evidence reuse rule](architecture.md#evidence-and-native-delivery). Rerun the checks affected by actual changes, contradictions or an explicit recheck request.
 
 ```bash
 python3 scripts/validate_public_surfaces.py

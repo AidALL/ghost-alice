@@ -18,13 +18,6 @@ Core 0.5.1 uses the current response-route and completion contract. Apache-2.0.
 
 The responding model keeps the user's objective and constraints, performs authorized work, and judges whether contrary evidence affects a required result or dependency. It corrects affected work when needed and preserves supported results and unresolved requirements.
 
-1. Input hooks record the current human input without storing the raw prompt. The responding model selects authorized work; a host tool passes that selection to Core for validation and storage.
-2. The model asks the host to run the needed tools and reads their actual observations. Valid unchanged evidence retains its original source and verification time.
-3. The model judges each claim against original evidence, then the complete answer against the user's objective and constraints. Core authenticates and records both judgments, returning status and references.
-4. The model submits its answer through the native host. Core's Stop guard checks the submitted review records. Unresolved required work remains visible.
-
-A route or saved plan does not grant permission. A supported answer can accurately report unfinished work. New input reopens routing without invalidating unchanged evidence; recording errors do not require replaying the business operation.
-
 See the [Core architecture](./architecture.md) for the standalone flow and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract.
 
 ## Quick Start
@@ -66,8 +59,6 @@ For native commands, custom addon sources, platform selection and removal, use t
 
 - Ghost-ALICE OS is a governance operating layer for agent sessions, not a general-purpose operating system.
 - User intent, boundaries, verification criteria, and install state are first-class surfaces.
-- The responding model selects current work from recorded intent; Core validates the submitted route before host tools execute permitted actions.
-- Completion claims require owning evidence; valid unchanged proof is reused at its original source and time.
 - The installer tracks managed surfaces and avoids broad deletion when ownership cannot be proven.
 
 Agent visibility command surface:

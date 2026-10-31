@@ -18,7 +18,7 @@ This procedure runs the same small request in real agent runtimes to verify that
 
 ## Purpose
 
-- Run the same input on the claimed installed Claude Code and Codex targets. Consult `skill-catalog/platform-adapters.json` for the supported adapter set; `terminal-only` is a manual fallback.
+- Run the same input on the claimed installed Claude Code and Codex targets. [Platform adapter compliance](platform-adapter-compliance.md#states) defines the adapter states.
 - Keep the request small and reversible, such as reading the first 10 README lines.
 - Verify runtime gate observability, not the quality of the summary itself.
 - Save experiment notes as a smoke record, but do not store raw prompts, secrets, or full transcripts.
@@ -52,9 +52,9 @@ Each smoke record captures whether these signals were observed:
 - `boundary-contract`: follows the current routing-surface decision; executed read-only verification may require a boundary contract. Record n/a only when that route does not require one.
 - `tool checkpoint`: follows the common contract's io-trace Transparency Rule; a routine read-only call needs no checkpoint.
 - `skill activation permission`: Claude Code is not blocked by a shortened allowlist that covers only core gates.
-- `verification-before-completion`: the workflow connects each closure claim to applicable evidence, preserving the original source and time for valid unchanged proof.
+- `verification-before-completion`: the workflow connects each closure claim to applicable evidence and reuses unchanged proof under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery).
 - `internal audit`: tool access remains auditable without requiring printed `[io-trace]`.
-- pending merge precheck: before changing an installed skill, re-check the current platform manifest; the session-start observation does not replace that check.
+- pending merge precheck: the check that [merge-companion](../../merge-companion/SKILL.md#entry-and-activation) requires before an installed skill changes.
 
 ## Verification Layers
 

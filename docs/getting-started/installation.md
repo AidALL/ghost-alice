@@ -218,7 +218,7 @@ Claude Code and Codex hook-enabled installs require a resolvable Node.js runtime
 
 Auto-reflection applies to skill bodies such as `SKILL.md`, `references/`, and `scripts/`. Hooks, bootstrap files, permission policy, and `_shared/` are installer-managed runtime surfaces, so rerun the installer when they change.
 
-Installation on disk and adoption by a running host are separate. After a hook command changes, confirm its native trust entry and observe a subsequent native callback; use the host's reload or full restart controls if it retains the previous registration. See [native hook trust and reload](./troubleshooting.md#native-hook-trust-and-reload). Do not repeat unchanged business verification to check host adoption.
+Installation on disk and adoption by a running host are separate. After a hook command changes, confirm its native trust entry and observe a subsequent native callback; use the host's reload or full restart controls if it retains the previous registration. See [native hook trust and reload](./troubleshooting.md#native-hook-trust-and-reload). Reuse unchanged business verification under the [evidence reuse rule](../../architecture.md#evidence-and-native-delivery) instead of repeating it to check host adoption.
 
 ### Core and addon transitions
 
@@ -251,7 +251,7 @@ A full install deploys:
 - Claude `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md` global bootstrap
 - Codex `~/.codex/AGENTS.md` loader and managed `~/.codex/ghost-alice-governance.md` common contract
 - the install record `~/.ghost-alice/installed-payload.json`: one file for both hosts that names every install location, its source and the fingerprints of copied files, written in the same step as each placement
-- `~/.ghost-alice/rollbacks/<txid>/`: the files one placement replaced, the install record as it was before, and the placement's journal; the next locked installer command restores a placement that stopped halfway, and the newest 20 finished folders are kept
+- `~/.ghost-alice/rollbacks/<txid>/`: the files one placement replaced, the install record as it was before, and the placement's journal; the next locked installer command restores a placement that stopped halfway, and [runtime state retention](../reference/repository-structure.md#runtime-state-retention) sets how many finished folders stay
 - support state for install-state, pending merges, and uninstall reports
 
 An installation that registered the optional context gateway: the install record's `service` section names the service's code root, `~/.ghost-alice/runtime/current`, and its three service files. The runtime placement (`_shared` and the companion script `session-intent-analyzer/scripts/session_intent_ledger.py`) stops the service before its files change and starts it after. The Codex copy `~/.agents/skills/_shared` and the Claude links are install targets, not the service's code, so their placement calls no service effect. `bash install.sh` alone is the update; no gateway refresh precedes it. The install prints one `Context gateway:` line with the service's runtime root and whether the service is running. An installation an earlier installer registered gets its `service` section once from the gateway's installation receipt, at the first install, repair or uninstall.
