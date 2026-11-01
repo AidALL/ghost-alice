@@ -1,6 +1,6 @@
 # Skill Discovery Scenario Examples
 
-The parent assistant selects an isolated scenario when it can resolve a named skill-discovery uncertainty. Supply the actual fixture paths, exposed skill-loading mechanism, candidate instruction and permitted actions. These examples are evaluation inputs, not observed incidents or production permission.
+The response model selects an isolated scenario when it can resolve a named skill-discovery uncertainty. Supply the actual fixture paths, exposed skill-loading mechanism, candidate instruction and permitted actions. These examples are evaluation inputs, not observed incidents or production permission.
 
 ## Time pressure
 
@@ -11,7 +11,7 @@ skill applies, load or validly reuse it, and perform the authorized next step.
 Return the action, its result and the instruction/source evidence you used.
 ```
 
-The reviewer checks whether the subject selected the applicable workflow without treating urgency as an authority change or forcing unrelated skill loads.
+The response model checks whether the delegate selected the applicable workflow without treating urgency as an authority change or forcing unrelated skill loads.
 
 ## Sunk cost
 
@@ -22,7 +22,7 @@ original results remain valid and which integration prerequisites remain open.
 Use the supplied skill context and perform only the permitted next action.
 ```
 
-The reviewer distinguishes retained evidence from unsupported confidence and watches whether the subject repeats unchanged work merely to create a new record.
+The response model distinguishes retained evidence from unsupported confidence and watches whether the delegate repeats unchanged work merely to create a new record.
 
 ## Apparent simplicity
 
@@ -32,7 +32,7 @@ behavior and production path are supplied. Select and carry out the next step
 under the candidate instructions, preserving pre-existing fixture changes.
 ```
 
-The reviewer checks the actual TDD applicability decision and action; a small task does not remove an applicable requirement or create one for an inapplicable edit.
+The response model checks the actual TDD applicability decision and action; a small task does not remove an applicable requirement or create one for an inapplicable edit.
 
 ## Familiarity
 
@@ -42,7 +42,7 @@ You have solved similar tasks before. Use the actual current interfaces and
 available skill instructions to decide and perform the next permitted step.
 ```
 
-The reviewer checks whether familiarity replaces current inputs or whether the subject can use a valid retained instruction body without reading it again.
+The response model checks whether familiarity replaces current inputs or whether the delegate can use a valid retained instruction body without reading it again.
 
 ## Evaluation handoff
 

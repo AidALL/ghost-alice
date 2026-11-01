@@ -8,11 +8,11 @@ compatibility:
 
 # Compact Handoff
 
-The current-session assistant uses this skill when long context, an agent transfer or session compaction could lose task state. This skill does not trigger compaction, install hooks or create background summaries.
+The response model uses this skill when long context, an agent transfer or session compaction could lose task state. This skill does not trigger compaction, install hooks or create background summaries.
 
 ## Record the handoff
 
-The current-session assistant fills the following block from retained task state and original evidence. When an authorized handoff artifact already exists, it writes the block there and invokes `python3 <loaded-skill-directory>/scripts/compact_handoff.py <absolute-handoff-file> --json` through the exposed shell tool. Otherwise it keeps the block in the host's handoff/task context and sends that same text to `python3 <loaded-skill-directory>/scripts/compact_handoff.py - --json` on stdin; do not create a report merely to obtain a filename. The validator returns `status`, `errors` and `warnings`. `status=fail` or exit 1 requires correcting the identified fields before submitting the handoff; a pass confirms only that structural check.
+The response model fills the following block from retained task state and original evidence. When an authorized handoff artifact already exists, it writes the block there and invokes `python3 <loaded-skill-directory>/scripts/compact_handoff.py <absolute-handoff-file> --json` through the exposed shell tool. Otherwise it keeps the block in the host's handoff/task context and sends that same text to `python3 <loaded-skill-directory>/scripts/compact_handoff.py - --json` on stdin; do not create a report merely to obtain a filename. The validator returns `status`, `errors` and `warnings`. `status=fail` or exit 1 requires correcting the identified fields before submitting the handoff; a pass confirms only that structural check.
 
 ```text
 [compact-handoff]
@@ -26,7 +26,7 @@ The current-session assistant fills the following block from retained task state
 - rollback: <nearest concrete rollback path>
 ```
 
-For an unresolved repair, the current-session assistant carries the failure, affected criterion, stage, target, cumulative failed rounds, first-five reassessment status, cause hypothesis and remaining resource allowance in in-progress or next-step. It preserves original evidence and its source/time. Apply systematic-debugging's incident-accounting procedure to those transported values; the handoff is not a new incident or resource allowance.
+For an unresolved repair, the response model carries the failure, affected criterion, stage, target, cumulative failed rounds, first-five reassessment status, cause hypothesis and remaining resource allowance in in-progress or next-step. It preserves original evidence and its source/time. Apply systematic-debugging's incident-accounting procedure to those transported values; the handoff is not a new incident or resource allowance.
 
 ## Pause compaction
 
@@ -34,7 +34,7 @@ Before requesting voluntary compaction or transferring a task, preserve the unre
 
 ## Resume
 
-1. The sending assistant passes the validated block through the host's actual context-handoff facility, or retains it in the existing authorized task context when no explicit facility exists. After compaction, the receiving current-session assistant reads objective, in-progress and next-step from that supplied block. A delegated assistant receives only the context needed for its explicitly assigned subtask.
+1. The response model that hands off the task passes the validated block through the host's actual context-handoff facility, or retains it in the existing authorized task context when no explicit facility exists. After compaction, the response model that resumes the task reads objective, in-progress and next-step from that supplied block. A delegate receives only the context needed for its explicitly assigned subtask.
 2. It compares the actual diff for files-changed with the handoff.
 3. If the most recent test failed, it follows systematic-debugging for that failure.
 4. Before a closure claim, it follows verification-before-completion.
@@ -43,4 +43,4 @@ Before requesting voluntary compaction or transferring a task, preserve the unre
 
 All eight fields are required. The validator rejects secret-like values without printing them. A handoff involving live config, such as platform settings/hooks or installed skill directories, requires a concrete rollback path. A tests-run value of not run or pending produces a warning: compaction may proceed, but completion is not established.
 
-The current-session assistant must not invoke /compact automatically, create extra reports solely for compaction or present the handoff as completion evidence. Proof decisions belong to `../coding-convention/verification-before-completion/SKILL.md`.
+The response model must not invoke /compact automatically, create extra reports solely for compaction or present the handoff as completion evidence. Proof decisions belong to `../coding-convention/verification-before-completion/SKILL.md`.

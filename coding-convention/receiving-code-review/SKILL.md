@@ -7,7 +7,7 @@ compatibility:
 
 # Receiving Code Review
 
-The implementing agent evaluates each review suggestion against the user's requirements and actual code before changing the implementation. Technical evidence governs acceptance; confidence, severity labels and praise do not.
+The response model evaluates each review suggestion against the user's requirements and actual code before changing the implementation. Technical evidence governs acceptance; confidence, severity labels and praise do not.
 
 ## Evaluate feedback
 
@@ -28,7 +28,7 @@ When posting a GitHub inline reply is authorized, reply on the original comment 
 
 ## Example
 
-A reviewer proposes removing a compatibility fallback. The agent checks the accepted minimum platform version and the replacement API's requirement. If the fallback remains necessary, the agent cites that evidence and retains it. If the current fallback has a separate defect, the agent fixes that defect within the existing support contract. Dropping old-platform support requires the user's decision when that changes an accepted requirement.
+A reviewer proposes removing a compatibility fallback. The response model checks the accepted minimum platform version and the replacement API's requirement. If the fallback remains necessary, it cites that evidence and retains it. If the current fallback has a separate defect, it fixes that defect within the existing support contract. Dropping old-platform support requires the user's decision when that changes an accepted requirement.
 
 ## Failure modes and result
 

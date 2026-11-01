@@ -7,7 +7,7 @@ compatibility:
 
 # Systematic Debugging
 
-The implementing agent investigates an observed failure, tests a causal hypothesis and corrects the supported cause. Apply this workflow before proposing a fix for a failure whose cause and sufficient correction depth need investigation, and for repair limits. A symptom alone does not identify its cause.
+The response model investigates an observed failure, tests a causal hypothesis and corrects the supported cause. Apply this workflow before proposing a fix for a failure whose cause and sufficient correction depth need investigation, and for repair limits. A symptom alone does not identify its cause.
 
 ## Investigation
 
@@ -29,17 +29,17 @@ If evidence identifies an environmental or external failure that cannot be remov
 
 ## Incident accounting and continuation
 
-This section owns failed-round accounting for the family. The assistant investigating the failure records the unresolved failure, affected criterion, stage and target in its existing task context or handoff to the next assistant. Business failures and evidence-recording failures are separate incidents even when their error text matches.
+This section owns failed-round accounting for the family. The response model investigating the failure records the unresolved failure, affected criterion, stage and target in its existing task context or in its handoff. Business failures and evidence-recording failures are separate incidents even when their error text matches.
 
 The initial observed failure counts as zero failed repair rounds. Increment the count only after a corrective change and a completed relevant observation show that the same failure remains unresolved. A failed diagnostic, unavailable infrastructure or inconclusive observation consumes its actual resources but is not a failed business repair round.
 
 Keep the incident's cumulative count across agents and handoffs. An unknown cause does not justify renaming the incident or resetting the count. Demonstrated resolution followed by recurrence creates a linked new incident.
 
-After five failed repair rounds and before another correction attempt, the agent must complete the first premise reassessment: use the accumulated observations to reconsider the causal hypothesis, target mapping, design and verification method. Five is a maximum before that reassessment, not a minimum retry count or a limit on the whole task. Once the reassessment is recorded, counts six or seven do not alone demand another reassessment; new contrary evidence or an active stopping condition can.
+After five failed repair rounds and before another correction attempt, the response model must complete the first premise reassessment: use the accumulated observations to reconsider the causal hypothesis, target mapping, design and verification method. Five is a maximum before that reassessment, not a minimum retry count or a limit on the whole task. Once the reassessment is recorded, counts six or seven do not alone demand another reassessment; new contrary evidence or an active stopping condition can.
 
-To continue after reassessment, identify a distinguishable hypothesis, the observation that can discriminate it, an explicit additional-attempt or resource allowance, and a stopping condition. The allowance must fit the user’s remaining resource limit and, for a delegated task, the parent assistant’s remaining allocation to that task. Reassessment resets neither attempts nor consumed resources. Exhaustion suspends that incident's further attempts. Five failures alone do not require a human decision.
+To continue after reassessment, identify a distinguishable hypothesis, the observation that can discriminate it, an explicit additional-attempt or resource allowance, and a stopping condition. The allowance must fit the user’s remaining resource limit and, for a delegated task, the parent’s remaining allocation to that task. Reassessment resets neither attempts nor consumed resources. Exhaustion suspends that incident's further attempts. Five failures alone do not require a human decision.
 
-Boundary-contract owns authorization and the renewal of agent-declared implementation limits. Verification-before-completion owns useful checks, required evidence and proof reuse. Its response review reference owns recording-specific recovery: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
+Boundary-contract owns authorization and the renewal of self-declared implementation limits. Verification-before-completion owns useful checks, required evidence and proof reuse. Its response review reference owns recording-specific recovery: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
 
 Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
 

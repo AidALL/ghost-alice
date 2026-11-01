@@ -1,6 +1,6 @@
 ---
 name: session-intent-analyzer
-description: "Records the assistant's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues."
+description: "Records the response model's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues."
 compatibility:
   - "Python 3.11+ standard library"
   - "hook-capable environments plus hookless/manual fallback"
@@ -14,7 +14,7 @@ The native intake hook records input identity without retaining raw prompt text.
 
 ## Current intent and references
 
-First identify the stored fact that can change the next decision. The supplied request and the session-start receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work.
+First identify the stored fact that can change the next decision. The supplied request and the session receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work.
 
 For a required intent lookup, use the exact receipt coordinates with `scripts/session_intent_ledger.py --read-intent`. The result contains routing keywords, their original input binding, the current input/revision, and JSON pointers to detailed state. Keywords do not establish work completion or current applicability by themselves.
 

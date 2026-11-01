@@ -1,14 +1,14 @@
-# Code Reviewer Assignment
+# Code Review Assignment
 
-The parent assistant assigns this bounded review to a delegated assistant and receives its findings.
+The parent assigns this bounded review to a delegate and receives its findings.
 
-The parent assistant fills this assignment with the accepted requirements and exact review target, then sends it through the host's exposed agent API. The reviewer inspects code; the implementer's summary is context, not evidence.
+The parent fills this assignment with the accepted requirements and exact review target, then sends it through the host's exposed agent API. The delegate inspects code; the implementation summary is context, not evidence.
 
 ## Assignment inputs
 
 Supply the implemented behavior, accepted plan/requirements, source checkout, base and head commits, and any separately identified uncommitted diff. For work prepared for publication, include finishing-a-development-branch's workflow/job inventory, tested tree, local results and unavoidable runner gaps.
 
-## Reviewer procedure
+## Review procedure
 
 1. Inspect the actual diff and relevant surrounding code. For a committed range use `git diff --stat BASE..HEAD` and `git diff BASE..HEAD`, replacing both refs with the supplied validated commits. Inspect an identified uncommitted target with the appropriate working-tree diff instead.
 2. Map changed behavior to the accepted requirements. Identify missing requirements, unauthorized additions and compatibility changes.

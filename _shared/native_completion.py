@@ -21,9 +21,9 @@ def _source_status_issue(reasons, *, explanation=False):
     """Describe observed source state without replacing the assistant's judgment."""
     observations = {
         'source-changed': ('Original observation bytes differ from the reviewed digest. '
-            'The current-session assistant compares only the affected claims with the changed source under verification-before-completion.'),
+            'The response model compares only the affected claims with the changed source under verification-before-completion.'),
         'source-unavailable': ('An original observation source could not be read. '
-            'The current-session assistant keeps affected acceptance pending until that source or authenticated retained proof is available for the affected review.'),
+            'The response model keeps affected acceptance pending until that source or authenticated retained proof is available for the affected review.'),
     }
     observed = ' '.join(f'{reason}: {observations[reason]}' for reason in sorted(set(reasons)))
     acceptance = 'Response' if explanation else 'Completion'
@@ -114,7 +114,7 @@ consumers obtain it directly from this Core API and check their input binding.
                 review_target = 'source_status'
             elif reason in {'response-unbound', 'response-unsupported', 'criterion-unbound'}:
                 review_issue = (f'{reason}: '
-                    'The current-session assistant follows verification-before-completion, section Prepare and record the response review, for this exact explanation and its original sources. '
+                    'The response model follows verification-before-completion, section Prepare and record the response review, for this exact explanation and its original sources. '
                     'Keep the review internal; do not submit completion controls for this explanation.')
             elif reason in {'response-assessment-required', 'route-unavailable'}:
                 # A review recorded for this input must cover the delivered text;
@@ -122,7 +122,7 @@ consumers obtain it directly from this Core API and check their input binding.
                 from completion_assessment import reviewed_for_input
                 if event is not None and reviewed_for_input(source, event, transaction=transaction):
                     review_issue = (f'{reason}: A recorded review binds this input but not this exact answer. '
-                        'The current-session assistant follows verification-before-completion, section Prepare and record the response review, for the delivered text.')
+                        'The response model follows verification-before-completion, section Prepare and record the response review, for the delivered text.')
             elif reason is None and context_issue is None:
                 context_issue = str(exc)
     selected = select_completion_route(context, dict(text=text, phase=phase),
@@ -137,7 +137,7 @@ consumers obtain it directly from this Core API and check their input binding.
             repair_target = review_target
         # A completion or partial claim is judged against the current owned contract.
         if issue is None and (marker or selected['required_completion_check']) and selected['route_binding'] != 'current':
-            issue = ('route-unavailable: The current-session assistant must use task-router to register the current '
+            issue = ('route-unavailable: The response model must use task-router to register the current '
                 'response-route through Core before submitting evidence. Retain existing proof; '
                 'a missing route does not invalidate the business result.')
             repair_target = 'response_route'

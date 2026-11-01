@@ -1,6 +1,6 @@
 # Verify-Or-Reuse Contract
 
-This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude and Codex use the same contract; platform adapters only map tool names. The executable form is `scripts/verify_or_reuse.py` in this skill directory.
+This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude and Codex use the same contract; [Host Tool Names](#host-tool-names) maps their different tool names. The executable form is `scripts/verify_or_reuse.py` in this skill directory.
 
 ## Contents
 
@@ -14,7 +14,7 @@ This reference is the canonical semantic contract for deciding whether a claim a
 - [Authoritative Copy](#authoritative-copy)
 - [Restatement](#restatement)
 - [Confirmed Flaw Propagation](#confirmed-flaw-propagation)
-- [Platform Adapters](#platform-adapters)
+- [Host Tool Names](#host-tool-names)
 - [Deterministic Helper](#deterministic-helper)
 - [Conversation Audit Template](#conversation-audit-template)
 - [Worked Cases](#worked-cases)
@@ -24,7 +24,7 @@ This reference is the canonical semantic contract for deciding whether a claim a
 
 ## Purpose
 
-Verification is decided by actual mutation authority and observed mutation events, not by the theoretical possibility that something changed. The agent usually already holds every fact the decision needs: what it wrote, who else can write, and which write events happened afterward. A re-read that cannot produce new information or change the answer is redundant verification, not diligence.
+Verification is decided by actual mutation authority and observed mutation events, not by the theoretical possibility that something changed. The response model usually already holds every fact the decision needs: what it wrote, who else can write, and which write events happened afterward. A re-read that cannot produce new information or change the answer is redundant verification, not diligence.
 
 For an agent-mediated artifact, retained authored content answers an authored-at claim. When no successful edit or other observed mutation followed, it also answers a current-state claim.
 
@@ -51,13 +51,13 @@ Last-known author: `current-agent`, `user`, `other-agent`, `external-process`, `
 | Actual mutation authority | Meaning |
 | --- | --- |
 | `closed` | No one other than the current actor can modify the artifact. |
-| `agent-mediated` | The user cannot edit it directly; every change goes through an instruction to the agent. |
-| `externally-writable` | The user or another party can modify it without the agent. |
+| `agent-mediated` | The user cannot edit it directly; every change goes through an instruction to the response model. |
+| `externally-writable` | The user, a delegate or another party can modify it without the response model. |
 | `unknown` | No evidence establishes who can modify it. |
 
 Authority needs a basis. `interaction-contract`, `permission`, `sharing-state`, and `observed-event` are evidence. `storage-location`, `assumption`, and `none` are not; an authority claimed on those bases becomes `unknown`. A local file or a Drive document is not `externally-writable` because of where it is stored. When the party holding an open change path confirms that nothing relevant changed (`writer_confirmed_unchanged`), that path is closed for the claim and retained evidence answers it as current; an observed mutation event still wins over the confirmation.
 
-Observed mutation events after the retained evidence: `agent-write-succeeded`, `external-revision`, `sync-revision`, `other-agent-write`, `user-provided-changed-artifact`. When the retained evidence is the agent's authored content and the last-known author is someone else, the helper derives `last-writer-changed`.
+Observed mutation events after the retained evidence: `agent-write-succeeded`, `external-revision`, `sync-revision`, `other-agent-write`, `user-provided-changed-artifact`. When the retained evidence is the response model's authored content and the last-known author is someone else, the helper derives `last-writer-changed`.
 
 Signals that are recorded but never count as mutations: `user-message`, `edit-instruction-unexecuted`, `agent-write-failed`, `agent-read`. Hypothetical changes are recorded separately and ignored.
 
@@ -83,7 +83,7 @@ Claim scopes for a `reuse` answer: `authored-at`, `current`, `last-known`; other
 | A required check cannot reach the artifact | `unverified`; report the gap | none |
 | The planned check targets a copy other than the claim's copy | `wrong-copy`; redirect to the target copy verdict | not the planned call |
 
-An agent write re-anchors evidence when the agent retains the full content it wrote; a partial patch does not, so the previous full-content evidence is stale after it. A failed write, an unexecuted instruction, or a read changes nothing.
+A write by the response model re-anchors evidence when it retains the full content it wrote; a partial patch does not, so the previous full-content evidence is stale after it. A failed write, an unexecuted instruction, or a read changes nothing.
 
 ## Instruction Body Reuse
 
@@ -132,9 +132,9 @@ A correction confined to completion control fields follows [Deliver](response-re
 
 Failure classes: `confirmed-flaw-not-propagated` for an explanation, a previous version, or a partial patch where the corrected complete deliverable was required; `unnecessary-reapproval` for asking permission for a safe in-scope fix; `unconfirmed-out-of-scope-change` for applying an out-of-scope fix without confirmation.
 
-## Platform Adapters
+## Host Tool Names
 
-Adapters map tool names to neutral classes and do nothing else. The decision itself never takes a platform input.
+The table maps each host's tool names to neutral classes and adds no decision logic. The decision itself never takes a platform input.
 
 | Neutral class | Claude Code tool names | Codex tool names |
 | --- | --- | --- |
@@ -196,7 +196,7 @@ Use this template to review a finished turn without storing raw conversation tex
 
 ## Out Of Scope
 
-This contract does not track theoretical external changes or hash every artifact. When the change path is closed, retained conversation evidence accounts for mutations. When the path is open, an agent-only hook registry cannot establish the external writes needed for a current-state claim. Additional tracking is justified only by an observed missing mutation fact that can change the next decision.
+This contract does not track theoretical external changes or hash every artifact. When the change path is closed, retained conversation evidence accounts for mutations. When the path is open, a hook registry of the response model's own tool calls cannot establish the external writes needed for a current-state claim. Additional tracking is justified only by an observed missing mutation fact that can change the next decision.
 
 ## Recording Binding And Evidence Time
 

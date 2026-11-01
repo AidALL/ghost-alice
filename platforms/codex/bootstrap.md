@@ -4,7 +4,7 @@
 
 ## Load common governance
 
-Common Ghost-ALICE governance comes from `{{GOVERNANCE_PATH}}` for every project. Before actionable work, the current-session assistant reads that installed common contract and applies its Session Intent and Work Selection sections with the exact intake receipt. Project instruction files supply project-specific rules, which the assistant applies together with the common contract. Explicit user instructions take precedence over this loading procedure.
+Common Ghost-ALICE governance comes from `{{GOVERNANCE_PATH}}` for every project. Before actionable work, the response model reads that installed common contract and applies its Session Intent and Work Selection sections with the exact session receipt. Project instruction files supply project-specific rules, which the response model applies together with the common contract. Explicit user instructions take precedence over this loading procedure.
 
 When no tool is needed (the supplied content or general knowledge supports the answer, and the answer needs no inspection, execution, modification or fresh verification), the response model answers directly without reading the common governance file, even when a hook message points to its sections. When it is unclear whether a tool is needed, the response model treats the request as work and reads the common governance file first.
 

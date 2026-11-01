@@ -7,7 +7,7 @@ compatibility:
 
 # Using Coding Convention
 
-The current-session assistant starting development uses this entrypoint to select the applicable family skills. A delegated assistant assigned one bounded task follows the parent assistant's supplied workflow instead of routing the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation.
+The response model starting development uses this entrypoint to select the applicable family skills. A delegate assigned one bounded task follows the parent's supplied workflow instead of routing the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation.
 
 ## Priority and loading
 
@@ -22,7 +22,7 @@ For Codex operations, use [references/codex-tools.md](references/codex-tools.md)
 
 ## Workflow
 
-After routing selects development work, the current-session assistant uses the table below to choose its family workflow. The common contract's Session Intent and Work Selection sections own the earlier interpretation and carry task-router's direct-answer rule.
+After routing selects development work, the response model uses the table below to choose its family workflow. The common contract's Session Intent and Work Selection sections own the earlier interpretation and carry task-router's direct-answer rule.
 
 Before the next file read, command, edit, plan, review or development-status claim, select the applicable workflow below. Reuse accepted design and authorization. If evidence contradicts the plan, revise the implicated assumption or task within that authorization. Follow boundary-contract to distinguish an implementation change within existing authority from a change requiring the user’s decision.
 
@@ -33,7 +33,7 @@ Before the next file read, command, edit, plan, review or development-status cla
 | A failure needs a cause and a correction | systematic-debugging |
 | Known behavior can be exercised by a meaningful test | test-driven-development |
 | Independent tasks can run concurrently | dispatching-parallel-agents |
-| An accepted plan will run through task-specific subagents | subagent-driven-development |
+| An accepted plan will run through task-specific delegates | subagent-driven-development |
 | An accepted plan will run inline | executing-plans |
 | The task needs an isolated checkout | using-git-worktrees |
 | Implementation needs review | requesting-code-review |
@@ -53,7 +53,7 @@ For repair attempts, follow systematic-debugging's [Incident accounting and cont
 ## Failure modes
 
 - A small change does not excuse skipping an applicable required workflow.
-- An agent's plan cannot weaken the user's acceptance criteria.
+- An agent's plan cannot weaken the user's done conditions.
 - Repeating a check requires the evidence trigger defined by verification-before-completion.
 
 Write prose paragraphs on one physical source line unless Markdown, syntax or protocol fields require separate lines.

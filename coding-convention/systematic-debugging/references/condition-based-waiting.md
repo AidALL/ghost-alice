@@ -11,8 +11,8 @@ Flaky tests often guess at timing with arbitrary delays. This creates race condi
 ~~~mermaid
 flowchart TD
   A{"Does the test use setTimeout or sleep?"} -->|yes| B{"Does the test verify timing behavior?"}
-  B -->|yes| C["The test author documents why the timeout is needed"]
-  B -->|no| D["The test author uses condition-based waiting"]
+  B -->|yes| C["The response model documents why the timeout is needed"]
+  B -->|no| D["The response model uses condition-based waiting"]
 ~~~
 
 When to use it.

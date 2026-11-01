@@ -30,7 +30,7 @@ When the intent is clear, apply the direct-answer rule below; applying it loads 
 
 ## Prohibitions
 
-- A procedure, routing keyword, stored result or available tool grants no authority. Do not derive installation or write authority from default paths; explicit paths and the current host receipt identify the installation and session.
+- A procedure, routing keyword, stored result or available tool grants no authority. Do not derive installation or write authority from default paths; explicit paths and the current session receipt identify the installation and session.
 - Do not substitute another session, repository, installation or discovery pointer. Missing or pending identity blocks dependent writes.
 - Finding no mismatch does not establish completion. Do not claim a result without positive support for every required criterion, including the combined result; partial evidence does not establish the whole task.
 - IDs, hashes and authenticated records do not establish semantic truth.

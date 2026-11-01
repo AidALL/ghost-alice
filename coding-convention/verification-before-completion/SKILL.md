@@ -7,11 +7,11 @@ compatibility:
 
 # Verification Before Completion
 
-A delegated assistant reviews its assigned evidence and returns the result to its parent. The assistant answering the current conversation performs route registration, response review and final delivery.
+A delegate reviews its assigned evidence and returns the result to its parent. The response model answering the user performs route registration, response review and final delivery.
 
-The current-session assistant follows this instruction document to judge claims before a new completion, fix, success, verified-status or material recommendation claim, and before rereading an artifact to support a claim. Match every claim to the user's actual criterion and evidence. A printed success label, another agent's report or a control block is not proof.
+The response model follows this instruction document to judge claims before a new completion, fix, success, verified-status or material recommendation claim, and before rereading an artifact to support a claim. Match every claim to the user's actual criterion and evidence. A printed success label, another agent's report or a control block is not proof.
 
-## Acceptance criteria and claim scope
+## Done conditions and claim scope
 
 Extract the requested result and accepted constraints from user intent and the active contract. Compare the proposed result with the original sources and required criteria, including how the verified parts support the whole requested outcome. Reconsider a selected reference or interpretation when contrary evidence challenges it; do not rewrite the source or user criterion to make the result pass.
 
@@ -27,7 +27,7 @@ Before inspecting an artifact again, apply [references/verify-or-reuse.md](refer
 
 ## Evidence selection and stop gate
 
-Before a discretionary check, the agent identifies the unresolved criterion or competing explanation, why the method distinguishes the alternatives, and which attainable outcomes would change a specific next action or acceptance judgment. If no outcome can change that decision, do not run the check. For stochastic repetition, define the uncertainty, sampling rule and stopping condition before repeating.
+Before a discretionary check, the response model identifies the unresolved criterion or competing explanation, why the method distinguishes the alternatives, and which attainable outcomes would change a specific next action or acceptance judgment. If no outcome can change that decision, do not run the check. For stochastic repetition, define the uncertainty, sampling rule and stopping condition before repeating.
 
 Mandatory checks are those that the user or the project requires; they remain required. A check that a skill lists is required only when its outcome can change the next action or a criterion's judgment. An unavailable required observation leaves its criterion unresolved. An inconclusive check supplies no business pass/fail verdict, although it consumes the resources used to run and record it.
 
@@ -44,16 +44,16 @@ For a new current-turn closure:
 1. Load this skill through the host's real mechanism, or validly reuse its body under [Instruction Body Reuse](references/verify-or-reuse.md#instruction-body-reuse), and apply the workflow to this input.
 2. Map each claim to its criterion and actual evidence. A successful result already returned in this turn can supply fresh evidence; run a further check only for a criterion it does not cover. Read the result, source locator, exit status and failures before judging it.
 3. Follow session-intent-analyzer's `references/ledger-schema.md`, section Core Response Projection, for the exact current binding. Resolve that reference from the selected installed session-intent-analyzer directory.
-4. Compare each claim with its original sources and criterion, then separately judge the complete draft against the user's objective and constraints. Follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) to submit both judgments to Core. Core authenticates and stores them; code does not decide their meaning.
+4. Compare each claim with its original sources and criterion, then separately judge the complete draft against the user's objective and constraints. Follow [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) to submit both judgments to Core code. Core code authenticates and stores them; code does not decide their meaning.
 5. Deliver the supported reviewed answer with its applicable completion or partial control under the owner reference's delivery procedure.
 
-Explaining an unchanged prior result is not a new completion submission. Core selects completion processing from an actual completion/partial control marker; it does not infer completion from prose or selected execution work. The current-session assistant identifies and explicitly routes its new completion claims through this workflow. Never describe an old check as freshly executed.
+Explaining an unchanged prior result is not a new completion submission. Core code selects completion processing from an actual completion/partial control marker; it does not infer completion from prose or selected execution work. The response model identifies and explicitly routes its new completion claims through this workflow. Never describe an old check as freshly executed.
 
 ## Retained original results and delivery
 
 For a source-backed explanation, [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) owns both judgments; record them only when the user explicitly requests an authenticated explanation review. New completion and partial-completion claims follow the finalization sequence above.
 
-For a correction to an already submitted answer, follow the review reference's [Deliver](references/response-review.md#deliver) procedure using the host's supplied visibility context. That procedure owns delivery of the reviewed answer and the Stop observation; the assistant does not infer visibility from an unrelated tool result.
+For a correction to an already submitted answer, follow the review reference's [Deliver](references/response-review.md#deliver) procedure using the host's supplied visibility context. That procedure owns delivery of the reviewed answer and the Stop observation; the response model does not infer visibility from an unrelated tool result.
 
 ## Retain evidence on first execution
 
@@ -65,13 +65,13 @@ To record proof, follow the review reference's [Proof bytes and time](references
 
 ## Completion-Check Format
 
-The control's `scope` describes completion evidence coverage. In `[partial-check]`, `scope: partial` means that declared required criteria remain unresolved. It is independent of the focus named in the answer's `[focus: …]` line, which selects the judgment target (`micro`, `meso`, `macro` or `meta`). A macro judgment can therefore have partial evidence coverage. The assistant preserves both meanings when preparing the answer; it does not substitute a focus value for the required partial control.
+The control's `scope` describes completion evidence coverage. In `[partial-check]`, `scope: partial` means that declared required criteria remain unresolved. It is independent of the focus named in the answer's `[focus: …]` line, which selects the judgment target (`micro`, `meso`, `macro` or `meta`). A macro judgment can therefore have partial evidence coverage. The response model preserves both meanings when preparing the answer; it does not substitute a focus value for the required partial control.
 
-For a new full closure, place `[completion-check]` before the supported summary. Declare every acceptance criterion and map each claim to its criterion, evidence and bare `pass` or `fail` verdict. Put `claim`, `criterion`, `evidence` and `verdict` on separate physical lines. A full block requires `unverified: none`; a failed verdict proves failure, not overall success.
+For a new full closure, place `[completion-check]` before the supported summary. Declare every done condition and map each claim to its criterion, evidence and bare `pass` or `fail` verdict. Put `claim`, `criterion`, `evidence` and `verdict` on separate physical lines. A full block requires `unverified: none`; a failed verdict proves failure, not overall success.
 
 For supported partial success, use `[partial-check]` with `scope: partial`, the same criterion/claim mapping and a nonempty `unverified` list. Each unresolved entry names a declared criterion as `criterion-id: reason`. Preserve all required criteria instead of narrowing the contract to the passing subset. Plain partial status without a successful-work claim does not need a success proof block.
 
-The same proof format applies on every host. Core completion acceptance authenticates the per-claim and whole-answer judgments under the current owned route, as specified in [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). Skill loading and reuse remain workflow and audit facts; a Skill invocation or self-report field is neither completion evidence nor a separate acceptance prerequisite.
+The same proof format applies on every host. Core code's completion acceptance authenticates the per-claim and whole-answer judgments under the current owned route, as specified in [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review). Skill loading and reuse remain workflow and audit facts; a Skill invocation or self-report field is neither completion evidence nor a separate acceptance prerequisite.
 
 The examples below illustrate serialization only; replace their claims and source locators with actual results. They do not assert that any example check ran.
 

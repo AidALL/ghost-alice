@@ -23,12 +23,12 @@ class OperatingRuleContractTest(unittest.TestCase):
         self.assertIn('Do not substitute another session', common)
         self.assertIn('Missing or pending identity blocks dependent writes', common)
         self.assertIn('stored result or available tool grants no authority', common)
-        self.assertIn('Do not derive installation or write authority from default paths; explicit paths and the current host receipt identify the installation and session', common)
+        self.assertIn('Do not derive installation or write authority from default paths; explicit paths and the current session receipt identify the installation and session', common)
         self.assertIn('The native host executes tools and enforces permission', common)
         self.assertIn('`session-intent-analyzer`: reading or writing the intent record', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('Work Selection section', router)
-        self.assertIn('register the Core response-route at that point, using the session-start receipt', router)
+        self.assertIn('register the response-route with Core code at that point, using the session receipt', router)
         self.assertIn('the input ID that `--read-intent` returned when this input', router)
 
     def test_checkpoint_condition_is_known_before_acting(self):

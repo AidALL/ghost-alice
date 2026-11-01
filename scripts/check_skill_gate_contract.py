@@ -85,7 +85,7 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                 'stop-conditions',
                                 'next-allowed-actions',
                                 'human-owned',
-                                'agent-declared'],
+                                'self-declared'],
  '_shared/install_hooks.py': ['TOOL_CHECKPOINT_MARKER',
                               'TOOL_CHECKPOINT_INTERNAL',
                               'pre_tool_use',

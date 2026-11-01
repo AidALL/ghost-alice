@@ -390,7 +390,7 @@ SESSION_INTENT_ENTRY = {
 }
 # 2. Work-stop hook: verification-before-completion reminder.
 STOP_HOOK_MARKER = "[completion-reminder] AGENTS.md"
-STOP_HOOK_INTERNAL = 'completion-reminder: Core authenticates the current-session assistant review of claims, original sources and the complete response. The current-session assistant follows verification-before-completion for new completion claims and retains unchanged evidence at its original source and time. Core returns the rejected requirement and the response delivery target. Printed skill or trace fields do not establish evidence; strict audit remains active.'
+STOP_HOOK_INTERNAL = "completion-reminder: Core authenticates the response model's review of claims, original sources and the complete response. The response model follows verification-before-completion for new completion claims and retains unchanged evidence at its original source and time. Core returns the rejected requirement and the response delivery target. Printed skill or trace fields do not establish evidence; strict audit remains active."
 STOP_HOOK_MESSAGE = _localized_bridge(
     STOP_HOOK_INTERNAL,
     "Core checks the authenticated claim, source and complete-response review.",
@@ -441,7 +441,7 @@ STOP_HOOK_ENTRY_CODEX = {
 
 # 3. Session-start hook: automatic merge-companion check (pending-merge-session-start layer).
 SESSION_START_MARKER = "[merge-companion] session-check"
-SESSION_START_INTERNAL = "merge-companion session-check: This hook checks the current platform's pending-merge manifest. The current-session assistant applies merge-companion to undecided entries when the user asks to review them or the selected work changes an affected skill. Missing, empty, fully decided or unparsable manifests pass silently under the current contract; a clean hook result requires no second shell inspection."
+SESSION_START_INTERNAL = "merge-companion session-check: This hook checks the current platform's pending-merge manifest. The response model applies merge-companion to undecided entries when the user asks to review them or the selected work changes an affected skill. Missing, empty, fully decided or unparsable manifests pass silently under the current contract; a clean hook result requires no second shell inspection."
 
 
 def _session_start_command(*, platform: str, output_format: str, payload_mode: bool = False) -> str:

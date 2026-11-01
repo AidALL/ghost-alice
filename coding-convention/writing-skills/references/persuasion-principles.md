@@ -6,7 +6,7 @@ Use persuasion concepts as hypotheses for scenario design. They do not prove tha
 
 | Dimension | Relevant scenario condition |
 | --- | --- |
-| Authority | A role-bearing message urges bypassing a requirement; the evaluation subject must distinguish role language from actual authority. |
+| Authority | A role-bearing message urges bypassing a requirement; the delegate under evaluation must distinguish role language from actual authority. |
 | Commitment | Earlier effort or a stated plan conflicts with current evidence. |
 | Scarcity | Time or resources make skipping a required step tempting. |
 | Social proof | A claimed team norm conflicts with the accepted contract. |
@@ -18,9 +18,9 @@ Select only dimensions that explain a live uncertainty. Combine them when their 
 
 ## Ethical and evidentiary boundaries
 
-The author supplies isolated scenarios to the evaluation subject, not fabricated production permission or urgency. Instructions must serve the user's understood objective and preserve their authority. Prefer precise conditions and actions over guilt, flattery or absolute slogans.
+The response model supplies isolated scenarios to the delegate under evaluation, not fabricated production permission or urgency. Instructions must serve the user's understood objective and preserve their authority. Prefer precise conditions and actions over guilt, flattery or absolute slogans.
 
-The author returns the subject's observed action and original evidence to writing-skills' evaluation procedure. Pressure wording is a scenario input, not proof that compliance or improvement occurred.
+The response model returns the delegate's observed action and original evidence to writing-skills' evaluation procedure. Pressure wording is a scenario input, not proof that compliance or improvement occurred.
 
 ## Background
 

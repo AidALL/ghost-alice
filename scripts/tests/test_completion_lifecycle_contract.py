@@ -70,7 +70,7 @@ class CompletionLifecycleContractTests(unittest.TestCase):
             self.assertIn(phrase, common)
         verification = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
         for phrase in ('then separately judge the complete draft',
-                       'Core authenticates and stores them; code does not decide their meaning'):
+                       'Core code authenticates and stores them; code does not decide their meaning'):
             self.assertIn(phrase, verification)
         for name in ('platforms/claude/CLAUDE.md', 'platforms/codex/AGENTS.md'):
             with self.subTest(path=name):

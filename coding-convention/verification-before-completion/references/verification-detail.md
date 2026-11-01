@@ -8,7 +8,7 @@ Use these patterns after applying the main skill's evidence selection and reuse 
 | Regression detects the original defect | Required RED/GREEN evidence from test-driven-development; retained original results remain usable. |
 | Build succeeded | Actual build result for the claimed tree and environment. |
 | Requirements satisfied | A claim-evidence mapping covering each accepted criterion. |
-| Delegated task completed | Inspected target plus criterion-relevant evidence, not the agent's status alone. |
+| Delegated task completed | Inspected target plus criterion-relevant evidence, not the delegate's status alone. |
 | Source guidance corrected | Changed instruction and its affected source-contract validation. |
 | Host behavior corrected | Observation of the relevant host execution, beyond source or installation evidence. |
 

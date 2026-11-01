@@ -1,6 +1,6 @@
 ---
 name: executing-plans
-description: Executes an accepted plan with the assistant doing every task itself, when inline execution is chosen.
+description: Executes an accepted plan with the response model doing every task itself, when inline execution is chosen.
 calls:
   - "hard:finishing-a-development-branch"
   - "hard:using-git-worktrees"
@@ -10,7 +10,7 @@ compatibility:
 
 # Executing Plans
 
-The implementing agent executes an accepted plan inline, updates tasks when evidence changes the implementation, and completes the authorized integration workflow. Announce use of this skill once. Use subagent-driven-development when that execution choice is authorized and appropriate; tool availability alone does not replace the chosen workflow.
+The response model executes an accepted plan inline, updates tasks when evidence changes the implementation, and completes the authorized integration workflow. Announce use of this skill once. Use subagent-driven-development when that execution choice is authorized and appropriate; tool availability alone does not replace the chosen workflow.
 
 ## Procedure
 
@@ -28,6 +28,6 @@ Do not execute example commands as though they were the actual plan, add unrelat
 
 ## Output and integration
 
-Report the implemented tasks, evidence for their acceptance criteria, changed plan decisions and unresolved dependencies. Verification-before-completion owns closure controls and claim scope.
+Report the implemented tasks, evidence for their done conditions, changed plan decisions and unresolved dependencies. Verification-before-completion owns closure controls and claim scope.
 
 Writing-plans supplies this workflow's input; the procedure above defines its checkout and integration handoffs.
