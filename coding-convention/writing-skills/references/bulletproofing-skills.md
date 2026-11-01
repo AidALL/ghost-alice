@@ -8,6 +8,8 @@ Compare the [preserved baseline](../SKILL.md#baseline-and-scope) with the accept
 
 When clear guidance was not followed or its required input was omitted, correct that task's application or input under its existing procedure. For example, if the review guidance already requires a head commit but the parent omitted it, supply the resolved head through the existing assignment instead of adding another template. If the comparison does not yet identify an instruction defect, retain the guidance and investigate the unresolved task condition.
 
+For supported wording ambiguity, first identify the competing noun referents or actions the sentence permits in its task context. Resolve those readings against the accepted requirement and the owning procedure, then rewrite the responsible instruction in place. Retain a term whose referenced procedure already determines the required action; a word such as “verify” is not defective by itself.
+
 For an identified instruction defect, select the repair form below. The example instructions illustrate forms within the affected task's authority and applicability conditions.
 
 | Supported instruction defect | Repair form | Example instruction |

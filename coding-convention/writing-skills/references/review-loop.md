@@ -10,4 +10,4 @@ Assert objective conditions directly, such as required fields, prohibited output
 
 ## Result and limits
 
-The response model retains the supported contradiction or unresolved interpretation in existing task context and corrects the affected instruction under the parent procedure. A delegate's preference alone does not demonstrate a defect. Verification-before-completion owns evidence scope and stopping.
+The response model retains the comparison in existing task context and follows the [diagnostic procedure](bulletproofing-skills.md#procedure) to select and apply the justified correction. A delegate's preference alone does not demonstrate a defect. Verification-before-completion owns evidence scope and stopping.
