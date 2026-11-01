@@ -358,8 +358,7 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                 record({'event': 'request-not-forwarded', 'reason': 'unknown-provider', 'status': 404})
                 self.reject(404)
                 return
-            # Every path of a configured provider goes upstream. Reduction applies only to
-            # its known request endpoints, from a client in this installation's scope.
+            # architecture.md#context-and-original-evidence lists which requests go upstream unchanged.
             platform = PLATFORMS[provider]
             selector = dispatch.get(platform) if suffix in SELECTION_ENDPOINTS[provider] else None
             server_selector = server_dispatch.get(platform) if suffix in SELECTION_ENDPOINTS[provider] else None
@@ -390,8 +389,7 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
                             'platform': platform, 'native_session_id': session_id,
                             'native_betas': list(betas) if platform == 'claude' else [],
                             'original_wire_sha256': digest(body), 'selected_blocks': []}
-                # Selection only removes material. When the gateway cannot complete it,
-                # the native request goes upstream unchanged and the reason is recorded.
+                # An incomplete selection forwards the original request (architecture.md#context-and-original-evidence).
                 if skipped is not None:
                     observed.update(state='unavailable', reason=skipped)
                 else:

@@ -1,7 +1,7 @@
 """Pure Claude native transcript and Anthropic Messages context adapter.
 
-The caller authenticates the source and selection in Core. This module does not
-read credentials, choose consumed content, contact a model, or modify originals.
+This module does not read credentials, choose consumed content, contact a model,
+or modify originals.
 """
 import copy
 import hashlib

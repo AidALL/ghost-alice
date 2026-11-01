@@ -44,7 +44,6 @@ BODY_TOKEN_SOFT_LIMIT = 5000  # Phase 2-2: rough line count x 10 estimate.
 INLINE_CODE_BLOCK_SOFT_LIMIT = 50  # Phase 2-5: a larger SKILL.md body code block suggests progressive disclosure drift.
 REFERENCE_TOC_LIMIT = 300
 
-# Phase 3-1: Detect Critical Rules / Warnings / Common Mistakes style sections. Match when a keyword appears anywhere in a header line such as `## ...`.
 CRITICAL_SECTION_PATTERN = re.compile(
     r"(?mi)^#{2,}[^\n]*("
     r"critical|gotcha|warnings?|failure\s*modes?|failure\s*patterns?|common\s*mistakes?|common\s*failures?|red\s*flags?|pitfall|caveat|troubleshoot|"
@@ -136,7 +135,6 @@ def validate_phase2_body(skill_md: Path, text: str, issues: list[Issue]) -> None
         issues.append(
             Issue("WARNING", skill_name, "2", "2-1", f"body {body_lines} lines > 500 recommendation")
         )
-    # 2-2: Rough token estimate (line count x 10).
     estimated_tokens = body_lines * 10
     if estimated_tokens > BODY_TOKEN_SOFT_LIMIT:
         issues.append(
@@ -169,14 +167,13 @@ def validate_phase2_body(skill_md: Path, text: str, issues: list[Issue]) -> None
 def validate_phase3_structure(skill_md: Path, text: str, issues: list[Issue]) -> None:
     """
     Phase 3. Structure and pattern validation.
-    3-1 Critical Rules / warnings style section exists.
+    3-1 Critical Rules / warnings style section exists; a keyword may appear anywhere in a `##`-or-deeper header line.
     3-4 When references/ exists, the SKILL.md body explicitly points to it.
     3-2 default tool declarations and 3-3 output format templates remain manual review items.
     """
     skill_name = skill_md.parent.name
     body = _extract_body(text)
 
-    # 3-1: Whether an anti-pattern section such as Critical Rules / Warnings exists.
     if not CRITICAL_SECTION_PATTERN.search(body):
         issues.append(
             Issue(
@@ -188,7 +185,6 @@ def validate_phase3_structure(skill_md: Path, text: str, issues: list[Issue]) ->
             )
         )
 
-    # 3-4: When references/ exists, check whether the body points to that directory.
     refs_dir = skill_md.parent / "references"
     if refs_dir.is_dir():
         ref_files = [p for p in refs_dir.rglob("*.md") if p.is_file()]

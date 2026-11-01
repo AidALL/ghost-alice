@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Runner for Ghost-ALICE hook commands.
 
-Agent visibility controls user-facing message exposure, not whether a registered
-hook runs. This module applies the disabled-hook break-glass list, validates the
-wrapped command, and then runs it.
+This module applies the disabled-hook break-glass list, validates the wrapped
+command, and then runs it.
 """
 
 from __future__ import annotations
@@ -773,7 +772,6 @@ def _reconcile_native_intake(env, hook_payload):
         return
     from native_completion import _ledger
     module = _ledger(env)
-    # PreToolUse and Stop run after the host appends the turn's input row.
     module.reconcile_native_inputs(root=Path(env['GHOST_ALICE_SESSION_INTENT_ROOT']),
                                    platform='claude', session_id=session, record_wait=True)
 

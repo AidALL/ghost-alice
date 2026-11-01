@@ -1,7 +1,7 @@
 """Authenticate model-selected context dispositions without retaining source bodies.
 
-The responding model decides use. Core binds that decision to native input and
-original records; request selection preserves anything outside that binding.
+Core binds each disposition to native input and original records; request
+selection preserves anything outside that binding.
 Dependencies: Python 3.11+ standard library and the installed Core ledger.
 """
 from __future__ import annotations

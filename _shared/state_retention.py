@@ -3,12 +3,10 @@
 `POLICIES` names every file and folder a Core installation creates under the Ghost-ALICE state root and the host
 folders, and how each stays bounded. A writer calls `apply(name, path)` at its own moment for an entry that removes
 something: size rotation, keep the newest N, age or line count. A log that several processes append to is written
-through `append(name, path, text)`, which appends and applies the entry under one lock on the log, so no writer
-rotates with a size it read before another writer rotated. A lock held past `LOCK_WAIT_S` never stops the writer: the
-text is appended without the rule and the wait is recorded. Overwritten files and material kept for the user are named
-only. `apply` never raises: a failure is one line in `state-retention-failures.jsonl` under the Ghost-ALICE state
-root, which keeps its last 500 lines and which doctor reads. `entry_for` names the entry a created path belongs to, so
-a test can require every created path to have one.
+through `append(name, path, text)`. Overwritten files and material kept for the user are named only. `apply` never
+raises: a failure is one line in `state-retention-failures.jsonl` under the Ghost-ALICE state root, which the
+`retention-failures` entry bounds and doctor reads. `entry_for` names the entry a created path belongs to, so a test
+can require every created path to have one.
 
 Dependencies: Python 3.11+ standard library. Without `fcntl` (Windows), appends go on without the lock.
 """

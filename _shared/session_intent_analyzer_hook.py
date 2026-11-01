@@ -53,7 +53,7 @@ try:
     _LEDGER_SCRIPT = Path(sys.modules['session_intent_ledger'].__file__).resolve()
     _LEDGER_IMPORT_BROKEN = False
 except ImportError as _ledger_exc:
-    # ImportError naming the ledger module itself means it is genuinely absent (skill uninstalled, mid-reinstall, or relocated) -> degrade as "unavailable". An ImportError naming a DIFFERENT module means the ledger is present but a transitive dependency is broken -> flag as broken, not absent. Either way degrade gracefully instead of crashing at import time.
+    # ImportError naming the ledger module itself means it is genuinely absent (skill uninstalled, mid-reinstall, or relocated) -> degrade as "unavailable". An ImportError naming a DIFFERENT module means the ledger is present but a transitive dependency is broken -> flag as broken, not absent, so a real defect is not silently labelled "unavailable". Either way degrade gracefully instead of crashing at import time.
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
@@ -62,7 +62,7 @@ except ImportError as _ledger_exc:
     session_paths = None
     _LEDGER_IMPORT_BROKEN = getattr(_ledger_exc, "name", None) not in (None, "session_intent_ledger")
 except Exception:
-    # Present but broken at import (syntax error, a failing transitive dependency). Still degrade non-blockingly, but flag it as broken so main() reports a distinct message instead of silently labelling a real defect "unavailable".
+    # Present but broken at import (syntax error, a failing transitive dependency). Still degrade non-blockingly, but flag it as broken.
     DEFAULT_ROOT = ".tmp/session-intent"
     build_input_observation = None
     record_turn = None
@@ -295,8 +295,7 @@ def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, P
                   observation: dict[str, Any] | None) -> str:
     """Add nothing while the session holds the current receipt; send a changed one once.
 
-    Only the session's own start creates its record, because only a session whose start hook runs gets the
-    receipt back after compaction. An input updates that record and never creates the store or a record.
+    The record rules are in session-intent-analyzer/references/ledger-schema.md#hook-observation-receipt.
     """
     receipt = session_receipt(paths)
     try:
@@ -307,12 +306,10 @@ def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, P
             return receipt
     except (ImportError, OSError, ValueError, TypeError):
         pass
-    # Without its session-start record, or after a failed update, each input carries its own receipt.
     return observation_receipt(paths, observation)
 
 
 def session_start(args: argparse.Namespace, payload: dict[str, Any], ledger_root: Path) -> str:
-    """The host repeats session start after resume, clear, compaction and fork, so one copy stays in context."""
     try:
         session_id = resolve_session_id(root=ledger_root, platform=args.platform, payload=payload,
                                         env=os.environ, for_write=True)
@@ -323,7 +320,7 @@ def session_start(args: argparse.Namespace, payload: dict[str, Any], ledger_root
         from session_check_cache import record_delivery
         record_delivery(ledger_root, args.platform, session_id, SESSION_RECEIPT_KEY, message, create=True)
     except (ImportError, OSError, ValueError, TypeError):
-        pass  # Without the delivery record, each input carries its own receipt until the next session start.
+        pass
     return render_payload(args.format, message, ledger_root, routine=True, event="SessionStart")
 
 
@@ -336,7 +333,7 @@ def render_payload(output_format: str, message: str, ledger_root: Path, *, routi
             body["systemMessage"] = message
             body["hookSpecificOutput"] = {"hookEventName": event, "additionalContext": message}
         if routine:
-            # A recorded observation is routine for the user screen; the model context above is unchanged.
+            # A recorded observation is routine.
             body["ghostAliceSurface"] = "routine"
         return json.dumps(body, ensure_ascii=False)
     if not message.strip():
@@ -379,7 +376,7 @@ def main(argv: list[str] | None = None) -> int:
             for func in (resolve_session_id, build_input_observation, record_turn)
         )
         if not ledger_available:
-            # Distinguish a genuinely absent ledger from one that is installed but broken at import, so a real defect is not silently mislabeled "unavailable". Both remain non-blocking (rc 0). A BROKEN ledger also leaves a durable degrade marker that records the unobserved input; an ABSENT ledger is the documented baseline and stays marker-free.
+            # An absent and a broken ledger both remain non-blocking (rc 0). A BROKEN ledger also leaves a durable degrade marker that records the unobserved input; an ABSENT ledger is the documented baseline and stays marker-free.
             if _LEDGER_IMPORT_BROKEN:
                 _write_degrade_marker(ledger_root, args.platform, payload, "ledger-broken")
             message = message + " " + (

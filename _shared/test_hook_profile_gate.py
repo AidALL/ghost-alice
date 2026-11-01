@@ -2294,8 +2294,6 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertEqual(row["visible_decision"], "force_show")
 
     def test_core_hook_exit_2_does_not_block_the_host(self):
-        # Core informs and stops. A usage error or a removed script behind an old registration
-        # must not become a host block (exit 2).
         gone = Path(__file__).with_name("retired_hook_that_is_gone.py").as_posix()
         for hook_id, args in (("session-intent", "-c 'import sys; sys.exit(2)'"), ("prompt", f"'{gone}'")):
             with self.subTest(hook_id=hook_id), tempfile.TemporaryDirectory() as temp_home:

@@ -1,6 +1,6 @@
 """Read selected original-source passages without creating another source copy.
 
-This reader locates information; Core authenticates evidence separately.
+This reader locates information.
 Selection follows the caller's source coordinates, without an output budget.
 """
 from __future__ import annotations

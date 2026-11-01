@@ -226,7 +226,6 @@ def _capture_governance_event(raw: str) -> None:
 
 def _append_log(row: dict[str, str]) -> None:
     payload = {"ts": _utc_now(), **row}
-    # Hooks of concurrent tool calls append here; the retention lock keeps their appends and trims apart.
     line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
     state_retention.append("io-trace", _log_file(), line)
 

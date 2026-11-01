@@ -14,6 +14,7 @@ import uuid
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = Path(__file__).with_name("project_runtime.py")
@@ -23,7 +24,7 @@ TEMP_KEYS = ("TEMP", "TMP", "TMPDIR")
 def load_project_runtime():
     if not MODULE_PATH.is_file():
         return None
-    return importlib.import_module("_shared.project_runtime")
+    return importlib.import_module("project_runtime")
 
 
 class ProjectRuntimePresenceTest(unittest.TestCase):

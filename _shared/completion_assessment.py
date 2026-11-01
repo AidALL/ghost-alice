@@ -1,9 +1,7 @@
 """Core authentication of the current-session assistant's evidence review.
 
-The current-session assistant reads the candidate and judges meaning. This
-module checks provenance and exact bindings, not the truth of model reasoning.
-IDs and metadata cannot replace the assistant's review. This module does not
-rerun business observations.
+This module checks provenance and exact bindings. It does not rerun business
+observations.
 """
 from __future__ import annotations
 
