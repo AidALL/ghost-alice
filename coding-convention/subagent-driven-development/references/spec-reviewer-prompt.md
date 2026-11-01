@@ -2,7 +2,7 @@
 
 The parent assigns this bounded review to a delegate and receives its findings.
 
-After implementation, the parent supplies the full accepted task requirements and requesting-code-review's [assignment inputs](../../requesting-code-review/references/code-reviewer.md#assignment-inputs), including the exact review target and relevant original constraints. The implementing delegate's claims are context for inspection. The delegate checks whether the reviewed artifacts satisfy the requested behavior without unauthorized additions.
+After implementation, the parent prepares the accepted requirement set and exact review target under requesting-code-review's [assignment inputs](../../requesting-code-review/references/code-reviewer.md#assignment-inputs), including original-source access and known corrections. The implementing delegate's claims are context for inspection. The delegate checks whether the reviewed artifacts satisfy the requested behavior without unauthorized additions.
 
 ## Review
 

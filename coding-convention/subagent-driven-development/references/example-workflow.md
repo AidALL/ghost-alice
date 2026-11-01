@@ -6,13 +6,13 @@ This illustrative workflow changes a CLI and its maintenance instructions. The r
 
 The original user requirement is: “Add `--output-format` for text or JSON output. Preserve `--format` as an alias, including its existing default and error behavior. Update the CLI maintenance instructions.”
 
-After the parent asks to continue, the user clarifies: “Continue. Keep the old alias visible in help and examples; the maintenance instructions must tell future editors to preserve it.” Both excerpts remain inputs to the review.
+After the parent asks to continue, the user clarifies: “Continue. Keep the old alias visible in help and examples; the maintenance instructions must tell future editors to preserve it.” In a real assignment, the parent supplies original-source locators for both requirements; the reviewer retrieves the passages needed for the current comparison.
 
 The parent separately proposes routing both flag names to the same parser destination. The accepted plan assigns the parser and regression coverage to one task, and help examples and `docs/cli-maintenance.md` to another.
 
 ## Implementation and review target
 
-The parent gives each implementing delegate its complete task and permitted paths, then receives the changed artifacts and evidence.
+The parent gives each implementing delegate the current task brief, permitted paths and original-source locators under the [implementation assignment](implementer-prompt.md), then receives the changed artifacts and evidence.
 
 The parent builds each review assignment from the shared [assignment inputs](../../requesting-code-review/references/code-reviewer.md#assignment-inputs). In this example, target `T1` consists of the committed range from base `B` to head `H`, plus the separately identified uncommitted diff `W1` containing the maintenance instructions. These symbols stand for actual resolved commit IDs and a retained diff in a real assignment. The review checkout must contain that same combined content; a `B..H` diff alone omits `W1`.
 
@@ -20,7 +20,7 @@ The specification reviewer inspects the parser, handler, tests, help and mainten
 
 The parent checks the finding under [receiving-code-review](../../receiving-code-review/SKILL.md#evaluate-feedback), accepts the conflict and asks the responsible delegate to correct the procedure. The finding and this disposition remain separate. The correction produces uncommitted diff `W2`; target `T2` is exactly `B..H` plus `W2`.
 
-The specification reviewer checks the affected instruction at `T2`. Once specification review is supported, the code-quality reviewer receives the same sources and exact `T2`, including the uncommitted instructions. A further target change follows the existing [affected-evidence procedure](../../verification-before-completion/references/verify-or-reuse.md#decision-flow).
+The specification reviewer checks the affected instruction at `T2`. Once specification review is supported, the code-quality reviewer receives the current comparison state, unresolved conditions, original-source locators and exact `T2`, including the uncommitted instruction target. The parent does not append previously supplied source bodies to the next assignment. A further target change follows the existing [affected-evidence procedure](../../verification-before-completion/references/verify-or-reuse.md#decision-flow).
 
 ## Findings and integration evidence
 

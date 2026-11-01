@@ -13,8 +13,8 @@ The response model executes an accepted plan by giving each task to a fresh dele
 
 Use this workflow when the plan's tasks can be assigned independently and execution remains in the current session. Use executing-plans for the accepted inline or separate-session workflow. Use the authorized checkout and apply using-git-worktrees only when isolation is needed; do not edit main/master without explicit user consent.
 
-1. Read the plan once, retain every task's text and shared dependencies, and create the task tracker.
-2. Select a ready task. Supply its full text, exact allowed paths, relevant context, constraints and required evidence using [references/implementer-prompt.md](references/implementer-prompt.md). The delegate need not reread the plan.
+1. Establish the tasks and shared dependencies from the accepted plan. Track current task state and original-source locations.
+2. Select a ready task and prepare its assignment using [references/implementer-prompt.md](references/implementer-prompt.md). The delegate retrieves the required task passages through the supplied source locations.
 3. Answer the delegate's questions from available authority and context.
 4. When implementation is ready, dispatch a delegate to review specification compliance using [references/spec-reviewer-prompt.md](references/spec-reviewer-prompt.md). That delegate checks the changed artifacts against the accepted requirements.
 5. Return valid specification defects to the delegate that implemented the task. Re-review the changed condition before code-quality review. Reject incorrect findings with evidence instead of implementing them blindly.

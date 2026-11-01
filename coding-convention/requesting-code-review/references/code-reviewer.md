@@ -8,7 +8,7 @@ The parent fills this assignment with the accepted requirements and exact review
 
 Supply the implemented behavior, accepted plan/requirements, artifact types and the exact review target established by requesting-code-review's [How to Request](../SKILL.md#how-to-request) procedure. Identify the source checkout, base and head commits, and any separately identified uncommitted diff. For work prepared for publication, include finishing-a-development-branch's workflow/job inventory, tested tree, local results and unavoidable runner gaps.
 
-Supply the relevant original requirement excerpts or accessible source locators, including known corrections affecting this task, separately from the parent's interpretation and assumptions. Include the necessary excerpts when the delegate cannot access a locator. The delegate reports a conflict with the original constraint or a missing required source to the parent, with the affected requirement and evidence limit.
+Supply accessible original-source locators for the relevant requirements and known corrections, separately from the parent's current interpretation and assumptions. The locators identify the applicable revision and passage, field or record when needed to distinguish the source. Use task-router's [Context Selection](../../../task-router/references/context-selection.md) for retrieval and later handoffs. The delegate retrieves the original passages needed for its review; when it cannot access a required locator, the parent resolves access or supplies only the necessary excerpt with its source. The delegate reports a conflict with the original constraint or a missing required source to the parent, with the affected requirement and evidence limit.
 
 ## Evidence by artifact
 

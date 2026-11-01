@@ -2,7 +2,9 @@
 
 The delegate implements the bounded task below and returns its evidence to the parent that assigned it.
 
-The parent supplies the full task text, accepted context, exact working directory, allowed files, dependencies, prohibited side effects, resources and result format. The delegate does not reread the whole plan.
+The parent supplies a current task brief, exact working directory, allowed files, prohibited side effects, resources and result format, with accessible original-source locators for the accepted task, constraints, known corrections and dependencies. The locators identify the applicable revision and passage, field or record when needed to distinguish the source.
+
+Use task-router's [Context Selection](../../../task-router/references/context-selection.md) for retrieval and later handoffs. The delegate retrieves the passages needed for its current decision rather than receiving accumulated source bodies. If the delegate cannot access a required original, the parent resolves access or supplies only the necessary excerpt with its source; missing required evidence holds the dependent action.
 
 ## Implementation procedure
 
