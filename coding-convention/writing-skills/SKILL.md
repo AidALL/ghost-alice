@@ -50,7 +50,7 @@ Verification-before-completion owns useful-check selection, evidence reuse, orig
 | Authoring uncertainty | Reference |
 | --- | --- |
 | Official skill design principles | [anthropic-best-practices.md](references/anthropic-best-practices.md) |
-| Rule rationalization exposed by a case | [bulletproofing-skills.md](references/bulletproofing-skills.md) |
+| Observed failure in output structure, necessary inputs or outputs, conditions, or rule adherence | [bulletproofing-skills.md](references/bulletproofing-skills.md) |
 | Trigger, workflow and output separation | [condition-skill-output-detailed.md](references/condition-skill-output-detailed.md) |
 | Flowchart notation | [mermaid-conventions.md](references/mermaid-conventions.md) |
 | Pressure dimensions for a case | [persuasion-principles.md](references/persuasion-principles.md) |

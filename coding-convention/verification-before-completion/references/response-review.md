@@ -86,6 +86,16 @@ Read both exit status and returned JSON. `status: unsupported` records the unfav
 
 The explanation review records the model's judgments; it does not satisfy a work criterion.
 
+## Coding example: local checks and the combined result
+
+Use this example when a coding task spans several components or a later correction changes a previously reviewed interface. The examples below are illustrative inputs, not reports of executed checks.
+
+Suppose the accepted task requires a producer and consumer to use the same response field. The producer's local tests pass while it emits `account_id`; the consumer's local tests pass while it reads `user_id`. Those results support their tested local conditions. The combined field contract remains unmet. The response model identifies the affected interface, requests its correction within existing authority and retains unrelated valid results. It reports the integration condition as unresolved until the required evidence supports it.
+
+If a quality-review correction changes that field after specification review, the response model follows [verify-or-reuse](verify-or-reuse.md#decision-flow) for the affected requirement before relying on the earlier review. The changed dependency determines what needs checking; the review's label alone does not invalidate unrelated proof.
+
+The response model reports the supported local results and the unmet shared-field requirement separately. A proposed correction is not an observed fix. After the correction, evidence for the affected producer-consumer behavior determines whether the combined result satisfies the task.
+
 ## Proof bytes and time
 
 The main verification skill owns completion and partial-control schemas. Keep exactly one nonempty top-level `- evidence:` section in new proof. Core code reads the exact source-reference text from it; nested claim evidence cannot substitute. Missing, empty, duplicate, ambiguous or placeholder evidence remains rejected.
