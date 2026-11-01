@@ -102,7 +102,7 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertEqual(boundary_issues, [])
 
     def test_boundary_contract_rejects_missing_authority_and_objective_protection(self) -> None:
-        for obligation in ("human-owned", "agent-declared", "objective"):
+        for obligation in ("human-owned", "self-declared", "objective"):
             with self.subTest(obligation=obligation), tempfile.TemporaryDirectory() as tmpdir:
                 root = Path(tmpdir)
                 self._write_valid_fixture(root)

@@ -417,7 +417,7 @@ def record_disposition(source, expected_input_event_id, selected, *, transaction
             if type(record) is not int or type(index) is not int or record not in items:
                 raise ContextSelectionRejected('Selected native record is unavailable')
             if any(not isinstance(choice[k], str) or not choice[k].strip() for k in ('summary', 'next_need')):
-                raise ContextSelectionRejected('The responding model must supply its use judgment and remaining need')
+                raise ContextSelectionRejected('The response model must supply its use judgment and remaining need')
             item = items[record]
             kind = choice.get('kind', 'output')
             block = _selected_value(item, choice)
@@ -741,7 +741,7 @@ def _record_claude(source, expected, selected, *, transaction=None, project_repl
             if type(record) is not int or type(index) is not int or record not in native.records:
                 raise ContextSelectionRejected('Selected native record is unavailable')
             if any(not isinstance(choice[key], str) or not choice[key].strip() for key in ('summary', 'next_need')):
-                raise ContextSelectionRejected('The responding model must supply its conclusion and remaining need')
+                raise ContextSelectionRejected('The response model must supply its conclusion and remaining need')
             kind = choice.get('kind', 'output')
             item = native.records[record]
             block = _selected_value(item, choice, 'claude')

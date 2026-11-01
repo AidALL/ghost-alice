@@ -460,7 +460,7 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
 
     def test_identity_rules_stay_with_their_owners(self):
         root = SCRIPT.parents[1]
-        self.assertIn('session-start receipt', (root / 'session-intent-analyzer/SKILL.md').read_text())
+        self.assertIn('session receipt', (root / 'session-intent-analyzer/SKILL.md').read_text())
 
     def setUp(self) -> None:
         self.tmp_home = pathlib.Path(tempfile.mkdtemp(prefix="session-intent-hook-test-"))

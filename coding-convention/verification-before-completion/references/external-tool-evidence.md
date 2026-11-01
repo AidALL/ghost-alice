@@ -1,6 +1,6 @@
 # External Tool Evidence
 
-The current-session assistant applies this reference when endorsing a material factual claim about an external tool, library, CLI, SDK, framework, version or platform, or when the user explicitly requests verification of such a claim. This reference owns the evidence decision; user-input hooks do not select searches. Follow the main skill's evidence selection and stop gate before another observation.
+The response model applies this reference when endorsing a material factual claim about an external tool, library, CLI, SDK, framework, version or platform, or when the user explicitly requests verification of such a claim. This reference owns the evidence decision; user-input hooks do not select searches. Follow the main skill's evidence selection and stop gate before another observation.
 
 ## Select evidence for the claim
 
@@ -14,7 +14,7 @@ Expand the investigation when contrary evidence challenges the current interpret
 
 ## Original sources and locators
 
-The assistant binds quoted sources, numeric claims, original evidence, tables/figures and attached files to accessible original source locations. A search snippet, summary, identifier or matching hash does not authenticate the meaning of the source. Follow the main skill's claim review and whole-response review before endorsing the answer.
+The response model binds quoted sources, numeric claims, original evidence, tables/figures and attached files to accessible original source locations. A search snippet, summary, identifier or matching hash does not authenticate the meaning of the source. Follow the main skill's claim review and whole-response review before endorsing the answer.
 
 Source-locator contract:
 
@@ -25,7 +25,7 @@ Source-locator contract:
 - Numeric claims, original sources, tables and figures bind the specific value to its source location.
 - An inaccessible source remains unconfirmed; do not substitute a secondary summary and call it the original observation.
 
-When web evidence is used, retain the actual observation and its locator in the claim evidence. The following evidence block illustrates one observation; include only the entries needed for the claims, without a minimum count. Omit `query` when the assistant accessed a known source directly.
+When web evidence is used, retain the actual observation and its locator in the claim evidence. The following evidence block illustrates one observation; include only the entries needed for the claims, without a minimum count. Omit `query` when the response model accessed a known source directly.
 
 ```text
 - web-search-evidence:

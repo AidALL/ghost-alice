@@ -7,7 +7,7 @@ compatibility:
 
 # Using Git Worktrees
 
-The agent selects an isolated checkout when the authorized development task requires isolation. Reuse a suitable attached or existing checkout before creating another. Prefer the host's managed-worktree API; use the shell procedure only when that API is unavailable or unsuitable.
+The response model selects an isolated checkout when the authorized development task requires isolation. Reuse a suitable attached or existing checkout before creating another. Prefer the host's managed-worktree API; use the shell procedure only when that API is unavailable or unsuitable.
 
 ## Select the checkout
 

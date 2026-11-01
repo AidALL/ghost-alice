@@ -1,6 +1,6 @@
 # Testing Anti-Patterns
 
-The implementing assistant uses this reference when selecting mocks or test utilities for work admitted by the main skill's applicability gate. Each example concerns a concrete production behavior; mock setup and test order alone do not prove that behavior.
+The response model uses this reference when selecting mocks or test utilities for work admitted by the main skill's applicability gate. Each example concerns a concrete production behavior; mock setup and test order alone do not prove that behavior.
 
 ## Assertions about mock presence
 

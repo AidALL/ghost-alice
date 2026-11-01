@@ -1,12 +1,12 @@
 # Correcting Observed Rule Rationalizations
 
-Use this reference when an evaluation shows that its subject bypassed a required rule through a specific interpretation. The author repairs the instruction responsible for that interpretation.
+Use this reference when an evaluation shows that its delegate bypassed a required rule through a specific interpretation. The response model repairs the instruction responsible for that interpretation.
 
 ## Procedure
 
 Preserve the actual choice, rationale and rule being violated. Identify whether the defect is an ambiguous trigger, unnamed action target, missing prerequisite or conflict with another instruction. Rewrite that decision in place before adding a separate prohibition.
 
-For example, “delete it and start over” fails to identify whose code may be removed. State instead that an agent who wrote premature production code under an applicable RED-first contract removes only its own authorized change before rebuilding from the test, preserving pre-existing user work.
+For example, “delete it and start over” fails to identify whose code may be removed. State instead that a response model that wrote premature production code under an applicable RED-first contract removes only its own authorized change before rebuilding from the test, preserving pre-existing user work.
 
 A rationalization table or red-flag list is useful when several observed cases expose distinct conditions. Update the trigger description only when discovery itself failed.
 

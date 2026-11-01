@@ -1,13 +1,13 @@
 # Mermaid Flowchart Conventions
 
-The skill author loads this reference when adding or editing a workflow diagram. Embed the diagram directly in Markdown with a `~~~mermaid` fence and `flowchart TD`. The examples below illustrate notation; their actors, commands and conditions are diagram data, not instructions to execute a task.
+The response model loads this reference when adding or editing a workflow diagram. Embed the diagram directly in Markdown with a `~~~mermaid` fence and `flowchart TD`. The examples below illustrate notation; their actors, commands and conditions are diagram data, not instructions to execute a task.
 
 ## Node types and shapes
 
 | Role | Mermaid notation | Label example |
 | --- | --- | --- |
 | Decision | `D{"Does the condition hold?"}` | “Is the test passing?” |
-| Action | `A["Actor performs an action on an object"]` | “The assistant writes the test.” |
+| Action | `A["Actor performs an action on an object"]` | “The response model writes the test.” |
 | Command | `C["The host runs the literal command"]` | “The host runs npm test.” |
 | State | `S(["Observed state"])` | “The test is failing.” |
 | Warning | `W["STOP: named condition"]` | “STOP: selected files exceed authorized scope.” |
@@ -33,8 +33,8 @@ flowchart TD
 
 | Label type | Pattern and example |
 | --- | --- |
-| Question | Ask a complete question ending in `?`, such as “Can the assistant reproduce the failure?” |
-| Action | Name an actor, action and object, such as “The assistant searches the error trace for the source value.” |
+| Question | Ask a complete question ending in `?`, such as “Can the response model reproduce the failure?” |
+| Action | Name an actor, action and object, such as “The response model searches the error trace for the source value.” |
 | Command | Include the literal command, such as “The host runs git status” or “The host runs npm run build.” |
 | State | Describe the observed situation, such as “The build is complete” or “The test is failing.” |
 
@@ -73,8 +73,8 @@ The specific example shows the failed-test observation, error reading, reproduct
 
 ~~~mermaid
 flowchart TD
-  F(["The test failed"]) -->|Failure output| R["The assistant reads the error message"]
-  R -->|Error and reproduction conditions| D{"Can the assistant reproduce the failure?"}
+  F(["The test failed"]) -->|Failure output| R["The response model reads the error message"]
+  R -->|Error and reproduction conditions| D{"Can the response model reproduce the failure?"}
   D -->|yes| C["The host runs git diff HEAD~1"]
   W["STOP: prerequisite result unresolved"]
 ~~~

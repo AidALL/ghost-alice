@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-10-28T23:07:16Z",
+  "generated_at": "2026-11-01T05:38:55Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -18,7 +18,7 @@
     {
       "name": "adversarial-verification",
       "path": "adversarial-verification/SKILL.md",
-      "description": "Assigns independent agents to try to refute a claim and its evidence and returns a verdict with the part that survives, when the user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim.",
+      "description": "Assigns independent delegates to try to refute a claim and its evidence and returns a verdict with the part that survives, when the user or another skill calls for an adversarial review or fact-check of a numeric, legal, novelty or prior-art claim.",
       "family": "domain",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -38,7 +38,7 @@
     {
       "name": "boundary-contract",
       "path": "boundary-contract/SKILL.md",
-      "description": "Writes a boundary contract listing the work's objective, allowed and prohibited paths and actions, acceptance criteria, phase and stop conditions, when task-router requires one.",
+      "description": "Writes a boundary contract listing the work's objective, allowed and prohibited paths and actions, done conditions, phase and stop conditions, when task-router requires one.",
       "family": "system",
       "governance_class": "boundary-gate",
       "compatibility": [
@@ -75,7 +75,7 @@
     {
       "name": "dispatching-parallel-agents",
       "path": "coding-convention/dispatching-parallel-agents/SKILL.md",
-      "description": "Delegates two or more tasks to parallel agents and combines their outputs, when no task edits a file another task reads or edits, no two share mutable state or an exclusive resource, and none needs another's output.",
+      "description": "Assigns two or more tasks to delegates that run in parallel and combines their outputs, when no task edits a file another task reads or edits, no two share mutable state or an exclusive resource, and none needs another's output.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -85,7 +85,7 @@
     {
       "name": "executing-plans",
       "path": "coding-convention/executing-plans/SKILL.md",
-      "description": "Executes an accepted plan with the assistant doing every task itself, when inline execution is chosen.",
+      "description": "Executes an accepted plan with the response model doing every task itself, when inline execution is chosen.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -135,7 +135,7 @@
     {
       "name": "necessity-gate",
       "path": "necessity-gate/SKILL.md",
-      "description": "Approves, rescopes or rejects new work (a task, follow-up, skill, file, tool, audit or verification cycle, or skill edit) when the assistant proposes it or the user asks whether to do it.",
+      "description": "Approves, rescopes or rejects new work (a task, follow-up, skill, file, tool, audit or verification cycle, or skill edit) when the response model proposes it or the user asks whether to do it.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -155,7 +155,7 @@
     {
       "name": "requesting-code-review",
       "path": "coding-convention/requesting-code-review/SKILL.md",
-      "description": "Dispatches the code-reviewer subagent after a major feature is built or before a merge into main, and checks that a pull request's reviews finished and CI passed on its latest commit before merging it.",
+      "description": "Has a delegate review the code after a major feature is built or before a merge into main, and checks that a pull request's reviews finished and CI passed on its latest commit before merging it.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -165,7 +165,7 @@
     {
       "name": "session-intent-analyzer",
       "path": "session-intent-analyzer/SKILL.md",
-      "description": "Records the assistant's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues.",
+      "description": "Records the response model's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues.",
       "family": "system",
       "governance_class": "intent-state-producer",
       "compatibility": [
@@ -182,7 +182,7 @@
     {
       "name": "skill-evolution",
       "path": "skill-evolution/SKILL.md",
-      "description": "Recommends skill changes from recorded tool-call patterns and corrections of the assistant's behavior, when the user asks for such recommendations or their pending backlog, or authorizes that analysis.",
+      "description": "Recommends skill changes from recorded tool-call patterns and corrections of the response model's behavior, when the user asks for such recommendations or their pending backlog, or authorizes that analysis.",
       "family": "domain",
       "governance_class": "governance-subskill",
       "compatibility": [
@@ -192,7 +192,7 @@
     {
       "name": "subagent-driven-development",
       "path": "coding-convention/subagent-driven-development/SKILL.md",
-      "description": "Executes an accepted plan in this session by giving each task, one at a time, to a new subagent and reviewing the result, when the user chose subagent execution and each task is self-contained.",
+      "description": "Executes an accepted plan in this session by giving each task, one at a time, to a new delegate and reviewing the result, when the user chose delegate execution and each task is self-contained.",
       "family": "coding-convention",
       "governance_class": "coding-process",
       "compatibility": [
@@ -212,7 +212,7 @@
     {
       "name": "task-router",
       "path": "task-router/SKILL.md",
-      "description": "Selects the work, skills, acceptance criteria and boundary contract for a request that needs or may need a tool to change, run, analyze or verify something, or to read a remote source.",
+      "description": "Selects the work, skills, done conditions and boundary contract for a request that needs or may need a tool to change, run, analyze or verify something, or to read a remote source.",
       "family": "system",
       "governance_class": "core-gate",
       "compatibility": [

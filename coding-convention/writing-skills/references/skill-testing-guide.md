@@ -1,6 +1,6 @@
 # Selecting Skill Evaluations
 
-Use this guide when the author must choose an evaluation method for a demonstrated skill defect.
+Use this guide when the response model must choose an evaluation method for a demonstrated skill defect.
 
 ## Match method to uncertainty
 
@@ -20,4 +20,4 @@ Use writing-skills' [Validate and evaluate](../SKILL.md#validate-and-evaluate) p
 
 ## Judge the result
 
-Return the observed action, criterion-specific comparison and checked configuration to the author. Partial compliance identifies the unmet requirement. Apply verification-before-completion for what that result supports and whether another observation can change acceptance.
+Keep the observed action, criterion-specific comparison and checked configuration as the evaluation evidence. Partial compliance identifies the unmet requirement. Apply verification-before-completion for what that result supports and whether another observation can change acceptance.

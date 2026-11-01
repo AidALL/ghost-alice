@@ -12,9 +12,9 @@ Keep the complete procedure in the body.
 
 ## Body and references
 
-The body supplies the executable handoff defined in [Author the package](../SKILL.md#author-the-package), not only an acting-agent label. For a two-stage review, identify the first review's actual returned findings and the condition under which the parent assistant sends the accepted target and those findings to the second reviewer. The second review cannot silently replace the first.
+The body supplies the executable handoff defined in [Author the package](../SKILL.md#author-the-package), not only an acting-agent label. For a two-stage review, identify the first review's actual returned findings and the condition under which the response model sends the accepted target and those findings to the delegate for the second review. The second review cannot silently replace the first.
 
-Use search terms the intended user or agent will encounter, including concrete error names and domain vocabulary. Name the skill for its responsibility rather than a generic label such as helper.
+Use search terms the intended user or response model will encounter, including concrete error names and domain vocabulary. Name the skill for its responsibility rather than a generic label such as helper.
 
 Replace repeated policy with a link to the document and section that define the applicable procedure. Label a required prerequisite as required and identify the point where it applies; label optional background as optional. Avoid host-specific forced-load syntax.
 

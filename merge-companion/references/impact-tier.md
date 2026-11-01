@@ -1,6 +1,6 @@
 # Impact Tier
 
-The reviewing agent assigns one display tier to each pending change. Adversarial-verification checks the classification along with the decision aid.
+The response model assigns one display tier to each pending change. Adversarial-verification checks the classification along with the decision aid.
 
 | Tier | Observed change | Display treatment |
 | --- | --- | --- |

@@ -5,7 +5,7 @@ Dependencies: Python 3.11+ standard library only. The module is pure: it does
 not read artifacts, hooks, ledgers, databases, or the network. Callers pass
 semantic facts they already hold, and the result says whether retained
 evidence answers the claim or one minimal check of the authoritative copy is
-needed. Platform adapters follow references/verify-or-reuse.md#platform-adapters.
+needed. Host tool names follow references/verify-or-reuse.md#host-tool-names.
 
 Usage:
     python3 scripts/verify_or_reuse.py decide --facts-json '<facts>'

@@ -7,7 +7,7 @@ compatibility:
 
 # Test-Driven Development
 
-The implementing assistant establishes a meaningful failing test for accepted behavior, implements that behavior, and observes the resulting pass. The test's expected result comes from the user's requirement and source contract.
+The response model establishes a meaningful failing test for accepted behavior, implements that behavior, and observes the resulting pass. The test's expected result comes from the user's requirement and source contract.
 
 ## Applicability
 
@@ -15,7 +15,7 @@ Apply RED-first when the required behavior is known, its expected result can be 
 
 If the premise, data flow, target or behavior is unknown, use bounded discovery or an implementation proof first. When that work establishes a testable production contract, apply RED-first to the subsequent implementation. Configuration, generated output and instruction changes without a meaningful behavioral test use their accepted source or runtime validation instead. Follow an explicit user instruction about implementation and verification order.
 
-Before starting, the assistant identifies the expected failure, the production path and the independent basis for the assertion. Unknown answers require discovery under systematic-debugging or the accepted design workflow; they do not justify inventing a test.
+Before starting, the response model identifies the expected failure, the production path and the independent basis for the assertion. Unknown answers require discovery under systematic-debugging or the accepted design workflow; they do not justify inventing a test.
 
 ## RED: establish the intended failure
 
@@ -25,7 +25,7 @@ Invoke the project's actual runner with the exact test target. Retain the origin
 
 If the test passes, determine whether the behavior already exists or the test misses the intended condition. If the test errors, correct the fixture or prerequisite and observe the affected result. Systematic-debugging owns failed-round accounting.
 
-For applicable work, observe this intended failure before writing production code. If the current assistant prematurely wrote production code, remove only its own authorized premature change before rebuilding from the test. Preserve pre-existing user changes and retained original failure evidence.
+For applicable work, observe this intended failure before writing production code. If the response model prematurely wrote production code, remove only its own authorized premature change before rebuilding from the test. Preserve pre-existing user changes and retained original failure evidence.
 
 ## GREEN: satisfy the behavior
 
@@ -56,7 +56,7 @@ test('returns success on the third allowed attempt', async () => {
 });
 ```
 
-The assistant first observes the intended failure in the actual project, then implements the accepted attempt limit:
+The response model first observes the intended failure in the actual project, then implements the accepted attempt limit:
 
 ```typescript
 async function retryOperation<T>(operation: () => Promise<T>): Promise<T> {

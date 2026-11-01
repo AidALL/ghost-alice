@@ -4,11 +4,11 @@ This is a local authoring summary, not a copy of an upstream specification or a 
 
 ## Instruction design
 
-The author supplies information the assistant reading the finished skill needs for the task: non-obvious constraints, domain facts, exact fragile sequences and the conditions for choosing among alternatives. Omit generic explanations that do not change that assistant's decision.
+Supply the information that the response model reading the finished skill needs for the task: non-obvious constraints, domain facts, exact fragile sequences and the conditions for choosing among alternatives. Omit generic explanations that do not change its decision.
 
-Match discretion to the operation. Give judgment-based work an objective and acceptance criteria; give a preferred pattern parameters and boundaries; give a fragile operation an exact sequence with named preconditions. An exact command is appropriate only when its paths, inputs, permissions and environment are established.
+Match discretion to the operation. Give judgment-based work an objective and done conditions; give a preferred pattern parameters and boundaries; give a fragile operation an exact sequence with named preconditions. An exact command is appropriate only when its paths, inputs, permissions and environment are established.
 
-Use one term for each concept. Distinguish what the agent must read from what it must execute. A script reference alone must not imply execution.
+Use one term for each concept. Distinguish what the response model must read from what it must execute. A script reference alone must not imply execution.
 
 ## Discovery and package structure
 
@@ -16,9 +16,9 @@ Follow writing-skills' [Author the package](../SKILL.md#author-the-package) requ
 
 ## Workflow and output examples
 
-For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package). For example, the assistant filling a form reads the actual field schema from the exposed form tool, maps user-supplied values into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping.
+For an operational handoff, apply [the authoring contract](../SKILL.md#author-the-package). For example, the response model filling a form reads the actual field schema from the exposed form tool, maps user-supplied values into that schema, submits the validated mapping with the tool's documented arguments, and inspects its returned document or validation errors. A mapping failure requires correcting that mapping.
 
-Use an exact template when an output consumer requires a schema. For narrative work, give a default structure with the conditions under which the agent may adapt it. One complete input/output example should demonstrate the expected content and level of detail.
+Use an exact template when an output consumer requires a schema. For narrative work, give a default structure with the conditions under which the response model may adapt it. One complete input/output example should demonstrate the expected content and level of detail.
 
 Choose a concrete default method when the domain contract supports one. Name an alternative only with the condition that makes the default unsuitable. Do not present an unexplained menu of libraries.
 

@@ -10,7 +10,7 @@ compatibility:
 
 # Writing Plans
 
-The planning agent turns accepted requirements into tasks an implementer can execute without prior project context. Announce use of this skill once. Brainstorming owns unresolved design decisions; this skill does not silently settle a human-owned requirement.
+The response model turns accepted requirements into tasks that can be executed without prior project context. Announce use of this skill once. Brainstorming owns unresolved design decisions; this skill does not silently settle a human-owned requirement.
 
 ## Define the plan
 
@@ -30,9 +30,9 @@ For every task include:
 - Complete code for a planned code change, including referenced types and functions.
 - The actual command and expected result for each check.
 - Dependencies and the condition that makes the task ready.
-- Acceptance criteria and any exact unresolved human decision.
+- Done conditions and any exact unresolved human decision.
 
-Do not leave placeholder implementation text, unspecified validation, undefined calls, or instructions such as “same as Task 2” when the implementer needs that code independently.
+Do not leave placeholder implementation text, unspecified validation, undefined calls, or instructions such as “same as Task 2” when the model executing that task needs that code independently.
 
 ## Review and correction
 
@@ -42,8 +42,8 @@ Use brainstorming's [references/document-reviewer-prompt.md](../brainstorming/re
 
 ## Execution handoff
 
-Continue the already authorized execution choice after saving or correcting the plan. When the choice is genuinely unresolved, present subagent-driven-development for task-specific agents and executing-plans for inline execution. Invoke the selected skill.
+Continue the already authorized execution choice after saving or correcting the plan. When the choice is genuinely unresolved, present subagent-driven-development for task-specific delegates and executing-plans for inline execution. Invoke the selected skill.
 
 ## Failure modes and result
 
-The planning assistant follows verification-before-completion before claiming that the plan satisfies its specification. The assistant that later executes the plan supplies the evidence for implementation claims.
+The response model follows verification-before-completion before claiming that the plan satisfies its specification. The response model that later executes the plan supplies the evidence for implementation claims.

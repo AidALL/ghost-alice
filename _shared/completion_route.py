@@ -164,7 +164,7 @@ def _criterion_decision(criterion, checks, assessments, failure, malformed_conta
         return dict(decision, evidence_route="reopen_cause",
                     reason="Malformed selected-owner evidence: reopen the unknown/integrity cause without a business rerun.")
     if failure in _REOPEN_FAILURES or failure not in {"none", "recording"}:
-        return dict(decision, evidence_route="reopen_cause", reason="The current-session assistant diagnoses the reported authority, integrity or contract failure before retrying dependent work.")
+        return dict(decision, evidence_route="reopen_cause", reason="The response model diagnoses the reported authority, integrity or contract failure before retrying dependent work.")
     if len(matches) > 1:
         return dict(decision, evidence_route="reopen_cause", reason="Criterion evidence is ambiguous.")
     proof = matches[0] if matches else None
@@ -172,7 +172,7 @@ def _criterion_decision(criterion, checks, assessments, failure, malformed_conta
         return dict(decision, evidence_route="reopen_cause", reason="Criterion proof ownership or revision is invalid.")
     if not required:
         return dict(decision, evidence_route="reopen_cause" if failure == "recording" else "owner_verification",
-                    reason="The current-session assistant must identify the checks needed for this criterion using verification-before-completion.")
+                    reason="The response model must identify the checks needed for this criterion using verification-before-completion.")
     if proof is None:
         return dict(decision, evidence_route="reopen_cause" if failure == "recording" else "fresh_affected",
                     check_ids=required if failure != "recording" else [], reason="Selected owner criterion has no covering proof.")
@@ -180,7 +180,7 @@ def _criterion_decision(criterion, checks, assessments, failure, malformed_conta
     covered = proof.get("check_ids")
     if (validity not in ("valid", "invalid") or change not in ("none", "changed")
             or not isinstance(covered, list) or not all(isinstance(c, str) for c in covered)):
-        return dict(decision, evidence_route="reopen_cause", reason="The current-session assistant must resolve the evidence validity or affected criteria before selecting new checks.")
+        return dict(decision, evidence_route="reopen_cause", reason="The response model must resolve the evidence validity or affected criteria before selecting new checks.")
     references = all(isinstance(proof.get(field), str) and proof[field].strip()
                      for field in ("proof_ref", "verified_at"))
     if not references:
@@ -199,7 +199,7 @@ def _criterion_decision(criterion, checks, assessments, failure, malformed_conta
     if failure == "recording":
         return dict(decision, evidence_route="reopen_cause", reason="Recording failure conflicts with the owner proof or coverage.")
     return dict(decision, evidence_route="fresh_affected", check_ids=required if change == "changed" or validity == "invalid" else missing,
-                reason="The current-session assistant runs only the checks listed in check_ids, within the user's authorization.")
+                reason="The response model runs only the checks listed in check_ids, within the user's authorization.")
 
 
 def select_completion_route(context, claim_scope, evidence_state):

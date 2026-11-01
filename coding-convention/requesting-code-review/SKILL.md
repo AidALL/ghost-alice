@@ -1,15 +1,15 @@
 ---
 name: requesting-code-review
-description: Dispatches the code-reviewer subagent after a major feature is built or before a merge into main, and checks that a pull request's reviews finished and CI passed on its latest commit before merging it.
+description: Has a delegate review the code after a major feature is built or before a merge into main, and checks that a pull request's reviews finished and CI passed on its latest commit before merging it.
 compatibility:
   - "Python 3.11+ standard library"
 ---
 
 # Requesting Code Review
 
-Dispatch the `code-reviewer` subagent to catch issues before they accumulate. The reviewer receives only the context prepared for evaluation. It never receives the session history. This keeps the reviewer focused on the work output rather than on your thought process, and preserves your own context for follow-up work.
+Dispatch a delegate with the `code-reviewer` assignment to catch issues before they accumulate. The delegate receives only the context prepared for evaluation. It never receives the session history. This keeps the delegate focused on the work output rather than on your thought process, and preserves your own context for follow-up work.
 
-The parent assistant requests review at required milestones and when a specific unresolved concern warrants independent inspection.
+The response model requests review at required milestones and when a specific unresolved concern warrants independent inspection.
 ## When to Request a Review
 
 A review listed below is required, or worth requesting, only when its outcome can change the next action or a criterion's judgment.
@@ -32,7 +32,7 @@ A review listed below is required, or worth requesting, only when its outcome ca
 
 Use the accepted task's starting commit and current head for committed work. Identify any uncommitted diff separately; a commit range cannot include it. Do not guess the base from HEAD~1 or a commit-message match.
 
-□ 2. Dispatch the code-reviewer subagent
+□ 2. Dispatch a delegate to review the code
 
 Use the host's exposed agent API and the actual `references/code-reviewer.md` template. Supply a role parameter only when the host schema defines one.
 
@@ -44,7 +44,7 @@ Placeholders
 - `{HEAD_SHA}`: the ending commit.
 - `{DESCRIPTION}`: a short summary.
 
-For publication review, the parent supplies the preflight matrix produced by finishing-a-development-branch Step 1. The reviewer reports any missing required result or unaccounted environment difference; that owning procedure determines affected reruns before publication.
+For publication review, the response model supplies the preflight matrix produced by finishing-a-development-branch Step 1. The delegate reports any missing required result or unaccounted environment difference; that owning procedure determines affected reruns before publication.
 
 □ 3. Respond to the feedback
 

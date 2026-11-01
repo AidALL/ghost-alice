@@ -329,7 +329,7 @@ def validate_identity(platform: str, session_id: str) -> None:
     """Mutation identities are exact, never sanitized aliases of another ID."""
     for value in (platform, session_id):
         if not isinstance(value, str) or not value or safe_component(value, "") != value:
-            raise ValueError("invalid ledger identity: use the exact canonical platform and session ID from the hook receipt")
+            raise ValueError("invalid ledger identity: use the exact canonical platform and session ID from the session receipt")
 
 
 def _load_legacy_state(paths: dict[str, Path], platform: str, session_id: str, *, data=None) -> dict[str, Any]:
@@ -2266,13 +2266,13 @@ def main(argv: list[str] | None = None) -> int:
         if bound_session and explicit_session and explicit_session != bound_session:
             raise SystemExit(
                 "session identity mismatch: --session-id does not match the bound host session; "
-                "use the session ID in the current hook receipt. No ledger was written. "
+                "use the session ID in the current session receipt. No ledger was written. "
                 "Do not unset or replace host identity to bypass this check."
             )
         if not bound_session and not explicit_session:
             raise SystemExit(
                 "--session-id is required for writes without a bound host session. "
-                "Use the current hook receipt or an explicitly selected standalone session; "
+                "Use the current session receipt or an explicitly selected standalone session; "
                 "current-session.json is a shared discovery hint, not a write identity. "
                 "No ledger was written."
             )

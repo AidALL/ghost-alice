@@ -11,7 +11,7 @@ Use this pattern after tracing a bad input when multiple actual entry paths can 
 | Execution environment | Prevent an operation whose target violates the environment's accepted boundary. |
 | Diagnostics | Record safe context to explain a failure; logging does not decide policy. |
 
-The agent maps the observed data flow and identifies which caller can bypass each earlier check. Add a later check only for a distinct invariant or bypass. The presence of four rows does not require four implementations.
+The response model maps the observed data flow and identifies which caller can bypass each earlier check. Add a later check only for a distinct invariant or bypass. The presence of four rows does not require four implementations.
 
 ## Example
 

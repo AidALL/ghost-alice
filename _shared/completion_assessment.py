@@ -1,4 +1,4 @@
-"""Core authentication of the current-session assistant's evidence review.
+"""Core authentication of the response model's evidence review.
 
 This module checks provenance and exact bindings. It does not rerun business
 observations.
@@ -109,7 +109,7 @@ def _schema(connection):
 def _stored(connection, table, reference):
     _require(connection is not None and connection.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone(),
-        'assessment-required', 'The current-session assistant must review the original proof and record its judgments through completion_assessment.py')
+        'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
     row = connection.execute(f'SELECT payload_json FROM {table} WHERE reference=?', (reference,)).fetchone()
     _require(row is not None, 'assessment-required', 'Referenced Core review is unavailable')
     value = json.loads(row[0])
@@ -835,7 +835,7 @@ def lookup_assessment(source, contract, proof, verified_at, *, transaction=None,
     with core._read_connection(root, transaction) as connection:
         _require(connection is not None and connection.execute(
             "SELECT 1 FROM sqlite_master WHERE name='core_completion_assessments'").fetchone(),
-            'assessment-required', 'The current-session assistant must review the original proof and record its judgments through completion_assessment.py')
+            'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
         rows = connection.execute('SELECT reference FROM core_completion_assessments WHERE lookup_key=?',
             (_lookup_key(contract, proof, verified_at),)).fetchall()
         _require(len(rows) == 1, 'assessment-required', 'One exact original Core assessment is required')
@@ -864,7 +864,7 @@ def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
         units = [work_unit_id] if work_unit_id is not None else route.get('selected_work_unit_ids', [])
         contracts = [_current_contract(core, root, owner, connection, unit)[0] for unit in units]
         _require(connection.execute("SELECT 1 FROM sqlite_master WHERE name='core_completion_assessments'").fetchone(),
-                 'assessment-required', 'The current-session assistant must review the original proof and record its judgments through completion_assessment.py')
+                 'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
         exact, equivalent = [], []
         comparison = review_comparison_text(proof)
         for contract in contracts:
@@ -899,7 +899,7 @@ def lookup_current_response(source, text, *, transaction=None):
     with core._read_connection(root, transaction) as connection:
         _require(connection is not None and connection.execute(
             "SELECT 1 FROM sqlite_master WHERE name='core_completion_responses'").fetchone(),
-            'response-assessment-required', 'The current-session assistant must review this complete response and record its judgment')
+            'response-assessment-required', 'The response model must review this complete response and record its judgment')
         if report_only:
             reviewed_source = _lookup_source_response(core, root, owner, connection, text)
             if reviewed_source is not None:
