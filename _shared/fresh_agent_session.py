@@ -12,15 +12,10 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence, TextIO
 
-# Package-style loads (_shared.fresh_agent_session) still find the sibling owner.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+from project_runtime import project_runtime
 from text_lines import split_lines
-
-try:
-    from _shared.project_runtime import project_runtime
-except ModuleNotFoundError:  # Direct execution from the installed _shared directory.
-    from project_runtime import project_runtime
 
 
 CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]

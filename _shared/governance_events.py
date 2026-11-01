@@ -103,7 +103,6 @@ def output_path() -> Path:
 
 
 def append_event(event: dict[str, str], path: Path) -> None:
-    # Hooks of concurrent tool calls append here; the retention lock keeps their appends and rotations apart.
     state_retention.append("governance-events", path, json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
 
 

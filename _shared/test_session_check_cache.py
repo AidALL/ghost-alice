@@ -99,7 +99,6 @@ class SessionCheckReuseTest(unittest.TestCase):
                             self.assertEqual(decision["visible_decision"], "force_show", profile)
 
     def test_every_check_outcome_informs_without_flow_control(self):
-        # Core informs and stops: no outcome of a parsed check carries a host control field or a blocking exit.
         import session_check_cache as cache
         import pending_merge_precheck_hook as hook
         import io
@@ -243,7 +242,7 @@ class SessionCheckReuseTest(unittest.TestCase):
             run()
             # Another installer run backs up a modified skill during the session.
             manifest.write_text(json.dumps({"entries": [{"decided": False}]}))
-            # merge-companion re-checks the manifest before work changes an installed skill; the next
+            # merge-companion re-checks the manifest itself (merge-companion/SKILL.md); the next
             # session start reports the change.
             compacted = run()
             self.assertNotIn("hookSpecificOutput", compacted)

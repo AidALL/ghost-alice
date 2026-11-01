@@ -12,7 +12,7 @@ Usage:
     python3 scripts/validate_entrypoints.py --json    # JSON output for CI
 
 Dependencies:
-    Python 3.8+ standard library only.
+    Python 3.11+ standard library only.
     Requires prebuilt skill-catalog/skills.json. Fails when missing.
 
 Exit codes:

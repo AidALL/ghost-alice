@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 
-# A file-path load, such as the installed-runtime check, still finds the sibling owner.
+# Package-style and file-path loads, such as the installed-runtime check, still find sibling modules.
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
 from text_lines import LINE_BREAK
@@ -230,7 +230,6 @@ def _strip_block_examples(text):
                 kept.append("")
                 continue
             indented = False
-        # A control record's nested fields are evidence data, not code examples.
         if control_fields and re.match(r"^\s*(?:-\s+|[A-Za-z0-9_-]+\s*:)", line):
             kept.append(line)
             paragraph = True
@@ -260,9 +259,9 @@ def _strip_block_examples(text):
 def _mask_multiline_quoted_examples(text):
     """Mask balanced quoted examples, retaining outside text and line breaks.
 
-    Reserve complete inline quotation boundaries before considering multiline
-    examples. Neither endpoint of an existing inline span may be repurposed.
-    Keep their original text, including evidence in actual control fields.
+    Neither endpoint of an existing inline span may be repurposed: a multiline
+    candidate that reuses one keeps its original text, so the inline spans at its
+    ends stay visible, including evidence in actual control fields.
     Multiline exclusion requires an explicit quote opening at a line boundary;
     ambiguous prose spans remain visible to normal validation.
     """
@@ -437,10 +436,7 @@ def validate_completion_evidence_map(completion_check, *, partial=False):
     Full completion requires unverified=none. Partial evidence requires unique
     declared criteria, scope=partial and explicit unresolved criterion reasons.
     The display parser also accepts compact full controls without declarations;
-    original-proof parsing requires criterion IDs, and native completion uses
-    completion_assessment.py to authenticate the assistant's recorded judgment
-    and exact response binding. The current-session assistant must still judge
-    whether the evidence satisfies the user's criteria.
+    original-proof parsing requires criterion IDs.
 
     Return all independent defects in one diagnostic, else None. Reporting a
     later defect never requires the model to submit another malformed block.
@@ -565,10 +561,8 @@ def review_comparison_text(text):
 def parse_original_completion_evidence(evidence_text, *, allow_partial=False, allow_failed_completion=False):
     """Interpret an original qualified proof into its criterion rows and claims.
 
-    This parser checks structure. The current-session assistant judges claims
-    against original sources; completion_assessment.py authenticates that record.
-    Criterion IDs and pass rows alone do not establish semantic support.
-    allow_failed_completion permits a full failure report through this parser.
+    This parser checks structure. allow_failed_completion permits a full failure
+    report through this parser.
     Failed criteria never enter criterion_ids; without allow_failed_completion every row must pass.
     """
     markers = [name for name, _, _ in _control_headers(evidence_text)
@@ -640,8 +634,7 @@ def validate_completion_text(text, *, require_completion_check=False):
     for empty text. This validator does not infer requirements from prose.
 
     Skill invocations and printed self-report/trace fields are workflow audit,
-    not evidence eligibility. Core's assessment authenticates the recorded
-    claim and whole-response judgments independently of those display fields.
+    not evidence eligibility.
     """
     if not looks_like_evidence_claim(text):
         if require_completion_check:

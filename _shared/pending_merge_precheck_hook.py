@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """Session-start pending-merge precheck hook.
 
-At session start, after resume, clear, compaction and fork, this hook checks the current platform's
-pending-merge manifest and reports the result on the user's screen; it adds nothing to the model
-context. An installer run can add entries during the session, so merge-companion re-checks the
-manifest before work changes an installed skill; no input hook repeats this check. A manifest that
-keeps changing during the check is reported as an unfinished check; the hook never blocks the host.
+At session start this hook checks the current platform's pending-merge manifest and reports the result
+on the user's screen; it adds nothing to the model context. merge-companion re-checks the manifest
+itself (merge-companion/SKILL.md#entry-and-activation); no input hook repeats this check. A manifest
+that keeps changing during the check is reported as an unfinished check; the hook never blocks the host.
 """
 
 from __future__ import annotations
@@ -114,7 +113,7 @@ def _json_payload(platform: str, result: dict | None = None) -> str:
         body['systemMessage'] = message
         return json.dumps(body, ensure_ascii=False)
     message = _clean_contract_line(platform)
-    # A clean pass is routine: the hook runner keeps it off the user screen and in the strict log.
+    # A clean pass is routine.
     body.update(systemMessage=message, ghostAliceSurface='routine')
     return json.dumps(body, ensure_ascii=False)
 

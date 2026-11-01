@@ -864,7 +864,7 @@ def normalize_decision(raw: Any, timestamp: str) -> dict[str, Any] | None:
 
 
 def canonical_source(value: Any, default: str) -> str:
-    """Return the current name of a source label; a legacy label maps to its current name."""
+    """Return the current name of a source label."""
     source = str(value or default).strip()
     return LEGACY_SOURCE_ALIASES.get(source, source)
 
@@ -945,7 +945,7 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
                 criterion["met_at"] = met_at
         store(acceptance_criterion_key(criterion), criterion)
 
-    # Incoming raw deltas may not assert "met": the status only transitions through mark_acceptance_criterion_met. Admission may still be promoted.
+    # An incoming delta may promote a criterion's admission.
     incoming_items = incoming if isinstance(incoming, list) else [incoming]
     for item in incoming_items:
         criterion = normalize_acceptance_criterion(item)

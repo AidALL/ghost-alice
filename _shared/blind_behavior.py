@@ -15,12 +15,10 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
-try:
-    from _shared.fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session
-    from _shared.project_runtime import ProjectRuntime, project_runtime
-except ModuleNotFoundError:  # Direct execution from the installed _shared directory.
-    from fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session
-    from project_runtime import ProjectRuntime, project_runtime
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session
+from project_runtime import ProjectRuntime, project_runtime
 
 CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
 PLATFORMS = {"claude", "codex"}

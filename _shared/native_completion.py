@@ -144,8 +144,7 @@ consumers obtain it directly from this Core API and check their input binding.
         if issue is None:
             issue = validate_completion_text(text, require_completion_check=selected['required_completion_check'])
         if issue is None and marker:
-            # The current-session assistant judged meaning against original sources under Core verification instructions.
-            # This function authenticates that exact review for the Stop observer.
+            # lookup_current_response authenticates the recorded review of this exact response for the Stop observer.
             from completion_assessment import CompletionAssessmentError, lookup_current_response
             try:
                 reviewed = lookup_current_response(source, text, transaction=transaction)

@@ -13,6 +13,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MODULE_PATH = Path(__file__).with_name("blind_behavior.py")
 DIMENSIONS = {
@@ -68,7 +70,7 @@ PASS_RESULT = {
 def load_blind_behavior():
     if not MODULE_PATH.is_file():
         return None
-    return importlib.import_module("_shared.blind_behavior")
+    return importlib.import_module("blind_behavior")
 
 
 def write_manifest(home: Path, manifest=MANIFEST, platform: str | None = None) -> Path:

@@ -5,7 +5,7 @@ Dependencies: Python 3.11+ standard library only. The module is pure: it does
 not read artifacts, hooks, ledgers, databases, or the network. Callers pass
 semantic facts they already hold, and the result says whether retained
 evidence answers the claim or one minimal check of the authoritative copy is
-needed. Platform adapters only map tool names to neutral tool classes.
+needed. Platform adapters follow references/verify-or-reuse.md#platform-adapters.
 
 Usage:
     python3 scripts/verify_or_reuse.py decide --facts-json '<facts>'
@@ -250,8 +250,7 @@ def decide(facts: Mapping[str, Any]) -> dict[str, Any]:
         verdict = "unverified"
         reasons.append("artifact-not-accessible")
 
-    # The party holding an open change path can close it for this claim by confirming nothing
-    # relevant changed; an observed mutation event still wins over that confirmation.
+    # Writer confirmation and observed mutations follow references/verify-or-reuse.md#state-vocabulary.
     confirmed_closed = authority in ("closed", "agent-mediated") or f["writer_confirmed_unchanged"]
     if f["writer_confirmed_unchanged"] and not mutations:
         reasons.append("writer-confirmed-unchanged")

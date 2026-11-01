@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Project hook-internal values by work-impact projection.
 
-Hook execution and strict audit logging are never reduced here. The primary
-question is whether a hook value changes the work boundary, focus layer,
-verification burden, or recovery path. User visibility follows the runtime
+The primary question is whether a hook value changes the work boundary, focus
+layer, verification burden, or recovery path. User visibility follows the runtime
 profile. The model-facing hint is derived from work impact.
 
 Materialization levels, low to high:
@@ -33,7 +32,6 @@ _TABLE: dict[str, dict[str, tuple[str, str]]] = {
     "routine": {"dynamic": ("hidden", "omitted"), "minimal": ("hidden", "omitted")},
 }
 
-# forced/risk/gate and failed verification reach both surfaces at the top.
 _FORCED = ("forced", "full")
 # fail-closed for unknown classification or unknown profile: full on both, but not the "forced" must-not-suppress flag (that is reserved for real risk).
 _FULL_FULL = ("full", "full")
@@ -50,8 +48,7 @@ def project_surfaces(
 
     Forced/gate/risk values and failed verification reach both surfaces at the
     top (user=forced, model=full) on every profile. Unknown classification or
-    unknown profile fails closed to (full, full). The strict log is never
-    affected by this function.
+    unknown profile fails closed to (full, full).
     """
     prof = str(profile or "").strip().lower()
     klass = str(exposure_class or "").strip().lower()

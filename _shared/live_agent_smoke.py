@@ -13,17 +13,16 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+from project_runtime import ProjectRuntime, project_runtime
 from text_lines import split_lines
-
-try:
-    from _shared.project_runtime import ProjectRuntime, project_runtime
-except ModuleNotFoundError:  # Direct execution from the installed _shared directory.
-    from project_runtime import ProjectRuntime, project_runtime
 
 
 STATUS_PASS = "pass"
@@ -162,7 +161,7 @@ def classify_smoke_result(
     if timed_out:
         fail_reasons.append("timeout")
 
-    # A CLI/harness error (unknown flag, version skew) is not a governance failure. Detect it on the runtime log and report invalid-harness, before the exit-code/fail logic so a nonzero exit cannot mask it.
+    # Check harness errors before the exit-code/fail logic so a nonzero exit cannot mask them.
     if not timed_out:
         harness_reasons: list[str] = []
         for reason, pattern in HARNESS_ERROR_PATTERNS:
@@ -176,7 +175,7 @@ def classify_smoke_result(
     elif exit_code not in (None, 0):
         fail_reasons.append(f"exit-code:{exit_code}")
 
-    # A run that exits 0 with non-empty output and all required markers satisfies this smoke case’s observable contract; these signals do not establish semantic correctness. Only a recovered Codex tool router diagnostic is treated as transient; hook failures, tracebacks, cache failures, and panics remain fatal because they can invalidate the governance surface even when the agent produced final text.
+    # A run that exits 0 with non-empty output and all required markers satisfies this smoke case’s observable contract. Only a recovered Codex tool router diagnostic is treated as transient; hook failures, tracebacks, cache failures, and panics remain fatal because they can invalidate the governance surface even when the agent produced final text.
     recovered_ok = (
         exit_code == 0
         and not timed_out
