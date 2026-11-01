@@ -22,13 +22,13 @@ locators, accessed paths and any uncertainty. Do not merely quote the rule.
 
 The response model fills the actual fixture paths and required tool limits before dispatch. On Claude Code use the exposed Task capability; on Codex use its agent API with only supported arguments. The platform mapping lives in using-coding-convention.
 
-## Review-handoff application case
+## Reviewer application to a supplied mixed target
 
-Use this representative case when a changed instruction affects how a parent supplies original constraints or reviews a mixed code-and-instruction target. It is conditional application evidence, not a required evaluation for unrelated skill changes. Follow the parent skill's [baseline and evaluation procedure](../SKILL.md#validate-and-evaluate); this case adds no evaluator requirement, trial quota or record format.
+Use this case when the live uncertainty concerns a reviewer's inspection of a supplied mixed code-and-instruction target. It evaluates that reviewer application, not the parent's ability to prepare the assignment. Follow the parent skill's [baseline and evaluation procedure](../SKILL.md#validate-and-evaluate).
 
 The response model prepares an isolated actual Git repository with a base commit, a head commit containing a CLI change, and a separately identified uncommitted change to a maintenance procedure. For this case, the accepted original requirement adds `--output-format` while preserving the old `--format` alias, defaults and errors. A later clarification after permission to continue requires the alias in help and examples and instructs future maintainers to preserve it.
 
-The response model constructs inspectable artifacts for that decision: the head's parser accepts only the new flag, and the uncommitted maintenance procedure tells the next editor to remove the alias from examples. These are intentional fixture mismatches with the accepted sources, not observations about production behavior. The parent retains the original excerpts or accessible locators separately from a supplied interpretation that omits the compatibility requirement. That conflict lets the application show whether the delegate checks the original constraint rather than adopting the summary.
+The response model constructs inspectable artifacts for that decision. For example, the parser preserves both flag names while the uncommitted maintenance procedure tells the next editor to remove the old alias from examples. This fixture distinguishes a supported instruction finding from an unsupported parser finding. The parent supplies original excerpts or accessible locators separately from an interpretation that omits the compatibility requirement.
 
 Before dispatch, the parent resolves the actual repository path, commit IDs and uncommitted target and builds an executable assignment using requesting-code-review's [assignment inputs](../../requesting-code-review/references/code-reviewer.md#assignment-inputs). The parent supplies the isolated checkout and read or execution limits through the host's exposed agent API. When comparing baseline and candidate, keep that combined Git target unchanged under their respective instructions; a code-only `BASE..HEAD` target omits the identified uncommitted procedure.
 
@@ -44,15 +44,17 @@ and state which conclusions require execution or another unavailable stage.
 Do not modify the fixture or infer that a source review proves runtime behavior.
 ```
 
-The delegate inspects the actual target and returns its real findings to the parent under the shared [artifact evidence](../../requesting-code-review/references/code-reviewer.md#evidence-by-artifact) and [result format](../../requesting-code-review/references/code-reviewer.md#result-format) guidance. The parent checks whether those findings address the omitted alias and contradictory procedure, and whether the delegate limits each conclusion to the observations it obtained. Quoting the supplied rule without inspecting either artifact does not demonstrate this application.
+The delegate inspects the actual target and returns findings to the parent under the shared [artifact evidence](../../requesting-code-review/references/code-reviewer.md#evidence-by-artifact) and [result format](../../requesting-code-review/references/code-reviewer.md#result-format) guidance. The parent compares the findings with the actual parser and procedure and the original requirement, including whether a defect was missed or invented. Quoting the rule without inspecting either artifact does not demonstrate the application.
 
-The parent retains the actual outcome, including a passing baseline or unresolved observation. A candidate supplied as instruction text tests application of that text; it does not show native skill discovery, installation or adoption. The evidence limits below and verification-before-completion govern any broader claim.
+## Parent assignment-preparation case
+
+Use this case when the live uncertainty concerns how the parent constructs review input. Give the parent the original request, later corrections, its separate interpretation and access to the Git checkout. Ask it to prepare the actual review assignment under the selected skill guidance; do not preassemble the assignment's fields or tell it which packaging difference the evaluation expects.
+
+For a baseline/candidate comparison, use the same original inputs and Git state in separate contexts, with only the selected guidance changed. Compare the resulting assignments with the original requirement and the actual committed and uncommitted targets. Judge preserved constraints, correct targets, unsupported assumptions and unnecessary questions; matching a particular heading or field label is not the criterion. An equally adequate baseline and candidate leave the claimed improvement unestablished for that case.
 
 ## Review and correction
 
-The response model inspects the delegate’s actions and resulting evidence rather than accepting the delegate’s compliance statement. If the result deviates, identify the exact instruction permitting the wrong decision. Correct that instruction in place and re-evaluate its affected condition.
-
-For a discovery failure, revise the description. For a misapplied rule, revise the trigger or action in the body. Add a rationalization example only when the observed rationale explains the defect.
+The response model inspects the delegate's actions and resulting evidence against the selected criterion. When the observed result deviates from that criterion, it follows the [diagnostic procedure](bulletproofing-skills.md#procedure) to decide which correction is justified. Task-input or application corrections remain with their owning task procedure. When the diagnosis identifies an instruction defect, writing-skills' [Validate and evaluate](../SKILL.md#validate-and-evaluate) procedure owns its correction and affected re-evaluation.
 
 ## Evidence limits
 

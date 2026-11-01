@@ -1,16 +1,20 @@
-# Correcting Observed Instruction Failures
+# Diagnosing and Correcting Instruction Failures
 
-Use this reference when an evaluation exposes wrong output structure, an omitted necessary input or output, a misapplied condition, or an interpretation that bypasses an applicable rule. The response model selects the repair form from the observed failure and corrects the responsible instruction.
+Use this reference to decide whether an observed output or rule-application failure warrants an instruction repair, and to select the repair form when the evidence supports one.
 
 ## Procedure
 
-Use the baseline preserved by writing-skills to identify the failed output or choice, governing instruction and any stated rationale. Locate the instruction that leaves the required structure, value, condition or action unclear, then select the repair form below. The example instructions illustrate repair forms within the affected task's authority and applicability conditions.
+Compare the [preserved baseline](../SKILL.md#baseline-and-scope) with the accepted requirement, governing instruction and required task inputs. Identify whether the evidence supports missing, ambiguous or conflicting guidance, or a specific interpretation to repair. The failed outcome alone does not establish that the instruction caused it.
 
-| Observed failure | Repair form | Example instruction |
+When clear guidance was not followed or its required input was omitted, correct that task's application or input under its existing procedure. For example, if the review guidance already requires a head commit but the parent omitted it, supply the resolved head through the existing assignment instead of adding another template. If the comparison does not yet identify an instruction defect, retain the guidance and investigate the unresolved task condition.
+
+For an identified instruction defect, select the repair form below. The example instructions illustrate forms within the affected task's authority and applicability conditions.
+
+| Supported instruction defect | Repair form | Example instruction |
 | --- | --- | --- |
-| Output has the wrong structure | Put a concrete template at the producing step, naming the fields or order that failed. | When returning a comparison, the response model gives the user a table with Option, Requirement and Evidence columns. |
-| A necessary input or output is omitted | Name the missing value, its authoritative source or recipient, and the step that consumes or produces it. | Before dispatching a review, the parent establishes the target from the accepted task and repository state, then supplies it to the delegate under requesting-code-review's assignment procedure. |
-| A condition is applied to the wrong case | State the trigger and the action for each relevant branch. | For a committed review target, the delegate inspects the supplied base-to-head range; for separately identified uncommitted work, it inspects that working-tree diff. |
+| Required output structure is missing or ambiguous | Put a concrete template at the producing step, naming the fields or order that failed. | When returning a comparison, the response model gives the user a table with Option, Requirement and Evidence columns. |
+| Guidance omits a necessary input or output handoff | Name the missing value, its authoritative source or recipient, and the step that consumes or produces it. | Before dispatching a review, the parent establishes the target from the accepted task and repository state, then supplies it to the delegate under requesting-code-review's assignment procedure. |
+| A trigger or action permits the wrong branch | State the trigger and the action for each relevant branch. | For a committed review target, the delegate inspects the supplied base-to-head range; for separately identified uncommitted work, it inspects that working-tree diff. |
 | An interpretation bypasses an applicable rule | Rewrite the misread decision in place before adding a separate prohibition. | Under an applicable RED-first contract, a response model that wrote premature production code removes only its own authorized change before rebuilding from the test, preserving pre-existing user work. |
 
 A rationalization table or red-flag list is useful when several observed cases expose distinct conditions. Update the trigger description only when discovery itself failed.
