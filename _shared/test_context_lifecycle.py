@@ -9,12 +9,14 @@ import unittest
 import types
 import io
 import os
+import subprocess
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_response_route import ResponseRouteTests
 import context_lifecycle as lifecycle
+import test_claude_context_intake as intake_fixtures
 
 
 class ContextLifecycleTests(unittest.TestCase):
@@ -1215,6 +1217,69 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
                 self.assertEqual((result.state, result.reason), ('preserved', 'selection-not-in-request'))
                 self.assertEqual(result.request, self.request())
                 self.assertEqual(result.observations, ())
+
+
+class ContextInputLookupTests(unittest.TestCase):
+    """The procedure's three ledger lookups choose the input that context_input_binding binds."""
+
+    LEDGER = Path(__file__).resolve().parents[1] / 'session-intent-analyzer' / 'scripts' / 'session_intent_ledger.py'
+
+    def setUp(self):
+        self.claude = intake_fixtures.ClaudeContextIntakeTests()
+        self.claude.setUp()
+        self.addCleanup(self.claude.doCleanups)
+
+    def lookup(self, *args, absent=False):
+        """Return the lookup's JSON, or None when absent=True and the ledger reports the detail unavailable."""
+        coords = self.claude.coords
+        completed = subprocess.run([sys.executable, str(self.LEDGER), '--root', str(coords['root']),
+            '--platform', coords['platform'], '--session-id', coords['session_id'], *args],
+            capture_output=True, text=True, stdin=subprocess.DEVNULL)
+        if absent and completed.returncode and completed.stderr.strip() == 'State detail is unavailable':
+            return None
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        return json.loads(completed.stdout)
+
+    def selected_input(self):
+        """Omit the input argument while intake is pending; otherwise prefer a nonempty context input to the latest human input."""
+        if self.lookup('--read-state', '--pointer', '/intake_status')['value'] == 'pending-native-origin':
+            return None
+        context = self.lookup('--read-state', '--pointer', '/current_context_input_event_id', absent=True)
+        return (context and context['value']) or self.lookup('--read-intent')['input_event_id']
+
+    def test_claude_human_input_selects_the_bound_input(self):
+        self.claude.stage(actor='human')
+        self.claude.reconcile()
+        self.assertEqual(self.selected_input(), self.claude.binding()['input_event_id'])
+
+    def test_claude_sdk_context_input_takes_precedence_over_the_latest_human_input(self):
+        self.claude.stage(actor='human')
+        self.claude.reconcile()
+        human = self.lookup('--read-intent')['input_event_id']
+        self.claude.stage('Continue with the next source comparison.')
+        self.claude.reconcile()
+        selected = self.selected_input()
+        self.assertTrue(human)
+        self.assertNotEqual(selected, human)
+        self.assertEqual(selected, self.claude.binding()['input_event_id'])
+
+    def test_pending_native_origin_omits_the_input_argument(self):
+        self.claude.stage(actor='human')
+        self.assertIsNone(self.selected_input())
+        self.claude.reconcile()
+        self.assertEqual(self.selected_input(), self.claude.binding()['input_event_id'])
+
+    def test_a_session_stored_without_the_context_field_selects_the_latest_input(self):
+        self.claude.stage(actor='human')
+        self.claude.reconcile()
+        owner = (self.claude.coords['platform'], self.claude.coords['session_id'])
+        with closing(sqlite3.connect(Path(self.claude.coords['root']) / 'ghost-state.sqlite3')) as connection, connection:
+            state = json.loads(connection.execute('SELECT state_json FROM sessions WHERE platform=? AND session_id=?',
+                                                  owner).fetchone()[0])
+            del state['current_context_input_event_id']
+            connection.execute('UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?',
+                               (json.dumps(state), *owner))
+        self.assertEqual(self.selected_input(), self.claude.binding()['input_event_id'])
 
 
 if __name__ == '__main__':
