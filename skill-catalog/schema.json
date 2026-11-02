@@ -89,7 +89,7 @@
         },
         "calls_relation": {
           "type": "array",
-          "description": "Static handoff/flow relationships declared by SKILL.md frontmatter calls. calls means possible agent-side flow or handoff, not runtime dependency, consumer-read relationship, or dynamic loop.",
+          "description": "Static handoff/flow relationships declared by SKILL.md frontmatter calls. calls means a possible flow or handoff between skills, not runtime dependency, consumer-read relationship, or dynamic loop.",
           "items": {
             "type": "object",
             "required": ["target", "type"],

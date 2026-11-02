@@ -3,7 +3,7 @@
 Validates final `[completion-check]` and scoped `[partial-check]` evidence.
 Both require claim + evidence + pass/fail verdict. Finalized completion requires
 unverified=none; partial reports require declared unresolved criterion IDs and
-scope=partial. The caller and Core assessment own semantic claim scope.
+scope=partial.
 
 Public API:
     validate_completion_text(text, require_completion_check=False) -> str | None

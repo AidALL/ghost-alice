@@ -31,7 +31,7 @@ Ask the AI chat:
 
 ## Review procedure
 
-The current-conversation assistant obtains the current platform's pending-merge
+The response model obtains the current platform's pending-merge
 result as the installed merge-companion skill's Entry and activation section
 directs. It follows that skill for any undecided entry, using the exact
 manifest entry's id, source_path and backup_path. The user's integrate, discard

@@ -51,9 +51,9 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 
 | # | Item | Spec criterion | Verification method | Automatic |
 | --- | --- | --- | --- | :---: |
-| 3-1 | Critical Rules/Gotchas section | an agent-misuse defense section exists | detect keywords in headers such as critical, prohibited, caution, failure mode, rationalization, red signal, troubleshoot | automatic |
+| 3-1 | Critical Rules/Gotchas section | a section that guards against misuse by the model following the skill exists | detect keywords in headers such as critical, prohibited, caution, failure mode, rationalization, red signal, troubleshoot | automatic |
 | 3-2 | default tools/libraries stated | a concrete default rather than a "choose A or B" menu | a meaning judgment, so it cannot be automated | manual |
-| 3-3 | output format template | defines the format of the output the agent will generate | a meaning judgment, so it cannot be automated | manual |
+| 3-3 | output format template | defines the format of the output that the model following the skill will generate | a meaning judgment, so it cannot be automated | manual |
 | 3-4 | reference file references | SKILL.md explicitly points to references/*.md | WARNING for suspected orphan when a file exists in the directory but its filename does not appear in the body | automatic |
 | 3-5 | Contents and heading parity | when `## Contents` exists, every unfenced level-2 section is listed and every Contents anchor resolves | ERROR for a missing section entry or dangling anchor; short skills without Contents are exempt | automatic |
 

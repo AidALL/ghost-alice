@@ -18,7 +18,7 @@ from native_transcript import native_tool_activity, stop_response_text
 
 
 def _source_status_issue(reasons, *, explanation=False):
-    """Describe observed source state without replacing the assistant's judgment."""
+    """Describe observed source state without replacing the response model's judgment."""
     observations = {
         'source-changed': ('Original observation bytes differ from the reviewed digest. '
             'The response model compares only the affected claims with the changed source under verification-before-completion.'),
@@ -43,7 +43,7 @@ def _ledger(source):
     if name not in sys.modules:
         spec = importlib.util.spec_from_file_location(name, path)
         if spec is None or spec.loader is None:
-            raise ImportError('Core ledger API is unavailable')
+            raise ImportError('The session-intent ledger API is unavailable')
         module = importlib.util.module_from_spec(spec)
         sys.modules[name] = module
         try:
@@ -138,7 +138,7 @@ consumers obtain it directly from this Core API and check their input binding.
         # A completion or partial claim is judged against the current owned contract.
         if issue is None and (marker or selected['required_completion_check']) and selected['route_binding'] != 'current':
             issue = ('route-unavailable: The response model must use task-router to register the current '
-                'response-route through Core before submitting evidence. Retain existing proof; '
+                'response-route with Core code before submitting evidence. Retain existing proof; '
                 'a missing route does not invalidate the business result.')
             repair_target = 'response_route'
         if issue is None:
@@ -152,7 +152,7 @@ consumers obtain it directly from this Core API and check their input binding.
                     issue = _source_status_issue(reviewed.source_issues.values())
                     repair_target = 'source_status'
                 elif any(j['verdict'] != 'supported' for j in reviewed.judgments):
-                    issue = 'assessment-unsupported: The Core review does not support every asserted claim.'
+                    issue = 'assessment-unsupported: The recorded claim review does not support every asserted claim.'
             except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error) as exc:
                 reason = getattr(exc, 'reason', 'assessment-unavailable')
                 if reason in {'source-changed', 'source-unavailable'}:

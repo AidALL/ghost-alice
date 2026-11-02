@@ -1,8 +1,8 @@
 """Authenticate model-selected context dispositions without retaining source bodies.
 
-Core binds each disposition to native input and original records; request
+Core code binds each disposition to native input and original records; request
 selection preserves anything outside that binding.
-Dependencies: Python 3.11+ standard library and the installed Core ledger.
+Dependencies: Python 3.11+ standard library, the sibling Core code modules in `_shared` and the installed session-intent ledger.
 """
 from __future__ import annotations
 
@@ -133,7 +133,7 @@ def _schema(connection):
     for operation in ('UPDATE', 'DELETE'):
         connection.execute(f'''CREATE TRIGGER IF NOT EXISTS immutable_context_{operation.lower()}
             BEFORE {operation} ON core_context_dispositions
-            BEGIN SELECT RAISE(ABORT, 'immutable Core context disposition'); END''')
+            BEGIN SELECT RAISE(ABORT, 'immutable context disposition'); END''')
     connection.execute('''CREATE TABLE IF NOT EXISTS core_context_current (
         platform TEXT NOT NULL, session_id TEXT NOT NULL, reference TEXT NOT NULL,
         PRIMARY KEY(platform, session_id))''')
@@ -404,7 +404,7 @@ def record_disposition(source, expected_input_event_id, selected, *, transaction
         text = _input_text(user)
         if ('sha256:' + hashlib.sha256(text.encode()).hexdigest() != binding['input_digest']
             or len(text) != binding['input_char_count']):
-            raise ContextSelectionRejected('Native input differs from the canonical Core receipt')
+            raise ContextSelectionRejected('Native input differs from the canonical intake receipt')
         user_record = max(n for n, i in items.items() if i == user)
         selections, seen = [], set()
         for choice in _resolve_choices(items, selected, user_record):

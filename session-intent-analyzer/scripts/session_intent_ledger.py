@@ -463,7 +463,7 @@ def _initialize_database(connection: sqlite3.Connection) -> None:
     for operation in ('UPDATE', 'DELETE'):
         connection.execute(f'''CREATE TRIGGER IF NOT EXISTS immutable_context_intake_{operation.lower()}
             BEFORE {operation} ON core_context_intakes
-            BEGIN SELECT RAISE(ABORT, 'immutable Core context intake'); END''')
+            BEGIN SELECT RAISE(ABORT, 'immutable context intake'); END''')
     connection.execute("""CREATE TABLE IF NOT EXISTS legacy_migrations (
         platform TEXT NOT NULL, session_id TEXT NOT NULL, sources_json TEXT NOT NULL,
         imported_at TEXT NOT NULL, PRIMARY KEY(platform, session_id),
@@ -1301,7 +1301,7 @@ def _shared_module(name):
         return retained
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError(f"Core {name} helper is unavailable")
+        raise RuntimeError(f"Core code helper {name} is unavailable")
     module = importlib.util.module_from_spec(spec)
     sys.modules[name] = module
     spec.loader.exec_module(module)

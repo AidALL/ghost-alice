@@ -2,7 +2,7 @@
 
 The parent assigns this bounded review to a delegate and receives its findings.
 
-The parent dispatches this review only after specification compliance is supported. Use requesting-code-review's [code review assignment](../../requesting-code-review/references/code-reviewer.md) with the accepted task, exact base/head or working-tree target, implementation summary and evidence.
+The parent dispatches this review only after specification compliance is supported. The parent fills requesting-code-review's [code review assignment](../../requesting-code-review/references/code-reviewer.md) with the accepted task, exact base/head or working-tree target, implementation summary and evidence.
 
 Inspect the changed responsibilities and interfaces, testability, accepted file structure and maintainability consequences introduced by this change. Do not flag pre-existing file size alone or require unrelated restructuring.
 

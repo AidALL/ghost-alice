@@ -17,9 +17,9 @@ Use this workflow when the plan's tasks can be assigned independently and execut
 2. Select a ready task and prepare its assignment using [references/implementer-prompt.md](references/implementer-prompt.md). The delegate retrieves the required task passages through the supplied source locations.
 3. Answer the delegate's questions from available authority and context.
 4. When implementation is ready, dispatch a delegate to review specification compliance using [references/spec-reviewer-prompt.md](references/spec-reviewer-prompt.md). That delegate checks the changed artifacts against the accepted requirements.
-5. Return valid specification defects to the delegate that implemented the task. Re-review the changed condition before code-quality review. Reject incorrect findings with evidence instead of implementing them blindly.
+5. Return valid specification defects to the delegate that implemented the task. After that delegate fixes them, dispatch a delegate to review the affected requirements again before code-quality review. Reject incorrect findings with evidence instead of implementing them blindly.
 6. After specification compliance, dispatch a delegate to review code quality using [references/code-quality-reviewer-prompt.md](references/code-quality-reviewer-prompt.md) and requesting-code-review.
-7. Have the delegate that implemented the task fix valid blocking quality findings, then re-review affected changes. Mark the task complete only after each review whose outcome can change the next action or a criterion's judgment has evidence.
+7. Have the delegate that implemented the task fix valid blocking quality findings, then dispatch a delegate to review the affected changes again. Mark the task complete only after each review whose outcome can change the next action or a criterion's judgment has evidence.
 8. Repeat for remaining tasks. Dispatch a final review of the combined implementation, then invoke finishing-a-development-branch.
 
 Do not have several delegates implement tasks concurrently in this workflow. For explicitly independent concurrent assignments, use dispatching-parallel-agents and its conflict boundaries.

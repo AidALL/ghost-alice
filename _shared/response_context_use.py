@@ -167,7 +167,7 @@ def _schema(connection):
     for operation in ('UPDATE', 'DELETE'):
         connection.execute(f'''CREATE TRIGGER IF NOT EXISTS immutable_response_use_{operation.lower()}
             BEFORE {operation} ON core_response_context_uses
-            BEGIN SELECT RAISE(ABORT, 'immutable Core response context use'); END''')
+            BEGIN SELECT RAISE(ABORT, 'immutable response context use'); END''')
 
 
 def _source_coordinates(observation):
@@ -223,7 +223,7 @@ def _judgment_schema(connection):
     for operation in ('UPDATE', 'DELETE'):
         connection.execute(f'''CREATE TRIGGER IF NOT EXISTS immutable_response_use_judgment_{operation.lower()}
             BEFORE {operation} ON core_response_use_judgments
-            BEGIN SELECT RAISE(ABORT, 'immutable Core response use judgment'); END''')
+            BEGIN SELECT RAISE(ABORT, 'immutable response use judgment'); END''')
     connection.execute('''CREATE TABLE IF NOT EXISTS core_response_use_current (
         platform TEXT NOT NULL, session_id TEXT NOT NULL, use_reference TEXT NOT NULL,
         reference TEXT NOT NULL, PRIMARY KEY(platform, session_id, use_reference))''')

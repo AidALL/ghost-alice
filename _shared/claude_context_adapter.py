@@ -639,7 +639,7 @@ class SignedCompactionPlan:
 
     The host sends ``request`` with its existing native authentication and beta,
     then passes that call's response to ``adopt``. This pure controller neither
-    sends a request nor authenticates a provider signature. The responding model
+    sends a request nor authenticates a provider signature. The response model
     compares the summary with the original objective before approving adoption.
     Desktop /compact and arbitrary signed-text omission are separate operations.
     Contract: https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand

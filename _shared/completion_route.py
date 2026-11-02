@@ -5,13 +5,13 @@ Input contracts (JSON-compatible dictionaries):
   read_response_route projection), verification_plan.checks. Each planned check
   has check_id, work_unit_id, contract_revision, criterion_id.
 * claim_scope: text, phase (final/before_tool), optional work_unit_ids narrowing
-  the current selection, optional consequential (the assistant's claim-scope judgment).
+  the current selection, optional consequential (the response model's claim-scope judgment).
 * evidence_state: failure_kind (none/recording/authority/integrity/contract/
   unknown), criteria. Each assessment has the same qualified criterion key,
   validity (valid/invalid/unknown), relevant_change (none/changed/unknown),
   check_ids (planned checks covered), proof_ref, verified_at, core_receipt. The
   caller supplies these assessments. This selector checks their structure;
-  completion_assessment.py authenticates recorded assistant judgments separately.
+  completion_assessment.py authenticates recorded response-model judgments separately.
 
 Output completion-route.v1 contains evidence_route, frozen selected
 units/criteria, per-unit/criterion decisions, required_completion_check,
@@ -190,7 +190,7 @@ def _criterion_decision(criterion, checks, assessments, failure, malformed_conta
     receipt = proof.get("core_receipt")
     if valid and (not isinstance(receipt, str) or not receipt.strip()):
         return dict(decision, evidence_route="reopen_cause", proof_ref=proof["proof_ref"], verified_at=proof["verified_at"],
-                    reason="Valid business evidence is retained; reopen only the missing Core receipt cause.")
+                    reason="Valid business evidence is retained; reopen only the cause of the missing `core_receipt`.")
     if valid:
         return dict(decision, evidence_route="recording_repair_only" if failure == "recording" else "reuse",
                     proof_ref=proof["proof_ref"], verified_at=proof["verified_at"], core_receipt=receipt,
