@@ -402,7 +402,7 @@ def _check_expected(state: dict[str, Any], expected_input_event_id: str | None,
         raise ValueError("stale ledger revision; read the current state and re-evaluate before writing")
     active_input = state["latest_input_event_id"]
     if active_input and expected_input_event_id is None and not new_input:
-        raise ValueError("expected-input-event-id is required; use the input_event_id from the receipt used for this decision")
+        raise ValueError("expected-input-event-id is required; use the input_event_id that session_intent_ledger.py --read-intent returns")
     if expected_input_event_id is not None and expected_input_event_id != active_input:
         raise ValueError("stale input event; re-evaluate against the current user input before writing")
 
@@ -2207,7 +2207,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", default=None, help="raw input to hash only; never persisted")
     parser.add_argument("--delta-json", default=None, help="intent delta JSON")
     parser.add_argument("--expected-input-event-id", default=None,
-                        help="input_event_id from the receipt used for this decision; required after intake")
+                        help="input_event_id that --read-intent returns; required after intake")
     parser.add_argument("--expected-revision", type=int, default=None,
                         help="optional ledger_revision of the snapshot used for this update")
     parser.add_argument("--snapshot", action="store_true", help="emit consumer snapshot")

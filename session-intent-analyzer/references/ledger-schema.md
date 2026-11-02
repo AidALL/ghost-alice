@@ -139,7 +139,7 @@ Core Python APIs expose record_turn, mark_acceptance_criterion_met, bind_legacy_
 
 The .sqlite-authority.json cutover marker is written before the first semantic commit. A lost database requires explicit restoration; corrupt/unsupported databases fail closed instead of reactivating stale JSON.
 
-`record_turn(..., expected_input_event_id=receipt_id, expected_revision=revision)` requires the expected event when an observed input is active. Digest-only new-input observation creates an anchor and is exempt from that comparison. Attaching a semantic delta to raw input does not bypass it. Independent additions for the same input can serialize without sharing a revision; a whole-snapshot decision uses expected_revision.
+`record_turn(..., expected_input_event_id=input_event_id, expected_revision=revision)`, with the `input_event_id` that `--read-intent` returns, requires the expected event when an observed input is active. Digest-only new-input observation creates an anchor and is exempt from that comparison. Attaching a semantic delta to raw input does not bypass it. Independent additions for the same input can serialize without sharing a revision; a whole-snapshot decision uses expected_revision.
 
 The met writer additionally requires an approved expected_criterion with exact ID, summary, source and boolean admitted. It uses the exact owner pair for an owned local ID and requires that criterion in the ready current selection. Direct ownerless writes remain input-bound. The Python ledger writer validates digest syntax and binding; the response model reviews the actual proof under Core verification instructions.
 
@@ -234,7 +234,7 @@ The route writer compares current input and atomically writes registry, projecti
 
 The reader uses only the canonical SQLite row, returning None without storage creation when absent; it does not read compatibility JSON for routes. Consumers pass one storage_transaction connection to route and origin-state reads for an atomic snapshot. Nested writes retain savepoint/outer rollback behavior.
 
-The CLI is `_shared/response_route.py --root <receipt-root> --platform <receipt-platform> --session-id <receipt-session> --expected-input-event-id <receipt-event> --boundary-ref <boundary-id> --candidate-json <candidate-json>`. Use --read instead of mutation arguments for inspection. Explicit identity is required; mutation rejects conflicting native identity, while reads may target explicit history. Success returns JSON; a typed error returns {error, message} on stderr with nonzero exit. The response model interprets a stale/schema failure and repairs the affected binding, rather than fabricating a ready result.
+The CLI is `_shared/response_route.py --root <receipt-root> --platform <receipt-platform> --session-id <receipt-session> --expected-input-event-id <input-event> --boundary-ref <boundary-id> --candidate-json <candidate-json>`, where `<input-event>` is the `input_event_id` that `scripts/session_intent_ledger.py --read-intent` returns. Use --read instead of mutation arguments for inspection. Explicit identity is required; mutation rejects conflicting native identity, while reads may target explicit history. Success returns JSON; a typed error returns {error, message} on stderr with nonzero exit. The response model interprets a stale/schema failure and repairs the affected binding, rather than fabricating a ready result.
 
 ### Canonical intake provenance
 
