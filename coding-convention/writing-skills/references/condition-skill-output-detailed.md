@@ -6,10 +6,6 @@ Use this reference when a skill's description is ambiguous or its body mixes dis
 
 Use concrete task purposes, symptoms and relevant domain terms. State a technology restriction when it actually limits applicability. Write in third person.
 
-For example, “Test first, implement, refactor” summarizes the body's workflow and does not say when the skill is used.
-
-Keep the complete procedure in the body.
-
 ## Body and references
 
 The body supplies the executable handoff defined in [Author the package](../SKILL.md#author-the-package), not only an acting-agent label. For a two-stage review, identify the first review's actual returned findings and the condition under which the response model sends the accepted target and those findings to the delegate for the second review. The second review cannot silently replace the first.
@@ -24,4 +20,4 @@ Reduce words that do not change the decision, not instructions that establish au
 
 ## Evaluation
 
-Use trigger-eval.md when the description's selection behavior is the live uncertainty. Use writing-skills' application workflow when the body is wrong. A better keyword match does not establish correct execution.
+Use trigger-eval.md when discovery is the live uncertainty. Use writing-skills' application workflow when the body is wrong. A better keyword match does not establish correct execution.

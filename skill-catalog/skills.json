@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-11-01T05:38:55Z",
+  "generated_at": "2026-11-02T13:29:35Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -145,7 +145,7 @@
     {
       "name": "receiving-code-review",
       "path": "coding-convention/receiving-code-review/SKILL.md",
-      "description": "When code review findings arrive, judges each against the requirements, code and tests before changing code, then fixes valid ones, rejects incorrect ones with evidence and reports the rest as unresolved.",
+      "description": "When code review findings arrive, judges each against the requirements, code and tests before changing code, and fixes the valid ones.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [
@@ -202,7 +202,7 @@
     {
       "name": "systematic-debugging",
       "path": "coding-convention/systematic-debugging/SKILL.md",
-      "description": "Before a fix is proposed for a failure with an unclear cause, tests hypotheses, fixes the supported cause and counts failed fix attempts, reassessing the hypothesis after five.",
+      "description": "Before a fix is proposed for a failure with an unclear cause, tests hypotheses, fixes the supported cause and counts failed fix attempts.",
       "family": "coding-convention",
       "governance_class": "verification-subskill",
       "compatibility": [

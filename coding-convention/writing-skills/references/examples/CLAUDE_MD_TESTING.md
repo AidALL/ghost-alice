@@ -46,4 +46,4 @@ The response model checks whether familiarity replaces current inputs or whether
 
 ## Evaluation handoff
 
-Follow [testing-skills-with-subagents.md](../testing-skills-with-subagents.md) for assignment and collection, [trigger-eval.md](../trigger-eval.md) when description selection is the uncertainty, and the parent writing-skills procedure for validation and correction. Return the original observations and checked limits; do not add pressure until a passing baseline fails to justify an edit.
+Follow [testing-skills-with-subagents.md](../testing-skills-with-subagents.md) for assignment and collection, [trigger-eval.md](../trigger-eval.md) when skill discovery is the uncertainty, and the parent writing-skills procedure for validation and correction. Return the original observations and checked limits; do not add pressure until a passing baseline fails to justify an edit.

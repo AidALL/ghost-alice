@@ -30,7 +30,7 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 | 1-3 | `name` = directory name | must exactly match the parent directory name | `basename $(dirname SKILL.md)` == name value | automatic |
 | 1-4 | `description` field exists | required | check whether the description key is present in frontmatter | automatic |
 | 1-5 | `description` length | maximum 1024 chars, with the key use case first: Claude Code truncates a listed description at 1,536 chars, and both hosts shorten or drop descriptions when their skill listing exceeds its budget ([Claude Code](https://code.claude.com/docs/en/skills), [Codex](https://learn.chatgpt.com/docs/build-skills)) | measured as Unicode characters (`len(description)`), not bytes. ERROR when over 1024 chars. The position of the key use case is a meaning judgment | automatic + manual |
-| 1-6 | `description` content | includes both "what it does" and "when it triggers" | a meaning judgment, so it cannot be automated | manual |
+| 1-6 | `description` content | states what the skill does and when it is used, and serves discovery, not execution: it contains no summary of the body and no procedure step, and no point appears twice in it | a meaning judgment, so it cannot be automated | manual |
 | 1-7 | `compatibility` field | required when there is an environment dependency (Python, CUDA, etc.) | whether it exceeds 500 chars is automatic, whether it is "needed but missing" is manual | partially automatic |
 
 ---
