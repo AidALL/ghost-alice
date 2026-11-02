@@ -1,4 +1,4 @@
-"""Core authentication of the response model's evidence review.
+"""Core code authentication of the response model's claim and response reviews.
 
 This module checks provenance and exact bindings. It does not rerun business
 observations.
@@ -53,7 +53,7 @@ class VerifiedAssessment:
     __slots__ = ('_json', '_seal', '_issues', '_candidate_json')
 
     def __init__(self, payload, seal, source_issues=None, *, candidate=None):
-        _require(seal is _SEAL, 'assessment-invalid', 'A Core database assessment is required')
+        _require(seal is _SEAL, 'assessment-invalid', 'A claim review read from the database is required')
         self._json, self._seal = _json(payload), seal
         self._candidate_json = _json(candidate if candidate is not None else payload['candidate'])
         self._issues = tuple((source_issues or {}).items())
@@ -99,7 +99,7 @@ def _schema(connection):
             reference TEXT PRIMARY KEY, lookup_key TEXT NOT NULL, payload_json TEXT NOT NULL)''')
         for operation in ('UPDATE', 'DELETE'):
             connection.execute(f'''CREATE TRIGGER IF NOT EXISTS {table}_{operation.lower()}
-                BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'immutable Core assessment'); END''')
+                BEFORE {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'immutable review record'); END''')
 
 
 
@@ -111,7 +111,7 @@ def _stored(connection, table, reference):
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone(),
         'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
     row = connection.execute(f'SELECT payload_json FROM {table} WHERE reference=?', (reference,)).fetchone()
-    _require(row is not None, 'assessment-required', 'Referenced Core review is unavailable')
+    _require(row is not None, 'assessment-required', 'Referenced review record is unavailable')
     value = json.loads(row[0])
     _require(_reference(value) == reference, 'assessment-invalid', 'Stored review bytes do not match their reference')
     return value
@@ -237,7 +237,7 @@ def _native_row_input(connection, owner, native_input_row):
         (owner['platform'], owner['session_id'])).fetchall()
     resolved = [event for raw, in rows if (event := json.loads(raw)).get('actor') == 'human'
         and event.get('native_row') == locator]
-    _require(len(resolved) == 1, 'input-unavailable', 'Native row lacks one committed Core actor resolution')
+    _require(len(resolved) == 1, 'input-unavailable', 'Native row lacks one committed actor resolution')
     return resolved[0]['input_event_id'], _digest(text), len(text), text
 
 
@@ -246,7 +246,7 @@ def response_input_binding(source, expected_input_event_id=None, *, native_input
     """Authenticate an original native intake without promoting it to current input."""
     core, root, owner = _coordinates(source)
     with core._read_connection(root, transaction) as connection:
-        _require(connection is not None, 'input-unavailable', 'Original Core intake is unavailable')
+        _require(connection is not None, 'input-unavailable', 'Original intake is unavailable')
         native = _native_row_input(connection, owner, native_input_row) if native_input_row is not None else None
         if native is not None:
             _require(expected_input_event_id is None or expected_input_event_id == native[0],
@@ -255,11 +255,11 @@ def response_input_binding(source, expected_input_event_id=None, *, native_input
         _require(isinstance(expected_input_event_id, str) and bool(expected_input_event_id),
             'input-unavailable', 'An exact original input event is required')
         state = core._stored_state(connection, **owner)
-        _require(state is not None, 'input-unavailable', 'Original Core owner is unavailable')
+        _require(state is not None, 'input-unavailable', 'Original owner is unavailable')
         rows = connection.execute('''SELECT sequence,event_json FROM intent_events
             WHERE platform=? AND session_id=? AND json_extract(event_json, '$.event_id')=?''',
             (owner['platform'], owner['session_id'], expected_input_event_id)).fetchall()
-        _require(len(rows) == 1, 'input-unavailable', 'One original Core intake is required')
+        _require(len(rows) == 1, 'input-unavailable', 'One original intake is required')
         sequence, raw = rows[0]
         event = json.loads(raw)
         digest, count = event.get('input_digest'), event.get('input_char_count')
@@ -268,7 +268,7 @@ def response_input_binding(source, expected_input_event_id=None, *, native_input
             and core._observation_matches(event, owner['platform'], owner['session_id'],
                 expected_input_event_id, digest, count), 'input-unavailable', 'Original intake binding is invalid')
         _require(native is None or native[:3] == (expected_input_event_id, digest, count),
-            'input-unavailable', 'Native row differs from its original Core intake')
+            'input-unavailable', 'Native row differs from its original intake')
         canonical = core._canonical_intake_record(connection, state)
         protected = canonical is not None and tuple(canonical) == (
             expected_input_event_id, digest, count, sequence)
@@ -752,7 +752,7 @@ def _validate_claim_judgments(candidate, judgments):
 
 
 def record_assessment(source, candidate_reference, judgments, *, response_judgment=None, transaction=None):
-    """Record the current-session assistant's explicit binding/source judgments append-only.
+    """Record the response model's explicit binding/source judgments append-only.
 
     A rationale is review evidence, not a machine-verifiable semantic proof.
     Missing observations should be recorded unavailable, never guessed pass.
@@ -765,7 +765,7 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
         _require(candidate.get('schema_version') == 'completion-assessment-candidate.v1'
             and candidate.get('intent_root') == str(root) and candidate.get('contract', {}).get('owner') == owner
             and isinstance(candidate.get('input_event_id'), str) and bool(candidate['input_event_id']),
-            'owner-mismatch', 'Review must retain its original Core owner, input and contract')
+            'owner-mismatch', 'Review must retain its original owner, input and contract')
         contract, event = candidate['contract'], candidate['input_event_id']
         source_ids = {s['source_id'] for s in candidate['sources']}
         _validate_claim_judgments(candidate, judgments)
@@ -816,7 +816,7 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
             if prior:
                 retained = _stored(connection, 'core_completion_responses', prior[0][0])
                 _require(retained['judgment'] == response_judgment, 'assessment-conflict',
-                         'The exact response already has an immutable recorded assistant judgment')
+                         'The exact response already has an immutable recorded response review')
                 result['response_reference'] = prior[0][0]
             else:
                 payload = dict(assessment_reference=reference, candidate_reference=candidate_reference,
@@ -838,7 +838,7 @@ def lookup_assessment(source, contract, proof, verified_at, *, transaction=None,
             'assessment-required', 'The response model must review the original proof and record its judgments through completion_assessment.py')
         rows = connection.execute('SELECT reference FROM core_completion_assessments WHERE lookup_key=?',
             (_lookup_key(contract, proof, verified_at),)).fetchall()
-        _require(len(rows) == 1, 'assessment-required', 'One exact original Core assessment is required')
+        _require(len(rows) == 1, 'assessment-required', 'One exact original claim review is required')
         payload = _stored(connection, 'core_completion_assessments', rows[0][0])
         candidate = _stored(connection, 'core_completion_candidates', payload['candidate_reference'])
         _require(('candidate' not in payload or candidate == payload['candidate']) and candidate['intent_root'] == str(root),
@@ -858,7 +858,7 @@ def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
     """Resolve delivered controls to one reviewed original; retain its bytes/time."""
     core, root, owner = _coordinates(source)
     with core._read_connection(root, transaction) as connection:
-        _require(connection is not None, 'assessment-required', 'Owning Core review is unavailable')
+        _require(connection is not None, 'assessment-required', 'Owning claim review is unavailable')
         route = core.read_response_route(root=root, **owner, transaction=connection)
         _require(isinstance(route, dict), 'route-unavailable', 'Current owned route is required')
         units = [work_unit_id] if work_unit_id is not None else route.get('selected_work_unit_ids', [])
@@ -884,7 +884,7 @@ def lookup_current_proof(source, proof, *, transaction=None, work_unit_id=None):
                 elif review_comparison_text(candidate['proof']) == comparison:
                     equivalent.append(candidate)
         matches = exact or equivalent
-        _require(len(matches) == 1, 'assessment-required', 'Final block must match exactly one recorded assistant review of its original proof')
+        _require(len(matches) == 1, 'assessment-required', 'Final block must match exactly one recorded claim review of its original proof')
         candidate = matches[0]
         return lookup_assessment(source, candidate['contract'], candidate['proof'], candidate['verified_at'], transaction=connection)
 
@@ -926,7 +926,7 @@ def lookup_current_response(source, text, *, transaction=None):
                 rows = [(reference,) for reference, in candidates
                     if review_comparison_text(_stored(connection, 'core_completion_responses', reference)
                         ['response_binding']['text']) == comparison]
-        _require(len(rows) == 1, 'response-assessment-required', 'Complete response text must match exactly one recorded assistant review')
+        _require(len(rows) == 1, 'response-assessment-required', 'Complete response text must match exactly one recorded response review')
         reviewed = _stored(connection, 'core_completion_responses', rows[0][0])
         candidate = _stored(connection, 'core_completion_candidates', reviewed['candidate_reference'])
         if report_only:
@@ -947,7 +947,7 @@ def lookup_current_response(source, text, *, transaction=None):
             and _same_sources(candidate['sources'], assessment.candidate['sources']),
             'response-unbound', 'Reviewed response differs from its original proof and observations')
         _require(reviewed['judgment']['verdict'] == 'supported', 'response-unsupported',
-                 'The recorded assistant judgment does not support this complete response')
+                 'The recorded response review does not support this complete response')
         issues = _source_issues(candidate, set(reviewed['judgment']['source_ids']))
         _require(not issues, next(iter(issues.values()), 'source-changed'), 'Response observations changed or are unavailable')
     return assessment
@@ -1031,7 +1031,7 @@ def lookup_original_response_record(source, response_reference, *, expected_inpu
 
 def _assessed_bindings(assessment, contract, proof, verified_at):
     _require(isinstance(assessment, VerifiedAssessment) and assessment._seal is _SEAL,
-             'assessment-required', 'Only authenticated Core assessments can establish coverage')
+             'assessment-required', 'Only authenticated claim reviews can establish coverage')
     candidate = assessment.candidate
     _require(candidate['contract'] == contract and candidate['proof'] == proof
         and candidate['proof_digest'] == _digest(proof) and candidate['verified_at'] == verified_at,
@@ -1063,7 +1063,7 @@ def read_review_claims(source, candidate_reference, claim_indices):
         candidate = _stored(connection, 'core_completion_candidates', candidate_reference)
         original_owner = candidate.get('owner') or candidate.get('contract', {}).get('owner')
         _require(candidate.get('intent_root') == str(root) and original_owner == owner,
-            'owner-mismatch', 'Original claims belong to another Core owner')
+            'owner-mismatch', 'Original claims belong to another owner')
         bindings = [b for b in candidate['bindings'] if b['claim_index'] in claim_indices]
         _require({b['claim_index'] for b in bindings} == set(claim_indices),
             'assessment-invalid', 'Selected original claims are unavailable')

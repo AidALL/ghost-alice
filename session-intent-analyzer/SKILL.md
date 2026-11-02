@@ -32,7 +32,7 @@ For a semantic update, pass `--delta-json` with only changed current values and 
 
 ## Native input and authority
 
-[Canonical intake provenance](references/ledger-schema.md#canonical-intake-provenance) owns how intake records input on each host; a notification does not become human authority. Pending input cannot authorize dependent writes. A native session binding must match the selected write session. Core reads and validates canonical state for route registration, context dispositions, authority-dependent execution and completion records; supplied prose cannot replace those checks. Historical read-only lookup does not grant that session's execution permission.
+[Canonical intake provenance](references/ledger-schema.md#canonical-intake-provenance) owns how intake records input on each host; a notification does not become human authority. Pending input cannot authorize dependent writes. A native session binding must match the selected write session. Core code reads and validates canonical state for route registration, context dispositions, authority-dependent execution and completion records; supplied prose cannot replace those checks. Historical read-only lookup does not grant that session's execution permission.
 
 A material conduct correction can be recorded as one compressed `conduct_feedback` entry with a stable ID and supported source. User assertions support `user-said`; a directly observed mismatch supports `interpreted-as`. A prospective constraint is not evidence of an earlier failure. Task-router consumes current intent; skill-evolution receives conduct feedback only as a report branch.
 

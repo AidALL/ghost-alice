@@ -64,24 +64,24 @@ def core_source_reference(source, root, owner, candidate_reference):
 def _core_source(reference):
     root = Path(reference['intent_root'])
     if not root.is_absolute():
-        raise SourceReferenceError('Original Core source needs its absolute owning root')
+        raise SourceReferenceError('Original source needs its absolute owning root')
     try:
         with closing(sqlite3.connect((root / 'ghost-state.sqlite3').as_uri() + '?mode=ro', uri=True)) as connection:
             row = connection.execute('SELECT payload_json FROM core_completion_candidates WHERE reference=?',
                                      (reference['candidate_reference'],)).fetchone()
     except sqlite3.Error as exc:
-        raise OSError('Original Core source record is unavailable') from exc
+        raise OSError('Original source record is unavailable') from exc
     if row is None:
-        raise SourceReferenceError('Original Core source record is unavailable')
+        raise SourceReferenceError('Original source record is unavailable')
     record = json.loads(row[0])
     owner = record.get('owner') or record.get('contract', {}).get('owner') or record.get('input_binding', {})
     if (_identity(record) != reference['candidate_reference'] or record.get('intent_root') != str(root)
             or any(owner.get(k) != reference['owner'].get(k) for k in ('platform', 'session_id'))):
-        raise SourceReferenceError('Original Core source record is unbound')
+        raise SourceReferenceError('Original source record is unbound')
     matches = [s for s in record['sources'] if all(s.get(k) == reference[k]
                for k in ('source_id', 'locator', 'digest'))]
     if len(matches) != 1 or ('text' not in matches[0] and 'bytes_base64' not in matches[0]):
-        raise SourceReferenceError('Original Core source must identify one retained body')
+        raise SourceReferenceError('Original source must identify one retained body')
     return matches[0]
 
 

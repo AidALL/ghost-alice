@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Core response-route validation and receipt-bound API.
+"""Response-route validation and receipt-bound API in Core code.
 
 Dependencies: Python 3.11+ standard library. SQLite authority belongs to the ledger.
 """
@@ -63,7 +63,7 @@ def _load_installed_ledger(platform):
         raise RouteBindingError("The selected installation must supply an absolute Core source root")
     scripts = Path(root) / "session-intent-analyzer" / "scripts"
     if not (scripts / "session_intent_ledger.py").is_file():
-        raise RouteBindingError("The selected installation has no Core ledger module")
+        raise RouteBindingError("The selected installation has no session-intent ledger module")
     sys.path.insert(0, str(scripts))
     import session_intent_ledger
     return session_intent_ledger
@@ -196,7 +196,7 @@ def _validate_continuation_feedback(value, selected, *, resolved=False):
             _object(selector, {'candidate_reference', 'source_id'} | ({'source'} if resolved else set()),
                     'required original selector')
             if any(not isinstance(selector[key], str) or not selector[key] for key in ('candidate_reference', 'source_id')):
-                raise RouteSchemaError('Existing Core candidate and source identities are required')
+                raise RouteSchemaError('Existing candidate and source identities are required')
             key = selector['candidate_reference'], selector['source_id']
             if key in sources:
                 raise RouteSchemaError('Original selectors cannot be duplicated in one work condition')
@@ -491,7 +491,7 @@ def main(argv=None):
     parser.add_argument("--boundary-ref")
     parser.add_argument("--expected-revision", type=int, help="Current ledger revision required for ownership binding")
     parser.add_argument("--bind-legacy-criteria-json",
-        help="Core binds existing admitted criterion snapshots to frozen ownership, records the candidate atomically, and returns the ready route")
+        help="Core code binds existing admitted criterion snapshots to frozen ownership, records the candidate atomically, and returns the ready route")
     parser.add_argument('--context-selection-json',
         help='Current use conclusions and remaining needs; resolved and committed with this work selection')
     parser.add_argument('--context-selection-mode', choices=('replace', 'update'), default='replace',

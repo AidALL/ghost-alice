@@ -272,7 +272,7 @@ class SessionCheckReuseTest(unittest.TestCase):
             result = dict(status='checked', checked_at='2026-10-12T21:00:00+00:00',
                           value=dict(undecided_count=count))
             body = json.loads(hook._json_payload('codex', result))
-            # The user sees the screen notice; merge-companion re-checks before work changes a skill.
+            # The user sees the screen notice; merge-companion re-checks the manifest itself (merge-companion/SKILL.md).
             self.assertNotIn('hookSpecificOutput', body)
             self.assertEqual(body['ghostAlicePendingMergeCheck']['undecided_count'], count)
             self.assertIn('systemMessage', body)

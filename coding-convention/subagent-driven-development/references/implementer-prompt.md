@@ -22,7 +22,7 @@ Return the implemented or attempted behavior, changed files, actual command resu
 
 Use DONE only when the assignment's required criteria have supporting evidence. Use DONE_WITH_CONCERNS for a supported result with an explicit advisory concern; a known unmet criterion is not done. Use NEEDS_CONTEXT for a specific missing input and BLOCKED for a dependency preventing the assigned action.
 
-The parent independently reviews specification compliance and code quality. The delegate's status is not the evidence for either review.
+The parent dispatches other delegates to review specification compliance and code quality. The implementing delegate's status is not the evidence for either review.
 
 ## Failure modes
 
