@@ -33,7 +33,7 @@ Do not add hypothetical defenses or repeat a prohibition merely to increase emph
 2. Edit the affected body, callers and references to remove the demonstrated contradiction.
 3. Read `official-docs/derived/skill-compliance-checklist.md` and complete Phases 1 through 5 for every changed package before evaluation.
 4. Run the affected pressure, application or source-contract check required by the task and record the actual outcome and limits.
-5. If an observation contradicts a requirement, correct the implicated instruction and repeat only the affected checks.
+5. If an observation contradicts a requirement, follow the [diagnostic procedure](references/bulletproofing-skills.md#procedure) to select and apply the justified correction, then repeat only the affected checks.
 6. Distribute or commit only under the user's existing authorization and after required validation succeeds.
 
 Coordinated changes may span packages; each changed package still needs its own disposition.
@@ -50,7 +50,7 @@ Verification-before-completion owns useful-check selection, evidence reuse, orig
 | Authoring uncertainty | Reference |
 | --- | --- |
 | Official skill design principles | [anthropic-best-practices.md](references/anthropic-best-practices.md) |
-| Rule rationalization exposed by a case | [bulletproofing-skills.md](references/bulletproofing-skills.md) |
+| Whether an observed output or rule-application failure warrants an instruction repair | [bulletproofing-skills.md](references/bulletproofing-skills.md) |
 | Trigger, workflow and output separation | [condition-skill-output-detailed.md](references/condition-skill-output-detailed.md) |
 | Flowchart notation | [mermaid-conventions.md](references/mermaid-conventions.md) |
 | Pressure dimensions for a case | [persuasion-principles.md](references/persuasion-principles.md) |
