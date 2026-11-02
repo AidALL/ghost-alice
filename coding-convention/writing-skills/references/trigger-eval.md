@@ -19,7 +19,6 @@ This is the trigger evaluation rule used when refining a description.
 
 ## Core principles
 
-- The description is not a summary of the body.
 - If you only add positives, you cannot see overtrigger.
 - For negatives, a near-miss matters more than an easy unrelated sentence.
 
@@ -47,12 +46,10 @@ Negatives to avoid:
 
 - Evaluate both missed intended triggers and new false triggers against the accepted discovery criteria. Higher recall alone does not establish a successful revision.
 - If it triggers often on near-miss negatives, the description is exaggerated.
-- Keep execution steps in the body; changing the description must clarify selection, not substitute for executing that body.
 
 ## Revision principles
 
-- First, write the trigger context more clearly.
-- Then reinforce keywords and synonyms.
+- Write the trigger context more clearly.
 
 ## Simple result-record example
 

@@ -10,7 +10,7 @@ Use this guide when the response model must choose an evaluation method for a de
 | Teach a technique | Apply it to the affected case and a meaningful variation. |
 | Recognize a pattern | Include a matching case and a near miss. |
 | Provide reference information | Locate and apply the specific information. |
-| Route from a description | Use trigger-eval.md to check selection and non-selection. |
+| Route from a description | Use trigger-eval.md to check missed and false triggers. |
 
 An agreement question such as “Do you understand?” tests recitation, not execution.
 

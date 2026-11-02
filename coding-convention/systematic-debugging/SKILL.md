@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: Before a fix is proposed for a failure with an unclear cause, tests hypotheses, fixes the supported cause and counts failed fix attempts, reassessing the hypothesis after five.
+description: Before a fix is proposed for a failure with an unclear cause, tests hypotheses, fixes the supported cause and counts failed fix attempts.
 compatibility:
   - "Python 3.11+ standard library"
 ---
