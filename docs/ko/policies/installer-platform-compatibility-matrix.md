@@ -37,7 +37,7 @@ Language: [🇺🇸 English](../../policies/installer-platform-compatibility-mat
 
 인스톨러는 훅 파일의 존재뿐 아니라 훅 입력·출력과 플랫폼 권한 정책이 현재 저장소 계약과 맞는지도 확인합니다. 기존 훅 항목이 있어도 실행 명령이 달라지면 인스톨러는 관리 항목을 갱신합니다. `agent_visibility.profile`은 훅 누락·불일치 판정을 완화하지 않습니다.
 
-[책임과 흐름](../../../architecture_ko.md#책임과-흐름)이 작업과 판단의 기록·인증을 Core 코드에 배정합니다. 애드온은 선언한 네이티브 이벤트에 관찰 훅을 등록하며, Core 실행기는 그 훅이 호스트를 막지 못하게 합니다. 애드온 Python 코드는 자체 기록을 관리하고, 현재 세션 어시스턴트는 애드온 지침에 따라 추가 작업을 판단하며, 영향받은 애드온 동작의 근거가 필요합니다.
+[책임과 흐름](../../../architecture_ko.md#책임과-흐름)이 작업과 판단의 기록·인증을 Core 코드에 배정합니다. 애드온은 선언한 네이티브 이벤트에 관찰 훅을 등록하며, Core 실행기는 그 훅이 호스트를 막지 못하게 합니다.
 
 Runtime live smoke는 [live-smoke-regression](live-smoke-regression.md#purpose)을 따르며, 이 절차는 지원을 주장하는 설치 대상마다 작은 요청 하나를 실행하고 관찰할 신호를 나열합니다.
 

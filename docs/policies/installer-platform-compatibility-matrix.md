@@ -37,7 +37,7 @@ This document is the compatibility test contract for the Ghost-ALICE installer. 
 
 The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. Hook payload and platform permission policy must also be synchronized with the current repo contract. Even if an older hook entry exists, the installer must update managed entries when the runtime payload changes. The agent visibility profile must not relax missing or drift judgments.
 
-[Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns the recording and authentication of work and judgments to Core code. An addon registers observational hooks at its declared native events, and the Core runner never lets them block the host. Addon Python code manages its own records; the current-session assistant follows addon instructions to judge additional work and require evidence for the affected addon behavior.
+[Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns the recording and authentication of work and judgments to Core code. An addon registers observational hooks at its declared native events, and the Core runner never lets them block the host.
 
 Runtime live smoke follows [live-smoke-regression](live-smoke-regression.md#purpose), which runs one small request on each claimed installed target and lists the signals it observes.
 

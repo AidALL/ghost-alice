@@ -11,7 +11,7 @@ The response model executes an accepted plan by giving each task to a fresh dele
 
 ## Preconditions and procedure
 
-Use this workflow when the plan's tasks can be assigned independently and execution remains in the current session. Use executing-plans for the accepted inline or separate-session workflow. Use the authorized checkout and apply using-git-worktrees only when isolation is needed; do not edit main/master without explicit user consent.
+Use this workflow when the plan's tasks can be assigned independently and execution remains in the current session. Use executing-plans for the accepted inline workflow. Use the authorized checkout and apply using-git-worktrees only when isolation is needed; do not edit main/master without explicit user consent.
 
 1. Read the plan once, retain every task's text and shared dependencies, and create the task tracker.
 2. Select a ready task. Supply its full text, exact allowed paths, relevant context, constraints and required evidence using [references/implementer-prompt.md](references/implementer-prompt.md). The delegate need not reread the plan.

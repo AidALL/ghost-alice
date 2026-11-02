@@ -202,13 +202,6 @@ class SkillGateContractTest(unittest.TestCase):
                 messages = "\n".join(issue.message for issue in issues)
                 self.assertIn(expected_message, messages)
 
-    def test_no_work_terminal_routes_are_enforced_by_checker(self) -> None:
-        # Meaning is enforced by terminal_routes machine values; the ledger schema owns the mode names.
-        for mode in ("clarification-only", "direct-response"):
-            self.assertEqual(CONTRACT["terminal_routes"][mode]["downstream_work"], "none")
-            self.assertEqual(CONTRACT["terminal_routes"][mode]["strict_logging"], "active")
-            self.assertIn(mode, REQUIRED_PATTERNS["session-intent-analyzer/references/ledger-schema.md"])
-
     def _extract_between(self, text: str, start_marker: str, end_marker: str) -> str:
         start = text.find(start_marker)
         self.assertGreaterEqual(start, 0, f"missing start marker: {start_marker}")

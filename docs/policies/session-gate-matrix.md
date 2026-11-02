@@ -72,7 +72,7 @@ The current-session assistant applies session-intent-analyzer to express semanti
 
 The current-session assistant applying task-router preserves the primary request and terminal objective. Investigation and worktree inspection remain means unless requested as deliverables.
 
-[Routing details](../../task-router/references/routing-details.md) separate a direct answer (`direct-response`) and a confirmation question (`clarification-only`) from work. A general why/how premise and ambient workspace do not authorize local diagnosis. A confirmation question takes the form the common contract's Session Intent section sets. The contract's [Work Selection](../../platforms/common-governance.md#work-selection) section sets the direct-answer condition: the answer uses no tool and registers no route. That condition does not prohibit authorized route registration on a work completion path.
+[Routing details](../../task-router/references/routing-details.md) separate a direct answer and a confirmation question from work. A general why/how premise and ambient workspace do not authorize local diagnosis. A confirmation question takes the form the common contract's Session Intent section sets. The contract's [Work Selection](../../platforms/common-governance.md#work-selection) section sets the direct-answer condition: the answer uses no tool and registers no route. That condition does not prohibit authorized route registration on a work completion path.
 
 ## Work-Impact Projection Contract
 
@@ -120,11 +120,11 @@ On the native Stop path, Core's observer validates the delivered text against th
 
 ## Current Selection and Bounded Recovery
 
-Core validates the current response route supplied by the model following task-router. A direct-answer or confirmation projection selects no execution units; a requested lookup is work. New input changes the route binding while preserving stable work units and unchanged original evidence.
+Core validates the current response route supplied by the model following task-router. New input changes the route binding while preserving stable work units and unchanged original evidence.
 
 A named route, proof or recording defect returns to its procedure owner below. The model chooses correction only when needed for the objective or a required dependency and within authority. Unsupported claims are revised or withdrawn; required unresolved criteria stay unmet. Identical unchanged recording failure parks dependent application without replaying business work or blocking independent authorized work.
 
-[Review and delivery](../../coding-convention/verification-before-completion/references/response-review.md) owns the calling sequence and correction shape. [Tool output semantics](tool-output-semantics.md#review-output-and-continuation) names the returned selectors. Core's retained-report path applies only when original applied proof supports the exact entire statement; added prose or a broader claim needs its own review.
+[Review and delivery](../../coding-convention/verification-before-completion/references/response-review.md) owns the calling sequence. Core's retained-report path applies only when original applied proof supports the exact entire statement; added prose or a broader claim needs its own review.
 
 ## Repair and authority conditions
 

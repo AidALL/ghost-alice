@@ -72,7 +72,7 @@ Tool-checkpoint는 도구 호출 전 단계(호스트의 `PreToolUse`/`BeforeToo
 
 task-router를 따르는 현재 세션 어시스턴트는 주 요청과 최종 목적을 보존합니다. 조사나 worktree 확인은 사용자가 산출물로 요구하지 않았다면 수단입니다.
 
-[경로 세부](../../../task-router/references/routing-details.md)는 바로 답하기(`direct-response`)와 확인 질문(`clarification-only`)을 작업과 구별합니다. 일반적인 이유·방법 질문의 전제나 열린 작업 공간만으로 로컬 진단을 승인하지 않습니다. 확인 질문은 공통 계약의 Session Intent 절이 정한 형식을 따릅니다. 바로 답하기의 조건은 공통 계약의 [Work Selection](../../../platforms/common-governance.md#work-selection) 절이 정하며, 그 답은 도구를 사용하지 않고 응답 경로를 기록하지 않습니다. 이 조건은 작업 완료 경로의 승인된 경로 등록을 금지하지 않습니다.
+[경로 세부](../../../task-router/references/routing-details.md)는 바로 답하기와 확인 질문을 작업과 구별합니다. 일반적인 이유·방법 질문의 전제나 열린 작업 공간만으로 로컬 진단을 승인하지 않습니다. 확인 질문은 공통 계약의 Session Intent 절이 정한 형식을 따릅니다. 바로 답하기의 조건은 공통 계약의 [Work Selection](../../../platforms/common-governance.md#work-selection) 절이 정하며, 그 답은 도구를 사용하지 않고 응답 경로를 기록하지 않습니다. 이 조건은 작업 완료 경로의 승인된 경로 등록을 금지하지 않습니다.
 
 ## Work-Impact Projection Contract
 
@@ -121,11 +121,11 @@ Continuation은 같은 process/session/tool-call ID를 다시 조회하는 경�
 
 ## Current Selection and Bounded Recovery
 
-Core는 task-router를 따르는 모델이 제출한 현재 응답 경로를 검증합니다. 바로 답하기나 확인 질문의 투영은 실행 단위를 선택하지 않으며, 요청된 조회는 작업입니다. 새 입력은 경로 연결을 바꾸되 안정된 작업 단위와 변경 없는 원본 근거를 보존합니다.
+Core는 task-router를 따르는 모델이 제출한 현재 응답 경로를 검증합니다. 새 입력은 경로 연결을 바꾸되 안정된 작업 단위와 변경 없는 원본 근거를 보존합니다.
 
 구체적인 경로·증거·기록 오류는 아래의 담당 절차로 돌아갑니다. 모델은 목적이나 필수 의존 관계에 필요하고 권한 안에 있을 때만 수정을 선택합니다. 지원되지 않는 주장은 수정·철회하며 필수 미해결 기준은 미충족 상태로 남습니다. 동일한 기록 실패가 반복되면 의존 적용을 보류하되 업무를 재실행하거나 독립적인 승인 작업을 막지 않습니다.
 
-[검토·전달 절차](../../../coding-convention/verification-before-completion/references/response-review.md)가 호출 순서와 정정 답변의 형태를 담당합니다. [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 선택 값을 정의합니다. Core의 과거 결과 보고 경로는 원본 적용 근거가 정확한 문장 전체를 뒷받침할 때만 적용하며, 추가 문구나 더 넓은 주장에는 별도 검토가 필요합니다.
+[검토·전달 절차](../../../coding-convention/verification-before-completion/references/response-review.md)가 호출 순서를 담당합니다. Core의 과거 결과 보고 경로는 원본 적용 근거가 정확한 문장 전체를 뒷받침할 때만 적용하며, 추가 문구나 더 넓은 주장에는 별도 검토가 필요합니다.
 
 ## Repair and authority conditions
 
