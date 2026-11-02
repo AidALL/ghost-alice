@@ -78,7 +78,7 @@ For reject, include rejection reasons and retracted claims. For escalate, identi
 
 ## External-tool and evaluator requirements
 
-For material external-tool claims, the response model loads verification-before-completion's `references/external-tool-evidence.md` from the installed skill and supplies its applicable category, evidence requirements and exact claim scope in each delegate's assignment. That reference owns query patterns and source-locator fields.
+For material external-tool claims, the response model loads verification-before-completion's `references/external-tool-evidence.md` from the installed skill and supplies its evidence requirements and exact claim scope in each delegate's assignment. That reference owns source-locator fields.
 
 For a claim reviewed at level-3-high-stakes, external governance absorption or evaluator-candidate promotion, follow `docs/policies/evaluator-artifact-contract.md` for its required artifacts and accepted result. The response model retains the returned verifier result and its supported scope; this skill does not redefine the evaluation protocol.
 

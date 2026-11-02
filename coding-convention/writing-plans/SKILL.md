@@ -10,7 +10,7 @@ compatibility:
 
 # Writing Plans
 
-The response model turns accepted requirements into tasks that can be executed without prior project context. Announce use of this skill once. Brainstorming owns unresolved design decisions; this skill does not silently settle a human-owned requirement.
+The response model turns accepted requirements into tasks that can be executed without prior project context. Brainstorming owns unresolved design decisions; this skill does not silently settle a human-owned requirement.
 
 ## Define the plan
 

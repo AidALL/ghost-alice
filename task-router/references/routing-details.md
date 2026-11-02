@@ -28,7 +28,7 @@ Follow the common contract's Work Selection section for a direct answer and its 
 | “I cannot get it to work” with no established referent | Ask the minimum question about the error/context; do not inspect the ambient project |
 | A stable compile-only how-to with no version-specific claim | Give the bounded method directly |
 | A general question about a past process state without an established inspected artifact | Explain common causes without diagnosing the ambient workspace |
-| “Check the requirements table against the body” | Normal verification; boundary-contract establishes comparison scope before extraction |
+| “Check the requirements table against the body” | Normal verification; when the purpose is established and both targets are known, the read-only comparison needs no new boundary contract |
 | “Build only the Android login mockup; do not touch auth/API/DI/navigation; verify a screenshot” | Normal development; boundary-contract preserves prohibited surfaces and visual criterion before coding |
 | “Schedule a meeting tomorrow at 3” | Normal operations; boundary-contract captures the external side effect before scheduling |
 

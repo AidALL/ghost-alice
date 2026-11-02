@@ -49,11 +49,9 @@ For a new current-turn closure:
 
 Explaining an unchanged prior result is not a new completion submission. Core code selects completion processing from an actual completion/partial control marker; it does not infer completion from prose or selected execution work. The response model identifies and explicitly routes its new completion claims through this workflow. Never describe an old check as freshly executed.
 
-## Retained original results and delivery
+## Retained original results
 
 For a source-backed explanation, [Prepare and record the response review](references/response-review.md#prepare-and-record-the-response-review) owns both judgments; record them only when the user explicitly requests an authenticated explanation review. New completion and partial-completion claims follow the finalization sequence above.
-
-For a correction to an already submitted answer, follow the review reference's [Deliver](references/response-review.md#deliver) procedure using the host's supplied visibility context. That procedure owns delivery of the reviewed answer and the Stop observation; the response model does not infer visibility from an unrelated tool result.
 
 ## Retain evidence on first execution
 
@@ -108,8 +106,6 @@ Partial result:
   - installed: Installed observation is unavailable
 - evidence: Original regression output with source locator
 ```
-
-Retain actual body-load/reuse facts in the internal audit. The common contract's io-trace Transparency Rule governs what the answer shows.
 
 The review reference's [Deliver](references/response-review.md#deliver) procedure owns delivery of the reviewed answer. The control block alone establishes neither application nor continuation.
 

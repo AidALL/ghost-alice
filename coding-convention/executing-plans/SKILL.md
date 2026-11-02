@@ -10,7 +10,7 @@ compatibility:
 
 # Executing Plans
 
-The response model executes an accepted plan inline, updates tasks when evidence changes the implementation, and completes the authorized integration workflow. Announce use of this skill once. Use subagent-driven-development when that execution choice is authorized and appropriate; tool availability alone does not replace the chosen workflow.
+The response model executes an accepted plan inline, updates tasks when evidence changes the implementation, and completes the authorized integration workflow. Use subagent-driven-development when that execution choice is authorized and appropriate; tool availability alone does not replace the chosen workflow.
 
 ## Procedure
 

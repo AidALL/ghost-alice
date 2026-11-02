@@ -141,7 +141,7 @@ The .sqlite-authority.json cutover marker is written before the first semantic c
 
 `record_turn(..., expected_input_event_id=receipt_id, expected_revision=revision)` requires the expected event when an observed input is active. Digest-only new-input observation creates an anchor and is exempt from that comparison. Attaching a semantic delta to raw input does not bypass it. Independent additions for the same input can serialize without sharing a revision; a whole-snapshot decision uses expected_revision.
 
-The met writer additionally requires an approved expected_criterion with exact ID, summary, source and boolean admitted. It uses the exact owner pair for an owned local ID and requires that criterion in the ready current selection. Direct ownerless writes remain input-bound. Managed v2 may bind a current request to accepted unchanged proof while retaining original source/time. The Python ledger writer validates digest syntax and binding; the response model reviews the actual proof under Core verification instructions.
+The met writer additionally requires an approved expected_criterion with exact ID, summary, source and boolean admitted. It uses the exact owner pair for an owned local ID and requires that criterion in the ready current selection. Direct ownerless writes remain input-bound. The Python ledger writer validates digest syntax and binding; the response model reviews the actual proof under Core verification instructions.
 
 `storage_transaction(root)` yields an operation-local connection. Nested calls receive that connection; only its owner commits/rolls back. Savepoints prevent a caught nested error from committing half a mutation. SQLite uses WAL, foreign keys, FULL synchronization and a ten-second contention wait, which is not a task-duration limit. Independent roots use independent databases. Repeated unversioned identical deltas carry no exactly-once guarantee.
 
@@ -153,13 +153,13 @@ For live backup, the operator uses SQLite backup or a quiescent consistent copy 
 
 ## Core Response Projection
 
-The response model applies task-router to form the current semantic route candidate, then invokes Core code's response_route.py through a host tool. That Python code validates and persists the candidate. The response model also follows session-intent-analyzer to express semantic criteria and admission facts; the ledger writer persists them. Addon Python code and intake hooks do not infer current selection from a backlog.
+The response model applies task-router to form the current semantic route candidate, then invokes Core code's response_route.py through a host tool. That Python code validates and persists the candidate. The response model also follows session-intent-analyzer to express semantic criteria and admission facts; the ledger writer persists them. Intake hooks do not infer current selection from a backlog.
 
 A new input marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap, intake or security. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
 
 An answer without a control block retains continuing selected work without a new completion submission. When the user has requested an authenticated review of such an answer, the recorded review binds that exact text, and the Stop observer judges the answer against that record. The response model explicitly routes and verifies new completion claims under the owning workflow.
 
-A direct answer or a confirmation question follows the common contract without ledger access or route registration by the response model. Hook observation still stales the prior projection, and semantic persistence waits for the next authorized normal route. An already supplied internal host handoff may carry a terminal projection; without it the projection remains absent. These restrictions do not prohibit authorized repair of Core code records on a normal route.
+A direct answer or a confirmation question follows the common contract without ledger access or route registration by the response model. Hook observation still stales the prior projection, and semantic persistence waits for the next authorized normal route. These restrictions do not prohibit authorized repair of Core code records on a normal route.
 
 The work_units registry freezes contracts by `(work_unit_id, contract_revision)`. Revision is an integer from one through `2**53 - 1`, excluding booleans. Each unit declares kind execution/nonexecution, boolean admitted and exact owner platform/session. Stored criteria freeze ID, summary and source. Same-revision kind, owner or definition changes fail; a newer revision is required. Admission may change with authority without erasing business proof. Selection cannot revive an older revision.
 
@@ -187,7 +187,7 @@ Each owned criterion carries both work_unit_id and contract_revision; a partial/
 
 The routing_surface requires response_mode (`normal | direct-response | clarification-only`) and boundary_contract (`required | n/a`). The optional reason is a compressed nonempty summary of at most 500 characters. Unknown fields/schema/enums, malformed supplied values, duplicate references, inconsistent owners, unadmitted selection and unbound references raise RouteSchemaError with code route-schema. The optional reason does not relax current input, boundary reference, owner, admission or criterion/source validation.
 
-Selection covers only this response and may be empty. Terminal direct-response/clarification-only projections cannot select execution units; writer and reader reject that contradiction, and completion selection never publishes it. Unselected execution units may remain without activating work. A requested lookup selects normal execution; a terminal explanation or explicit stop clears execution selection while retaining backlog/proof. An invalid route does not exempt an actual closure claim from proof.
+Selection covers only this response and may be empty. Unselected execution units may remain without activating work. An invalid route does not exempt an actual closure claim from proof.
 
 The validated projection adds ready status, authoritative identity/input and canonical boundary_ref or null. A required boundary needs a nonnull reference. Selected criteria are detached snapshots with criterion_id as the local-ID alias; they freeze the selected condition, not current proof/status. The reader adds current_input_event_id and returns stale for changed input/definition, rejecting malformed stored schemas.
 

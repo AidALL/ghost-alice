@@ -16,8 +16,6 @@ Guide the completion of development work with clear options and handle the selec
 
 Core principle: reproduce relevant CI locally -> honor the selected path -> reconcile remote CI and review -> integrate the verified head -> clean up only when safe.
 
-Announcement at start: "I'm using the finishing-a-development-branch skill to complete this work."
-
 ## Process
 
 ### Step 1: CI preflight
@@ -53,18 +51,7 @@ Use the PR target, user's specified target or inspected repository default. A me
 
 First use the user's existing instruction. If they already authorized merging, pushing a PR, or retaining the branch, carry out that path after its checks. Authorization to merge does not imply permission to skip review.
 
-Only when the integration path remains undecided, present the following 4 options:
-
-```
-Implementation complete. What would you like to do?
-
-1. Merge back to <base-branch> locally
-2. Push and create a Pull Request
-3. Keep the branch as-is (I'll handle it later)
-4. Discard this work
-
-Which option?
-```
+Only when the integration path remains undecided, ask the user, in the user's language, to choose one of Step 4's four options: local merge, push and create a pull request, keep as-is, or discard.
 
 Keep the options concise and explain only a concrete blocker or consequence the user needs to decide.
 
@@ -169,7 +156,7 @@ Verification-before-completion owns completion claims and evidence reuse; system
 
 Called by:
 - subagent-driven-development - after all tasks and final review are complete
-- executing-plans (Step 3: Finish development) - after all tasks are complete and verified
+- executing-plans - after all required tasks and checks satisfy the plan
 
 Pairs with:
 - using-git-worktrees - clean up worktrees created by that skill

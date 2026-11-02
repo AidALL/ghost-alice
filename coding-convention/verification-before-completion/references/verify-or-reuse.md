@@ -115,7 +115,7 @@ When several versions of an artifact exist, a current-state claim uses the copy 
 
 ## Restatement
 
-Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. A user's request to restate a result or Core's selection of a complete final response can require that content again. Use Core's delivery context for that decision; unknown visibility alone does not authorize UI inspection or answer replay. `audit_restatement()` flags potential repeats for review and excludes fenced control blocks whose schema repeats by design.
+Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. A user's request to restate a result can require that content again. `audit_restatement()` flags potential repeats for review and excludes fenced control blocks whose schema repeats by design.
 
 ## Confirmed Flaw Propagation
 
@@ -127,8 +127,6 @@ For a confirmed flaw in an authored prompt, document, plan or other requested ar
 | User asked for diagnosis only | `diagnosis-only` |
 | Fix is unsafe or outside the agreed scope | `confirm-before-fix` |
 | No flaw confirmed | `none` |
-
-A correction confined to completion control fields follows [Deliver](response-review.md#deliver), which may preserve an already visible answer.
 
 Failure classes: `confirmed-flaw-not-propagated` for an explanation, a previous version, or a partial patch where the corrected complete deliverable was required; `unnecessary-reapproval` for asking permission for a safe in-scope fix; `unconfirmed-out-of-scope-change` for applying an out-of-scope fix without confirmation.
 
