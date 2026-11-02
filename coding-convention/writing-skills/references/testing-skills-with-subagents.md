@@ -20,7 +20,7 @@ inside the fixture only. Return the actual actions, result, supporting source
 locators, accessed paths and any uncertainty. Do not merely quote the rule.
 ```
 
-The response model fills the actual fixture paths and required tool limits before dispatch. On Claude Code use the exposed Task capability; on Codex use its agent API with only supported arguments. The platform mapping lives in using-coding-convention.
+The response model fills the actual fixture paths and required tool limits before dispatch. On Claude Code use the exposed Agent capability; on Codex use its agent API with only supported arguments.
 
 ## Reviewer application to a supplied mixed target
 

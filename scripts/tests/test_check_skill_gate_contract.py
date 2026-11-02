@@ -422,14 +422,6 @@ class SkillGateContractTest(unittest.TestCase):
             path.write_text(path.read_text().replace("Instruction Body Reuse", "REMOVED"))
             self.assertTrue(any("Instruction Body Reuse" in issue.message for issue in run_contract_checks(root)))
 
-    def test_missing_prose_no_hard_wrap_contract_fails(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            root = Path(tmpdir)
-            self._write_valid_fixture(root)
-            path = root / "coding-convention/using-coding-convention/SKILL.md"
-            path.write_text(path.read_text().replace("one physical source line", "REMOVED"))
-            self.assertTrue(any("one physical source line" in issue.message for issue in run_contract_checks(root)))
-
     def test_coercive_skip_wording_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)

@@ -25,7 +25,6 @@ Known local provenance anchors include:
 
 - `coding-convention/writing-skills/references/anthropic-best-practices.md`
 - `coding-convention/using-coding-convention/references/codex-tools.md`
-- `coding-convention/using-coding-convention/references/copilot-tools.md`
 
 Do not assume that copied, translated, or closely adapted upstream documentation inside these references is relicensed as project-owned Apache-2.0 material. Public release docs should keep only original Ghost-ALICE commentary with short citations or recorded source/license decisions.
 
