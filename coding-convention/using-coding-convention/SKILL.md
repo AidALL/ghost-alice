@@ -13,10 +13,7 @@ The response model starting development uses this entrypoint to select the appli
 
 User instructions and project rules govern the task; family skills govern the implementation procedure within that authority. Load or validly reuse the family skill selected for the next development action. When uncertain applicability would change that action, read the body and decide; otherwise continue with the established workflow.
 
-Use the host's actual skill mechanism:
-
-- Copilot CLI: use its exposed skill capability and [references/copilot-tools.md](references/copilot-tools.md).
-- Other hosts: map operations to the exposed tool schemas; do not invent unavailable tools.
+Use the host's actual skill mechanism, map each operation to the host's exposed tool schemas, and do not invent unavailable tools.
 
 For Codex operations, use [references/codex-tools.md](references/codex-tools.md). Instruction body reuse is defined in verification-before-completion's [Instruction Body Reuse](../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse).
 
@@ -55,5 +52,3 @@ For repair attempts, follow systematic-debugging's [Incident accounting and cont
 - A small change does not excuse skipping an applicable required workflow.
 - An agent's plan cannot weaken the user's done conditions.
 - Repeating a check requires the evidence trigger defined by verification-before-completion.
-
-Write prose paragraphs on one physical source line unless Markdown, syntax or protocol fields require separate lines.

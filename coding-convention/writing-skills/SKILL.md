@@ -31,10 +31,9 @@ Do not add hypothetical defenses or repeat a prohibition merely to increase emph
 
 1. Preserve baseline evidence before changing the candidate.
 2. Edit the affected body, callers and references to remove the demonstrated contradiction.
-3. Read `official-docs/derived/skill-compliance-checklist.md` and complete Phases 1 through 5 for every changed package before evaluation.
-4. Run the affected pressure, application or source-contract check required by the task and record the actual outcome and limits.
-5. If an observation contradicts a requirement, follow the [diagnostic procedure](references/bulletproofing-skills.md#procedure) to select and apply the justified correction, then repeat only the affected checks.
-6. Distribute or commit only under the user's existing authorization and after required validation succeeds.
+3. Run the affected pressure, application or source-contract check required by the task and record the actual outcome and limits.
+4. If an observation contradicts a requirement, follow the [diagnostic procedure](references/bulletproofing-skills.md#procedure) to select and apply the justified correction, then repeat only the affected checks.
+5. Distribute or commit only under the user's existing authorization and after required validation succeeds.
 
 Coordinated changes may span packages; each changed package still needs its own disposition.
 

@@ -1,6 +1,6 @@
 # Verify-Or-Reuse Contract
 
-This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude and Codex use the same contract; [Host Tool Names](#host-tool-names) maps their different tool names. The executable form is `scripts/verify_or_reuse.py` in this skill directory.
+This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude and Codex use the same contract. The executable form is `scripts/verify_or_reuse.py` in this skill directory.
 
 ## Contents
 
@@ -14,7 +14,6 @@ This reference is the canonical semantic contract for deciding whether a claim a
 - [Authoritative Copy](#authoritative-copy)
 - [Restatement](#restatement)
 - [Confirmed Flaw Propagation](#confirmed-flaw-propagation)
-- [Host Tool Names](#host-tool-names)
 - [Deterministic Helper](#deterministic-helper)
 - [Conversation Audit Template](#conversation-audit-template)
 - [Worked Cases](#worked-cases)
@@ -130,21 +129,6 @@ For a confirmed flaw in an authored prompt, document, plan or other requested ar
 
 Failure classes: `confirmed-flaw-not-propagated` for an explanation, a previous version, or a partial patch where the corrected complete deliverable was required; `unnecessary-reapproval` for asking permission for a safe in-scope fix; `unconfirmed-out-of-scope-change` for applying an out-of-scope fix without confirmation.
 
-## Host Tool Names
-
-The table maps each host's tool names to neutral classes and adds no decision logic. The decision itself never takes a platform input.
-
-| Neutral class | Claude Code tool names | Codex tool names |
-| --- | --- | --- |
-| file-read | `Read` | native file reads, pass `class` explicitly |
-| file-search | `Grep`, `Glob` | pass `class` explicitly |
-| shell | `Bash` | `shell` |
-| fetch | `WebFetch` | pass `class` explicitly |
-| connector | `mcp__<server>__<tool>` | pass `class` explicitly |
-| write | `Write`, `Edit`, `NotebookEdit` | `apply_patch` |
-
-On Claude Code, the always-loaded `CLAUDE.md` block and this skill carry the contract, because a PreToolUse allow does not add model context there. On Codex, the same rules arrive through the `AGENTS.md` block, the installed skill under `~/.agents/skills/verification-before-completion/`, and the tool-checkpoint reminder. Resolve `scripts/` and `references/` relative to the loaded skill directory; do not depend on a Claude-only skill directory variable.
-
 ## Deterministic Helper
 
 The helper encodes the same rules for tests and audits. Do not spend a tool call on it when the flow already settles the verdict; its purpose is regression evidence and after-the-fact review, not a gate before every answer.
@@ -155,7 +139,7 @@ python3 scripts/verify_or_reuse.py audit --platform codex --facts-json '<facts>'
 python3 scripts/verify_or_reuse.py flaw --facts-json '{"flaw_confirmed":true}' --response explanation-only
 ```
 
-Invalid or unknown values exit with status 2 instead of being guessed. Record a possibility in `hypothetical_changes`, not in `events_since_evidence`.
+Each `--calls-json` entry names a `tool` or a neutral `class`; `tool_class()` in the script maps the tool names it knows, and any other tool name counts as `other`, which is not an inspection. Invalid values, and unknown values other than tool names, exit with status 2 instead of being guessed. Record a possibility in `hypothetical_changes`, not in `events_since_evidence`.
 
 ## Conversation Audit Template
 
