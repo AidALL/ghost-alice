@@ -709,8 +709,7 @@ def read_session_state(*, root: Path = DEFAULT_ROOT, platform: str, session_id: 
             return {}
         raw = json.loads(paths["state"].read_text(encoding="utf-8"))
         _load_legacy_state(paths, platform, session_id, data=raw)
-        # A pending import projection does not invalidate its committed current
-        # block. Preserve the pending marker; import reconciles it atomically.
+        # Preserve the pending import marker; import reconciles it atomically.
         return raw
 
 

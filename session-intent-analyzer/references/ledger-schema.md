@@ -66,7 +66,7 @@ The database event table is append-only and available through `--read-events` an
 
 An event accompanying raw input is user-input-observed and contains event_id equal to the observation's input_event_id plus input_digest. A delta that the response model submits without raw input is intent-updated: it references the input_event_id without creating/displacing an input event. API-written events include ledger_revision and unique mutation_id; older imported events without them remain readable. Claude native intake appends native-input-staged, native-input-resolved, native-input-superseded with its cause, native-input-waiting once per blocking input and cause, and native-input-notice once per session and cause; none stores input text.
 
-The Python ledger writer derives semantic_changes as before/after digests of normalized state for goals, summaries, constraints, non-goals, questions, criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, security reasons, hints, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
+The Python ledger writer derives semantic_changes as before/after digests of normalized state for goals, summaries, constraints, non-goals, questions, criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, hints, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
 
 The compatibility `current-session.json` pointer is advisory discovery:
 
@@ -146,7 +146,7 @@ For live backup, the operator uses SQLite backup or a quiescent consistent copy 
 
 The response model applies task-router to form the current semantic route candidate, then invokes Core code's response_route.py through a host tool. That Python code validates and persists the candidate. The response model also follows session-intent-analyzer to express semantic criteria and admission facts; the ledger writer persists them. Intake hooks do not infer current selection from a backlog.
 
-A new input marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap, intake or security. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
+A new input marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap or intake. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
 
 An answer without a control block retains continuing selected work without a new completion submission. When the user has requested an authenticated review of such an answer, the recorded review binds that exact text, and Core code's Stop script compares the answer with that record. The response model explicitly routes and verifies new completion claims under the owning workflow.
 

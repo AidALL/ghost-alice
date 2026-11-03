@@ -15,7 +15,7 @@ REPO = pathlib.Path(__file__).resolve().parents[1]
 HOOK = REPO / "_shared" / "ghost-alice-hook.mjs"
 
 
-class DerivationTests(unittest.TestCase):
+class DispatcherOutputTests(unittest.TestCase):
     def test_healthy_checkpoint_does_not_append_instruction_context(self) -> None:
         for platform in ("codex", "claude"):
             with self.subTest(platform=platform):
@@ -48,7 +48,7 @@ class DerivationTests(unittest.TestCase):
             for tool in tools:
                 with self.subTest(platform=platform, tool=tool["tool_name"]):
                     out = subprocess.run(["node", str(HOOK), "--platform", platform, "--event", "PreToolUse"],
-                                         input=json.dumps({"session_id": "s-derive", **tool}),
+                                         input=json.dumps({"session_id": "s-dispatch", **tool}),
                                          capture_output=True, text=True, check=False)
                     self.assertEqual((out.returncode, out.stderr), (0, ""))
                     self.assertEqual(json.loads(out.stdout), {})

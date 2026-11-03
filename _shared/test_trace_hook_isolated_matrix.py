@@ -218,7 +218,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
     def observe(self, platform, session):
         self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                    "--platform", platform, "--session-id", session,
-                                   "--input", "Synthetic isolated security case."])
+                                   "--input", "Synthetic isolated admission case."])
         state = self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                   "--platform", platform, "--session-id", session, "--snapshot"])
         return json.loads(state.stdout)["latest_input_event_id"]
