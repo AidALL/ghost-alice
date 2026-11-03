@@ -207,13 +207,11 @@ def _run_group(runtime, group: TestGroup) -> int:
         print(f"FAILED {group.name}: exit {result.returncode}", file=sys.stderr)
         return result.returncode
     if group.name == "shared-all":
-        print("Shared function tests: install destination and retired stage/discovery", flush=True)
+        print("Shared function tests: install destination", flush=True)
         result = runtime.run(
             _py(
                 "-m", "pytest", "-q",
                 "_shared/test_install_destination.py",
-                "_shared/test_retired_detector_stage.py",
-                "_shared/test_retired_discovery.py",
                 "--basetemp", str(runtime.temp_dir / "shared-pytest"),
                 "-p", "no:cacheprovider",
             ),

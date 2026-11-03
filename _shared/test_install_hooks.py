@@ -304,39 +304,6 @@ def _write_session_intent_preflight(
     )
 
 
-def _write_downstream_gate(
-    home: str | Path,
-    platform: str,
-    session_id: str,
-    decision: str,
-    *,
-    event_id: str = "evt-current",
-    input_digest: str = "sha256:test",
-    session_intent_root: str | Path | None = None,
-) -> None:
-    root = Path(session_intent_root) if session_intent_root is not None else Path(home) / ".ghost-alice" / "session-intent"
-    session_dir = root / platform / session_id
-    session_dir.mkdir(parents=True, exist_ok=True)
-    session_dir.joinpath("downstream-gates.json").write_text(
-        json.dumps({
-            "schema_version": "downstream-gates.v1",
-            "platform": platform,
-            "session_id": session_id,
-            "gate": "jailbreak-detector",
-            "decision": decision,
-            "opened": decision == "allow",
-            "input_event_id": event_id,
-            "input_digest": input_digest,
-            "rules": ["instruction-hierarchy-override"] if decision == "block" else [],
-            "state_goal_digest": "sha256:test",
-            "evidence_summary": "test gate state",
-            "updated_at": "2026-01-01T00:00:00Z",
-        }, indent=2)
-        + "\n",
-        encoding="utf-8",
-    )
-
-
 def _minimal_visibility_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env = os.environ.copy()
     env["GHOST_ALICE_AGENT_VISIBILITY"] = "minimal"
@@ -2451,13 +2418,6 @@ class TestInstallHook(TempHomeTestCase):
                         self.fake_home,
                         platform,
                         session_id,
-                        session_intent_root=intent_root,
-                    )
-                    _write_downstream_gate(
-                        self.fake_home,
-                        platform,
-                        session_id,
-                        "allow",
                         session_intent_root=intent_root,
                     )
                     request = json.dumps({

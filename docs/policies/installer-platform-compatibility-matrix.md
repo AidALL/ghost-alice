@@ -97,7 +97,7 @@ python3 -m pip install pytest
 python3 scripts/run_installer_compat_tests.py
 ```
 
-The `shared-all` group runs shared unittest discovery and the pytest functions in `_shared/test_install_destination.py`, `_shared/test_retired_detector_stage.py`, and `_shared/test_retired_discovery.py`; either execution failing fails the group.
+The `shared-all` group runs shared unittest discovery and the pytest functions in `_shared/test_install_destination.py`; either execution failing fails the group.
 
 Without `--group`, `scripts/run_installer_compat_tests.py` skips each focused group whose `within` field names another group. The named group already runs every test module of the focused group, so each test module runs once. Name a focused group with `--group` to run it alone.
 

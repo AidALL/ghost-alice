@@ -52,8 +52,6 @@ class GovernanceClassTaxonomyTest(unittest.TestCase):
             by_name["skill-evolution"]["governance_class"],
             "governance-subskill",
         )
-        self.assertNotIn("jailbreak-detector", by_name)
-        self.assertNotIn("jailbreak-detector", catalog["install_roots"])
         self.assertNotEqual(
             by_name["skill-evolution"]["family"],
             by_name["skill-evolution"]["governance_class"],

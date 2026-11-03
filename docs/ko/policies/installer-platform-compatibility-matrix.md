@@ -97,7 +97,7 @@ python3 -m pip install pytest
 python3 scripts/run_installer_compat_tests.py
 ```
 
-`shared-all` 그룹은 `_shared/`에서 unittest 자동 탐색으로 찾은 테스트와 `_shared/test_install_destination.py`, `_shared/test_retired_detector_stage.py`, `_shared/test_retired_discovery.py`의 pytest 함수를 실행합니다. 두 실행 중 하나라도 실패하면 그룹이 실패합니다.
+`shared-all` 그룹은 `_shared/`에서 unittest 자동 탐색으로 찾은 테스트와 `_shared/test_install_destination.py`의 pytest 함수를 실행합니다. 두 실행 중 하나라도 실패하면 그룹이 실패합니다.
 
 `scripts/run_installer_compat_tests.py`를 `--group` 없이 실행하면, 이 스크립트는 `within` 필드에 다른 그룹을 지정한 개별 그룹을 건너뜁니다. `within`에 지정된 그룹이 그 개별 그룹의 테스트 모듈을 모두 실행하므로, 각 테스트 모듈은 한 번만 실행됩니다. 개별 그룹은 `--group`으로 이름을 지정해 따로 실행합니다.
 

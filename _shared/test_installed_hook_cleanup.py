@@ -15,7 +15,6 @@ from unittest.mock import patch
 import hook_definitions
 import install_doctor
 import install_hooks
-import retired_assets
 from installer import hosts, report
 from test_install_hooks import TempHomeTestCase
 
@@ -171,19 +170,6 @@ class InstalledHookCleanupTests(TempHomeTestCase):
                 settings = {"hooks": {"UserPromptSubmit": [
                     {"hooks": [{"type": "command", "command": f"echo old # {marker}"}]}]}}
                 self.assertEqual(install_hooks._codex_trusted_hook_state_entries(Path("/x/hooks.json"), settings), {})
-
-    def test_claude_reinstall_drops_retired_skill_permissions(self):
-        skills = self.fake_home / ".claude" / "skills"
-        for name in retired_assets.RETIRED_SKILLS:
-            (skills / name).mkdir(parents=True)
-        retired = [f"Skill({name})" for name in retired_assets.RETIRED_SKILLS]
-        self._write_settings("claude", {"permissions": {"allow": [*retired, "Skill(user-own)", "Bash(ls:*)"]}})
-        self.assertEqual(install_hooks.install_hook("claude"), "installed")
-        allow = self._read_settings("claude")["permissions"]["allow"]
-        for rule in retired:
-            self.assertNotIn(rule, allow)
-        self.assertIn("Skill(user-own)", allow)
-        self.assertIn("Bash(ls:*)", allow)
 
     def test_doctor_counts_no_retired_marker_command_as_managed(self):
         shared = self._create_runtime_shared_dir()

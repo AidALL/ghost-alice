@@ -14,7 +14,6 @@ SKILL_ROOTS = (
     "boundary-contract",
     "coding-convention",
     "compact-handoff",
-    "jailbreak-detector",
     "merge-companion",
     "necessity-gate",
     "session-intent-analyzer",

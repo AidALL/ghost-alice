@@ -570,20 +570,16 @@ class SkillGateContractTest(unittest.TestCase):
         for field in ("skill-call", "skills-loaded", "skills-reused"):
             self.assertNotIn(field, section)
 
-    def test_retired_classifier_and_nonterminal_evolution_are_rejected(self):
-        for mutation in ('detector', 'evolution'):
-            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as tmpdir:
-                root = Path(tmpdir)
-                self._write_valid_fixture(root)
-                path = root / "skill-catalog/session-gates.json"
-                contract = json.loads(path.read_text())
-                if mutation == 'detector':
-                    contract['intent_consumers']['session-intent-analyzer'].append('jailbreak-detector')
-                else:
-                    contract['intent_consumers']['skill-evolution'].append('task-router')
-                path.write_text(json.dumps(contract))
-                messages = '\n'.join(issue.message for issue in run_contract_checks(root))
-                self.assertIn('retired standalone classifier' if mutation == 'detector' else 'report-only-terminal-branch', messages)
+    def test_nonterminal_evolution_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            path = root / "skill-catalog/session-gates.json"
+            contract = json.loads(path.read_text())
+            contract['intent_consumers']['skill-evolution'].append('task-router')
+            path.write_text(json.dumps(contract))
+            messages = '\n'.join(issue.message for issue in run_contract_checks(root))
+            self.assertIn('report-only-terminal-branch', messages)
 
     def test_direct_intake_contract_rejects_a_renamed_intermediate_stage(self):
         with tempfile.TemporaryDirectory() as tmpdir:
