@@ -1,4 +1,4 @@
-"""Core owns native assessment inputs; the Stop observer reads only its decisions."""
+"""Core owns native assessment inputs; the Stop script reads only its decisions."""
 import hashlib
 import importlib
 import json

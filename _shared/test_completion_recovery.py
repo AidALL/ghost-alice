@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 
 import completion_check_validator as validator
-from test_completion_skill_evidence import assert_stop_observation
+from test_completion_skill_evidence import assert_stop_observation, stop_issue
 
 
 HOOK = Path(__file__).with_name("claude_stop_verification_hook.py")
@@ -177,7 +177,7 @@ class CompletionRecoveryTests(unittest.TestCase):
                     payload = self.hook(text, retry=retry)
                     assert_stop_observation(self, payload, issue="Invalid verdict value",
                         repair_target="completion_metadata")
-                    self.assertIn("without punctuation", payload["response_assessment"]["body_issue"])
+                    self.assertIn("without punctuation", stop_issue(payload))
 
     def test_missing_or_empty_verdict_keeps_distinct_missing_diagnostic(self):
         for text in (
@@ -194,7 +194,7 @@ class CompletionRecoveryTests(unittest.TestCase):
                         assert_stop_observation(self, payload,
                             issue="Every claim-evidence-map entry must include verdict:",
                             repair_target="completion_metadata")
-                        self.assertNotIn("Invalid verdict value", payload["response_assessment"]["body_issue"])
+                        self.assertNotIn("Invalid verdict value", stop_issue(payload))
 
     def test_invalid_retry_is_not_accepted_as_verified_completion(self):
         invalid = VALID.replace("    evidence: python check.py exited 0\n", "")
@@ -225,7 +225,7 @@ class CompletionRecoveryTests(unittest.TestCase):
             with self.subTest(platform=platform):
                 payload = self.hook(VALID, platform=platform, record_review=False)
                 assert_stop_observation(self, payload, issue='assessment-required:', repair_target='completion_metadata')
-                self.assertNotIn('Invoke the Claude Code Skill tool', payload['response_assessment']['body_issue'])
+                self.assertNotIn('Invoke the Claude Code Skill tool', stop_issue(payload))
                 assert_stop_observation(self, self.hook(VALID, platform=platform))
 
     def test_closure_prose_under_a_label_is_not_a_completion_submission(self):

@@ -56,7 +56,8 @@ For the full installer architecture, read [installer architecture](./installer-a
 | [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | Gate that writes the work's boundary contract: objective, allowed and prohibited paths and actions, done conditions, phase and stop conditions |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | Development workflow family |
 | [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | The skill catalog `skills.json` generated from each `SKILL.md` frontmatter and its schema `schema.json`, the hand-maintained gate and adapter metadata `session-gates.json` and `platform-adapters.json`, and the addon manifest schema `addon-schema.json` |
-| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Single Core assessment read by the Stop observer |
+| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Single Core assessment the Stop script calls |
+| [_shared/stop_notice.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/stop_notice.py) | Stop notice message: built by the Stop script and recorded in `stop-notice.json` in the session folder next to the hook log; the hook runner passes the file's path to Stop hooks in `GHOST_ALICE_STOP_NOTICE_FILE` |
 
 ## Official Docs And Policies
 

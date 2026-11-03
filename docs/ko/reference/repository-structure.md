@@ -56,7 +56,8 @@
 | [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | 작업의 목표, 허용·금지 경로와 행동, 완료 조건, 단계, 중단 조건을 경계 계약으로 작성하는 게이트 |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | 개발 작업 절차를 제공하는 스킬 모음 |
 | [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | 각 `SKILL.md` 머리말에서 생성한 스킬 카탈로그 `skills.json`과 그 스키마 `schema.json`, 직접 관리하는 게이트·어댑터 메타데이터 `session-gates.json`·`platform-adapters.json`, 애드온 매니페스트 스키마 `addon-schema.json` |
-| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Stop 관찰자가 읽는 Core의 단일 평가 |
+| [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Stop 스크립트가 호출하는 Core의 단일 평가 |
+| [_shared/stop_notice.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/stop_notice.py) | Stop 안내 메시지: Stop 스크립트가 생성해 훅 로그가 있는 세션 폴더의 `stop-notice.json`에 기록하고, 훅 실행기가 그 파일의 경로를 `GHOST_ALICE_STOP_NOTICE_FILE`로 Stop 훅에 전달 |
 
 ## 공식 문서와 정책
 

@@ -185,8 +185,8 @@ def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claud
         if log.exists():
             for line in log.read_text().splitlines():
                 raw = json.loads(json.loads(line)['stdout'])
-                if 'response_assessment' in raw:
-                    result.stop_observation = raw['response_assessment']
+                if 'stop_notice' in raw:
+                    result.stop_observation = raw
         return result
 
 
@@ -4021,7 +4021,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload, {"continue": True})
         self.assertIsNotNone(result.stop_observation)
-        assert_stop_observation(self, {'continue': True, 'response_assessment': result.stop_observation})
+        assert_stop_observation(self, result.stop_observation)
 
     def test_codex_stop_passes_closure_prose_without_a_control_block(self):
         result = _run_reviewed_stop_command(
@@ -4050,8 +4050,7 @@ class TestForegroundHookPayloads(TempHomeTestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout), {'continue': True})
                 self.assertIsNotNone(result.stop_observation)
-                assert_stop_observation(self,
-                    {'continue': True, 'response_assessment': result.stop_observation})
+                assert_stop_observation(self, result.stop_observation)
 
     def test_codex_stop_hook_allows_explanatory_response_without_completion_check(self):
         result = _run_reviewed_stop_command(

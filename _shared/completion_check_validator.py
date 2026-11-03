@@ -506,11 +506,16 @@ def validate_completion_evidence_map(completion_check, *, partial=False):
     return " ".join(dict.fromkeys(issues)) if issues else None
 
 
+def extract_partial_unverified_entries(block):
+    """Return explicit unresolved (criterion ID, reason) pairs; malformed entries remain invalid."""
+    section = extract_top_level_field_section(block, "unverified")
+    return [(match.group(1), match.group(2)) for line in _split_lines(section)
+            if (match := re.fullmatch(r"\s*-\s*([A-Za-z0-9_.=-]+)\s*:\s*(\S.*?)\s*", line))]
+
+
 def extract_partial_unverified_ids(block):
     """Return explicit unresolved criterion IDs; malformed entries remain invalid."""
-    section = extract_top_level_field_section(block, "unverified")
-    return [match.group(1) for line in _split_lines(section)
-            if (match := re.fullmatch(r"\s*-\s*([A-Za-z0-9_.=-]+)\s*:\s*(\S.*?)\s*", line))]
+    return [criterion for criterion, _ in extract_partial_unverified_entries(block)]
 
 
 def extract_original_proof(text):

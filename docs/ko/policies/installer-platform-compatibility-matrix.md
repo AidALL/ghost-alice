@@ -68,9 +68,9 @@ tool-checkpoint 훅은 일상적인 호출에 복구 비용 필드와 복구 메
 
 ### completion-reminder
 
-설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core가 인증하는 두 판단은 [근거와 네이티브 표시](../../../architecture_ko.md#근거와-네이티브-표시)가 설명합니다. Core의 Stop 관찰자가 그 평가를 사용하며 호스트를 막지 않습니다.
+설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core가 인증하는 두 판단은 [근거와 네이티브 표시](../../../architecture_ko.md#근거와-네이티브-표시)가 설명합니다. Core 코드의 Stop 스크립트가 그 평가를 사용하며 호스트를 막지 않습니다.
 
-두 호스트 모두 Stop 관찰자는 답변 평가를 기록하고 호스트의 정지를 허용합니다. 훅 실행기는 실행하는 모든 훅의 JSON 출력에서 차단·정지·권한 결정 제어를 제거하고 차단·정지·거부·사용자 확인 요청을 `systemMessage`로 알리며, 훅의 종료 코드 2를 차단하지 않는 종료 코드 1로 변환합니다. 훅 로그는 원래 종료 코드를 보존합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 완료 확인 블록의 형식을 정합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 훅 항목과 플랫폼 연결을 확인할 뿐 모델 판단이 참인지 검증하지 않습니다.
+두 호스트에서 Core 코드의 Stop 스크립트는 Stop 안내 메시지를 훅 로그가 있는 세션 폴더의 `stop-notice.json`에 기록하고, 메시지가 뒷받침되지 않는 주장, 답변을 대조하며 찾은 문제, 미해결 기준, 선언된 남은 작업 가운데 하나라도 알리면 안내 글을 `systemMessage`로 반환하며, 호스트의 정지를 허용합니다. 훅 실행기는 실행하는 모든 훅의 JSON 출력에서 차단·정지·권한 결정 제어를 제거하고 차단·정지·거부·사용자 확인 요청을 `systemMessage`로 알리며, 훅의 종료 코드 2를 차단하지 않는 종료 코드 1로 변환합니다. 훅 로그는 원래 종료 코드를 보존합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 완료 확인 블록의 형식을 정합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 훅 항목과 플랫폼 연결을 확인할 뿐 모델 판단이 참인지 검증하지 않습니다.
 
 ## 셸 매트릭스
 

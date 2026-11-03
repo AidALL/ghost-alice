@@ -1,5 +1,6 @@
 """Native assessment preserves the submitted body without a printed trace."""
 
+import hashlib
 import json
 import os
 import subprocess
@@ -100,7 +101,11 @@ class TraceDisplayRepairTests(unittest.TestCase):
                             input=json.dumps({"transcript_path": str(path)}),
                             text=True, capture_output=True, check=True,
                         )
-                    self.assertEqual(json.loads(result.stdout), {"continue": True})
+                    payload = json.loads(result.stdout)
+                    # The new turn has no answer yet, so the old completion is not assessed again.
+                    self.assertEqual((payload["continue"], payload["stop_notice"]["state"]), (True, "quiet"))
+                    self.assertEqual(payload["stop_notice"]["body_digest"], "sha256:" + hashlib.sha256(b"").hexdigest())
+                    self.assertNotIn("systemMessage", payload)
 
 
 if __name__ == "__main__":

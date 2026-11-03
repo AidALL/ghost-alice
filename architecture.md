@@ -66,6 +66,11 @@ flowchart TD
   R -->|Routine explanation| D["Response model: submit the answer"]
   C -->|Status and references| D
   D --> H["Native host: display the answer"]
+  H -->|Stop event| SR["Core Stop script: compare the answer with its recorded review<br/>and record this Stop's notice message in stop-notice.json"]
+  SR --> S{"Does the message report an unsupported claim, an issue found in the check,<br/>an unresolved criterion or declared remaining work?"}
+  S -->|Yes| N["Core Stop script: return the notice text as systemMessage;<br/>the host shows it after the answer"]
+  S -->|No| E["Native host: stop"]
+  N --> E
 ```
 
 The model chooses the next judgment target: micro for an individual result, meso for a subtask or mapping, macro for the integrated outcome and dependencies, or meta for necessity or premise. The task complexity level follows from the work's verification burden; whether the evidence supports full or partial completion is a separate judgment. A mismatch starts investigation; it does not identify the cause. Unresolved conditions prevent their dependent claims or actions while independent authorized work can continue. The wiki page [Verification and Evidence](https://github.com/AidALL/ghost-alice/wiki/Verification-and-Evidence) describes these decisions.
@@ -94,9 +99,15 @@ sequenceDiagram
   opt Claude PreToolUse or Stop
     R->>R: Record in the intent ledger which session inputs the user typed,<br/>from the Claude transcript<br/>A failure is recorded in the ledger, or else in the hook log, and the hook still runs
   end
+  opt Stop
+    R->>R: Before an add-on Stop hook, build this Stop's notice message and record it<br/>in stop-notice.json in the session folder unless the file already holds it.<br/>For every Stop hook, set GHOST_ALICE_STOP_NOTICE_FILE to the file's full path.<br/>A failure is recorded in the hook log, and the hook runs without the variable
+  end
   R->>C: Run the Core hook script with the event JSON
   opt The script needs a ledger record or a source binding check
     C->>C: Read or write the intent ledger,<br/>or check a source's binding to the current input
+  end
+  opt The Core Stop script
+    C->>C: Compare the answer with its recorded review, record this Stop's notice message<br/>in stop-notice.json, and return its text as systemMessage when its state is notice
   end
   C-->>R: Output, diagnostics and exit code
   R->>R: Keep only the fields the host accepts<br/>Remove block, stop and permission-decision fields<br/>Report block, stop, deny and ask in systemMessage
@@ -119,7 +130,36 @@ sequenceDiagram
   end
 ```
 
-On Stop, Core code's Stop hook compares the answer only with the recorded review. The hook log keeps that assessment, and the runner passes no Stop notice to the user or to add-ons.
+On Stop, Core code's Stop script compares the answer with its recorded review and builds one Stop notice message for the current input and answer. It records the message at the path the runner sets in the environment variable `GHOST_ALICE_STOP_NOTICE_FILE`: `stop-notice.json` in the session folder `~/.ghost-alice/session-logs/<host>/<session>/`, next to the hook log. The script returns `continue: true`. The message's `state` is `notice` when it reports at least one of four things: a claim the recorded review does not support; an issue found while checking the answer; a criterion a partial-completion block leaves unresolved; or remaining work the response model declared in the route. The script then also returns the notice text as `systemMessage`, and the host shows it after the answer. For an answer with none of the four, the message's `state` is `quiet` and the script returns no `systemMessage`. A plain explanation without a completion block or declared remaining work, whose input has no recorded review, is such an answer. As remaining work, the script lists only the rows the response model declared in the route registered for the current input; a criterion that is unmet in the ledger but named by no declared row does not appear. The notice's fixed words are English. Claims, unresolved reasons, and each declared row's reason and next needed information appear as the response model wrote them; a claim shows its first 160 characters. An example of the text:
+
+```text
+Ghost-ALICE Stop notice: the recorded review does not support 1 of 2 claims.
+- Not supported (criterion c2): the report was checked
+- Remaining work: unknown; the response model made no declaration for this input
+```
+
+Before an add-on Stop hook runs, the runner builds this Stop's message with the same Core code and records it in the file unless the file already holds the same message. The runner then runs the add-on's script with the file's full path in `GHOST_ALICE_STOP_NOTICE_FILE`. The host does not order the Stop hooks of one event; Claude Code runs them in parallel. Core code's Stop script and the add-on hook's runner build the message from the same Stop event JSON and ledger. When that JSON carries the answer text, the two messages are the same: whichever runs first records the message, and the other finds it in the file and leaves the file unchanged. The add-on installer registers add-on hooks only for PostToolUse and SessionStart, so an installation has no add-on Stop hook.
+
+```mermaid
+sequenceDiagram
+  participant H as Native host
+  box Ghost-ALICE
+    participant RC as Hook runner for the Core Stop hook
+    participant CS as Core Stop script
+    participant F as stop-notice.json
+    participant RA as Hook runner for an add-on Stop hook
+  end
+  participant A as Add-on script
+  H->>RC: Stop event JSON
+  H->>RA: The same Stop event JSON, in parallel
+  RC->>CS: Run the script with the file's full path<br/>in the environment variable GHOST_ALICE_STOP_NOTICE_FILE
+  CS->>F: Build this Stop's message, then record it unless the file already holds it
+  CS-->>RC: continue true, and the notice text as systemMessage<br/>when the message's state is notice
+  RC-->>H: continue true, and that systemMessage when the script returned one
+  RA->>F: Build this Stop's message, then record it unless the file already holds it
+  RA->>A: Run the add-on script with the file's full path<br/>in the environment variable GHOST_ALICE_STOP_NOTICE_FILE
+  A->>F: Read the message
+```
 
 ## Response boundary
 
@@ -130,7 +170,7 @@ flowchart TD
   R["Current requested work performed and results assessed"] --> N{"Currently actionable required follow-up?"}
   N -->|No| A["Answer: supported result and unresolved conditions"]
   N -->|Yes| B["Answer plus recommended additional work"]
-  A --> D["Native host displays answer; Core response ends"]
+  A --> D["Native host displays the answer. When the Stop notice message's state is notice,<br/>the Core Stop script returns the notice text and the host shows it. The host stops"]
   B --> D
 ```
 
@@ -174,7 +214,7 @@ flowchart LR
 
 ## Evidence and native delivery
 
-The model makes two distinct judgments: each claim against original evidence, and the complete answer against the user's objective and constraints. Core code authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The native host displays the model's answer. Core code's Stop hook checks the submitted review records; it does not generate missing judgments or schedule another task.
+The model makes two distinct judgments: each claim against original evidence, and the complete answer against the user's objective and constraints. Core code authenticates ownership, input bindings and source integrity; IDs and hashes do not determine semantic truth. The native host displays the model's answer. Core code's Stop script compares the answer with the recorded review; it does not generate missing judgments or schedule another task.
 
 The [verification procedure](coding-convention/verification-before-completion/SKILL.md) owns evidence selection and completion claims. Its [response review procedure](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review) owns the recording handoff. Other documents refer to that procedure rather than duplicating its commands.
 
@@ -182,4 +222,4 @@ Supported results retain their original evidence, verification times and correct
 
 ## Necessary-work declaration
 
-The response model declares current necessary unprocessed work, its reason and the next needed information in the route that Core code stores. Core code authenticates the selected criteria, current human input, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core code records this declaration and schedules none of the work it names; only a later user request starts that work.
+The response model declares current necessary unprocessed work, its reason and the next needed information in the route that Core code stores. Core code authenticates the selected criteria, current human input, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core code records this declaration and schedules none of the work it names; only a later user request starts that work. Core code's Stop script writes the declared rows into the Stop notice message; the host shows them in the notice text, and anyone can read them in `stop-notice.json`.

@@ -1,4 +1,4 @@
-"""Core-owned native assessment service behind the Stop observer.
+"""Core-owned native assessment service behind the Stop script.
 
 Callers supply native coordinates and the observed body, never policy inputs,
 claim validity, selected work or evidence verdicts. This request/result boundary
@@ -12,7 +12,7 @@ from pathlib import Path
 import sqlite3
 import sys
 
-from completion_check_validator import looks_like_evidence_claim, validate_completion_text
+from completion_check_validator import extract_original_proof, looks_like_evidence_claim, validate_completion_text
 from completion_route import select_completion_route
 from native_transcript import native_tool_activity, stop_response_text
 
@@ -34,6 +34,13 @@ def _source_status_issue(reasons, *, explanation=False):
         'Do not replay business work or expand unrelated review.' + (
             ' Keep any explanation review internal; do not submit completion controls for this explanation.'
             if explanation else ''))
+
+
+def _claim_judgments(reviewed):
+    """Each recorded claim binding with its verdict, so the Stop notice names the claims the recorded review does not support."""
+    verdicts = {j['binding_id']: j['verdict'] for j in reviewed.judgments}
+    return [dict(claim_index=b['claim_index'], criterion_id=b['criterion']['id'], verdict=verdicts.get(b['binding_id']))
+            for b in reviewed.candidate['bindings']]
 
 
 def _ledger(source):
@@ -127,7 +134,7 @@ consumers obtain it directly from this Core API and check their input binding.
                 context_issue = str(exc)
     selected = select_completion_route(context, dict(text=text, phase=phase),
         {'failure_kind': 'none', 'criteria': []})
-    issue = None
+    issue, claim_judgments = None, None
     repair_target = 'completion_metadata'
     native_activity = (native_tool_activity(platform, session, native_input, input_observation=input_observation)
         if phase == 'final' and native_input is not None else None)
@@ -144,10 +151,11 @@ consumers obtain it directly from this Core API and check their input binding.
         if issue is None:
             issue = validate_completion_text(text, require_completion_check=selected['required_completion_check'])
         if issue is None and marker:
-            # lookup_current_response authenticates the recorded review of this exact response for the Stop observer.
-            from completion_assessment import CompletionAssessmentError, lookup_current_response
+            # lookup_current_response authenticates the recorded review of this exact response for the Stop script.
+            from completion_assessment import CompletionAssessmentError, lookup_current_proof, lookup_current_response
             try:
                 reviewed = lookup_current_response(source, text, transaction=transaction)
+                claim_judgments = _claim_judgments(reviewed)
                 if reviewed.source_issues:
                     issue = _source_status_issue(reviewed.source_issues.values())
                     repair_target = 'source_status'
@@ -160,10 +168,17 @@ consumers obtain it directly from this Core API and check their input binding.
                     repair_target = 'source_status'
                 else:
                     issue = f'{reason}: {exc}'
+                if reason == 'response-unsupported':
+                    # The claim review still exists when the whole-answer judgment is unsupported.
+                    try:
+                        claim_judgments = _claim_judgments(lookup_current_proof(
+                            source, extract_original_proof(text), transaction=transaction))
+                    except (CompletionAssessmentError, ValueError, OSError, sqlite3.Error):
+                        claim_judgments = None
     return dict(schema_version='native-completion.v1', platform=platform, session_id=session,
         input_event_id=context.get('input_event_id'), body_digest='sha256:' + hashlib.sha256(text.encode()).hexdigest(),
         phase=phase, context_status=context_status, context_issue=context_issue,
         native_activity=native_activity,
         response_route=route, completion_route=selected, body_issue=issue,
-        repair_target=repair_target,
+        repair_target=repair_target, claim_judgments=claim_judgments,
         validation_text=text, has_evidence_marker=marker)

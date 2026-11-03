@@ -73,7 +73,7 @@ class TestAgentVisibilityPolicy(unittest.TestCase):
 
     def test_completion_assessment_issue_is_forced(self):
         decision = self._decide("minimal", hook_id="completion", event="Stop", stdout=(
-            '{"continue": true, "response_assessment": {"body_issue": "requires a [completion-check]"}}'))
+            '{"continue": true, "stop_notice": {"issues": [{"detail": "requires a [completion-check]"}]}}'))
 
         self.assertEqual(decision, {"visible_decision": "force_show", "reason": "forced-verification"})
 

@@ -56,7 +56,7 @@ Runtime consumers use the public API with the exact session-receipt root/platfor
 1. The session-intent-analyzer SessionStart hook supplies the session receipt. The UserPromptSubmit hook records each input and adds model context only when that receipt was not delivered or intake failed. Core intake establishes exact canonical human input through direct Codex observation or trusted Claude reconciliation. Read-state remains a pure read. The response model applies task-router to select work; it separately applies skill-evolution when report-only analysis is required.
 2. The response model submits the normal route candidate to Core. Core Python code validates current input, ownership, admission and selected criteria before storing the ready projection.
 3. The response model follows any required boundary and owning workflow. [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns tool execution and permission enforcement to the native host. PostToolUse keeps recording tool operations in the audit records (`~/.ghost-alice/io-trace.jsonl`).
-4. At completion, the Stop observer calls Core's input/body-bound assessment and records the result; it blocks nothing.
+4. When an answer ends and Stop fires, Core code's Stop script calls Core's input/body-bound assessment and records the Stop notice message. When the message reports an unsupported claim, an issue found while checking the answer, an unresolved criterion or declared remaining work, the script returns the notice text and the host shows it. The script blocks nothing.
 
 Tool-checkpoint runs at the before-tool stage (host `PreToolUse`/`BeforeTool`) and is not user-input intake. Tool payloads and audit metadata do not grant native permission. The [Notes](#notes) list installed bytes and native execution as separate claims; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
 
@@ -116,7 +116,7 @@ For this condition, the response model records both judgments using the [owning 
 
 Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
 
-On the native Stop path, Core's observer validates the delivered text against the recorded review and keeps the result in the hook log; it issues no second command and does not delay the answer. Supported, unsupported and unresolved states stay distinct: an unresolved criterion remains unmet, and a supported report may fulfill no work criterion.
+On the native Stop path, Core code's Stop script compares the delivered text with the recorded review, records the result as the Stop notice message in `stop-notice.json`, issues no second command and does not delay the answer. The hook runner keeps the script's raw output in the hook log. Supported, unsupported and unresolved states stay distinct: an unresolved criterion remains unmet, and a supported report may fulfill no work criterion.
 
 ## Current Selection and Bounded Recovery
 
