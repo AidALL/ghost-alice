@@ -164,7 +164,6 @@ def session_paths(root: Path, platform: str, session_id: str) -> dict[str, Path]
         "dir": session_dir,
         "state": session_dir / "intent-state.json",
         "events": session_dir / "intent-events.jsonl",
-        "security": session_dir / "security-events.jsonl",
     }
 
 
@@ -638,7 +637,7 @@ def _load_state_for_update(connection, paths, platform, session_id):
     if state is not None:
         return state
     sources = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
-               for key in ("state", "events", "security") if paths[key].exists()}
+               for key in ("state", "events") if paths[key].exists()}
     state = _load_legacy_state(paths, platform, session_id)
     # Portable state may carry a copied intake stamp or ready route. Only a
     # fresh intake committed here can establish canonical current authority.
@@ -660,7 +659,7 @@ def _load_state_for_update(connection, paths, platform, session_id):
     # Detect source-file mutations during import; source writers
     # must be stopped during import. The originals remain a recovery source.
     after = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
-             for key in ("state", "events", "security") if paths[key].exists()}
+             for key in ("state", "events") if paths[key].exists()}
     if after != sources:
         raise ValueError("JSON source changed during import; retry after stopping its writer")
     _save_state(connection, state)
@@ -1646,12 +1645,14 @@ def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dic
                              coordinates).fetchone()
     if row is None:
         return 0
-    sources = json.loads(row[0])
-    if not isinstance(sources, dict) or not sources or not set(sources) <= {"state", "events", "security"}:
+    recorded = json.loads(row[0])
+    if not isinstance(recorded, dict) or not recorded:
         return None
+    # Only the state and events digests decide; a record may also carry digests of other files.
+    sources = {key: digest for key, digest in recorded.items() if key in ("state", "events")}
     paths = session_paths(root, *coordinates)
     try:
-        if {key for key in ("state", "events", "security") if paths[key].exists()} != set(sources):
+        if {key for key in ("state", "events") if paths[key].exists()} != set(sources):
             return None
         if any(not paths[key].is_file() or hashlib.sha256(paths[key].read_bytes()).hexdigest() != digest
                for key, digest in sources.items()):
