@@ -120,7 +120,7 @@ Windows installer changes should include PowerShell-oriented validation where po
 .\install.cmd --doctor
 ```
 
-The Wiki lives in a separate repository (`<repo>.wiki.git`), so changes there are not covered by the repo test suites. When you edit Wiki pages, clone the wiki and run the report-only structural audit against your checkout. It flags broken internal links and missing English/Korean page pairs only; it does not judge prose.
+The Wiki lives in a separate repository (`<repo>.wiki.git`), so changes there are not covered by the repo test suites. When you edit Wiki pages, `scripts/audit_wiki_integrity.py` or the public-text rules in `scripts/public_text_rules.py`, clone the wiki and run the report-only audit against that clone. It flags broken internal links, page layout and English/Korean pairing problems, and lines that break the public-text rules; `scripts/tests/test_terminology_clarity.py` and `scripts/tests/test_public_command_surface.py` apply the same rules to this repository's files. Beyond these fixed patterns, it does not judge what the prose says.
 
 ```bash
 git clone https://github.com/AidALL/ghost-alice.wiki.git /tmp/ga-wiki

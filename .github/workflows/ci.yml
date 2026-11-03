@@ -47,6 +47,9 @@ jobs:
       - name: Install test dependencies
         run: python3 -m pip install pytest
 
+      - name: Install zsh for the zsh invocation tests
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: Validate public surfaces
         run: python3 scripts/validate_public_surfaces.py
 
@@ -63,9 +66,18 @@ jobs:
           mkdir -p "$HOME"
           bash ./install.sh --platform codex --skip-source-health
 
+      - name: Install Claude skills for the Claude installed-copy comparison
+        env:
+          HOME: ${{ runner.temp }}/ghost-alice-ci-home
+        run: bash ./install.sh --platform claude --skip-source-health
+
+      - name: Install the Codex CLI for the native prompt-input test
+        run: npm install -g @openai/codex@0.161.0
+
       - name: Run script unit tests
         env:
           GHOST_ALICE_INSTALLED_SKILLS_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.agents/skills
+          GHOST_ALICE_INSTALLED_CLAUDE_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.claude
         run: python3 scripts/run_installer_compat_tests.py --group scripts-all
 
       - name: Validate platform adapters

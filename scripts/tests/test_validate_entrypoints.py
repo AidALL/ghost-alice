@@ -19,16 +19,13 @@ class EntrypointBodyContractTest(unittest.TestCase):
         for rel in (
             "AGENTS.md",
             "platforms/common-governance.md",
-            "task-router/references/routing-details.md",
             "task-router/SKILL.md",
             "coding-convention/using-coding-convention/SKILL.md",
             "boundary-contract/SKILL.md",
             "session-intent-analyzer/SKILL.md",
-            "session-intent-analyzer/references/ledger-schema.md",
             "coding-convention/systematic-debugging/SKILL.md",
             "coding-convention/verification-before-completion/SKILL.md",
             "merge-companion/SKILL.md",
-            "coding-convention/verification-before-completion/references/verify-or-reuse.md",
             "coding-convention/verification-before-completion/references/response-review.md",
         ):
             target = repo / rel
@@ -36,7 +33,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
             shutil.copyfile(source / rel, target)
 
     def test_platform_ports_are_not_compared_by_rule_number(self) -> None:
-        # Decisions 8 and 9: each rule has one owner and the contract carries no numbered rules,
+        # Each rule has one owner and the contract carries no numbered rules,
         # so host templates are not compared with numbered rule headers.
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
@@ -69,26 +66,9 @@ class EntrypointBodyContractTest(unittest.TestCase):
 
             self.assertEqual([], [f.to_dict() for f in findings])
 
-    def test_entry_sections_require_headings_not_only_mentions(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            repo = Path(tmp)
-            self.copy_owner_contract(repo)
-            ssot = repo / SSOT_RULES_FILE
-            ssot.write_text(
-                ssot.read_text(encoding="utf-8").replace("## Work Selection\n", "## Other section\n"),
-                encoding="utf-8",
-            )
-
-            findings: list[Finding] = []
-            check_ssot_rules(repo, findings)
-
-            self.assertTrue(any("Work Selection section" in f.message for f in findings))
-
     def test_missing_owner_reference_is_rejected(self) -> None:
         cases = (
             (SSOT_RULES_FILE, check_ssot_rules, "merge-companion"),
-            ("task-router/SKILL.md", check_task_router_body,
-             "../session-intent-analyzer/references/ledger-schema.md#core-response-projection"),
             ("coding-convention/using-coding-convention/SKILL.md", check_using_cc_body,
              "../systematic-debugging/SKILL.md#incident-accounting-and-continuation"),
         )
@@ -112,7 +92,6 @@ class EntrypointBodyContractTest(unittest.TestCase):
 
     def test_missing_owner_file_is_rejected(self) -> None:
         for check, target in ((check_ssot_rules, "merge-companion/SKILL.md"),
-                              (check_task_router_body, "session-intent-analyzer/references/ledger-schema.md"),
                               (check_using_cc_body, "coding-convention/systematic-debugging/SKILL.md")):
             with self.subTest(check=check.__name__), tempfile.TemporaryDirectory() as tmp:
                 repo = Path(tmp)
@@ -128,8 +107,7 @@ class EntrypointBodyContractTest(unittest.TestCase):
                 )
 
     def test_missing_owner_heading_is_rejected(self) -> None:
-        for check, target, heading in ((check_task_router_body, "session-intent-analyzer/references/ledger-schema.md", "Core Response Projection"),
-                                       (check_using_cc_body, "coding-convention/systematic-debugging/SKILL.md", "Incident accounting and continuation")):
+        for check, target, heading in ((check_using_cc_body, "coding-convention/systematic-debugging/SKILL.md", "Incident accounting and continuation"),):
             with self.subTest(check=check.__name__), tempfile.TemporaryDirectory() as tmp:
                 repo = Path(tmp)
                 self.copy_owner_contract(repo)

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""audit_wiki_integrity.py. Report-only structural integrity audit for the Wiki.
+"""audit_wiki_integrity.py. Report-only integrity audit for the Wiki.
 
 The Wiki is a separate checkout containing design pages and links to the
 canonical repository contracts. The language policy
 (docs/concepts/language-policy.md) defines its layout: English pages at the
 Wiki root, Korean pages directly under ``ko/``, a sidebar per folder that lists
 the pages of that folder's language, no footer, and a language switch line at
-the top of every content page. This command checks page links and that layout.
-It does not validate architecture prose, runtime behavior or remote
+the top of every content page. This command checks page links and that layout,
+and checks every page against the public-text rules in
+scripts/public_text_rules.py. Beyond these fixed patterns, it does not judge
+what the prose says, and it does not check runtime behavior or remote
 publication state. Findings produce a nonzero exit status; the audit neither
 edits pages nor controls runtime permission.
 
@@ -24,6 +26,12 @@ Checks:
 - sidebar-coverage : a content page that its language's sidebar does not list.
 - sidebar-language : a sidebar link to a page in the other language.
 - footer           : a ``_Footer`` page; the Wiki has no footer.
+- opaque-term      : a line with an opaque term or a bare layer token.
+- removed-command  : a line with a removed or unimplemented installer command
+                     or a stale installer claim.
+- powershell-command : a line with a powershell code fence, an install.ps1 call
+                     or a PowerShell-style installer flag, or a line that
+                     presents Git Bash as the Windows default.
 
 A page's language is its folder's: English at the Wiki root, Korean directly
 under ``ko/``. GitHub wiki special pages (any ``_``-prefixed page such as
@@ -44,6 +52,9 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import public_text_rules  # noqa: E402
 
 # [text](target) — non-greedy text, target up to the first closing paren.
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
@@ -242,14 +253,31 @@ def check_footer(pages: dict[str, str]) -> list[Finding]:
     ]
 
 
+def check_public_text(pages: dict[str, str]) -> list[Finding]:
+    """Apply the rules in public_text_rules.py to every page, special pages included."""
+    findings: list[Finding] = []
+    for key in sorted(pages):
+        text = pages[key]
+        for lineno, message in public_text_rules.term_findings(text):
+            findings.append(Finding("opaque-term", key, f"line {lineno}: {message}"))
+        for check, patterns in (
+            ("removed-command", public_text_rules.REMOVED_COMMAND_PATTERNS),
+            ("powershell-command", public_text_rules.POWERSHELL_COMMAND_PATTERNS),
+        ):
+            for lineno, label, line in public_text_rules.pattern_findings(text, patterns):
+                findings.append(Finding(check, key, f"line {lineno}: {label}: {line}"))
+    return findings
+
+
 def audit(pages: dict[str, str]) -> list[Finding]:
-    """Run all deterministic structural checks over a {page path: text} wiki map."""
+    """Run all deterministic checks over a {page path: text} wiki map."""
     return (
         check_duplicate_pages(pages)
         + check_broken_links(pages)
         + check_language_switches(pages)
         + check_sidebars(pages)
         + check_footer(pages)
+        + check_public_text(pages)
     )
 
 
@@ -284,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps([f.__dict__ for f in findings], ensure_ascii=False, indent=2))
     else:
         if not findings:
-            print(f"wiki integrity: OK ({len(pages)} pages, no structural drift)")
+            print(f"wiki integrity: OK ({len(pages)} pages, no findings)")
         else:
             print(f"wiki integrity: {len(findings)} finding(s) across {len(pages)} pages")
             for f in findings:

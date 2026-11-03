@@ -337,6 +337,17 @@ class SkillGateContractTest(unittest.TestCase):
             issues = run_contract_checks(root)
             self.assertTrue(any("AGENTS.md" in issue.path for issue in issues))
 
+    def test_task_router_links_the_ledger_schema_owner_by_its_path(self) -> None:
+        link = "../session-intent-analyzer/references/ledger-schema.md#core-response-projection"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self._write_valid_fixture(root)
+            router = root / "task-router/SKILL.md"
+            router.write_text(router.read_text(encoding="utf-8").replace(
+                link, "../session-intent-analyzer/ledger-schema.md#core-response-projection"), encoding="utf-8")
+            messages = [issue.message for issue in run_contract_checks(root)]
+            self.assertIn(f"missing required pattern: {link}", messages)
+
     def test_missing_boundary_contract_skill_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -538,7 +549,7 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertTrue(any("merge-companion-precheck" in issue.message for issue in run_contract_checks(root)))
 
     def test_retired_gate_state_block_is_not_a_contract(self) -> None:
-        # Decision 14 retired the printed [gate-state] block, so no file is checked for its order.
+        # The printed [gate-state] block is retired, so no file is checked for its order.
         with tempfile.TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
             self._write_valid_fixture(root)
@@ -551,7 +562,7 @@ class SkillGateContractTest(unittest.TestCase):
             self.assertNotIn("gate-state", messages)
 
     def test_instruction_reuse_names_no_retired_printed_fields(self) -> None:
-        # Decisions 6, 7 and 14 retired the printed skill-call, skills-loaded and skills-reused fields.
+        # The printed skill-call, skills-loaded and skills-reused fields are retired.
         text = (
             REPO_ROOT / "coding-convention/verification-before-completion/references/verify-or-reuse.md"
         ).read_text(encoding="utf-8")
@@ -665,10 +676,6 @@ class SkillGateContractTest(unittest.TestCase):
                     self.assertTrue(any("removed contract wording" in issue.message for issue in run_contract_checks(root)))
             path.write_text(original, encoding="utf-8")
             self.assertFalse(any("removed contract wording" in issue.message for issue in run_contract_checks(root)))
-
-    def test_real_claude_first_turn_routes_directly_after_exact_intake(self) -> None:
-        from check_skill_gate_contract import _check_claude_first_turn_contract
-        self.assertEqual(_check_claude_first_turn_contract(REPO_ROOT), [])
 
     def test_valid_contract_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

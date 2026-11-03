@@ -7,14 +7,13 @@ official-docs/derived/skill-compliance-checklist.md and checks whether
 skill-catalog/skills.json is synchronized with frontmatter.
 
 Usage:
-    python3 scripts/validate_skills.py                # full validation
-    python3 scripts/validate_skills.py --escape-hatch # enable escape hatches and demote ERROR to WARNING
-    python3 scripts/validate_skills.py --json         # print JSON output for CI
+    python3 scripts/validate_skills.py         # full validation
+    python3 scripts/validate_skills.py --json  # print JSON output for CI
 
 Exit codes:
     0: all ERROR checks passed (WARNING is allowed)
     1: I/O error
-    2: one or more ERROR findings when escape hatches are disabled
+    2: one or more ERROR findings, or an argument error reported by argparse
 """
 
 from __future__ import annotations
@@ -22,7 +21,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -645,46 +643,9 @@ def validate_catalog_schema_contract(repo_root: Path, issues: list[Issue]) -> No
         )
 
 
-def detect_escape_hatch(repo_root: Path) -> set[str]:
-    '\n    Detect escape hatches from environment variables or PR title/labels.\n    CI receives them through GITHUB_PR_TITLE and GITHUB_PR_LABELS.\n    Locally, detect them from the latest commit message.\n    '
-    import os
-
-    hatches: set[str] = set()
-    pr_title = os.environ.get("GITHUB_PR_TITLE", "")
-    pr_labels = os.environ.get("GITHUB_PR_LABELS", "")
-    pr_body = os.environ.get("GITHUB_PR_BODY", "")
-    haystack = " ".join([pr_title, pr_labels, pr_body])
-
-    if not haystack.strip():
-        try:
-            result = subprocess.run(
-                ["git", "log", "-1", "--pretty=%B"],
-                cwd=repo_root,
-                capture_output=True,
-                text=True,
-                check=False,
-                encoding="utf-8",
-                errors="replace",
-            )
-            haystack = result.stdout or ""
-        except (OSError, subprocess.SubprocessError):
-            pass
-
-    if haystack is None:
-        haystack = ""
-    if "[wip]" in haystack.lower():
-        hatches.add("wip")
-    if "[skill-draft]" in haystack.lower():
-        hatches.add("skill-draft")
-    if "[skip-calls-check]" in haystack.lower():
-        hatches.add("skip-calls-check")
-    return hatches
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", default=".")
-    parser.add_argument("--escape-hatch", action="store_true", help="Force all escape hatches on")
     parser.add_argument("--json", action="store_true", help="Print JSON output")
     args = parser.parse_args()
 
@@ -729,21 +690,6 @@ def main() -> int:
             )
         )
 
-    # Escape hatch handling.
-    hatches = detect_escape_hatch(repo_root) if not args.escape_hatch else {"wip", "skill-draft", "skip-calls-check"}
-    demoted = 0
-    if "wip" in hatches or "skill-draft" in hatches:
-        for issue in issues:
-            if issue.severity == "ERROR":
-                issue.severity = "WARNING"
-                demoted += 1
-    elif "skip-calls-check" in hatches:
-        # Selectively demote only calls validation ERROR findings.
-        for issue in issues:
-            if issue.severity == "ERROR" and issue.phase == "P12":
-                issue.severity = "WARNING"
-                demoted += 1
-
     error_count = sum(1 for i in issues if i.severity == "ERROR")
     warning_count = sum(1 for i in issues if i.severity == "WARNING")
     skill_count = len(skill_files)
@@ -753,14 +699,10 @@ def main() -> int:
             "skill_count": skill_count,
             "error_count": error_count,
             "warning_count": warning_count,
-            "escape_hatches": sorted(hatches),
-            "demoted_errors": demoted,
             "issues": [i.to_dict() for i in issues],
         }, ensure_ascii=False, indent=2))
     else:
         print(f"Validation target: {skill_count} skills")
-        if hatches:
-            print(f"Escape hatches active: {sorted(hatches)} (demoted {demoted} ERROR finding(s) to WARNING)")
         for issue in issues:
             print(f"  [{issue.severity}] {issue.skill} (Phase {issue.phase} / {issue.rule}): {issue.message}")
         print(f"Result: ERROR {error_count}, WARNING {warning_count}")
