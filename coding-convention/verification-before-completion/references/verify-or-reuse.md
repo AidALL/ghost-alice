@@ -94,7 +94,7 @@ On first use the helper reads the body and stores path, file version and check t
 
 Current workflow execution rests on either a fresh body read or this valid reuse; it never reuses a prior input's verdict. Visible Skill surfaces keep their platform-native invocation requirement.
 
-The pending-merge hook uses the same session-bound store: unchanged manifest versions reuse a normalized count; creation, replacement or modification invalidates it. Every input's intent/security state is evaluated fresh. Cache failure performs the real check; it never grants permission or hides a block.
+The pending-merge hook uses the same session-bound store: unchanged manifest versions reuse a normalized count; creation, replacement or modification invalidates it. Every input's intent state is evaluated fresh. Cache failure performs the real check; it never grants permission.
 
 ## Signals That Are Not Triggers
 

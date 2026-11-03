@@ -218,7 +218,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
     def observe(self, platform, session):
         self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                    "--platform", platform, "--session-id", session,
-                                   "--input", "Synthetic isolated security case."])
+                                   "--input", "Synthetic isolated admission case."])
         state = self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                   "--platform", platform, "--session-id", session, "--snapshot"])
         return json.loads(state.stdout)["latest_input_event_id"]
@@ -431,19 +431,12 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 self.assertEqual(diagnostic["state"], "notice")
                 self.assertTrue(diagnostic["issues"])
 
-    def test_installed_checkpoint_retains_block_data_without_widening_current_admission(self):
+    def test_installed_checkpoint_does_not_widen_current_admission(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
             with self.subTest(platform=platform, profile=profile), self.installed(platform, profile) as (home, env, hooks):
-                session = f"security-{platform}-{profile}"
+                session = f"admission-{platform}-{profile}"
                 event_id = self.observe(platform, session)
-                decision = {"decision": "block", "risk_flags": ["instruction-hierarchy-override"],
-                            "reason": "synthetic current security block", "input_event_id": event_id}
-                self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
-                                  "--platform", platform, "--session-id", session,
-                                  "--expected-input-event-id", event_id,
-                                  "--delta-json", json.dumps({"model_security_decision": decision})])
                 payload = {"session_id": session, "hook_event_name": "PreToolUse", "tool_name": "Read"}
-                # Retained model-security data is a storage fact, never native permission authority.
                 state_command = [sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                  "--platform", platform, "--session-id", session, "--snapshot"]
                 before = json.loads(self.run_process(state_command).stdout)
@@ -451,8 +444,6 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 protocol = json.loads(observed.stdout)
                 self.assertNotIn("permissionDecision", protocol.get("hookSpecificOutput", {}))
                 self.assertEqual(json.loads(self.run_process(state_command).stdout), before)
-                self.assertEqual(before["model_security_decision"]["decision"], "block")
-                self.assertEqual(before["model_security_decision"]["input_event_id"], event_id)
                 row = self.strict_rows(home, platform, session)[-1]
                 self.assertEqual(row["event"], "PreToolUse")
                 self.assertEqual(row["hook_id"], "tool-checkpoint")
@@ -488,11 +479,10 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 self.assertIn("admitted owned criterion", diagnostic["message"])
                 self.assertEqual(json.loads(self.run_process(state_command).stdout), protected)
                 self.assertIsNone(protected["response_route"])
-                # New input changes lineage without relabeling retained history.
+                # New input changes the input lineage.
                 self.observe(platform, session)
                 current = json.loads(self.run_process(state_command).stdout)
                 self.assertNotEqual(current["latest_input_event_id"], event_id)
-                self.assertEqual(current["model_security_decision"], protected["model_security_decision"])
                 self.installed_hook(hooks, "PreToolUse", "tool-checkpoint", payload, env)
                 self.assertEqual(len(self.strict_rows(home, platform, session)), 2)
 

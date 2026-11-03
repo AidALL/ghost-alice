@@ -39,19 +39,10 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
   }],
   "decisions": [],
   "risk_flags": [],
-  "model_security_decision": {
-    "decision": "allow",
-    "risk_flags": [],
-    "reason": "compressed model judgment, maximum 240 characters",
-    "input_event_id": "sha256:...",
-    "recorded_at": "2026-05-19T00:00:01Z"
-  },
   "consumer_hints": {},
   "conduct_feedback": []
 }
 ```
-
-`model_security_decision` is compatibility audit data. Import/audit callers may record it under exact-event mutation rules; intake, routing and checkpoints do not derive native permission or execution authorization from it.
 
 Completion proof belongs to the current criterion definition. Recording the same ID with unchanged summary preserves verified met status, digest and time. Changing the summary or explicitly withdrawing admission resets that criterion to unmet and removes current proof fields; other criteria retain their proof. A wording change counts as a changed condition because the parser cannot establish semantic equivalence. The prior acceptance-criterion-met event remains historical evidence, not proof for the revised condition. A semantic delta cannot set met; completion uses the owning verification writer.
 
@@ -65,7 +56,7 @@ Optional pattern_class groups recurring failures across differently named entrie
 
 An update omitting pattern_class preserves the stored class. Unknown supplied source or class rejects the entire write with allowed values; absent source defaults to user-said, absent class stays unclassified, and stored entries are not revalidated. The ledger stores a supplied source label as given and never rewrites a stored one. A legacy `user-explicit` or `inferred` label stays valid; admission, route validation and skill-evolution read it as `user-said` or `interpreted-as`. That parser default does not establish provenance: the response model follows the correction evidence rules in `../SKILL.md`.
 
-The snapshot returns detached active non-superseded decision objects, latest_scope or {} when absent/malformed, and decision_count. It returns the current constraints, non-goals and model_security_decision. List-field updates follow [intent-state.json](#intent-statejson). The response model must reconcile these facts with human instructions; scope presence, timestamps, admission and previous edits do not independently establish authorization or restriction chronology.
+The snapshot returns detached active non-superseded decision objects, latest_scope or {} when absent/malformed, and decision_count. It returns the current constraints and non-goals. List-field updates follow [intent-state.json](#intent-statejson). The response model must reconcile these facts with human instructions; scope presence, timestamps, admission and previous edits do not independently establish authorization or restriction chronology.
 
 Snapshots also expose persisted platform, session_id, ledger_revision and latest_input_event_id from the same read. Missing metadata is null rather than invented. An explicitly persisted empty input ID means no input was observed in that state. A read-only snapshot is not an authorization check; writers validate bindings.
 
@@ -75,7 +66,7 @@ The database event table is append-only and available through `--read-events` an
 
 An event accompanying raw input is user-input-observed and contains event_id equal to the observation's input_event_id plus input_digest. A delta that the response model submits without raw input is intent-updated: it references the input_event_id without creating/displacing an input event. API-written events include ledger_revision and unique mutation_id; older imported events without them remain readable. Claude native intake appends native-input-staged, native-input-resolved, native-input-superseded with its cause, native-input-waiting once per blocking input and cause, and native-input-notice once per session and cause; none stores input text.
 
-The Python ledger writer derives semantic_changes as before/after digests of normalized state for goals, summaries, constraints, non-goals, questions, criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, security reasons, hints, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
+The Python ledger writer derives semantic_changes as before/after digests of normalized state for goals, summaries, constraints, non-goals, questions, criteria, decisions, feedback and scope. Nested allowlists retain only defined keys; scope retains allowed, prohibited, non_goals, constraints and stop_conditions. Accessory fields, hints, raw prompts and tool output are excluded. Callers still must provide compressed summaries: the parser cannot detect a raw quotation disguised as a valid summary. It does not reconstruct historical digest-only dialogue or invent chronology.
 
 The compatibility `current-session.json` pointer is advisory discovery:
 
@@ -155,7 +146,7 @@ For live backup, the operator uses SQLite backup or a quiescent consistent copy 
 
 The response model applies task-router to form the current semantic route candidate, then invokes Core code's response_route.py through a host tool. That Python code validates and persists the candidate. The response model also follows session-intent-analyzer to express semantic criteria and admission facts; the ledger writer persists them. Intake hooks do not infer current selection from a backlog.
 
-A new input marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap, intake or security. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
+A new input marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap or intake. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
 
 An answer without a control block retains continuing selected work without a new completion submission. When the user has requested an authenticated review of such an answer, the recorded review binds that exact text, and Core code's Stop script compares the answer with that record. The response model explicitly routes and verifies new completion claims under the owning workflow.
 

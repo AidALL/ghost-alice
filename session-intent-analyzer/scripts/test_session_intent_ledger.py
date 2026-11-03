@@ -459,6 +459,26 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertIn("outside-current-boundary", snapshot["risk_flags"])
         self.assertNotIn("events", snapshot)
 
+    def test_default_state_and_snapshot_carry_only_the_current_fields(self) -> None:
+        state = self.ledger.default_state("codex", "fields")
+        self.assertEqual(set(state), {
+            "acceptance_criteria", "canonical_input_event_id", "conduct_feedback", "constraints", "consumer_hints",
+            "created_at", "current_context_input_event_id", "current_goal", "decisions", "intake_status",
+            "last_intake_source", "last_semantic_delta_status", "latest_input_char_count", "latest_input_digest",
+            "latest_input_event_id", "ledger_revision", "native_input_cursors", "native_input_notified_causes",
+            "native_input_waiting", "non_goals", "open_questions", "pending_native_inputs", "platform",
+            "response_route", "risk_flags", "schema_version", "semantic_delta_policy", "session_id", "updated_at",
+            "user_intent_summary", "work_units",
+        })
+        self.assertEqual(set(self.ledger.consumer_snapshot(state)), {
+            "acceptance_criteria", "active_decisions", "canonical_input_event_id", "conduct_feedback", "constraints",
+            "consumer_hints", "current_context_input_event_id", "current_goal", "decision_count", "intake_status",
+            "last_semantic_delta_status", "latest_input_char_count", "latest_input_digest", "latest_input_event_id",
+            "latest_scope", "ledger_revision", "non_goals", "open_questions", "pending_native_input_count",
+            "platform", "response_route", "risk_flags", "schema_version", "semantic_delta_policy", "session_id",
+            "user_intent_summary", "work_units",
+        })
+
     def test_acceptance_criteria_are_persisted_and_exposed_in_snapshot(self) -> None:
         root = self.tmpdir / "ledger"
         paths = self.ledger.record_turn(
@@ -519,10 +539,6 @@ class SessionIntentLedgerTests(unittest.TestCase):
                 "constraints": ["Keep unrelated files unchanged"],
                 "non_goals": ["Edit configuration during diagnosis", "Publish externally"],
                 "decisions": [{"id": "diagnosis-only", "summary": "Inspect configuration without editing"}],
-                "model_security_decision": {
-                    "decision": "block", "reason": "An unrelated operation is blocked",
-                    "risk_flags": ["outside-current-boundary"],
-                },
             },
         )
         scope = {"allowed": ["Repair the diagnosed configuration"], "prohibited": ["Publish externally"]}
@@ -550,7 +566,6 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertEqual(snapshot["latest_scope"], scope)
         self.assertEqual(snapshot["constraints"], ["Keep unrelated files unchanged"])
         self.assertEqual(snapshot["non_goals"], ["Edit configuration during diagnosis", "Publish externally"])
-        self.assertEqual(snapshot["model_security_decision"]["decision"], "block")
         self.assertEqual(authority_bytes(self.ledger, paths["state"]), before)
 
     def test_snapshot_scope_context_is_detached_from_state(self) -> None:
@@ -997,47 +1012,9 @@ class SessionIntentLedgerTests(unittest.TestCase):
         self.assertNotIn("secret-token", events_text)
 
 
-class ModelSecurityDecisionTests(unittest.TestCase):
+class IntentEventLabelTests(unittest.TestCase):
     def setUp(self) -> None:
         self.ledger = load_module()
-
-    def test_records_block_decision_replace_semantics(self) -> None:
-        state = self.ledger.default_state("claude", "s1")
-        state = self.ledger.apply_delta(state, {"model_security_decision": {
-            "decision": "block",
-            "risk_flags": ["instruction-hierarchy-override", "instruction-hierarchy-override"],
-            "reason": "x" * 500,
-            "input_event_id": "sha256:e1",
-        }})
-        decision = state["model_security_decision"]
-        self.assertEqual(decision["decision"], "block")
-        self.assertEqual(decision["risk_flags"], ["instruction-hierarchy-override"])
-        self.assertLessEqual(len(decision["reason"]), 240)
-        self.assertEqual(decision["input_event_id"], "sha256:e1")
-
-    def test_latest_decision_replaces_not_accumulates(self) -> None:
-        state = self.ledger.default_state("claude", "s1")
-        state = self.ledger.apply_delta(state, {"model_security_decision": {
-            "decision": "block", "risk_flags": ["a"], "input_event_id": "sha256:e1",
-        }})
-        state = self.ledger.apply_delta(state, {"model_security_decision": {
-            "decision": "allow", "risk_flags": [], "input_event_id": "sha256:e2",
-        }})
-        self.assertEqual(state["model_security_decision"]["decision"], "allow")
-        self.assertEqual(state["model_security_decision"]["input_event_id"], "sha256:e2")
-
-    def test_invalid_decision_ignored(self) -> None:
-        state = self.ledger.default_state("claude", "s1")
-        state = self.ledger.apply_delta(state, {"model_security_decision": {"decision": "maybe"}})
-        self.assertIsNone(state.get("model_security_decision"))
-
-    def test_snapshot_includes_decision(self) -> None:
-        state = self.ledger.default_state("claude", "s1")
-        state = self.ledger.apply_delta(state, {"model_security_decision": {
-            "decision": "block", "risk_flags": ["a"], "input_event_id": "sha256:e1",
-        }})
-        snap = self.ledger.consumer_snapshot(state)
-        self.assertEqual(snap["model_security_decision"]["decision"], "block")
 
     def test_record_turn_labels_delta_only_event_as_intent_updated(self) -> None:
         root = pathlib.Path(tempfile.mkdtemp(prefix="evt-label-"))

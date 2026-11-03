@@ -49,9 +49,6 @@ ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-said", "previous-tool", "system-do
 # Stored labels are never rewritten; readers map a legacy label to its current name.
 LEGACY_SOURCE_ALIASES = {"user-explicit": "user-said", "inferred": "interpreted-as"}
 COMPLETION_CHECK_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
-SECURITY_DECISIONS = {"allow", "block"}
-SECURITY_REASON_MAX = 240
-SECURITY_RISK_FLAG_MAX = 12
 CONDUCT_FEEDBACK_SOURCES = {"user-said", "interpreted-as"}
 CONDUCT_FEEDBACK_STATUS = {"open", "encoded"}
 # Stable failure families let differently named corrections recur visibly across sessions.
@@ -167,7 +164,6 @@ def session_paths(root: Path, platform: str, session_id: str) -> dict[str, Path]
         "dir": session_dir,
         "state": session_dir / "intent-state.json",
         "events": session_dir / "intent-events.jsonl",
-        "security": session_dir / "security-events.jsonl",
     }
 
 
@@ -269,7 +265,6 @@ def default_state(platform: str, session_id: str) -> dict[str, Any]:
         "conduct_feedback": [],
         "risk_flags": [],
         "consumer_hints": {},
-        "model_security_decision": None,
         "intake_status": "pending",
         "last_intake_source": "",
         "last_semantic_delta_status": "not-provided",
@@ -642,7 +637,7 @@ def _load_state_for_update(connection, paths, platform, session_id):
     if state is not None:
         return state
     sources = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
-               for key in ("state", "events", "security") if paths[key].exists()}
+               for key in ("state", "events") if paths[key].exists()}
     state = _load_legacy_state(paths, platform, session_id)
     # Portable state may carry a copied intake stamp or ready route. Only a
     # fresh intake committed here can establish canonical current authority.
@@ -664,7 +659,7 @@ def _load_state_for_update(connection, paths, platform, session_id):
     # Detect source-file mutations during import; source writers
     # must be stopped during import. The originals remain a recovery source.
     after = {key: hashlib.sha256(paths[key].read_bytes()).hexdigest()
-             for key in ("state", "events", "security") if paths[key].exists()}
+             for key in ("state", "events") if paths[key].exists()}
     if after != sources:
         raise ValueError("JSON source changed during import; retry after stopping its writer")
     _save_state(connection, state)
@@ -713,8 +708,7 @@ def read_session_state(*, root: Path = DEFAULT_ROOT, platform: str, session_id: 
             return {}
         raw = json.loads(paths["state"].read_text(encoding="utf-8"))
         _load_legacy_state(paths, platform, session_id, data=raw)
-        # A pending import projection does not invalidate its committed current
-        # block. Preserve the pending marker; import reconciles it atomically.
+        # Preserve the pending import marker; import reconciles it atomically.
         return raw
 
 
@@ -978,34 +972,6 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
     return [merged[criterion_id] for criterion_id in order]
 
 
-# Import/audit shape only; current consumers do not derive permission.
-def normalize_security_decision(raw: Any) -> dict[str, Any] | None:
-    if not isinstance(raw, dict):
-        return None
-    decision = str(raw.get("decision", "")).strip().lower()
-    if decision not in SECURITY_DECISIONS:
-        return None
-    flags: list[str] = []
-    raw_flags = raw.get("risk_flags")
-    if isinstance(raw_flags, list):
-        for value in raw_flags:
-            text = safe_component(str(value).lower(), "")
-            if text and text not in flags:
-                flags.append(text)
-            if len(flags) >= SECURITY_RISK_FLAG_MAX:
-                break
-    decision_out: dict[str, Any] = {
-        "decision": decision,
-        "risk_flags": flags,
-        "reason": str(raw.get("reason", "")).strip()[:SECURITY_REASON_MAX],
-    }
-    for key in ("input_event_id", "input_digest", "recorded_at"):
-        value = str(raw.get(key, "")).strip()
-        if value:
-            decision_out[key] = value
-    return decision_out
-
-
 def normalize_conduct_feedback(raw: Any, timestamp: str) -> dict[str, Any] | None:
     if isinstance(raw, str):
         rule = raw.strip()
@@ -1151,12 +1117,6 @@ def apply_delta(state: dict[str, Any], delta: dict[str, Any] | None) -> dict[str
     state["conduct_feedback"] = [item for item in state.get("conduct_feedback", [])
                                  if item.get("status") != "encoded"]
 
-    if "model_security_decision" in delta:
-        normalized = normalize_security_decision(delta.get("model_security_decision"))
-        if normalized is not None:
-            normalized.setdefault("recorded_at", now)
-            state["model_security_decision"] = normalized
-
     if isinstance(delta.get("latest_scope"), dict):
         state["latest_scope"] = delta["latest_scope"]
 
@@ -1213,12 +1173,6 @@ def _commit_turn(connection, state, observation, *, has_input, intent_delta, sou
         state["canonical_input_event_id"] = observation["input_event_id"]
         state["latest_input_digest"] = observation["input_digest"]
         state["latest_input_char_count"] = observation["input_char_count"]
-    decision = (intent_delta or {}).get("model_security_decision")
-    if isinstance(decision, dict) and state["latest_input_event_id"]:
-        if decision.get("input_event_id") != state["latest_input_event_id"]:
-            raise ValueError("stale or missing security decision input event; re-evaluate the current input")
-        if decision.get("input_digest") not in (None, "", state["latest_input_digest"]):
-            raise ValueError("security decision input digest mismatch")
     before = _semantic_projection(state)
     feedback_ids = {item["id"] for item in state.get("conduct_feedback", []) if isinstance(item, dict) and item.get("id")}
     state = apply_delta(state, intent_delta)
@@ -1691,12 +1645,14 @@ def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dic
                              coordinates).fetchone()
     if row is None:
         return 0
-    sources = json.loads(row[0])
-    if not isinstance(sources, dict) or not sources or not set(sources) <= {"state", "events", "security"}:
+    recorded = json.loads(row[0])
+    if not isinstance(recorded, dict) or not recorded:
         return None
+    # Only the state and events digests decide; a record may also carry digests of other files.
+    sources = {key: digest for key, digest in recorded.items() if key in ("state", "events")}
     paths = session_paths(root, *coordinates)
     try:
-        if {key for key in ("state", "events", "security") if paths[key].exists()} != set(sources):
+        if {key for key in ("state", "events") if paths[key].exists()} != set(sources):
             return None
         if any(not paths[key].is_file() or hashlib.sha256(paths[key].read_bytes()).hexdigest() != digest
                for key, digest in sources.items()):
@@ -2148,7 +2104,6 @@ def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:
         "risk_flags": list(state.get("risk_flags", [])),
         "consumer_hints": dict(state.get("consumer_hints", {})),
         "conduct_feedback": list(state.get("conduct_feedback", [])),
-        "model_security_decision": state.get("model_security_decision"),
         "intake_status": state.get("intake_status", "pending"),
         "last_semantic_delta_status": state.get("last_semantic_delta_status", "not-provided"),
         "semantic_delta_policy": state.get(

@@ -3,7 +3,7 @@
 
 A hook declares its own routine state with the private `ghostAliceSurface` key. The runner strips the key before the
 host sees the output, keeps model context untouched, and forces visibility only from real state: an undecided
-pending-merge entry, a current downstream block, a nonzero exit, or a block/deny decision.
+pending-merge entry, a nonzero exit, or a block/deny decision.
 """
 
 from __future__ import annotations
