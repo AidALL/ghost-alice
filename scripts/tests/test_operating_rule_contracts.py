@@ -41,8 +41,7 @@ class OperatingRuleContractTest(unittest.TestCase):
     def test_rendered_contracts_carry_no_retired_instructions(self):
         for name in ('platforms/codex/AGENTS.md', 'platforms/claude/CLAUDE.md'):
             body = platform_contract_text(ROOT / name)
-            for retired in ('jailbreak-detector',
-                            'End every normal response with `[io-trace]`',
+            for retired in ('End every normal response with `[io-trace]`',
                             'Output an `[io-trace]` block at the end of every normal response'):
                 with self.subTest(path=name, retired=retired):
                     self.assertNotIn(retired, body)

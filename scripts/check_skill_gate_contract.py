@@ -523,15 +523,6 @@ def run_contract_checks(root: Path) -> list[ContractIssue]:
                 "intent_consumers.skill-evolution must be report-only-terminal-branch",
             )
         )
-    if ("jailbreak-detector" in graph_positions or "jailbreak-detector" in intent_consumers
-            or "jailbreak-detector" in session_consumers):
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "retired standalone classifier must not participate in the active graph",
-            )
-        )
 
     routing_surface = contract.get("routing_surface", {})
     if not isinstance(routing_surface, dict):

@@ -17,7 +17,6 @@ BASE_SCAN_PATHS = [
     "architecture.md",
     "adversarial-verification",
     "docs",
-    "jailbreak-detector",
     "merge-companion",
     "platforms/claude/CLAUDE.md",
     "platforms/codex/AGENTS.md",

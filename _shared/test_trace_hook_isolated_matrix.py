@@ -443,8 +443,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                                   "--expected-input-event-id", event_id,
                                   "--delta-json", json.dumps({"model_security_decision": decision})])
                 payload = {"session_id": session, "hook_event_name": "PreToolUse", "tool_name": "Read"}
-                # Retained model-security data is a storage fact after removal
-                # of the standalone classifier, never native permission authority.
+                # Retained model-security data is a storage fact, never native permission authority.
                 state_command = [sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                                  "--platform", platform, "--session-id", session, "--snapshot"]
                 before = json.loads(self.run_process(state_command).stdout)

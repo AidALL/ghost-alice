@@ -443,20 +443,20 @@ class SessionIntentLedgerTests(unittest.TestCase):
             platform="codex",
             session_id="session-3",
             intent_delta={
-                "current_goal": "provide session intent to skill-evolution and jailbreak-detector",
+                "current_goal": "provide session intent to skill-evolution",
                 "constraints": ["do not promote long-term memory without user approval"],
                 "non_goals": ["raw prompt storage"],
-                "risk_flags": ["jailbreak-suspected"],
+                "risk_flags": ["outside-current-boundary"],
                 "decisions": [{"id": "consumer-api", "summary": "use the state JSON as the consumer API"}],
             },
         )
 
         snapshot = self.ledger.consumer_snapshot(paths["state"])
 
-        self.assertEqual(snapshot["current_goal"], "provide session intent to skill-evolution and jailbreak-detector")
+        self.assertEqual(snapshot["current_goal"], "provide session intent to skill-evolution")
         self.assertEqual(snapshot["decision_count"], 1)
         self.assertIn("do not promote long-term memory without user approval", snapshot["constraints"])
-        self.assertIn("jailbreak-suspected", snapshot["risk_flags"])
+        self.assertIn("outside-current-boundary", snapshot["risk_flags"])
         self.assertNotIn("events", snapshot)
 
     def test_acceptance_criteria_are_persisted_and_exposed_in_snapshot(self) -> None:

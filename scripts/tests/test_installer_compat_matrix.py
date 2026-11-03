@@ -57,11 +57,7 @@ class InstallerCompatMatrixTest(unittest.TestCase):
             shutil.copy2(RUNNER, root / "scripts" / RUNNER.name)
             shutil.copy2(REPO_ROOT / "_shared" / "project_runtime.py", shared)
             shutil.copy2(REPO_ROOT / "_shared" / "git_hook_paths.py", shared)
-            modules = (
-                "test_install_destination.py",
-                "test_retired_detector_stage.py",
-                "test_retired_discovery.py",
-            )
+            modules = ("test_install_destination.py",)
             for module in modules:
                 (shared / module).write_text(
                     "from pathlib import Path\nimport pytest\n"
@@ -95,20 +91,18 @@ class InstallerCompatMatrixTest(unittest.TestCase):
             }
         return result, observed
 
-    def test_shared_all_executes_three_owned_function_modules(self) -> None:
+    def test_shared_all_executes_the_owned_function_module(self) -> None:
         result, observed = self._run_shared_function_fixtures()
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
         self.assertEqual(observed, {
             "test_install_destination": ["first", "second"],
-            "test_retired_detector_stage": ["first", "second"],
-            "test_retired_discovery": ["first", "second"],
             "test_unit_control": ["unit"],
         })
 
     def test_shared_all_propagates_owned_function_failure(self) -> None:
-        result, observed = self._run_shared_function_fixtures("test_retired_discovery.py")
+        result, observed = self._run_shared_function_fixtures("test_install_destination.py")
         self.assertEqual(result.returncode, 1, msg=result.stderr + result.stdout)
-        self.assertEqual(observed.get("test_retired_discovery"), ["first", "second"])
+        self.assertEqual(observed.get("test_install_destination"), ["first", "second"])
         self.assertIn("owned function failure", result.stdout + result.stderr)
 
     def test_ci_installs_pytest_before_the_shared_suite(self) -> None:
