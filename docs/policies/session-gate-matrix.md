@@ -55,7 +55,7 @@ Runtime consumers use the public API with the exact session-receipt root/platfor
 
 1. The session-intent-analyzer SessionStart hook supplies the session receipt. The UserPromptSubmit hook records each input and adds model context only when that receipt was not delivered or intake failed. Core intake establishes exact canonical human input through direct Codex observation or trusted Claude reconciliation. Read-state remains a pure read. The response model applies task-router to select work; it separately applies skill-evolution when report-only analysis is required.
 2. The response model submits the normal route candidate to Core. Core Python code validates current input, ownership, admission and selected criteria before storing the ready projection.
-3. The response model follows any required boundary and owning workflow. [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns tool execution and permission enforcement to the native host. PostToolUse retains strict audit.
+3. The response model follows any required boundary and owning workflow. [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns tool execution and permission enforcement to the native host. PostToolUse keeps recording tool operations in the audit records (`~/.ghost-alice/io-trace.jsonl`).
 4. At completion, the Stop observer calls Core's input/body-bound assessment and records the result; it blocks nothing.
 
 Tool-checkpoint runs at the before-tool stage (host `PreToolUse`/`BeforeTool`) and is not user-input intake. Tool payloads and audit metadata do not grant native permission. The [Notes](#notes) list installed bytes and native execution as separate claims; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
@@ -79,7 +79,7 @@ The response model applying task-router preserves the primary request and termin
 Hooks classify values by whether they change the work boundary, focus layer, verification burden, or recovery.
 
 - Forced/risk/gate values and failed verification retain full model hints and forced visibility.
-- Routine values remain in the strict log and enter model guidance only when they affect a work decision.
+- Routine values remain in the hook log (`~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`) and enter model guidance only when they affect a work decision.
 - Unknown or failed values expose fuller context and reopen the affected judgment.
 
 Clean-pass notices and correlation metadata do not independently justify new work. Token reduction is a consequence, not a success metric.
@@ -90,7 +90,7 @@ Decision-relevant routing guidance is owned by [task-router](../../task-router/S
 
 [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md#completion-check-format) owns the shared completion-check and partial-check formats and their criterion/claim/evidence mapping. Core completion acceptance requires authenticated review of the claims, original sources and complete response under the current owned route. Skill loading remains workflow guidance and audit activity, not a separate acceptance prerequisite. Finalized completion requires supported verdicts with no unverified criteria. A partial-success report retains the full contract and identifies unresolved criteria; it cannot present the successful subset as whole-task completion.
 
-A displayed trace does not establish proof; strict internal audit and actual workflow evidence remain required.
+A displayed trace does not establish proof. Hooks keep audit records regardless of the display, and the response model supports each claim with actual workflow evidence.
 
 ## tool-checkpoint Visible Surface
 
@@ -98,7 +98,7 @@ The common contract's io-trace Transparency Rule owns checkpoint visibility.
 
 ## tool-checkpoint Batch / Continuation Compression
 
-Hooks check every call and preserve strict audit while suppressing unchanged repeated user-facing blocks in the same input lineage. Batch and continuation forms do not grant permission.
+Hooks check every call and keep all audit records; in the calls that follow the same user input, they omit only unchanged, repeated user-facing guidance. Batch and continuation forms do not grant permission.
 
 Continuation refers only to polling the same process/session/tool-call ID. A denial, mismatch or relevant state change can require a new checkpoint. Polling and a new input alone do not require repeating guidance.
 
@@ -116,7 +116,7 @@ For this condition, the response model records both judgments using the [owning 
 
 Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
 
-On the native Stop path, Core's observer validates the delivered text against the recorded review and keeps the result in strict audit; it issues no second command and holds no output. Supported, unsupported and unresolved states stay distinct: an unresolved criterion remains unmet, and a supported report may fulfill no work criterion.
+On the native Stop path, Core's observer validates the delivered text against the recorded review and keeps the result in the hook log; it issues no second command and does not delay the answer. Supported, unsupported and unresolved states stay distinct: an unresolved criterion remains unmet, and a supported report may fulfill no work criterion.
 
 ## Current Selection and Bounded Recovery
 

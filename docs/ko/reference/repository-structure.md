@@ -91,7 +91,7 @@
 | `~/.ghost-alice/io-trace.jsonl` | 10,000줄을 넘으면 마지막 5,000줄만 남김 | io-trace 행마다 |
 | `~/.ghost-alice/governance-events.jsonl` | 5MB를 넘으면 이전 파일 `governance-events.jsonl.1` 하나로 이동 | 거버넌스 이벤트마다 |
 | `~/.ghost-alice/install/` | 최근 설치 실행 30회분, 실행마다 로그 하나와 이벤트 기록 하나 | 인스톨러, 새 로그를 열기 전 |
-| `~/.ghost-alice/install-state/<host>-events.jsonl` | 5MB를 넘으면 이전 파일 하나로 이동 | 게시 실패나 은퇴 이벤트마다 |
+| `~/.ghost-alice/install-state/<host>-events.jsonl` | 5MB를 넘으면 이전 파일 하나로 이동 | 게시 실패나, 더 이상 설치하지 않는 스킬·명령을 백업으로 옮길 때마다 |
 | `~/.ghost-alice/rollbacks/` | 끝난 게시 중 최근 20개. 끝나지 않은 게시는 복원될 때까지 남김 | 게시마다 |
 | `~/.ghost-alice/uninstall-reports/` | 최근 보고서 30개 | 제거 명령, 새 보고서를 작성하기 전 |
 | `~/.ghost-alice/context-gateway/usage.jsonl` | 20MB를 넘으면 이전 파일 하나로 이동 | 게이트웨이 이벤트마다 |
@@ -99,4 +99,4 @@
 | `~/.ghost-alice/context-gateway/backups/` | 최근 등록 5개와 설치 기록이 가리키는 백업 | 게이트웨이 등록이 성공할 때마다 |
 | 호스트 폴더의 `settings.json.bak*`, `hooks.json.bak*` | 최근 3개 | 훅 설정을 작성할 때마다 |
 
-한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 게이트웨이는 요청 필드를 항목 수, 바이트 합, 종류·역할별 개수로 기록하고, 사용량 이벤트마다 사용량 값을 하나만 기록합니다. `response-end`에는 응답이 끝난 방식을 `completed`, `client-closed`, `upstream-closed` 중 하나로 기록합니다. 클라이언트가 연결을 닫으면 `service.log`에 traceback 대신 이 결과가 남습니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본, 병합 대기 사본, 은퇴 백업에는 사용자 변경분이 들어 있을 수 있으므로 프로그램이 삭제하지 않습니다. 영수증의 저장소 루트에 있는 Core 원장 데이터베이스 `.tmp/session-intent/ghost-state.sqlite3`는 이 표 밖에 있으며 행을 기한 없이 유지합니다.
+한도를 크게 넘은 파일은 최근 부분만 한도만큼 지난 파일로 남깁니다. 게이트웨이는 요청 필드를 항목 수, 바이트 합, 종류·역할별 개수로 기록하고, 사용량 이벤트마다 사용량 값을 하나만 기록합니다. `response-end`에는 응답이 끝난 방식을 `completed`, `client-closed`, `upstream-closed` 중 하나로 기록합니다. 클라이언트가 연결을 닫으면 `service.log`에 traceback 대신 이 결과가 남습니다. 설치 기록, 호스트 설정, 설치된 스킬과 런타임은 같은 자리에 덮어씁니다. `~/.ghost-alice/uninstall-backup/<host>/support-state/` 아래의 제거 보존 사본, 병합 대기 사본, 더 이상 설치하지 않는 스킬·명령의 백업에는 사용자 변경분이 들어 있을 수 있으므로 프로그램이 삭제하지 않습니다. 영수증의 저장소 루트에 있는 Core 원장 데이터베이스 `.tmp/session-intent/ghost-state.sqlite3`는 이 표 밖에 있으며 행을 기한 없이 유지합니다.

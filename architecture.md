@@ -32,7 +32,7 @@ flowchart TB
   C -.->|Stop notice anyone can read| AD
 ```
 
-Core and the adapters are Ghost-ALICE; the hosts and the generative backends are not, so Ghost-ALICE instructs and records but cannot force them. The user and the add-ons also stand outside. Host formats that still sit in Core code, such as Codex configuration, Claude tool names and the Codex patch format, belong to the adapters. The wiki's [design principles: structure boundaries](https://github.com/AidALL/ghost-alice/wiki/Design-Principles#structure-boundaries) explains why each boundary sits where it does.
+Core and the adapters are Ghost-ALICE; the hosts and the generative backends are not, so Ghost-ALICE instructs and records but cannot force them. The user and the add-ons also stand outside. Core code's context gateway runs only on macOS. After the user registers it with the [registration command](docs/getting-started/installation.md#python-contract), it relays Codex's model requests; without that registration, Codex sends them directly to the generative backend. Host formats that still sit in Core code, such as Codex configuration, Claude tool names and the Codex patch format, belong to the adapters. The wiki's [design principles: structure boundaries](https://github.com/AidALL/ghost-alice/wiki/Design-Principles#structure-boundaries) explains why each boundary sits where it does.
 
 ## Responsibilities and flow
 
@@ -41,21 +41,27 @@ While a request runs, each participant has one responsibility.
 | Participant | Responsibility |
 | --- | --- |
 | User | Supplies the objective, constraints and authority. |
-| Response model | Follows Core's instructions: selects and performs work, compares claims with originals, then judges the complete answer. |
+| Response model | Follows Core's instructions: interprets each input, selects and performs work, compares claims with originals, then judges the complete answer. |
 | Adapter | Translates Core's instructions, hook events, transcripts and configuration for its host. |
 | Native host | Executes tools, enforces permissions, constructs model requests and displays answers. |
 | Core code | Binds work, sources and both judgments to the exact native input, and records and authenticates them. |
 
 ```mermaid
 flowchart TD
-  U["User purpose and authority"] --> M["Response model: select and perform work"]
+  U["User purpose and authority"] -->|"Input as is (user-said)"| I["Response model: interpret the input (interpreted-as):<br/>objective, constraints and done conditions"]
+  I -->|"Work that needs tools, except a local read-only lookup:<br/>new or changed interpretation, before the first tool call"| L["Core code: record the interpretation in the intent ledger"]
+  I -->|Interpretation and its assumptions| Q{"Do the user's words leave more than one reasonable reading<br/>that changes the next action, or a decision only the user can make?"}
+  Q -->|Yes| K["Response model: end the answer with a question that states<br/>the assumption and what changes if it is wrong"]
+  K -->|Confirmation question| U
+  Q -->|"No; the intent is clear"| M["Response model: select and perform work"]
   M -->|Authorized tool requests| T["Native host: tools and permissions"]
   T -->|Observed results| M
   O["Original evidence"] --> J["Compare claims with originals"]
   M --> J
-  J --> W["Judge the complete answer against the objective"]
+  J --> W["Judge the complete answer against the interpreted<br/>objective, constraints and done conditions"]
+  I -->|"Interpreted objective, constraints and done conditions"| W
   W -->|Correction or needed investigation within the current request| M
-  W --> R{"Completion claims or requested authenticated review"}
+  W --> R{"Completion claims or an authenticated review the user requested"}
   R -->|Required| C["Core code: authenticate both judgments and source bindings"]
   R -->|Routine explanation| D["Response model: submit the answer"]
   C -->|Status and references| D
@@ -63,6 +69,57 @@ flowchart TD
 ```
 
 The model chooses the next judgment target: micro for an individual result, meso for a subtask or mapping, macro for the integrated outcome and dependencies, or meta for necessity or premise. The task complexity level follows from the work's verification burden; whether the evidence supports full or partial completion is a separate judgment. A mismatch starts investigation; it does not identify the cause. Unresolved conditions prevent their dependent claims or actions while independent authorized work can continue. The wiki page [Verification and Evidence](https://github.com/AidALL/ghost-alice/wiki/Verification-and-Evidence) describes these decisions.
+
+## Hook calls
+
+The native host runs the registered command of each Core hook and add-on hook through the hook runner, `_shared/hook_profile_gate.py`, which writes each call to the hook log `~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`. Each registered command carries an installation binding, the value that names the installation's locations, including its ledger root. The figure follows one call of an enabled Core hook whose binding is valid. For an add-on hook, the runner takes the same steps and runs the add-on's own script, which is outside Ghost-ALICE, in place of the Core hook script.
+
+```mermaid
+sequenceDiagram
+  participant H as Native host
+  box Ghost-ALICE
+    participant R as Hook runner
+    participant C as Core hook script
+    participant L as Hook log
+  end
+  participant M as Response model
+
+  Note over H: A registered event occurs
+  H->>R: Run the registered hook command with the event JSON
+  R->>R: Check the hook command: no command substitution, newline<br/>or shell control operator, an allowed program, and a ledger root<br/>equal to the one the installation binding names
+  break The command check fails
+    R->>L: The refusal and its reason
+    R-->>H: Exit code 126 without running the hook script
+  end
+  opt Claude PreToolUse or Stop
+    R->>R: Record in the intent ledger which session inputs the user typed,<br/>from the Claude transcript<br/>A failure is recorded in the ledger, or else in the hook log, and the hook still runs
+  end
+  R->>C: Run the Core hook script with the event JSON
+  opt The script needs a ledger record or a source binding check
+    C->>C: Read or write the intent ledger,<br/>or check a source's binding to the current input
+  end
+  C-->>R: Output, diagnostics and exit code
+  R->>R: Keep only the fields the host accepts<br/>Remove block, stop and permission-decision fields<br/>Report block, stop, deny and ask in systemMessage
+  R->>R: Apply the agent visibility profile to the user-facing output
+  opt Claude PreToolUse or Stop, the runner could not resolve whether an input was typed by the user, has not warned about that cause in this session, and the output can carry the warning
+    R->>R: Add a systemMessage warning that intent, response-route<br/>and completion records wait for the user's next typed input
+  end
+  R->>L: The hook's original output, diagnostics and exit code,<br/>the visibility decision and the user-facing output
+  R-->>H: Output for the host and an exit code<br/>(exit code 2 becomes 1, and a command registered with || true returns 0)
+  H->>H: Read the fields its return protocol supports<br/>from the hook response
+  opt The response carries systemMessage, and the host supports it for this event
+    H->>H: Show systemMessage to the user
+  end
+  opt The response carries a context field the host supports for this event
+    H->>H: Add the context to the model request
+  end
+  opt The host invokes the response model
+    H->>M: Model input assembled for this invocation
+    M-->>H: Answer or tool call request
+  end
+```
+
+On Stop, Core code's Stop hook compares the answer only with the recorded review. The hook log keeps that assessment, and the runner passes no Stop notice to the user or to add-ons.
 
 ## Response boundary
 
@@ -110,7 +167,7 @@ flowchart LR
   H["Native history"] --> A["Context gateway"]
   C --> A
   A -->|Supported selected input| S["Model server"]
-  A -->|No authenticated supported change, or a read or processing failure: original request and recorded reason| S
+  A -->|No authenticated supported change, or a read or processing failure: original request, with the reason recorded by the gateway| S
   S --> D["Native answer display"]
   O["Original locations"] -->|Explicit retrieval| M
 ```

@@ -9,7 +9,7 @@
 
 Windows에서는 `install.cmd`가 기본 래퍼를 통해 인스톨러를 실행합니다. Python 3.11 이상을 요구하고 콘솔을 UTF-8로 설정하며 `-NoProfile -ExecutionPolicy Bypass`를 사용합니다. PowerShell 실행 정책으로 인한 차단을 처리하되 사용자나 컴퓨터의 실행 정책은 변경하지 않습니다.
 
-Windows 인스톨러에는 PowerShell 7.6 이상이 필요합니다. Windows PowerShell 5.1은 은퇴했습니다. 더 낮은 PowerShell에서는 인스톨러가 요구 사항을 출력하고 멈춥니다. `winget install --id Microsoft.PowerShell --exact`로 PowerShell을 설치한 뒤 `.\install.cmd`를 다시 실행해 주세요.
+Windows 인스톨러에는 PowerShell 7.6 이상이 필요합니다. Windows PowerShell 5.1은 지원하지 않습니다. 더 낮은 PowerShell에서는 인스톨러가 요구 사항을 출력하고 멈춥니다. `winget install --id Microsoft.PowerShell --exact`로 PowerShell을 설치한 뒤 `.\install.cmd`를 다시 실행해 주세요.
 
 ## Core 설치
 
@@ -86,7 +86,7 @@ bash install.sh --prompt-platform
 
 ## 상태 확인
 
-Doctor는 상태를 변경하지 않는 엄격한 진단입니다. 설치 상태가 의심스러우면 변경 전에 doctor를 실행해 주세요. `hook-rejections` 줄은 Ghost-ALICE 훅 실행기가 최근 14일 동안 실행을 거부한 훅 명령을 세션마다 한 줄씩 개수와 마지막 거부의 시각·훅·이유와 함께 보이며, `overall`은 바꾸지 않습니다.
+Doctor는 설치를 변경하지 않고 진단합니다. `overall`이 `error`일 때, 애드온 제거가 완료되지 않아 `.removing` 표시가 남았을 때, 훅 상태 확인을 마치지 못했을 때 종료 코드 1을 반환합니다. 설치 상태가 의심스러우면 변경 전에 doctor를 실행해 주세요. `hook-rejections` 줄은 Ghost-ALICE 훅 실행기가 최근 14일 동안 실행을 거부한 훅 명령을 세션마다 한 줄씩 개수와 마지막 거부의 시각·훅·이유와 함께 보이며, `overall`은 바꾸지 않습니다.
 
 ```bash
 bash install.sh --doctor
@@ -168,7 +168,7 @@ cd C:\path\to\new-checkout
 
 ### 에이전트 표시 프로필
 
-기본 표시 프로필은 `dynamic`입니다. 사용자에게 보이는 거버넌스 메시지의 양만 조절하며 훅 설치·실행, 엄격한 감사 로그와 Work-Impact Projection은 축소하지 않습니다.
+기본 표시 프로필은 `dynamic`입니다. 사용자에게 보이는 거버넌스 메시지의 양만 조절하며 훅 설치·실행, 훅 로그(`~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`)와 감사 기록, Work-Impact Projection은 축소하지 않습니다.
 
 [Ghost-ALICE 입력 경고](./troubleshooting.md#입력-경고와-doctor-목록)는 어느 프로필에서나 표시됩니다.
 

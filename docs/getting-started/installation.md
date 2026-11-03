@@ -9,7 +9,7 @@ This guide is the command reference for installing, updating, checking, and repa
 
 On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+ installer contract, UTF-8 console setup, and `-NoProfile -ExecutionPolicy Bypass`. This handles PowerShell execution policy blocks and does not change the user or machine execution policy.
 
-The Windows installer needs PowerShell 7.6 or newer. Windows PowerShell 5.1 is retired: under an older PowerShell the installer prints the requirement and stops. Install PowerShell with `winget install --id Microsoft.PowerShell --exact`, then rerun `.\install.cmd`.
+The Windows installer needs PowerShell 7.6 or newer. Windows PowerShell 5.1 is not supported: under an older PowerShell the installer prints the requirement and stops. Install PowerShell with `winget install --id Microsoft.PowerShell --exact`, then rerun `.\install.cmd`.
 
 ## Install Core
 
@@ -86,7 +86,7 @@ bash install.sh --prompt-platform
 
 ## Check Status
 
-Doctor is a read-only strict diagnostic. Use it before changing a suspicious install. The `hook-rejections` line lists the hook commands the Ghost-ALICE hook runner refused to run in the last 14 days, one line per session with the count and the last refusal's time, hook and reason, and it does not change `overall`.
+Doctor diagnoses the installation without changing it. It returns exit code 1 when `overall` is `error`, when an unfinished add-on removal left a `.removing` marker, or when the hook status check cannot complete. Use it before changing a suspicious install. The `hook-rejections` line lists the hook commands the Ghost-ALICE hook runner refused to run in the last 14 days, one line per session with the count and the last refusal's time, hook and reason, and it does not change `overall`.
 
 ```bash
 bash install.sh --doctor
@@ -168,7 +168,7 @@ The installer sets the repository's git hook path (`core.hooksPath`, which every
 
 ### Agent Visibility Profile
 
-The default profile is `dynamic`. The profile controls how much governance surface is shown to the user; it does not reduce hook installation or execution, strict-grade logs, or Work-Impact Projection.
+The default profile is `dynamic`. The profile controls how much governance surface is shown to the user; it does not reduce hook installation or execution, the hook log (`~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`), audit records or Work-Impact Projection.
 
 The [Ghost-ALICE intake warning](./troubleshooting.md#intake-warning-and-doctor-lists) appears under every profile.
 
