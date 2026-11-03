@@ -29,7 +29,7 @@
 | 사용자 홈 경로 | 공백과 ASCII가 아닌 문자를 포함한 HOME 픽스처 지원 유지 | `scripts.tests.test_installer_asset_inventory`, 인스톨러 통합 테스트 |
 | PSScriptAnalyzer 선택 사항 | PSScriptAnalyzer는 선택 사항입니다. 모듈이 없으면 파서·정적 테스트가 최소 게이트입니다 | 로컬 전체 검증 |
 | 공개 안내 일치 | README, index.html, Claude 명령 래퍼의 스킬 개수, 목록, 대상 경로는 `skill-catalog/skills.json`과 일치해야 합니다 | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
-| Ghost-ALICE 새 복제 설치 정책 | 공개 설치는 `AidALL/ghost-alice`를 새로 복제한 뒤 설치합니다. 인스톨러는 기존 원격 저장소 설정을 다시 작성하거나 로컬 체크아웃 디렉터리의 이름을 변경하지 않으며 저장소 이관 옵션을 제공하지 않습니다. 인스톨러는 설치된 Claude 권한에서 관리 대상인 오래된 체크아웃 경로의 허용 규칙과 은퇴한 스킬의 `Skill(<name>)` 권한만 삭제합니다. | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook`, `_shared.test_installed_hook_cleanup` |
+| Ghost-ALICE 새 복제 설치 정책 | 공개 설치는 `AidALL/ghost-alice`를 새로 복제한 뒤 설치합니다. 인스톨러는 기존 원격 저장소 설정을 다시 작성하거나 로컬 체크아웃 디렉터리의 이름을 변경하지 않으며 저장소 이관 옵션을 제공하지 않습니다. 인스톨러는 설치된 Claude 권한에서 관리 대상인 오래된 체크아웃 경로의 허용 규칙과 더 이상 설치하지 않는 스킬의 `Skill(<name>)` 권한만 삭제합니다. | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook`, `_shared.test_installed_hook_cleanup` |
 | 에이전트 표시 프로필 | 기본값, 허용 값, `--visibility` 옵션과 `--agent-visibility` 별칭은 [에이전트 표시 프로필](../getting-started/installation.md#에이전트-표시-프로필) 절에 있습니다. 네이티브 래퍼의 호환 별칭은 구현 테스트가 계속 검증합니다. 프로필은 생성된 훅 명령 계약을 변경하지 않습니다. | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
 | 에이전트 표시 런타임 명령 | 플랫폼별 명령은 [플랫폼별 슬래시 명령](../getting-started/installation.md#플랫폼별-슬래시-명령) 절에 있습니다. 문서는 `/visibility`를 Codex 명령으로 안내하면 안 됩니다 | `scripts.tests.test_install_status_contract` |
 
@@ -70,7 +70,7 @@ tool-checkpoint 훅은 일상적인 호출에 복구 비용 필드와 복구 메
 
 설치된 완료 훅은 현재 입력·정확한 답변에 연결된 Core 평가를 사용합니다. Core가 인증하는 두 판단은 [근거와 네이티브 표시](../../../architecture_ko.md#근거와-네이티브-표시)가 설명합니다. Core의 Stop 관찰자가 그 평가를 사용하며 호스트를 막지 않습니다.
 
-두 호스트 모두 Stop 관찰자는 답변 평가를 기록하고 호스트의 정지를 허용합니다. 훅 실행기는 실행하는 모든 훅의 JSON 출력에서 차단·정지·권한 거부 제어를 제거하고 그 요청을 `systemMessage`로 알리며, 훅의 종료 코드 2를 차단하지 않는 종료 코드 1로 변환합니다. 엄격 로그는 원래 종료 코드를 보존합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 완료 확인 블록의 형식을 정합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 훅 항목과 플랫폼 연결을 확인할 뿐 모델 판단이 참인지 검증하지 않습니다.
+두 호스트 모두 Stop 관찰자는 답변 평가를 기록하고 호스트의 정지를 허용합니다. 훅 실행기는 실행하는 모든 훅의 JSON 출력에서 차단·정지·권한 결정 제어를 제거하고 차단·정지·거부·사용자 확인 요청을 `systemMessage`로 알리며, 훅의 종료 코드 2를 차단하지 않는 종료 코드 1로 변환합니다. 훅 로그는 원래 종료 코드를 보존합니다. [Verification-before-completion](../../../coding-convention/verification-before-completion/SKILL.md)은 주장 범위와 완료 확인 블록의 형식을 정합니다. [검토 참조](../../../coding-convention/verification-before-completion/references/response-review.md)는 기록 복구와 전달을, [출력 의미](tool-output-semantics.md#검토출력계속-작업)는 반환 상태를 정의합니다. 인스톨러 테스트는 등록된 훅 항목과 플랫폼 연결을 확인할 뿐 모델 판단이 참인지 검증하지 않습니다.
 
 ## 셸 매트릭스
 
@@ -84,7 +84,7 @@ tool-checkpoint 훅은 일상적인 호출에 복구 비용 필드와 복구 메
 | Git Bash | `copy-fallback` 설치 방식, `~/.codex/hooks.json`을 통한 Codex 훅 설정, UTF-8 로케일과 Python UTF-8 모드 강제 | 런타임 감지와 Codex 훅 설정 테스트 |
 | Windows 네이티브 Codex 훅 점검 | 네이티브 Windows Codex 인스톨러 명령 `.\install.cmd --platform codex`가 Codex 부트스트랩, `hooks.json`, 훅을 활성화한 `config.toml`을 작성하고, 실환경 점검이 훅 호출의 입력·출력을 관찰합니다 | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/ko/policies/live-smoke-regression.md` |
 | Windows 표시 설정 점검 | 네이티브 래퍼가 표시 설정 인수를 `_shared/install_hooks.py --visibility`까지 전달합니다. 호환용 표시 설정 별칭도 계속 허용하며, status는 훅 상태와 런타임 프로필을 따로 출력합니다 | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD 실환경 점검 |
-| Windows PowerShell 5.1 | 은퇴했습니다. `install.ps1`은 UTF-8 BOM과 Windows PowerShell 5.1 문법(`PSUseCompatibleSyntax`, 대상 5.1)을 유지해 5.1에서도 첫 문장까지 실행됩니다. 그 문장이 `PowerShell 7.6 or newer is required`와 `winget install --id Microsoft.PowerShell --exact`를 출력하고 종료 코드 1로 끝냅니다 | `scripts.tests.test_thin_shells`, `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
+| Windows PowerShell 5.1 | 지원하지 않습니다. `install.ps1`은 UTF-8 BOM과 Windows PowerShell 5.1 문법(`PSUseCompatibleSyntax`, 대상 5.1)을 유지해 5.1에서도 첫 문장까지 실행됩니다. 그 문장이 `PowerShell 7.6 or newer is required`와 `winget install --id Microsoft.PowerShell --exact`를 출력하고 종료 코드 1로 끝냅니다 | `scripts.tests.test_thin_shells`, `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |
 | PowerShell 7 | 기준선은 7.6 LTS 계열입니다. `install.ps1`은 PowerShell 7.6 이상에서 실행되고, 더 낮은 7.x는 같은 요구 문구로 멈춥니다. 인스톨러는 PowerShell을 설치하지 않습니다. 콘솔 입출력을 UTF-8로 설정하고 Python 3.11 이상을 준비한 뒤, 예전 PowerShell 매개변수 이름을 cli 플래그로 바꾸어 모든 인수를 순서대로 `_shared/installer/cli.py`에 넘기고 그 종료 코드를 돌려줍니다 | `scripts.tests.test_thin_shells`(CI 러너처럼 `pwsh`가 있으면 `install.ps1`을 실행), `scripts.tests.test_powershell_static_analysis` |
 | CMD 래퍼 | `pwsh.exe`로, `pwsh.exe`가 없으면 `powershell.exe`로 `install.ps1`을 실행합니다. 후자에서는 `install.ps1`의 버전 확인이 요구 버전 문구를 출력합니다. 인수를 변경 없이 전달하고 UTF-8을 강제하며 종료 코드를 반환합니다. 옵션과 도움말은 Python 인스톨러가 제공합니다 | `scripts.tests.test_install_cmd_wrapper`, `scripts.tests.test_thin_shells` |
 
