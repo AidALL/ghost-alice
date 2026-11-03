@@ -39,19 +39,10 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
   }],
   "decisions": [],
   "risk_flags": [],
-  "model_security_decision": {
-    "decision": "allow",
-    "risk_flags": [],
-    "reason": "compressed model judgment, maximum 240 characters",
-    "input_event_id": "sha256:...",
-    "recorded_at": "2026-05-19T00:00:01Z"
-  },
   "consumer_hints": {},
   "conduct_feedback": []
 }
 ```
-
-`model_security_decision` is compatibility audit data. Import/audit callers may record it under exact-event mutation rules; intake, routing and checkpoints do not derive native permission or execution authorization from it.
 
 Completion proof belongs to the current criterion definition. Recording the same ID with unchanged summary preserves verified met status, digest and time. Changing the summary or explicitly withdrawing admission resets that criterion to unmet and removes current proof fields; other criteria retain their proof. A wording change counts as a changed condition because the parser cannot establish semantic equivalence. The prior acceptance-criterion-met event remains historical evidence, not proof for the revised condition. A semantic delta cannot set met; completion uses the owning verification writer.
 
@@ -65,7 +56,7 @@ Optional pattern_class groups recurring failures across differently named entrie
 
 An update omitting pattern_class preserves the stored class. Unknown supplied source or class rejects the entire write with allowed values; absent source defaults to user-said, absent class stays unclassified, and stored entries are not revalidated. The ledger stores a supplied source label as given and never rewrites a stored one. A legacy `user-explicit` or `inferred` label stays valid; admission, route validation and skill-evolution read it as `user-said` or `interpreted-as`. That parser default does not establish provenance: the response model follows the correction evidence rules in `../SKILL.md`.
 
-The snapshot returns detached active non-superseded decision objects, latest_scope or {} when absent/malformed, and decision_count. It returns the current constraints, non-goals and model_security_decision. List-field updates follow [intent-state.json](#intent-statejson). The response model must reconcile these facts with human instructions; scope presence, timestamps, admission and previous edits do not independently establish authorization or restriction chronology.
+The snapshot returns detached active non-superseded decision objects, latest_scope or {} when absent/malformed, and decision_count. It returns the current constraints and non-goals. List-field updates follow [intent-state.json](#intent-statejson). The response model must reconcile these facts with human instructions; scope presence, timestamps, admission and previous edits do not independently establish authorization or restriction chronology.
 
 Snapshots also expose persisted platform, session_id, ledger_revision and latest_input_event_id from the same read. Missing metadata is null rather than invented. An explicitly persisted empty input ID means no input was observed in that state. A read-only snapshot is not an authorization check; writers validate bindings.
 

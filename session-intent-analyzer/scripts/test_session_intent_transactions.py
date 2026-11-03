@@ -137,6 +137,16 @@ class TransactionTests(unittest.TestCase):
         self.write(intent_delta={"current_goal": "new goal"}, expected_input_event_id=self.observed_id())
         self.assertEqual(self.state()["current_goal"], "new goal")
 
+    def test_a_stored_field_the_ledger_does_not_define_never_blocks_later_writes(self):
+        # A ledger written by an older Core can hold a field this code no longer defines.
+        self.write(raw_user_input="first request")
+        state = self.state()
+        state["retired_field"] = {"written_by": "an older Core"}
+        self.write_database_state(state)
+        self.write(intent_delta={"current_goal": "next goal"}, expected_input_event_id=self.observed_id())
+        self.assertEqual(self.state()["current_goal"], "next goal")
+        self.assertNotIn("retired_field", self.ledger.consumer_snapshot(self.state()))
+
     def test_expected_revision_rejects_a_lost_snapshot(self):
         self.write()
         self.write(intent_delta={"constraints": ["keep"]})
@@ -237,13 +247,12 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
             "current_goal": "Repair the diagnosed configuration",
             "latest_scope": {"allowed": ["configuration"], "prohibited": ["publish"], "raw_prompt": "RAW_SCOPE"},
             "decisions": [{"id": "repair", "summary": "Repair authorized", "tool_output": "RAW_TOOL_OUTPUT"}],
-            "model_security_decision": {"decision": "allow", "reason": "RAW_REASON", "input_event_id": anchor},
             "consumer_hints": {"raw": ["RAW_HINT"]},
         })
         rows = self.events()
         changes = rows[-1]["semantic_changes"]
         digest = self.ledger.json_digest
-        # History keeps digests of the allowlisted projection; security reasons and hints are not semantic fields.
+        # History keeps digests of the allowlisted projection; hints are not semantic fields.
         self.assertEqual(set(changes), {"current_goal", "latest_scope", "decisions"})
         self.assertEqual(changes["current_goal"], {"before_digest": digest("Inspect configuration"),
                                                    "after_digest": digest("Repair the diagnosed configuration")})
@@ -253,7 +262,7 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
                          digest([{"id": "repair", "summary": "Repair authorized", "superseded": False}]))
         self.assertEqual(rows[-1]["input_event_id"], anchor)
         self.assertEqual(rows[-1]["ledger_revision"], 2)
-        for raw in ("RAW_USER_PROMPT", "RAW_SCOPE", "RAW_TOOL_OUTPUT", "RAW_REASON", "RAW_HINT"):
+        for raw in ("RAW_USER_PROMPT", "RAW_SCOPE", "RAW_TOOL_OUTPUT", "RAW_HINT"):
             self.assertNotIn(raw, json.dumps(self.events()))
 
     def test_failed_event_insert_rolls_back_state_and_retry_does_not_duplicate_feedback(self):
@@ -315,14 +324,6 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.write_database_state(state)
         with self.assertRaisesRegex(ValueError, "identity"):
             self.mark(expected_input_event_id=anchor, expected_criterion=approved)
-
-    def test_security_record_cannot_launder_an_old_input_using_fresh_cas(self):
-        self.write(raw_user_input="old input")
-        old = self.observed_id()
-        self.write(raw_user_input="new input")
-        with self.assertRaisesRegex(ValueError, "security decision input"):
-            self.write(expected_input_event_id=self.observed_id(), intent_delta={
-                "model_security_decision": {"decision": "block", "input_event_id": old}})
 
     def test_legacy_valid_header_migrates_input_anchor_with_cas(self):
         self.write(raw_user_input="legacy input")

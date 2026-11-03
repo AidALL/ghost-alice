@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Persist reusable mechanical checks, scoped to an exact platform/session.
 
-Dependencies: Python 3.11+ standard library. This is not an intent ledger or a
-security-decision cache. Values must be small check metadata, never prompts,
+Dependencies: Python 3.11+ standard library. This is not an intent ledger.
+Values must be small check metadata, never prompts,
 instruction bodies, credentials or tool transcripts. A delivery record keeps the
 digest of content a session received, never the content.
 """
