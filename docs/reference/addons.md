@@ -1,6 +1,6 @@
 # Addons
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/official-addons.md)
+[🇺🇸 English](./addons.md) | [🇰🇷 한국어](../ko/reference/addons.md)
 
 Addons extend a Ghost-ALICE OS install with optional capability packages on top of the core skills. This page is the contributor and operator reference for addon sources: repositories, tenant packages, and local development checkouts. They all enter through the same installer entrypoint.
 

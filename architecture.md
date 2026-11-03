@@ -1,8 +1,8 @@
 # Ghost-ALICE Core Architecture
 
-언어: 🇺🇸 English | [🇰🇷 한국어](architecture_ko.md)
+[🇺🇸 English](architecture.md) | [🇰🇷 한국어](architecture_ko.md)
 
-Ghost-ALICE Core is the collection of how the generative backend works under this philosophy: the common contract, the skills, and the Core code (hooks, ledger and context gateway). An adapter translates Core for one host, such as Claude Code or Codex: the instruction template, hook event names, transcript format and configuration. The host runs the generative backend and its tools, and the responding model follows Core's instructions, performs authorized work and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/Design-Principles) makes the user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
+Ghost-ALICE Core is the collection of how the generative backend works under this philosophy: the common contract, the skills, and the Core code (hooks, ledger and context gateway). An adapter translates Core for one host, such as Claude Code or Codex: the instruction template, hook event names, transcript format and configuration. The host runs the generative backend and its tools, and the response model follows Core's instructions, performs authorized work and judges its results. The [design philosophy](https://github.com/AidALL/ghost-alice/wiki/Design-Principles) makes the user's purpose the standard for judgment; agreement between procedures or records alone does not prove success.
 
 ## Structure and boundaries
 
@@ -41,14 +41,14 @@ While a request runs, each participant has one responsibility.
 | Participant | Responsibility |
 | --- | --- |
 | User | Supplies the objective, constraints and authority. |
-| Responding model | Follows Core's instructions: selects and performs work, compares claims with originals, then judges the complete answer. |
+| Response model | Follows Core's instructions: selects and performs work, compares claims with originals, then judges the complete answer. |
 | Adapter | Translates Core's instructions, hook events, transcripts and configuration for its host. |
 | Native host | Executes tools, enforces permissions, constructs model requests and displays answers. |
 | Core code | Binds work, sources and both judgments to the exact native input, and records and authenticates them. |
 
 ```mermaid
 flowchart TD
-  U["User purpose and authority"] --> M["Responding model: select and perform work"]
+  U["User purpose and authority"] --> M["Response model: select and perform work"]
   M -->|Authorized tool requests| T["Native host: tools and permissions"]
   T -->|Observed results| M
   O["Original evidence"] --> J["Compare claims with originals"]
@@ -57,7 +57,7 @@ flowchart TD
   W -->|Correction or needed investigation within the current request| M
   W --> R{"Completion claims or requested authenticated review"}
   R -->|Required| C["Core code: authenticate both judgments and source bindings"]
-  R -->|Routine explanation| D["Responding model: submit the answer"]
+  R -->|Routine explanation| D["Response model: submit the answer"]
   C -->|Status and references| D
   D --> H["Native host: display the answer"]
 ```
@@ -88,7 +88,7 @@ flowchart LR
   U["Purpose and unresolved conditions"] --> D["Select information"]
   O["Original sources"] -->|Needed content| D
   R["Conclusions and source references"] --> D
-  D --> M["Responding model: compare and judge"]
+  D --> M["Response model: compare and judge"]
 ```
 
 Healthy hooks supply current receipts and changed decision-relevant conditions. The common contract and owning skills supply procedures; hooks do not repeat their bodies. Review preparation and recording return references rather than echoing the submitted answer. The complete answer remains available for an explicit later comparison.
@@ -125,4 +125,4 @@ Supported results retain their original evidence, verification times and correct
 
 ## Necessary-work declaration
 
-The responding model declares current necessary unprocessed work, its reason and the next needed information in the route that Core code stores. Core code authenticates the selected criteria, current human, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core code records this declaration and schedules none of the work it names; only a later user request starts that work.
+The response model declares current necessary unprocessed work, its reason and the next needed information in the route that Core code stores. Core code authenticates the selected criteria, current human input, declared boundary and original-source references without copying their bodies. Changed originals hold only dependent feedback rows while preserving work and proof. Core code records this declaration and schedules none of the work it names; only a later user request starts that work.

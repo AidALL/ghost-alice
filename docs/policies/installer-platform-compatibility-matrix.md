@@ -1,8 +1,8 @@
 # Installer Platform Compatibility Matrix
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/installer-platform-compatibility-matrix.md)
+[🇺🇸 English](./installer-platform-compatibility-matrix.md) | [🇰🇷 한국어](../ko/policies/installer-platform-compatibility-matrix.md)
 
-This document is the compatibility test contract for the Ghost-ALICE installer. The [Core architecture](../../architecture.md) describes the responsibilities and return paths.
+This document is the compatibility test contract for the Ghost-ALICE installer. Each row states a required behavior and names the test or validation that verifies it. The [Core architecture](../../architecture.md) describes the responsibilities and return paths.
 
 ## Contents
 
@@ -29,13 +29,13 @@ This document is the compatibility test contract for the Ghost-ALICE installer. 
 | User home paths | spaces and non-ASCII HOME fixtures stay supported | `scripts.tests.test_installer_asset_inventory`, installer integration tests |
 | PSScriptAnalyzer optional | PSScriptAnalyzer optional; parser/static tests are the minimum gate when the module is absent | local full validation |
 | Public surface parity | README, index.html, Claude command wrappers stay aligned with `skill-catalog/skills.json` count, list, and targets | `scripts/validate_public_surfaces.py`, `scripts/run_installer_compat_tests.py --group public-surface-contract` |
-| Ghost-ALICE fresh clone install policy | Public installs use a fresh `AidALL/ghost-alice` clone plus install. The installer does not rewrite existing remotes, rename local checkout directories, or expose repository migration flags. Installed Claude permission cleanup is limited to managed stale checkout path allow rules. | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook` |
+| Ghost-ALICE fresh clone install policy | Public installs use a fresh `AidALL/ghost-alice` clone plus install. The installer does not rewrite existing remotes, rename local checkout directories, or expose repository migration flags. Installed Claude permission cleanup removes only managed stale checkout path allow rules and the `Skill(<name>)` permissions of retired skills. | `scripts.tests.test_source_health_gate`, `_shared.test_install_hooks.TestInstallHook`, `_shared.test_installed_hook_cleanup` |
 | Agent visibility profile | The [agent visibility profile](../getting-started/installation.md#agent-visibility-profile) section gives the default, the allowed values, the `--visibility` flag and the `--agent-visibility` alias. Native wrapper compatibility aliases remain implementation-test coverage. The profile does not change generated hook command contracts. | `_shared.test_runtime_config`, `_shared.test_hook_profile_gate`, `_shared.test_install_hooks`, `scripts.tests.test_install_status_contract` |
 | Agent visibility runtime command surface | [Slash commands by platform](../getting-started/installation.md#slash-commands-by-platform) gives each platform's command. Documentation must not present `/visibility` as a Codex command. | `scripts.tests.test_install_status_contract` |
 
 ## Agent Hook Runtime Contract
 
-The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. Hook payload and platform permission policy must also be synchronized with the current repo contract. Even if an older hook entry exists, the installer must update managed entries when the runtime payload changes. The agent visibility profile must not relax missing or drift judgments.
+The Ghost-ALICE installer does not treat hook files as sufficient merely because they exist. It also synchronizes the managed hook entries and the platform permission policy with the current repository contract. When the command of an existing managed hook entry differs from the command the installer generates, the installer replaces that entry. The agent visibility profile must not relax missing or drift judgments.
 
 [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns the recording and authentication of work and judgments to Core code. An addon registers observational hooks at its declared native events, and the Core runner never lets them block the host.
 
@@ -43,7 +43,7 @@ Runtime live smoke follows [live-smoke-regression](live-smoke-regression.md#purp
 
 | Platform | Runtime surface | Contract | Regression owner |
 | --- | --- | --- | --- |
-| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks, and `permissions.allow` | Install the self-contained `platforms/claude/CLAUDE.md` managed block so arbitrary-working-directory sessions receive the common contract and the hookless fallback. Preserve markerless user-owned files through a proposal that does not count as installed. Allow `Skill(<name>)` permission for the full set of installed Ghost-ALICE skills; a shortened core-only allowlist is insufficient. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `settings.json` hooks, and `permissions.allow` | Install the self-contained `platforms/claude/CLAUDE.md` managed block so arbitrary-working-directory sessions receive the common contract and the hookless fallback. Preserve markerless user-owned files through a proposal that does not count as installed. Allow `Skill(<name>)` permission for the full set of installed Ghost-ALICE skills; a shortened allowlist that covers only the core gate skills is insufficient. | `scripts.tests.test_global_rule_blocks`, `scripts.tests.test_validate_entrypoints`, `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestInstallHook` |
 | Codex | `~/.codex/hooks.json`, `~/.codex/config.toml`, bootstrap `AGENTS.md` | Because there is no visible Skill tool, required gates are recorded through `SKILL.md` read plus workflow execution. Hook event names in `hooks.json` are install-surface configuration, not runtime firing proof; gate-completion claims require observed hook payload evidence, runtime smoke, or the hookless/manual fallback wording. `tool-checkpoint` payloads are installation and drift verification targets; external-tool evidence selection follows the verification reference when a claim needs it. Windows native Codex gets separate smoke for actual hook payload firing and `SKILL.md` read records. | `_shared.test_install_hooks`, `scripts.check_skill_gate_contract`, Windows native live smoke |
 
 The Codex managed loader declares the installed `~/.codex/ghost-alice-governance.md` as the common instruction source. Work reads that source together with project-specific constraints; a direct answer uses the loader's no-tool rule. Status and doctor require the declared companion regardless of prose headings. The installer does not increase unrelated projects' instruction budgets. User-owned governance files remain protected, and a symlink at the Codex common-contract path prevents replacement. See [common governance and project instructions](../getting-started/installation.md#common-governance-and-project-instructions).
@@ -60,7 +60,7 @@ The installer registers session-intent-analyzer as the single UserPromptSubmit i
 
 ### pending merge precheck
 
-[merge-companion](../../merge-companion/SKILL.md#entry-and-activation) sets what the SessionStart pending-merge report means and when the current-session assistant checks the manifest and reviews its entries.
+[merge-companion](../../merge-companion/SKILL.md#entry-and-activation) sets what the SessionStart pending-merge report means and when the response model checks the manifest and reviews its entries.
 
 ### tool-checkpoint recovery surface
 
@@ -70,7 +70,7 @@ Runtime tool-checkpoint payload does not require routine recovery cost or recove
 
 Installed completion hooks consume Core's current-input and exact-answer assessment. [Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the two judgments that Core authenticates. Core's Stop observer consumes that assessment and blocks nothing.
 
-Claude retains its one-retry budget and visible unresolved-defect notice; Codex blocks genuine completion-evidence defects. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check those registered payloads and platform mappings, not the truth of model judgments.
+On both hosts the Stop observer records its assessment of the answer and lets the host stop. The hook runner removes the JSON block, stop and permission-denial controls from every hook it runs and reports them in `systemMessage`; it turns a hook's exit code 2 into a non-blocking exit code 1, and the strict log keeps the original code. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check the registered hook payloads and platform mappings, not the truth of model judgments.
 
 ## Shell Matrix
 
@@ -78,10 +78,10 @@ Claude retains its one-retry budget and visible unresolved-defect notice; Codex 
 | --- | --- | --- |
 | macOS bash 3.2 | `install.sh` parse and targeted install/status flows | local macOS full validation |
 | modern bash | Linux/GitHub Actions `install.sh` smoke and unittest integration | `installer compatibility matrix` workflow step |
-| zsh invocation | `zsh install.sh` re-execs under bash before bash-only syntax runs; installer stays bash-owned | `scripts.tests.test_installer_compat_matrix` |
+| zsh invocation | `zsh install.sh` re-execs under bash before bash-only syntax runs, then runs the Python installer `_shared/installer/cli.py` | `scripts.tests.test_installer_compat_matrix` |
 | Linux bash | `install.sh --platform codex --skip-source-health task-router` fixture | `scripts.tests.test_install_preflight_quarantine` |
 | WSL | same as Linux bash, with Windows path boundary smoke | manual or Windows CI |
-| Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, UTF-8 bridge | runtime detection and Codex hook config tests |
+| Git Bash | copy-mode fallback, Codex hook config through `~/.codex/hooks.json`, forced UTF-8 locale and Python UTF-8 mode | runtime detection and Codex hook config tests |
 | Windows native Codex hook smoke | Native Windows Codex installer path `.\install.cmd --platform codex` writes Codex bootstrap, `hooks.json`, and `config.toml` with hooks enabled; live smoke observes hook payload firing | `scripts.tests.test_install_status_contract`, `_shared.test_install_hooks.TestCodexHookSupportGuard`, `docs/policies/live-smoke-regression.md` |
 | Windows visibility preference smoke | Native wrapper visibility forwarding reaches `_shared/install_hooks.py --visibility`; visibility aliases remain accepted as compatibility coverage, and status reports hook state and runtime profile separately | `scripts.tests.test_install_status_contract`, Windows PowerShell/CMD live smoke |
 | Windows PowerShell 5.1 | Retired. `install.ps1` keeps a UTF-8 BOM and Windows PowerShell 5.1 syntax (`PSUseCompatibleSyntax` with target 5.1) so that 5.1 reaches its first statement, which prints `PowerShell 7.6 or newer is required` with `winget install --id Microsoft.PowerShell --exact` and exits 1 | `scripts.tests.test_thin_shells`, `scripts.tests.test_install_ps1_encoding`, `scripts.tests.test_powershell_static_analysis` |

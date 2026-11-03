@@ -1,6 +1,6 @@
 # Installation And Update Guide
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/installation.md)
+[🇺🇸 English](./installation.md) | [🇰🇷 한국어](../ko/getting-started/installation.md)
 
 This guide is the command reference for installing, updating, checking, and repairing Ghost-ALICE OS. Public guidance uses OS-native entrypoints with the same long flag surface.
 
@@ -260,7 +260,7 @@ The installer owns only the marked Ghost-ALICE block in each global rule file. I
 
 ### Common Governance and Project Instructions
 
-Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the current-session assistant reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. User instructions and project-specific constraints retain precedence.
+Ghost-ALICE common governance applies across projects and task domains. On a normal Codex route, the response model reads the common contract at the path rendered into the managed `~/.codex/AGENTS.md` loader. The installer writes that contract to the sibling `ghost-alice-governance.md`. Claude Code receives the common contract directly in the managed portion of `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`. Project instruction files add project-specific constraints; they do not supply a second copy of the common procedures. User instructions and project-specific constraints retain precedence.
 
 ```mermaid
 flowchart LR

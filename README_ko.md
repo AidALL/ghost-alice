@@ -1,8 +1,8 @@
 # Ghost-ALICE OS
 
-Language: [🇺🇸 English](./README.md) | 🇰🇷 한국어
+[🇺🇸 English](./README.md) | [🇰🇷 한국어](./README_ko.md)
 
-![Ghost-ALICE OS logo](imgs/Ghost-ALICE_logo.png)
+![Ghost-ALICE OS 로고](imgs/Ghost-ALICE_logo.png)
 
 Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층입니다. 지원하는 에이전트 실행 환경에서 사용자의 의도, 작업 범위, 검증 근거, 실행 상태를 확인할 수 있도록 관리합니다.
 
@@ -14,9 +14,9 @@ Ghost-ALICE OS는 AI 에이전트의 작업을 관리하는 거버넌스 계층�
 
 Core 0.5.1은 현재 response-route와 완료 계약을 사용합니다. Apache-2.0으로 제공됩니다.
 
-## 승인된 작업의 진행과 복구
+## 거버넌스를 따르는 작업의 진행 방식
 
-응답 모델은 사용자의 목적과 제약을 유지하며 승인된 작업을 수행하고, 반대 근거가 필수 결과나 의존 관계에 영향을 주는지 판단합니다. 필요한 작업을 수정하면서 지원되는 결과와 미해결 요구를 보존합니다.
+응답 모델은 사용자의 목적과 제약을 유지하며 승인된 작업을 수행하고, 반대 근거가 필수 결과나 의존 관계에 영향을 주는지 판단합니다. 영향이 있으면 영향받은 작업을 수정하고, 근거가 뒷받침하는 결과와 미해결 요구는 보존합니다.
 
 단독 흐름은 [Core 아키텍처](./architecture_ko.md), 상세 계약은 [세션 게이트 매트릭스](./docs/ko/policies/session-gate-matrix.md)를 참고해 주세요.
 
@@ -38,7 +38,7 @@ bash install.sh
 bash install.sh --addon-source <저장소-또는-경로>
 ```
 
-운영체제별 명령, 사용자 정의 애드온, 플랫폼 선택과 제거는 [설치 안내](./docs/ko/getting-started/installation.md)와 [애드온 참조](./docs/ko/reference/official-addons.md)를 확인해 주세요.
+운영체제별 명령, 사용자 정의 애드온 소스, 플랫폼 선택과 제거는 [설치 안내](./docs/ko/getting-started/installation.md)와 [애드온 참조](./docs/ko/reference/addons.md)를 확인해 주세요.
 
 ## 문서 안내
 
@@ -50,9 +50,9 @@ bash install.sh --addon-source <저장소-또는-경로>
 - 사용자의 의도, 작업 범위, 검증 기준, 설치 상태를 핵심 관리 대상으로 다룹니다.
 - 인스톨러는 자신이 관리하는 파일과 설정을 추적하며, 관리 대상임을 입증할 수 없으면 삭제 범위를 넓히지 않습니다.
 
-[에이전트 표시 프로필](./docs/ko/getting-started/installation.md#agent-visibility-profile)은 사용자에게 보이는 작업 관리 메시지의 양을 정합니다. 기본값과 플랫폼별 명령은 설치 안내에 있습니다.
+[에이전트 표시 프로필](./docs/ko/getting-started/installation.md#에이전트-표시-프로필)은 사용자에게 보이는 거버넌스 메시지의 양을 정합니다. 기본값과 플랫폼별 명령은 설치 안내에 있습니다.
 
-Ghost-ALICE 입력 경고와 doctor의 입력 목록은 [문제 해결](docs/ko/getting-started/troubleshooting.md#intake-warning-and-doctor-lists)을 참고해 주세요.
+Ghost-ALICE 입력 경고와 doctor의 입력 목록은 [문제 해결](docs/ko/getting-started/troubleshooting.md#입력-경고와-doctor-목록)을 참고해 주세요.
 
 전체 제거가 필요하시면 다음 명령을 사용해 주세요.
 
@@ -80,7 +80,7 @@ python3 scripts/validate_public_surfaces.py
 python scripts/check_skill_gate_contract.py
 ```
 
-인스톨러 호환성 검사 그룹과 그 명령은 인스톨러 플랫폼 호환성 문서의 [CI Commands](./docs/ko/policies/installer-platform-compatibility-matrix.md#ci-commands) 절에 있습니다.
+인스톨러 호환성 검사 그룹과 그 명령은 인스톨러 플랫폼 호환성 매트릭스의 [CI 명령](./docs/ko/policies/installer-platform-compatibility-matrix.md#ci-명령) 절에 있습니다.
 
 ## 라이선스
 

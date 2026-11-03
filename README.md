@@ -1,12 +1,12 @@
 # Ghost-ALICE OS
 
-언어: 🇺🇸 English | [🇰🇷 한국어](./README_ko.md)
+[🇺🇸 English](./README.md) | [🇰🇷 한국어](./README_ko.md)
 
 ![Ghost-ALICE OS logo](imgs/Ghost-ALICE_logo.png)
 
 Ghost-ALICE OS is an agent governance layer for AI work. It keeps intent, boundaries, evidence, and runtime state inspectable across supported agent runtimes.
 
-It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It is the operating layer that makes agent work auditable before the agent claims completion.
+It is not a prompt library, a chatbot wrapper, or a standalone agent runtime. It runs on top of existing agent runtimes as the operating layer that makes agent work auditable before the agent claims completion.
 
 ## Version 0.5.1
 
@@ -16,7 +16,7 @@ Core 0.5.1 uses the current response-route and completion contract. Apache-2.0.
 
 ## How governed work proceeds
 
-The responding model keeps the user's objective and constraints, performs authorized work, and judges whether contrary evidence affects a required result or dependency. It corrects affected work when needed and preserves supported results and unresolved requirements.
+The response model keeps the user's objective and constraints, performs authorized work, and judges whether contrary evidence affects a required result or dependency. It corrects affected work when needed and preserves supported results and unresolved requirements.
 
 See the [Core architecture](./architecture.md) for the standalone flow and [session gate matrix](./docs/policies/session-gate-matrix.md) for the detailed contract.
 
@@ -38,7 +38,7 @@ An addon is installed from its own repository or a local path:
 bash install.sh --addon-source <repository-or-path>
 ```
 
-For native commands, custom addon sources, platform selection and removal, use the [installation guide](./docs/getting-started/installation.md) and [addon reference](./docs/reference/official-addons.md).
+For native commands, custom addon sources, platform selection and removal, use the [installation guide](./docs/getting-started/installation.md) and [addon reference](./docs/reference/addons.md).
 
 ## Documentation Map
 

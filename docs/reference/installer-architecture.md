@@ -1,8 +1,8 @@
 # Installer Architecture
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/installer-architecture.md)
+[🇺🇸 English](./installer-architecture.md) | [🇰🇷 한국어](../ko/reference/installer-architecture.md)
 
-This document is the contributor bridge between the quick installation docs and the installer compatibility contracts. It does not make the whole installer trivial. It gives contributors the architecture map they need before tracing a change through the installer, hook payloads, install state, and tests.
+This document is the contributor bridge between the quick installation docs and the installer compatibility contracts. It gives contributors the architecture map they need before tracing a change through the installer, hook payloads, install state, and tests.
 
 For quick user instructions, read [installation](../getting-started/installation.md). For compatibility requirements and test ownership, read [installer platform compatibility](../policies/installer-platform-compatibility-matrix.md).
 ## Contents
@@ -28,7 +28,7 @@ For quick user instructions, read [installation](../getting-started/installation
 
 ## Architecture Summary
 
-The installer has three layers.
+The installer has four layers.
 
 | Layer | Main files | Responsibility |
 | --- | --- | --- |
@@ -41,7 +41,7 @@ The installer updates assets and hooks while protecting user edits and recording
 
 The hook runtime contains both `_shared` modules and `session-intent-analyzer/scripts/session_intent_ledger.py` under the same runtime root. Native hooks resolve the ledger API and its sibling helpers from that deployment. The source checkout identifies installation inputs; editing that checkout does not select execution libraries for an installed hook. The ledger database path and native session identity remain separate runtime inputs.
 
-Four shared modules belong to neither layer, so the installer, the hook runtime and the skills may all import them. `_shared/hook_definitions.py` owns the names that the installer and the hook runtime read together: hook ids and host event names, and the `ghost_alice_context` provider name. `_shared/install_lock.py` owns the install lock file and the one judgment of whether this process or the process that started it holds the lock. `_shared/content_digest.py` owns the one fingerprint of installed content and the one comparison of an install record entry with the disk. `_shared/installed_payload.py` owns the install record. The first three import only the standard library; `installed_payload` imports only `content_digest` and `install_lock`. A runtime module imports no installer module, and an installer module imports no runtime module. `_shared.test_hook_definitions` checks these rules, and that no `installer` package module shadows a standard-library module name.
+Four shared modules belong to neither the installer nor the hook runtime, so the installer, the hook runtime and the skills may all import them. `_shared/hook_definitions.py` owns the names that the installer and the hook runtime read together: hook ids and host event names, and the `ghost_alice_context` provider name. `_shared/install_lock.py` owns the install lock file and the one judgment of whether this process or the process that started it holds the lock. `_shared/content_digest.py` owns the one fingerprint of installed content and the one comparison of an install record entry with the disk. `_shared/installed_payload.py` owns the install record. The first three import only the standard library; `installed_payload` imports only `content_digest` and `install_lock`. A runtime module imports no installer module, and an installer module imports no runtime module. `_shared.test_hook_definitions` checks these rules, and that no `installer` package module shadows a standard-library module name.
 
 ## Install Flow
 
@@ -93,7 +93,7 @@ The full uninstall of the last host restores the hook path. When the repository'
 | `source` | `root`, `commit`, `dirty` and `hooks_path` of the source checkout |
 | `last_transaction` | `id`, `updated_at` and `rollback_dir` of the last publish |
 | `targets` | Per install location: `name`, `kind` (`skill`, `support`, `runtime`, `command`, `resource`), `mode` (`link`, `copy`), `provider` (`core` or `addon:<id>`), `source`, `source_commit`, `used_by`, `link_target` for a link or `files` for a copy, `installed_at` and `baseline` |
-| `service` | The registered context gateway, absent when none is registered: `label`, `runtime_root` (the folder of the runtime `_shared` the service runs from), `program`, the three service files `launch_agent`, `state_path` and `config_path` with `launch_agent_digest`, `state_digest` and `config_block_digest` (the fingerprint of the provider blocks in Codex `config.toml`; `null` until a registration recorded it), `config_backup`, `registered_at`, `restarted_at` and `listener_ready` |
+| `service` | The registered context gateway, absent when none is registered: `label`, `runtime_root` (the folder that holds the runtime `_shared` the service runs from), `program`, the three service files `launch_agent`, `state_path` and `config_path` with `launch_agent_digest`, `state_digest` and `config_block_digest` (the fingerprint of the provider blocks in Codex `config.toml`; `null` until a registration recorded it), `config_backup`, `registered_at`, `restarted_at` and `listener_ready` |
 
 A copy's `files` maps each relative path to `sha256:<hex>` of its bytes, and a copied single file is its own one path `.`; a link records only the path it points to. `content_digest` computes both and leaves out caches (`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.git`), `.pyc` and `.DS_Store` files, the ownership marker and linked files and folders. `baseline` says where the fingerprints come from: `recorded` by a publish, `migrated` from an earlier installer's records, or `unknown` when those records had none.
 
@@ -171,7 +171,7 @@ Gateway errors keep their phase and stable identifier: exit 2 for a failed preco
 
 Claude Code can expose native skill invocation and hook permissions, but those surfaces do not replace a global instruction port for sessions outside the repository. The installer therefore merges the managed block from `platforms/claude/CLAUDE.md` into the Claude config directory. Codex does not expose the same skill surface, so its separate bootstrap and hook config make required gates auditable through `SKILL.md` read records and hook payloads. Both global rule files preserve text outside their managed blocks; a markerless user-owned destination receives a `.ghost-alice-proposed` file instead of an overwrite.
 
-Core hook transport preserves the firing native cwd as Core context; installation source and project-trust paths do not replace it.
+When the hook binding's `destination` mode is `normal`, Core hook transport preserves the firing native cwd as Core context; installation source and project-trust paths do not replace it.
 
 Managed hook commands and native trust entries must agree with the reviewed installed payload. A running host can retain its previously loaded registration. Verify adoption through an actual native callback after the appropriate reload; refer to [hook trust and reload](../getting-started/troubleshooting.md#native-hook-trust-and-reload). The [session gate notes](../policies/session-gate-matrix.md#notes) list installed bytes and native execution as separate claims.
 
@@ -203,7 +203,7 @@ This is why update and uninstall are part of the installer architecture, not sep
 | Public docs or command surface | `README.md`, `docs/`, `index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
 | Platform compatibility rule | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list` and the focused group named by the policy |
 
-When changing one part, look for the paired contract. The test owner named in the compatibility matrix is the fastest way to find the regression surface.
+When changing one part, look for the paired contract and find its regression checks in the test owner that the compatibility matrix names.
 
 ## What Not To Infer
 
@@ -214,4 +214,4 @@ When changing one part, look for the paired contract. The test owner named in th
 
 ## Full Understanding
 
-A contributor can usually get oriented in a few minutes, but full installer understanding requires tracing one change through the entrypoint, orchestration layer, runtime surface, state file, and test owner. This page is the first map for that trace. It is not a substitute for reading the relevant implementation and compatibility contract.
+Full installer understanding requires tracing one change through the entrypoint, orchestration layer, runtime surface, state file, and test owner. This page is the first map for that trace. It is not a substitute for reading the relevant implementation and compatibility contract.

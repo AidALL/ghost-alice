@@ -1,6 +1,6 @@
 # Gateway installer lifecycle design
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../../ko/coding-convention/specs/2026-10-15-gateway-installer-design.md)
+[🇺🇸 English](./2026-10-15-gateway-installer-design.md) | [🇰🇷 한국어](../../ko/coding-convention/specs/2026-10-15-gateway-installer-design.md)
 
 Status: implemented in the source checkout; local acceptance and remote publication are separate stages. No installer deployment or native-service restart has targeted the actual user HOME during this restructuring. Existing source links continue to expose this checkout's installer files.
 
@@ -131,7 +131,7 @@ flowchart TD
     CHECK --> EXEC["Run install/refresh or detach transaction"]
 ```
 
-The existing general installer lock must be reused or passed as an owned lock context; nesting a second lock acquisition would deadlock. All cooperating mutation paths use the same lock scope. A lock does not replace artifact comparisons because external editors do not participate in it.
+The existing general installer lock must be reused or passed as an owned lock context; a nested second acquisition fails because the lock is already held. All cooperating mutation paths use the same lock scope. A lock does not replace artifact comparisons because external editors do not participate in it.
 
 Dry-run is an explicit caller option, not an automatic decision by the installer. It answers "what would this request change?" with the same validated plan that execution would use: stop/start actions, file writes/deletions, preserved targets and recovery order. Returning the plan ends that invocation; it neither waits for approval nor schedules another run. A later execution is a separate invocation that reacquires/reuses the lock and reinspects current state. A dry-run that discovers a conflict or unavailable required observation returns an error, not a successful executable plan.
 
@@ -224,12 +224,14 @@ flowchart TD
     STOP -->|"Unconfirmed"| HOLD["Hold; preserve current artifacts; block dependent work"]
     VERIFY -->|"Concurrent change"| HOLD
     VERIFY -->|"Safe to restore"| RESTORE["Restore applied changes in reverse order"]
-    RESTORE --> PRIOR{"Prior service existed?"}
+    RESTORE --> PRIOR{"Prior service stopped by this attempt?"}
     PRIOR -->|"Yes"| CHECK["Validate restored prior runtime and state"]
     CHECK --> START["Restart prior service and establish readiness"]
-    PRIOR -->|"No"| CLEAN["Remove only unchanged artifacts created by this attempt"]
+    PRIOR -->|"No"| FIRST{"First installation?"}
+    FIRST -->|"Yes"| CLEAN["Remove only unchanged artifacts created by this attempt"]
     START --> FAILED["Return failed-but-restored; no dependent deletion"]
     CLEAN --> FAILED
+    FIRST -->|"No"| FAILED
     RESTORE -. "Failure" .-> HOLD
     CHECK -. "Mismatch" .-> HOLD
     START -. "Failure" .-> HOLD
