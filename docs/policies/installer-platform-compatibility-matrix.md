@@ -77,7 +77,7 @@ On both hosts Core code's Stop script records its Stop notice message in `stop-n
 | Environment | Required coverage | Automation |
 | --- | --- | --- |
 | macOS bash 3.2 | `install.sh` parse and targeted install/status flows | local macOS full validation |
-| modern bash | Linux/GitHub Actions `install.sh` smoke and unittest integration | `installer compatibility matrix` workflow step |
+| modern bash | Linux/GitHub Actions `install.sh` smoke and unittest integration | `ci.yml` job `Public validation` |
 | zsh invocation | `zsh install.sh` re-execs under bash before bash-only syntax runs, then runs the Python installer `_shared/installer/cli.py` | `scripts.tests.test_installer_compat_matrix` |
 | Linux bash | `install.sh --platform codex --skip-source-health task-router` fixture | `scripts.tests.test_install_preflight_quarantine` |
 | WSL | same as Linux bash, with Windows path boundary smoke | manual or Windows CI |
@@ -98,6 +98,8 @@ python3 scripts/run_installer_compat_tests.py
 ```
 
 The `shared-all` group runs shared unittest discovery and the pytest functions in `_shared/test_install_destination.py`, `_shared/test_retired_detector_stage.py`, and `_shared/test_retired_discovery.py`; either execution failing fails the group.
+
+Without `--group`, `scripts/run_installer_compat_tests.py` skips each focused group whose `within` field names another group. The named group already runs every test module of the focused group, so each test module runs once. Name a focused group with `--group` to run it alone.
 
 Focused groups:
 

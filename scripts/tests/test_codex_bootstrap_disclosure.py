@@ -3,6 +3,7 @@
 from pathlib import Path
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -209,6 +210,11 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertIn("codex-governance: absent", result.stdout,
                           "Doctor accepted a selector without its required fallback")
 
+    def test_ci_installs_the_native_codex_cli(self):
+        # Without the CLI the native prompt-input test below skips in CI.
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("npm install -g @openai/codex@", workflow)
+
     @unittest.skipUnless(shutil.which("codex"), "Native Codex CLI not installed")
     def test_native_project_input_does_not_repeat_full_governance(self):
         with tempfile.TemporaryDirectory(prefix="bootstrap-native-") as tmp:
@@ -229,6 +235,15 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             env = {k: v for k, v in os.environ.items()
                    if not k.startswith("GHOST_ALICE_") and k != "CODEX_THREAD_ID"}
             env["CODEX_HOME"] = str(task_home)
+            capability = subprocess.run(
+                ["codex", "-C", str(project), "debug", "prompt-input", "--help"],
+                env=env, text=True, capture_output=True, timeout=30, check=False,
+            )
+            if capability.returncode and re.search(
+                r"unrecognized subcommand ['\"](?:debug|prompt-input)['\"]", capability.stderr,
+            ):
+                self.skipTest("Installed Codex CLI lacks the prompt-input diagnostic")
+            self.assertEqual(capability.returncode, 0, capability.stderr)
             rendered = subprocess.run(
                 ["codex", "-C", str(project), "debug", "prompt-input", "Explain the objective."],
                 env=env, text=True, capture_output=True, timeout=30,

@@ -1,11 +1,15 @@
 import os
-import re
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "scripts"))
+
+from public_text_rules import term_findings  # noqa: E402
+
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 BASE_SCAN_PATHS = [
@@ -29,48 +33,13 @@ SKIP_PARTS = {
     "node_modules",
 }
 
+# These files hold the rule tables or fixtures that must contain the forbidden terms.
 SKIP_FILES = {
+    Path("scripts/public_text_rules.py"),
     Path("scripts/tests/test_terminology_clarity.py"),
 }
 
 TEXT_SUFFIXES = {".json", ".md", ".mjs", ".py"}
-
-LINE_ALLOWLIST = [
-    # External model identifiers are API literals; clarify nearby prose instead.
-    re.compile(r"korean-MiniLM-L6-v2"),
-]
-
-FORBIDDEN_EXACT = [
-    "SG1",
-    "cNoHardcode",
-    "cModelDecision",
-    "cInvariant",
-    "cInjectionResistant",
-    "cEnforce",
-    "P1",
-    "P2",
-    "P3",
-    "P4",
-    "D1",
-    "D2",
-    "D3",
-    "D4",
-    "D5",
-    "D6",
-    "D7",
-    "D8",
-    "D9",
-    "D10",
-    "D11",
-    "D12",
-    "EN1",
-    "IN1",
-    "IN2",
-    "IN3",
-]
-
-BARE_LAYER_RE = re.compile(r"(?<![A-Za-z0-9_])L[1-8](?![A-Za-z0-9_])")
-
 
 def local_scan_paths(root: Path):
     skill_roots = {str(path.parent.relative_to(root)) for path in root.glob("*/SKILL.md")}
@@ -102,24 +71,13 @@ def iter_text_files(root: Path, scan_paths):
 
 def collect_findings(root: Path, scan_paths):
     findings = []
-    exact_patterns = [
-        (term, re.compile(rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])"))
-        for term in FORBIDDEN_EXACT
-    ]
     for path in iter_text_files(root, scan_paths):
         try:
             text = path.read_text(encoding="utf-8")
         except UnicodeDecodeError:
             continue
         rel = path.relative_to(root)
-        for lineno, line in enumerate(text.splitlines(), start=1):
-            if any(pattern.search(line) for pattern in LINE_ALLOWLIST):
-                continue
-            for term, pattern in exact_patterns:
-                if pattern.search(line):
-                    findings.append(f"{rel}:{lineno}: opaque term `{term}`")
-            for match in BARE_LAYER_RE.finditer(line):
-                findings.append(f"{rel}:{lineno}: bare layer token `{match.group(0)}`")
+        findings.extend(f"{rel}:{lineno}: {message}" for lineno, message in term_findings(text))
     return findings
 
 
@@ -146,26 +104,10 @@ class TestTerminologyClarity(unittest.TestCase):
             workflow,
         )
 
-    def test_addon_text_uses_explicit_terms_when_available(self):
-        addon_dir = os.environ.get("GHOST_ALICE_ADDON_DIR")
-        if not addon_dir:
-            self.skipTest("set GHOST_ALICE_ADDON_DIR to scan addon skill source")
-        root = Path(addon_dir)
-        findings = collect_findings(root, ["addons"])
-        self.assertEqual([], findings)
-
     def test_installed_skill_text_uses_explicit_terms_when_available(self):
         skills_dir = os.environ.get("GHOST_ALICE_INSTALLED_SKILLS_DIR")
         if not skills_dir:
             self.skipTest("set GHOST_ALICE_INSTALLED_SKILLS_DIR to scan installed skill copies")
         root = Path(skills_dir)
-        findings = collect_findings(root, ["."])
-        self.assertEqual([], findings)
-
-    def test_wiki_governance_text_uses_explicit_terms_when_available(self):
-        wiki_dir = os.environ.get("GHOST_ALICE_WIKI_DIR")
-        if not wiki_dir:
-            self.skipTest("set GHOST_ALICE_WIKI_DIR to scan the remote wiki checkout")
-        root = Path(wiki_dir)
         findings = collect_findings(root, ["."])
         self.assertEqual([], findings)

@@ -1,9 +1,10 @@
 """Report-only Wiki integrity checks.
 
 Validate internal page links, page-name uniqueness, the language switch line,
-its pairing, folder placement, sidebar presence, coverage and language, and the
-absence of a footer. External links, images, same-page anchors and special pages
-are excluded from page-target checks.
+its pairing, folder placement, sidebar presence, coverage and language, the
+absence of a footer, and page lines against the public-text rules. External
+links, images, same-page anchors and special pages are excluded from
+page-target checks.
 Main-repository contracts remain normative.
 
 Run: python3 -m pytest scripts/tests/test_audit_wiki_integrity.py -q
@@ -46,6 +47,32 @@ CLEAN = {
 class TestCleanWiki(unittest.TestCase):
     def test_clean_wiki_has_no_findings(self):
         self.assertEqual(awi.audit(CLEAN), [])
+
+
+class TestPublicTextRules(unittest.TestCase):
+    """The audit checks wiki pages against the rules in public_text_rules.py."""
+
+    def _flagged(self, page, line):
+        pages = dict(CLEAN)
+        pages[page] = CLEAN[page] + "\n\n" + line
+        return awi.audit(pages)
+
+    def test_opaque_term_in_a_page_is_flagged(self):
+        # The token is split so that the repository terminology scan does not flag this file.
+        findings = self._flagged("Design-Principles", "L" + "3 expands the fixed reviewer count.")
+        self.assertEqual(_pages_with(findings, "opaque-term"), {"Design-Principles"})
+
+    def test_removed_command_in_a_page_is_flagged(self):
+        findings = self._flagged("ko/설계-원칙", "`./install.sh --offboard`로 정리합니다.")
+        self.assertEqual(_pages_with(findings, "removed-command"), {"ko/설계-원칙"})
+
+    def test_powershell_style_installer_command_in_a_page_is_flagged(self):
+        findings = self._flagged("Home", "```powershell\n.\\install.ps1 -Platform codex\n```")
+        self.assertEqual(_pages_with(findings, "powershell-command"), {"Home"})
+
+    def test_the_audit_imports_the_shared_rule_module(self):
+        import public_text_rules
+        self.assertIs(awi.public_text_rules, public_text_rules)
 
 
 class TestBrokenInternalLinks(unittest.TestCase):
@@ -248,20 +275,6 @@ class TestLoadWiki(unittest.TestCase):
             (root / ".git" / "ignored.md").write_text("x", encoding="utf-8")
             pages = awi.load_wiki(root)
         self.assertEqual(set(pages), {"Home", "ko/홈"})
-
-
-class TestRealWiki(unittest.TestCase):
-    """Non-overblock evidence against the real cloned wiki when present."""
-
-    def test_real_wiki_clone_is_clean_if_available(self):
-        wiki_dir = Path("/tmp/ga-wiki")
-        if not wiki_dir.exists():
-            self.skipTest("real wiki clone not present at /tmp/ga-wiki")
-        pages = awi.load_wiki(wiki_dir)
-        findings = awi.audit(pages)
-        self.assertEqual(
-            findings, [], msg=f"real wiki reported drift: {[(f.check, f.page) for f in findings]}"
-        )
 
 
 if __name__ == "__main__":

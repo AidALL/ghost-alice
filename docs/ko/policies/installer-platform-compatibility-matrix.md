@@ -77,7 +77,7 @@ tool-checkpoint 훅은 일상적인 호출에 복구 비용 필드와 복구 메
 | 환경 | 필수 검증 범위 | 자동화 |
 | --- | --- | --- |
 | macOS bash 3.2 | `install.sh` 구문 분석과 대상을 지정한 install/status 실행 | 로컬 macOS 전체 검증 |
-| 최신 bash | Linux/GitHub Actions의 `install.sh` 점검과 unittest 통합 테스트 | `installer compatibility matrix` 워크플로 단계 |
+| 최신 bash | Linux/GitHub Actions의 `install.sh` 점검과 unittest 통합 테스트 | `ci.yml`의 `Public validation` 작업 |
 | zsh 호출 | `zsh install.sh`는 bash 전용 문법을 실행하기 전에 bash로 자신을 다시 실행하고, 그다음 Python 인스톨러 `_shared/installer/cli.py`를 실행합니다 | `scripts.tests.test_installer_compat_matrix` |
 | Linux bash | `install.sh --platform codex --skip-source-health task-router` 픽스처 | `scripts.tests.test_install_preflight_quarantine` |
 | WSL | Linux bash와 동일하며 Windows 경로 경계 점검 포함 | 수동 또는 Windows CI |
@@ -98,6 +98,8 @@ python3 scripts/run_installer_compat_tests.py
 ```
 
 `shared-all` 그룹은 `_shared/`에서 unittest 자동 탐색으로 찾은 테스트와 `_shared/test_install_destination.py`, `_shared/test_retired_detector_stage.py`, `_shared/test_retired_discovery.py`의 pytest 함수를 실행합니다. 두 실행 중 하나라도 실패하면 그룹이 실패합니다.
+
+`scripts/run_installer_compat_tests.py`를 `--group` 없이 실행하면, 이 스크립트는 `within` 필드에 다른 그룹을 지정한 개별 그룹을 건너뜁니다. `within`에 지정된 그룹이 그 개별 그룹의 테스트 모듈을 모두 실행하므로, 각 테스트 모듈은 한 번만 실행됩니다. 개별 그룹은 `--group`으로 이름을 지정해 따로 실행합니다.
 
 개별 그룹:
 

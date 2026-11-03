@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Run the installer compatibility test matrix."""
+"""Run the installer compatibility test matrix.
+
+Without --group, every group runs except a subset group: a group whose `within` field
+names another group that already runs every test module of the subset group.
+Name a subset group with --group to run it alone.
+"""
 
 from __future__ import annotations
 
@@ -24,6 +29,8 @@ class TestGroup:
     name: str
     description: str
     command: tuple[str, ...]
+    # The group whose run already includes every module of this one; the default run skips this group.
+    within: str | None = None
 
 
 def _py(*args: str) -> tuple[str, ...]:
@@ -50,11 +57,13 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
             "scripts.tests.test_check_skill_gate_contract",
             "scripts.tests.test_validate_entrypoints",
         ),
+        within="scripts-all",
     ),
     TestGroup(
         "merge-companion-v2",
         "snapshot v2 and diff collector compatibility",
         _py("-m", "unittest", "discover", "-s", "merge-companion/scripts", "-p", "test_*_v2.py"),
+        within="merge-companion-core",
     ),
     TestGroup(
         "merge-companion-core",
@@ -92,16 +101,19 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
             "scripts.tests.test_installer_default_auto",
             "scripts.tests.test_installer_compat_matrix",
         ),
+        within="scripts-all",
     ),
     TestGroup(
         "installer-cmd-wrapper",
         "CMD wrapper delegation, UTF-8, and argument forwarding",
         _py("-m", "unittest", "scripts.tests.test_install_cmd_wrapper"),
+        within="scripts-all",
     ),
     TestGroup(
         "public-surface-contract",
         "README, homepage, and command wrapper parity with the skill catalog",
         _py("-m", "unittest", "scripts.tests.test_validate_public_surfaces"),
+        within="scripts-all",
     ),
     TestGroup(
         "installer-encoding",
@@ -113,11 +125,13 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
             "scripts.tests.test_install_sh_inline_python_encoding",
             "scripts.tests.test_encoding_guard",
         ),
+        within="scripts-all",
     ),
     TestGroup(
         "installer-powershell-static",
         "PowerShell parser and optional PSScriptAnalyzer warning budget",
         _py("-m", "unittest", "scripts.tests.test_powershell_static_analysis"),
+        within="scripts-all",
     ),
     TestGroup(
         "installer-status-contract",
@@ -129,6 +143,7 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
             "scripts.tests.test_global_rule_blocks",
             "scripts.tests.test_install_status_contract",
         ),
+        within="scripts-all",
     ),
     TestGroup(
         "installer-transaction",
@@ -141,6 +156,7 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
             "scripts.tests.test_install_postflight_validation",
             "scripts.tests.test_install_state_manifest",
         ),
+        within="scripts-all",
     ),
     TestGroup(
         "shared-install-hooks",
@@ -151,6 +167,7 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
             "_shared.test_install_hooks",
             "_shared.test_merge_companion_messages",
         ),
+        within="shared-all",
     ),
 )
 
@@ -164,7 +181,7 @@ def _check_python_runtime() -> int:
 
 def _selected_groups(names: Sequence[str]) -> list[TestGroup]:
     if not names:
-        return list(TEST_GROUPS)
+        return [group for group in TEST_GROUPS if group.within is None]
     by_name = {group.name: group for group in TEST_GROUPS}
     missing = [name for name in names if name not in by_name]
     if missing:

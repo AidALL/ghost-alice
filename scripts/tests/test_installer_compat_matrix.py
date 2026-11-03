@@ -1,6 +1,7 @@
 import contextlib
 import fnmatch
 import io
+import itertools
 import os
 import runpy
 import subprocess
@@ -18,6 +19,32 @@ RUNNER = REPO_ROOT / "scripts" / "run_installer_compat_tests.py"
 SKILL_VALIDATION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "skill-validation.yml"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 SKILL_GATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "skill-gate-contract.yml"
+
+
+def _reached_test_files(command, test_files):
+    """The tracked test files one group command runs: named modules, and files its discovery finds."""
+    command = list(command)
+    reached = {Path(*argument.split(".")).with_suffix(".py") for argument in command
+               if argument.startswith(("scripts.tests.", "_shared."))}
+    if "discover" not in command:
+        return reached
+    start = Path(command[command.index("-s") + 1])
+    pattern = command[command.index("-p") + 1] if "-p" in command else "test*.py"
+    for path in test_files:
+        if not (path.is_relative_to(start) and fnmatch.fnmatch(path.name, pattern)):
+            continue
+        # Python 3.11 discovers tests in a subfolder only when every folder below the start is a package.
+        folders = path.parent.relative_to(start).parts
+        if all((REPO_ROOT / start / Path(*folders[:depth]) / "__init__.py").is_file()
+               for depth in range(1, len(folders) + 1)):
+            reached.add(path)
+    return reached
+
+
+def _tracked_test_files():
+    listed = subprocess.run(["git", "ls-files", "-z", "--", "*test_*.py"], cwd=REPO_ROOT,
+                            capture_output=True, check=True).stdout.decode("utf-8")
+    return {Path(path) for path in listed.split("\0") if path and Path(path).name.startswith("test_")}
 
 
 class InstallerCompatMatrixTest(unittest.TestCase):
@@ -84,13 +111,12 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         self.assertEqual(observed.get("test_retired_discovery"), ["first", "second"])
         self.assertIn("owned function failure", result.stdout + result.stderr)
 
-    def test_shared_workflows_install_pytest_before_owning_suite(self) -> None:
-        for path in (CI_WORKFLOW, SKILL_VALIDATION_WORKFLOW):
-            with self.subTest(workflow=path.name):
-                workflow = path.read_text(encoding="utf-8")
-                install_command = "python3 -m pip install pytest"
-                self.assertIn(install_command, workflow)
-                self.assertLess(workflow.index(install_command), workflow.index("scripts/run_installer_compat_tests.py"))
+    def test_ci_installs_pytest_before_the_shared_suite(self) -> None:
+        # Only shared-all runs pytest functions, and only ci.yml runs shared-all.
+        workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+        install_command = "python3 -m pip install pytest"
+        self.assertIn(install_command, workflow)
+        self.assertLess(workflow.index(install_command), workflow.index("--group shared-all"))
 
     def test_matrix_document_covers_required_shell_and_python_contracts(self) -> None:
         matrix = MATRIX_DOC.read_text(encoding="utf-8")
@@ -196,27 +222,11 @@ class InstallerCompatMatrixTest(unittest.TestCase):
 
     def test_every_tracked_test_file_runs_in_a_group(self) -> None:
         # CI runs only what a group reaches; a test file outside every group drifts from the code it tests unseen.
-        listed = subprocess.run(["git", "ls-files", "-z", "--", "*test_*.py"], cwd=REPO_ROOT,
-                                capture_output=True, check=True).stdout.decode("utf-8")
-        test_files = {Path(path) for path in listed.split("\0") if path and Path(path).name.startswith("test_")}
+        test_files = _tracked_test_files()
         namespace = runpy.run_path(str(RUNNER))
         reached = set()
         for group in namespace["TEST_GROUPS"]:
-            command = list(group.command)
-            reached.update(Path(*argument.split(".")).with_suffix(".py") for argument in command
-                           if argument.startswith(("scripts.tests.", "_shared.")))
-            if "discover" not in command:
-                continue
-            start = Path(command[command.index("-s") + 1])
-            pattern = command[command.index("-p") + 1] if "-p" in command else "test*.py"
-            for path in test_files:
-                if not (path.is_relative_to(start) and fnmatch.fnmatch(path.name, pattern)):
-                    continue
-                # Python 3.11 discovers tests in a subfolder only when every folder below the start is a package.
-                folders = path.parent.relative_to(start).parts
-                if all((REPO_ROOT / start / Path(*folders[:depth]) / "__init__.py").is_file()
-                       for depth in range(1, len(folders) + 1)):
-                    reached.add(path)
+            reached.update(_reached_test_files(group.command, test_files))
         runner = RUNNER.read_text(encoding="utf-8")
         unrun = []
         for path in sorted(test_files):
@@ -227,6 +237,69 @@ class InstallerCompatMatrixTest(unittest.TestCase):
                 # unittest discovery imports a pytest-only file without running it; the runner must name it.
                 unrun.append(str(path))
         self.assertEqual(unrun, [])
+
+    def test_every_module_and_folder_a_group_names_exists(self) -> None:
+        namespace = runpy.run_path(str(RUNNER))
+        missing = []
+        for group in namespace["TEST_GROUPS"]:
+            command = list(group.command)
+            for argument in command:
+                if argument.startswith(("scripts.tests.", "_shared.")):
+                    module = REPO_ROOT / Path(*argument.split(".")).with_suffix(".py")
+                    if not module.is_file():
+                        missing.append(f"{group.name}: {argument}")
+            if "discover" in command and not (REPO_ROOT / command[command.index("-s") + 1]).is_dir():
+                missing.append(f"{group.name}: {command[command.index('-s') + 1]}")
+        self.assertEqual(missing, [])
+
+    def test_a_subset_group_runs_only_what_its_containing_group_runs(self) -> None:
+        namespace = runpy.run_path(str(RUNNER))
+        groups = {group.name: group for group in namespace["TEST_GROUPS"]}
+        test_files = _tracked_test_files()
+        for group in groups.values():
+            if group.within is None:
+                continue
+            with self.subTest(group=group.name):
+                outside = (_reached_test_files(group.command, test_files)
+                           - _reached_test_files(groups[group.within].command, test_files))
+                self.assertEqual(outside, set())
+
+    def test_the_default_run_skips_subset_groups(self) -> None:
+        namespace = runpy.run_path(str(RUNNER))
+        default = [group.name for group in namespace["_selected_groups"]([])]
+        self.assertEqual(default, [group.name for group in namespace["TEST_GROUPS"] if group.within is None])
+        self.assertIn("shared-all", default)
+        self.assertIn("scripts-all", default)
+
+    def test_no_two_default_groups_run_the_same_test_file(self) -> None:
+        # A group whose test files another default group also runs must set `within`;
+        # without it the default run runs those files twice.
+        namespace = runpy.run_path(str(RUNNER))
+        test_files = _tracked_test_files()
+        reached = {group.name: _reached_test_files(group.command, test_files)
+                   for group in namespace["_selected_groups"]([])}
+        overlaps = [f"{first} and {second}: {sorted(map(str, reached[first] & reached[second]))}"
+                    for first, second in itertools.combinations(reached, 2)
+                    if reached[first] & reached[second]]
+        self.assertEqual(overlaps, [])
+
+    def test_ci_installs_zsh_before_the_shared_suite(self) -> None:
+        # Without zsh the zsh invocation tests in shared-all and scripts-all skip in CI.
+        workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+        install_command = "sudo apt-get install -y zsh"
+        self.assertIn(install_command, workflow)
+        self.assertLess(workflow.index(install_command), workflow.index("--group shared-all"))
+
+    def test_the_two_workflows_split_the_default_groups(self) -> None:
+        # ci.yml runs shared-all and scripts-all; skill-validation.yml runs every other default group once.
+        namespace = runpy.run_path(str(RUNNER))
+        default = {group.name for group in namespace["_selected_groups"]([])}
+        workflow = SKILL_VALIDATION_WORKFLOW.read_text(encoding="utf-8")
+        line = next(line for line in workflow.splitlines() if "scripts/run_installer_compat_tests.py" in line)
+        words = line.split()
+        flags, named = words[2::2], words[3::2]
+        self.assertEqual(set(flags), {"--group"})
+        self.assertEqual(sorted(named), sorted(default - {"shared-all", "scripts-all"}))
 
     def test_runner_replaces_hostile_temp_env_only_for_its_child_process(self) -> None:
         namespace = runpy.run_path(str(RUNNER))
@@ -299,12 +372,6 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
         self.assertNotIn("BASH_SOURCE", result.stderr + result.stdout)
         self.assertIn("Available skills:", result.stdout)
-
-    def test_skill_validation_workflow_runs_installer_compatibility_suite(self) -> None:
-        workflow = SKILL_VALIDATION_WORKFLOW.read_text(encoding="utf-8")
-
-        self.assertIn("installer compatibility matrix", workflow)
-        self.assertIn("python3 scripts/run_installer_compat_tests.py", workflow)
 
     def test_ci_unittest_batches_use_repo_local_runtime_runner(self) -> None:
         ci = CI_WORKFLOW.read_text(encoding="utf-8")

@@ -46,33 +46,18 @@ PLATFORM_PORTS = [
     "platforms/codex/AGENTS.md",
 ]
 
-REQUIRED_SSOT_PHRASES = [
-    ("Operating Model section", r"(?m)^##\s+Operating Model\s*$"),
-    ("task-router name reference", r"task-router"),
-    ("Session Intent section", r"(?m)^##\s+Session Intent\s*$"),
-    ("Work Selection section", r"(?m)^##\s+Work Selection\s*$"),
-]
-
 REQUIRED_TASK_ROUTER_PHRASES = [
-    ("Work Selection owner reference", r"Work Selection section"),
-    ("response-route record", r"response-route"),
     ("meta:\\* calls", r"meta:\*"),
 ]
 
 REQUIRED_USING_CC_PHRASES = [
     ("Session Intent and Work Selection owner reference", r"Session Intent and Work Selection sections"),
-    ("verification owner reference", r"verification-before-completion"),
 ]
 
 # Entrypoints delegate procedures to these source owners. Check their wiring,
 # including target existence, without requiring copied procedure prose.
 REQUIRED_OWNER_REFERENCES = {
-    ENTRYPOINT_SKILLS["task-router"]: (
-        "references/routing-details.md",
-        "../session-intent-analyzer/references/ledger-schema.md#core-response-projection",
-    ),
     ENTRYPOINT_SKILLS["using-coding-convention"]: (
-        "../verification-before-completion/references/verify-or-reuse.md#instruction-body-reuse",
         "../systematic-debugging/SKILL.md#incident-accounting-and-continuation",
     ),
 }
@@ -153,16 +138,6 @@ def check_ssot_rules(repo: Path, findings: list[Finding]) -> None:
             findings.append(Finding('ERROR', 'ssot', 'owner-reference', f'{SSOT_RULES_FILE} is missing owner reference {name}.'))
         elif not (repo / owner).is_file():
             findings.append(Finding('ERROR', 'ssot', 'owner-missing', f'{SSOT_RULES_FILE} owner {name} targets a missing file.'))
-    for label, pattern in REQUIRED_SSOT_PHRASES:
-        if not re.search(pattern, text):
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "ssot",
-                    "phrase",
-                    f"{SSOT_RULES_FILE} is missing the '{label}' phrase. pattern: {pattern!r}",
-                )
-            )
     check_owner_references(repo, SSOT_RULES_FILE, text, "ssot", findings)
 
 

@@ -69,7 +69,7 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                           'Work Selection section',
                           'verification-before-completion',
                           'references/routing-details.md',
-                          'ledger-schema.md#core-response-projection'],
+                          '../session-intent-analyzer/references/ledger-schema.md#core-response-projection'],
  'boundary-contract/SKILL.md': ['name: boundary-contract',
                                 '## Authority and renewal',
                                 '[boundary-contract]',

@@ -595,6 +595,13 @@ class InstalledCopyTests(unittest.TestCase):
 
     FILES = ("SKILL.md", "references/verify-or-reuse.md", "scripts/verify_or_reuse.py")
 
+    def test_ci_installs_claude_skills_for_the_claude_copy_comparison(self) -> None:
+        # Without GHOST_ALICE_INSTALLED_CLAUDE_DIR the Claude copy test below skips in CI;
+        # without the Claude install it fails.
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("bash ./install.sh --platform claude --skip-source-health", workflow)
+        self.assertIn("GHOST_ALICE_INSTALLED_CLAUDE_DIR: ${{ runner.temp }}/ghost-alice-ci-home/.claude", workflow)
+
     def _check_installed_skill(self, skills_dir: Path) -> None:
         installed = skills_dir / "verification-before-completion"
         for rel in self.FILES:

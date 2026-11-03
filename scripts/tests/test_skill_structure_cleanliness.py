@@ -1,6 +1,8 @@
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -36,6 +38,29 @@ class SkillStructureCleanlinessTest(unittest.TestCase):
         issues = payload.get("issues", [])
         self.assertEqual(payload.get("error_count"), 0, msg=json.dumps(issues, ensure_ascii=False, indent=2))
         self.assertEqual(payload.get("warning_count"), 0, msg=json.dumps(issues, ensure_ascii=False, indent=2))
+
+    def test_no_marker_or_option_lowers_an_error_finding(self) -> None:
+        # An empty root has ERROR findings, and a pull request marker such as [wip] must not lower them to WARNING.
+        with tempfile.TemporaryDirectory() as empty_root:
+            marked = subprocess.run(
+                [sys.executable, "scripts/validate_skills.py", "--repo-root", empty_root, "--json"],
+                cwd=ROOT,
+                env={**os.environ, "GITHUB_PR_TITLE": "[wip] [skill-draft] [skip-calls-check]"},
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        self.assertEqual(marked.returncode, 2, msg=marked.stderr + marked.stdout)
+        self.assertGreater(json.loads(marked.stdout)["error_count"], 0)
+        rejected = subprocess.run(
+            [sys.executable, "scripts/validate_skills.py", "--escape-hatch"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(rejected.returncode, 2)
+        self.assertIn("unrecognized arguments: --escape-hatch", rejected.stderr)
 
     def test_skill_bodies_do_not_keep_non_operational_history_or_personal_traces(self) -> None:
         forbidden = {
