@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Observe native response assessment without starting a second response.
+"""Compare the native answer with its recorded review, return the notice text for the host to show, and let the host stop.
 
 Core authenticates proof independently. A Stop event is not a submission port:
-its continuation decision starts another model input rather than holding output.
+its continuation decision starts another model input rather than holding output,
+so this script never asks the host to block, add context or retry.
 """
 from __future__ import annotations
 import argparse
@@ -13,17 +14,8 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_completion import assess_native_completion
-from native_transcript import assistant_text_this_turn as _assistant_text_this_turn, stop_response_text
-
-NATIVE_SESSION_KEYS = ('session_id', 'sessionId', 'thread_id', 'threadId')
-
-
-def _native_source(platform: str, hook_input: dict[str, Any]) -> dict[str, str]:
-    """Bind the assessment to the session the host named; an unnamed session stays empty, never guessed."""
-    session = next((hook_input[key] for key in NATIVE_SESSION_KEYS
-                    if isinstance(hook_input.get(key), str) and hook_input[key].strip()), '')
-    return dict(os.environ, GHOST_ALICE_PLATFORM=platform, GHOST_ALICE_SESSION_ID=session)
+from native_transcript import assistant_text_this_turn as _assistant_text_this_turn  # noqa: F401
+from stop_notice import ENV_FILE, ensure_stop_notice
 
 
 def _read_hook_input() -> dict[str, Any]:
@@ -50,19 +42,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument('--platform', choices=('claude', 'codex'), default='claude')
     args = parser.parse_args()
-    native_input = _read_hook_input()
-    text = stop_response_text(native_input)
-    if not text.strip():
-        print(json.dumps({'continue': True}))
-        return 0
-    source = _native_source(args.platform, native_input)
-    assessment = assess_native_completion(source, text=text, phase='final', native_input=native_input)
-    # The wrapper retains this structured result in its strict audit and sends
-    # only the native envelope to the host. No response is promoted by this log.
-    observation = {key: assessment.get(key) for key in
-        ('input_event_id', 'body_digest', 'body_issue', 'repair_target')}
-    observation['status'] = 'unaccepted' if assessment['body_issue'] else 'no-issue'
-    print(json.dumps({'continue': True, 'response_assessment': observation}, ensure_ascii=False))
+    # The script records the message only at the path the hook runner sets in GHOST_ALICE_STOP_NOTICE_FILE.
+    message = ensure_stop_notice(args.platform, _read_hook_input(), os.environ, os.environ.get(ENV_FILE))
+    output: dict[str, Any] = {'continue': True, 'stop_notice': message}
+    if message['state'] == 'notice':
+        output['systemMessage'] = message['text']
+    # The runner sends the host only continue and systemMessage, and keeps this whole output in the hook log.
+    print(json.dumps(output, ensure_ascii=False))
     return 0
 
 

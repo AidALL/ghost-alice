@@ -35,7 +35,7 @@ if "--binding-b64" in sys.argv:
         raise SystemExit(126)
 
 import agent_visibility_policy
-from hook_definitions import normalize_hook_id
+from hook_definitions import CORE_HOOK_IDS, normalize_hook_id
 import runtime_config
 import work_impact_projection
 import strict_session_log
@@ -886,6 +886,22 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     # including installed interpreters outside the child's PATH.
     if not child_env.get("GHOST_ALICE_PYTHON"):
         child_env["GHOST_ALICE_PYTHON"] = sys.executable
+    stop_notice_failure = None
+    # Only the runner names the notice file, and only for this Stop; an inherited value never reaches a hook.
+    child_env.pop("GHOST_ALICE_STOP_NOTICE_FILE", None)
+    if _event_name(hook_payload, env) == "Stop":
+        # Core code's Stop script records this Stop's notice message at this path. Before an add-on Stop hook,
+        # the runner builds that message and records it there first unless the file already holds it.
+        try:
+            import stop_notice
+            notice = stop_notice.notice_path(env, hook_payload, _platform_name(env))
+            if normalize_hook_id(hook_id) not in CORE_HOOK_IDS:
+                stop_notice_failure = stop_notice.ensure_stop_notice(
+                    _platform_name(env), hook_payload, env, notice).get("file_error")
+            if stop_notice_failure is None:
+                child_env[stop_notice.ENV_FILE] = str(notice)
+        except Exception as error:  # noqa: BLE001 - Ghost-ALICE's own step fails without stopping the hook
+            stop_notice_failure = f"{type(error).__name__}: {error}"
     started = time.perf_counter()
     result = subprocess.run(
         argv,
@@ -933,6 +949,8 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     )
     if native_intake_failure is not None:
         item['native_intake_failure'] = native_intake_failure
+    if stop_notice_failure is not None:
+        item['stop_notice_failure'] = stop_notice_failure
     model_surface_output = _render_model_surface(item, host_stdout, result.stderr)
     native_stdout = _native_protocol_output(host_stdout, hook_id=hook_id)
     user_stdout, user_stderr = _render_user_surface(item, native_stdout, result.stderr)

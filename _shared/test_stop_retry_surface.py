@@ -160,7 +160,7 @@ class StopRetrySurfaceTests(unittest.TestCase):
     def test_unmarked_closure_prose_is_not_a_submission(self):
         payload = self.run_hook([prompt("Fix it."), reply(UNMARKED_CLOSURE)], "claude-desktop", record_review=False)
         assert_stop_observation(self, payload)
-        self.assertNotIn("response_assessment", json.dumps(payload).replace('"response_assessment": {"input_event_id"', ''))
+        self.assertEqual(set(payload), {"continue", "stop_notice"})
 
     def test_repeated_defects_remain_unaccepted_without_retry_notice_or_replay(self):
         for platform in ("claude", "codex"):

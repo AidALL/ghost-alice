@@ -1,6 +1,6 @@
 # Response Review
 
-Core Python code selects admitted execution criteria from the current route, owner, work-unit ID and contract revision. Core code records the response model's review of a response against those criteria and its original sources; the Stop observer validates the delivered text against that record.
+Core Python code selects admitted execution criteria from the current route, owner, work-unit ID and contract revision. Core code records the response model's review of a response against those criteria and its original sources; Core code's Stop script compares the delivered text with that record.
 
 ## Authority and route prerequisites
 
@@ -96,7 +96,7 @@ Supply the original raw timestamp through `--verified-at`; Core code retains tha
 
 A recording-only error is retained without blocking Stop or requesting answer resubmission. Changed claims remain subject to Core verification.
 
-Native Stop observes the native response. Core code's observer returns `continue: true` and preserves raw `response_assessment.body_issue` in strict audit. It sends no review-retry, route-repair or visibility-recovery prompt and does not hold or replace desktop output. Core code selects the body through `native_transcript.completion_scope()`, prioritizing inline text and requiring native ownership for transcript fallback. A Stop observation does not establish that the user saw the answer.
+Core code's Stop script compares the native response with its recorded review and builds one Stop notice message for the current input and answer. It records the message at the path the hook runner sets in the environment variable `GHOST_ALICE_STOP_NOTICE_FILE`, `stop-notice.json` in the session folder next to the hook log, and returns `continue: true`. The script also returns the notice text as `systemMessage` when the message reports at least one of four things: a claim the recorded review does not support; an issue found while checking the answer; a criterion a partial-completion block leaves unresolved; or remaining work the response model declared in the route. As remaining work, the script lists only the rows the response model declared in the route registered for the current input; a criterion that is unmet in the ledger but named by no declared row does not appear. The Stop script sends no review-retry, route-repair or visibility-recovery prompt and does not hold or replace desktop output. Before an add-on Stop hook runs, the hook runner builds this Stop's message and records it in that file unless the file already holds the same message. Core code selects the body through `native_transcript.stop_response_text()`, prioritizing inline text and requiring native ownership for transcript fallback. The Stop notice does not establish that the user saw the answer.
 
 Do not invoke Stop to obtain a read-only status. For current criterion state, use the receipt-bound `session_intent_ledger.py --read-state --pointer /acceptance_criteria/<index>` procedure; a `met` criterion alone does not establish host delivery. Reuse supplied native events when available; a new delivery lookup requires a user-authorized inspection task.
 

@@ -66,6 +66,11 @@ flowchart TD
   R -->|설명만 하는 답변| D["응답 모델: 답변 제출"]
   C -->|상태와 참조| D
   D --> H["네이티브 호스트: 답변 표시"]
+  H -->|Stop 이벤트| SR["Core Stop 스크립트: 답변을 기록된 검토와 대조하고<br/>이번 Stop의 안내 메시지를 stop-notice.json에 기록"]
+  SR --> S{"메시지에 뒷받침되지 않는 주장, 대조에서 찾은 문제,<br/>미해결 기준, 선언된 남은 작업이 있습니까?"}
+  S -->|예| N["Core Stop 스크립트: 안내 글을 systemMessage로 반환,<br/>호스트가 답변 뒤에 표시"]
+  S -->|아니요| E["네이티브 호스트: 정지"]
+  N --> E
 ```
 
 모델은 다음 판단 대상을 선택합니다. micro는 개별 결과, meso는 하위 작업이나 대응 관계, macro는 통합 결과와 의존 관계, meta는 필요성이나 전제를 가리킵니다. 작업 복잡도 수준은 일의 검증 부담에서 정해지며, 근거가 전체 완료나 부분 완료를 뒷받침하는지는 따로 판단합니다. 불일치는 조사의 출발점이며 원인을 확정하지 않습니다. 미해결 조건은 그 조건에 의존하는 주장이나 작업을 막지만, 그 조건에 의존하지 않는 승인된 작업은 계속할 수 있습니다. 위키의 [검증과 증거](https://github.com/AidALL/ghost-alice/wiki/검증과-증거) 페이지가 이 판단을 설명합니다.
@@ -94,9 +99,15 @@ sequenceDiagram
   opt Claude의 PreToolUse나 Stop
     R->>R: Claude 대화 기록으로 세션의 입력 가운데 사용자가 입력한 것을<br/>의도 원장에 확정<br/>실패하면 원장에, 그렇지 못하면 훅 로그에 실패를 기록하고 훅은 계속 실행
   end
+  opt Stop
+    R->>R: 애드온 Stop 훅이면 먼저 이번 Stop의 안내 메시지를 생성하고,<br/>세션 폴더의 stop-notice.json에 같은 메시지가 없으면 기록<br/>모든 Stop 훅에 환경 변수 GHOST_ALICE_STOP_NOTICE_FILE로 그 파일의 전체 경로를 전달<br/>실패하면 훅 로그에 실패를 기록하고, 훅은 환경 변수 없이 실행
+  end
   R->>C: Core 훅 스크립트에 이벤트 JSON을 전달해 실행
   opt 스크립트가 원장 기록이나 출처 연결 확인을 요구함
     C->>C: 의도 원장 조회·기록, 또는 출처와 현재 입력의 연결 확인
+  end
+  opt Core Stop 스크립트
+    C->>C: 답변을 기록된 검토와 대조하고, 이번 Stop의 안내 메시지를 stop-notice.json에 기록<br/>메시지의 state가 notice이면 안내 글을 systemMessage로 반환
   end
   C-->>R: 출력, 진단, 종료 코드
   R->>R: 호스트가 받는 반환 필드만 유지<br/>차단·정지·권한 결정 필드 삭제<br/>차단·정지·거부·사용자 확인 요청은 systemMessage로 알림
@@ -119,7 +130,36 @@ sequenceDiagram
   end
 ```
 
-Stop에서 Core 코드의 Stop 훅은 답변을 기록된 검토와만 대조합니다. 훅 로그가 그 평가를 보관하고, 실행기는 Stop 안내를 사용자에게도 애드온에도 전달하지 않습니다.
+Stop에서 Core 코드의 Stop 스크립트는 답변을 기록된 검토와 대조하고, 현재 입력과 답변에 대한 Stop 안내 메시지 하나를 생성합니다. 스크립트는 실행기가 환경 변수 `GHOST_ALICE_STOP_NOTICE_FILE`에 설정한 경로, 곧 훅 로그가 있는 세션 폴더 `~/.ghost-alice/session-logs/<host>/<session>/`의 `stop-notice.json`에 메시지를 기록합니다. 스크립트는 `continue: true`를 반환합니다. 메시지가 다음 네 가지 가운데 하나라도 알리면 메시지의 `state`는 `notice`입니다: 기록된 검토가 뒷받침하지 않는 주장, 답변을 대조하며 찾은 문제, 부분 완료 블록이 미해결로 남긴 기준, 응답 모델이 응답 경로에 선언한 남은 작업. 이때 스크립트는 안내 글을 `systemMessage`로도 반환하고, 호스트는 그 글을 답변 뒤에 표시합니다. 네 가지가 하나도 없는 답변이면 메시지의 `state`는 `quiet`이고, 스크립트는 `systemMessage`를 반환하지 않습니다. 완료 블록과 선언된 남은 작업이 없고 그 입력에 기록된 검토도 없는 설명 답변이 그런 답변입니다. 스크립트는 현재 입력에 대해 등록된 응답 경로에서 응답 모델이 선언한 항목만 남은 작업으로 작성합니다. 원장에서 상태가 `unmet`인 기준이라도 선언된 항목이 그 기준을 가리키지 않으면 남은 작업에 작성하지 않습니다. 안내 글의 고정 문구는 영어입니다. 스크립트는 응답 모델이 작성한 주장, 미해결 이유, 선언된 항목의 이유와 다음에 요구되는 정보를 수정 없이 안내 글에 작성하고, 주장은 처음 160자까지 작성합니다. 안내 글의 예입니다.
+
+```text
+Ghost-ALICE Stop notice: the recorded review does not support 1 of 2 claims.
+- Not supported (criterion c2): the report was checked
+- Remaining work: unknown; the response model made no declaration for this input
+```
+
+실행기는 애드온 Stop 훅을 실행하기 전에 같은 Core 코드로 이번 Stop의 메시지를 생성하고, 파일에 같은 메시지가 기록되어 있지 않으면 그 메시지를 기록합니다. 이어서 실행기는 파일의 전체 경로를 환경 변수 `GHOST_ALICE_STOP_NOTICE_FILE`에 담아 애드온의 스크립트를 실행합니다. 호스트는 한 이벤트의 Stop 훅들의 실행 순서를 보장하지 않습니다. Claude Code는 이 훅들을 병렬로 실행합니다. Core 코드의 Stop 스크립트와 애드온 훅의 실행기는 같은 Stop 이벤트 JSON과 같은 원장으로 메시지를 생성합니다. 그 JSON에 답변 글이 들어 있으면 두 메시지가 같으므로, 먼저 실행된 쪽이 메시지를 기록하고, 나중에 실행된 쪽은 파일에서 같은 메시지를 조회하고 파일을 변경하지 않습니다. 애드온 인스톨러는 애드온 훅을 PostToolUse와 SessionStart에만 등록하므로, 설치된 Ghost-ALICE에는 애드온 Stop 훅이 없습니다.
+
+```mermaid
+sequenceDiagram
+  participant H as 네이티브 호스트
+  box Ghost-ALICE
+    participant RC as Core Stop 훅의 실행기
+    participant CS as Core Stop 스크립트
+    participant F as stop-notice.json
+    participant RA as 애드온 Stop 훅의 실행기
+  end
+  participant A as 애드온 스크립트
+  H->>RC: Stop 이벤트 JSON
+  H->>RA: 같은 Stop 이벤트 JSON, 병렬 실행
+  RC->>CS: 파일의 전체 경로를 환경 변수<br/>GHOST_ALICE_STOP_NOTICE_FILE에 담아 스크립트 실행
+  CS->>F: 이번 Stop의 메시지를 생성하고, 파일에 없으면 기록
+  CS-->>RC: continue true, 메시지의 state가 notice이면<br/>안내 글을 담은 systemMessage
+  RC-->>H: continue true, 스크립트가 반환한 systemMessage
+  RA->>F: 이번 Stop의 메시지를 생성하고, 파일에 없으면 기록
+  RA->>A: 파일의 전체 경로를 환경 변수<br/>GHOST_ALICE_STOP_NOTICE_FILE에 담아 애드온 스크립트 실행
+  A->>F: 메시지 조회
+```
 
 ## 답변 종료 경계
 
@@ -130,7 +170,7 @@ flowchart TD
   R["현재 요청의 작업 수행과 결과 판단"] --> N{"지금 진행 가능한 필수 후속 작업이 있는가?"}
   N -->|아니오| A["답변: 근거가 뒷받침하는 결과와 미해결 조건"]
   N -->|예| B["답변 + 추천하는 추가 작업"]
-  A --> D["호스트가 답변 표시; Core 응답 종료"]
+  A --> D["호스트가 답변을 표시합니다. Stop 안내 메시지의 state가 notice이면<br/>Core Stop 스크립트가 안내 글을 반환하고, 호스트가 그 글을 표시합니다. 호스트는 정지합니다"]
   B --> D
 ```
 
@@ -174,7 +214,7 @@ flowchart LR
 
 ## 근거와 네이티브 표시
 
-모델은 각 주장을 원본 근거와 비교하는 판단과 답변 전체를 사용자 목적·제약에 비추어 평가하는 판단을 구분하여 수행합니다. Core 코드는 소유권·입력 연결·출처 무결성을 인증하며, 식별자와 해시가 의미적 진실을 결정하지는 않습니다. 네이티브 호스트가 모델의 답변을 표시합니다. Core 코드의 Stop 훅은 제출된 검토 기록을 검사하며 누락된 판단을 만들거나 다음 작업을 예약하지 않습니다.
+모델은 각 주장을 원본 근거와 비교하는 판단과 답변 전체를 사용자 목적·제약에 비추어 평가하는 판단을 구분하여 수행합니다. Core 코드는 소유권·입력 연결·출처 무결성을 인증하며, 식별자와 해시가 의미적 진실을 결정하지는 않습니다. 네이티브 호스트가 모델의 답변을 표시합니다. Core 코드의 Stop 스크립트는 답변을 기록된 검토와 대조하며, 누락된 판단을 생성하거나 다음 작업을 예약하지 않습니다.
 
 [검증 절차](coding-convention/verification-before-completion/SKILL.md)는 근거 선택과 완료 주장을 소유합니다. 그 [답변 검토 절차](coding-convention/verification-before-completion/references/response-review.md#prepare-and-record-the-response-review)는 기록의 인계를 소유합니다. 다른 문서는 명령을 복제하지 않고 해당 절차를 참조합니다.
 
@@ -182,4 +222,4 @@ flowchart LR
 
 ## 필요한 작업의 선언
 
-응답 모델은 현재 요구되는 미처리 작업, 그 이유, 다음에 요구되는 정보를 Core 코드가 저장하는 응답 경로에 선언합니다. Core 코드는 선택된 기준·현재 사용자 입력·선언된 경계·원본 참조를 인증하며 원문을 복사하지 않습니다. 원본이 변경되면 Core 코드는 그 원본에 의존하는 피드백 항목만 보류하고, 작업과 근거는 보존합니다. Core 코드는 이 선언을 기록할 뿐 선언된 작업을 예약하지 않습니다. 그 작업은 사용자의 다음 요청으로만 시작됩니다.
+응답 모델은 현재 요구되는 미처리 작업, 그 이유, 다음에 요구되는 정보를 Core 코드가 저장하는 응답 경로에 선언합니다. Core 코드는 선택된 기준·현재 사용자 입력·선언된 경계·원본 참조를 인증하며 원문을 복사하지 않습니다. 원본이 변경되면 Core 코드는 그 원본에 의존하는 피드백 항목만 보류하고, 작업과 근거는 보존합니다. Core 코드는 이 선언을 기록할 뿐 선언된 작업을 예약하지 않습니다. 그 작업은 사용자의 다음 요청으로만 시작됩니다. Core 코드의 Stop 스크립트는 선언된 항목을 Stop 안내 메시지에 작성합니다. 호스트는 안내 글로 그 항목을 표시하고, 누구나 `stop-notice.json`에서 그 항목을 조회할 수 있습니다.

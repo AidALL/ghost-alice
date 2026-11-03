@@ -9,6 +9,7 @@ immutable source checkout to compare a baseline without changing installed files
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import itertools
 import json
 import os
@@ -128,14 +129,14 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
 
     def assert_unaccepted(self, payload):
         self.assert_allow(payload)
-        observation = payload.get("response_assessment", {})
-        self.assertEqual(observation.get("status"), "unaccepted")
-        self.assertTrue(observation.get("body_issue"))
-        self.assertNotIn("systemMessage", payload)
+        message = payload.get("stop_notice", {})
+        self.assertEqual(message.get("state"), "notice")
+        self.assertTrue(message.get("issues"))
+        self.assertEqual(payload.get("systemMessage"), message.get("text"))
 
     def assert_diagnostic(self, payload):
         self.assert_unaccepted(payload)
-        self.assertEqual(payload['response_assessment']['repair_target'], 'completion_metadata')
+        self.assertEqual(payload['stop_notice']['issues'][0]['repair_target'], 'completion_metadata')
         self.assertNotIn('reason', payload)
 
     def bind_review(self, platform, text, env, *, purpose=None, session='fixture-stop', ledger_root=None):
@@ -335,7 +336,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
             with self.subTest(platform=platform, previous_valid=previous_valid, new_turn=new_turn, boundary=boundary):
                 payload = self.stop(platform, None, entries=[prompt(), skill(), reply(previous), boundary])
                 self.assert_allow(payload)
-                self.assertNotIn("response_assessment", payload)
+                self.assertEqual(payload["stop_notice"]["body_digest"], "sha256:" + hashlib.sha256(b"").hexdigest())
+                self.assertNotIn("systemMessage", payload)
 
     def test_recovery_never_forces_business_replay_for_any_configured_host(self):
         for platform, profile, host, defect in itertools.product(PLATFORMS, PROFILES, HOSTS,
@@ -425,9 +427,9 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 rows = self.strict_rows(home, platform, session)
                 self.assertEqual(len(rows), len(scenarios))
                 self.assertTrue(all(row["hook_id"] == "completion" and row["event"] == "Stop" for row in rows))
-                diagnostic = json.loads(rows[1]["stdout"])["response_assessment"]
-                self.assertEqual(diagnostic["status"], "unaccepted")
-                self.assertTrue(diagnostic["body_issue"])
+                diagnostic = json.loads(rows[1]["stdout"])["stop_notice"]
+                self.assertEqual(diagnostic["state"], "notice")
+                self.assertTrue(diagnostic["issues"])
 
     def test_installed_checkpoint_retains_block_data_without_widening_current_admission(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):

@@ -51,20 +51,34 @@ def reply(text):
     return {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}]}}
 
 
+def stop_issue(payload):
+    """The first issue the Stop notice message records, or an empty text."""
+    return next((issue['detail'] for issue in payload['stop_notice']['issues']), '')
+
+
 def assert_stop_observation(case, payload, *, issue=None, repair_target=None):
-    """Stop transport must not substitute for acceptance of the observed body."""
+    """Stop informs and stops: no control or context field, and the notice text only when the message has one."""
     case.assertIs(payload.get('continue'), True)
-    for key in ('decision', 'reason', 'systemMessage'):
+    for key in ('decision', 'reason', 'stopReason', 'additionalContext', 'hookSpecificOutput'):
         case.assertNotIn(key, payload)
-    observation = payload['response_assessment']
-    case.assertEqual(observation['status'], 'unaccepted' if issue else 'no-issue')
-    if issue:
-        case.assertIn(issue, observation['body_issue'])
+    message = payload['stop_notice']
+    case.assertEqual(message['schema_version'], 'stop-notice.v1')
+    if message['state'] == 'notice':
+        case.assertEqual(payload.get('systemMessage'), message['text'])
     else:
-        case.assertIsNone(observation['body_issue'])
+        case.assertNotIn('systemMessage', payload)
+    details = [entry['detail'] for entry in message['issues']]
+    if issue:
+        case.assertEqual(message['state'], 'notice')
+        case.assertTrue(any(issue in detail for detail in details), details)
+    else:
+        case.assertEqual(details, [])
+        case.assertEqual(message['unsupported_claims'], [])
     if repair_target is not None:
-        case.assertEqual(observation['repair_target'], repair_target)
-    return observation
+        case.assertEqual(message['issues'][0]['repair_target'], repair_target)
+    return dict(status='unaccepted' if details else 'no-issue', body_issue=details[0] if details else None,
+                repair_target=message['issues'][0]['repair_target'] if details else None,
+                input_event_id=message['input_event_id'], body_digest=message['body_digest'])
 
 
 class ValidatorOptionTests(unittest.TestCase):
@@ -116,12 +130,15 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
     @staticmethod
     def _review_format_fixture(root, platform, text, env, review_verdict="supported", *,
                                session_id="fixture-stop", ledger_root=None, core_root=None,
-                               record_review=True, input_text='Synthetic protocol fixture'):
+                               record_review=True, input_text='Synthetic protocol fixture',
+                               claim_verdicts=None, continuation_feedback=None):
         """Give native protocol cases explicit synthetic reviewed observations.
 
         These cases isolate host protocol, not semantic review quality. Missing,
         unsupported and changed reviews are exercised by NativeProofBindingTests.
         No original application checks or real session records are touched.
+        claim_verdicts sets each claim's verdict in binding order; continuation_feedback
+        is stored with the route as the response model's declared remaining work.
         """
         try:
             proof = validator.extract_original_proof(text)
@@ -144,6 +161,8 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
         route['work_units'][0]['owner'] = owner
         route['selected_criteria'] = [dict(work_unit_id='first', contract_revision=1,
                                           criterion_id=key) for key in ids]
+        if continuation_feedback is not None:
+            route['continuation_feedback'] = continuation_feedback
         fixtures.ledger.record_response_route(**coords, expected_input_event_id=event,
             candidate=route, boundary_ref='synthetic-protocol')
         source = dict(GHOST_ALICE_CORE_ROOT=str(core_root or HOOK.parent.parent),
@@ -159,10 +178,11 @@ class StopHookSkillEvidenceTests(unittest.TestCase):
                         if parsed is not None else dict(claim_statements=[text]))
         candidate = prepare_response_review(source, response_text=text,
             source_paths=[str(observation)], **review_inputs)
+        verdicts = claim_verdicts or ['supported'] * len(candidate['bindings'])
         claims = [dict(binding_id=b['binding_id'],
-            source_ids=[candidate['sources'][0]['source_id']], verdict='supported',
+            source_ids=[candidate['sources'][0]['source_id']], verdict=verdict,
             rationale='The explicit synthetic fixture supplies this observation for host protocol testing.')
-            for b in candidate['bindings']]
+            for b, verdict in zip(candidate['bindings'], verdicts)]
         record_response_review(source, candidate['candidate_reference'], dict(claims=claims,
             response=dict(binding_id=candidate['response_binding']['binding_id'],
                 source_ids=[candidate['sources'][0]['source_id']], verdict=review_verdict,
