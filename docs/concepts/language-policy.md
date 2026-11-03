@@ -1,6 +1,6 @@
 # Language Policy
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/concepts/language-policy.md)
+[🇺🇸 English](./language-policy.md) | [🇰🇷 한국어](../ko/concepts/language-policy.md)
 
 Ghost-ALICE OS uses English as the default repository entry language and maintains Korean counterparts for reader-facing documentation.
 
@@ -10,7 +10,7 @@ English remains the primary coordination language for code, schemas, control tok
 
 - Keep English as the default entry path for the repository.
 - Maintain Korean counterparts under `docs/ko/` for reader-facing repository documentation.
-- Keep each paired document connected with a language switch near the top. Write the switch label in the other language so that a reader who cannot read the page can still find it: English documents use `언어: 🇺🇸 English | [🇰🇷 한국어](…)` and Korean documents use `Language: [🇺🇸 English](…) | 🇰🇷 한국어`. The current language is plain text and the other language is the link.
+- Keep each paired document connected with a language switch line directly below its title; a Wiki page starts with that line. Both editions carry the same two labels in the same order with no prefix: `[🇺🇸 English](…) | [🇰🇷 한국어](…)`. The English label links to the English edition and the Korean label to the Korean edition, by a path relative to the current file in the repository and by page name on the Wiki, so a reader can move between the two editions from either page.
 - In English documents, link internally to English documents by default.
 - In Korean documents, link internally to Korean counterparts when a counterpart exists.
 - Keep runtime contracts and executable behavior in the main repository.

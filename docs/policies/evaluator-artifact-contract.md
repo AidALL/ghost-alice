@@ -1,8 +1,8 @@
 # Evaluator Artifact Contract
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/evaluator-artifact-contract.md)
+[🇺🇸 English](./evaluator-artifact-contract.md) | [🇰🇷 한국어](../ko/policies/evaluator-artifact-contract.md)
 
-This artifact contract applies to claims that adversarial-verification reviewed at level-3-high-stakes, intake of external agent-governance logic, and RAG/evaluator-driven improvement candidates. It preserves promotable evidence together with rejected candidates.
+This artifact contract applies to claims that adversarial-verification reviewed at level-3-high-stakes, intake of external agent-governance logic, and RAG/evaluator-driven improvement candidates. It requires that promotable evidence and rejected candidates both be preserved.
 ## Contents
 
 - [Applicability](#applicability)

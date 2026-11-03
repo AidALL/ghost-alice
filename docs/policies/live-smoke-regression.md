@@ -1,6 +1,6 @@
 # Live Smoke Regression
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/live-smoke-regression.md)
+[🇺🇸 English](./live-smoke-regression.md) | [🇰🇷 한국어](../ko/policies/live-smoke-regression.md)
 
 This procedure runs the same small request in real agent runtimes to verify that hook, gate, permission, and completion contracts are alive. Automated unit tests cover hook payload and file contracts; this smoke closes the final connection on the actual session surface.
 ## Contents
@@ -65,7 +65,7 @@ Each smoke record captures whether these signals were observed:
 | Automated blind screening | Evaluate an installed subject on a held-out authentic prompt in a fresh session. | Only the prompt and ordinary runtime context are visible. | Repeatable behavior screening; evaluator purpose, rubric, expected answer, pass criteria, prior output, and experiment label stay private. |
 | Manual clean-terminal acceptance | A human runs the held-out case in a newly opened terminal after canonical installation. | Only the authentic request is given to the subject. | Final live acceptance gate. Computer Use must not automate this terminal. |
 
-Automated blind screening uses only direct-process transport. Its controller and subject packets are structurally separate, and subject output stays in memory until a separate evaluator returns a verdict. Missing or invalid evaluator state is a non-pass. The controller loads the sealed case file itself, computes a digest of the exact loaded bytes plus a canonical hash of the validated case, and rejects caller-supplied freshness, isolation, or digest fields. Installed provenance comes only from the schema-version-1 installer state at `~/.ghost-alice/install-state/<platform>.json`; caller or subject self-attestation is not provenance.
+Automated blind screening uses only direct-process transport. Its controller and subject packets are structurally separate. The controller writes the subject response to `subject-response.txt` in its run directory under `.tmp/runs/` before it starts a separate evaluator; a passing verdict deletes that directory, and every other evaluator outcome keeps it with the evaluator's stdout, stderr and failure stage for diagnosis. Missing or invalid evaluator state is a non-pass. The controller loads the sealed case file itself, computes a digest of the exact loaded bytes plus a canonical hash of the validated case, and rejects caller-supplied freshness, isolation, or digest fields. Installed provenance comes only from the schema-version-1 installer state at `~/.ghost-alice/install-state/<platform>.json`; caller or subject self-attestation is not provenance.
 
 ## Smoke Record
 
@@ -109,7 +109,7 @@ The blind record is a separate schema from the governance-smoke summary. It may 
 
 Persisted dimension keys are constrained opaque ids. Criterion text remains evaluator-private and is never used as a durable dimension key.
 
-`_shared/blind_behavior.py` is the dedicated automated screening path; blind evaluation is not a mode of `_shared/live_agent_smoke.py`. The controller validates the loaded case and evaluator-private types, then delegates subject execution to `_shared/fresh_agent_session.py`, which alone constructs the Claude no-persistence or Codex ephemeral command, rejects resume/session arguments, and creates the empty run cwd. It sends only the authentic prompt over subject stdin, adds no case/private argv, and passes only ordinary runtime values plus `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when configured; rubric, purpose, expected-answer, and controller-private environment values are stripped. The controller holds the response in memory and sends it plus private state to a separate evaluator process.
+`_shared/blind_behavior.py` is the dedicated automated screening path; blind evaluation is not a mode of `_shared/live_agent_smoke.py`. The controller validates the loaded case and evaluator-private types, then delegates subject execution to `_shared/fresh_agent_session.py`, which alone constructs the Claude no-persistence or Codex ephemeral command, rejects resume/session arguments, and creates the empty run cwd. It sends only the authentic prompt over subject stdin, adds no case/private argv, and passes only ordinary runtime values plus `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when configured; rubric, purpose, expected-answer, and controller-private environment values are stripped. The controller sends the prompt, the response and the private state to a separate evaluator process.
 
 Subject or evaluator timeout, non-zero exit, empty subject response, malformed evaluator output, invalid evaluator state, and overall/dimension disagreement all fail closed and emit no conduct-feedback candidate. Only an evaluator-confirmed behavioral failure emits exactly one canonical report-only candidate. An optional record write is atomic and persists only the sanitized record, never the candidate or controller-private material.
 

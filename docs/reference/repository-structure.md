@@ -1,6 +1,6 @@
 # Repository Structure
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/repository-structure.md)
+[🇺🇸 English](./repository-structure.md) | [🇰🇷 한국어](../ko/reference/repository-structure.md)
 
 This document is the repository map.
 ## Contents
@@ -53,9 +53,9 @@ For the full installer architecture, read [installer architecture](./installer-a
 | --- | --- |
 | [session-intent-analyzer/](https://github.com/AidALL/ghost-alice/tree/main/session-intent-analyzer) | Records compressed user-intent facts and decisions through the session intake procedure |
 | [task-router/](https://github.com/AidALL/ghost-alice/tree/main/task-router) | Consumes exact session intent and selects current work and skills |
-| [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | Work boundary contract gate |
+| [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | Gate that writes the work's boundary contract: objective, allowed and prohibited paths and actions, done conditions, phase and stop conditions |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | Development workflow family |
-| [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | Generated gate metadata used by the runtime |
+| [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | The skill catalog `skills.json` generated from each `SKILL.md` frontmatter and its schema `schema.json`, the hand-maintained gate and adapter metadata `session-gates.json` and `platform-adapters.json`, and the addon manifest schema `addon-schema.json` |
 | [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Single Core assessment read by the Stop observer |
 
 ## Official Docs And Policies
@@ -63,7 +63,8 @@ For the full installer architecture, read [installer architecture](./installer-a
 | Path | Role |
 | --- | --- |
 | [official-docs/derived/](https://github.com/AidALL/ghost-alice/tree/main/official-docs/derived) | Public contributor compliance procedures; long-form philosophy lives in the Wiki |
-| [docs/policies/](https://github.com/AidALL/ghost-alice/tree/main/docs/policies) | Runtime, platform, and evaluator policy documents |
+| [docs/policies/](https://github.com/AidALL/ghost-alice/tree/main/docs/policies) | English runtime, platform, and evaluator policy documents |
+| [docs/ko/policies/](https://github.com/AidALL/ghost-alice/tree/main/docs/ko/policies) | Korean editions of the policy documents |
 
 ## Installed Runtime State
 

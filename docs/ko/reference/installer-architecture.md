@@ -1,49 +1,49 @@
-# Installer Architecture
+# 인스톨러 아키텍처
 
-Language: [🇺🇸 English](../../reference/installer-architecture.md) | 🇰🇷 한국어
+[🇺🇸 English](../../reference/installer-architecture.md) | [🇰🇷 한국어](./installer-architecture.md)
 
 이 문서는 기여자가 빠른 설치 안내에서 인스톨러 호환성 계약으로 넘어갈 때 사용하는 구조 안내입니다. 인스톨러, 훅 입력·출력, 설치 상태와 테스트 사이의 연결을 설명합니다.
 
 사용자는 [설치 안내](../getting-started/installation.md)에서 실행 절차를 확인하실 수 있습니다. 기여자는 [플랫폼 호환성 계약](../policies/installer-platform-compatibility-matrix.md)에서 요구 조건과 담당 테스트를 확인합니다.
-## Contents
+## 목차
 
 - [읽는 순서](#읽는-순서)
-- [Architecture Summary](#architecture-summary)
-- [Install Flow](#install-flow)
-- [Install Record](#install-record)
-- [Gateway Lifecycle](#gateway-lifecycle)
-- [Platform Surfaces](#platform-surfaces)
-- [State And Safety Model](#state-and-safety-model)
-- [Contributor Entry Points](#contributor-entry-points)
-- [What Not To Infer](#what-not-to-infer)
-- [Full Understanding](#full-understanding)
+- [아키텍처 요약](#아키텍처-요약)
+- [설치 흐름](#설치-흐름)
+- [설치 기록](#설치-기록)
+- [게이트웨이 생명주기](#게이트웨이-생명주기)
+- [플랫폼별 설치 항목](#플랫폼별-설치-항목)
+- [상태와 안전 모델](#상태와-안전-모델)
+- [기여자 진입점](#기여자-진입점)
+- [추론하지 않을 것](#추론하지-않을-것)
+- [전체 이해](#전체-이해)
 
 
 ## 읽는 순서
 
 1. 이 문서에서 구성 요소와 호출 방향을 파악합니다.
-2. 파일 위치는 [repository structure](./repository-structure.md)에서 찾습니다.
-3. 사용자에게 보이는 동작은 [installation](../getting-started/installation.md)과 [uninstall](../getting-started/uninstall.md)에서 확인합니다.
-4. 계약과 필요한 검증은 [installer platform compatibility](../policies/installer-platform-compatibility-matrix.md), [tool output semantics](../policies/tool-output-semantics.md), [live smoke regression](../policies/live-smoke-regression.md)에서 확인합니다.
+2. 파일 위치는 [저장소 구조](./repository-structure.md)에서 찾습니다.
+3. 사용자에게 보이는 동작은 [설치 안내](../getting-started/installation.md)와 [제거 안내](../getting-started/uninstall.md)에서 확인합니다.
+4. 계약과 검증 부담은 [인스톨러 플랫폼 호환성 매트릭스](../policies/installer-platform-compatibility-matrix.md), [도구 출력의 의미](../policies/tool-output-semantics.md), [실환경 점검 회귀 테스트](../policies/live-smoke-regression.md)에서 확인합니다.
 
-## Architecture Summary
+## 아키텍처 요약
 
-인스톨러 구성 요소는 다음 세 계층에서 역할을 나눕니다.
+인스톨러는 다음 네 계층으로 구성됩니다.
 
-| Layer | Main files | Responsibility |
+| 계층 | 주요 파일 | 책임 |
 | --- | --- | --- |
-| Shell entrypoints | `install.sh`, `install.ps1`, `install.cmd` | `install.sh`는 UTF-8 로케일을 설정하고 Python 3.11 이상을 찾거나 설치한 뒤, 사용자의 인수를 그대로 `_shared/installer/cli.py`에 넘깁니다. `install.ps1`은 PowerShell이 7.6보다 낮으면 7.6 요구 문구를 출력하고 멈춥니다. 그 밖에는 콘솔 입출력을 UTF-8로 설정하고 Python 3.11 이상을 찾거나 설치한 뒤, 예전 PowerShell 인스톨러의 매개변수 이름을 같은 뜻의 긴 옵션으로 바꾸어 모든 인수를 순서대로 같은 cli에 넘깁니다. `GHOST_ALICE_INSTALL_COMMAND`로 `.\install.cmd`를 알리므로 인스톨러의 help와 안내 문구가 Windows 명령을 씁니다. 알리지 않으면 `bash install.sh`를 씁니다. `install.cmd`는 `pwsh.exe`로, `pwsh.exe`가 없으면 `powershell.exe`로 `install.ps1`을 실행합니다 |
-| Installer package | `_shared/installer/` (`cli`, `auto`, `selection`, `addons`, `preservation`, `transaction`, `hosts`, `diagnostics`, `lifecycle`, `source`, `prerequisites`, `lock`, `report`, `locations`, `config`, `runner`) | 옵션을 해석하고 명령 표에서 명령을 고르며 플랫폼과 대상을 정합니다. 설치 단계 순서를 지키고 설치 잠금을 쥐며 보고서를 출력합니다. 파일 변경은 모두 아래 진입점을 거칩니다 |
-| Installer entry points | `_shared/install_hooks.py`, `_shared/install_transaction.py`, `_shared/install_state_writer.py`, `_shared/addon_installer.py`, `_shared/uninstall_cleanup.py`, `_shared/install_doctor.py`와 패키지가 자식 프로세스로 실행하는 다른 `_shared/*.py` 도구 | 스킬과 훅을 설치하고, 배치마다 같은 단계에서 설치 기록을 작성하고, 설치 상태를 기록합니다. 로컬 수정을 보호하고 관리 대상을 제거하며 설치를 진단합니다 |
-| Runtime surfaces | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | 설치된 스킬, 플랫폼 훅 설정, Claude·Codex 전역 부트스트랩 지침, 설치 기록, 게시 복원 자료, 설치 상태 매니페스트, 훅 기능 복원 메타데이터, 병합 대기 자료와 제거 결과를 보관합니다 |
+| 셸 진입점 | `install.sh`, `install.ps1`, `install.cmd` | `install.sh`는 UTF-8 로케일을 설정하고 Python 3.11 이상을 찾거나 설치한 뒤, 사용자의 인수를 변경 없이 `_shared/installer/cli.py`에 전달합니다. `install.ps1`은 PowerShell이 7.6보다 낮으면 7.6 요구 문구를 출력하고 종료합니다. 그 밖에는 콘솔 입출력을 UTF-8로 설정하고 Python 3.11 이상을 찾거나 설치한 뒤, 예전 PowerShell 인스톨러의 매개변수 이름을 같은 뜻의 긴 옵션으로 변환하여 모든 인수를 순서대로 같은 `cli.py`에 전달합니다. `GHOST_ALICE_INSTALL_COMMAND`에 `.\install.cmd`를 지정하므로 인스톨러의 도움말과 안내 문구는 Windows 명령을 표시합니다. 이 값이 없으면 `bash install.sh`를 표시합니다. `install.cmd`는 `pwsh.exe`로, `pwsh.exe`가 없으면 `powershell.exe`로 `install.ps1`을 실행합니다 |
+| 인스톨러 패키지 | `_shared/installer/` (`cli`, `auto`, `selection`, `addons`, `preservation`, `transaction`, `hosts`, `diagnostics`, `lifecycle`, `source`, `prerequisites`, `lock`, `report`, `locations`, `config`, `runner`) | 옵션을 해석하고 명령 표에서 명령을 선택하며 플랫폼과 대상을 결정합니다. 설치 단계 순서를 유지하고 설치 잠금을 보유하며 보고서를 출력합니다. 파일 변경은 모두 아래 진입점을 거칩니다 |
+| 인스톨러 진입점 | `_shared/install_hooks.py`, `_shared/install_transaction.py`, `_shared/install_state_writer.py`, `_shared/addon_installer.py`, `_shared/uninstall_cleanup.py`, `_shared/install_doctor.py`와 패키지가 자식 프로세스로 실행하는 다른 `_shared/*.py` 도구 | 스킬과 훅을 설치하고, 배치마다 같은 단계에서 설치 기록을 작성하고, 설치 상태를 기록합니다. 로컬 수정을 보호하고 관리 대상을 제거하며 설치를 진단합니다 |
+| 런타임 설치 항목 | `~/.claude/`, `~/.codex/`, `~/.agents/skills/`, `~/.ghost-alice/` | 설치된 스킬, 플랫폼 훅 설정, Claude·Codex 전역 부트스트랩 지침, 설치 기록, 게시 복원 자료, 설치 상태 매니페스트, 훅 기능 복원 메타데이터, 병합 대기 자료와 제거 보고서를 보관합니다 |
 
 인스톨러는 설치 파일과 훅을 갱신하면서 사용자가 수정한 파일을 보호하고 자신의 변경을 기록합니다. `status`, `doctor`, 업데이트와 제거 절차는 이 기록을 읽어 실제 설치 상태와 복원 가능한 변경을 판단합니다.
 
 설치된 훅 런타임은 같은 런타임 루트 아래에 `_shared` 모듈과 `session-intent-analyzer/scripts/session_intent_ledger.py`를 함께 포함합니다. 네이티브 훅은 이 설치본에서 원장 API와 관련 모듈을 불러옵니다. 소스 체크아웃은 설치 입력을 지정하며, 소스 편집만으로 설치된 훅의 실행 모듈이 바뀌지 않습니다. 원장 데이터베이스 경로와 네이티브 세션 식별자는 별도의 실행 입력입니다.
 
-공용 모듈 네 개는 어느 계층에도 속하지 않으므로 인스톨러, 훅 런타임과 스킬이 모두 가져올 수 있습니다. `_shared/hook_definitions.py`는 인스톨러와 훅 런타임이 함께 읽는 이름을 소유합니다. 훅 ID와 호스트 이벤트 이름, `ghost_alice_context` 제공자 이름이 여기에 있습니다. `_shared/install_lock.py`는 설치 잠금 파일과, 잠금을 이 프로세스나 이 프로세스를 실행한 부모 프로세스가 쥐었는지 판정하는 함수 하나를 소유합니다. `_shared/content_digest.py`는 설치 내용의 지문 생성과 설치 기록 항목·현재 파일의 비교를 소유합니다. `_shared/installed_payload.py`는 설치 기록을 소유합니다. 앞의 세 모듈은 표준 라이브러리만 가져오고, `installed_payload`는 `content_digest`와 `install_lock`만 가져옵니다. 런타임 모듈은 인스톨러 모듈을 가져오지 않고, 인스톨러 모듈은 런타임 모듈을 가져오지 않습니다. `_shared.test_hook_definitions`가 이 규칙들을 검사하고, `installer` 패키지의 모듈 이름이 표준 라이브러리 모듈 이름과 겹치지 않는지도 검사합니다.
+공용 모듈 네 개는 인스톨러에도 훅 런타임에도 속하지 않으므로 인스톨러, 훅 런타임과 스킬이 모두 가져올 수 있습니다. `_shared/hook_definitions.py`는 인스톨러와 훅 런타임이 공통으로 조회하는 이름을 소유합니다. 훅 ID와 호스트 이벤트 이름, `ghost_alice_context` provider 이름이 여기에 있습니다. `_shared/install_lock.py`는 설치 잠금 파일과, 잠금을 이 프로세스나 이 프로세스를 실행한 부모 프로세스가 보유했는지 판정하는 함수 하나를 소유합니다. `_shared/content_digest.py`는 설치 내용의 지문 생성과 설치 기록 항목·현재 파일의 비교를 소유합니다. `_shared/installed_payload.py`는 설치 기록을 소유합니다. 앞의 세 모듈은 표준 라이브러리만 가져오고, `installed_payload`는 `content_digest`와 `install_lock`만 가져옵니다. 런타임 모듈은 인스톨러 모듈을 가져오지 않고, 인스톨러 모듈은 런타임 모듈을 가져오지 않습니다. `_shared.test_hook_definitions`가 이 규칙들을 검사하고, `installer` 패키지의 모듈 이름이 표준 라이브러리 모듈 이름과 겹치지 않는지도 검사합니다.
 
-## Install Flow
+## 설치 흐름
 
 | 전달 주체 | 입력으로 넘기는 내용 | 다음 단계에서 사용하는 결과 |
 | --- | --- | --- |
@@ -62,7 +62,7 @@ Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달합니다. `i
 
 설치 명령은 다음 순서로 진행합니다. `installer.cli.dispatch`가 1단계를, `installer.cli.prepare_install`이 2단계를 실행하고, `installer.cli.run_command`가 잠금을 잡은 뒤, `installer.cli.run_install`이 나머지를 실행합니다. `_shared/test_installer_cli.py`가 이 순서를 고정합니다.
 
-1. 설치 원본 확인. 아무것도 바꾸기 전에 실행합니다. `installer.source.match_install_source`가 설치 기록의 `source.root`와 인스톨러가 실행되는 체크아웃을 링크를 따라간 경로로 비교합니다. 이 함수가 어느 체크아웃이 설치 원본인지 판정하는 유일한 함수입니다. `installer.source.check_install_source`는 그 결과로 진행하거나 종료합니다. 기록이 없거나, 기록에 원본이 없거나, 기록의 체크아웃이면 진행합니다. 두 번째 clone이나 git worktree 같은 다른 체크아웃은 `--adopt-source`가 있으면 진행합니다. 기록된 체크아웃이 더는 없으면(다른 경로에 다시 clone한 경우) 묻지 않고 진행합니다. 그 밖의 경우 인스톨러는 두 폴더를 출력하고, 터미널에서는 이 체크아웃으로 설치 원본을 교체할지 묻습니다(기본값 아니오). 터미널이 아니면 종료 코드 2로 종료하고 실행할 명령을 안내합니다. 자동 모드는 부모 프로세스가 한 번만 확인하고, 교체 결정을 `--adopt-source`로 자식 프로세스에 전달합니다. 기록을 읽을 수 없으면 경고를 출력하고 확인을 건너뜁니다. 명령의 첫 게시가 새 원본을 기록합니다. 애드온 소스는 이 단계 뒤에 준비합니다. `--repair`도 이 단계를 먼저 실행하지만 설치 원본을 교체하지 않습니다. 다른 체크아웃에서 실행하면 종료 코드 2로 종료하고, 설치본을 옮기는 설치 명령을 안내합니다. 명령은 잠금(3단계)을 잡은 뒤 한 번 더 비교합니다. 그래서 이 명령이 잠금을 기다리는 동안 다른 인스톨러가 원본을 바꿨다면, 바뀐 상태로 다시 판정합니다.
+1. 설치 원본 확인. 무엇이든 변경하기 전에 실행합니다. `installer.source.match_install_source`가 설치 기록의 `source.root`와 인스톨러가 실행되는 체크아웃을 링크를 따라간 경로로 비교합니다. 이 함수가 어느 체크아웃이 설치 원본인지 판정하는 유일한 함수입니다. `installer.source.check_install_source`는 그 결과로 진행하거나 종료합니다. 기록이 없거나, 기록에 원본이 없거나, 기록의 체크아웃이면 진행합니다. 두 번째 복제본이나 git worktree 같은 다른 체크아웃은 `--adopt-source`가 있으면 진행합니다. 기록된 체크아웃이 더는 없으면(다른 경로에 다시 복제한 경우) 묻지 않고 진행합니다. 그 밖의 경우 인스톨러는 두 폴더를 출력하고, 터미널에서는 이 체크아웃으로 설치 원본을 교체할지 묻습니다(기본값 아니오). 터미널이 아니면 종료 코드 2로 종료하고 실행할 명령을 안내합니다. 자동 모드는 부모 프로세스가 한 번만 확인하고, 교체 결정을 `--adopt-source`로 자식 프로세스에 전달합니다. 기록을 해석할 수 없으면 경고를 출력하고 확인을 건너뜁니다. 명령의 첫 게시가 새 원본을 기록합니다. 애드온 소스는 이 단계 뒤에 준비합니다. `--repair`도 이 단계를 먼저 실행하지만 설치 원본을 교체하지 않습니다. 다른 체크아웃에서 실행하면 종료 코드 2로 종료하고, 설치본을 이관하는 설치 명령을 안내합니다. 명령은 잠금(3단계)을 획득한 뒤 한 번 더 비교합니다. 그래서 이 명령이 잠금을 기다리는 동안 다른 인스톨러가 원본을 교체했다면, 교체된 상태로 다시 판정합니다.
 2. 선행 도구(`git`, `node`)와 git 훅 경로. 인스톨러는 저장소의 공용 `core.hooksPath`를 설치 원본 `hooks` 폴더의 절대 경로로 작성합니다([post-merge 훅](#post-merge-훅)).
 3. 설치 잠금(`~/.ghost-alice/install.lock`). 명령이 끝날 때까지 쥡니다. 인스톨러는 잠금을 생성한 직후, 저널이 `done`도 `restored`도 아닌 게시를 모두 복원합니다.
 4. 이관. 설치 기록 이관은 `~/.ghost-alice/installed-payload.json`이 없고 이전 인스톨러의 install-state가 있을 때만 실행합니다. 이전 인스톨러가 교체한 사본을 보관하던 폴더 둘(`~/.ghost-alice/install-rollbacks`, Claude 스킬 폴더의 `.ghost-alice-install-rollbacks`)은 이 단계에서 삭제합니다. 삭제하지 못한 폴더는 경고로 알리고 `~/.ghost-alice/state-retention-failures.jsonl`에 기록합니다. 그다음 소스 상태 확인, 그다음 대상 수집(핵심 스킬, `_shared`, 애드온 대상).
@@ -78,26 +78,26 @@ Windows에서는 `install.cmd`가 인수를 `install.ps1`에 전달합니다. `i
 
 git 훅 단계(2단계)는 저장소의 `core.hooksPath`를 `git config --local`로 작성하며, 값은 설치 원본 `hooks` 폴더의 절대 경로입니다. 저장소의 모든 worktree가 이 설정을 함께 조회합니다. 그래서 어느 worktree에서 merge나 pull에 성공하든 git은 설치 원본의 `hooks/post-merge`를 실행하고, 다른 체크아웃의 같은 이름 파일은 실행하지 않습니다. worktree 자신의 설정(`git config --worktree`)이 있으면 git은 그 설정을 먼저 조회합니다. `installer.source.setup_git_hooks`는 작성한 값과, Ghost-ALICE가 값을 작성하기 전의 값을 반환합니다. 호스트마다의 install-state가 두 값을 기록하고(`system_env_changes`, kind `source_repo_hook_path`), 설치 기록은 작성한 값을 `source.hooks_path`에 기록합니다. 인스톨러는 이전 인스톨러가 작성한 상대 경로 `hooks`를 이전 값 없음으로 기록합니다. 다만 같은 저장소의 체크아웃에서 그 인스톨러의 install-state가 바꾸기 전 값을 기록했으면, 인스톨러는 그 값을 이전 값으로 기록합니다. 재설치가 자기 값을 발견하면, 인스톨러는 설치본이 그 값에 기록한 이전 값을 이어서 기록합니다. 이 단계는 git 설정을 작성하는 같은 단계에서 두 값을 `~/.ghost-alice/install-state/source-repo-hook-path.json`에도 작성합니다. 그래서 install-state를 작성하기 전에 멈춘 설치도 다음 설치에 이전 값을 남깁니다. 어떤 기록도 지정하지 않은 값을 발견하면 인스톨러는 이전 값을 모르므로 install-state에 항목을 작성하지 않습니다.
 
-훅은 git이 merge한 worktree를 위해 전달한 `GIT_DIR` 같은 변수를 삭제한 뒤, 설치 원본의 `bash install.sh --post-merge --merged-checkout <merge한 worktree>`를 호출합니다. `installer.cli.run_post_merge`는 merge한 체크아웃을 전달해 설치 원본 확인의 판정 함수 `installer.source.match_install_source`를 호출합니다. merge한 체크아웃이 설치 기록이 설치 원본으로 지정한 체크아웃이면, 이 단계는 감지한 모든 호스트에 자동 모드 설치를 이어서 실행합니다. 이 단계는 잠금을 잡지 않습니다. 호스트마다의 설치가 잠금을 잡으며, 다른 설치가 잠금을 쥐고 있으면 설치는 아무것도 바꾸지 않고 종료하고 훅은 그 종료 코드를 한 줄로 보고합니다. 다른 체크아웃이거나, 기록이 없거나, 기록을 읽을 수 없으면 이 단계는 한 줄만 출력하고 설치하지 않습니다. 기록된 체크아웃이 더는 없을 때 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며, merge는 교체하지 않습니다. 훅은 항상 종료 코드 0으로 종료하므로 훅 때문에 merge가 실패하지 않습니다.
+훅은 git이 병합한 worktree용으로 설정한 `GIT_DIR` 같은 환경 변수를 삭제한 뒤, 설치 원본의 `bash install.sh --post-merge --merged-checkout <병합한 worktree>`를 호출합니다. `installer.cli.run_post_merge`는 병합한 체크아웃을 인수로 설치 원본 확인의 판정 함수 `installer.source.match_install_source`를 호출합니다. 병합한 체크아웃이 설치 기록이 설치 원본으로 지정한 체크아웃이면, 이 단계는 감지한 모든 호스트에 자동 모드 설치를 이어서 실행합니다. 이 단계는 잠금을 획득하지 않습니다. 각 호스트의 설치가 잠금을 획득하며, 다른 설치가 잠금을 보유하고 있으면 설치는 실행을 거부하고 훅은 그 종료 코드를 한 줄로 보고합니다. 다른 체크아웃이거나, 기록이 없거나, 기록을 해석할 수 없으면 이 단계는 한 줄만 출력하고 설치하지 않습니다. 기록된 체크아웃이 더는 없을 때 설치 원본을 교체하는 것은 사용자가 실행한 설치뿐이며, 병합은 교체하지 않습니다. 훅은 항상 종료 코드 0으로 종료하므로 훅 때문에 병합이 실패하지 않습니다.
 
 마지막 호스트의 전체 제거가 훅 경로를 복원합니다. 저장소의 값이 install-state가 작성한 값으로 기록한 값과 같으면, `_shared/uninstall_cleanup.py`가 기록된 이전 값을 다시 작성하고, 이전 값이 없으면 설정을 삭제합니다. 다른 호스트의 install-state가 남아 있으면 제거는 그 호스트를 위해 훅 경로와 `source-repo-hook-path.json`을 그대로 두고, 마지막 호스트의 제거가 그 기록을 삭제합니다. 어느 install-state도 작성했다고 기록하지 않은 값과, 설치 뒤에 바뀐 값은 제거가 그대로 둡니다.
 
-## Install Record
+## 설치 기록
 
 `~/.ghost-alice/installed-payload.json`은 인스톨러가 어느 위치에 무엇을 설치했는지 기록합니다. 두 호스트가 파일 하나를 함께 쓰며, 설치 위치 경로마다 항목이 하나입니다. 런타임 `~/.ghost-alice/runtime/current/_shared`처럼 두 호스트가 함께 쓰는 위치는 항목 하나의 `used_by`에 두 호스트를 기록합니다.
 
-| Section | Content |
+| 섹션 | 내용 |
 | --- | --- |
 | `schema_version` | `1` |
 | `installer` | 마지막으로 기록을 작성한 인스톨러의 `commit`과 `schema_version` |
 | `source` | 설치 원본 체크아웃의 `root`, `commit`, `dirty`, `hooks_path` |
 | `last_transaction` | 마지막 게시의 `id`, `updated_at`, `rollback_dir` |
 | `targets` | 설치 위치마다 `name`, `kind`(`skill`, `support`, `runtime`, `command`, `resource`), `mode`(`link`, `copy`), `provider`(`core` 또는 `addon:<id>`), `source`, `source_commit`, `used_by`, 링크이면 `link_target`, 복사이면 `files`, `installed_at`, `baseline` |
-| `service` | 등록된 컨텍스트 게이트웨이. 등록이 없으면 이 섹션도 없습니다. `label`, `runtime_root`(서비스가 실행하는 런타임 `_shared`의 상위 폴더), `program`, 서비스 파일 세 개 `launch_agent`·`state_path`·`config_path`와 지문 `launch_agent_digest`·`state_digest`·`config_block_digest`(Codex `config.toml`의 provider 블록 지문. 등록 명령이 기록하기 전에는 `null`), `config_backup`, `registered_at`, `restarted_at`, `listener_ready` |
+| `service` | 등록된 문맥 게이트웨이. 등록이 없으면 이 섹션도 없습니다. `label`, `runtime_root`(서비스가 실행하는 런타임 `_shared`의 상위 폴더), `program`, 서비스 파일 세 개 `launch_agent`·`state_path`·`config_path`와 지문 `launch_agent_digest`·`state_digest`·`config_block_digest`(Codex `config.toml`의 provider 블록 지문. 등록 명령이 기록하기 전에는 `null`), `config_backup`, `registered_at`, `restarted_at`, `listener_ready` |
 
 복사 항목의 `files`는 상대 경로마다 파일 내용의 `sha256:<hex>` 지문을 기록하며, 파일 하나를 복사한 항목은 자기 자신을 경로 `.`로 기록합니다. 링크 항목은 링크가 가리키는 경로만 기록합니다. `content_digest`가 둘을 생성하며 캐시(`__pycache__`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `node_modules`, `.git`), `.pyc`·`.DS_Store` 파일, 소유 표지 파일, 링크인 파일과 폴더를 제외합니다. `baseline`은 지문의 출처입니다. `recorded`는 게시가 작성한 지문, `migrated`는 이전 인스톨러의 기록에서 이관한 지문, `unknown`은 이전 기록에 지문이 없었다는 뜻입니다.
 
-| Writer | When | What it writes |
+| 작성 주체 | 시점 | 작성 내용 |
 | --- | --- | --- |
 | `install_transaction.publish` | 배치할 때마다, 그리고 이미 원본을 가리키는 링크에 대해 설치마다 한 번 | 게시한 대상, `source`, `installer`, `last_transaction`을 이름 변경과 같은 단계에서 갱신합니다. 이미 원본을 가리키는 링크는 교체하지 않고 기록만 작성합니다 |
 | `installed_payload.migrate` | 기록이 없고 이전 인스톨러의 install-state가 있을 때의 첫 설치, 복구 또는 제거 | 호스트마다 install-state의 대상을 항목으로 작성합니다. 링크는 지금 가리키는 경로, 복사는 소유 표지의 지문, 표지가 없으면 merge-companion 스냅숏의 지문, 둘 다 없으면 지문 없이(`unknown`) 작성합니다. `provider`는 애드온 사이드카에서 조회합니다. 현재 파일의 지문을 기준값으로 채택하지 않으며, 이전 기록은 변경하지 않습니다 |
@@ -105,7 +105,7 @@ git 훅 단계(2단계)는 저장소의 `core.hooksPath`를 `git config --local`
 | `context_gateway_install.py` | `gateway` 등록·분리 명령의 단계 기계가 commit 단계에서 | 등록은 서비스 준비 확인 뒤 `service` 섹션을 작성하고, 분리는 섹션을 삭제합니다. 실패한 작업은 섹션을 이전 값으로 복원합니다 |
 | `installer.gateway_participant` | 서비스의 코드를 바꾼 게시 뒤 | 서비스가 다시 준비되면 `service` 섹션의 `restarted_at`과 `listener_ready`를 갱신합니다 |
 
-`installed_payload.update`는 기록 섹션을 작성하는 유일한 함수이고, `installed_payload.restore`는 게시가 보관한 사본으로 기록을 복원합니다. 두 함수는 임시 파일에 작성한 뒤 이름을 변경하여 교체하며, 설치 잠금이 호출한 프로세스나 그 부모 프로세스의 것이 아니면 거부합니다. 다른 schema version처럼 이 인스톨러가 읽을 수 없는 기록은 변경하지 않고, 파일 게시는 계속합니다. `--status`와 `--doctor`는 기록에서 해당 플랫폼의 대상을 요약한 줄 하나와, 기록과 다른 대상마다 줄 하나를 출력합니다. 기준값이 없는 대상은 개수만 알리고 비교하지 않으며, 일치는 비교한 대상에 대해서만 보고합니다. 기록은 두 명령의 결과를 변경하지 않습니다.
+`installed_payload.update`는 기록 섹션을 작성하는 유일한 함수이고, `installed_payload.restore`는 게시가 보관한 사본으로 기록을 복원합니다. 두 함수는 임시 파일에 작성한 뒤 이름을 변경하여 교체하며, 설치 잠금이 호출한 프로세스나 그 부모 프로세스의 것이 아니면 거부합니다. 다른 스키마 버전처럼 이 인스톨러가 해석할 수 없는 기록은 변경하지 않고, 파일 게시는 계속합니다. `--status`와 `--doctor`는 기록에서 해당 플랫폼의 대상을 요약한 줄 하나와, 기록과 다른 대상마다 줄 하나를 출력합니다. 기준값이 없는 대상은 개수만 출력하고 비교하지 않으며, 일치는 비교한 대상에 대해서만 보고합니다. 기록은 두 명령의 결과를 변경하지 않습니다.
 
 ```mermaid
 flowchart TB
@@ -126,13 +126,13 @@ flowchart TB
     JR -.->|"프로세스 중지"| NEXT
 ```
 
-게시는 교체한 자료를 `~/.ghost-alice/rollbacks/<txid>/` 한 곳에만 보관합니다. 원래 파일, 기록 사본, `journal.json`이 그 폴더에 있습니다. 저널은 게시가 교체하는 대상을 기록하고, 대상마다 원래 상태와 준비한 결과를 기록합니다. 파일은 지문, 링크는 가리키는 경로, 폴더는 빈 폴더까지 모두 기록하며 캐시와 생성 파일만 제외합니다. 저널은 무엇이든 변경하기 전에 `prepare`, 파일·기록과 참여자의 `after_publish`가 모두 끝난 뒤 `done`, 복원한 뒤 `restored`를 기록합니다. 참여자의 오류는 복원 뒤에도 자신의 종료 코드(2, 3, 4, 5)를 유지하며, 복원 단계가 자신의 코드로 실패하면 그 코드를 보고합니다(서비스 복구를 확인하지 못하면 5). 교체할 대상이 없는 게시(이미 원본을 가리키는 링크)는 참여자를 호출하지 않습니다. `install_transaction`은 참여자 인터페이스만 압니다(`installer/participant.py`: `before_publish`, `after_publish`, `before_restore`, `after_restore`. 기록 루트, 호스트, 작업 번호, 교체하는 설치 위치를 전달합니다). 인스톨러 모듈 중 게이트웨이 모듈을 가져오는 파일은 `installer/gateway_participant.py` 하나입니다. 프로세스가 `done` 전에 중지되면 다음 잠금 명령이 `install_transaction.py recover --txid <id>`를 호출합니다. 이 명령은 모든 대상을 먼저 확인합니다. 설치 위치에는 게시가 남긴 결과나 원래 파일이 있어야 하고, 이동한 원래 파일이 남아 있어야 합니다. 복원할 수 없는 게시는 명령을 종료 코드 1로 중지하고 검토할 폴더를 알립니다. 절반만 게시된 파일 위에 다시 게시하면 어느 파일이 원래 파일인지 판별할 수 없기 때문입니다. 이 복원은 파일과 기록만 복원하며 컨텍스트 게이트웨이 서비스를 중지하거나 재시작하지 않습니다.
+게시는 교체한 자료를 `~/.ghost-alice/rollbacks/<txid>/` 한 곳에만 보관합니다. 원래 파일, 기록 사본, `journal.json`이 그 폴더에 있습니다. 저널은 게시가 교체하는 대상을 기록하고, 대상마다 원래 상태와 준비한 결과를 기록합니다. 파일은 지문, 링크는 가리키는 경로, 폴더는 빈 폴더까지 모두 기록하며 캐시와 생성 파일만 제외합니다. 저널은 무엇이든 변경하기 전에 `prepare`, 파일·기록과 참여자의 `after_publish`가 모두 완료된 뒤 `done`, 복원한 뒤 `restored`를 기록합니다. 참여자의 오류는 복원 뒤에도 자신의 종료 코드(2, 3, 4, 5)를 유지하며, 복원 단계가 자신의 코드로 실패하면 그 코드를 보고합니다(서비스 복구를 확인하지 못하면 5). 교체할 대상이 없는 게시(이미 원본을 가리키는 링크)는 참여자를 호출하지 않습니다. `install_transaction`은 참여자 인터페이스만 압니다(`installer/participant.py`: `before_publish`, `after_publish`, `before_restore`, `after_restore`. 기록 루트, 호스트, 작업 번호, 교체하는 설치 위치를 전달합니다). 인스톨러 모듈 중 게이트웨이 모듈을 가져오는 파일은 `installer/gateway_participant.py` 하나입니다. 프로세스가 `done` 전에 중지되면 잠금을 획득하는 다음 명령이 `install_transaction.py recover --txid <id>`를 호출합니다. 이 명령은 모든 대상을 먼저 확인합니다. 설치 위치에는 게시가 남긴 결과나 원래 파일이 있어야 하고, 이동한 원래 파일이 남아 있어야 합니다. 복원할 수 없는 게시는 명령을 종료 코드 1로 중지하고 검토할 폴더를 알립니다. 절반만 게시된 파일 위에 다시 게시하면 어느 파일이 원래 파일인지 판별할 수 없기 때문입니다. 이 복원은 파일과 기록만 복원하며 문맥 게이트웨이 서비스를 중지하거나 재시작하지 않습니다.
 
-## Gateway Lifecycle
+## 게이트웨이 생명주기
 
 게이트웨이 등록·갱신·분리는 `_shared/context_gateway_*`의 여섯 모듈이 담당합니다. `model`은 요청·관측값·계획·결과와 실행 인터페이스의 자료형을 정의하며 AI 모델을 호출하지 않습니다. `inventory`는 전달받은 플랫폼 어댑터로 서비스 파일을 조회합니다. `plan`은 서비스 파일을 설치 기록의 `service` 섹션과 비교하여 I/O 없이 순서가 정해진 계획을 작성합니다. `transaction`은 계획을 실행하고, commit 단계에서 기록의 `service` 섹션을 작성하며, 역순 복구를 담당합니다. `platform`은 개별 파일·기록·네이티브 서비스 작업을 수행합니다. `install`은 `gateway` 명령 뒤에서 이 모듈들을 연결합니다. `bash install.sh gateway --codex-dir <dir> --ledger-root <dir> --state-dir <dir> --launch-agent <plist>`는 서비스를 등록하거나 갱신하고, `bash install.sh gateway detach --confirm`은 등록을 해제하며, `--dry-run`은 검증한 계획을 출력하고 적용 없이 종료합니다.
 
-등록 명령은 설치 기록에서 가장 최근 게시가 작성한 런타임 대상을 조회하고 서비스 파일 세 개만 작성합니다. launch agent, `state.json`, Codex `config.toml`의 provider 블록입니다. 모듈을 복사하지 않습니다. 서비스는 인스톨러가 게시한 런타임 `_shared`와 동반 스크립트를 실행하며, 어느 바이트인지는 기록의 `targets`가 말합니다. 그래서 Core를 먼저 설치합니다. 상태 디렉터리는 링크를 따라간 경로로도 그 런타임 밖에 있어야 합니다. `service` 섹션이 없으면 명령은 새 리스너를 등록하며, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록이 있으면 거부합니다. 섹션이 있으면 서비스 파일 세 개가 섹션의 기록과 같을 때 같은 포트와 scope로 갱신하고, 어느 하나가 인스톨러 밖에서 바뀌었으면 아무것도 바꾸기 전에 종료합니다(종료 코드 2). 사용자가 그 파일을 검토한 뒤 명령을 다시 실행합니다.
+등록 명령은 설치 기록에서 가장 최근 게시가 작성한 런타임 대상을 조회하고 서비스 파일 세 개만 작성합니다. launch agent, `state.json`, Codex `config.toml`의 provider 블록입니다. 모듈을 복사하지 않습니다. 서비스는 인스톨러가 게시한 런타임 `_shared`와 동반 스크립트를 실행하며, 실행할 파일은 기록의 `targets`가 지정합니다. 그래서 Core를 먼저 설치해야 합니다. 상태 디렉터리는 심볼릭 링크를 따라간 실제 경로도 그 런타임 밖에 있어야 합니다. `service` 섹션이 없으면 명령은 새 리스너를 등록하며, 기록이 지정하지 않은 launch agent, 상태 디렉터리 항목, provider 블록이 있으면 거부합니다. 섹션이 있으면 서비스 파일 세 개가 섹션의 기록과 같을 때 같은 포트와 `scope` 값으로 갱신하고, 어느 하나가 인스톨러 밖에서 변경되었으면 무엇이든 변경하기 전에 종료합니다(종료 코드 2). 사용자가 그 파일을 검토한 뒤 명령을 다시 실행합니다.
 
 ```mermaid
 flowchart LR
@@ -155,63 +155,63 @@ flowchart LR
     DET --> SVC
 ```
 
-인스톨러 모듈 중 게이트웨이 모듈을 가져오는 유일한 파일 `installer/gateway_participant.py`가 모든 게시와 제거를 기록으로 판정합니다. 설치 위치가 `service.runtime_root`와 같거나 그 아래·그 위이거나 서비스 파일 세 개 중 하나이면 서비스에 영향을 줍니다. `~/.codex`, `~/.claude`, 원장은 서비스가 조회하는 데이터이지 코드가 아니며, 링크는 가리키는 곳이 아니라 링크 자신의 경로로 비교합니다. 영향을 주는 게시는 파일 교체 전에 서비스를 중지하고, 교체 뒤에 시작하고, 준비를 확인하고, `restarted_at`을 기록합니다. 준비 확인이 실패하면 파일을 복원하고 이전 서비스를 시작합니다(종료 코드 4). 영향을 주는 제거와 모든 Codex 전체 제거는 먼저 분리합니다. 서비스를 중지하고, provider 블록과 launch agent를 제거하고, `service` 섹션을 삭제합니다. 상태 디렉터리는 남깁니다. 인스톨러 밖에서 바뀐 서비스 파일은 분리를 검토 대상으로 중지합니다. `service` 섹션이 없으면 제거는 launchd에 조회합니다. 게이트웨이 레이블의 서비스가 적재돼 있고 그 프로그램이 제거 루트 안이면 제거를 검토 대상으로 보류하고(종료 코드 3), 서비스가 없거나 다른 곳에서 실행하면 제거를 진행합니다. 설치(런타임 게시 뒤)와 복구(`--repair`)도 같은 함수 `installer.gateway_participant.loaded_service`로 launchd를 조회합니다. 기록에 `service` 섹션이 없는데 적재된 게이트웨이 서비스가 런타임 뿌리 아래에서 실행되면, 게시는 진행하고 인스톨러는 그 서비스를 중지하거나 시작하지 않습니다. 인스톨러에는 그 서비스 파일의 기록이 없기 때문입니다. 그다음 `Context gateway:` 줄이 경고를 출력하고 등록 명령을 안내합니다. 등록 명령은 서비스를 기록에 작성하고 새 코드로 재시작합니다. 조회 결과가 불확실하면 서비스가 없는 것으로 보고 설치 로그에 한 줄을 작성합니다. 체크아웃의 관리형 Git 업데이트(`--update-source`)는 서비스를 건드리지 않습니다. 체크아웃은 서비스의 코드가 아니기 때문입니다.
+인스톨러 모듈 중 게이트웨이 모듈을 가져오는 유일한 파일 `installer/gateway_participant.py`가 모든 게시와 제거를 기록으로 판정합니다. 설치 위치가 `service.runtime_root`와 같거나 그 아래·그 위이거나 서비스 파일 세 개 중 하나이면 서비스에 영향을 줍니다. `~/.codex`, `~/.claude`, 원장은 서비스가 조회하는 데이터이지 코드가 아니며, 링크는 가리키는 곳이 아니라 링크 자신의 경로로 비교합니다. 영향을 주는 게시는 파일 교체 전에 서비스를 중지하고, 교체 뒤에 시작하고, 준비를 확인하고, `restarted_at`을 기록합니다. 준비 확인이 실패하면 파일을 복원하고 이전 서비스를 시작합니다(종료 코드 4). 영향을 주는 제거와 모든 Codex 전체 제거는 먼저 분리합니다. 서비스를 중지하고, provider 블록과 launch agent를 제거하고, `service` 섹션을 삭제합니다. 상태 디렉터리는 남깁니다. 인스톨러 밖에서 바뀐 서비스 파일은 분리를 검토 대상으로 중지합니다. `service` 섹션이 없으면 제거는 launchd에 조회합니다. 게이트웨이 레이블의 서비스가 적재돼 있고 그 프로그램이 제거 루트 안이면 제거를 검토 대상으로 보류하고(종료 코드 3), 서비스가 없거나 다른 곳에서 실행하면 제거를 진행합니다. 설치(런타임 게시 뒤)와 복구(`--repair`)도 같은 함수 `installer.gateway_participant.loaded_service`로 launchd를 조회합니다. 기록에 `service` 섹션이 없는데 적재된 게이트웨이 서비스가 런타임 루트 아래에서 실행되면, 게시는 진행하고 인스톨러는 그 서비스를 중지하거나 시작하지 않습니다. 인스톨러에는 그 서비스 파일의 기록이 없기 때문입니다. 그다음 `Context gateway:` 줄이 경고를 출력하고 등록 명령을 안내합니다. 등록 명령은 서비스를 기록에 작성하고 새 코드로 재시작합니다. 조회 결과가 불확실하면 서비스가 없는 것으로 보고 설치 로그에 한 줄을 작성합니다. 체크아웃의 관리형 Git 업데이트(`--update-source`)는 서비스를 건드리지 않습니다. 체크아웃은 서비스의 코드가 아니기 때문입니다.
 
-전송 설정이 변경되면 호스트를 새로 실행해야 할 수 있습니다. 제공자 등록이나 설치 성공은 이미 실행 중인 네이티브 프로세스가 새 설정을 적용했다는 근거가 아니며, 그 주장에는 그 프로세스의 세션 영수증과 그 프로세스가 실제로 보낸 요청의 관찰이 있어야 합니다. 서비스는 요청의 형태와 식별자, 선택된 원본 참조, 서버가 알린 원래 사용량, 응답 해시를 기록하고, 그 밖의 대화나 자격 증명 본문은 보관하지 않습니다. 효과를 판단하려면 선택된 원본, 그 참조, 그 부재를 이후의 여러 요청에서 대조하고, 이후 판단이 요구하는 원본을 다시 조회할 수 있는지 확인하며, 서버 응답마다 한 번 세고 없는 사용량은 알 수 없음으로 남깁니다. 캐시 적중이나 한 번 작아진 요청은 제외를 입증하지 않습니다. 머리글, 리다이렉트, 모르는 제공자 경로에 대한 게이트웨이의 동작과 변경 없이 보내는 요청은 [아키텍처](../../../architecture_ko.md#문맥과-원본-근거)가 담당합니다.
+전송 설정이 변경되면 호스트를 새로 실행해야 할 수 있습니다. 제공자 등록이나 설치 성공은 이미 실행 중인 네이티브 프로세스가 새 설정을 적용했다는 근거가 아니며, 그 주장에는 그 프로세스의 세션 영수증과 그 프로세스가 실제로 보낸 요청의 관찰이 있어야 합니다. 서비스는 요청의 형태와 식별자, 선택된 원본 참조, 서버가 알린 원래 사용량, 응답 해시를 기록하고, 그 밖의 대화나 자격 증명 본문은 보관하지 않습니다. 효과를 판단하려면 선택된 원본, 그 참조, 그 부재를 이후의 여러 요청에서 대조하고, 이후 판단이 요구하는 원본을 다시 조회할 수 있는지 확인하며, 서버 응답마다 한 번 세고 없는 사용량은 알 수 없음으로 남깁니다. 캐시 적중이나 한 번 작아진 요청은 제외를 입증하지 않습니다. 머리글, 리다이렉트, 모르는 provider 경로에 대한 게이트웨이의 동작과 변경 없이 보내는 요청은 [아키텍처](../../../architecture_ko.md#문맥과-원본-근거)가 담당합니다.
 
-게이트웨이 오류는 발생 단계와 고정 오류 식별자를 유지합니다. 종료 코드 2는 선행 조건 불충족, 3은 파일 변경 전 서비스 상태 확인 불가, 4는 작업 실패 후 이전 설치 복원, 5는 변경 시작 후 복구 확인 불가를 뜻합니다. 인스톨러는 구조화된 원인을 출력하고 그 종료 코드를 유지합니다. 등록에는 zstd 코덱이 동작하는 Python 3.14가 필요하며 분리는 Python 3.11에서 실행합니다. [설치 생명주기 명세](../../coding-convention/specs/2026-10-15-gateway-installer-design.md)는 이 단계 기계의 출발이 된 설계를 기록합니다.
+게이트웨이 오류는 발생 단계와 고정 오류 식별자를 유지합니다. 종료 코드 2는 선행 조건 불충족, 3은 파일 변경 전 서비스 상태 확인 불가, 4는 작업 실패 후 이전 설치 복원, 5는 변경 시작 후 복구 확인 불가를 뜻합니다. 인스톨러는 구조화된 원인을 출력하고 그 종료 코드를 유지합니다. 등록은 zstd 코덱이 동작하는 Python 3.14를 요구하며, 분리는 Python 3.11에서 실행합니다. [설치 생명주기 명세](../coding-convention/specs/2026-10-15-gateway-installer-design.md)는 이 단계 전이 구조가 따르는 설계를 기록합니다.
 
-## Platform Surfaces
+## 플랫폼별 설치 항목
 
-| Platform | Installed surfaces |
+| 플랫폼 | 설치 항목 |
 | --- | --- |
-| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`, `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Claude command wrappers |
+| Claude Code | `${CLAUDE_CONFIG_DIR:-~/.claude}/skills/`, `${CLAUDE_CONFIG_DIR:-~/.claude}/CLAUDE.md`, `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`, Claude 명령 래퍼 |
 | Codex | `~/.agents/skills/`, `~/.codex/AGENTS.md`, `~/.codex/ghost-alice-governance.md`, `~/.codex/hooks.json`, `~/.codex/config.toml` |
-| Shared state | `~/.ghost-alice/installed-payload.json`, `~/.ghost-alice/rollbacks/`, `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
+| 공용 상태 | `~/.ghost-alice/installed-payload.json`, `~/.ghost-alice/rollbacks/`, `~/.ghost-alice/install-state/`, `~/.ghost-alice/pending-merges/`, `~/.ghost-alice/uninstall-reports/`, `~/.ghost-alice/install/` |
 
-Claude Code의 native skill invocation과 hook permission은 저장소 밖의 세션에 필요한 global instruction을 대신하지 않습니다. installer는 `platforms/claude/CLAUDE.md`의 managed block을 Claude config directory에 병합합니다. Codex의 별도 bootstrap과 hook config는 required gate를 `SKILL.md` read record와 hook payload로 감사할 수 있게 합니다. 두 global rule file은 managed block 밖의 사용자 텍스트를 보존하며, marker가 없는 사용자 파일에는 덮어쓰기 대신 `.ghost-alice-proposed` 제안 파일을 만듭니다.
+Claude Code는 네이티브 스킬 호출과 훅 권한을 제공할 수 있지만, 이 수단은 저장소 밖의 세션에 전역 지침을 전달하는 경로를 대신하지 않습니다. 그래서 인스톨러는 `platforms/claude/CLAUDE.md`의 관리 블록을 Claude 설정 디렉터리에 병합합니다. Codex는 같은 스킬 호출 수단을 제공하지 않으므로, Codex의 별도 부트스트랩과 훅 설정이 필수 게이트를 `SKILL.md` 조회 기록과 훅 입력·출력으로 감사할 수 있게 합니다. 두 전역 규칙 파일은 관리 블록 밖의 사용자 텍스트를 보존하며, 관리 표지가 없는 사용자 파일은 교체하지 않고 `.ghost-alice-proposed` 제안 파일을 따로 작성합니다.
 
-일반 Core hook 전달은 실제 native cwd를 Core 맥락으로 유지합니다. 설치 source와 프로젝트 신뢰 경로는 이를 대체하지 않습니다.
+훅 바인딩의 `destination` 모드가 `normal`이면, Core 훅 전달은 훅이 실행될 때 네이티브 호스트가 전달한 cwd를 Core 문맥으로 유지합니다. 설치 원본과 프로젝트 신뢰 경로는 이 cwd를 대체하지 않습니다.
 
-관리 훅 명령과 네이티브 신뢰 항목은 검토한 설치 내용과 일치해야 합니다. 실행 중인 호스트가 이전 등록을 유지할 수 있으므로 적절히 재로드한 뒤 실제 네이티브 콜백으로 반영을 확인합니다. [훅 신뢰와 재로드](../getting-started/troubleshooting.md#native-hook-trust-and-reload)를 참고해 주세요. [세션 게이트 Notes](../policies/session-gate-matrix.md#notes)는 설치된 바이트와 네이티브 실행을 서로 다른 주장으로 나열합니다.
+관리 훅 명령과 네이티브 신뢰 항목은 검토한 설치 내용과 일치해야 합니다. 실행 중인 호스트가 이전 등록을 유지할 수 있으므로, 호스트별 재로드 절차를 실행한 뒤 실제 네이티브 콜백으로 적용을 확인합니다. [훅 신뢰와 재로드](../getting-started/troubleshooting.md#네이티브-훅-신뢰와-재로드)를 참고해 주세요. [세션 게이트 참고 사항](../policies/session-gate-matrix.md#참고)은 설치된 바이트와 네이티브 실행을 서로 다른 주장으로 나열합니다.
 
-## State And Safety Model
+## 상태와 안전 모델
 
 인스톨러는 제거·복원할 대상을 추측하지 않도록 변경 내용을 기록합니다.
 
-| State path | Why it exists |
+| 상태 경로 | 존재 이유 |
 | --- | --- |
 | `~/.ghost-alice/installed-payload.json` | 설치 기록입니다. 두 호스트의 모든 설치 위치, 출처, 복사한 파일의 지문을 배치와 같은 단계에서 기록합니다 |
-| `~/.ghost-alice/rollbacks/<txid>/` | 게시 한 번이 교체한 원래 파일, 게시 전의 기록, 저널을 보관합니다. 저널이 done을 기록하기 전에 중지된 게시는 다음 잠금 명령이 복원합니다. 완료된 게시를 남기는 개수는 [런타임 상태 보존](repository-structure.md#runtime-state-retention)이 정합니다 |
+| `~/.ghost-alice/rollbacks/<txid>/` | 게시 한 번이 교체한 원래 파일, 게시 전의 기록, 저널을 보관합니다. 저널이 `done`을 기록하기 전에 중지된 게시는 잠금을 획득하는 다음 명령이 복원합니다. 보관하는 완료 게시 수는 [런타임 상태 보존](repository-structure.md#런타임-상태-보존)이 정합니다 |
 | `~/.ghost-alice/install-state/<platform>.json` | 인스톨러가 관리한 대상과 환경 변경을 기록하며 상태 조회와 제거 명령이 읽습니다 |
 | `~/.ghost-alice/pending-merges/<platform>/` | 인스톨러가 Ghost-ALICE 복사 설치 스킬 파일을 바꾸기 전에 사용자 수정본을 보존합니다. 설치 표식이 있는 폴더와, 이번 설치가 바꾸는 폴더는 표식이 사라졌어도 확인하며, merge-companion과 사용자가 병합 여부를 결정합니다. Claude 앱의 `synced`처럼 Ghost-ALICE가 설치하지 않는 폴더는 기록하지 않습니다 |
-| `~/.ghost-alice/install/` | 감사와 복구에 필요한 설치 결과와 이벤트를 보관하며, 보관하는 실행 수는 [런타임 상태 보존](repository-structure.md#runtime-state-retention)이 정합니다 |
+| `~/.ghost-alice/install/` | 감사와 복구에 사용하는 설치 보고서와 이벤트 기록을 보관하며, 보관하는 실행 수는 [런타임 상태 보존](repository-structure.md#런타임-상태-보존)이 정합니다 |
 
-설치된 파일, 훅이나 실행 설정을 바꾸는 개발자는 상태 조회, 진단, 병합 대기 처리와 제거 복원에 미치는 영향도 확인해야 합니다. 이 절차들은 같은 설치 기록에 의존합니다.
+그래서 업데이트와 제거는 별도 작업이 아니라 인스톨러 아키텍처에 속합니다. 복사한 설치 파일, 훅이나 실행 설정을 변경하는 작업은 대개 상태 조회, 진단, 병합 대기 동작과 제거 복원에도 영향을 줍니다.
 
-## Contributor Entry Points
+## 기여자 진입점
 
-| Change type | Start here | Then verify with |
+| 변경 유형 | 시작 위치 | 검증 수단 |
 | --- | --- | --- |
-| Python runtime detection, the PowerShell 7.6 check, PowerShell parameter names or locale setup | `install.sh`, `install.ps1`, `install.cmd` | `scripts/tests/test_thin_shells.py`, `scripts/tests/test_install_runtime_detection.py`, compatibility matrix groups |
-| Installer option, command table, dispatch or install order | `_shared/installer/cli.py`, `_shared/installer/auto.py` | `_shared/test_installer_cli.py`, `_shared/test_installer_auto.py`, `_shared/test_installer_checkout.py`, `_shared/test_*_shell.py` end-to-end tests |
-| Installer wording or the install report | `_shared/installer/report.py` | `_shared/test_installer_report.py`, `scripts/tests/test_installer_default_auto.py` |
-| Hook payload or hook status wording | `_shared/install_hooks.py` | `_shared.test_install_hooks`, `scripts/check_skill_gate_contract.py` |
-| Hook id or host event name | `_shared/hook_definitions.py` | `_shared.test_hook_definitions` |
-| Install record, fingerprints, publish journal or restore | `_shared/installed_payload.py`, `_shared/content_digest.py`, `_shared/install_transaction.py`, `_shared/installer/transaction.py`, `_shared/installer/lock.py` | `_shared/test_installed_payload.py`, `_shared/test_content_digest.py`, `_shared/test_install_transaction_publish.py`, `_shared/test_install_record_shell.py` |
-| Install-state or uninstall behavior | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `_shared/installer/lifecycle.py`, `_shared/installer/transaction.py` | `_shared/test_installer_lifecycle.py`, `_shared/test_installer_transaction.py`, install-state schema tests and uninstall tests |
-| Public docs or command surface | `README.md`, `docs/`, `index.html` | `scripts/validate_public_surfaces.py` and public-surface contract tests |
-| Platform compatibility rule | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list` and policy가 지정한 focused group |
+| Python 런타임 감지, PowerShell 7.6 확인, PowerShell 매개변수 이름 또는 로케일 설정 | `install.sh`, `install.ps1`, `install.cmd` | `scripts/tests/test_thin_shells.py`, `scripts/tests/test_install_runtime_detection.py`, 호환성 매트릭스 그룹 |
+| 인스톨러 옵션, 명령 표, 명령 분기 또는 설치 순서 | `_shared/installer/cli.py`, `_shared/installer/auto.py` | `_shared/test_installer_cli.py`, `_shared/test_installer_auto.py`, `_shared/test_installer_checkout.py`, `_shared/test_*_shell.py` 종단 간 테스트 |
+| 인스톨러 문구 또는 설치 보고서 | `_shared/installer/report.py` | `_shared/test_installer_report.py`, `scripts/tests/test_installer_default_auto.py` |
+| 훅 항목 또는 훅 상태 문구 | `_shared/install_hooks.py` | `_shared.test_install_hooks`, `scripts/check_skill_gate_contract.py` |
+| 훅 ID 또는 호스트 이벤트 이름 | `_shared/hook_definitions.py` | `_shared.test_hook_definitions` |
+| 설치 기록, 지문, 게시 저널 또는 복원 | `_shared/installed_payload.py`, `_shared/content_digest.py`, `_shared/install_transaction.py`, `_shared/installer/transaction.py`, `_shared/installer/lock.py` | `_shared/test_installed_payload.py`, `_shared/test_content_digest.py`, `_shared/test_install_transaction_publish.py`, `_shared/test_install_record_shell.py` |
+| install-state 또는 제거 동작 | `_shared/install_state_writer.py`, `_shared/uninstall_cleanup.py`, `_shared/installer/lifecycle.py`, `_shared/installer/transaction.py` | `_shared/test_installer_lifecycle.py`, `_shared/test_installer_transaction.py`, install-state 스키마 테스트와 제거 테스트 |
+| 공개 문서 또는 공개 명령 | `README.md`, `docs/`, `index.html` | `scripts/validate_public_surfaces.py`와 `public-surface-contract` 그룹 테스트 |
+| 플랫폼 호환성 규칙 | `docs/policies/installer-platform-compatibility-matrix.md` | `scripts/run_installer_compat_tests.py --list`와 정책이 지정한 개별 그룹 |
 
-기여자는 구성 요소를 바꿀 때 연결된 계약을 확인합니다. 호환성 표가 지정한 담당 테스트에서 영향을 받는 회귀 검사를 찾습니다.
+기여자는 구성 요소를 변경할 때 연결된 계약을 확인하고, 호환성 매트릭스가 지정한 담당 테스트에서 그 계약의 회귀 검사를 찾습니다.
 
-## What Not To Infer
+## 추론하지 않을 것
 
 - 훅 파일의 존재만으로 현재 입력·출력 계약과 일치한다고 판단하지 않습니다.
 - 복사된 스킬 디렉터리만으로 플랫폼이 해당 스킬을 호출하거나 감사할 수 있다고 판단하지 않습니다.
 - 설치 점검의 통과만으로 상태 조회·진단·업데이트·병합 대기·제거 절차의 일관성을 판단하지 않습니다.
 - 사용자용 설치 명령은 진입점을 안내하며 내부 구조 설명을 대신하지 않습니다.
 
-## Full Understanding
+## 전체 이해
 
-기여자는 검토할 변경이 셸 진입점에서 설치 조정 코드, 설치 대상, 상태 기록과 담당 테스트로 어떻게 이어지는지 확인합니다. 이 문서는 그 연결을 찾는 안내이며, 관련 구현과 호환성 계약을 읽는 절차를 대신하지 않습니다.
+인스톨러 전체를 이해하려면 변경 하나를 셸 진입점, 설치 조정 코드, 런타임 설치 항목, 상태 파일, 담당 테스트까지 따라가야 합니다. 이 문서는 그 추적의 첫 안내도입니다. 이 문서는 해당 구현과 호환성 계약을 조회하는 절차를 대신하지 않습니다.

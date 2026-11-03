@@ -14,16 +14,20 @@ edits pages nor controls runtime permission.
 Checks:
 - broken-link      : a [text](Target) link pointing at a non-existent wiki page.
 - duplicate-page   : two files share one page name; GitHub serves pages by name.
+- page-folder      : a content page neither at the Wiki root nor directly under ``ko/``.
 - switch-format    : a content page whose first line is not a language switch line.
-- switch-folder    : an English page outside the root or a Korean page outside ``ko/``.
-- switch-pair      : a switch link whose target does not switch back to the page.
+- switch-pair      : a switch line whose own-language link does not name the page,
+                     or whose other-language link does not name a page in the other
+                     language's folder that carries the same switch line. A link to a
+                     page that does not exist is reported as broken-link instead.
 - missing-sidebar  : English or Korean pages exist without their folder's ``_Sidebar``.
 - sidebar-coverage : a content page that its language's sidebar does not list.
 - sidebar-language : a sidebar link to a page in the other language.
 - footer           : a ``_Footer`` page; the Wiki has no footer.
 
-GitHub wiki special pages (any ``_``-prefixed page such as ``_Sidebar``) carry
-no switch line; their links are still checked.
+A page's language is its folder's: English at the Wiki root, Korean directly
+under ``ko/``. GitHub wiki special pages (any ``_``-prefixed page such as
+``_Sidebar``) carry no switch line; their links are still checked.
 
 Usage:
     python3 scripts/audit_wiki_integrity.py --wiki /path/to/ghost-alice.wiki
@@ -46,9 +50,8 @@ _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
 _EXTERNAL_PREFIXES = ("http://", "https://", "mailto:", "tel:", "ftp://", "//", "/")
 
-# The switch label is written in the other language.
-_EN_SWITCH_RE = re.compile(r"^언어: 🇺🇸 English \| \[🇰🇷 한국어\]\(([^)]+)\)$")
-_KO_SWITCH_RE = re.compile(r"^Language: \[🇺🇸 English\]\(([^)]+)\) \| 🇰🇷 한국어$")
+# Both editions carry the same line: the English page link, then the Korean one.
+_SWITCH_RE = re.compile(r"^\[🇺🇸 English\]\(([^)]+)\) \| \[🇰🇷 한국어\]\(([^)]+)\)$")
 
 _KO_FOLDER = "ko"
 # The folder holding each language's pages and sidebar ("" is the Wiki root).
@@ -110,14 +113,26 @@ def _internal_targets(text: str) -> list[str]:
     return targets
 
 
-def parse_switch(text: str) -> tuple[str, str] | None:
-    """Return (language, target page name) from the first non-empty line."""
-    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    for language, pattern in (("en", _EN_SWITCH_RE), ("ko", _KO_SWITCH_RE)):
-        match = pattern.match(first)
-        if match:
-            return language, link_target_to_slug(match.group(1)) or ""
+def page_language(key: str) -> str | None:
+    """The language whose folder directly holds the page, or None."""
+    folder = _folder(key)
+    for language, language_folder in _LANGUAGE_FOLDER.items():
+        if folder == language_folder:
+            return language
     return None
+
+
+def parse_switch(text: str) -> dict[str, str] | None:
+    """Return {language: target page name} from the first non-empty line, or None
+    when that line is not a switch line; a link that names no wiki page maps to ""."""
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    match = _SWITCH_RE.match(first)
+    if not match:
+        return None
+    return {
+        language: link_target_to_slug(target) or ""
+        for language, target in zip(("en", "ko"), match.groups())
+    }
 
 
 def _by_name(pages: dict[str, str]) -> dict[str, str]:
@@ -158,25 +173,31 @@ def check_language_switches(pages: dict[str, str]) -> list[Finding]:
     for key in sorted(pages):
         if _is_special(key):
             continue
+        language = page_language(key)
+        if language is None:
+            findings.append(
+                Finding("page-folder", key, "page must live at the wiki root or directly under ko/")
+            )
         switch = parse_switch(pages[key])
         if switch is None:
             findings.append(
                 Finding("switch-format", key, "first line is not a language switch line")
             )
             continue
-        language, target = switch
-        if _folder(key) != _LANGUAGE_FOLDER[language]:
-            expected = "directly under ko/" if language == "ko" else "at the wiki root"
+        if language is None:
+            continue
+        pair_language = "ko" if language == "en" else "en"
+        pair_key = names.get(switch[pair_language])
+        if pair_key is None and switch[pair_language] and switch[language] == page_name(key):
+            continue  # a missing pair page is reported as broken-link
+        if (
+            switch[language] != page_name(key)
+            or pair_key is None
+            or page_language(pair_key) != pair_language
+            or parse_switch(pages[pair_key]) != switch
+        ):
             findings.append(
-                Finding("switch-folder", key, f"{language} page must live {expected}")
-            )
-        target_key = names.get(target)
-        if target_key is None:
-            continue  # reported as broken-link
-        back = parse_switch(pages[target_key])
-        if back is None or back[0] == language or back[1] != page_name(key):
-            findings.append(
-                Finding("switch-pair", key, f"switch target '{target}' does not switch back to this page")
+                Finding("switch-pair", key, f"switch line does not pair this page with a {pair_language} page carrying the same line")
             )
     return findings
 
@@ -186,12 +207,12 @@ def check_sidebars(pages: dict[str, str]) -> list[Finding]:
     names = _by_name(pages)
     languages: dict[str, str] = {}
     for key in sorted(pages):
-        switch = None if _is_special(key) else parse_switch(pages[key])
-        if switch is not None:
-            languages[key] = switch[0]
+        language = None if _is_special(key) else page_language(key)
+        if language is not None:
+            languages[key] = language
     for language, folder in _LANGUAGE_FOLDER.items():
         sidebar = f"{folder}/_Sidebar" if folder else "_Sidebar"
-        content = [key for key, page_language in languages.items() if page_language == language]
+        content = [key for key, key_language in languages.items() if key_language == language]
         if sidebar not in pages:
             if content:
                 findings.append(

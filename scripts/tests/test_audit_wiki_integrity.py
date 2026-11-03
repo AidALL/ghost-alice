@@ -34,10 +34,10 @@ def _pages_with(findings, check) -> set:
 # A minimal but structurally-valid wiki: English pages at the root, Korean pages
 # under ko/, switch lines paired, sidebars in their folder's language.
 CLEAN = {
-    "Home": "언어: 🇺🇸 English | [🇰🇷 한국어](홈)\n\nRead [Design Principles](Design-Principles).",
-    "ko/홈": "Language: [🇺🇸 English](Home) | 🇰🇷 한국어\n\n[설계 원칙](설계-원칙)을 읽어 주세요.",
-    "Design-Principles": "언어: 🇺🇸 English | [🇰🇷 한국어](설계-원칙)\n\nBody.\n\n[← Home](Home)",
-    "ko/설계-원칙": "Language: [🇺🇸 English](Design-Principles) | 🇰🇷 한국어\n\n본문.\n\n[← 홈](홈)",
+    "Home": "[🇺🇸 English](Home) | [🇰🇷 한국어](홈)\n\nRead [Design Principles](Design-Principles).",
+    "ko/홈": "[🇺🇸 English](Home) | [🇰🇷 한국어](홈)\n\n[설계 원칙](설계-원칙)을 읽어 주세요.",
+    "Design-Principles": "[🇺🇸 English](Design-Principles) | [🇰🇷 한국어](설계-원칙)\n\nBody.\n\n[← Home](Home)",
+    "ko/설계-원칙": "[🇺🇸 English](Design-Principles) | [🇰🇷 한국어](설계-원칙)\n\n본문.\n\n[← 홈](홈)",
     "_Sidebar": "[Home](Home)\n\n1. [Design Principles](Design-Principles)",
     "ko/_Sidebar": "[홈](홈)\n\n1. [설계 원칙](설계-원칙)",
 }
@@ -124,43 +124,70 @@ class TestLanguageSwitch(unittest.TestCase):
 
     def test_unflagged_switch_line_is_flagged(self):
         pages = dict(CLEAN)
-        pages["Design-Principles"] = "Language: English | [한국어](설계-원칙)\n\nBody."
+        pages["Design-Principles"] = "[English](Design-Principles) | [한국어](설계-원칙)\n\nBody."
         self.assertIn("Design-Principles", _pages_with(awi.audit(pages), "switch-format"))
 
-    def test_label_in_the_page_language_is_flagged(self):
-        # An English page labels its switch in Korean, not "Language:".
+    def test_prefixed_switch_line_is_flagged(self):
+        # Neither edition puts a prefix such as "Language:" before the switch.
         pages = dict(CLEAN)
-        pages["Design-Principles"] = "Language: 🇺🇸 English | [🇰🇷 한국어](설계-원칙)\n\nBody."
+        pages["Design-Principles"] = "Language: [🇺🇸 English](Design-Principles) | [🇰🇷 한국어](설계-원칙)\n\nBody."
         self.assertIn("Design-Principles", _pages_with(awi.audit(pages), "switch-format"))
 
-    def test_korean_page_outside_ko_folder_is_flagged(self):
-        pages = dict(CLEAN)
-        pages["설계-원칙"] = pages.pop("ko/설계-원칙")
-        self.assertIn("설계-원칙", _pages_with(awi.audit(pages), "switch-folder"))
-
-    def test_english_page_inside_ko_folder_is_flagged(self):
-        pages = dict(CLEAN)
-        pages["ko/Design-Principles"] = pages.pop("Design-Principles")
-        self.assertIn("ko/Design-Principles", _pages_with(awi.audit(pages), "switch-folder"))
-
-    def test_english_page_in_another_subfolder_is_flagged(self):
+    def test_page_in_another_subfolder_is_flagged(self):
         pages = dict(CLEAN)
         pages["draft/Design-Principles"] = pages.pop("Design-Principles")
-        self.assertIn("draft/Design-Principles", _pages_with(awi.audit(pages), "switch-folder"))
+        self.assertIn("draft/Design-Principles", _pages_with(awi.audit(pages), "page-folder"))
 
-    def test_korean_page_in_a_nested_folder_is_flagged(self):
+    def test_page_in_a_subfolder_of_ko_is_flagged(self):
         pages = dict(CLEAN)
         pages["ko/draft/설계-원칙"] = pages.pop("ko/설계-원칙")
-        self.assertIn("ko/draft/설계-원칙", _pages_with(awi.audit(pages), "switch-folder"))
+        self.assertIn("ko/draft/설계-원칙", _pages_with(awi.audit(pages), "page-folder"))
+
+    def test_copied_switch_line_is_flagged(self):
+        # Each label links to its own edition, so a page's own label links the page itself.
+        pages = dict(CLEAN)
+        pages["Architecture"] = CLEAN["Design-Principles"]
+        self.assertIn("Architecture", _pages_with(awi.audit(pages), "switch-pair"))
+
+    def test_self_pair_is_flagged(self):
+        pages = dict(CLEAN)
+        pages["Notes"] = "[🇺🇸 English](Notes) | [🇰🇷 한국어](Notes)\n\nBody."
+        self.assertIn("Notes", _pages_with(awi.audit(pages), "switch-pair"))
+
+    def test_missing_pair_page_is_left_to_broken_link(self):
+        pages = dict(CLEAN)
+        pages["Notes"] = "[🇺🇸 English](Notes) | [🇰🇷 한국어](노트)\n\nBody."
+        findings = awi.audit(pages)
+        self.assertIn("Notes", _pages_with(findings, "broken-link"))
+        self.assertNotIn("Notes", _pages_with(findings, "switch-pair"))
+
+    def test_other_language_link_without_a_wiki_page_is_flagged(self):
+        # A URL or a nested path is not a wiki page, so broken-link does not report it.
+        for target in ("https://example.com/ko/notes", "ko/노트"):
+            with self.subTest(target=target):
+                pages = dict(CLEAN)
+                pages["Notes"] = f"[🇺🇸 English](Notes) | [🇰🇷 한국어]({target})\n\nBody."
+                self.assertIn("Notes", _pages_with(awi.audit(pages), "switch-pair"))
+
+    def test_korean_page_at_the_root_is_flagged(self):
+        # The root makes a page English, so its English label no longer names it.
+        pages = dict(CLEAN)
+        pages["설계-원칙"] = pages.pop("ko/설계-원칙")
+        self.assertIn("설계-원칙", _pages_with(awi.audit(pages), "switch-pair"))
+
+    def test_english_page_inside_ko_is_flagged(self):
+        pages = dict(CLEAN)
+        pages["ko/Design-Principles"] = pages.pop("Design-Principles")
+        self.assertIn("ko/Design-Principles", _pages_with(awi.audit(pages), "switch-pair"))
 
     def test_switch_that_does_not_come_back_is_flagged(self):
         pages = dict(CLEAN)
-        pages["Architecture"] = "언어: 🇺🇸 English | [🇰🇷 한국어](설계-원칙)\n\nBody."
+        pages["Architecture"] = "[🇺🇸 English](Architecture) | [🇰🇷 한국어](설계-원칙)\n\nBody."
         self.assertIn("Architecture", _pages_with(awi.audit(pages), "switch-pair"))
 
     def test_switch_to_a_same_language_page_is_flagged(self):
         pages = dict(CLEAN)
-        pages["Design-Principles"] = "언어: 🇺🇸 English | [🇰🇷 한국어](Home)\n\nBody."
+        pages["Design-Principles"] = "[🇺🇸 English](Design-Principles) | [🇰🇷 한국어](Home)\n\nBody."
         self.assertIn("Design-Principles", _pages_with(awi.audit(pages), "switch-pair"))
 
     def test_sidebars_carry_no_switch_line(self):
@@ -184,6 +211,12 @@ class TestSidebars(unittest.TestCase):
         pages = dict(CLEAN)
         pages["_Sidebar"] = "[Home](Home)"
         self.assertIn("Design-Principles", _pages_with(awi.audit(pages), "sidebar-coverage"))
+
+    def test_unlisted_page_without_a_switch_line_is_flagged(self):
+        # A page's language comes from its folder, so its folder's sidebar must list it.
+        pages = dict(CLEAN)
+        pages["Notes"] = "Body without a switch."
+        self.assertIn("Notes", _pages_with(awi.audit(pages), "sidebar-coverage"))
 
     def test_korean_sidebar_linking_an_english_page_is_flagged(self):
         pages = dict(CLEAN)

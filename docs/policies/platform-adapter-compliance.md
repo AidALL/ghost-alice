@@ -1,8 +1,8 @@
 # Platform Adapter Compliance
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/platform-adapter-compliance.md)
+[🇺🇸 English](./platform-adapter-compliance.md) | [🇰🇷 한국어](../ko/policies/platform-adapter-compliance.md)
 
-This contract records, without exaggeration, which surfaces are actually supported by the Claude, Codex, and terminal-only adapters.
+Under this contract, `skill-catalog/platform-adapters.json` records, without exaggeration, the surfaces that the Claude, Codex, and terminal-only adapters actually support and the verification state of that support.
 ## Contents
 
 - [Principles](#principles)
@@ -50,4 +50,4 @@ Each record in `skill-catalog/platform-adapters.json` has these fields:
 python3 scripts/validate_platform_adapters.py
 ```
 
-The validator checks required fields, required adapter ids, date formats, source doc existence, absence of Codex native claims, and hook evidence/fallback records.
+The validator checks required fields and adapter ids, date formats and the existence of source documents. It rejects a `native` state for Codex, requires the text of Codex's `unsupported_surfaces` and `risk_notes` to contain `hook` and one of `evidence`, `runtime` or `smoke`, and to contain `event` and `firing proof`, and requires Claude's `supported_assets` to contain both `repo-local` and `installed-global`.

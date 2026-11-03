@@ -1,6 +1,6 @@
 # Troubleshooting
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/getting-started/troubleshooting.md)
+[🇺🇸 English](./troubleshooting.md) | [🇰🇷 한국어](../ko/getting-started/troubleshooting.md)
 
 This document is a fast recovery playbook for cases where a user cannot pull the latest repository docs while installing or updating Ghost-ALICE. The GitHub Wiki home links to this guide online, so users can read it without updating their checkout.
 
@@ -32,7 +32,7 @@ If any of the following appears, the installer is not the first problem. The loc
 - `CONFLICT (add/add)`
 - `Automatic merge failed; fix conflicts and then commit the result.`
 - `error: Your local changes to the following files would be overwritten by merge`
-- `error: your local changes to the following files would be overwritten by merge` (the same error shown by a Korean-locale Git installation)
+- `error: 다음 파일의 로컬 변경 사항을 병합 때문에 덮어 쓰게 됩니다` (the same error shown by a Korean-locale Git installation)
 - `## main...origin/main [ahead N, behind M]`
 - `git status --short` shows `UU` or `AA`
 
@@ -66,7 +66,7 @@ git config --global user.email "you@example.com"
 git config --global user.name "your-name"
 ```
 
-If a conflict has already started, do not repeat `git pull` immediately after setting identity. Move to conflict recovery in step 2, then choose step 3 or step 4 according to whether local changes must be preserved.
+If a conflict has already started, do not repeat `git pull` immediately after setting identity. Inspect the current state in step 2, then choose step 3 or step 4 according to whether local changes must be preserved.
 
 ### 2. Inspect Current State
 
@@ -145,7 +145,7 @@ bash install.sh --doctor
 bash install.sh --status
 ```
 
-If `Doctor` or `Status` reports a pending merge warning, the installer created a protective backup during install. Open a fresh Claude/Codex session and ask it to review backed-up changes so the merge-companion flow can decide what to keep.
+If `Doctor` or `Status` reports a pending merge warning, the installer created a protective backup during install. Open a fresh Claude/Codex session and ask it to review backed-up changes. The merge-companion flow explains the choices, and you decide what to keep.
 
 ### 6. Operating Principles
 

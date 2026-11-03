@@ -1,6 +1,6 @@
 # 문서 안내
 
-Language: [🇺🇸 English](../README.md) | 🇰🇷 한국어
+[🇺🇸 English](../README.md) | [🇰🇷 한국어](./README.md)
 
 Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다. 저장소의 기본 안내는 영어이며, 한국어 문서는 `docs/ko/` 아래에서 영어 문서와 같은 디렉터리 구조로 관리합니다.
 
@@ -14,14 +14,14 @@ Ghost-ALICE OS의 사용자용 문서는 영어와 한국어로 제공합니다.
 bash install.sh
 ```
 
-저장소 복제, 운영체제별 명령과 명시적인 플랫폼 선택은 [설치 안내](./getting-started/installation.md)를 확인해 주세요. 애드온은 자체 저장소나 로컬 경로에서 설치합니다. [Install Addons](./getting-started/installation.md#install-addons)를 확인해 주세요.
+저장소 복제, 운영체제별 명령과 명시적인 플랫폼 선택은 [설치 안내](./getting-started/installation.md)를 확인해 주세요. 애드온은 자체 저장소나 로컬 경로에서 설치합니다. [애드온 설치](./getting-started/installation.md#애드온-설치)를 확인해 주세요.
 
 ## 시작 안내
 
 1. 설치와 업데이트는 [getting-started/installation.md](./getting-started/installation.md)를 확인해 주세요.
 2. 업데이트가 막히면 [getting-started/troubleshooting.md](./getting-started/troubleshooting.md)를 확인해 주세요.
 3. 저장소 구조는 [reference/repository-structure.md](./reference/repository-structure.md)를 확인해 주세요.
-4. 인스톨러 구조는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 확인해 주세요.
+4. 인스톨러 아키텍처는 [reference/installer-architecture.md](./reference/installer-architecture.md)를 확인해 주세요.
 5. 공개 질문은 [SUPPORT.md](https://github.com/AidALL/ghost-alice/blob/main/SUPPORT.md)와 GitHub Issues를 이용해 주세요.
 6. 비공개 취약점 보고는 [SECURITY.md](https://github.com/AidALL/ghost-alice/blob/main/SECURITY.md)의 안내를 따라 주세요.
 
@@ -30,26 +30,26 @@ bash install.sh
 | 목적 | 영어 | 한국어 |
 | --- | --- | --- |
 | 아키텍처와 책임 | [../../architecture.md](../../architecture.md) | [../../architecture_ko.md](../../architecture_ko.md) |
-| Documentation index | [../README.md](../README.md) | README.md |
-| Installation and update flow | [../getting-started/installation.md](../getting-started/installation.md) | [getting-started/installation.md](./getting-started/installation.md) |
-| Git/update troubleshooting | [../getting-started/troubleshooting.md](../getting-started/troubleshooting.md) | [getting-started/troubleshooting.md](./getting-started/troubleshooting.md) |
-| Uninstall cleanup | [../getting-started/uninstall.md](../getting-started/uninstall.md) | [getting-started/uninstall.md](./getting-started/uninstall.md) |
-| Repository structure | [../reference/repository-structure.md](../reference/repository-structure.md) | [reference/repository-structure.md](./reference/repository-structure.md) |
-| Installer architecture | [../reference/installer-architecture.md](../reference/installer-architecture.md) | [reference/installer-architecture.md](./reference/installer-architecture.md) |
-| Skill catalog guide | [../reference/skills.md](../reference/skills.md) | [reference/skills.md](./reference/skills.md) |
-| Official addons | [../reference/official-addons.md](../reference/official-addons.md) | [reference/official-addons.md](./reference/official-addons.md) |
-| Language policy | [../concepts/language-policy.md](../concepts/language-policy.md) | [concepts/language-policy.md](./concepts/language-policy.md) |
-| Runtime gate matrix | [../policies/session-gate-matrix.md](../policies/session-gate-matrix.md) | [policies/session-gate-matrix.md](./policies/session-gate-matrix.md) |
-| Platform compatibility | [../policies/installer-platform-compatibility-matrix.md](../policies/installer-platform-compatibility-matrix.md) | [policies/installer-platform-compatibility-matrix.md](./policies/installer-platform-compatibility-matrix.md) |
-| Tool output semantics | [../policies/tool-output-semantics.md](../policies/tool-output-semantics.md) | [policies/tool-output-semantics.md](./policies/tool-output-semantics.md) |
-| Platform adapter compliance | [../policies/platform-adapter-compliance.md](../policies/platform-adapter-compliance.md) | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) |
-| Live smoke regression | [../policies/live-smoke-regression.md](../policies/live-smoke-regression.md) | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) |
-| Evaluator artifact contract | [../policies/evaluator-artifact-contract.md](../policies/evaluator-artifact-contract.md) | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) |
-| Public release checklist | [../release/public-release-checklist.md](../release/public-release-checklist.md) | [release/public-release-checklist.md](./release/public-release-checklist.md) |
+| 문서 안내 | [../README.md](../README.md) | README.md |
+| 설치와 업데이트 절차 | [../getting-started/installation.md](../getting-started/installation.md) | [getting-started/installation.md](./getting-started/installation.md) |
+| Git·업데이트 문제 해결 | [../getting-started/troubleshooting.md](../getting-started/troubleshooting.md) | [getting-started/troubleshooting.md](./getting-started/troubleshooting.md) |
+| 설치 제거 | [../getting-started/uninstall.md](../getting-started/uninstall.md) | [getting-started/uninstall.md](./getting-started/uninstall.md) |
+| 저장소 구조 | [../reference/repository-structure.md](../reference/repository-structure.md) | [reference/repository-structure.md](./reference/repository-structure.md) |
+| 인스톨러 아키텍처 | [../reference/installer-architecture.md](../reference/installer-architecture.md) | [reference/installer-architecture.md](./reference/installer-architecture.md) |
+| 스킬 카탈로그 안내 | [../reference/skills.md](../reference/skills.md) | [reference/skills.md](./reference/skills.md) |
+| 애드온 | [../reference/addons.md](../reference/addons.md) | [reference/addons.md](./reference/addons.md) |
+| 언어 정책 | [../concepts/language-policy.md](../concepts/language-policy.md) | [concepts/language-policy.md](./concepts/language-policy.md) |
+| 런타임 게이트 매트릭스 | [../policies/session-gate-matrix.md](../policies/session-gate-matrix.md) | [policies/session-gate-matrix.md](./policies/session-gate-matrix.md) |
+| 플랫폼 호환성 | [../policies/installer-platform-compatibility-matrix.md](../policies/installer-platform-compatibility-matrix.md) | [policies/installer-platform-compatibility-matrix.md](./policies/installer-platform-compatibility-matrix.md) |
+| 도구 출력의 의미 | [../policies/tool-output-semantics.md](../policies/tool-output-semantics.md) | [policies/tool-output-semantics.md](./policies/tool-output-semantics.md) |
+| 플랫폼 어댑터 준수 | [../policies/platform-adapter-compliance.md](../policies/platform-adapter-compliance.md) | [policies/platform-adapter-compliance.md](./policies/platform-adapter-compliance.md) |
+| 실환경 점검 회귀 테스트 | [../policies/live-smoke-regression.md](../policies/live-smoke-regression.md) | [policies/live-smoke-regression.md](./policies/live-smoke-regression.md) |
+| 평가 산출물 계약 | [../policies/evaluator-artifact-contract.md](../policies/evaluator-artifact-contract.md) | [policies/evaluator-artifact-contract.md](./policies/evaluator-artifact-contract.md) |
+| 공개 배포 점검표 | [../release/public-release-checklist.md](../release/public-release-checklist.md) | [release/public-release-checklist.md](./release/public-release-checklist.md) |
 
 ## 기준 기여자 문서
 
-영어 원본 하나만 유지하는 문서는 [언어 정책](concepts/language-policy.md#intentionally-unpaired-sources)이 나열하며, 사용자용 한국어 대응 문서는 위 표에서 제공합니다.
+영어 원본 하나만 유지하는 문서는 [언어 정책](concepts/language-policy.md#의도적으로-짝이-없는-원본)이 나열하고, 짝을 이루는 사용자용 안내 문서는 위 표가 나열합니다.
 
 ## 갱신 규칙
 

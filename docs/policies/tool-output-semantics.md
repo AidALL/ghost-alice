@@ -1,6 +1,6 @@
 # Tool Output Semantics
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/policies/tool-output-semantics.md)
+[🇺🇸 English](./tool-output-semantics.md) | [🇰🇷 한국어](../ko/policies/tool-output-semantics.md)
 
 Tool results distinguish an observation, an authenticated review, and an executed action. Human labels help readers; the documented machine fields govern consumers. Compatibility labels do not replace those fields.
 
@@ -18,7 +18,7 @@ Counts retain their declared unit. A unique finding count differs from physical 
 
 ```mermaid
 flowchart LR
-  M["Responding model: claims and whole-answer judgments"] --> C["Core: authenticate bindings"]
+  M["Response model: claims and whole-answer judgments"] --> C["Core: authenticate bindings"]
   C -->|Status and references| M
   M --> H["Native host: display answer"]
   H -->|Stop observation| S["Core observer: record the assessment"]

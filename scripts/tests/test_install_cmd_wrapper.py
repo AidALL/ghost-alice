@@ -77,7 +77,7 @@ class InstallCmdWrapperTest(unittest.TestCase):
             TROUBLESHOOTING_DOC_KO: [
                 ".\\install.cmd",
                 "cannot be loaded because running scripts is disabled",
-                "사용자 또는 머신 execution policy를 변경하지 않습니다",
+                "사용자 또는 컴퓨터의 실행 정책을 변경하지 않습니다",
             ],
         }
 
@@ -99,28 +99,30 @@ class InstallCmdWrapperTest(unittest.TestCase):
 
 
     def test_install_and_uninstall_docs_put_command_choices_before_runtime_detail(self) -> None:
+        # Each edition's own headings: quick install, addons, one platform, common commands, runtime reference.
         install_docs = {
-            INSTALLATION_DOC: ("## Quick Install", "## Install Addons", "## Runtime And Platform Reference"),
-            INSTALLATION_DOC_KO: ("## Quick Install", "## Install Addons", "## Runtime And Platform Reference"),
+            INSTALLATION_DOC: ("## Quick Install", "## Install Addons", "## Install One Platform", "## Common Commands", "## Runtime And Platform Reference"),
+            INSTALLATION_DOC_KO: ("## 빠른 설치", "## 애드온 설치", "## 플랫폼 하나만 설치", "## 자주 사용하는 명령", "## 런타임과 플랫폼 참조"),
         }
-        for path, markers in install_docs.items():
+        for path, (quick, addons, one_platform, common, runtime) in install_docs.items():
             with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
                 text = path.read_text(encoding="utf-8-sig")
-                positions = [text.index(marker) for marker in markers]
+                positions = [text.index(marker) for marker in (quick, addons, runtime)]
                 self.assertEqual(positions, sorted(positions))
-                self.assertLess(text.index("## Install Addons"), text.index("## Install One Platform"))
-                self.assertLess(text.index("## Common Commands"), text.index("## Runtime And Platform Reference"))
+                self.assertLess(text.index(addons), text.index(one_platform))
+                self.assertLess(text.index(common), text.index(runtime))
 
-        uninstall_docs = [
-            REPO_ROOT / "docs" / "getting-started" / "uninstall.md",
-            REPO_ROOT / "docs" / "ko" / "getting-started" / "uninstall.md",
-        ]
-        for path in uninstall_docs:
+        # Each edition's removal-scope and source-file headings, then a phrase from its addon-removal text.
+        uninstall_docs = {
+            REPO_ROOT / "docs" / "getting-started" / "uninstall.md": ("## Choose The Removal Scope", "## Source", "Addon-specific removal"),
+            REPO_ROOT / "docs" / "ko" / "getting-started" / "uninstall.md": ("## 제거 범위 선택", "## 기준 파일", "개별 애드온 제거"),
+        }
+        for path, (scope, source, addon_removal) in uninstall_docs.items():
             with self.subTest(path=path.relative_to(REPO_ROOT).as_posix()):
                 text = path.read_text(encoding="utf-8-sig")
-                self.assertIn("## Choose The Removal Scope", text)
-                self.assertLess(text.index("## Choose The Removal Scope"), text.index("## Source"))
-                self.assertIn("개별 애드온 제거" if "ko" in path.parts else "Addon-specific removal", text)
+                self.assertIn(scope, text)
+                self.assertLess(text.index(scope), text.index(source))
+                self.assertIn(addon_removal, text)
 
 
 if __name__ == "__main__":

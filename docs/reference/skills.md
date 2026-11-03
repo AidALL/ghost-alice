@@ -1,8 +1,8 @@
 # Skill Catalog Guide
 
-언어: 🇺🇸 English | [🇰🇷 한국어](../ko/reference/skills.md)
+[🇺🇸 English](./skills.md) | [🇰🇷 한국어](../ko/reference/skills.md)
 
-The installable skill catalog source of truth is [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json).
+The installable skill catalog is [skill-catalog/skills.json](https://github.com/AidALL/ghost-alice/blob/main/skill-catalog/skills.json); `scripts/build_catalog.py` generates it from each skill's `SKILL.md` frontmatter.
 
 This page is only a pointer for contributors. It should not duplicate the current skill count, skill list, or routing metadata, because those values change in the catalog.
 
@@ -15,7 +15,7 @@ This page is only a pointer for contributors. It should not duplicate the curren
 
 ## Update Rule
 
-When public skill availability changes, update `skill-catalog/skills.json` first, then rebuild or validate public surfaces:
+To add or remove a public skill, add or remove its directory with its `SKILL.md`; to change a catalog entry, edit that `SKILL.md` frontmatter. Then regenerate the catalog with `python3 scripts/build_catalog.py` and validate public surfaces:
 
 ```bash
 python3 scripts/validate_public_surfaces.py
