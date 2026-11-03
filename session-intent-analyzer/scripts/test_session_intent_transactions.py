@@ -138,14 +138,13 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(self.state()["current_goal"], "new goal")
 
     def test_a_stored_field_the_ledger_does_not_define_never_blocks_later_writes(self):
-        # A ledger written by an older Core can hold a field this code no longer defines.
         self.write(raw_user_input="first request")
         state = self.state()
-        state["retired_field"] = {"written_by": "an older Core"}
+        state["undefined_field"] = {"value": 1}
         self.write_database_state(state)
         self.write(intent_delta={"current_goal": "next goal"}, expected_input_event_id=self.observed_id())
         self.assertEqual(self.state()["current_goal"], "next goal")
-        self.assertNotIn("retired_field", self.ledger.consumer_snapshot(self.state()))
+        self.assertNotIn("undefined_field", self.ledger.consumer_snapshot(self.state()))
 
     def test_expected_revision_rejects_a_lost_snapshot(self):
         self.write()
