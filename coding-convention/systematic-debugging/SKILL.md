@@ -7,11 +7,11 @@ compatibility:
 
 # Systematic Debugging
 
-The response model investigates an observed failure, tests a causal hypothesis and corrects the supported cause. Apply this workflow before proposing a fix for a failure whose cause and sufficient correction depth need investigation, and for repair limits. A symptom alone does not identify its cause.
+The response model investigates an observed failure, tests a causal hypothesis and corrects the supported cause. Apply this workflow before proposing a fix for a failure that needs investigation of its cause and of how deep the correction must go, and to count failed repair rounds. A symptom alone does not identify its cause.
 
 ## Investigation
 
-Read the complete error and relevant trace. Retain the failure's command or trigger, target, source locator and observed result. Whether to reproduce follows verification-before-completion's [evidence selection gate](../verification-before-completion/SKILL.md#evidence-selection-and-stop-gate).
+Read the complete error and relevant trace. Retain the failure's command or trigger, target, source locator and observed result. Decide whether to reproduce the failure under verification-before-completion's [evidence selection gate](../verification-before-completion/SKILL.md#evidence-selection-and-stop-gate).
 
 Inspect changes and dependencies that could produce the observed result. Give the largest supported cause priority without declaring other plausible causes resolved. In a multi-component system, inspect the input, output and configuration at the relevant component boundaries. Record presence or safe metadata for credentials.
 
@@ -29,9 +29,9 @@ If evidence identifies an environmental or external failure that cannot be remov
 
 ## Incident accounting and continuation
 
-This section owns failed-round accounting for the family. The response model investigating the failure records the unresolved failure, affected criterion, stage and target in its existing task context or in its handoff. Business failures and evidence-recording failures are separate incidents even when their error text matches.
+This section defines how the coding-convention skills count failed repair rounds. The response model investigating the failure records the unresolved failure, affected acceptance criterion, stage and target in its existing task context or in its handoff. A failure of the work and a failure to record its evidence are separate incidents even when their error text matches.
 
-The initial observed failure counts as zero failed repair rounds. Increment the count only after a corrective change and a completed relevant observation show that the same failure remains unresolved. A failed diagnostic, unavailable infrastructure or inconclusive observation consumes its actual resources but is not a failed business repair round.
+The initial observed failure counts as zero failed repair rounds. Increment the count only after a corrective change and a completed relevant observation show that the same failure remains unresolved. A failed diagnostic, unavailable infrastructure or inconclusive observation consumes its actual resources but is not a failed repair round.
 
 Keep the incident's cumulative count across agents and handoffs. An unknown cause does not justify renaming the incident or resetting the count. Demonstrated resolution followed by recurrence creates a linked new incident.
 
@@ -39,7 +39,7 @@ After five failed repair rounds and before another correction attempt, the respo
 
 To continue after reassessment, identify a distinguishable hypothesis, the observation that can discriminate it, an explicit additional-attempt or resource allowance, and a stopping condition. The allowance must fit the user’s remaining resource limit and, for a delegated task, the parent’s remaining allocation to that task. Reassessment resets neither attempts nor consumed resources. Exhaustion suspends that incident's further attempts. Five failures alone do not require a human decision.
 
-Boundary-contract owns authorization and the renewal of self-declared implementation limits. Verification-before-completion owns useful checks, required evidence and proof reuse. Its response review reference owns recording-specific recovery: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
+Boundary-contract defines authorization and the renewal of self-declared implementation limits. Verification-before-completion defines useful checks, required evidence and proof reuse. Its response review reference defines how to recover from a recording failure: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
 
 Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
 
@@ -52,6 +52,6 @@ Exclude suspended or human-waiting branches from executable work until a relevan
 
 ## Output and supporting techniques
 
-Report the observed cause or remaining uncertainty, correction, criterion-specific evidence and incident status when it affects continuation. Verification-before-completion owns final completion and partial-control blocks.
+Report the observed cause or remaining uncertainty, correction, the evidence for the affected acceptance criterion and incident status when it affects continuation. Verification-before-completion defines the final completion and partial completion blocks.
 
 Use [references/defense-in-depth.md](references/defense-in-depth.md) when evidence requires validation at multiple boundaries, and [references/condition-based-waiting.md](references/condition-based-waiting.md) when a timing failure requires waiting for an observable condition. Neither reference authorizes unrelated changes.

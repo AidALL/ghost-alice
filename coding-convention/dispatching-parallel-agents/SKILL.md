@@ -43,7 +43,7 @@ The example is an assignment, not executable tool syntax. Map it to the active h
 ## Failure modes
 
 - Parallel dispatch does not authorize shared-file edits or a broader objective.
-- A repeated failure needs a revised hypothesis or new evidence; follow systematic-debugging's incident limits.
+- A repeated failure needs a revised hypothesis or new evidence; follow systematic-debugging's incident accounting.
 - Do not increase a timeout without evidence that the original bound caused the failure.
 
 ## Result

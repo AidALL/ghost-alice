@@ -37,7 +37,7 @@ Do not add hypothetical defenses or repeat a prohibition merely to increase emph
 
 Coordinated changes may span packages; each changed package still needs its own disposition.
 
-Verification-before-completion owns useful-check selection, evidence reuse, original source/time and completion claims. Systematic-debugging owns failed-round accounting and bounded continuation. Do not duplicate either policy in a skill under repair.
+Verification-before-completion defines useful-check selection, evidence reuse, original source and time, and completion claims. Systematic-debugging defines incident accounting and bounded continuation. Do not duplicate either policy in a skill under repair.
 
 ## Failure modes
 

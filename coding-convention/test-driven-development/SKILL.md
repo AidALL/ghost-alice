@@ -23,15 +23,15 @@ Write a focused test with a descriptive name and an assertion about required beh
 
 Invoke the project's actual runner with the exact test target. Retain the original command, output, status and evidence locator. Judge whether the failure demonstrates the missing behavior rather than an invalid fixture, syntax error or unavailable dependency.
 
-If the test passes, determine whether the behavior already exists or the test misses the intended condition. If the test errors, correct the fixture or prerequisite and observe the affected result. Systematic-debugging owns failed-round accounting.
+If the test passes, determine whether the behavior already exists or the test misses the intended condition. If the test errors, correct the fixture or prerequisite and observe the affected result. Follow systematic-debugging to count failed repair rounds.
 
 For applicable work, observe this intended failure before writing production code. If the response model prematurely wrote production code, remove only its own authorized premature change before rebuilding from the test. Preserve pre-existing user changes and retained original failure evidence.
 
 ## GREEN: satisfy the behavior
 
-Implement the accepted behavior to the depth required by the observed cause. A structural defect may need a structural correction; passing one assertion does not settle other required criteria. Exclude unrelated features and refactors.
+Implement the accepted behavior to the depth required by the observed cause. A structural defect may need a structural correction; passing one assertion does not settle other required acceptance criteria. Exclude unrelated features and refactors.
 
-Run the same relevant target and inspect its result. If it fails, compare the failure with the accepted criterion: correct production behavior when it violates that criterion, or correct an assertion or fixture that misstates it. A passing implementation must not depend on weakening a valid requirement.
+Run the same relevant target and inspect its result. If it fails, compare the failure with the acceptance criterion: correct production behavior when it violates that acceptance criterion, or correct an assertion or fixture that misstates it. A passing implementation must not depend on weakening a valid requirement.
 
 Use verification-before-completion's [Evidence selection and stop gate](../verification-before-completion/SKILL.md#evidence-selection-and-stop-gate) for affected additional checks and [verify-or-reuse](../verification-before-completion/references/verify-or-reuse.md) for retained results. Report unrelated failures without claiming they were caused or resolved by this change.
 
@@ -77,4 +77,4 @@ The example covers success on the third attempt. If the contract also requires p
 
 Do not replace an unknown requirement with an implementation-shaped assertion, count mock configuration as production behavior, or treat RED-first order alone as proof of coverage. When setup is difficult, inspect the actual dependencies before prescribing interface changes or asking the user for an implementation detail.
 
-Return the behavior covered, original RED and GREEN observations, changed production target and any unresolved requirement. Verification-before-completion owns the completion judgment, including how this evidence supports the whole requested result.
+Return the behavior covered, original RED and GREEN observations, changed production target and any unresolved requirement. Verification-before-completion defines the completion judgment, including how this evidence supports the whole requested result.
