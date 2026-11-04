@@ -24,7 +24,7 @@ The response model writes the `interpreted-as: ` record as a semantic update: `c
 The ledger also holds detailed work, authority and evidence records for the Core code that uses them. When the next decision needs one stored detail, read it by its JSON pointer:
 
 ```bash
-session_intent_ledger.py --root "<ledger_root>" --platform "<platform>" --session-id "<session_id>" --read-state --pointer /latest_scope --expected-input-event-id "<current input>"
+session_intent_ledger.py --root "<ledger_root>" --platform "<platform>" --session-id "<session_id>" --read-state --pointer /latest_scope --expected-input-event-id "<input_event_id>"
 ```
 
 Pass `--expected-revision` when a pointer with a list index depends on an exact revision. The command returns the selected value with the input and revision it belongs to. When that input or revision has changed, interpret the newer input before writing.
