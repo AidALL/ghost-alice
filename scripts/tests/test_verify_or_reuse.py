@@ -31,7 +31,7 @@ FLOW = (
     "actual-mutation-authority -> observed-mutation-event -> evidence-still-valid -> "
     "decision-impact -> verify-or-reuse"
 )
-VERIFY_OR_REUSE_PRECHECK = "Reuse unchanged evidence at its original time and source."
+VERIFY_OR_REUSE_PRECHECK = "Reuse unchanged evidence with its original source and verification time."
 
 # Current scenario: an agent-authored Markdown file has agent-mediated mutation
 # authority. No mutation instruction or write event follows; a content question

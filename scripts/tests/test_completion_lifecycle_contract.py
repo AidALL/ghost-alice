@@ -63,10 +63,10 @@ class CompletionLifecycleContractTests(unittest.TestCase):
 
     def test_common_contracts_keep_routing_independent_of_proof(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
-        for phrase in ('Reuse unchanged evidence at its original time and source',
-                       'A recording error does not refute the business result or authorize replay',
-                       'Core code authenticates records and source bindings',
-                       '`verification-before-completion` owns evidence selection, the per-claim and whole-answer judgments'):
+        for phrase in ('Reuse unchanged evidence with its original source and verification time',
+                       'A recording failure does not refute the result of the work or authorize running the work again',
+                       'Core code authenticates each record and its link to its source',
+                       '`verification-before-completion`: selecting evidence, the per-claim and whole-response judgments'):
             self.assertIn(phrase, common)
         verification = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
         for phrase in ('then separately judge the complete draft',

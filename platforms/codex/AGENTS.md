@@ -8,4 +8,4 @@ The response model uses the tools actually exposed by this host. A Claude `Skill
 
 Installed skills are under `~/.agents/skills/`; Claude-only `${CLAUDE_SKILL_DIR}` is not a Codex path. Resolve `scripts/` and `references/` from the selected installed skill. Native hook configuration is `~/.codex/hooks.json`.
 
-Preserve the native `CODEX_THREAD_ID` binding of the session receipt's `session_id`; a mismatch is an error.
+Preserve the native `CODEX_THREAD_ID` binding of the session metadata's `session_id`; a mismatch is an error.

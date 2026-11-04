@@ -35,7 +35,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
             root = Path(tmp)
             common = root / 'platforms/common-governance.md'
             common.parent.mkdir()
-            common.write_text('# Ghost-ALICE Common Governance\n\nOne current procedure.\n')
+            common.write_text('# Ghost-ALICE Common Contract\n\nOne current procedure.\n')
             for platform, name, apply, marker, render in (
                     ('codex', 'AGENTS.md', blocks.apply_codex_bootstrap, blocks.CODEX_BOOTSTRAP_MARKER, blocks.render_codex_bootstrap),
                     ('claude', 'CLAUDE.md', blocks.apply_claude_bootstrap, blocks.CLAUDE_BOOTSTRAP_MARKER, blocks.render_claude_bootstrap)):
@@ -53,7 +53,7 @@ class GlobalRuleBlockTest(unittest.TestCase):
                 common.unlink()
                 with self.assertRaises(blocks.GlobalRuleBlockError):
                     apply(source, dest)
-                common.write_text('# Ghost-ALICE Common Governance\n\nOne current procedure.\n')
+                common.write_text('# Ghost-ALICE Common Contract\n\nOne current procedure.\n')
 
     def test_claude_bootstrap_is_created_when_destination_is_missing(self) -> None:
         blocks = _load_global_rule_blocks()
@@ -242,8 +242,8 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         body = blocks.render_codex_bootstrap(source)
 
-        self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session receipt"), 1)
-        self.assertIn("does not invent a receipt, and does not claim intake, routing, Stop or audit records", body)
+        self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session metadata"), 1)
+        self.assertIn("does not invent session metadata, and does not claim input, response route, Stop notice, hook log or io-trace records", body)
 
     def test_claude_source_owns_one_hookless_fallback(self) -> None:
         blocks = _load_global_rule_blocks()
@@ -261,8 +261,8 @@ class GlobalRuleBlockTest(unittest.TestCase):
 
         body = blocks.render_claude_bootstrap(source)
 
-        self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session receipt"), 1)
-        self.assertIn("does not claim intake, routing, Stop or audit records", body)
+        self.assertEqual(body.count("When this session's context carries no Ghost-ALICE session metadata"), 1)
+        self.assertIn("does not claim input, response route, Stop notice, hook log or io-trace records", body)
 
     def test_installers_route_global_rule_files_through_block_helper(self) -> None:
         hosts_py = (REPO_ROOT / "_shared" / "installer" / "hosts.py").read_text(encoding="utf-8")

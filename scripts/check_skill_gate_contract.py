@@ -47,7 +47,7 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                           'boundary-contract',
                                           'verification-before-completion',
                                           'routing-surface'],
- 'AGENTS.md': ['installed common contract', 'current-session receipt', 'platforms/common-governance.md'],
+ 'AGENTS.md': ['installed common contract', 'current session metadata', 'platforms/common-governance.md'],
  'platforms/codex/AGENTS.md': ['## Codex tools and installation',
                                'Metadata alone is not execution'],
  'platforms/claude/CLAUDE.md': ['## Claude tools and installation',

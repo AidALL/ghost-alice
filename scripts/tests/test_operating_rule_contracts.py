@@ -18,14 +18,14 @@ class OperatingRuleContractTest(unittest.TestCase):
                      'ask the user before that action'):
             self.assertIn(term, intent)
         for term in ('apply the direct-answer rule below; applying it loads no skill',
-                     'A direct answer reads no skills, accesses no ledger, registers no route'):
+                     'A direct answer reads no skills, accesses no ledger, registers no response route'):
             self.assertIn(term, selection)
         self.assertIn('Do not substitute another session', common)
-        self.assertIn('Missing or pending identity blocks dependent writes', common)
+        self.assertIn('A missing or pending identity of the session, installation or input blocks the writes that depend on it', common)
         self.assertIn('stored result or available tool grants no authority', common)
-        self.assertIn('Do not derive installation or write authority from default paths; explicit paths and the current session receipt identify the installation and session', common)
-        self.assertIn('The native host executes tools and enforces permission', common)
-        self.assertIn('`session-intent-analyzer`: reading or writing the intent record', common)
+        self.assertIn('Do not derive installation or write authority from default paths; explicit paths and the current session metadata identify the installation and session', common)
+        self.assertIn('The host executes tools and enforces permissions', common)
+        self.assertIn('`session-intent-analyzer`: reading or writing the `interpreted-as` record', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('Work Selection section', router)
         self.assertIn('register the response-route with Core code at that point, using the session receipt', router)
@@ -35,7 +35,7 @@ class OperatingRuleContractTest(unittest.TestCase):
         common = (ROOT / 'platforms/common-governance.md').read_text()
         trace = common.split('## io-trace Transparency Rule\n', 1)[1].split('\n## ', 1)[0]
         for phrase in ('Before a tool call that changes an authority boundary, a tool call made to obtain information for an open work decision',
-                       'Repeated healthy tool calls need no checkpoint'):
+                       'A tool call that repeats an earlier call needs no tool checkpoint while no denial, mismatch or relevant state change has occurred'):
             self.assertIn(phrase, trace)
 
     def test_rendered_contracts_carry_no_retired_instructions(self):
@@ -72,8 +72,8 @@ class OperatingRuleContractTest(unittest.TestCase):
 
     def test_visibility_does_not_disable_audit_or_execution(self):
         common = (ROOT / 'platforms/common-governance.md').read_text()
-        self.assertIn('strict audit independently of displayed guidance', common)
-        self.assertIn('Do not print full audit records', common)
+        self.assertIn('The hook runner writes the hook log and the io-trace hook writes the io-trace records at every visibility level', common)
+        self.assertIn('Do not print full io-trace records or the hook log', common)
         self.assertIn('A displayed trace does not establish proof', common)
 
     def test_external_and_evaluator_details_are_reachable_from_verification(self):
