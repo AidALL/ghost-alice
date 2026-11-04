@@ -151,8 +151,9 @@ class PublicSurfaceParityValidatorTest(unittest.TestCase):
 
         self.assertIn(
             'content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs '
-            'your coding agent to keep your objective, check each claim against its original '
-            'evidence and show what it touched."',
+            'the response model to keep your objective and to check each claim against its original '
+            'evidence, and it records each tool call the response model makes, with the file or command it '
+            'used, so that you can review it."',
             text,
         )
         self.assertNotIn("session-intent-" + "guard", text)
