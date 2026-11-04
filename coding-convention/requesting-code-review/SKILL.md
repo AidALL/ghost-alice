@@ -36,13 +36,12 @@ Use the accepted task's starting commit and current head for committed work. Ide
 
 Use the host's exposed agent API and the actual `references/code-reviewer.md` template. Supply a role parameter only when the host schema defines one.
 
-Placeholders
+Values to supply
 
-- `{WHAT_WAS_IMPLEMENTED}`: what you just built.
-- `{PLAN_OR_REQUIREMENTS}`: what you were supposed to do.
-- `{BASE_SHA}`: the starting commit.
-- `{HEAD_SHA}`: the ending commit.
-- `{DESCRIPTION}`: a short summary.
+- The implemented behavior.
+- The accepted plan or requirements.
+- The SHA of the starting commit.
+- The SHA of the current head.
 
 For publication review, the response model supplies the preflight matrix produced by finishing-a-development-branch Step 1. The delegate reports any missing required result or unaccounted environment difference; finishing-a-development-branch Step 1 determines which checks run again before publication.
 

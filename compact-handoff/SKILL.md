@@ -26,7 +26,7 @@ The response model fills the following block from the retained task state and th
 - rollback: <nearest concrete rollback path>
 ```
 
-For an unresolved repair, the response model carries the failure, the affected acceptance criterion, the stage, the target, the cumulative failed rounds, the status of the reassessment after five failed rounds, the cause hypothesis and the remaining resource allowance in `in-progress` or `next-step`. It keeps the original evidence with its source and time. It applies systematic-debugging's incident accounting to those values; the handoff creates neither a new incident nor a new resource allowance.
+For an unresolved repair, the response model carries the failure, the affected acceptance criterion, the stage, the target, the cumulative failed rounds, the status of the reassessment after five failed rounds, the cause hypothesis and any stopping condition in `in-progress` or `next-step`. It keeps the original evidence with its source and time. It applies systematic-debugging's incident accounting to those values; the handoff does not create a new incident.
 
 ## Pause compaction
 
