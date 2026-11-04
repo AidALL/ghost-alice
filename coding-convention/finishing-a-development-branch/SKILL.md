@@ -12,9 +12,9 @@ compatibility:
 
 ## Overview
 
-Guide the completion of development work with clear options and handle the selected workflow.
+Offer clear options for completing development work and carry out the selected workflow.
 
-Core principle: reproduce relevant CI locally -> honor the selected path -> reconcile remote CI and review -> integrate the verified head -> clean up only when safe.
+Principle: reproduce relevant CI locally -> honor the selected path -> reconcile remote CI and review -> integrate the verified head -> clean up only when safe.
 
 ## Process
 
@@ -59,7 +59,7 @@ Keep the options concise and explain only a concrete blocker or consequence the 
 
 #### Before integrating a pull request
 
-The response model follows requesting-code-review's [Remote Pull Request Review Gate](../requesting-code-review/SKILL.md#remote-pull-request-review-gate). That procedure returns the reconciled head, required review/CI results and finding dispositions. Integrate only the head those results support. A purely local integration without a PR has no invented remote-review dependency.
+The response model follows requesting-code-review's [Remote Pull Request Review Gate](../requesting-code-review/SKILL.md#remote-pull-request-review-gate). That procedure returns the reconciled head, required review/CI results and finding dispositions. Integrate only the head those results support. This gate adds no remote review to a purely local integration without a PR.
 
 When the user requests one commit, consolidate the unmerged work before the final review. An authorized replacement of a published PR branch uses `--force-with-lease` with the expected prior head and targets only that PR branch. A one-commit request alone does not authorize rewriting published `main` or another shared base branch. Work already merged needs a follow-up commit unless the user specifically authorizes replacing an identified published range. With that separate authorization, preserve recovery refs, verify that the replacement contains exactly the authorized work without dropping unrelated changes, and use an explicit expected-head lease on the authorized target ref. If the remote head moves or the range cannot be reconciled, stop the push and inspect; do not broaden the authorization or overwrite the new work. A rewritten head invalidates the prior review's freshness even when tests remain green.
 
@@ -150,7 +150,7 @@ The process above defines each prerequisite once. Do not substitute a representa
 
 A published-history rewrite needs the exact authorization and expected-head lease defined in Step 4. A selected integration path does not authorize unrelated changes or messages.
 
-Verification-before-completion owns completion claims and evidence reuse; systematic-debugging owns failed attempts. The output states the actual integration result, verified head, remaining gaps and preserved or removed checkout.
+Verification-before-completion defines completion claims and evidence reuse; follow systematic-debugging to count failed repair rounds. The output states the actual integration result, verified head, remaining gaps and preserved or removed checkout.
 
 ## Integration
 

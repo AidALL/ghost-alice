@@ -32,8 +32,8 @@ class GateSurfaceDesignTest(unittest.TestCase):
     def test_finalization_allows_actual_returned_results_and_separate_reviews(self):
         body = (ROOT / 'coding-convention/verification-before-completion/SKILL.md').read_text()
         self.assertIn('A successful result already returned in this turn can supply fresh evidence', body)
-        self.assertIn('run a further check only for a criterion it does not cover', body)
-        self.assertIn('Compare each claim with its original sources and criterion, then separately judge the complete draft', body)
+        self.assertIn('run a further check only for an acceptance criterion it does not cover', body)
+        self.assertIn('Compare each claim with its original sources and acceptance criterion, then separately judge the complete draft', body)
         self.assertIn('A verdict you endorse is your claim', body)
         self.assertIn('criterion and actual evidence', body)
 

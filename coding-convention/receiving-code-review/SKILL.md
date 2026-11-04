@@ -16,7 +16,7 @@ The response model evaluates each review suggestion against the user's requireme
 3. Check each finding against current code, relevant tests, supported platforms and the reason for the existing behavior. Use retained evidence where verification-before-completion permits it.
 4. Accept a valid finding, reject an incorrect one with evidence, or report the specific observation still unavailable. A reviewer cannot override a user's accepted architecture or compatibility requirement.
 5. Implement valid authorized fixes in dependency order: blocking correctness/security issues first, then small corrections and more complex changes. Test the affected behavior for each correction and required interactions.
-6. Report the disposition with code or test evidence. Systematic-debugging owns failed correction attempts; verification-before-completion owns success claims.
+6. Report the disposition with code or test evidence. Follow systematic-debugging for failed correction attempts and verification-before-completion for success claims.
 
 ## Scope and communication
 

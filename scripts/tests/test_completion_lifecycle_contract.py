@@ -17,7 +17,7 @@ def section(text, title):
 class CompletionLifecycleContractTests(unittest.TestCase):
     def assert_review_contract(self, text):
         finalization = section(text, 'Finalization sequence')
-        claim = finalization.index('Compare each claim with its original sources and criterion')
+        claim = finalization.index('Compare each claim with its original sources and acceptance criterion')
         whole = finalization.index('separately judge the complete draft')
         record = finalization.index('submit both judgments to Core')
         self.assertLess(claim, whole)
@@ -31,7 +31,7 @@ class CompletionLifecycleContractTests(unittest.TestCase):
 
     def test_missing_judgment_or_false_code_semantics_rejects_contract(self):
         body = SKILL.read_text()
-        for phrase in ('Compare each claim with its original sources and criterion',
+        for phrase in ('Compare each claim with its original sources and acceptance criterion',
                        'separately judge the complete draft', 'code does not decide their meaning'):
             with self.subTest(phrase=phrase), self.assertRaises((AssertionError, ValueError)):
                 self.assert_review_contract(body.replace(phrase, 'removed'))
@@ -46,7 +46,7 @@ class CompletionLifecycleContractTests(unittest.TestCase):
                        'A different execution-local variable or a recording failure'):
             self.assertIn(phrase, reference)
         selection = section(body, 'Evidence selection and stop gate')
-        for phrase in ('unresolved criterion or competing explanation',
+        for phrase in ('unresolved acceptance criterion or competing explanation',
                        'why the method distinguishes the alternatives',
                        'which attainable outcomes would change a specific next action',
                        'Mandatory checks are those that the user or the project requires; they remain required',
@@ -89,7 +89,7 @@ class CompletionLifecycleContractTests(unittest.TestCase):
         body = section(SKILL.read_text(), 'Completion-Check Format')
         for phrase in ('[completion-check]', '[partial-check]', 'scope: partial',
                        'failed verdict proves failure, not overall success',
-                       'Preserve all required criteria', 'claim', 'criterion', 'evidence', 'verdict'):
+                       'Preserve all required acceptance criteria', 'claim', 'criterion', 'evidence', 'verdict'):
             self.assertIn(phrase, body)
         self.assertIn('neither application nor continuation', body)
         self.assertIn('completion evidence coverage', body)

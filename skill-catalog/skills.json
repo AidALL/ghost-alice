@@ -1,6 +1,6 @@
 {
   "version": "1.3.0",
-  "generated_at": "2026-11-04T14:19:50Z",
+  "generated_at": "2026-11-04T14:51:17Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -261,7 +261,7 @@
     {
       "name": "verification-before-completion",
       "path": "coding-convention/verification-before-completion/SKILL.md",
-      "description": "Before a new completion, working-fix, success or verified-status claim or a recommendation the user will act on, checks it against its criterion and evidence and decides whether evidence must be reread.",
+      "description": "Before a new completion, working-fix, success or verified-status claim or a recommendation the user will act on, checks it against its acceptance criterion and evidence and decides whether evidence must be reread.",
       "family": "coding-convention",
       "governance_class": "completion-gate",
       "compatibility": [

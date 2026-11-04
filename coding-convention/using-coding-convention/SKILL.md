@@ -7,11 +7,11 @@ compatibility:
 
 # Using Coding Convention
 
-The response model starting development uses this entrypoint to select the applicable family skills. A delegate assigned one bounded task follows the parent's supplied workflow instead of routing the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation.
+The response model starting development uses this entrypoint to select the applicable coding-convention skills. A delegate assigned one bounded task follows the parent's supplied workflow instead of following task-router for the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation.
 
 ## Priority and loading
 
-User instructions and project rules govern the task; family skills govern the implementation procedure within that authority. Load or validly reuse the family skill selected for the next development action. When uncertain applicability would change that action, read the body and decide; otherwise continue with the established workflow.
+User instructions and project rules govern the task; coding-convention skills govern the implementation procedure within that authority. Load or validly reuse the skill selected for the next development action. When uncertain applicability would change that action, read the body and decide; otherwise continue with the established workflow.
 
 Use the host's actual skill mechanism, map each operation to the host's exposed tool schemas, and do not invent unavailable tools.
 
@@ -19,7 +19,7 @@ For Codex operations, use [references/codex-tools.md](references/codex-tools.md)
 
 ## Workflow
 
-After routing selects development work, the response model uses the table below to choose its family workflow. The common contract's Session Intent and Work Selection sections own the earlier interpretation and carry task-router's direct-answer rule.
+After selecting development work under task-router, the response model uses the table below to choose its workflow. The common contract's Session Intent and Work Selection sections define the earlier interpretation and the direct-answer rule.
 
 Before the next file read, command, edit, plan, review or development-status claim, select the applicable workflow below. Reuse accepted design and authorization. If evidence contradicts the plan, revise the implicated assumption or task within that authorization. Follow boundary-contract to distinguish an implementation change within existing authority from a change requiring the user’s decision.
 
@@ -43,12 +43,12 @@ Use the selected skill's body for its procedure, required calls and output forma
 
 ## Final claims
 
-Verification-before-completion owns evidence reuse, completion and partial-control formats, and the finalization sequence.
+Verification-before-completion defines evidence reuse, the completion and partial completion blocks, and the finalization sequence.
 
 For repair attempts, follow systematic-debugging's [Incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). For authorization, follow boundary-contract. Do not copy either procedure into a task-specific plan.
 
 ## Failure modes
 
 - A small change does not excuse skipping an applicable required workflow.
-- An agent's plan cannot weaken the user's done conditions.
+- An agent's plan cannot weaken the user's acceptance criteria.
 - Repeating a check requires the evidence trigger defined by verification-before-completion.

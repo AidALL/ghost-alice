@@ -13,9 +13,9 @@ The response model resolves unsettled product or technical design decisions befo
 
 ## Design procedure
 
-1. Inspect the relevant project structure, documentation and recent changes when the task authorizes that inspection. Identify the objective, constraints, done conditions and decisions already supplied.
+1. Inspect the relevant project structure, documentation and recent changes when the task authorizes that inspection. Identify the objective, constraints, acceptance criteria and decisions already supplied.
 2. Decompose a request containing independent subsystems into independently understandable specifications. Preserve the complete objective and the relationships and execution order between subsystems.
-3. Ask one decisive question at a time for missing human-owned decisions. Prefer concise choices when useful. A user example supplies evidence about desired behavior; resolve the criterion it illustrates rather than making the example the whole contract.
+3. Ask one decisive question at a time for missing human-owned decisions. Prefer concise choices when useful. A user example supplies evidence about desired behavior; resolve the acceptance criterion it illustrates rather than making the example the whole contract.
 4. For a live design choice, compare two or three alternatives, explain the trade-offs and recommend one. Do not reopen settled choices without contrary evidence.
 5. Present a concrete design covering components, interfaces, data flow, error handling and verification. Use enough detail to resolve the uncertainty.
 6. Save the accepted design to `docs/coding-convention/specs/YYYY-MM-DD-<topic>-design.md`, unless the user specified another location or prohibited an artifact. Follow the task's commit policy.
@@ -26,7 +26,7 @@ The response model resolves unsettled product or technical design decisions befo
 
 Each component needs a named responsibility, interface and dependency set. In an existing project, follow its established patterns. Include structural improvement when the observed defect affects the requested work; do not add unrelated refactoring.
 
-Contrary evidence can require revisiting a requirement, component or data-flow assumption. Identify the affected decision, revise it within existing authority and verify that correction. Boundary-contract owns any change requiring new human authority.
+Contrary evidence can require revisiting a requirement, component or data-flow assumption. Identify the affected decision, revise it within existing authority and verify that correction. Follow boundary-contract for any change requiring new human authority.
 
 Use [references/document-reviewer-prompt.md](references/document-reviewer-prompt.md) when an independent specification review can resolve an uncertainty the self-review leaves. Do not dispatch a delegate merely to repeat an unchanged approval.
 

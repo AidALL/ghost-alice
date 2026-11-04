@@ -10,7 +10,7 @@ compatibility:
 
 # Writing Plans
 
-The response model turns accepted requirements into tasks that can be executed without prior project context. Brainstorming owns unresolved design decisions; this skill does not silently settle a human-owned requirement.
+The response model turns accepted requirements into tasks that can be executed without prior project context. Brainstorming resolves open design decisions; this skill does not silently settle a human-owned requirement.
 
 ## Define the plan
 
@@ -30,9 +30,9 @@ For every task include:
 - Complete code for a planned code change, including referenced types and functions.
 - The actual command and expected result for each check.
 - Dependencies and the condition that makes the task ready.
-- Done conditions and any exact unresolved human decision.
+- Acceptance criteria and any exact unresolved human decision.
 
-Do not leave placeholder implementation text, unspecified validation, undefined calls, or instructions such as “same as Task 2” when the model executing that task needs that code independently.
+Do not leave placeholder implementation text, unspecified validation, undefined calls, or instructions such as “same as Task 2” when the response model or delegate executing that task needs that code independently.
 
 ## Review and correction
 

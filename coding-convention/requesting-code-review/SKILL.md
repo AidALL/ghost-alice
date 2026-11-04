@@ -12,7 +12,7 @@ Dispatch a delegate with the `code-reviewer` assignment to catch issues before t
 The response model requests review at required milestones and when a specific unresolved concern warrants independent inspection.
 ## When to Request a Review
 
-A review listed below is required, or worth requesting, only when its outcome can change the next action or a criterion's judgment.
+A review listed below is required, or worth requesting, only when its outcome can change the next action or the judgment of an acceptance criterion.
 
 □ Required
 
@@ -44,7 +44,7 @@ Placeholders
 - `{HEAD_SHA}`: the ending commit.
 - `{DESCRIPTION}`: a short summary.
 
-For publication review, the response model supplies the preflight matrix produced by finishing-a-development-branch Step 1. The delegate reports any missing required result or unaccounted environment difference; that owning procedure determines affected reruns before publication.
+For publication review, the response model supplies the preflight matrix produced by finishing-a-development-branch Step 1. The delegate reports any missing required result or unaccounted environment difference; finishing-a-development-branch Step 1 determines which checks run again before publication.
 
 □ 3. Respond to the feedback
 
@@ -67,6 +67,6 @@ Record a compact result with the PR URL, head SHA, review sources and completion
 
 ## Failure modes and result
 
-Do not substitute a reviewer's confidence or CI status for the required review result. receiving-code-review owns each finding's disposition; retain unresolved conditions before dependent integration.
+Do not substitute a reviewer's confidence or CI status for the required review result. Follow receiving-code-review for each finding's disposition; retain each unresolved finding and outstanding condition before the integration that depends on it.
 
-Template: `references/code-reviewer.md`. Verification-before-completion owns final claim scope and evidence; a reviewer verdict alone does not establish integration readiness.
+Template: `references/code-reviewer.md`. Verification-before-completion defines final claim scope and evidence; a reviewer verdict alone does not establish integration readiness.
