@@ -3,6 +3,7 @@ name: session-intent-analyzer
 description: "Records the response model's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues."
 compatibility:
   - "Python 3.11+ standard library"
+  - "Ghost-ALICE _shared folder, installed beside the skill"
   - "hook-capable environments plus hookless/manual fallback"
 calls:
   - "soft:skill-evolution"

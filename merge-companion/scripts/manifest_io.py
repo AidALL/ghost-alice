@@ -1,26 +1,29 @@
-"""manifest_io. Merge-companion manifest CRUD with atomic write and flock.
+"""manifest_io. Merge-companion manifest CRUD with atomic write and a file lock.
 
-Dependencies: Python 3.11+ standard library only.
+Dependencies: Python 3.11+ standard library and the Core helpers `atomic_write` and `file_lock` in `_shared`.
 
 Manifest-missing-or-invalid silent-pass rule: missing, empty, or unparsable manifest -> silent pass with an empty dict.
-Atomic-manifest-write guarantee: atomic write (tempfile + os.replace) plus POSIX flock protects against race and crash cases.
+Atomic-manifest-write guarantee: atomic write (temporary file + rename) plus the lock on the sibling .lock file protects
+against race and crash cases. A lock held past `MANIFEST_LOCK_WAIT_S` raises `file_lock.LockTimeout` to the caller.
 """
 
 from __future__ import annotations
 
 import contextlib
 import json
-import os
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 
-try:
-    import fcntl
-    HAS_FCNTL = True
-except ImportError:
-    HAS_FCNTL = False
+_SHARED = Path(__file__).resolve().parents[2] / "_shared"
+if str(_SHARED) not in sys.path:
+    sys.path.insert(0, str(_SHARED))
+import atomic_write  # noqa: E402
+import file_lock  # noqa: E402
+
+# Longer than the log limit: a timeout here aborts the install, while a holder normally keeps the lock only for one
+# read and one write of the manifest.
+MANIFEST_LOCK_WAIT_S = 30.0
 
 
 class ManifestError(Exception):
@@ -33,23 +36,11 @@ class ManifestError(Exception):
 
 @contextlib.contextmanager
 def _exclusive_lock(path: Path):
-    """POSIX: apply fcntl.flock to a sibling .lock file. Windows: best-effort no-op."""
+    """The lock on the sibling .lock file. The manifest itself is replaced by rename, so a lock on it would not guard
+    the version that replaces it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    if not HAS_FCNTL:
-        # Windows environment: proceed without a real lock.
+    with file_lock.exclusive(path.with_suffix(path.suffix + ".lock"), wait=MANIFEST_LOCK_WAIT_S):
         yield
-        return
-    f = open(lock_path, "w")
-    try:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-        yield
-    finally:
-        try:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
-        f.close()
 
 
 # ---------------------------------------------------------------------------
@@ -86,28 +77,12 @@ def read_manifest(path: Path) -> dict:
 
 
 def write_manifest(path: Path, data: dict) -> None:
-    """Write a manifest atomically with tempfile + fsync + os.replace.
+    """Write a manifest atomically.
 
     The existing file is preserved across partial writes or crashes
     (atomic-manifest-write guarantee).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(
-        dir=str(path.parent), prefix=".manifest.", suffix=".tmp"
-    )
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    except Exception:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    atomic_write.write_json(path, data)
 
 
 def append_entry(path: Path, entry: dict) -> None:

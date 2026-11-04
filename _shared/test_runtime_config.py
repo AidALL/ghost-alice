@@ -16,26 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import runtime_config
 
 
-class _FailAfterPartialWrite:
-    def __init__(self, handle, error: OSError) -> None:
-        self._handle = handle
-        self._error = error
-
-    def __enter__(self):
-        self._handle.__enter__()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return self._handle.__exit__(exc_type, exc_value, traceback)
-
-    def write(self, value):
-        partial_length = max(1, len(value) // 2)
-        self._handle.write(value[:partial_length])
-        self._handle.flush()
-        raise self._error
-
-    def __getattr__(self, name):
-        return getattr(self._handle, name)
+from test_atomic_write import _FailAfterPartialWrite  # noqa: E402
 
 
 class TestRuntimeConfigDefaults(unittest.TestCase):
@@ -235,112 +216,6 @@ class TestRuntimeConfigDefaults(unittest.TestCase):
         )
         self.assertEqual(stat.S_IMODE(target.stat().st_mode), original_mode)
 
-    def test_atomic_write_replaces_resolved_symlink_destination(self):
-        path = runtime_config.config_path(self.home)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"symlink entry sentinel")
-        target = self.home / "runtime-target" / "config.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"old target")
-        original_mode = stat.S_IMODE(target.stat().st_mode)
-        original_is_symlink = Path.is_symlink
-        original_resolve = Path.resolve
-
-        def simulated_is_symlink(candidate: Path) -> bool:
-            if candidate == path:
-                return True
-            return original_is_symlink(candidate)
-
-        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
-            if candidate == path:
-                return target
-            return original_resolve(candidate, *args, **kwargs)
-
-        with (
-            mock.patch.object(Path, "is_symlink", new=simulated_is_symlink),
-            mock.patch.object(Path, "resolve", new=simulated_resolve),
-        ):
-            runtime_config._atomic_write_bytes(path, b"new target")
-
-        self.assertEqual(path.read_bytes(), b"symlink entry sentinel")
-        self.assertEqual(target.read_bytes(), b"new target")
-        self.assertEqual(stat.S_IMODE(target.stat().st_mode), original_mode)
-
-    def test_resolved_symlink_failure_keeps_entry_and_target_bytes(self):
-        path = runtime_config.config_path(self.home)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"symlink entry sentinel")
-        target = self.home / "runtime-target" / "config.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"old target")
-        original_is_symlink = Path.is_symlink
-        original_resolve = Path.resolve
-        original_fdopen = os.fdopen
-        write_error = OSError("target temp write failed")
-
-        def simulated_is_symlink(candidate: Path) -> bool:
-            if candidate == path:
-                return True
-            return original_is_symlink(candidate)
-
-        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
-            if candidate == path:
-                return target
-            return original_resolve(candidate, *args, **kwargs)
-
-        def failing_fdopen(fd, *args, **kwargs):
-            return _FailAfterPartialWrite(
-                original_fdopen(fd, *args, **kwargs),
-                write_error,
-            )
-
-        with (
-            mock.patch.object(Path, "is_symlink", new=simulated_is_symlink),
-            mock.patch.object(Path, "resolve", new=simulated_resolve),
-            mock.patch.object(runtime_config.os, "fdopen", side_effect=failing_fdopen),
-            mock.patch.object(
-                runtime_config.tempfile,
-                "mkstemp",
-                wraps=tempfile.mkstemp,
-            ) as mkstemp,
-            self.assertRaises(OSError) as raised,
-        ):
-            runtime_config._atomic_write_bytes(path, b"new target")
-
-        self.assertIs(raised.exception, write_error)
-        self.assertEqual(path.read_bytes(), b"symlink entry sentinel")
-        self.assertEqual(target.read_bytes(), b"old target")
-        self.assertEqual(Path(mkstemp.call_args.kwargs["dir"]), target.parent)
-        self.assertEqual(list(target.parent.glob(f".{target.name}.*.tmp")), [])
-
-    def test_broken_symlink_with_missing_target_parent_fails_safely(self):
-        path = runtime_config.config_path(self.home)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"symlink entry sentinel")
-        target = self.home / "missing-target-parent" / "config.json"
-        original_is_symlink = Path.is_symlink
-        original_resolve = Path.resolve
-
-        def simulated_is_symlink(candidate: Path) -> bool:
-            if candidate == path:
-                return True
-            return original_is_symlink(candidate)
-
-        def simulated_resolve(candidate: Path, *args, **kwargs) -> Path:
-            if candidate == path:
-                return target
-            return original_resolve(candidate, *args, **kwargs)
-
-        with (
-            mock.patch.object(Path, "is_symlink", new=simulated_is_symlink),
-            mock.patch.object(Path, "resolve", new=simulated_resolve),
-            self.assertRaises(FileNotFoundError),
-        ):
-            runtime_config._atomic_write_bytes(path, b"new target")
-
-        self.assertEqual(path.read_bytes(), b"symlink entry sentinel")
-        self.assertFalse(target.exists())
-
     def test_symlink_write_failure_preserves_link_target_and_uses_target_directory(self):
         path = runtime_config.config_path(self.home)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -362,7 +237,7 @@ class TestRuntimeConfigDefaults(unittest.TestCase):
         with (
             mock.patch.object(runtime_config.os, "fdopen", side_effect=failing_fdopen),
             mock.patch.object(
-                runtime_config.tempfile,
+                tempfile,
                 "mkstemp",
                 wraps=tempfile.mkstemp,
             ) as mkstemp,

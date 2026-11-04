@@ -4,6 +4,7 @@ description: Reviews the user's backed-up edits to installed skills and merges e
 type: lifecycle-gate
 compatibility:
   - "Python 3.11+ standard library"
+  - "Ghost-ALICE _shared folder, installed beside the skill"
 ---
 
 # Merge Companion

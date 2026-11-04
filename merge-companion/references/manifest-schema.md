@@ -53,7 +53,7 @@ PY
 
 ## Persistence behavior
 
-The helper writes through a temporary file and os.replace. POSIX uses flock; the Windows fallback is best-effort and performs no locking. Corrupt JSON follows the silent-pass behavior and is backed up with the .corrupt-bak suffix.
+The helper writes through a temporary file and a rename. `append_entry`, `append_entry_if_absent` and `mark_decided` hold the lock on the sibling `.lock` file and wait for it at most `MANIFEST_LOCK_WAIT_S` in `manifest_io.py`; a lock held longer raises `file_lock.LockTimeout` to the caller. Windows takes no lock. Corrupt JSON follows the silent-pass behavior and is backed up with the .corrupt-bak suffix.
 
 ## Safety boundary
 

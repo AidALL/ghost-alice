@@ -8,11 +8,11 @@ raises: a failure is one line in `state-retention-failures.jsonl` under the Ghos
 `retention-failures` entry bounds and doctor reads. `entry_for` names the entry a created path belongs to, so a test
 can require every created path to have one.
 
-Dependencies: Python 3.11+ standard library. Without `fcntl` (Windows), appends go on without the lock.
+Dependencies: Python 3.11+ standard library and the Core helpers `atomic_write`, `file_lock`, `install_destination`,
+`text_lines` and `installed_payload` in `_shared`. Without `fcntl` (Windows), appends go on without the lock.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import datetime, timezone
 import fnmatch
 import json
@@ -22,19 +22,14 @@ import re
 import shutil
 import time
 from typing import Callable, Iterable, Mapping, NamedTuple
-import uuid
 
+import atomic_write
+import file_lock
 import install_destination
 from text_lines import committed_length, split_lines
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
-
 MB = 1024 * 1024
 DAY = 86400
-LOCK_WAIT_S = 2.0  # the longest a writer waits for a shared log's lock
 METHODS = ("size-rotation", "keep-newest", "age", "line-count", "overwrite", "user-kept")
 FAILURES = "state-retention-failures.jsonl"
 
@@ -64,11 +59,6 @@ class Policy(NamedTuple):
     copy_truncate: bool = False    # size-rotation of a file another process holds open in append mode
     marker: str | None = None      # age: the file whose modification time dates its folder
     pending: str | None = None     # the change that adds the writer applying this entry, until it does
-
-
-class LockTimeout(Exception):
-    """A shared log's lock stayed held past `LOCK_WAIT_S`."""
-
 
 
 _TABLE = (
@@ -232,67 +222,38 @@ def apply(name: str, path: Path | str, *, protect: Iterable[Path | str] = (),
         return ()
 
 
-def append(name: str, path: Path | str, text: str) -> None:
-    """Append `text` to the log `path` and apply the entry `name`, both under the log's lock. When the lock stays
-    held past `LOCK_WAIT_S`, the text is appended without the rule and the wait is recorded. Writing the text can
-    raise like any write; the entry's failures are recorded and never raised."""
+def append(name: str, path: Path | str, text: str, *, apply_rule: bool = True) -> None:
+    """Append `text` to the log `path` under the log's lock and, unless `apply_rule` is False, apply the entry `name`
+    there too. When the lock stays held past `file_lock.LOCK_WAIT_S`, the text is appended without the lock or the
+    rule and the wait is recorded under `name`. Writing the text can raise like any write; the entry's failures are
+    recorded and never raised."""
     path = Path(path)
     install_destination.assert_mutation_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with _exclusive(path):
+        with file_lock.exclusive(path):
             _append_once(path, text)
-            apply(name, path)
+            if apply_rule:
+                apply(name, path)
             return
-    except LockTimeout as timeout:
+    except file_lock.LockTimeout as timeout:
         _append_once(path, text)
-        _record_failure(name, path, type(timeout).__name__, f"lock held past {LOCK_WAIT_S}s; appended without the rule")
+        skipped = "the rule" if apply_rule else "the lock"
+        _record_failure(name, path, type(timeout).__name__,
+                        f"lock held past {file_lock.LOCK_WAIT_S}s; appended without {skipped}")
 
 
 def _append_once(path: Path, text: str) -> None:
-    """One append-mode write, so concurrent writers never interleave within a line."""
+    """One append-mode write, so concurrent writers never interleave within a line; a write that the system takes only
+    in part raises, as a buffered write does."""
+    data = text.encode("utf-8")
     descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
     try:
-        os.write(descriptor, text.encode("utf-8"))
+        written = os.write(descriptor, data)
     finally:
         os.close(descriptor)
-
-
-@contextmanager
-def _exclusive(path: Path):
-    """An exclusive flock on the file at `path`, created when missing; yields the locked file's stat, or None
-    without `fcntl`. A writer that waited while another rotated the file locks the file now at `path`; a lock still
-    held after `LOCK_WAIT_S` raises LockTimeout."""
-    if fcntl is None:
-        yield None
-        return
-    deadline = time.monotonic() + LOCK_WAIT_S
-    while True:
-        descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
-        try:
-            while True:
-                try:
-                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except BlockingIOError:
-                    if time.monotonic() >= deadline:
-                        raise LockTimeout(str(path))
-                    time.sleep(0.01)
-            held = os.fstat(descriptor)
-            try:
-                current = os.stat(path)
-            except FileNotFoundError:
-                current = None
-        except BaseException:
-            os.close(descriptor)
-            raise
-        if current is not None and os.path.samestat(held, current):
-            break
-        os.close(descriptor)  # the file was rotated while this writer waited
-    try:
-        yield held
-    finally:
-        os.close(descriptor)
+    if written != len(data):
+        raise OSError(f"appended {written} of {len(data)} bytes to {path}")
 
 
 def _size_rotation(path: Path, policy: Policy) -> tuple[Path, ...]:
@@ -307,14 +268,9 @@ def _size_rotation(path: Path, policy: Policy) -> tuple[Path, ...]:
     install_destination.assert_mutation_path(previous)
     if size > 2 * policy.limit:
         # A file far past its limit keeps only its newest part as the previous file.
-        _write_new(previous, _tail(path, policy.limit))
+        atomic_write.write_bytes(previous, _tail(path, policy.limit))
     elif policy.copy_truncate:
-        temporary = _temporary(previous)
-        try:
-            shutil.copyfile(path, temporary)
-            os.replace(temporary, previous)
-        finally:
-            temporary.unlink(missing_ok=True)
+        atomic_write.write_bytes(previous, path.read_bytes())
     else:
         os.replace(path, previous)
         return (previous,)
@@ -332,19 +288,6 @@ def _tail(path: Path, limit: int) -> bytes:
         stream.seek(-(limit + 1), os.SEEK_END)
         window = stream.read(limit + 1)
     return window[window.find(b"\n") + 1:] if b"\n" in window else b""
-
-
-def _temporary(target: Path) -> Path:
-    return target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
-
-
-def _write_new(target: Path, data: bytes) -> None:
-    temporary = _temporary(target)
-    try:
-        temporary.write_bytes(data)
-        os.replace(temporary, target)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def _line_count(path: Path, policy: Policy) -> tuple[Path, ...]:
@@ -494,10 +437,10 @@ def _record_failure(name: str, path: Path, error_type: str, detail: str) -> None
                "error_type": error_type, "error": detail[:500]}
         line = json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
         try:
-            with _exclusive(record):
+            with file_lock.exclusive(record):
                 _append_once(record, line)
                 _line_count(record, POLICIES["retention-failures"])
-        except LockTimeout:
+        except file_lock.LockTimeout:
             _append_once(record, line)  # the record keeps its limit at the next failure
     except Exception:
         pass

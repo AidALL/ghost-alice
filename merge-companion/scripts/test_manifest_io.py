@@ -1,16 +1,21 @@
 """Tests for merge-companion manifest I/O.
 
-Dependencies: Python 3.11+ standard library + local merge-companion modules.
+Dependencies: Python 3.11+ standard library, the local merge-companion modules and the Core `file_lock` they use.
 """
 
+import os
+import stat
+import threading
 import unittest
 import tempfile
 from pathlib import Path
+from unittest import mock
 import manifest_io
 from manifest_io import (
     read_manifest, append_entry, append_entry_if_absent,
     mark_decided, list_pending, ManifestError,
 )
+import file_lock  # manifest_io puts the Core helpers on the import path
 
 class TestManifestIO(unittest.TestCase):
     def setUp(self):
@@ -84,10 +89,58 @@ class TestManifestIO(unittest.TestCase):
         backup = self.path.with_suffix(self.path.suffix + ".corrupt-bak")
         self.assertTrue(backup.exists())
 
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_lock_held_past_the_limit_raises_lock_timeout(self):
+        # A writer that stopped while holding the manifest lock must not stop the installer behind it.
+        lock = self.path.with_suffix(self.path.suffix + ".lock")
+        outcome = []
+
+        def writer():
+            try:
+                append_entry(self.path, {"id": "late", "decided": False})
+            except file_lock.LockTimeout:
+                outcome.append("timeout")
+
+        with mock.patch.object(manifest_io, "MANIFEST_LOCK_WAIT_S", 0.2), file_lock.exclusive(lock):
+            thread = threading.Thread(target=writer, daemon=True)
+            thread.start()
+            thread.join(5)
+        self.assertEqual(outcome, ["timeout"])
+        self.assertEqual(read_manifest(self.path), {"entries": []})
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_holder_slower_than_the_log_limit_does_not_fail_the_write(self):
+        # A timeout here aborts the install, so a holder that is only slow must not trip it.
+        lock = self.path.with_suffix(self.path.suffix + ".lock")
+        held = threading.Event()
+        release = threading.Event()
+
+        def holder():
+            with file_lock.exclusive(lock):
+                held.set()
+                release.wait(5)
+
+        thread = threading.Thread(target=holder, daemon=True)
+        thread.start()
+        self.assertTrue(held.wait(5))
+        timer = threading.Timer(0.5, release.set)
+        timer.start()
+        with mock.patch.object(file_lock, "LOCK_WAIT_S", 0.1):
+            append_entry(self.path, {"id": "patient", "decided": False})
+        thread.join(5)
+        timer.join(5)
+        self.assertEqual([entry["id"] for entry in read_manifest(self.path)["entries"]], ["patient"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_a_rewrite_keeps_the_manifest_mode(self):
+        self.path.write_text('{"entries": []}\n', encoding="utf-8")
+        os.chmod(self.path, 0o640)
+        manifest_io.write_manifest(self.path, {"version": 1, "entries": []})
+        self.assertEqual(stat.S_IMODE(self.path.stat().st_mode), 0o640)
+        self.assertEqual(read_manifest(self.path), {"version": 1, "entries": []})
+
     def test_append_if_absent_works_without_fcntl(self):
-        old_has_fcntl = manifest_io.HAS_FCNTL
-        manifest_io.HAS_FCNTL = False
-        try:
+        with mock.patch.object(file_lock, "fcntl", None):
             entry = {
                 "id": "pending-a",
                 "platform": "codex",
@@ -115,8 +168,6 @@ class TestManifestIO(unittest.TestCase):
                     ["platform", "source_path", "snapshot_hash", "current_hash", "change_kind"],
                 )
             )
-        finally:
-            manifest_io.HAS_FCNTL = old_has_fcntl
 
         self.assertEqual(len(read_manifest(self.path)["entries"]), 1)
         self.assertFalse(self.path.with_suffix(self.path.suffix + ".lock").exists())
