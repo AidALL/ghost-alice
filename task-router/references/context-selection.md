@@ -12,7 +12,7 @@ For local originals, `python3 <installed-shared-directory>/source_lookup.py <pat
 
 ## After use
 
-After using a source body or tool result, the response model updates the current summary with the conclusion, uncertainty, unresolved condition and source locator. Later Ghost-ALICE handoffs pass that current state and locator, without repeating the body. When a subsequent decision needs the original wording, the response model retrieves the relevant source again. The hook log and the io-trace records retain the original observation; neither a summary nor a keyword replaces proof. Core code keeps work, authorization and proof records for its own decisions, separately from model input.
+After using a source body or tool result, the response model updates the current summary with the conclusion, uncertainty, unresolved condition and source locator. Later Ghost-ALICE handoffs pass that current state and locator, without repeating the body. When a subsequent decision needs the original wording, the response model retrieves the relevant source again. Neither a summary nor a keyword replaces proof. Core code keeps work, authorization and proof records for its own decisions, separately from model input.
 
 ## Change the input representation
 
