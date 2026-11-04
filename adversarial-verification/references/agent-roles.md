@@ -31,12 +31,12 @@ Valid examples include identifying an unexamined premise behind a no-attack decl
 
 “Agent X is wrong,” “X is taking sides,” and unsupported agreement are invalid. A meta-attack is not a vehicle for placing an ordinary off-axis claim attack into the record. The response model audits the distinction through round-protocol.md.
 
-## Assignment by complexity
+## Assignment by verification complexity
 
-| Complexity | Delegates | Composition |
+| Verification complexity | Delegates | Composition |
 | --- | --- | --- |
 | level 1 | zero | Entry evidence precheck only |
 | level 2 | three | Fixed internal-logic, external-fact, internal-fact |
 | level 3 | five | Fixed three plus two distinct extended roles |
 
-Simple operational documents normally use level 1. Regulation, contract or policy interpretation normally uses level 2, with level 3 for high-risk claims. Patents, papers, investor-relations and legal documents normally use level 3. Technical documents normally use level 1, increasing for numeric, compatibility or security claims. The response model supplies the actual complexity for the admitted claim; these defaults do not waive its evidence burden.
+Simple operational documents normally use level 1. Regulation, contract or policy interpretation normally uses level 2, with level 3 for high-risk claims. Patents, papers, investor-relations and legal documents normally use level 3. Technical documents normally use level 1, increasing for numeric, compatibility or security claims. The response model supplies the actual verification complexity for the admitted claim; these defaults do not waive its evidence burden.

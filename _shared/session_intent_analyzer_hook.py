@@ -295,7 +295,7 @@ def input_receipt(root: Path, platform: str, session_id: str, paths: dict[str, P
                   observation: dict[str, Any] | None) -> str:
     """Add nothing while the session holds the current receipt; send a changed one once.
 
-    The record rules are in session-intent-analyzer/references/ledger-schema.md#hook-observation-receipt.
+    The record rules are in session-intent-analyzer/references/ledger-schema.md#session-metadata-from-the-hooks.
     """
     receipt = session_receipt(paths)
     try:

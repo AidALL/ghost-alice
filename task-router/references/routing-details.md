@@ -1,6 +1,6 @@
 # Routing Details
 
-The response model uses this reference when boundary reconciliation is uncertain or a supplied phrase leaves the next action uncertain. `../SKILL.md` owns the route procedure and schemas.
+The response model uses this reference when boundary reconciliation is uncertain or a supplied phrase leaves the next action uncertain. `../SKILL.md` defines the response route procedure and links its schema.
 
 ## Boundary reconciliation
 
@@ -10,13 +10,13 @@ If only conflicting snapshot fields remain, the response model leaves the confli
 
 ## Direct answer and confirmation conditions
 
-The common contract's Work Selection section carries task-router's direct-answer rule and its no-tool action; its Session Intent section owns confirmation questions. Use the examples below when a supplied phrase leaves the next action uncertain.
+The common contract's Work Selection section carries task-router's direct-answer rule and its no-tool action; its Session Intent section defines confirmation questions. Use the examples below when a supplied phrase leaves the next action uncertain.
 
 A general why/how premise remains an explanation topic unless the user identifies a workspace, supplies workspace evidence, requests exact diagnosis, or the conversation establishes the inspected referent. First-person wording, past tense, technical-state vocabulary and an open project do not independently establish inspection authority. An established referent permits inspection but does not require it when retained evidence answers the question.
 
-## Direct-answer actions and the agent visibility profile
+## Direct-answer actions and the visibility level
 
-Follow the common contract's Work Selection section for a direct answer and its Session Intent section for a confirmation question. For work, task-router owns route registration and verification-before-completion owns closure claims; an instruction from the agent visibility profile does not replace either workflow.
+Follow the common contract's Work Selection section for a direct answer and its Session Intent section for a confirmation question. For work, task-router defines response route registration and verification-before-completion defines completion and partial completion claims; an instruction from the visibility level does not replace either workflow.
 
 ## Examples
 
@@ -29,7 +29,7 @@ Follow the common contract's Work Selection section for a direct answer and its 
 | A stable compile-only how-to with no version-specific claim | Give the bounded method directly |
 | A general question about a past process state without an established inspected artifact | Explain common causes without diagnosing the ambient workspace |
 | “Check the requirements table against the body” | Normal verification; when the purpose is established and both targets are known, the read-only comparison needs no new boundary contract |
-| “Build only the Android login mockup; do not touch auth/API/DI/navigation; verify a screenshot” | Normal development; boundary-contract preserves prohibited surfaces and visual criterion before coding |
+| “Build only the Android login mockup; do not touch auth/API/DI/navigation; verify a screenshot” | Normal development; boundary-contract preserves prohibited surfaces and the visual acceptance criterion before coding |
 | “Schedule a meeting tomorrow at 3” | Normal operations; boundary-contract captures the external side effect before scheduling |
 
 The examples illustrate classification, not findings about any current tool or workspace.
@@ -38,4 +38,4 @@ The examples illustrate classification, not findings about any current tool or w
 
 The response model must not infer authorization from metadata, use no-work labels to abandon implementation, or claim an untested branch passed because another branch passed.
 
-Authority and renewal belong to `../../boundary-contract/SKILL.md#authority-and-renewal`. Incident accounting belongs to `../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation`. Proof reuse, discretionary checks and native delivery belong to `../../coding-convention/verification-before-completion/SKILL.md`. A new input or route error reopens the affected binding, not unrelated business proof. A genuinely expanded release-readiness claim requires evidence for the added conditions.
+Authority and renewal belong to `../../boundary-contract/SKILL.md#authority-and-renewal`. Incident accounting belongs to `../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation`. Proof reuse, discretionary checks and answer delivery belong to `../../coding-convention/verification-before-completion/SKILL.md`. A new user input, an SDK-started turn or a route error reopens the affected binding, not unrelated proof of the work. A genuinely expanded release-readiness claim requires evidence for the added conditions.

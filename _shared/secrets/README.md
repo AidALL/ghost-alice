@@ -58,7 +58,7 @@ secrets_list
 
 ```python
 import sys, os
-sys.path.insert(0, os.path.join("<project root>", "_shared", "secrets"))
+sys.path.insert(0, os.path.join("<directory containing _shared>", "_shared", "secrets"))
 import load as secrets
 
 # 1. Look up from env/file only (None if absent)
