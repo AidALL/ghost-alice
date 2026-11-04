@@ -86,7 +86,7 @@ CHECKS: list[LayerCheck] = [
         pattern=r"`merge-companion`: before the selected work modifies, replaces or installs an installed skill",
         owner=REPO / "merge-companion" / "SKILL.md",
         owner_section="Entry and activation",
-        owner_pattern=r"re-check the current platform's manifest[\s\S]*does not answer that check[\s\S]*bounded read-only lookup unrelated to those changes[\s\S]*leaves the backups undecided",
+        owner_pattern=r"reads the current host's manifest again[\s\S]*an installer run can add entries during the session[\s\S]*read-only lookup unrelated to those changes[\s\S]*the backups stay undecided",
     ),
     LayerCheck(
         layer="pending-merge-bootstrap-self-check",

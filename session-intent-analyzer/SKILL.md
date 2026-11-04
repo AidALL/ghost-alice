@@ -1,6 +1,6 @@
 ---
 name: session-intent-analyzer
-description: "Records the response model's new or changed interpretation of a request before the first tool call of work, and reads the stored interpretation when it can change the objective, constraints, work choice or whether earlier work continues."
+description: "Records the response model's new or changed interpretation of a request as its `interpreted-as` record before the first tool call of work, and reads that record when it can change the objective, constraints, work choice or whether earlier work continues."
 compatibility:
   - "Python 3.11+ standard library"
   - "Ghost-ALICE _shared folder, installed beside the skill"
@@ -11,32 +11,32 @@ calls:
 
 # Session Intent Analyzer
 
-The native intake hook records input identity without retaining raw prompt text. The common contract's Session Intent section sets when the response model records its `interpreted-as: ` interpretation; this skill sets the record's fields. Task-router selects work and skills from that record and the current request.
+Core code records the identity of each user input in the intent ledger without keeping its text. The common contract's Session Intent section sets when the response model records its `interpreted-as: ` interpretation; this skill defines the record's fields. Following task-router, the response model selects the work and skills from that record and the user's current input.
 
 ## Current intent and references
 
-First identify the stored fact that can change the next decision. The supplied request and the session receipt can support a source lookup without another state read. Retrieve stored intent when it can affect the objective, constraints, authorized continuation, work selection or a semantic update. When the decision has no stored-state dependency and needs no semantic update, defer ledger access and proceed with the selected work.
+First identify the stored fact that can change the next decision. A source lookup can proceed from the user's input and the session metadata (the `[session-intent-receipt]` block) without reading the ledger. Read the stored `interpreted-as` record when it can affect the objective, the constraints, whether authorized work continues, the work selection or a semantic update (a ledger write through `--delta-json`). When the decision depends on no stored state and needs no semantic update, do not read the ledger and proceed with the selected work.
 
-For a required intent lookup, use the exact receipt coordinates with `scripts/session_intent_ledger.py --read-intent`. The result contains routing keywords, their original input binding, the current input/revision, and JSON pointers to detailed state. Keywords do not establish work completion or current applicability by themselves.
+To read the stored `interpreted-as` record, run `scripts/session_intent_ledger.py --read-intent` with `ledger_root`, `platform` and `session_id` from the session metadata. The result holds the routing keywords, the input they were written for, the current input and revision, and JSON pointers to detailed state. Keywords alone do not establish that the work is complete or that the keywords still apply.
 
-The `interpreted-as: ` record is a semantic update: `current_goal` holds the objective, `constraints` and `non_goals` hold the constraints, and `acceptance_criteria` holds the done conditions, each with the source label that the common contract's Session Intent section names. The ledger stores a condition labeled `interpreted-as` as unadmitted, so it cannot be marked met; report such a condition as an assumption together with the result. When the user approves it, update that condition with `admitted: true`. The response model writes `routing_keywords` and `routing_summary` as replacements: short selection terms and a concise current objective, relevant constraints, decision and next action. Neither field contains raw prompts, tool output, full documents or repeated history. Omit an unchanged update. `constraints`, `non_goals`, `open_questions`, `risk_flags` and `consumer_hints` describe current conditions. Supply a field's complete current value only when it changes, and an empty list to remove all of its entries. Preserve applicable user restrictions when preparing a replacement.
+The response model writes the `interpreted-as: ` record as a semantic update: `current_goal` holds the objective, `constraints` and `non_goals` hold the constraints, and `acceptance_criteria` holds the acceptance criteria, each with the source label that the common contract's Session Intent section names. The ledger stores an acceptance criterion labeled `interpreted-as` as unadmitted, so it cannot be marked met; report such an acceptance criterion as an assumption together with the result. When the user approves it, update that acceptance criterion with `admitted: true`. `routing_keywords` holds short terms for selecting work and `routing_summary` holds a concise current objective, the relevant constraints, the decision and the next action; each write replaces the earlier value. Neither field contains prompt text, tool output, full documents or repeated history. Send no update when nothing changed. `constraints`, `non_goals`, `open_questions`, `risk_flags` and `consumer_hints` hold current values. Supply a field's complete current value only when it changes, and an empty list to remove all of its entries. Keep the applicable user restrictions when preparing a replacement.
 
-Detailed work, authority and evidence records remain available to their owning code. When the next decision needs a stored detail, select its pointer:
+The ledger also holds detailed work, authority and evidence records for the Core code that uses them. When the next decision needs one stored detail, read it by its JSON pointer:
 
 ```bash
-session_intent_ledger.py --root "<receipt root>" --platform "<receipt platform>" --session-id "<receipt session>" --read-state --pointer /latest_scope --expected-input-event-id "<current input>"
+session_intent_ledger.py --root "<ledger_root>" --platform "<platform>" --session-id "<session_id>" --read-state --pointer /latest_scope --expected-input-event-id "<current input>"
 ```
 
-Use `--expected-revision` when an indexed selection depends on an exact revision. The tool returns the selected value and its input/revision binding. A changed binding requires interpreting the newer input before a write.
+Pass `--expected-revision` when a pointer with a list index depends on an exact revision. The command returns the selected value with the input and revision it belongs to. When that input or revision has changed, interpret the newer input before writing.
 
-For a semantic update, pass `--delta-json` with only changed current values and bind `--expected-input-event-id` to the current input identity that `--read-intent` returns. Code retains only the defined summary fields and required audit facts. Do not create a second state file or export merely to read current intent. The canonical SQLite API, ownership, work contract and correction details are in [references/ledger-schema.md](references/ledger-schema.md); open the relevant section only for that operation.
+For a semantic update, pass `--delta-json` with only the changed values and pass `--expected-input-event-id` with the current input ID that `--read-intent` returns. Core code keeps only the defined summary fields and the event records it requires. Do not create a second state file or an export only to read the current `interpreted-as` record. The canonical SQLite API, ownership, work contract and correction details are in [references/ledger-schema.md](references/ledger-schema.md); open the relevant section only for that operation.
 
-## Native input and authority
+## Input records and authority
 
-[Canonical intake provenance](references/ledger-schema.md#canonical-intake-provenance) owns how intake records input on each host; a notification does not become human authority. Pending input cannot authorize dependent writes. A native session binding must match the selected write session. Core code reads and validates canonical state for route registration, context dispositions, authority-dependent execution and completion records; supplied prose cannot replace those checks. Historical read-only lookup does not grant that session's execution permission.
+[Canonical intake provenance](references/ledger-schema.md#canonical-intake-provenance) defines how Core code records input on each host; a notification never counts as human authority. A pending input cannot authorize the writes that depend on it. The session that the host reports must match the session selected for a write. Core code reads and validates the ledger state for response route registration, context dispositions, execution that depends on authority, and completion records; supplied prose cannot replace those checks. A read-only lookup of an earlier session does not grant that session's permission to execute.
 
-A material conduct correction can be recorded as one compressed `conduct_feedback` entry with a stable ID and supported source. User assertions support `user-said`; a directly observed mismatch supports `interpreted-as`. A prospective constraint is not evidence of an earlier failure. Task-router consumes current intent; skill-evolution receives conduct feedback only as a report branch.
+The response model can record a material correction of its conduct as one compressed `conduct_feedback` entry with a stable ID and a supported source. An assertion by the user supports the source `user-said`; a mismatch the response model observed directly supports `interpreted-as`. A constraint for future work is not evidence of an earlier failure. Task-router uses the current `interpreted-as` record; skill-evolution reads `conduct_feedback` only for its reports.
 
 ## Failure modes
 
-Do not accumulate routing keywords, obsolete summaries or resolved questions. Do not equate successful persistence with completed work. Missing state remains a named dependency.
+Do not accumulate routing keywords, obsolete summaries or resolved questions. A successful ledger write does not establish that the work is complete. Name missing state as an unresolved dependency.
