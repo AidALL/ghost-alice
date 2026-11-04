@@ -4,7 +4,9 @@ Dependencies: Python 3.11+ standard library only.
 """
 import importlib.util
 import json
+import os
 import sqlite3
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -36,6 +38,29 @@ class TransactionTests(unittest.TestCase):
 
     def write(self, **kwargs):
         return self.ledger.record_turn(**self.identity, **kwargs)
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_a_state_write_keeps_the_mode_of_the_file_it_replaces(self):
+        path = self.root / "state.json"
+        self.ledger.write_json(path, {"revision": 1})
+        os.chmod(path, 0o640)
+        self.ledger.write_json(path, {"revision": 2})
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o640)
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8")), {"revision": 2})
+
+    @unittest.skipIf(os.name == "nt", "Windows cannot flush a folder")
+    def test_a_state_write_also_flushes_its_folder_entry(self):
+        # A ledger state file survives a power loss under its new name, not only its new contents.
+        flushed = []
+        real_fsync = os.fsync
+
+        def observe(descriptor):
+            flushed.append(stat.S_ISDIR(os.fstat(descriptor).st_mode))
+            return real_fsync(descriptor)
+
+        with patch("os.fsync", side_effect=observe):
+            self.ledger.write_json(self.root / "state.json", {"revision": 1})
+        self.assertIn(True, flushed)
 
     def state(self):
         return self.ledger.read_session_state(**self.identity)

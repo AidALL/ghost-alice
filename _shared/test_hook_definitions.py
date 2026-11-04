@@ -40,6 +40,9 @@ SHARED_MODULES = {
     "install_lock": set(),
     "content_digest": set(),
     "installed_payload": {"content_digest", "install_lock"},
+    "install_destination": set(),
+    "atomic_write": {"install_destination"},
+    "file_lock": set(),
 }
 # The installer package (`_shared/installer/*.py`) is the installer layer too; it runs
 # the entry points above as child processes and imports none of the runtime.

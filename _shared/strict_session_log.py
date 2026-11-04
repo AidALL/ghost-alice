@@ -124,8 +124,6 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
     safe_platform = safe_component(platform)
     safe_session_id = safe_component(session_id)
     path = log_path(home=home, platform=safe_platform, session_id=safe_session_id)
-    install_destination.assert_mutation_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     first_row = not path.exists()
 
     row = {
@@ -149,8 +147,9 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
     for optional_key in ("surface_item", "surface_items", "model_surface_output", "user_surface_output"):
         if optional_key in event:
             row[optional_key] = _safe_json_value(event[optional_key])
-    with path.open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+    line = json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n"
+    # This log's retention rule runs on the sessions folder at a session's first row, below, so the append skips it.
+    state_retention.append("session-logs", path, line, apply_rule=False)
     if first_row:
         # A new session removes the session folders of every host whose log has been idle for 14 days.
         state_retention.apply("session-logs", path.parents[2], protect=[path.parent])

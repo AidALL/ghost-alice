@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -300,6 +301,17 @@ class StopNoticeFileTests(StopNoticeCase):
                 text=True, capture_output=True, check=True, env=env).stdout)
             self.assertEqual(again["stop_notice"]["state"], "quiet")
             self.assertEqual(json.loads(notice.read_text(encoding="utf-8")), again["stop_notice"])
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_a_recorded_message_keeps_the_mode_of_the_file_it_replaces(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            notice = root / "stop-notice.json"
+            self.stop(COMPLETE, root, notice_file=notice)
+            os.chmod(notice, 0o640)
+            payload = self.stop("A different answer.", root / "second", ledger=False, notice_file=notice)
+            self.assertEqual(stat.S_IMODE(notice.stat().st_mode), 0o640)
+            self.assertEqual(json.loads(notice.read_text(encoding="utf-8")), payload["stop_notice"])
 
     def test_a_failed_replacement_leaves_no_temporary_file(self):
         with tempfile.TemporaryDirectory() as temporary:

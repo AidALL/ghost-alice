@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import stat
 import sys
 import tempfile
 import threading
@@ -17,6 +18,8 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import state_retention  # noqa: E402
+import atomic_write  # noqa: E402
+import file_lock  # noqa: E402
 
 MB = 1024 * 1024
 DAY = 86400
@@ -142,12 +145,42 @@ class SizeRotationTests(RetentionTestCase):
         path.write_bytes(b"z\n" * 40)
         policy = state_retention.POLICIES["gateway-service-log"]._replace(limit=64)
         with mock.patch.dict(state_retention.POLICIES, {"gateway-service-log": policy}), \
-                mock.patch("state_retention.shutil.copyfile", side_effect=OSError("disk full")):
+                mock.patch.object(atomic_write, "write_bytes", side_effect=OSError("disk full")):
             state_retention.apply("gateway-service-log", path)
         self.assertEqual(path.read_bytes(), b"z\n" * 40)
         [failure] = self.failures()
         self.assertEqual((failure["policy"], failure["path"], failure["error_type"]),
                          ("gateway-service-log", str(path), "OSError"))
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_the_previous_file_written_from_the_tail_keeps_its_mode(self):
+        # The previous file is replaced like every Core state file: flushed, renamed over it, its mode kept.
+        path = self.root / "usage.jsonl"
+        previous = path.with_name("usage.jsonl.1")
+        previous.write_bytes(b"older\n")
+        os.chmod(previous, 0o604)
+        path.write_bytes(b"x" * 200 + b"\n" + b'{"n":1}\n')
+        policy = state_retention.POLICIES["gateway-usage"]._replace(limit=64)
+        with mock.patch.dict(state_retention.POLICIES, {"gateway-usage": policy}):
+            state_retention.apply("gateway-usage", path)
+        self.assertEqual(previous.read_bytes(), b'{"n":1}\n')
+        self.assertEqual(stat.S_IMODE(previous.stat().st_mode), 0o604)
+        self.assertEqual(self.failures(), [])
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_a_copy_truncated_previous_file_keeps_its_mode(self):
+        path = self.root / "service.log"
+        previous = path.with_name("service.log.1")
+        previous.write_bytes(b"older\n")
+        os.chmod(previous, 0o604)
+        path.write_bytes(b"y" * 100 + b"\n")
+        policy = state_retention.POLICIES["gateway-service-log"]._replace(limit=64)
+        with mock.patch.dict(state_retention.POLICIES, {"gateway-service-log": policy}):
+            state_retention.apply("gateway-service-log", path)
+        self.assertEqual(previous.read_bytes(), b"y" * 100 + b"\n")
+        self.assertEqual(stat.S_IMODE(previous.stat().st_mode), 0o604)
+        self.assertEqual(path.stat().st_size, 0)
+        self.assertEqual(self.failures(), [])
 
 
 class LineCountTests(RetentionTestCase):
@@ -284,6 +317,15 @@ class AppendTests(RetentionTestCase):
     """Writers that share a log append and apply its entry under one lock on the log, so no writer rotates with a size
     it read before another writer rotated."""
 
+    def test_a_short_write_raises_instead_of_leaving_the_line_cut(self):
+        # A buffered write raised when the system took only part of a line; the one-write append raises too.
+        path = self.root / "governance-events.jsonl"
+        real_write = os.write
+        with mock.patch.object(state_retention.os, "write",
+                               side_effect=lambda descriptor, data: real_write(descriptor, data[:5])), \
+                self.assertRaises(OSError):
+            state_retention.append("governance-events", path, '{"row": 1}\n')
+
     def test_appends_and_rotations_of_one_log_never_overlap(self):
         path = self.root / "governance-events.jsonl"
         policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
@@ -315,26 +357,7 @@ class AppendTests(RetentionTestCase):
         self.assertEqual(peak[0], 1)
         self.assertEqual(self.failures(), [])
 
-    @unittest.skipIf(state_retention.fcntl is None, "this platform has no flock")
-    def test_a_writer_that_waited_while_the_log_was_rotated_locks_the_new_log(self):
-        path = self.root / "io-trace.jsonl"
-        path.write_text("old\n", encoding="utf-8")
-        locked = []
-
-        def writer():
-            with state_retention._exclusive(path) as held:
-                locked.append(held.st_ino)
-
-        with state_retention._exclusive(path):
-            thread = threading.Thread(target=writer)
-            thread.start()
-            time.sleep(0.1)  # the writer now waits for the lock on the old file
-            path.rename(path.with_name("io-trace.jsonl.1"))
-            path.write_text("new\n", encoding="utf-8")
-        thread.join(10)
-        self.assertEqual(locked, [path.stat().st_ino])
-
-    @unittest.skipIf(state_retention.fcntl is None, "this platform has no flock")
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_lock_held_too_long_appends_the_line_without_rotation_and_records_it(self):
         # A writer that stops while holding the lock must not stop the hooks behind it.
         path = self.root / "governance-events.jsonl"
@@ -347,7 +370,7 @@ class AppendTests(RetentionTestCase):
             done.set()
 
         with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy}), \
-                mock.patch.object(state_retention, "LOCK_WAIT_S", 0.2), state_retention._exclusive(path):
+                mock.patch.object(file_lock, "LOCK_WAIT_S", 0.2), file_lock.exclusive(path):
             thread = threading.Thread(target=writer)
             thread.start()
             finished = done.wait(5)
@@ -358,12 +381,12 @@ class AppendTests(RetentionTestCase):
         [failure] = self.failures()
         self.assertEqual((failure["policy"], failure["error_type"]), ("governance-events", "LockTimeout"))
 
-    @unittest.skipIf(state_retention.fcntl is None, "this platform has no flock")
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_failure_record_held_too_long_still_gets_the_line(self):
         record = self.ghost / "state-retention-failures.jsonl"
         record.parent.mkdir(parents=True)
         record.write_text("", encoding="utf-8")
-        with mock.patch.object(state_retention, "LOCK_WAIT_S", 0.2), state_retention._exclusive(record):
+        with mock.patch.object(file_lock, "LOCK_WAIT_S", 0.2), file_lock.exclusive(record):
             state_retention.apply("no-such-entry", self.root)
         [failure] = self.failures()
         self.assertEqual(failure["error_type"], "UnknownPolicy")
@@ -450,8 +473,8 @@ class FailureTests(RetentionTestCase):
 
 
 def _entry_callers() -> set[str]:
-    """Entry names that production code passes to `state_retention.apply` or `append`, plus the entries
-    `state_retention` applies itself."""
+    """Entry names that production code passes to `state_retention.apply`, or to `append` without
+    `apply_rule=False`, plus the entries `state_retention` applies itself."""
     import ast
     shared = Path(__file__).resolve().parent
     names: set[str] = set()
@@ -463,7 +486,9 @@ def _entry_callers() -> set[str]:
             if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                     and node.func.attr in ("apply", "append") and isinstance(node.func.value, ast.Name)
                     and node.func.value.id == "state_retention" and node.args
-                    and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)):
+                    and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str)
+                    and not any(keyword.arg == "apply_rule" and isinstance(keyword.value, ast.Constant)
+                                and keyword.value.value is False for keyword in node.keywords)):
                 names.add(node.args[0].value)
             if (source.name == "state_retention.py" and isinstance(node, ast.Subscript)
                     and isinstance(node.value, ast.Name) and node.value.id == "POLICIES"

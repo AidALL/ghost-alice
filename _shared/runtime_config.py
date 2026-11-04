@@ -6,9 +6,8 @@ from __future__ import annotations
 import copy
 import json
 import os
-import stat
-import tempfile
 from pathlib import Path
+import atomic_write
 import install_destination
 from typing import Any
 
@@ -102,84 +101,21 @@ def load_config(env: dict[str, str] | None = None, home: Path | None = None) -> 
     return config
 
 
+# The installer's hook writer calls these four names; each calls `atomic_write` when it runs.
 def _resolve_symlink_target(path: Path) -> Path:
-    path = Path(path)
-    try:
-        return path.resolve(strict=False)
-    except (OSError, RuntimeError) as error:
-        raise OSError(f"Cannot resolve atomic write symlink {path}: {error}") from error
+    return atomic_write.link_target(path)
 
 
 def _atomic_write_destination(path: Path) -> Path:
-    """Return the filesystem entry replaced by an atomic write.
-
-    Existing symlinks remain in place: their fully resolved target is replaced
-    in the target directory. A broken link follows direct-write behavior only
-    when its resolved target parent already exists; otherwise it fails without
-    changing the link.
-    """
-
-    path = Path(path)
-    install_destination.assert_mutation_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.is_symlink():
-        return path
-    destination = _resolve_symlink_target(path)
-    install_destination.assert_mutation_path(destination)
-    if not destination.parent.is_dir():
-        raise FileNotFoundError(
-            f"Cannot write through broken symlink {path}: "
-            f"target parent does not exist: {destination.parent}"
-        )
-    return destination
+    return atomic_write.destination(path)
 
 
 def _atomic_write_bytes(path: Path, contents: bytes) -> None:
-    destination = _atomic_write_destination(path)
-    try:
-        existing_mode = stat.S_IMODE(destination.stat().st_mode)
-    except FileNotFoundError:
-        existing_mode = None
-
-    descriptor, temp_name = tempfile.mkstemp(
-        dir=destination.parent,
-        prefix=f".{destination.name}.",
-        suffix=".tmp",
-    )
-    temp_path = Path(temp_name)
-    try:
-        handle = os.fdopen(descriptor, "wb")
-        descriptor = -1
-        with handle:
-            handle.write(contents)
-            handle.flush()
-            os.fsync(handle.fileno())
-        if existing_mode is not None:
-            os.chmod(temp_path, existing_mode)
-        os.replace(temp_path, destination)
-    except BaseException as primary_error:
-        if descriptor >= 0:
-            try:
-                os.close(descriptor)
-            except OSError as close_error:
-                primary_error.add_note(
-                    f"Failed to close temporary file descriptor for {temp_path}: "
-                    f"{close_error}"
-                )
-        try:
-            temp_path.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError as cleanup_error:
-            primary_error.add_note(
-                f"Failed to clean up temporary file {temp_path}: {cleanup_error}"
-            )
-        raise
+    atomic_write.write_bytes(path, contents)
 
 
 def _atomic_write_json(path: Path, data: Any) -> None:
-    contents = (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
-    _atomic_write_bytes(path, contents)
+    atomic_write.write_json(path, data)
 
 
 def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
@@ -205,5 +141,5 @@ def save_config(config: dict[str, Any], home: Path | None = None) -> Path:
     )
     normalized["agent_visibility"].pop("enabled", None)
     normalized["strict_session_log"] = {"mode": "always"}
-    _atomic_write_json(path, normalized)
+    atomic_write.write_json(path, normalized)
     return path

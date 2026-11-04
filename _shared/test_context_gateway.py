@@ -26,6 +26,7 @@ except ImportError:
 
 import context_gateway
 import context_lifecycle
+import file_lock
 from test_context_lifecycle import ContextLifecycleTests
 
 
@@ -308,6 +309,23 @@ class ContextGatewayTests(unittest.TestCase):
         if encoding: headers['Content-Encoding'] = encoding
         return urllib.request.urlopen(urllib.request.Request(
             f'http://127.0.0.1:{self.server.server_port}{path}', data=body, headers=headers))
+
+    def test_a_usage_record_takes_the_usage_log_lock_and_a_stuck_lock_never_drops_the_request(self):
+        # The gateway's threads and processes share the usage log. A lock held past the limit costs the record its
+        # retention rule, recorded as a retention failure, and never the request.
+        ghost = Path(self.core.fixture.tmp.name) / 'ghost'
+        body = json.dumps(self.core.request).encode()
+        self.wire.parent.mkdir(parents=True, exist_ok=True)
+        with patch.dict('os.environ', {'GHOST_ALICE_GHOST_ROOT': str(ghost)}), \
+                patch.object(file_lock, 'LOCK_WAIT_S', 0.2), file_lock.exclusive(self.wire):
+            with self.request(body) as reply:
+                self.assertEqual(reply.read(), self.answer)
+        records = [json.loads(line) for line in self.wire.read_text(encoding='utf-8').splitlines()]
+        self.assertTrue(any(record['event'] == 'request-selection' for record in records))
+        failures = [json.loads(line) for line in
+                    (ghost / 'state-retention-failures.jsonl').read_text(encoding='utf-8').splitlines()]
+        self.assertEqual({(failure['policy'], failure['error_type']) for failure in failures},
+                         {('gateway-usage', 'LockTimeout')})
 
     def test_selected_input_and_auth_preserved_response_for_all_supported_encodings(self):
         self.assert_selected_encoding_contract([(None, lambda x:x, lambda x:x),

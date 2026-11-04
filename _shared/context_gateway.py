@@ -17,7 +17,6 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import sys
-import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -278,7 +277,6 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
     selectors use the native platform keys codex and claude; no signature is
     inferred and duplicate Codex declarations are rejected.
     """
-    lock = threading.Lock()
     origins = dict(origins or ORIGINS)
     openers = {provider: urllib.request.build_opener(_OriginRedirectHandler(origin))
                for provider, origin in origins.items()}
@@ -297,10 +295,7 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
 
     def record(value):
         value['observed_at'] = datetime.now(timezone.utc).isoformat()
-        with lock:
-            with Path(output).open('a') as stream:
-                stream.write(json.dumps(value, ensure_ascii=False) + '\n')
-            state_retention.apply('gateway-usage', output)
+        state_retention.append('gateway-usage', output, json.dumps(value, ensure_ascii=False) + '\n')
 
     class Observer(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'

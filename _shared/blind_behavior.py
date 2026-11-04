@@ -6,17 +6,16 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import re
 import subprocess
 import sys
-import tempfile
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 if str(Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(Path(__file__).resolve().parent))
+import atomic_write
 from fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session
 from project_runtime import ProjectRuntime, project_runtime
 
@@ -409,20 +408,7 @@ def _safe_record(value: Any) -> dict[str, Any]:
 
 
 def write_record_atomic(path: Path | str, record: Any) -> None:
-    target, checked = Path(path), _safe_record(record)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary: Path | None = None
-    try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=target.parent, delete=False) as handle:
-            temporary = Path(handle.name)
-            json.dump(checked, handle, ensure_ascii=False, sort_keys=True, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, target)
-    finally:
-        if temporary is not None and temporary.exists():
-            temporary.unlink()
+    atomic_write.write_json(path, _safe_record(record), sort_keys=True)
 
 
 def _command_argument(value: str) -> list[str]:

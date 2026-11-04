@@ -41,6 +41,7 @@ from typing import Any
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import atomic_write
 import hook_profile_gate
 import hook_definitions
 import install_hooks
@@ -1606,7 +1607,7 @@ class TestInstallHook(TempHomeTestCase):
                 side_effect=failing_fdopen,
             ),
             patch.object(
-                install_hooks.runtime_config.tempfile,
+                tempfile,
                 "mkstemp",
                 wraps=tempfile.mkstemp,
             ) as mkstemp,
@@ -2046,16 +2047,16 @@ class TestInstallHook(TempHomeTestCase):
         selected_node = self._fake_node("selected")
         persistence_error = OSError("runtime persistence failed")
         rollback_error = OSError("settings rollback failed")
-        original_atomic_write_bytes = install_hooks.runtime_config._atomic_write_bytes
+        original_write_bytes = atomic_write.write_bytes
         settings_write_count = 0
 
-        def failing_settings_rollback(path, contents):
+        def failing_settings_rollback(path, contents, **options):
             nonlocal settings_write_count
             if Path(path) == settings_file:
                 settings_write_count += 1
                 if settings_write_count == 2:
                     raise rollback_error
-            return original_atomic_write_bytes(path, contents)
+            return original_write_bytes(path, contents, **options)
 
         with (
             patch.dict(
@@ -2072,8 +2073,8 @@ class TestInstallHook(TempHomeTestCase):
                 side_effect=persistence_error,
             ),
             patch.object(
-                install_hooks.runtime_config,
-                "_atomic_write_bytes",
+                atomic_write,
+                "write_bytes",
                 side_effect=failing_settings_rollback,
             ),
             self.assertRaises(ExceptionGroup) as raised,

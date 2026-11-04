@@ -5,6 +5,7 @@ import hashlib
 import importlib
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -734,6 +735,17 @@ class BlindBehaviorContractTest(unittest.TestCase):
                     with self.assertRaises((TypeError, ValueError)):
                         self.blind.write_record_atomic(target, attack)
                     self.assertEqual(target.read_bytes(), before)
+
+    @unittest.skipIf(os.name == "nt", "POSIX file modes")
+    def test_rewriting_a_record_keeps_its_mode(self):
+        record = self._execute()[0]["record"]
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "record.json"
+            self.blind.write_record_atomic(target, record)
+            os.chmod(target, 0o640)
+            self.blind.write_record_atomic(target, record)
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o640)
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), record)
 
     def test_only_confirmed_behavioral_failure_emits_one_feedback_candidate(self):
         evaluator = {

@@ -7,12 +7,14 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import file_lock
 import strict_session_log
 
 
@@ -21,6 +23,9 @@ class TestStrictSessionLogPath(unittest.TestCase):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp_dir.cleanup)
         self.home = Path(self.temp_dir.name)
+        environment = mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.home / ".ghost-alice")})
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def test_log_path_uses_platform_and_session_id(self):
         path = strict_session_log.log_path(
@@ -219,6 +224,64 @@ class TestSessionLogRetention(unittest.TestCase):
         self.assertEqual(len(path.read_text(encoding="utf-8").splitlines()), 1)
         failures = (self.home / ".ghost-alice" / "state-retention-failures.jsonl").read_text(encoding="utf-8")
         self.assertIn('"policy": "session-logs"', failures)
+
+
+class StrictSessionLogLockTests(unittest.TestCase):
+    """Hooks of one session append to one log; each row is one write under the log's lock."""
+
+    def setUp(self) -> None:
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.home = Path(self.temp_dir.name)
+        environment = mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT": str(self.home / ".ghost-alice")})
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("GHOST_ALICE_OWNED_ROOT", None)
+        self.path = strict_session_log.log_path(home=self.home, platform="claude", session_id="locked")
+        self.path.parent.mkdir(parents=True)
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_row_waits_for_the_log_lock(self):
+        written = threading.Event()
+
+        def writer():
+            strict_session_log.append_event(self.home, "claude", "locked", {"hook_id": "prompt"})
+            written.set()
+
+        with file_lock.exclusive(self.path):
+            thread = threading.Thread(target=writer)
+            thread.start()
+            self.assertFalse(written.wait(0.3))
+            self.assertEqual(self.path.read_bytes(), b"")
+        thread.join(10)
+        self.assertTrue(written.is_set())
+        self.assertEqual(len(self.path.read_text(encoding="utf-8").splitlines()), 1)
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_lock_held_past_the_limit_still_appends_the_row(self):
+        # A hook that stopped while holding the lock must not cost the next hook its audit row.
+        with mock.patch.object(file_lock, "LOCK_WAIT_S", 0.2), file_lock.exclusive(self.path):
+            strict_session_log.append_event(self.home, "claude", "locked", {"hook_id": "prompt"})
+        rows = [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([row["hook_id"] for row in rows], ["prompt"])
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_lock_held_past_the_limit_is_recorded_as_a_retention_failure(self):
+        # A holder that stopped makes every later row wait; the retention failure record says why.
+        with mock.patch.object(file_lock, "LOCK_WAIT_S", 0.2), file_lock.exclusive(self.path):
+            strict_session_log.append_event(self.home, "claude", "locked", {"hook_id": "prompt"})
+        record = self.home / ".ghost-alice" / "state-retention-failures.jsonl"
+        rows = [json.loads(line) for line in record.read_text(encoding="utf-8").splitlines()] if record.exists() else []
+        self.assertEqual([(row["policy"], row["error_type"], row["path"], row["error"]) for row in rows],
+                         [("session-logs", "LockTimeout", str(self.path),
+                           "lock held past 0.2s; appended without the lock")])
+
+    def test_a_row_under_the_lock_leaves_the_retention_failure_record_empty(self):
+        # The log's retention rule runs on the sessions folder at a session's first row, never on the log itself.
+        for _ in range(2):
+            strict_session_log.append_event(self.home, "claude", "locked", {"hook_id": "prompt"})
+        self.assertEqual(len(self.path.read_text(encoding="utf-8").splitlines()), 2)
+        self.assertFalse((self.home / ".ghost-alice" / "state-retention-failures.jsonl").exists())
 
 
 if __name__ == "__main__":

@@ -12,15 +12,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from pathlib import Path
 import re
-import tempfile
 from typing import Any, Mapping
 
+import atomic_write
 from completion_check_validator import (extract_claim_evidence_entries, extract_control_block,
                                         extract_partial_unverified_entries, find_control_block_positions)
-import install_destination
 from native_completion import assess_native_completion
 from native_transcript import stop_response_text
 import strict_session_log
@@ -128,18 +126,9 @@ def ensure_stop_notice(platform: str, native_input: Mapping[str, Any], env: Mapp
     if recorded == message:
         # The other Stop hook already recorded this same message; keep the file as it is.
         return recorded
-    temporary = None
     try:
-        install_destination.assert_mutation_path(path, env=dict(env))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent, prefix='.stop-notice-',
-                                         suffix='.tmp', delete=False) as handle:
-            temporary = handle.name
-            json.dump(message, handle, ensure_ascii=False, indent=2)
-        os.replace(temporary, path)
+        atomic_write.write_bytes(path, json.dumps(message, ensure_ascii=False, indent=2).encode('utf-8'), env=env)
     except (OSError, ValueError) as error:
-        if temporary:
-            Path(temporary).unlink(missing_ok=True)
         return dict(message, file_error=f'{type(error).__name__}: {error}')
     return message
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Maintain a session-local semantic intent ledger.
 
-Dependencies: Python 3.11+ standard library only.
+Dependencies: Python 3.11+ standard library and the Core helpers in `_shared`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ import os
 import re
 import sqlite3
 import sys
-import tempfile
 import time
 import uuid
 from contextlib import contextmanager
@@ -293,27 +292,9 @@ def load_state(path: Path, platform: str = "unknown", session_id: str = "unknown
 
 
 def _atomic_write(path: Path, text: str) -> None:
-    """Replace one file; readers see either complete version, never a prefix."""
-    _assert_location_write(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        if os.name != "nt":
-            directory = os.open(path.parent, os.O_RDONLY)
-            try:
-                os.fsync(directory)
-            finally:
-                os.close(directory)
-    finally:
-        try:
-            os.unlink(temporary)
-        except FileNotFoundError:
-            pass
+    """Replace one file; readers see either complete version, never a prefix, and its new name survives a power loss."""
+    _shared_module("install_destination")  # the writer imports this guard by name
+    _shared_module("atomic_write").write_bytes(path, text.encode("utf-8"), sync_folder=True)
 
 
 def write_json(path: Path, data: dict[str, Any]) -> None:

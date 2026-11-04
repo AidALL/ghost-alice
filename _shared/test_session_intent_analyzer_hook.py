@@ -824,7 +824,7 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         self.hook = shared / "session_intent_analyzer_hook.py"
         shutil.copy2(SCRIPT, self.hook)
         shutil.copy2(SCRIPT.with_name("install_destination.py"),shared/"install_destination.py")
-        for dependency in ('reminder_texts.py', 'reminder_texts.json'):
+        for dependency in ('reminder_texts.py', 'reminder_texts.json', 'atomic_write.py'):
             shutil.copy2(SCRIPT.with_name(dependency), shared / dependency)
         self.home = self.base / "home"
         self.home.mkdir()
@@ -905,6 +905,35 @@ class LedgerDependencyDegradeTests(unittest.TestCase):
         result = self._run()
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertFalse(self._marker().exists(), msg=result.stdout)
+
+
+class DegradeMarkerWriteTests(unittest.TestCase):
+    """The degrade marker is replaced atomically, and a failed write never breaks the hook."""
+
+    def setUp(self) -> None:
+        self.root = pathlib.Path(tempfile.mkdtemp(prefix="sia-marker-"))
+        self.addCleanup(lambda: shutil.rmtree(self.root, ignore_errors=True))
+        environment = patch.dict(os.environ)
+        environment.start()
+        self.addCleanup(environment.stop)
+        os.environ.pop("GHOST_ALICE_OWNED_ROOT", None)
+        if str(SCRIPT.parent) not in sys.path:
+            sys.path.insert(0, str(SCRIPT.parent))
+        import session_intent_analyzer_hook
+
+        self.hook = session_intent_analyzer_hook
+
+    def test_the_marker_goes_through_atomic_write_and_its_write_error_is_not_raised(self) -> None:
+        import atomic_write
+
+        payload = {"session_id": "s-marker"}
+        self.hook._write_degrade_marker(self.root, "codex", payload, "ledger-broken")
+        marker = self.root / "codex" / "s-marker" / "ledger-degraded.json"
+        before = marker.read_bytes()
+        with patch.object(atomic_write, "write_bytes", side_effect=OSError("disk full")):
+            self.hook._write_degrade_marker(self.root, "codex", payload, "ledger-write-failed")
+        self.assertEqual(marker.read_bytes(), before)
+        self.assertEqual(json.loads(before)["reason"], "ledger-broken")
 
 
 def _load_fresh(name: str):
