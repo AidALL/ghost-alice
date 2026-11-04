@@ -109,8 +109,8 @@ class PatternClassNormalizationTests(unittest.TestCase):
 class CaptureReminderTests(unittest.TestCase):
     def test_capture_reminder_asks_for_pattern_class(self) -> None:
         body = (REPO_ROOT / "session-intent-analyzer/SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("A material conduct correction", body)
-        self.assertIn("compressed `conduct_feedback` entry with a stable ID and supported source", body)
+        self.assertIn("a material correction of its conduct", body)
+        self.assertIn("compressed `conduct_feedback` entry with a stable ID and a supported source", body)
         self.assertIn("pattern_class", SCHEMA_DOC.read_text())
         self.assertIn("ledger-schema.md", body)
         self.assertIn("session-intent-analyzer", INSTALL_HOOKS.read_text(encoding="utf-8"))

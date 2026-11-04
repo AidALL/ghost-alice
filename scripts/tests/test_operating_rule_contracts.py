@@ -28,7 +28,8 @@ class OperatingRuleContractTest(unittest.TestCase):
         self.assertIn('`session-intent-analyzer`: reading or writing the `interpreted-as` record', common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
         self.assertIn('Work Selection section', router)
-        self.assertIn('register the response-route with Core code at that point, using the session receipt', router)
+        self.assertIn('register the response route with Core code at that point', router)
+        self.assertIn('`ledger_root`, `platform` and `session_id` from the session metadata', router)
         self.assertIn('the input ID that `--read-intent` returned when this input', router)
 
     def test_checkpoint_condition_is_known_before_acting(self):
@@ -58,7 +59,7 @@ class OperatingRuleContractTest(unittest.TestCase):
         for term in ('micro', 'meso', 'macro', 'meta', 'runs a further check only when'):
             self.assertIn(term, common)
         router = (ROOT / 'task-router/SKILL.md').read_text()
-        self.assertIn('sufficient correction depth', router)
+        self.assertIn('how deep the correction must go', router)
         self.assertIn('systematic-debugging', router)
 
     def test_focus_changes_are_shown_with_a_reason(self):

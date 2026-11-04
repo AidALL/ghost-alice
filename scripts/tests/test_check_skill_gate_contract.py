@@ -701,7 +701,7 @@ class SkillGateContractTest(unittest.TestCase):
         text = (REPO_ROOT / "skill-evolution/SKILL.md").read_text()
         procedure = self._extract_between(text, "## Analyze and dispose", "## Conduct feedback")
         self.assertLess(procedure.index("observed behavior"), procedure.index("quality_summary"))
-        self.assertIn("report-only branch does not dispatch implementation", procedure)
+        self.assertIn("report-only workflow does not start implementation", procedure)
         self.assertIn("defer/reject disposition grants no action", procedure)
         self.assertIn("Watch/reject triage candidates still receive this disposition", procedure)
         payload = json.loads(self._extract_between(text, "```json", "```"))
@@ -731,7 +731,7 @@ class SkillGateContractTest(unittest.TestCase):
     def test_route_surface_carries_only_controls_and_reason(self) -> None:
         router = (REPO_ROOT / "task-router/SKILL.md").read_text()
         schema = (REPO_ROOT / "session-intent-analyzer/references/ledger-schema.md").read_text()
-        self.assertIn('user objective', router)
+        self.assertIn("the user's objective", router)
         self.assertIn('Do not replace a requested repair with a report', router)
         self.assertIn('ledger-schema.md#core-response-projection', router)
         for field in ('response_mode', 'boundary_contract', '"reason"'):
@@ -746,12 +746,12 @@ class SkillGateContractTest(unittest.TestCase):
         proof = (REPO_ROOT / "coding-convention/verification-before-completion/SKILL.md").read_text()
         merge = (REPO_ROOT / "merge-companion/SKILL.md").read_text()
         self.assertIn("terminal objective separately", boundary)
-        self.assertIn("Every criterion describes a requested outcome", boundary)
+        self.assertIn("Every acceptance criterion describes a requested outcome", boundary)
         self.assertIn("## Evidence selection and stop gate", proof)
         self.assertIn("semantic", proof)
         self.assertIn("identity", proof)
-        self.assertIn("Hash/provenance evidence establishes identity, drift and merge safety", merge)
-        self.assertIn("current contract and behavior evidence determine which semantics to retain", merge)
+        self.assertIn("Hash and provenance evidence establishes identity, drift and merge safety", merge)
+        self.assertIn("evidence from the current contract and behavior decides which meaning to keep", merge)
 
     def test_korean_session_gate_matrix_points_to_the_english_owners(self) -> None:
         for relative in ("docs/ko/policies/session-gate-matrix.md",):

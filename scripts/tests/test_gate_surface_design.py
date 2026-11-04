@@ -25,8 +25,8 @@ class GateSurfaceDesignTest(unittest.TestCase):
         owner = (ROOT / 'task-router/references/routing-details.md').read_text()
         self.assertIn('current human instructions', owner)
         self.assertIn('bounded change without formal revocation wording', owner)
-        self.assertIn("The common contract's Session Intent section interprets the input, and its Work Selection section sends work here", body)
-        self.assertIn('Core code validates the submitted response-route', body)
+        self.assertIn("The response model interprets the user's input under the common contract's Session Intent section, and that contract's Work Selection section sends work to this skill", body)
+        self.assertIn('Core code validates the submitted response route', body)
         self.assertNotIn('skill-call: session-intent-analyzer (this turn)', body)
 
     def test_finalization_allows_actual_returned_results_and_separate_reviews(self):

@@ -9,38 +9,38 @@ compatibility:
 
 # Merge Companion
 
-The response model uses this lifecycle workflow to protect user changes backed up by a skill installer. The installer records changed installed files under `~/.ghost-alice/pending-merges/<platform>/`; the response model reviews undecided manifest entries before applying a user's chosen result.
+The response model uses this workflow to protect user changes that the installer backed up. The installer records changed installed files under `~/.ghost-alice/pending-merges/<platform>/`; the response model reviews the undecided manifest entries before applying the result the user chose.
 
 ## Entry and activation
 
-The response model applies this skill in two cases. In both, it must first re-check the current platform's manifest; an earlier observation does not answer that check because an installer run can add entries during the session.
+The response model applies this skill in the two cases below. In both, it first reads the current host's manifest again, because an installer run can add entries during the session.
 
-- Before selected work modifies, replaces or installs an installed skill, the review below runs only for an undecided entry for that skill. Without one, including a missing manifest, empty entries or a JSON parse failure, the work continues without a notice.
-- When the user asks to review backed-up changes, the review below runs for every undecided entry. Without one, the response model tells the user that no backed-up change is waiting, or that the manifest could not be read.
+- Before selected work modifies, replaces or installs an installed skill, the response model runs the review below only for an undecided entry of that skill. Without such an entry, including when the manifest is missing, has no entries or fails to parse as JSON, the work continues without a notice.
+- When the user asks to review backed-up changes, the response model runs the review below for every undecided entry. When there is none, it tells the user that no backed-up change is waiting, or that the manifest could not be read.
 
-A bounded read-only lookup unrelated to those changes does not load this procedure, inspect backups or request a merge decision. Other skills must not invoke it speculatively.
+A read-only lookup unrelated to those changes does not load this skill, read backups or ask for a merge decision. Other skills invoke this skill only in the two cases above.
 
-The session-start hook, installer tail, pending-merges READ-ME-FIRST and session-start failsafe command ending in `|| true` surface the same pending entries. Their reports do not authorize a merge or expand this workflow to unrelated work. An explicit user defer permits other authorized work and leaves the backups undecided.
+The session-start hook, the installer's closing output, the pending-merges READ-ME-FIRST file and the session-start failsafe command ending in `|| true` report the same pending entries. Their reports do not authorize a merge or extend this workflow to unrelated work. When the user explicitly defers the review, other authorized work continues and the backups stay undecided.
 
 ## Review and apply
 
 1. The response model explains that the installer detected local changes and gives the backup location.
 2. It classifies each change as trivial, semantic or structural using `references/impact-tier.md`. The tier controls display order and detail only.
-3. It presents a natural-language diff and workflow impact, with raw diff on request. Hash/provenance evidence establishes identity, drift and merge safety; current contract and behavior evidence determine which semantics to retain.
+3. It describes each diff and its effect on the workflow in natural language, and shows the raw diff on request. Hash and provenance evidence establishes identity, drift and merge safety; evidence from the current contract and behavior decides which meaning to keep.
 4. It offers integrate, discard or later. Later is the default and leaves the entry pending. An advanced flow may offer a partial merge.
 5. For integration, it prepares the proposed result under `~/.ghost-alice/staged/<entry-id>/` without changing the live file.
-6. After approval of the staged result, it follows [Apply and record a decision](references/manifest-schema.md#apply-and-record-a-decision): apply the live change through the host file tool, then record the exact manifest entry through the importable helper. If the user rejects the proposal, it removes the staged result and leaves the entry undecided.
+6. After the user approves the staged result, it follows [Apply and record a decision](references/manifest-schema.md#apply-and-record-a-decision): it applies the change to the live file through the host's file tool, then records the manifest entry through the importable helper. If the user rejects the proposal, it removes the staged result and leaves the entry undecided.
 
-All AI decision-aid content in steps 3–5 passes adversarial-verification before presentation or application. Low impact and cost do not waive that requirement. The response model must not use a tier as verification evidence.
+The content that the response model prepares for the user's decision in steps 3–5 passes adversarial-verification before the response model presents or applies it. Low impact or low cost does not waive that requirement. The response model must not use a tier as verification evidence.
 
 ## Propagation and decision state
 
-The default decision affects only the current platform manifest. After step 4, the response model asks whether the decision also applies to other platforms unless the user's existing instruction already supplies that choice. If authorized, it inspects matching source_path entries and stages each result under that platform's contract. Platform-specific differing outputs make propagation unavailable for that entry.
+By default, a decision changes only the current host's manifest. After step 4, the response model asks whether the decision also applies to the other hosts, unless the user's instructions already give that choice. If the user authorizes it, the response model reads the matching `source_path` entries and stages each result under that host's contract. When the result would differ between hosts, the decision does not propagate for that entry.
 
-The response model marks an entry merged or discarded only after the corresponding approved application or discard completes. Approval or staging alone does not prove application. Later records deferred while keeping decided=false. The lifecycle and safety fields are in `references/manifest-schema.md`; the worked flow is in `references/merge-flow.md`.
+The response model marks an entry merged or discarded only after the approved change or discard completes. Approval or staging alone does not prove that the change was applied. The option `later` records `deferred` and keeps `decided=false`. The lifecycle and safety fields are in `references/manifest-schema.md`; the worked flow is in `references/merge-flow.md`.
 
 ## Audit and warnings
 
-The response model retains manifest operations, backup reads/copies, staged writes and confirmation evidence internally.
+The response model keeps evidence of manifest operations, backup reads and copies, staged writes and user confirmations without displaying it.
 
-The response model must not overwrite live files before required approval, merge the three choices into one default, bypass adversarial verification or propagate without authority.
+The response model must not overwrite live files before the required approval, merge the three choices into one default, bypass adversarial-verification or propagate a decision without authority.
