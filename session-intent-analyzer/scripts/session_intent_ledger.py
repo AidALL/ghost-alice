@@ -14,6 +14,7 @@ import os
 import re
 import sqlite3
 import sys
+import threading
 import time
 import uuid
 from contextlib import contextmanager
@@ -23,18 +24,7 @@ from pathlib import Path
 from typing import Any
 
 
-def assert_mutation_path(path, *, env=None):
-    """Expose Core's single location guard without breaking normal skill copies."""
-    source=os.environ if env is None else env
-    if not source.get("GHOST_ALICE_OWNED_ROOT"):
-        return Path(path)
-    sys.path.insert(0,str(Path(__file__).resolve().parents[2]/"_shared"))
-    from install_destination import assert_mutation_path as guard
-    return guard(path,env=source)
-
-
-_assert_location_write = assert_mutation_path
-
+_SHARED_MODULE_LOAD = threading.RLock()
 
 SCHEMA_VERSION = "session-intent-ledger.v1"
 CURRENT_SESSION_SCHEMA = "session-intent-current.v1"
@@ -43,11 +33,9 @@ LEGACY_DEFAULT_ROOT = Path("~/.ghost-alice/session-intent")
 TEXT_FIELDS = ("current_goal", "user_intent_summary", "routing_summary")
 LIST_FIELDS = ("constraints", "non_goals", "open_questions", "risk_flags")
 ACCEPTANCE_CRITERIA_SOURCES = {"user-said", "interpreted-as", "previous-tool", "system-doc"}
-ACCEPTANCE_CRITERIA_STATUSES = {"unmet", "met"}
 ACCEPTANCE_CRITERIA_ADMITTED_SOURCES = {"user-said", "previous-tool", "system-doc"}
 # Stored labels are never rewritten; readers map a legacy label to its current name.
 LEGACY_SOURCE_ALIASES = {"user-explicit": "user-said", "inferred": "interpreted-as"}
-COMPLETION_CHECK_DIGEST_PATTERN = re.compile(r"[0-9a-f]{64}")
 CONDUCT_FEEDBACK_SOURCES = {"user-said", "interpreted-as"}
 CONDUCT_FEEDBACK_STATUS = {"open", "encoded"}
 # Stable failure families let differently named corrections recur visibly across sessions.
@@ -476,7 +464,7 @@ def storage_transaction(root: Path):
     """
     database = storage_database_path(root)
     _require_database_if_initialized(root)
-    _assert_location_write(database)
+    _shared_module("install_destination").assert_mutation_path(database)
     database.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(database, timeout=10, isolation_level=None)
     try:
@@ -746,7 +734,7 @@ def _semantic_projection(state: dict[str, Any]) -> dict[str, Any]:
     for key in ("constraints", "non_goals", "open_questions"):
         projection[key] = objects(state.get(key), ("id", "summary", "source", "status"))
     projection["acceptance_criteria"] = objects(state.get("acceptance_criteria"),
-        ("id", "summary", "source", "admitted", "status", "met_completion_check_digest", "work_unit_id", "contract_revision"))
+        ("id", "summary", "source", "admitted", "work_unit_id", "contract_revision"))
     projection["decisions"] = objects(state.get("decisions"),
         ("id", "summary", "source", "superseded", "superseded_by"))
     projection["conduct_feedback"] = objects(state.get("conduct_feedback"),
@@ -853,7 +841,6 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
             "id": safe_component(summary.lower(), "criterion"),
             "summary": summary,
             "source": "interpreted-as",
-            "status": "unmet",
             "admitted": False,
         }
     if not isinstance(raw, dict):
@@ -865,9 +852,6 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
     source = str(raw.get("source") or "interpreted-as").strip()
     if canonical_source(source, "interpreted-as") not in ACCEPTANCE_CRITERIA_SOURCES:
         source = "interpreted-as"
-    status = str(raw.get("status") or "").strip().lower()
-    if status not in ACCEPTANCE_CRITERIA_STATUSES:
-        status = "unmet"
     admitted = raw.get("admitted")
     if not isinstance(admitted, bool):
         admitted = canonical_source(source, "interpreted-as") in ACCEPTANCE_CRITERIA_ADMITTED_SOURCES
@@ -875,7 +859,6 @@ def normalize_acceptance_criterion(raw: Any) -> dict[str, Any] | None:
         "id": criterion_id,
         "summary": summary,
         "source": source,
-        "status": status,
         "admitted": admitted,
     }
     if "work_unit_id" in raw or "contract_revision" in raw:
@@ -902,22 +885,11 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             order.append(criterion_id)
         merged[criterion_id] = criterion
 
-    # Existing persisted criteria are trusted, including a "met" status set by mark_acceptance_criterion_met (the sole legitimate "met" writer).
     existing_items = existing if isinstance(existing, list) else [existing]
     for item in existing_items:
         criterion = normalize_acceptance_criterion(item)
         if criterion is None:
             continue
-        if isinstance(item, dict):
-            stored_status = str(item.get("status") or "").strip().lower()
-            if stored_status in ACCEPTANCE_CRITERIA_STATUSES:
-                criterion["status"] = stored_status
-            digest = item.get("met_completion_check_digest")
-            if isinstance(digest, str) and digest:
-                criterion["met_completion_check_digest"] = digest
-            met_at = item.get("met_at")
-            if isinstance(met_at, str) and met_at:
-                criterion["met_at"] = met_at
         store(acceptance_criterion_key(criterion), criterion)
 
     # An incoming delta may promote a criterion's admission.
@@ -933,21 +905,6 @@ def merge_acceptance_criteria(existing: Any, incoming: Any) -> list[dict[str, An
             if not isinstance(incoming_admitted, bool):
                 # No explicit boolean admission: admission is sticky and can be upgraded by a newly contract-bound source, but a present-but-invalid field (e.g. null) must never silently drop it.
                 criterion["admitted"] = bool(prior["admitted"]) or bool(criterion["admitted"])
-            # An ID identifies the requirement, not a perpetual completion proof.
-            # Code cannot certify that changed wording has unchanged meaning.
-            # Reopen only the revised/withdrawn condition; historical proof stays
-            # in the append-only events, and unchanged criteria retain evidence.
-            same_condition = criterion["summary"] == prior["summary"]
-            if same_condition and criterion["admitted"]:
-                criterion["status"] = prior["status"]
-                if "met_completion_check_digest" in prior:
-                    criterion["met_completion_check_digest"] = prior["met_completion_check_digest"]
-                if "met_at" in prior:
-                    criterion["met_at"] = prior["met_at"]
-            else:
-                criterion["status"] = "unmet"
-        else:
-            criterion["status"] = "unmet"
         store(criterion_id, criterion)
 
     return [merged[criterion_id] for criterion_id in order]
@@ -1148,7 +1105,7 @@ def _commit_turn(connection, state, observation, *, has_input, intent_delta, sou
             state['current_context_input_event_id'] = ''
         route = state.get("response_route")
         if isinstance(route, dict) and route.get("input_event_id") != observation["input_event_id"]:
-            # Reopen routing/authorization binding, never the business proof.
+            # Reopen only the routing and authorization binding.
             route["status"] = "stale"
         state["latest_input_event_id"] = observation["input_event_id"]
         state["canonical_input_event_id"] = observation["input_event_id"]
@@ -1231,16 +1188,17 @@ def record_turn(
 def _shared_module(name):
     """Load the sibling Core helper; installation preserves this shared layout."""
     path = Path(__file__).resolve().parents[2] / "_shared" / (name + ".py")
-    retained = sys.modules.get(name)
-    if retained is not None and Path(retained.__file__).resolve() == path:
-        return retained
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Core code helper {name} is unavailable")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
-    return module
+    with _SHARED_MODULE_LOAD:  # one thread loads a helper; the others wait for the loaded module
+        retained = sys.modules.get(name)
+        if retained is not None and Path(retained.__file__).resolve() == path:
+            return retained
+        spec = importlib.util.spec_from_file_location(name, path)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"Core code helper {name} is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+        return module
 
 
 def _response_route_module():
@@ -1747,8 +1705,8 @@ def bind_legacy_acceptance_criteria(
     """Core binds existing admitted rows to their frozen unit and returns state.
 
     The caller supplies the current input, revision and complete row snapshots.
-    Core preserves criterion meaning, admission, status and proof; binding does
-    not accept evidence or establish a response route.
+    Core preserves the criterion's meaning and admission; binding does not
+    accept evidence or establish a response route.
     """
     routes = _response_route_module()
     validate_identity(platform, session_id)
@@ -1882,164 +1840,6 @@ def read_response_route(*, root: Path = DEFAULT_ROOT, platform: str, session_id:
             return None
         projection = routes.project_stored_response_route(state, expected_input_event_id)
         return None if projection is None else routes.refresh_continuation_feedback(projection, root, connection)
-
-
-def mark_acceptance_criterion_met(
-    *,
-    root: Path = DEFAULT_ROOT,
-    platform: str,
-    session_id: str,
-    criterion_id: str,
-    completion_check_digest: str,
-    expected_input_event_id: str | None = None,
-    expected_criterion: dict[str, Any] | None = None,
-    expected_revision: int | None = None,
-    transaction: sqlite3.Connection | None = None,
-) -> dict[str, Path]:
-    """Flip an acceptance criterion to "met". The sole writer of "met".
-
-    The caller supplies the accepted full or partial proof digest and exact
-    input/criterion snapshot. This writer checks binding and digest syntax;
-    it does not review source meaning or infer fulfillment from work execution.
-    A caller applies only the criteria supported by Core's assessment.
-    Raw semantic deltas cannot assert "met".
-    """
-    digest = str(completion_check_digest or "").strip().lower()
-    if not COMPLETION_CHECK_DIGEST_PATTERN.fullmatch(digest):
-        raise ValueError(
-            "mark_acceptance_criterion_met requires a sha256 completion-check digest"
-        )
-    validate_identity(platform, session_id)
-    if not isinstance(expected_criterion, dict):
-        raise ValueError("expected_criterion is required from the approved completion snapshot")
-    target_id = str(criterion_id)
-    paths = session_paths(root, platform, session_id)
-    with _transaction(root, transaction) as connection:
-        state = _load_state_for_update(connection, paths, platform, session_id)
-        _check_expected(state, expected_input_event_id, expected_revision)
-        criteria = state.get("acceptance_criteria")
-        matches = [c for c in criteria if isinstance(c, dict) and c.get("id") == target_id
-                   and (c.get("work_unit_id"), c.get("contract_revision")) ==
-                       (expected_criterion.get("work_unit_id"), expected_criterion.get("contract_revision"))] if isinstance(criteria, list) else []
-        if len(matches) != 1:
-            raise ValueError("acceptance criterion is missing or ambiguous")
-        criterion = matches[0]
-        if criterion.get("admitted") is not True:
-            raise ValueError("acceptance criterion is not admitted")
-        if "work_unit_id" in criterion:
-            state["canonical_input_event_id"] = (state["latest_input_event_id"]
-                if _canonical_input_bound(connection, root, state) else "")
-            route = _response_route_module().project_stored_response_route(state)
-            if (route is None or route["status"] != "ready" or not any(
-                    (c["work_unit_id"], c["contract_revision"], c["criterion_id"]) ==
-                    acceptance_criterion_key(criterion) for c in route["selected_criteria"])):
-                raise ValueError("owned criterion must be selected by a ready current response route")
-        for key in ("id", "summary", "source", "admitted", *(
-                ("work_unit_id", "contract_revision") if "work_unit_id" in criterion else ())):
-            if (key not in expected_criterion or expected_criterion[key] != criterion.get(key)
-                    or type(expected_criterion[key]) is not type(criterion.get(key))):
-                raise ValueError("stale expected criterion; obtain evidence for the current approved condition")
-        before = _semantic_projection(state)
-        now = utc_now()
-        criterion["status"] = "met"
-        criterion["met_completion_check_digest"] = digest
-        criterion["met_at"] = now
-        state["updated_at"] = now
-        if "work_unit_id" in criterion:
-            _persist_canonical_intake(connection, state)
-        _commit(connection, state, {
-            "ts": now,
-            "event": "acceptance-criterion-met",
-            "platform": platform,
-            "session_id": session_id,
-            "criterion_id": target_id,
-            "work_unit_id": criterion.get("work_unit_id"),
-            "contract_revision": criterion.get("contract_revision"),
-            "completion_check_digest": digest,
-            "input_event_id": state["latest_input_event_id"],
-            "semantic_changes": _semantic_changes(before, state),
-        })
-    return paths
-
-
-def invalidate_acceptance_criterion(
-    *, root: Path = DEFAULT_ROOT, platform: str, session_id: str,
-    criterion_id: str, expected_input_event_id: str,
-    expected_criterion: dict[str, Any], expected_completion_check_digest: str,
-    invalidation_reason: str, transaction: sqlite3.Connection | None = None,
-) -> dict[str, Path]:
-    """Reopen observed invalid evidence without changing its admitted meaning.
-
-    Dependency callers supply observed changes. This writer checks exact current
-    native selection, immutable definition and the currently met proof (CAS).
-    It cannot assert pass. Duplicate invalidation of that same proof/input is a
-    no-op only when the last proof event for this qualified criterion is the
-    matching invalidation. Newer proof is never withdrawn by an old request.
-    """
-    validate_identity(platform, session_id)
-    if (not isinstance(expected_input_event_id, str) or not expected_input_event_id
-            or not isinstance(expected_criterion, dict)
-            or not isinstance(expected_completion_check_digest, str)
-            or not COMPLETION_CHECK_DIGEST_PATTERN.fullmatch(expected_completion_check_digest)
-            or invalidation_reason != "dependency-mismatch"):
-        raise ValueError("invalidation requires current input, definition, proof digest and an allowed evidence change")
-    digest = expected_completion_check_digest.removeprefix("sha256:").lower()
-    paths = session_paths(root, platform, session_id)
-    with _transaction(root, transaction) as connection:
-        state = _load_state_for_update(connection, paths, platform, session_id)
-        _check_expected(state, expected_input_event_id, None)
-        key = (expected_criterion.get("work_unit_id"), expected_criterion.get("contract_revision"), criterion_id)
-        if (not isinstance(key[0], str) or not key[0] or type(key[1]) is not int or key[1] < 1):
-            raise ValueError("invalidation requires an exact owned qualified criterion")
-        matches = [c for c in state.get("acceptance_criteria", [])
-                   if isinstance(c, dict) and acceptance_criterion_key(c) == key]
-        if len(matches) != 1 or matches[0].get("admitted") is not True:
-            raise ValueError("invalidation criterion is missing, ambiguous or not admitted")
-        criterion = matches[0]
-        for field in ("id", "summary", "source", "admitted", "work_unit_id", "contract_revision"):
-            if (field not in expected_criterion or expected_criterion[field] != criterion.get(field)
-                    or type(expected_criterion[field]) is not type(criterion.get(field))):
-                raise ValueError("stale expected criterion; no invalidation was applied")
-        state["canonical_input_event_id"] = (state["latest_input_event_id"]
-            if _canonical_input_bound(connection, root, state) else "")
-        route = _response_route_module().project_stored_response_route(state)
-        if (route is None or route["status"] != "ready" or not any(
-                (c["work_unit_id"], c["contract_revision"], c["criterion_id"]) == key
-                for c in route["selected_criteria"]) or not any(
-                u["work_unit_id"] == key[0] and u["contract_revision"] == key[1]
-                and u["owner"] == {"platform": platform, "session_id": session_id}
-                for u in route["work_units"])):
-            raise ValueError("invalidation requires the ready current native owner selection")
-        if criterion.get("status") != "met":
-            events = read_session_events(root=root, platform=platform, session_id=session_id, transaction=connection)
-            latest = next((e for e in reversed(events) if
-                (e.get("work_unit_id"), e.get("contract_revision"), e.get("criterion_id")) == key
-                and e.get("event") in {"acceptance-criterion-met", "acceptance-criterion-evidence-invalidated"}), None)
-            if (latest is not None and latest["event"] == "acceptance-criterion-evidence-invalidated"
-                    and latest.get("input_event_id") == expected_input_event_id
-                    and latest.get("prior_completion_check_digest", "").removeprefix("sha256:") == digest):
-                return paths
-            raise ValueError("criterion is not currently met by the expected proof")
-        prior_digest = criterion.get("met_completion_check_digest", "")
-        if prior_digest.removeprefix("sha256:") != digest:
-            raise ValueError("newer or different met proof; no invalidation was applied")
-        before = _semantic_projection(state)
-        prior_time = criterion.get("met_at")
-        criterion["status"] = "unmet"
-        criterion.pop("met_completion_check_digest", None)
-        criterion.pop("met_at", None)
-        now = utc_now()
-        state["updated_at"] = now
-        _persist_canonical_intake(connection, state)
-        _commit(connection, state, {
-            "ts": now, "event": "acceptance-criterion-evidence-invalidated",
-            "platform": platform, "session_id": session_id, "criterion_id": criterion_id,
-            "work_unit_id": key[0], "contract_revision": key[1], "input_event_id": expected_input_event_id,
-            "invalidation_reason": invalidation_reason, "criterion_source": criterion["source"],
-            "prior_completion_check_digest": prior_digest, "prior_met_at": prior_time,
-            "semantic_changes": _semantic_changes(before, state),
-        })
-    return paths
 
 
 def consumer_snapshot(state_or_path: dict[str, Any] | Path) -> dict[str, Any]:

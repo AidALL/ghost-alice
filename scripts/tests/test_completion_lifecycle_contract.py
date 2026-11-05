@@ -91,7 +91,6 @@ class CompletionLifecycleContractTests(unittest.TestCase):
                        'failed verdict proves failure, not overall success',
                        'Preserve all required acceptance criteria', 'claim', 'criterion', 'evidence', 'verdict'):
             self.assertIn(phrase, body)
-        self.assertIn('neither application nor continuation', body)
         self.assertIn('completion evidence coverage', body)
         self.assertIn("independent of the focus named in the answer's `[focus:", body)
         self.assertIn('A macro judgment can therefore have partial evidence coverage', body)

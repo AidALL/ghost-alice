@@ -110,10 +110,6 @@ class TransactionTests(unittest.TestCase):
         self.write(intent_delta={"acceptance_criteria": [
             {"id": "report", "summary": "Validate revision one", "source": "user-said"}]})
 
-    def mark(self, **kwargs):
-        return self.ledger.mark_acceptance_criterion_met(
-            **self.identity, criterion_id="report", completion_check_digest="a" * 64, **kwargs)
-
     def test_persisted_identity_mismatch_cannot_be_overwritten(self):
         for key, wrong in [("session_id", "other-session"), ("platform", "claude")]:
             with self.subTest(key=key):
@@ -171,37 +167,67 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(self.state()["current_goal"], "next goal")
         self.assertNotIn("undefined_field", self.ledger.consumer_snapshot(self.state()))
 
+    def test_a_criterion_field_the_ledger_does_not_define_never_blocks_later_writes(self):
+        self.write(intent_delta={"acceptance_criteria": [
+            {"id": "report", "summary": "Validate revision one", "source": "user-said"},
+            {"id": "other", "summary": "Keep the other row", "source": "user-said"}]})
+        state = self.state()
+        for row in state["acceptance_criteria"]:
+            row.update(status="met", met_completion_check_digest="a" * 64, met_at="2026-10-01T12:00:00Z")
+        self.write_database_state(state)
+        self.write(intent_delta={"current_goal": "next goal"})
+        self.assertEqual(self.state()["current_goal"], "next goal")
+        self.write(intent_delta={"acceptance_criteria": [dict(self.criterion(), summary="Validate revision two")]})
+        self.assertEqual(self.state()["acceptance_criteria"], [
+            {"id": "report", "summary": "Validate revision two", "source": "user-said", "admitted": True},
+            {"id": "other", "summary": "Keep the other row", "source": "user-said", "admitted": True}])
+
+    def test_a_write_checks_the_stored_identity(self):
+        self.write(raw_user_input="request")
+        state = self.state()
+        anchor = self.observed_id()
+        state["platform"] = "claude"
+        self.write_database_state(state)
+        with self.assertRaisesRegex(ValueError, "identity"):
+            self.write(intent_delta={"current_goal": "other goal"}, expected_input_event_id=anchor)
+
+    def test_a_ledger_outside_the_owned_root_is_refused(self):
+        owned = self.root / "owned"
+        owned.mkdir()
+        with patch.dict(os.environ, {"GHOST_ALICE_OWNED_ROOT": str(owned)}), \
+                self.assertRaisesRegex(ValueError, "escape"):
+            self.write(intent_delta={"current_goal": "outside"})
+        self.assertFalse(self.ledger.storage_database_path(self.root).exists())
+
+    def test_first_writes_from_parallel_threads_share_one_loaded_helper(self):
+        self.write(intent_delta={"current_goal": "existing root"})
+        script = (
+            "import importlib.util, sys, threading\n"
+            "spec = importlib.util.spec_from_file_location('ledger_under_test', sys.argv[1])\n"
+            "ledger = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(ledger)\n"
+            "errors = []\n"
+            "def write(index):\n"
+            "    try:\n"
+            "        ledger.record_turn(root=ledger.Path(sys.argv[2]), platform='codex', session_id=f'thread-{index}')\n"
+            "    except Exception as error:\n"
+            "        errors.append(repr(error))\n"
+            "threads = [threading.Thread(target=write, args=(index,)) for index in range(8)]\n"
+            "for thread in threads:\n"
+            "    thread.start()\n"
+            "for thread in threads:\n"
+            "    thread.join()\n"
+            "sys.exit('\\n'.join(errors) or 0)\n")
+        result = subprocess.run([sys.executable, "-B", "-c", script, str(MODULE), str(self.root)],
+                                capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_expected_revision_rejects_a_lost_snapshot(self):
         self.write()
         self.write(intent_delta={"constraints": ["keep"]})
         with self.assertRaisesRegex(ValueError, "revision"):
             self.write(intent_delta={"constraints": ["stale"]}, expected_revision=1)
         self.assertEqual(self.state()["constraints"], ["keep"])
-
-    def test_completion_requires_bound_criterion(self):
-        self.setup_criterion()
-        with self.assertRaisesRegex(ValueError, "expected.criterion"):
-            self.mark()
-        self.assertEqual(self.criterion()["status"], "unmet")
-
-    def test_completion_snapshot_requires_boolean_admission_not_integer_alias(self):
-        self.setup_criterion()
-        with self.assertRaisesRegex(ValueError, "criterion"):
-            self.mark(expected_criterion=dict(self.criterion(), admitted=1))
-
-    def test_old_completion_cannot_close_revised_criterion(self):
-        self.setup_criterion()
-        approved = self.criterion()
-        self.write(intent_delta={"acceptance_criteria": [dict(approved, summary="Validate revision two")]})
-        with self.assertRaisesRegex(ValueError, "criterion"):
-            self.mark(expected_criterion=approved)
-        self.assertEqual(self.criterion()["status"], "unmet")
-
-    def test_unadmitted_criterion_cannot_be_marked(self):
-        self.setup_criterion()
-        self.write(intent_delta={"acceptance_criteria": [dict(self.criterion(), admitted=False)]})
-        with self.assertRaisesRegex(ValueError, "admitted"):
-            self.mark(expected_criterion=self.criterion())
 
     def test_concurrent_subprocess_updates_lose_no_write(self):
         # A list update carries the complete current list, so each writer extends the list it read inside the
@@ -333,22 +359,6 @@ m.record_turn(root=root, platform="codex", session_id="session-a", intent_delta=
         self.assertEqual(self.ledger.read_session_state(**self.identity, recover_audit=False).get("ledger_revision", 0), 0)
         self.assertEqual(list(self.root.rglob("*")), [])
 
-    def test_mark_uses_input_cas_and_exact_persisted_identity(self):
-        self.setup_criterion()
-        approved = self.criterion()
-        self.write(raw_user_input="old request")
-        old = self.observed_id()
-        self.write(raw_user_input="new request")
-        with self.assertRaisesRegex(ValueError, "stale"):
-            self.mark(expected_input_event_id=old, expected_criterion=approved)
-        self.assertEqual(self.criterion()["status"], "unmet")
-        state = self.state()
-        anchor = self.observed_id()
-        state["platform"] = "claude"
-        self.write_database_state(state)
-        with self.assertRaisesRegex(ValueError, "identity"):
-            self.mark(expected_input_event_id=anchor, expected_criterion=approved)
-
     def test_legacy_valid_header_migrates_input_anchor_with_cas(self):
         self.write(raw_user_input="legacy input")
         anchor = self.observed_id()
@@ -438,32 +448,6 @@ sys.exit(7)
             if process.poll() is None:
                 process.kill()
                 process.communicate()
-
-    def test_record_and_completion_share_the_same_lock(self):
-        self.setup_criterion()
-        approved = self.criterion()
-        entered = threading.Event()
-        errors = []
-        real_apply = self.ledger.apply_delta
-        def slow_apply(state, delta):
-            entered.set()
-            time.sleep(0.1)
-            return real_apply(state, delta)
-        def update():
-            try:
-                self.write(intent_delta={"constraints": ["concurrent constraint"]})
-            except Exception as exc:
-                errors.append(exc)
-        with patch.object(self.ledger, "apply_delta", side_effect=slow_apply):
-            thread = threading.Thread(target=update)
-            thread.start()
-            self.assertTrue(entered.wait(timeout=5))
-            self.mark(expected_criterion=approved)
-            thread.join(timeout=5)
-        self.assertFalse(thread.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(self.state()["constraints"], ["concurrent constraint"])
-        self.assertEqual(self.criterion()["status"], "met")
 
     def test_attached_raw_input_cannot_bypass_semantic_cas(self):
         self.write(raw_user_input="current request")

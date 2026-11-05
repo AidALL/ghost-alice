@@ -739,7 +739,7 @@ class NativeProofBindingTests(unittest.TestCase):
                 finally:
                     self.owner.observation.write_bytes(original)
 
-    def test_final_delivers_reviewed_honest_failure_without_marking_criterion_met(self):
+    def test_final_delivers_reviewed_honest_failure_without_changing_the_criterion(self):
         self.proof = self.proof.replace('폴더 탭의 푸터가 목록을 더 이상 가리지 않습니다.',
             'The footer still covers the list.').replace('verdict: pass', 'verdict: fail')
         self.owner.observation.write_text('The footer still covers the list.')
@@ -762,7 +762,7 @@ class NativeProofBindingTests(unittest.TestCase):
         self.assertTrue(result['completion_route']['required_partial_check'])
         self.assertEqual(result['completion_route']['selected_work_unit_ids'], ['first'])
 
-    def test_reviewed_success_is_deliverable_without_marking_the_criterion_met(self):
+    def test_reviewed_success_is_deliverable_without_changing_the_criterion(self):
         before = fixtures.ledger.read_session_state(**self.owner.fixture.coords)
         self.review()
         result = self.assess(self.proof)

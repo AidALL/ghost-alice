@@ -11,7 +11,7 @@ def context():
                   owner=dict(platform="claude", session_id="session"))
              for u, k in (("fix", "execution"), ("explain", "nonexecution"), ("backlog", "execution"))]
     criteria = [dict(work_unit_id="fix", contract_revision=1, criterion_id="AC1", id="AC1",
-                     summary="Repair the original failure", source="user-said", admitted=True, status="unmet")]
+                     summary="Repair the original failure", source="user-said", admitted=True)]
     surface = dict(response_mode="normal", boundary_contract="n/a", reason="approved")
     route = dict(schema_version="response-route.v1", status="ready", platform="claude", session_id="session",
                  input_event_id="input-new", current_input_event_id="input-new", boundary_ref=None,
@@ -140,7 +140,6 @@ class CompletionRouteTests(unittest.TestCase):
         decision = result["unit_decisions"][0]["criteria"][0]
         self.assertEqual(decision["verified_at"], "2026-10-01T12:00:00Z")
         self.assertEqual(decision["proof_ref"], "tool-result-old")
-        self.assertEqual(result["selected_criteria"][0]["status"], "unmet")
 
     def test_changed_or_missing_coverage_runs_only_owner_affected_check(self):
         for updates in (dict(relevant_change="changed"), dict(check_ids=[]), dict(validity="invalid")):
@@ -159,7 +158,6 @@ class CompletionRouteTests(unittest.TestCase):
         proof = evidence(core_receipt=None); proof["failure_kind"] = "recording"
         result = self.select(proof=proof)
         self.assertEqual(result.get("evidence_route"), "reopen_cause")
-        self.assertNotIn("met", result.get("reason", ""))
         decision = result["unit_decisions"][0]["criteria"][0]
         self.assertEqual(decision["proof_ref"], "tool-result-old")
         self.assertEqual(decision["verified_at"], "2026-10-01T12:00:00Z")
@@ -294,7 +292,6 @@ class CompletionRouteTests(unittest.TestCase):
                 self.assertEqual(result["route_binding"], "current")
                 self.assertFalse(result["required_completion_check"])
                 self.assertIn("No completion submission", result["reason"])
-                self.assertEqual(result["selected_criteria"][0]["status"], "unmet")
 
     def test_terminal_response_rejects_inconsistent_selected_execution(self):
         for mode in ("direct-response", "clarification-only"):

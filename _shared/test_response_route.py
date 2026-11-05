@@ -310,22 +310,64 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(ledger.read_session_state(**self.coords)["response_route"], route)
         self.assertFalse(ledger.session_paths(self.root, "codex", "current")["state"].exists())
 
-    def test_new_input_stales_binding_and_preserves_verified_evidence_and_unit(self):
+    def test_a_stored_field_the_ledger_does_not_define_never_blocks_a_route(self):
         self.event = self.setup_owned()
         self.record()
-        criterion = ledger.read_session_state(**self.coords)["acceptance_criteria"][0]
-        ledger.mark_acceptance_criterion_met(**self.coords, criterion_id="AC1", expected_criterion=criterion,
-            expected_input_event_id=self.event, completion_check_digest="a" * 64)
+        state = ledger.read_session_state(**self.coords)
+        stored = dict(status="met", met_completion_check_digest="a" * 64, met_at="2026-10-01T12:00:00Z", undefined_field=1)
+        state["acceptance_criteria"][0].update(stored)
+        state["response_route"]["selected_criteria"][0].update(stored)
+        with ledger.storage_transaction(self.root) as tx:
+            tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                       (json.dumps(state), "codex", "current"))
+        self.assertEqual(self.api.read_response_route(**self.coords)["status"], "ready")
+        rebound = self.record()
+        self.assertEqual(rebound["status"], "ready")
+        self.assertEqual(set(rebound["selected_criteria"][0]),
+                         {"id", "summary", "source", "admitted", "work_unit_id", "contract_revision", "criterion_id"})
+
+    def test_an_unadmitted_criterion_cannot_be_selected(self):
+        self.event = self.setup_owned()
+        ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+            "acceptance_criteria": [dict(self.criterion("first"), id="AC2", summary="an assumption", source="interpreted-as",
+                                         admitted=False)]})
+        candidate = self.candidate()
+        candidate["selected_criteria"][0]["criterion_id"] = "AC2"
+        with self.assertRaisesRegex(self.api.RouteSchemaError, "admitted ledger condition"):
+            self.record(candidate)
+
+    def test_a_changed_definition_makes_the_route_stale(self):
+        self.event = self.setup_owned()
+        ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+            "acceptance_criteria": [dict(self.criterion("first"), id="AC2", summary="verify first again")]})
+        for change in (dict(summary="verify first, revised"), dict(source="system-doc"), dict(admitted=False)):
+            with self.subTest(change=change):
+                self.record()
+                self.assertEqual(self.api.read_response_route(**self.coords)["status"], "ready")
+                ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+                    "acceptance_criteria": [dict(self.criterion("first"), **change)]})
+                self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
+                ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
+                    "acceptance_criteria": [self.criterion("first")]})
+        self.record()
+        state = ledger.read_session_state(**self.coords)
+        state["acceptance_criteria"] = [row for row in state["acceptance_criteria"]
+                                        if (row.get("work_unit_id"), row["id"]) != ("first", "AC1")]
+        with ledger.storage_transaction(self.root) as tx:
+            tx.execute("UPDATE sessions SET state_json=? WHERE platform=? AND session_id=?",
+                       (json.dumps(state), "codex", "current"))
+        self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
+
+    def test_new_input_stales_binding_and_preserves_the_unit(self):
+        self.event = self.setup_owned()
+        self.record()
         next_event = self.intake("status; continue the approved work")
         route = self.api.read_response_route(**self.coords)
         self.assertEqual(route["status"], "stale")
         self.assertEqual(route["current_input_event_id"], next_event)
         self.assertEqual(route["input_event_id"], self.event)
-        state = ledger.read_session_state(**self.coords)
-        self.assertEqual(state["acceptance_criteria"][0]["met_completion_check_digest"], "a" * 64)
         rebound = self.record(event=next_event)
         self.assertEqual(rebound["work_units"][0]["work_unit_id"], "first")
-        self.assertEqual(rebound["selected_criteria"][0]["status"], "met")
 
     def test_stale_writer_is_rejected_without_mutation(self):
         self.event = self.setup_owned()
@@ -370,9 +412,6 @@ class ResponseRouteTests(unittest.TestCase):
         missing_summary = deepcopy(baseline["acceptance_criteria"])
         missing_summary[0].pop("summary")
         variants.append(missing_summary)
-        invalid_status = deepcopy(baseline["acceptance_criteria"])
-        invalid_status[0]["status"] = "invalid"
-        variants.append(invalid_status)
         for criteria in variants:
             with self.subTest(criteria=criteria):
                 bad_state = deepcopy(baseline)
@@ -400,9 +439,6 @@ class ResponseRouteTests(unittest.TestCase):
         missing_summary = deepcopy(baseline["acceptance_criteria"])
         missing_summary[0].pop("summary")
         variants.append(missing_summary)
-        invalid_status = deepcopy(baseline["acceptance_criteria"])
-        invalid_status[0]["status"] = "invalid"
-        variants.append(invalid_status)
         for criteria in variants:
             with self.subTest(criteria=criteria):
                 bad_state = deepcopy(baseline)
@@ -474,13 +510,10 @@ class ResponseRouteTests(unittest.TestCase):
         with self.assertRaisesRegex(self.api.RouteSchemaError, "terminal.*execution"):
             self.api.project_stored_response_route(state)
 
-    def test_explanation_or_stop_clears_current_execution_without_reopening_proof(self):
+    def test_explanation_or_stop_clears_current_execution_without_changing_the_criteria(self):
         from completion_route import select_completion_route
         self.event = self.setup_owned()
         self.record()
-        criterion = ledger.read_session_state(**self.coords)["acceptance_criteria"][0]
-        ledger.mark_acceptance_criterion_met(**self.coords, criterion_id="AC1", expected_criterion=criterion,
-            expected_input_event_id=self.event, completion_check_digest="a" * 64)
         preserved = deepcopy(ledger.read_session_state(**self.coords)["acceptance_criteria"])
         for request in ("Explain the pwd result already returned; do not run it again.",
                         "Stop execution. Only explain the existing result."):
@@ -526,15 +559,6 @@ class ResponseRouteTests(unittest.TestCase):
                 self.assertEqual(self.api.read_response_route(**self.coords, transaction=tx)["status"], "ready")
                 raise RuntimeError("outer rollback")
         self.assertEqual(ledger.read_session_state(**self.coords), before)
-
-    def test_owned_met_writer_rejects_another_units_local_id(self):
-        self.event = self.setup_owned()
-        self.record()
-        second = ledger.read_session_state(**self.coords)["acceptance_criteria"][1]
-        with self.assertRaisesRegex(ValueError, "selected.*current.*route"):
-            ledger.mark_acceptance_criterion_met(**self.coords, criterion_id="AC1", expected_criterion=second,
-                expected_input_event_id=self.event, completion_check_digest="c" * 64)
-        self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"][1]["status"], "unmet")
 
     def test_compatibility_only_ready_export_cannot_authorize_a_route(self):
         self.event = self.setup_owned()
@@ -675,20 +699,13 @@ class ResponseRouteTests(unittest.TestCase):
                              ("codex", "current")).fetchone()
             self.assertEqual(row[0], self.event)
 
-    def test_ownerless_met_snapshot_only_matches_ownerless_local_id(self):
+    def test_an_ownerless_row_never_aliases_an_owned_local_id(self):
         self.event = self.setup_owned()
         ledger.record_turn(**self.coords, expected_input_event_id=self.event, intent_delta={
             "acceptance_criteria": [{"id": "AC1", "summary": "legacy AC1", "source": "user-explicit"}]})
         state = ledger.read_session_state(**self.coords)
-        legacy = next(c for c in state["acceptance_criteria"] if c["id"] == "AC1" and "work_unit_id" not in c)
-        try:
-            ledger.mark_acceptance_criterion_met(**self.coords, criterion_id="AC1", expected_criterion=legacy,
-                expected_input_event_id=self.event, completion_check_digest="d" * 64)
-        except ValueError as exc:
-            self.fail(f"ownerless snapshot must not collide with owned local IDs: {exc}")
-        state = ledger.read_session_state(**self.coords)
-        self.assertEqual([c["status"] for c in state["acceptance_criteria"] if c["id"] == "AC1"],
-                         ["unmet", "unmet", "met"])
+        self.assertEqual([(c.get("work_unit_id"), c["summary"]) for c in state["acceptance_criteria"] if c["id"] == "AC1"],
+                         [("first", "verify first"), ("second", "verify second"), (None, "legacy AC1")])
 
     def test_official_ledger_snapshot_exposes_detached_projection(self):
         self.event = self.setup_owned()
@@ -724,7 +741,8 @@ class ResponseRouteTests(unittest.TestCase):
         (install / "_shared").mkdir()
         shutil.copy2(ROOT / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py",
                      install / "session-intent-analyzer" / "scripts" / "session_intent_ledger.py")
-        shutil.copy2(ROOT / "_shared" / "response_route.py", install / "_shared" / "response_route.py")
+        for helper in ("response_route.py", "install_destination.py"):
+            shutil.copy2(ROOT / "_shared" / helper, install / "_shared" / helper)
         script = install / "_shared" / "response_route.py"
         import os
         env = dict(os.environ, CODEX_THREAD_ID="current", GHOST_ALICE_SESSION_ID="")
@@ -735,12 +753,9 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.api.read_response_route(**self.coords)["status"], "ready")
 
-    def test_real_intake_hook_stales_route_without_erasing_evidence(self):
+    def test_real_intake_hook_stales_the_route(self):
         self.event = self.setup_owned()
         self.record()
-        criterion = ledger.read_session_state(**self.coords)["acceptance_criteria"][0]
-        ledger.mark_acceptance_criterion_met(**self.coords, criterion_id="AC1", expected_criterion=criterion,
-            expected_input_event_id=self.event, completion_check_digest="b" * 64)
         result = subprocess.run([sys.executable, str(ROOT / "_shared" / "session_intent_analyzer_hook.py"),
             "--root", str(self.root), "--platform", "codex", "--format", "json"],
             input=json.dumps({"session_id": "current", "prompt": "continue with the current task"}),
@@ -748,8 +763,6 @@ class ResponseRouteTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("session-intent-receipt", result.stdout)
         self.assertEqual(self.api.read_response_route(**self.coords)["status"], "stale")
-        self.assertEqual(ledger.read_session_state(**self.coords)["acceptance_criteria"][0]
-                         ["met_completion_check_digest"], "b" * 64)
 
     def test_read_rejects_wrong_input_receipt_and_unknown_stored_enum(self):
         self.event = self.setup_owned()

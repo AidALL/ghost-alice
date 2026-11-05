@@ -172,8 +172,8 @@ class StopNoticeMessageTests(StopNoticeCase):
                        unresolved_criteria=[dict(criterion="c2", reason="the checker is not installed")])
         self.assertEqual(stop_notice.render(message).splitlines()[-1], "- Remaining work: none, as the response model declared")
 
-    def test_unmet_criteria_alone_are_not_remaining_work(self):
-        # Both criteria stay unmet in the ledger; only a declaration names remaining work.
+    def test_selected_criteria_alone_are_not_remaining_work(self):
+        # The route selects both criteria; only a declaration names remaining work.
         payload = self.run_stop(COMPLETE)
         self.assertEqual(payload["stop_notice"]["remaining_work"], {"declared": False})
         self.assertNotIn("systemMessage", payload)

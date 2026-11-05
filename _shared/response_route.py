@@ -32,8 +32,7 @@ ROUTING_CONTROLS = {"response_mode", "boundary_contract"}
 CANDIDATE_KEYS = {"schema_version", "routing_surface", "work_units", "selected_work_unit_ids", "selected_criteria"}
 UNIT_KEYS = {"work_unit_id", "contract_revision", "kind", "admitted", "owner"}
 REFERENCE_KEYS = {"work_unit_id", "contract_revision", "criterion_id"}
-CRITERION_KEYS = {"id", "summary", "source", "status", "admitted", "work_unit_id", "contract_revision"}
-CRITERION_PROOF_KEYS = {"met_completion_check_digest", "met_at"}
+CRITERION_KEYS = {"id", "summary", "source", "admitted", "work_unit_id", "contract_revision"}
 
 
 class ResponseRouteError(ValueError):
@@ -121,21 +120,15 @@ def _validate_terminal_selection(surface, units, selected):
 
 def _criterion(value, *, resolved=False):
     required = CRITERION_KEYS | ({"criterion_id"} if resolved else set())
-    if (not isinstance(value, dict) or not required <= set(value)
-            or not set(value) <= required | CRITERION_PROOF_KEYS):
-        raise RouteSchemaError("owned criterion fields are incomplete or unknown")
+    if not isinstance(value, dict) or not required <= set(value):
+        raise RouteSchemaError("owned criterion fields are incomplete")
     key = (*_unit_key(value), _identifier(value["id"], "criterion id"))
     if not isinstance(value["summary"], str) or not value["summary"].strip():
         raise RouteSchemaError("owned criterion summary must be a nonempty string")
     if not isinstance(value["source"], str) or ledger.canonical_source(value["source"], "") not in ledger.ACCEPTANCE_CRITERIA_SOURCES:
         raise RouteSchemaError("owned criterion source is invalid")
-    if not isinstance(value["status"], str) or value["status"] not in ledger.ACCEPTANCE_CRITERIA_STATUSES:
-        raise RouteSchemaError("owned criterion status is invalid")
     if type(value["admitted"]) is not bool:
         raise RouteSchemaError("owned criterion admission must be boolean")
-    for field in CRITERION_PROOF_KEYS & set(value):
-        if not isinstance(value[field], str) or not value[field]:
-            raise RouteSchemaError(f"owned criterion {field} must be a nonempty string")
     if resolved and value["criterion_id"] != key[2]:
         raise RouteSchemaError("stored criterion local-ID alias is inconsistent")
     return key
@@ -350,7 +343,7 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
         if (key[0] not in selected_ids or unit is None or unit["contract_revision"] != key[1]
                 or criterion is None or criterion.get("admitted") is not True):
             raise RouteSchemaError("selected criterion needs an admitted current owner and admitted ledger condition")
-        resolved.append(dict(deepcopy(criterion), criterion_id=key[2]))
+        resolved.append(dict({field: criterion[field] for field in CRITERION_KEYS}, criterion_id=key[2]))
     projection = {
         "schema_version": SCHEMA_VERSION, "status": "ready", "platform": state["platform"],
         "session_id": state["session_id"], "input_event_id": state["latest_input_event_id"],
@@ -384,7 +377,7 @@ def project_stored_response_route(state, expected_input_event_id=None):
         _identifier(stored["boundary_ref"], "boundary_ref")
     if stored["routing_surface"]["boundary_contract"] == "required" and stored["boundary_ref"] is None:
         raise RouteSchemaError("stored required boundary reference is missing")
-    # Validate frozen shape independently of later business-evidence mutations.
+    # Validate the stored route's frozen shape.
     if not all(isinstance(stored[k], list) for k in ("work_units", "selected_work_unit_ids", "selected_criteria")):
         raise RouteSchemaError("stored selection lists are invalid")
     units = {}
@@ -409,8 +402,7 @@ def project_stored_response_route(state, expected_input_event_id=None):
     for criterion in stored["selected_criteria"]:
         key = _criterion(criterion, resolved=True)
         if (key in seen or key[0] not in selected or units[key[0]]["contract_revision"] != key[1]
-                or criterion.get("id") != key[2] or criterion.get("admitted") is not True
-                or criterion.get("status") not in ("met", "unmet")):
+                or criterion.get("id") != key[2] or criterion.get("admitted") is not True):
             raise RouteSchemaError("stored selected criterion binding is invalid")
         seen.add(key)
     if 'continuation_feedback' in stored:

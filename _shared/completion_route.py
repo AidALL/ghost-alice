@@ -22,7 +22,7 @@ never an instruction to rerun every unit. ``check_ids`` is affected work to run;
 ``required_check_ids`` preserves the supplied verification_plan.checks for that
 criterion. Missing administrative receipts retain valid business proof with no
 business checks selected.
-No result grants permission, marks a criterion met, or verifies domain truth.
+No result grants permission or verifies domain truth.
 Evidence dates are retained verbatim and are never compared with input age.
 """
 
