@@ -145,7 +145,7 @@ class ClaudeContextIntakeTests(unittest.TestCase):
         core.record_response_route(**self.coords, expected_input_event_id=event, candidate=candidate, boundary_ref='boundary-1')
         return event, candidate, core.read_session_state(**self.coords)
 
-    def test_current_sdk_closes_old_human_semantic_ownerless_route_and_completion_gates(self):
+    def test_current_sdk_closes_old_human_semantic_route_and_completion_gates(self):
         human, candidate, before = self.setup_human_authority()
         human_events = [e for e in core.read_session_events(**self.coords) if e['event']=='user-input-observed']
         self.stage(); state = self.reconcile(); sdk = self.binding()['input_event_id']
@@ -162,9 +162,6 @@ class ClaudeContextIntakeTests(unittest.TestCase):
             with self.subTest(identity=identity):
                 with self.assertRaises(ValueError):
                     core.record_turn(**self.coords, expected_input_event_id=identity, intent_delta={'current_goal':'Forbidden SDK authority'})
-                with self.assertRaises(ValueError):
-                    core.mark_acceptance_criterion_met(**self.coords, criterion_id='ownerless', expected_criterion=state['acceptance_criteria'][1],
-                        expected_input_event_id=identity, completion_check_digest='a'*64)
                 with self.assertRaises(ValueError):
                     core.record_response_route(**self.coords, expected_input_event_id=identity, candidate=candidate, boundary_ref='boundary-1')
         with core._read_connection(self.fixture.root) as tx:

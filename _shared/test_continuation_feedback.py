@@ -42,12 +42,10 @@ class ContinuationFeedbackTests(unittest.TestCase):
     def read(self):
         return self.fixture.api.read_response_route(**self.fixture.coords)
 
-    def test_explicit_empty_feedback_is_distinct_from_absence_and_does_not_complete_work(self):
+    def test_explicit_empty_feedback_is_distinct_from_absence(self):
         self.assertNotIn('continuation_feedback', self.read())
         self.fixture.record(self.candidate())
         self.assertEqual(self.read()['continuation_feedback']['required_unprocessed'], [])
-        state = ledger.read_session_state(**self.fixture.coords)
-        self.assertEqual(next(row for row in state['acceptance_criteria'] if row.get('work_unit_id')=='first')['status'], 'unmet')
 
     def test_current_needed_work_resolves_existing_original_without_another_body_copy(self):
         self.fixture.record(self.candidate([self.required()]))

@@ -106,7 +106,7 @@ Continuation refers only to polling the same process/session/tool-call ID. A den
 
 Procedure ownership prevents duplicated rules from drifting. The response model follows [instruction-body reuse](../../coding-convention/verification-before-completion/references/verify-or-reuse.md) and records actual reads or valid reuse internally. Routine clean states need no repeated prose; pending, changed and failed states retain their decision-relevant notice.
 
-Source edit, named test pass, installed bytes, native execution, recorded review, met criterion and visible answer are separate claims. Evidence for one stage cannot establish another.
+Source edit, named test pass, installed bytes, native execution, recorded review and visible answer are separate claims. Evidence for one stage cannot establish another.
 
 ## Completion Recording Contract
 
@@ -116,15 +116,15 @@ For this condition, the response model records both judgments using the [owning 
 
 Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
 
-On the native Stop path, Core code's Stop script compares the delivered text with the recorded review, records the result as the Stop notice message in `stop-notice.json`, issues no second command and does not delay the answer. The hook runner keeps the script's raw output in the hook log. Supported, unsupported and unresolved states stay distinct: an unresolved criterion remains unmet, and a supported report may fulfill no work criterion.
+On the native Stop path, Core code's Stop script compares the delivered text with the recorded review, records the result as the Stop notice message in `stop-notice.json`, issues no second command and does not delay the answer. The hook runner keeps the script's raw output in the hook log. Supported, unsupported and unresolved states stay distinct, and a supported report may fulfill no work criterion.
 
 ## Current Selection and Bounded Recovery
 
 Core validates the current response route supplied by the model following task-router. New input changes the route binding while preserving stable work units and unchanged original evidence.
 
-A named route, proof or recording defect returns to its procedure owner below. The model chooses correction only when needed for the objective or a required dependency and within authority. Unsupported claims are revised or withdrawn; required unresolved criteria stay unmet. Identical unchanged recording failure parks dependent application without replaying business work or blocking independent authorized work.
+A named route, proof or recording defect returns to its procedure owner below. The model chooses correction only when needed for the objective or a required dependency and within authority. Unsupported claims are revised or withdrawn; the answer reports a required unresolved criterion as unresolved. An identical unchanged recording failure suspends that recording attempt without replaying business work or blocking independent authorized work.
 
-[Review and delivery](../../coding-convention/verification-before-completion/references/response-review.md) owns the calling sequence. Core's retained-report path applies only when original applied proof supports the exact entire statement; added prose or a broader claim needs its own review.
+[Review and delivery](../../coding-convention/verification-before-completion/references/response-review.md) owns the calling sequence. Core's retained-report path applies only when the original proof supports the exact entire statement; added prose or a broader claim needs its own review.
 
 ## Repair and authority conditions
 

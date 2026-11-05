@@ -35,7 +35,8 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
   "acceptance_criteria": [{
     "id": "AC1",
     "summary": "verifiable acceptance criterion",
-    "source": "user-said"
+    "source": "user-said",
+    "admitted": true
   }],
   "decisions": [],
   "risk_flags": [],
@@ -44,7 +45,7 @@ The Python ledger writer replaces scalar goal/summary fields with the latest sem
 }
 ```
 
-Completion proof belongs to the current acceptance criterion's definition. Recording the same ID with unchanged summary preserves verified met status, digest and time. Changing the summary or explicitly withdrawing admission resets that acceptance criterion to unmet and removes current proof fields; other acceptance criteria retain their proof. A wording change counts as a changed acceptance criterion because the parser cannot establish semantic equivalence. The prior acceptance-criterion-met event remains historical evidence, not proof for the revised acceptance criterion. A semantic delta cannot set met; only `mark_acceptance_criterion_met` writes it.
+An acceptance criterion row holds `id`, `summary`, `source`, `admitted` and the owner pair. The row holds no proof; the response review holds the judgments about the criterion. Recording the same ID and owner pair replaces the summary and source, and admission changes only through an explicit boolean or a contract-bound source. A response route that selected the earlier row no longer reads as ready. A wording change counts as a changed acceptance criterion because the parser cannot establish semantic equivalence. A semantic update that records acceptance criteria rewrites every row with these fields only. A stored criterion field the ledger does not define carries no meaning and never blocks a read or a write.
 
 ## Conduct and consumer snapshots
 
@@ -126,13 +127,11 @@ Explicit historical read-only snapshots and the library's explicit-session recor
 
 ## Mutation Contract and Recovery
 
-Core Python APIs expose record_turn, mark_acceptance_criterion_met, bind_legacy_acceptance_criteria and record_response_route. Each validates canonical identity, opens an immediate SQLite transaction, compares expected input and writes state plus audit event. Semantic/completion writers optionally compare an expected revision; legacy binding requires one. Unsafe IDs fail rather than being sanitized into a different identity.
+Core Python APIs expose record_turn, bind_legacy_acceptance_criteria and record_response_route. Each validates canonical identity, opens an immediate SQLite transaction, compares expected input and writes state plus audit event. Semantic writers optionally compare an expected revision; legacy binding requires one. Unsafe IDs fail rather than being sanitized into a different identity.
 
 The .sqlite-authority.json cutover marker is written before the first semantic commit. A lost database requires explicit restoration; corrupt/unsupported databases fail closed instead of reactivating stale JSON.
 
 `record_turn(..., expected_input_event_id=input_event_id, expected_revision=revision)`, with the `input_event_id` that `--read-intent` returns, requires the expected event when an observed input is active. Digest-only new-input observation creates an anchor and is exempt from that comparison. Attaching a semantic delta to raw input does not bypass it. Independent additions for the same input can serialize without sharing a revision; a whole-snapshot decision uses expected_revision.
-
-`mark_acceptance_criterion_met` additionally requires an approved expected_criterion with exact ID, summary, source and boolean admitted. It uses the exact owner pair for an owned local ID and requires that acceptance criterion in the ready current selection. Direct ownerless writes remain input-bound. The Python ledger writer validates digest syntax and binding; the response model reviews the actual proof under Core verification instructions.
 
 `storage_transaction(root)` yields an operation-local connection. Nested calls receive that connection; only its owner commits/rolls back. Savepoints prevent a caught nested error from committing half a mutation. SQLite uses WAL, foreign keys, FULL synchronization and a ten-second contention wait, which is not a task-duration limit. Independent roots use independent databases. Repeated unversioned identical deltas carry no exactly-once guarantee.
 
@@ -146,15 +145,15 @@ For live backup, the operator uses SQLite backup or a quiescent consistent copy 
 
 The response model applies task-router to form the current semantic route candidate, then invokes Core code's response_route.py through a host tool. That Python code validates and persists the candidate. The response model also follows session-intent-analyzer to express acceptance criteria and admission facts; the ledger writer persists them. Intake hooks do not infer current selection from a backlog.
 
-A new user input or an SDK-started turn marks the retained route stale and preserves stable work units and prior met proof. Missing projection is an explicit absence, not denial of bootstrap or intake. Consumers read the ready projection for current selection and the origin ledger for current status/proof; an export or registry entry replaces neither.
+A new user input or an SDK-started turn marks the retained route stale and preserves stable work units. Missing projection is an explicit absence, not denial of bootstrap or intake. Consumers read the ready projection for current selection and the origin ledger for the current acceptance criteria; an export or registry entry replaces neither.
 
 An answer without a completion or partial completion block retains continuing selected work without a new completion submission. When the user has requested an authenticated review of such an answer, the recorded review binds that exact text, and Core code's Stop script compares the answer with that record. The response model explicitly routes and verifies new completion claims under verification-before-completion.
 
 A direct answer or a confirmation question follows the common contract without ledger access or route registration by the response model. Hook observation still stales the prior projection, and semantic persistence waits for the next authorized normal route. These restrictions do not prohibit authorized repair of Core code records on a normal route.
 
-The work_units registry freezes contracts by `(work_unit_id, contract_revision)`. Revision is an integer from one through `2**53 - 1`, excluding booleans. Each unit declares kind execution/nonexecution, boolean admitted and exact owner platform/session. Stored acceptance criteria freeze ID, summary and source. Same-revision kind, owner or definition changes fail; a newer revision is required. Admission may change with authority without erasing proof of the work. Selection cannot revive an older revision.
+The work_units registry freezes contracts by `(work_unit_id, contract_revision)`. Revision is an integer from one through `2**53 - 1`, excluding booleans. Each unit declares kind execution/nonexecution, boolean admitted and exact owner platform/session. Stored acceptance criteria freeze ID, summary and source. Same-revision kind, owner or definition changes fail; a newer revision is required. Admission may change with authority. Selection cannot revive an older revision.
 
-Each owned acceptance criterion carries both work_unit_id and contract_revision; a partial/malformed pair rejects the delta. Ownerless rows cannot enter ready selection or inherit ownership from a matching local ID. A changed acceptance criterion reopens only itself; route refresh preserves unchanged proof.
+Each owned acceptance criterion carries both work_unit_id and contract_revision; a partial/malformed pair rejects the delta. Ownerless rows cannot enter ready selection or inherit ownership from a matching local ID.
 
 ```json
 {
@@ -180,7 +179,7 @@ The routing_surface requires response_mode (`normal | direct-response | clarific
 
 Selection covers only this response and may be empty. Unselected execution units may remain without activating work. An invalid route does not exempt an actual completion or partial completion claim from proof.
 
-The validated projection adds ready status, authoritative identity/input and canonical boundary_ref or null. A required boundary needs a nonnull reference. Selected criteria are detached snapshots with criterion_id as the local-ID alias; they freeze the selected condition, not current proof/status. The reader adds current_input_event_id and returns stale for changed input/definition, rejecting malformed stored schemas.
+The validated projection adds ready status, authoritative identity/input and canonical boundary_ref or null. A required boundary needs a nonnull reference. Selected criteria are detached snapshots with criterion_id as the local-ID alias; they freeze the selected acceptance criterion. The reader adds current_input_event_id and returns stale for changed input/definition, rejecting malformed stored schemas.
 
 ### Current necessary continuation feedback
 
@@ -200,7 +199,7 @@ When authorized continued work needs a next input, the response model declares i
 }
 ```
 
-This is an illustrative declaration, not execution authority. `control` is `active | human-stop`; `prerequisite` is `ready | missing`. Each row has nonempty model-supplied `reason` and `next_information`, and nonempty selected, admitted owned criterion references. Core's Stop notice shows each row's `reason` and `next_information` to the user, so the response model writes them in the user's language. Rows cannot overlap. `source_refs` is an explicit list and may be empty when current information needs no original lookup. Absence leaves necessity undeclared; an explicit empty `required_unprocessed` list declares no currently necessary follow-up and does not mark unmet criteria complete. An unmet status alone establishes no necessity.
+This is an illustrative declaration, not execution authority. `control` is `active | human-stop`; `prerequisite` is `ready | missing`. Each row has nonempty model-supplied `reason` and `next_information`, and nonempty selected, admitted owned criterion references. Core's Stop notice shows each row's `reason` and `next_information` to the user, so the response model writes them in the user's language. Rows cannot overlap. `source_refs` is an explicit list and may be empty when current information needs no original lookup. Absence leaves necessity undeclared; an explicit empty `required_unprocessed` list declares no currently necessary follow-up and does not establish that a selected acceptance criterion holds. A selected acceptance criterion alone establishes no necessity.
 
 The canonical route writer authenticates each `(candidate_reference, source_id)` selector against an existing immutable candidate in the exact owning root and platform/session, verifies its original, and stores only authenticated source-reference metadata. A source ID is local to its candidate. Inline originals remain in their existing Core code record; feedback copies neither text nor bytes. A fabricated, changed or unavailable original rejects the declaration and rolls back the route transaction. Current input and the declared boundary continue to bind the normal route.
 
@@ -233,13 +232,13 @@ canonical_intakes is a separate SQLite record keyed by platform/session with inp
 
 Session metadata without canonical provenance can register without another observation only when its event, digest, count and owner match canonical audit evidence. Intake from the host supplies an authoritative sequence boundary. Without one, import sources must match SQLite legacy_migrations hashes; Core Python code reconstructs and compares the exact imported audit prefix, including a pending event, and requires the current observation after that prefix. Those hashes attest import provenance, not current authority for a route or an acceptance criterion.
 
-Registration persists the canonical record atomically. Missing/changed sources without that trusted sequence boundary remain unresolved and cause binding error. The operator restores the required provenance evidence; it must not fabricate input. Import clears copied projection stamps and stales routes. Canonical intake does not reopen unrelated proof of the work.
+Registration persists the canonical record atomically. Missing/changed sources without that trusted sequence boundary remain unresolved and cause binding error. The operator restores the required provenance evidence; it must not fabricate input. Import clears copied projection stamps and stales routes.
 
 ### Guarded legacy ownership
 
 For admitted ownerless criteria matching an existing current owner's latest frozen execution contract, the response model following the selected procedure reads complete criterion rows and ledger revision. It passes --bind-legacy-criteria-json containing only work_unit_id, contract_revision and exact expected_criteria snapshots, plus --expected-revision and the current route candidate and session metadata.
 
-Core Python code requires canonical intake, exact revision, the admitted same-session execution unit at its latest revision and exact frozen definitions. It compares full row snapshots with type-sensitive values and rejects ambiguous rows, partial ownership or collisions. It adds only the owner pair, preserving order, definition, admission, status, proof and time, and writes the ownership audit event.
+Core Python code requires canonical intake, exact revision, the admitted same-session execution unit at its latest revision and exact frozen definitions. It compares full row snapshots with type-sensitive values and rejects ambiguous rows, partial ownership or collisions. It adds only the owner pair, preserving order, definition and admission, and writes the ownership audit event.
 
 The CLI binds rows and registers the route in one transaction; either failure rolls back both. Library callers pass the same storage_transaction connection to obtain that boundary. The response model must not resubmit rows through the semantic writer, which creates distinct owned entries. Binding creates no acceptance criteria or admission and does not mark completion.
 

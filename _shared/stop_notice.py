@@ -180,7 +180,7 @@ def _claim(entries: list[dict[str, Any]], index: int) -> str:
 
 
 def _remaining_work(assessment: Mapping[str, Any]) -> dict[str, Any]:
-    """Only the rows the response model declared in the current route; an unmet criterion alone is not one."""
+    """Only the rows the response model declared in the current route; a selected criterion alone is not one."""
     route = assessment.get('response_route')
     if (not route or route.get('status') != 'ready'
             or (assessment.get('completion_route') or {}).get('route_binding') != 'current'):

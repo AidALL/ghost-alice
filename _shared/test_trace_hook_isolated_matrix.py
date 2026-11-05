@@ -454,7 +454,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 # Current work admission remains a separate owning Core check.
                 # A checkpoint or broader focus cannot admit the prohibited unit.
                 criterion = dict(id="protected-resource", summary="Protected target requires admission",
-                                 source="user-said", admitted=False, status="unmet",
+                                 source="user-said", admitted=False,
                                  work_unit_id="protected-unit", contract_revision=1)
                 self.run_process([sys.executable, "-B", str(self.ledger), "--root", str(self.ledger_root),
                     "--platform", platform, "--session-id", session, "--expected-input-event-id", event_id,

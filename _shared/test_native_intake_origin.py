@@ -266,11 +266,6 @@ class IntakeOriginQueueTests(unittest.TestCase):
         self.assertEqual(ledger.read_response_route(**self.coords)['status'], 'ready')
         ledger.record_response_route(**self.coords, expected_input_event_id=event, candidate=candidate,
                                      boundary_ref='boundary-1')
-        criterion = next(c for c in state['acceptance_criteria'] if c['id'] == 'AC1')
-        ledger.mark_acceptance_criterion_met(**self.coords, criterion_id='AC1', expected_criterion=criterion,
-                                             expected_input_event_id=event, completion_check_digest='a' * 64)
-        criteria = ledger.read_session_state(**self.coords)['acceptance_criteria']
-        self.assertEqual(next(c for c in criteria if c['id'] == 'AC1')['status'], 'met')
 
     def test_queued_peer_hand_back_keeps_the_current_human_input(self):
         before = self.human('Typed request.')

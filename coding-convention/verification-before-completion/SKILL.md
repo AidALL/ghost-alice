@@ -107,7 +107,7 @@ Partial result:
 - evidence: Original regression output with source locator
 ```
 
-The review reference's [Deliver](references/response-review.md#deliver) section states what Core code does with the delivered answer. The control block alone establishes neither application nor continuation.
+The review reference's [Deliver](references/response-review.md#deliver) section states what Core code does with the delivered answer.
 
 ## Confirmed flaw propagation
 
