@@ -5,6 +5,7 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 from pathlib import Path
@@ -317,14 +318,95 @@ class AppendTests(RetentionTestCase):
     """Writers that share a log append and apply its entry under one lock on the log, so no writer rotates with a size
     it read before another writer rotated."""
 
-    def test_a_short_write_raises_instead_of_leaving_the_line_cut(self):
+    def test_a_short_write_raises_for_a_caller_that_must_write(self):
         # A buffered write raised when the system took only part of a line; the one-write append raises too.
         path = self.root / "governance-events.jsonl"
         real_write = os.write
         with mock.patch.object(state_retention.os, "write",
                                side_effect=lambda descriptor, data: real_write(descriptor, data[:5])), \
                 self.assertRaises(OSError):
+            state_retention.append("governance-events", path, '{"row": 1}\n', must_write=True)
+
+    def test_a_write_that_fails_is_recorded_and_never_raised(self):
+        # The writer's own log is Ghost-ALICE's record: losing a line must not stop the work that wrote it.
+        path = self.root / "governance-events.jsonl"
+        real = state_retention._append_once
+
+        def full_disk(target, text):
+            if target == path:
+                raise OSError(28, "No space left on device")
+            real(target, text)
+
+        with mock.patch.object(state_retention, "_append_once", side_effect=full_disk):
             state_retention.append("governance-events", path, '{"row": 1}\n')
+        self.assertEqual((self.failures()[-1]["policy"], self.failures()[-1]["error_type"]),
+                         ("governance-events", "OSError"))
+        state_retention.append("governance-events", path, '{"row": "\ud800"}\n')
+        self.assertEqual((self.failures()[-1]["policy"], self.failures()[-1]["error_type"]),
+                         ("governance-events", "UnicodeEncodeError"))
+
+    def test_a_line_a_full_disk_cut_never_joins_the_next_line(self):
+        path = self.root / "governance-events.jsonl"
+        path.write_bytes(b'{"row')
+        state_retention.append("governance-events", path, '{"row": 2}\n')
+        self.assertEqual(path.read_bytes(), b'{"row\n{"row": 2}\n')
+
+    def test_a_character_a_full_disk_cut_never_ends_the_line_count_rule(self):
+        path = self.root / "io-trace.jsonl"
+        path.write_bytes("한".encode("utf-8")[:2])
+        policy = state_retention.POLICIES["io-trace"]._replace(limit=3, keep=2)
+        with mock.patch.dict(state_retention.POLICIES, {"io-trace": policy}):
+            for count in range(6):
+                state_retention.append("io-trace", path, f'{{"n": {count}}}\n')
+        self.assertLessEqual(len(path.read_bytes().splitlines()), 3)
+        self.assertEqual(self.failures(), [])
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_write_that_fails_after_a_lock_held_too_long_is_recorded(self):
+        path = self.root / "governance-events.jsonl"
+        real = state_retention._append_once
+
+        def full_disk(target, text):
+            if target == path:
+                raise OSError(28, "No space left on device")
+            real(target, text)
+
+        with mock.patch.object(file_lock, "LOCK_WAIT_S", 0.2), file_lock.exclusive(path), \
+                mock.patch.object(state_retention, "_append_once", side_effect=full_disk):
+            state_retention.append("governance-events", path, '{"late": true}\n')
+        self.assertEqual((self.failures()[-1]["policy"], self.failures()[-1]["error_type"]),
+                         ("governance-events", "OSError"))
+
+    def test_an_audit_line_that_cannot_be_written_moves_the_retired_asset_back(self):
+        import retired_assets
+        asset = self.root / "commands" / "asset.md"
+        asset.parent.mkdir()
+        asset.write_text("managed\n", encoding="utf-8")
+        pending = self.root / "pending"
+        pending.mkdir()
+        (pending / "install-state").write_text("", encoding="utf-8")  # the audit log's folder cannot be created
+        with self.assertRaises(OSError):
+            retired_assets._retire(asset, ownership=retired_assets.OWNERSHIP_GHOST_ALICE_MANAGED,
+                                   backup_root=self.root / "backups", platform="claude",
+                                   source_root=self.root, pending_root=pending)
+        self.assertEqual(asset.read_text(encoding="utf-8"), "managed\n")
+        # The move back has its own audit line, which cannot be written either and stays recorded.
+        self.assertEqual({failure["policy"] for failure in self.failures()}, {"install-state-events"})
+
+    def test_a_failure_event_that_cannot_be_written_is_recorded(self):
+        import install_transaction
+        log = self.root / "events.jsonl"
+        log.mkdir()
+        install_transaction._write_failure_event(log, source=self.root / "a", dest=self.root / "b",
+                                                 phase="copy", error="boom")
+        self.assertEqual({failure["policy"] for failure in self.failures()}, {"install-state-events"})
+
+    def test_a_log_folder_that_cannot_be_created_is_recorded_and_never_raised(self):
+        blocker = self.root / "not-a-folder"
+        blocker.write_text("", encoding="utf-8")
+        state_retention.append("governance-events", blocker / "governance-events.jsonl", '{"row": 1}\n')
+        [failure] = self.failures()
+        self.assertEqual(failure["policy"], "governance-events")
 
     def test_appends_and_rotations_of_one_log_never_overlap(self):
         path = self.root / "governance-events.jsonl"
@@ -380,6 +462,23 @@ class AppendTests(RetentionTestCase):
         self.assertFalse(path.with_name("governance-events.jsonl.1").exists())
         [failure] = self.failures()
         self.assertEqual((failure["policy"], failure["error_type"]), ("governance-events", "LockTimeout"))
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_lock_the_file_system_refuses_keeps_the_rule_of_the_log_and_of_the_failure_record(self):
+        # A refusal lasts as long as the file system, so nothing it leaves unbounded may grow.
+        path = self.root / "governance-events.jsonl"
+        policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
+        failures = state_retention.POLICIES["retention-failures"]._replace(limit=3, keep=2)
+        refused = OSError(errno.ENOLCK, "No locks available")
+        with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy, "retention-failures": failures}), \
+                mock.patch.object(file_lock.fcntl, "flock", side_effect=refused):
+            path.write_bytes(b"x" * 100 + b"\n")
+            state_retention.append("governance-events", path, '{"row": 1}\n')
+            self.assertTrue(path.with_name("governance-events.jsonl.1").exists())
+            self.assertEqual(self.failures(), [])
+            for _ in range(6):
+                state_retention.record_failure("install-staging", self.root, OSError("stuck"))
+        self.assertLessEqual(len(self.failures()), 3)
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_failure_record_held_too_long_still_gets_the_line(self):

@@ -52,7 +52,7 @@ PY
 
 ## Persistence behavior
 
-The helper writes through a temporary file and a rename. `append_entry`, `append_entry_if_absent` and `mark_decided` hold the lock on the sibling `.lock` file and wait for it at most `MANIFEST_LOCK_WAIT_S` in `manifest_io.py`; a lock held longer raises `file_lock.LockTimeout` to the caller. Windows takes no lock. When a manifest holds corrupt JSON, `read_manifest` prints a warning, backs the file up with the `.corrupt-bak` suffix and returns an empty entry list.
+The helper writes through a temporary file and a rename. `append_entry`, `append_entry_if_absent` and `mark_decided` hold the lock on the sibling `.lock` file and wait for it at most `MANIFEST_LOCK_WAIT_S` in `manifest_io.py`; a lock held longer raises `file_lock.LockTimeout` to the caller, and a lock the file system refuses raises its `OSError`. Windows takes no lock. When a manifest holds corrupt JSON, `read_manifest` prints a warning, backs the file up with the `.corrupt-bak` suffix and returns an empty entry list.
 
 ## Safety boundary
 

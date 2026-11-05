@@ -1082,8 +1082,8 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
                          "2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError")
         _, output = self._run("claude", strict=False)
         self.assertIn("state-retention: 2 failures; last 2026-10-22T01:02:03Z gateway-usage PermissionError", output)
-        # A retention failure is Ghost-ALICE's own and needs no repair by the user: doctor reports it and
-        # overall stays what it was without the record.
+        # A retention failure is Ghost-ALICE's own and stops no work: doctor reports it and overall stays what it
+        # was without the record.
         overall = lambda text: [line for line in text.splitlines() if line.startswith("overall:")]
         self.assertEqual(overall(output), overall(clean))
 
@@ -1091,6 +1091,13 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
         self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
         self.record.write_bytes(b"\xff\xfe not json\n")
         self.assertEqual(install_doctor._retention_failure_line(self.record), "record unreadable")
+
+    def test_a_row_a_full_disk_cut_leaves_the_other_rows_readable(self):
+        self.ghost_alice_root.mkdir(parents=True, exist_ok=True)
+        row = {"ts": "2026-10-21T00:00:00Z", "policy": "session-logs", "path": "/a", "error_type": "OSError", "error": "x"}
+        self.record.write_bytes(json.dumps(row).encode("utf-8") + b'\n{"ts": "\xeb\xa1\n')
+        self.assertEqual(install_doctor._retention_failure_line(self.record),
+                         "1 failures; last 2026-10-21T00:00:00Z session-logs OSError")
 
 
 class HookRejectionDoctorTest(NodeRuntimeRunPathTest):

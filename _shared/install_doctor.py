@@ -199,15 +199,21 @@ def _pending_manifest_status(manifest: Path) -> tuple[str, str, int]:
 def _retention_failure_line(record: Path) -> str:
     """The retention failure record `state_retention` writes, as one informational doctor line: ok without a
     failure, else the count and the last failure's time, entry and error type. A retention failure is Ghost-ALICE's
-    own and needs no repair by the user, so the line never changes doctor's overall status."""
+    own and stops no work, so the line never changes doctor's overall status."""
     try:
-        rows = [json.loads(line) for line in record.read_text(encoding="utf-8").splitlines() if line.strip()]
+        lines = [line for line in record.read_text(encoding="utf-8", errors="replace").splitlines() if line.strip()]
     except FileNotFoundError:
         return "ok"
-    except (OSError, UnicodeDecodeError, ValueError):
+    except OSError:
         return "record unreadable"
+    rows = []
+    for line in lines:
+        try:
+            rows.append(json.loads(line))
+        except ValueError:
+            pass  # a row a full disk cut; the rows around it stay readable
     if not rows:
-        return "ok"
+        return "record unreadable" if lines else "ok"
     last = rows[-1] if isinstance(rows[-1], dict) else {}
     return f"{len(rows)} failures; last {last.get('ts')} {last.get('policy')} {last.get('error_type')}"
 
@@ -1182,7 +1188,7 @@ def run(args: argparse.Namespace) -> int:
     statuses.append(snapshot_status)
     print(f"snapshot: {snapshot_detail}")
 
-    # Informational: a retention failure needs no repair by the user, so the line never changes overall.
+    # Informational: a retention failure stops no work, so the line never changes overall.
     print(f"state-retention: {_retention_failure_line(state_retention.failure_record_path())}")
 
     # Informational: the hook runner's own command rejections, read from the strict session logs it writes them to.
