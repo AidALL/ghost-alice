@@ -31,7 +31,7 @@ When the intent is clear, apply the direct-answer rule below; applying it loads 
 ## Prohibitions
 
 - A procedure, routing keyword, stored result or available tool grants no authority. Do not derive installation or write authority from default paths; explicit paths and the current session metadata identify the installation and session.
-- Do not substitute another session, repository or installation, or the shared pointer `current-session.json`, for the ones this session was given, even when they are missing. A missing or pending identity of the session, installation or input blocks the writes that depend on it.
+- Do not substitute another session, repository or installation, or the shared pointer `current-session.json`, for the ones this session was given, even when they are missing. A missing or pending identity of the session, repository, installation or input blocks the writes that depend on it.
 - Finding no mismatch does not establish completion. Do not claim a result without positive support for every required acceptance criterion, including those for the combined result; partial evidence does not establish the whole task.
 - IDs, hashes and authenticated records do not establish that a source supports a claim's meaning.
 - Do not substitute extra warnings, exceptions or retries for correcting the cause.
@@ -69,4 +69,4 @@ io-trace lets the user see which tools the response model called and which files
 
 ## Compact Instructions
 
-Preserve the current objective, applicable user restrictions, unresolved decisions, next action and exact source locations. Replace obsolete summaries; do not enumerate all past user messages, retell completed steps, or copy tool output and file bodies. Preserve negation and uncertainty. After compaction, the response model retrieves a source passage when the next decision requires it. The host controls when automatic compaction occurs.
+Preserve the current objective, applicable user restrictions, unresolved decisions, next action and exact source locations. Replace obsolete summaries; do not enumerate all past user messages, retell completed steps, or copy tool output and file bodies. Preserve negation and uncertainty. After compaction, the response model retrieves a source passage when the next decision requires it.

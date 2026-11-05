@@ -146,17 +146,6 @@ For an open PR or keep-as-is choice (options 2 and 3): keep the worktree. A PR m
 
 ## Failure modes
 
-The process above defines each prerequisite once. Do not substitute a representative test subset for required preflight.
+A selected integration path does not authorize unrelated changes or messages.
 
-A published-history rewrite needs the exact authorization and expected-head lease defined in Step 4. A selected integration path does not authorize unrelated changes or messages.
-
-Verification-before-completion defines completion claims and evidence reuse; follow systematic-debugging to count failed repair rounds. The output states the actual integration result, verified head, remaining gaps and preserved or removed checkout.
-
-## Integration
-
-Called by:
-- subagent-driven-development - after all tasks and final review are complete
-- executing-plans - after all required tasks and checks satisfy the plan
-
-Pairs with:
-- using-git-worktrees - clean up worktrees created by that skill
+Verification-before-completion owns completion claims and evidence reuse; systematic-debugging owns failed attempts. The output states the actual integration result, verified head, remaining gaps and preserved or removed checkout.

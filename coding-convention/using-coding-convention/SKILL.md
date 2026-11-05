@@ -7,7 +7,7 @@ compatibility:
 
 # Using Coding Convention
 
-The response model starting development uses this entrypoint to select the applicable coding-convention skills. A delegate assigned one bounded task follows the parent's supplied workflow instead of following task-router for the whole conversation again; when the user's own direct input arrives after that handoff, it follows that input wherever it differs from the parent's workflow or interpretation.
+The response model starting development uses this entrypoint to select the applicable coding-convention skills.
 
 ## Priority and loading
 

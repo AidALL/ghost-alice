@@ -29,5 +29,3 @@ Do not execute example commands as though they were the actual plan, add unrelat
 ## Output and integration
 
 Report the implemented tasks, evidence for their acceptance criteria, changed plan decisions and unresolved dependencies. Verification-before-completion defines the completion and partial completion blocks and claim scope.
-
-Writing-plans supplies this workflow's input; the procedure above defines its checkout and integration handoffs.

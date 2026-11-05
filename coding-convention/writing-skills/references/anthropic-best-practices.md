@@ -6,7 +6,7 @@ This is a local authoring summary, not a copy of an upstream specification or a 
 
 Supply the information that the response model reading the finished skill needs for the task: non-obvious constraints, domain facts, exact fragile sequences and the conditions for choosing among alternatives. Omit generic explanations that do not change its decision.
 
-Match discretion to the operation. Give judgment-based work an objective and done conditions; give a preferred pattern parameters and boundaries; give a fragile operation an exact sequence with named preconditions. An exact command is appropriate only when its paths, inputs, permissions and environment are established.
+Match discretion to the operation. Give judgment-based work an objective and acceptance criteria; give a preferred pattern parameters and boundaries; give a fragile operation an exact sequence with named preconditions. An exact command is appropriate only when its paths, inputs, permissions and environment are established.
 
 Use one term for each concept. Distinguish what the response model must read from what it must execute. A script reference alone must not imply execution.
 
@@ -34,7 +34,7 @@ A utility script should validate inputs and return actionable errors for expecte
 
 Prefer a maintained deterministic helper when it implements an established repeated operation. State its inputs, command, outputs and error behavior. For batch or consequential operations, validate a structured proposed change before applying it when that mapping is a live source of error.
 
-When layout matters, render the output and inspect the relevant pages or regions. When the claim concerns data or code behavior, use evidence appropriate to that criterion; a visual preview does not replace it.
+When layout matters, render the output and inspect the relevant pages or regions. When the claim concerns data or code behavior, use evidence appropriate to the claim's acceptance criterion; a visual preview does not replace it.
 
 ## Failure modes
 

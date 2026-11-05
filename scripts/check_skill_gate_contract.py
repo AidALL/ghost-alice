@@ -159,7 +159,7 @@ OWNER_SECTIONS = (
         "references/response-review.md#deliver",
         "coding-convention/verification-before-completion/references/response-review.md",
         "Deliver",
-        ("continue: true", "stop-notice.json", "systemMessage", "does not hold or replace desktop output"),
+        ("recording-only error", "Do not invoke Stop"),
     ),
 )
 

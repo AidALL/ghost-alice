@@ -10,4 +10,4 @@ Read the changed artifacts and relevant dependencies at the supplied target, usi
 
 Return “spec compliant” only for the reviewed requirement set with supporting locators. Otherwise list each missing, extra or mismatched behavior, its trigger and file/line. State any observation unavailable to the review. Include every accessed absolute path.
 
-Do not infer runtime correctness from source inspection alone. Name the stage the evidence covers. The parent begins code-quality review only after the required specification review is supported; confident wording in the review cannot satisfy a missing criterion.
+Do not infer runtime correctness from source inspection alone. Name the stage the evidence covers. The parent begins code-quality review only after the required specification review is supported; confident wording in the review cannot satisfy a missing acceptance criterion.

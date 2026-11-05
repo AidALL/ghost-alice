@@ -18,8 +18,6 @@ This reference is the canonical semantic contract for deciding whether a claim a
 - [Conversation Audit Template](#conversation-audit-template)
 - [Worked Cases](#worked-cases)
 - [Out Of Scope](#out-of-scope)
-- [Recording Binding And Evidence Time](#recording-binding-and-evidence-time)
-- [Discriminating checks and required evidence](#discriminating-checks-and-required-evidence)
 
 ## Purpose
 
@@ -93,8 +91,6 @@ Resolve `<installed-root>`, the absolute installed directory that contains `_sha
 On first use the helper reads the body and stores path, file version and check time in `session-checks.sqlite3` under the intent ledger root; it never stores the body. The JSON return includes `status`, `value` and `checked_at`; a performed read also returns `body`. Read that returned body before applying the workflow. On a later invocation, add `--body-retained` only when the complete usable body remains in current context. A `reused` result relies on that retained body and does not return it again. An observed instruction change, different session/copy, or missing/corrupt record requires a read; a read is also required when the retained body is lost. On a cache failure, the helper falls back to an actual read; it does not fabricate successful persistence. Do not recreate hashes or inspect the file separately before this helper; its stamp and stored session record perform that mechanical decision once.
 
 Current workflow execution rests on either a fresh body read or this valid reuse; it never reuses a prior input's verdict. A visible `Skill` tool keeps the invocation requirement of its host.
-
-The pending-merge hook uses the same session-bound store: unchanged manifest versions reuse a normalized count; creation, replacement or modification invalidates it. The response model interprets every input fresh. On a cache failure, the hook performs the real check; the failure never grants permission.
 
 ## Signals That Are Not Triggers
 
@@ -179,11 +175,3 @@ Use this template to review a finished turn without storing raw conversation tex
 ## Out Of Scope
 
 This contract does not track theoretical external changes or hash every artifact. When the change path is closed, retained conversation evidence accounts for mutations. When the path is open, a hook registry of the response model's own tool calls cannot establish the external writes needed for a current-state claim. Additional tracking is justified only by an observed missing mutation fact that can change the next decision.
-
-## Recording Binding And Evidence Time
-
-Follow [response-review.md](response-review.md) for the current session metadata, retained original time and recording-specific recovery.
-
-## Discriminating checks and required evidence
-
-Apply the main skill's [Evidence selection and stop gate](../SKILL.md#evidence-selection-and-stop-gate) before a discretionary observation. The main skill and its response-review reference define the separate per-claim and whole-response judgments.

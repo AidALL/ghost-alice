@@ -7,7 +7,6 @@ This is the trigger evaluation rule used when refining a description.
 - [Core principles](#core-principles)
 - [Query set composition](#query-set-composition)
 - [Judgment rules](#judgment-rules)
-- [Revision principles](#revision-principles)
 - [Simple result-record example](#simple-result-record-example)
 
 
@@ -46,10 +45,6 @@ Negatives to avoid:
 
 - Evaluate both missed intended triggers and new false triggers against the accepted discovery criteria. Higher recall alone does not establish a successful revision.
 - If it triggers often on near-miss negatives, the description is exaggerated.
-
-## Revision principles
-
-- Write the trigger context more clearly.
 
 ## Simple result-record example
 

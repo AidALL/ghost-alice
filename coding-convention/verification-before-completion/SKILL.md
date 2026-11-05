@@ -35,7 +35,7 @@ Choose evidence for the claim: content or behavior for semantic claims; hashes o
 
 When an already-executed action has an unknown outcome, inspect the affected result through a bounded observation instead of automatically executing the action again. Required work that has not run still needs its actual execution. Preserve unchanged valid proof with its original source and time.
 
-Systematic-debugging defines [incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). Boundary-contract defines authority and resource boundaries.
+Systematic-debugging defines [incident accounting and continuation](../systematic-debugging/SKILL.md#incident-accounting-and-continuation). Boundary-contract owns authority and resource boundaries.
 
 ## Finalization sequence
 
@@ -106,8 +106,6 @@ Partial result:
   - installed: Installed observation is unavailable
 - evidence: Original regression output with source locator
 ```
-
-The review reference's [Deliver](references/response-review.md#deliver) section states what Core code does with the delivered answer.
 
 ## Confirmed flaw propagation
 

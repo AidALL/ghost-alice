@@ -12,7 +12,7 @@ Approval does not prove implementation or runtime behavior. The parent corrects 
 
 ## Specification document
 
-Check component responsibilities, interfaces and verification criteria. Approval covers this document's readiness for planning.
+Check component responsibilities, interfaces and acceptance criteria. Approval covers this document's readiness for planning.
 
 ## Plan document
 

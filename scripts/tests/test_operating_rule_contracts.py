@@ -21,7 +21,7 @@ class OperatingRuleContractTest(unittest.TestCase):
                      'A direct answer reads no skills, accesses no ledger, registers no response route'):
             self.assertIn(term, selection)
         self.assertIn('Do not substitute another session', common)
-        self.assertIn('A missing or pending identity of the session, installation or input blocks the writes that depend on it', common)
+        self.assertIn('A missing or pending identity of the session, repository, installation or input blocks the writes that depend on it', common)
         self.assertIn('stored result or available tool grants no authority', common)
         self.assertIn('Do not derive installation or write authority from default paths; explicit paths and the current session metadata identify the installation and session', common)
         self.assertIn('The host executes tools and enforces permissions', common)
