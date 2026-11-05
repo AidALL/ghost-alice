@@ -7,6 +7,7 @@ which also requires the owning Core assessment.
 """
 
 import unittest
+from unittest import mock
 
 import completion_check_validator as v
 
@@ -178,9 +179,66 @@ class TestMarkdownExampleBoundaries(unittest.TestCase):
                 self.assertTrue(v.looks_like_completion_claim(text))
                 self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
 
-    def test_shorter_fence_does_not_end_an_unclosed_long_fence(self):
-        text = "````text\n```\nSample payload.\n[completion-check]\n"
+    def test_shorter_fence_does_not_end_a_long_fence(self):
+        text = "````text\n```\nSample payload.\n[completion-check]\n````\n"
         self.assertFalse(v.looks_like_completion_claim(text))
+
+    def test_an_unclosed_fence_does_not_hide_a_later_control(self):
+        # A summary with a stray fence must not take the completion block after it out of the Stop comparison.
+        for opening in ("```\ncode\n", "````text\n```\ncode\n", "- item\n\n  ```\n  code\n",
+                        "[boundary-contract]\n- id: fix\n\n```\ncode\n"):
+            text = "Summary.\n\n" + opening + "\n" + _final_text("completion", "summary", "io")
+            with self.subTest(opening=opening):
+                self.assertTrue(v.looks_like_completion_claim(text))
+                self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+                self.assertTrue(v.extract_original_proof(text).startswith("[completion-check]"))
+
+    def test_an_unclosed_fence_with_no_control_after_it_is_no_claim(self):
+        self.assertFalse(v.looks_like_completion_claim("Summary.\n```\ncode\n"))
+
+    def test_a_control_inside_a_fence_that_never_closes_counts_as_a_control(self):
+        # Code cannot tell a sample from a real block here. A wrong notice costs less than a claim Stop never compares.
+        self.assertTrue(v.looks_like_completion_claim("Format:\n```\n[completion-check]\n- unverified:\n"))
+
+    def test_an_unclosed_fence_after_a_completion_block_stays_hidden(self):
+        # The block before it already keeps the answer in the Stop comparison.
+        block = _final_text("completion", "summary", "io")
+        text = block + "\n\nFormat:\n```\n[completion-check]\n- unverified:\n"
+        self.assertTrue(v.looks_like_completion_claim(text))
+        self.assertIsNone(v.validate_completion_text(text, require_completion_check=True))
+        self.assertTrue(v.extract_original_proof(text).startswith("[completion-check]"))
+        # Text after the fence cannot turn the prose before the block into a quoted example.
+        quoted = "'tis done.\n" + block + "\n```\nthe users' code\n"
+        self.assertTrue(v.looks_like_completion_claim(quoted))
+        # A fence inside the block hides the fields after it from the check of the block.
+        split = block.replace("- unverified:", "```\n- unverified:")
+        self.assertIsNotNone(v.validate_completion_text(split, require_completion_check=True))
+
+    def test_an_unclosed_fence_after_a_partial_block_stays_hidden(self):
+        block = _final_text("completion", "summary", "io").replace(
+            "[completion-check]", "[partial-check]\n- scope: partial").replace(
+            "- unverified:\n  - none", "- unverified:\n  - c2: not checked")
+        stripped = v._strip_block_examples(block + "\n\nFormat:\n```\n[partial-check]\n- unverified:\n")
+        self.assertEqual(stripped.count("[partial-check]"), 1)
+
+    def test_equal_fences_that_never_close_take_two_passes(self):
+        # A closing line for a later opener would also have closed the first one, so the later ones are not rescanned.
+        text = "```a\n" * 5000 + "\n" + _final_text("completion", "summary", "io")
+        with mock.patch.object(v, "_mask_block_lines", wraps=v._mask_block_lines) as passes:
+            stripped = v._strip_block_examples(text)
+        self.assertEqual(passes.call_count, 2)
+        self.assertEqual(stripped.count("[completion-check]"), 1)
+        self.assertEqual(len(v._split_lines(stripped)), len(v._split_lines(text)))
+
+    def test_a_fence_that_can_still_close_stays_a_fence_after_one_that_never_closes(self):
+        for name, text in (("another character", "~~~\n````\nsample\n````\n"),
+                           ("a shorter opening", "````\n```   \nsample\n```\n"),
+                           ("another list indent", "```\n- ````\n   sample\nx\n")):
+            with self.subTest(name):
+                self.assertNotIn("sample", v._strip_block_examples(text))
+
+    def test_a_fence_opened_on_the_last_line_keeps_the_line_count(self):
+        self.assertEqual(v._strip_block_examples("Summary.\n```"), "Summary.\n")
 
     def test_closing_fence_with_text_is_still_inside_example(self):
         text = "````text\n```` extra text\n[completion-check]\nSample payload.\n````\n"

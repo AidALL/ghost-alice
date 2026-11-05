@@ -145,10 +145,33 @@ def _strip_block_examples(text):
     at least the opening length. Indented code starts at a paragraph boundary;
     indentation within real control records remains data. Blockquote paragraphs
     may continue lazily without a repeated marker, until a blank or new block.
-    Keep line boundaries so examples cannot join otherwise separate assertions.
+    A fence that never closes hides only its opening line, unless a completion or
+    partial completion block stands before it. Keep line boundaries so examples
+    cannot join otherwise separate assertions.
     """
+    lines = _split_lines(text)
     kept = []
+    never_closed = {}  # (fence character, list indent) -> shortest opening length with no closing line after it
+    seen_proof = False
+    start = 0
+    while True:
+        fence, fence_line, seen_proof = _mask_block_lines(lines, start, kept, never_closed, seen_proof)
+        if fence is None or seen_proof:
+            break
+        never_closed[fence[0], fence[2]] = fence[1]
+        start = fence_line + 1
+        del kept[start:]
+    return _mask_multiline_quoted_examples("\n".join(kept))
+
+
+def _mask_block_lines(lines, start, kept, never_closed, seen_proof):
+    """Append to `kept` the mask of `lines` from `start`, as a document that begins there.
+
+    Return the fence still open at the end, its opening line, and whether a
+    completion or partial completion header has been kept.
+    """
     fence = None
+    fence_line = 0
     indented = False
     paragraph = False
     quote_paragraph = False
@@ -156,12 +179,13 @@ def _strip_block_examples(text):
     quoted_fence = None
     control_fields = False
     list_indent = 0
-    for line in _split_lines(text):
+    for index in range(start, len(lines)):
+        line = lines[index]
         expanded = line.expandtabs(4)
         blank = not line.strip()
         indentation = len(expanded) - len(expanded.lstrip(" "))
         if fence is not None:
-            char, length, container_indent = fence
+            char, opening, container_indent = fence
             if container_indent and not blank and indentation < container_indent:
                 # A list container ending also ends its unclosed example fence.
                 fence = None
@@ -169,7 +193,7 @@ def _strip_block_examples(text):
                 paragraph = False
             else:
                 content = expanded[container_indent:]
-                if re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(length) + r",}[ \t]*", content):
+                if re.fullmatch(r" {0,3}" + re.escape(char) + "{" + str(opening) + r",}[ \t]*", content):
                     fence = None
                 kept.append("")
                 continue
@@ -245,15 +269,22 @@ def _strip_block_examples(text):
         content = expanded[list_indent:] if list_indent else expanded
         opener = _FENCE_OPEN_RE.match(content)
         if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
-            fence = opener.group(1)[0], len(opener.group(1)), list_indent
+            length = len(opener.group(1))
+            # A closing line for this length would also have closed the shorter fence recorded above it.
+            if seen_proof or length < never_closed.get((opener.group(1)[0], list_indent), length + 1):
+                fence = opener.group(1)[0], length, list_indent
+                fence_line = index
+            else:
+                list_indent = 0
             paragraph = False
             kept.append("")
             continue
         header = _BLOCK_HEADER_RE.match(line.strip())
         control_fields = bool(header and header.group(1).lower() in _CONTROL_BLOCKS)
+        seen_proof = seen_proof or bool(header and header.group(1).lower() in {"completion-check", "partial-check"})
         kept.append(line)
         paragraph = bool(content.strip()) and not _PARAGRAPH_BREAK_RE.match(content)
-    return _mask_multiline_quoted_examples("\n".join(kept))
+    return fence, fence_line, seen_proof
 
 
 def _mask_multiline_quoted_examples(text):

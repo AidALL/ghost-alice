@@ -266,7 +266,7 @@ def request_shape(raw, encoding):
             if field in body:
                 result['units'][field] = field_shape(body[field])
         return result
-    except (ValueError, ImportError, OSError):
+    except Exception:  # the record only observes the request, so a body it cannot read still goes upstream
         return {'shape_unavailable': 'content-not-decoded'}
 
 
@@ -295,7 +295,10 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
 
     def record(value):
         value['observed_at'] = datetime.now(timezone.utc).isoformat()
-        state_retention.append('gateway-usage', output, json.dumps(value, ensure_ascii=False) + '\n')
+        try:
+            state_retention.append('gateway-usage', output, json.dumps(value, ensure_ascii=False) + '\n')
+        except Exception as error:  # the usage log is Ghost-ALICE's own record; the request goes on
+            state_retention.record_failure('gateway-usage', output, error)
 
     class Observer(BaseHTTPRequestHandler):
         protocol_version = 'HTTP/1.1'
