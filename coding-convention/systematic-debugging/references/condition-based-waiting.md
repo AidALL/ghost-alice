@@ -4,7 +4,7 @@
 
 Flaky tests often guess at timing with arbitrary delays. This creates race conditions that pass on a fast machine but fail under load or in CI.
 
-○ Core principle: do not guess at how long something will take. Wait for the condition you actually care about.
+○ Principle: do not guess at how long something will take. Wait for the condition you actually care about.
 
 ## When to Use
 
@@ -25,9 +25,9 @@ When to use it.
 When not to use it.
 
 - Testing real timing behavior (debounce or throttle intervals)
-- If you use an arbitrary timeout, always document why it is needed
+- If the response model uses an arbitrary timeout, it always documents why the timeout is needed
 
-## Core Pattern
+## Pattern
 
 ```typescript
 // ❌ BEFORE: guessing at timing
