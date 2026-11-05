@@ -12,7 +12,7 @@ Resolve each operation against the tools actually exposed by the current Codex h
 
 A missing delegation capability is a workflow limitation, not permission to edit configuration or pretend a delegate ran.
 
-Load another skill by its name and exact path in the current host's skill catalog. Markdown links between source packages are navigation aids; the installer may flatten `coding-convention/<skill>` into `<installed-skills>/<skill>`, so a source-relative cross-package link is not a runtime path recipe. Obtain Core code module roots and current-session coordinates from trusted runtime/receipt context separately; the skills directory, task checkout and ledger root are not interchangeable.
+Load another skill by its name and exact path in the current host's skill catalog. Markdown links between source packages are navigation aids; the installer may flatten `coding-convention/<skill>` into `<installed-skills>/<skill>`, so a source-relative cross-package link is not a runtime path recipe. Obtain Core code module roots and current-session coordinates from the trusted runtime binding and the session metadata separately; the skills directory, task checkout and intent ledger root are not interchangeable.
 
 ## Install and bootstrap locations
 
@@ -35,4 +35,4 @@ git worktree list
 
 Distinct Git/common directories identify a linked worktree. An empty branch name identifies detached HEAD; it does not itself prohibit branch creation, commits or pushes. Actual user instructions, repository policy and host permissions govern those actions.
 
-Reuse a suitable existing checkout. When the host exposes managed-worktree tools, follow their create, attach and archive contracts. Do not remove an active checkout or infer a cleanup action from a successful PR alone. For integration, follow `finishing-a-development-branch` and the user's existing authorization; use app controls only when the supported workflow requires them.
+Reuse a suitable existing checkout. When the host exposes managed-worktree tools, follow their create, attach and archive contracts. Do not remove an active checkout or infer a cleanup action from a successful PR alone. For integration, follow `finishing-a-development-branch` and the user's existing authorization; use the host's controls only when the supported workflow requires them.

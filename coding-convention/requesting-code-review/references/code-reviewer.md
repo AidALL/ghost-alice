@@ -6,15 +6,15 @@ The parent fills this assignment with the accepted requirements and exact review
 
 ## Assignment inputs
 
-Supply the implemented behavior, accepted plan/requirements, artifact types and the exact review target established by requesting-code-review's [How to Request](../SKILL.md#how-to-request) procedure. Identify the source checkout, base and head commits, and any separately identified uncommitted diff. For work prepared for publication, include finishing-a-development-branch's workflow/job inventory, tested tree, local results and unavoidable runner gaps.
+Supply the implemented behavior, accepted plan/requirements, artifact types and the exact review target established by requesting-code-review's [How to Request](../SKILL.md#how-to-request) procedure. Identify the checkout, base and head commits, and any separately identified uncommitted diff. For work prepared for publication, include finishing-a-development-branch's workflow/job inventory, tested tree, local results and unavoidable runner gaps.
 
-Supply accessible original-source locators for the relevant requirements and known corrections, separately from the parent's current interpretation and assumptions. The locators identify the applicable revision and passage, field or record when needed to distinguish the source. For retrieval and later handoffs, load task-router from the current host's skill catalog and follow that package's `references/context-selection.md`. The delegate retrieves the original passages needed for its review; when it cannot access a required locator, the parent resolves access or supplies only the necessary excerpt with its source. The delegate reports a conflict with the original constraint or a missing required source to the parent, with the affected requirement and evidence limit.
+Supply accessible original-source locators for the relevant requirements and known corrections, separately from the parent's current interpretation and assumptions. The locators identify the applicable revision and passage, field or record when needed to distinguish the source. For retrieval and later handoffs, the delegate loads task-router from the current host's skill catalog and follows that package's `references/context-selection.md`. The delegate retrieves the original passages needed for its review; when it cannot access a required locator, the parent resolves access or supplies only the necessary excerpt with its source. The delegate reports a conflict with the original constraint or a missing required source to the parent, with the affected requirement and evidence limit.
 
 ## Evidence by artifact
 
 For executable changes, inspect the implementation, relevant callers and tests. Use actual execution results for runtime claims; source inspection supports only the behavior it can establish.
 
-For instruction and procedure changes, apply writing-skills' [operational handoff guidance](../../writing-skills/SKILL.md#author-the-package) to the changed text, required references and callers. Compare the accepted requirements and original constraints with what the recipient is instructed to do. Source conformance and an observed model action are different evidence stages.
+For instruction and procedure changes, apply writing-skills' [operational handoff guidance](../../writing-skills/SKILL.md#author-the-package) to the changed text, required references and callers. Compare the accepted requirements and original constraints with what the recipient is instructed to do. Source conformance and an observed action of the recipient are different evidence stages.
 
 For a mixed change, apply each method to its affected artifacts and identify which evidence supports each finding.
 
@@ -38,7 +38,7 @@ Return:
 - Assessment: supported readiness for this code-review stage, outstanding conditions and evidence limits.
 - Every accessed absolute file path.
 
-Use actual severity; neither soften a severe finding nor inflate a style preference. A code-review approval does not claim remote CI, remote review, installation or native delivery. Requesting-code-review owns the remote integration gate.
+Use actual severity; neither soften a severe finding nor inflate a style preference. A code-review approval does not claim remote CI, remote review, installation or delivery in the host. Requesting-code-review defines the remote integration gate.
 
 ## Failure modes
 

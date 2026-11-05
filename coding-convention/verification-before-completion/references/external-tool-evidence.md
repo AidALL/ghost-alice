@@ -1,20 +1,20 @@
 # External Tool Evidence
 
-The response model applies this reference when endorsing a material factual claim about an external tool, library, CLI, SDK, framework, version or platform, or when the user explicitly requests verification of such a claim. This reference owns the evidence decision; user-input hooks do not select searches. Follow the main skill's evidence selection and stop gate before another observation.
+The response model applies this reference when endorsing a material factual claim about an external tool, library, CLI, SDK, framework, version or platform, or when the user explicitly requests verification of such a claim. This reference defines the evidence decision; user-input hooks do not select searches. Follow the main skill's evidence selection and stop gate before another observation.
 
 ## Select evidence for the claim
 
-Identify the criterion, claimed behavior and unresolved uncertainty from the actual task. Stable, low-risk explanations answerable from supplied content need no fresh search. In a local-only task, do not invent an external-tool claim to justify a web lookup. Honor the user's explicit search request or restriction within its stated scope.
+Identify the acceptance criterion, claimed behavior and unresolved uncertainty from the actual task. Stable, low-risk explanations answerable from supplied content need no fresh search. In a local-only task, do not invent an external-tool claim to justify a web lookup. Honor the user's explicit search request or restriction within its stated scope.
 
 For a claim about what a specification requires, inspect the relevant official source; limit the claim to that definition. For current, version-specific, disputed or high-risk behavior, obtain evidence applicable to the claimed version and environment. Official documentation establishes intended behavior, not successful runtime execution. Use an authorized direct observation, reproducible result or relevant primary report to establish observed behavior. Preserve the distinction when the specification and observation disagree.
 
 Choose a search or runtime check to resolve a named uncertainty that can change the conclusion or next action. Relevant issue reports and community observations can expose regressions or competing explanations; use them when they bear on that uncertainty, and inspect their original evidence before relying on them. No query count, mandatory site list or search-result total establishes support. Repeated descriptions of the same report are not independent observations.
 
-Expand the investigation when contrary evidence challenges the current interpretation; narrow or qualify the claim when the necessary observation is unavailable. Keep the criterion unresolved when the permitted evidence cannot settle it.
+Expand the investigation when contrary evidence challenges the current interpretation; narrow or qualify the claim when the necessary observation is unavailable. Keep the acceptance criterion unresolved when the permitted evidence cannot settle it.
 
 ## Original sources and locators
 
-The response model binds quoted sources, numeric claims, original evidence, tables/figures and attached files to accessible original source locations. A search snippet, summary, identifier or matching hash does not authenticate the meaning of the source. Follow the main skill's claim review and whole-response review before endorsing the answer.
+The response model binds quoted sources, numeric claims, original evidence, tables/figures and attached files to accessible original source locations. A search snippet, summary, identifier or matching hash does not authenticate the meaning of the source. Follow the main skill's per-claim and whole-response judgments before endorsing the answer.
 
 Source-locator contract:
 

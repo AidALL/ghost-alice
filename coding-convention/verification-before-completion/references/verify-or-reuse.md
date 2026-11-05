@@ -1,6 +1,6 @@
 # Verify-Or-Reuse Contract
 
-This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude and Codex use the same contract. The executable form is `scripts/verify_or_reuse.py` in this skill directory.
+This reference is the canonical semantic contract for deciding whether a claim about an artifact needs a new read, fetch, shell inspection, or connector call, or whether retained evidence already answers it. Claude Code and Codex use the same contract. The executable form is `scripts/verify_or_reuse.py` in this skill directory.
 
 ## Contents
 
@@ -86,15 +86,15 @@ A write by the response model re-anchors evidence when it retains the full conte
 
 ## Instruction Body Reuse
 
-Instruction loading and current-input workflow execution are separate obligations. Where the host's adapter maps a Claude `Skill` instruction to reading the instruction body, a retained instruction body already read in the same session may be reused; a new user input alone does not require another body read. Still execute the applicable workflow for the current input, including intent, routing and completion decisions. Metadata, a name, a prior verdict or a thin summary is not a retained body.
+Instruction loading and current-input workflow execution are separate obligations. Where the host's adapter maps a Claude Code `Skill` instruction to reading the instruction body, a retained instruction body already read in the same session may be reused; a new user input alone does not require another body read. Still execute the applicable workflow for the current input, including intent, routing and completion decisions. Metadata, a name, a prior verdict or a thin summary is not a retained body.
 
-Resolve `<installed-root>`, the absolute installed directory that contains `_shared/`, from the trusted runtime binding, separately from the receipt's ledger root, as defined in [Prepare and record the response review](response-review.md#prepare-and-record-the-response-review). Through the host's exposed shell tool, run `python3 <installed-root>/_shared/session_check_cache.py --root <receipt.ledger_root> --platform <receipt.platform> --session-id <receipt.session_id> --instruction-path <absolute-SKILL.md>`. Replace every argument with its established current-session value before invocation.
+Resolve `<installed-root>`, the absolute installed directory that contains `_shared/`, from the trusted runtime binding, separately from the session metadata's `ledger_root`, as defined in [Prepare and record the response review](response-review.md#prepare-and-record-the-response-review). Through the host's shell tool, run `python3 <installed-root>/_shared/session_check_cache.py --root <ledger_root> --platform <platform> --session-id <session_id> --instruction-path <absolute-SKILL.md>`. Before invocation, replace `<ledger_root>`, `<platform>` and `<session_id>` with those fields of the current session metadata and `<absolute-SKILL.md>` with the absolute path of the skill's `SKILL.md`.
 
-On first use the helper reads the body and stores path, file version and check time in `session-checks.sqlite3` under the ledger root; it never stores the body. The JSON return includes `status`, `value` and `checked_at`; a performed read also returns `body`. Read that returned body before applying the workflow. On a later invocation, add `--body-retained` only when the complete usable body remains in current context. A `reused` result relies on that retained body and does not return it again. An observed instruction change, different session/copy, or missing/corrupt record requires a read; a read is also required when the retained body is lost. Cache failure falls back to an actual read; it does not fabricate successful persistence. Do not recreate hashes or inspect the file separately before this helper; its stamp and stored session record perform that mechanical decision once.
+On first use the helper reads the body and stores path, file version and check time in `session-checks.sqlite3` under the intent ledger root; it never stores the body. The JSON return includes `status`, `value` and `checked_at`; a performed read also returns `body`. Read that returned body before applying the workflow. On a later invocation, add `--body-retained` only when the complete usable body remains in current context. A `reused` result relies on that retained body and does not return it again. An observed instruction change, different session/copy, or missing/corrupt record requires a read; a read is also required when the retained body is lost. On a cache failure, the helper falls back to an actual read; it does not fabricate successful persistence. Do not recreate hashes or inspect the file separately before this helper; its stamp and stored session record perform that mechanical decision once.
 
-Current workflow execution rests on either a fresh body read or this valid reuse; it never reuses a prior input's verdict. Visible Skill surfaces keep their platform-native invocation requirement.
+Current workflow execution rests on either a fresh body read or this valid reuse; it never reuses a prior input's verdict. A visible `Skill` tool keeps the invocation requirement of its host.
 
-The pending-merge hook uses the same session-bound store: unchanged manifest versions reuse a normalized count; creation, replacement or modification invalidates it. Every input's intent state is evaluated fresh. Cache failure performs the real check; it never grants permission.
+The pending-merge hook uses the same session-bound store: unchanged manifest versions reuse a normalized count; creation, replacement or modification invalidates it. The response model interprets every input fresh. On a cache failure, the hook performs the real check; the failure never grants permission.
 
 ## Signals That Are Not Triggers
 
@@ -114,7 +114,7 @@ When several versions of an artifact exist, a current-state claim uses the copy 
 
 ## Restatement
 
-Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. A user's request to restate a result can require that content again. `audit_restatement()` flags potential repeats for review and excludes fenced control blocks whose schema repeats by design.
+Avoid repeating an unchanged delivered explanation, status or apology when it adds no information. A user's request to restate a result can require that content again. `audit_restatement()` flags potential repeats for review and excludes fenced boundary contract, completion and partial completion blocks, whose schema repeats by design.
 
 ## Confirmed Flaw Propagation
 
@@ -135,7 +135,7 @@ The helper encodes the same rules for tests and audits. Do not spend a tool call
 
 ```bash
 python3 scripts/verify_or_reuse.py decide --facts-json '{"claim_time":"authored-at","claim_copy":"chat-sandbox:plan.md","retained_evidence":{"present":true,"copy":"chat-sandbox:plan.md","origin":"authored"},"last_known_author":"current-agent","mutation_authority":"agent-mediated","authority_basis":"interaction-contract","events_since_evidence":["user-message"]}'
-python3 scripts/verify_or_reuse.py audit --platform codex --facts-json '<facts>' --calls-json '[{"tool":"shell","copy":"chat-sandbox:plan.md"}]'
+python3 scripts/verify_or_reuse.py audit --platform codex --facts-json '{"claim_time":"authored-at","claim_copy":"chat-sandbox:plan.md","retained_evidence":{"present":true,"copy":"chat-sandbox:plan.md","origin":"authored"},"last_known_author":"current-agent","mutation_authority":"agent-mediated","authority_basis":"interaction-contract","events_since_evidence":["user-message"]}' --calls-json '[{"tool":"shell","copy":"chat-sandbox:plan.md"}]'
 python3 scripts/verify_or_reuse.py flaw --facts-json '{"flaw_confirmed":true}' --response explanation-only
 ```
 
@@ -149,7 +149,7 @@ Use this template to review a finished turn without storing raw conversation tex
 [verify-or-reuse-audit]
 - claim: <compressed claim>
 - claim-time: authored-at | current
-- target-copy: <copy id>
+- target-copy: <claim_copy>
 - retained-evidence: present | lost | other-copy
 - last-known-author: <author>
 - actual-mutation-authority: <authority> (basis: <basis>)
@@ -182,8 +182,8 @@ This contract does not track theoretical external changes or hash every artifact
 
 ## Recording Binding And Evidence Time
 
-Follow [response-review.md](response-review.md) for current receipt binding, retained original time and recording-specific recovery.
+Follow [response-review.md](response-review.md) for the current session metadata, retained original time and recording-specific recovery.
 
 ## Discriminating checks and required evidence
 
-Apply the main skill's [Evidence selection and stop gate](../SKILL.md#evidence-selection-and-stop-gate) before a discretionary observation. The main skill and its response-review reference define the separate claim and whole-answer judgments.
+Apply the main skill's [Evidence selection and stop gate](../SKILL.md#evidence-selection-and-stop-gate) before a discretionary observation. The main skill and its response-review reference define the separate per-claim and whole-response judgments.

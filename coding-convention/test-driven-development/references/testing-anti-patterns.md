@@ -42,7 +42,7 @@ This example assumes the accepted Session API already exposes workspace informat
 
 Inspect a dependency's actual inputs, outputs and side effects before substituting it. If duplicate detection depends on a configuration write, mocking the method that performs that write removes a precondition of the test.
 
-Substitute the external or slow boundary while preserving the configuration operation the criterion requires. If that dependency contract is unknown, inspect the real path or authoritative interface first. An unexpected pass or failure is a reason to trace the path, not add more mocks indiscriminately.
+Substitute the external or slow boundary while preserving the configuration operation the acceptance criterion requires. If that dependency contract is unknown, inspect the real path or authoritative interface first. An unexpected pass or failure is a reason to trace the path, not add more mocks indiscriminately.
 
 ## Incomplete response contracts
 
@@ -66,4 +66,4 @@ Required tests and their order follow the main [TDD applicability and cycle](../
 
 ## Failure modes and result
 
-For each test, identify which production behavior makes its assertion pass or fail and which dependency contract the fixture preserves. If an assertion measures only a mock or unrelated condition, correct that assertion or fixture. Return the covered criterion, actual observation and limits; verification-before-completion owns the resulting completion claim.
+For each test, identify which production behavior makes its assertion pass or fail and which dependency contract the fixture preserves. If an assertion measures only a mock or unrelated condition, correct that assertion or fixture. Return the covered acceptance criterion, actual observation and limits; verification-before-completion defines the judgment of the resulting completion claim.
