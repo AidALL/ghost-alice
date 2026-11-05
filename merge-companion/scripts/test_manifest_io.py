@@ -3,6 +3,7 @@
 Dependencies: Python 3.11+ standard library, the local merge-companion modules and the Core `file_lock` they use.
 """
 
+import errno
 import os
 import stat
 import threading
@@ -106,6 +107,14 @@ class TestManifestIO(unittest.TestCase):
             thread.start()
             thread.join(5)
         self.assertEqual(outcome, ["timeout"])
+        self.assertEqual(read_manifest(self.path), {"entries": []})
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_lock_the_file_system_refuses_raises_and_writes_nothing(self):
+        # An entry points at a backed-up user edit, so two writers without the lock could lose it without a trace.
+        with mock.patch.object(file_lock.fcntl, "flock", side_effect=OSError(errno.ENOLCK, "No locks available")), \
+                self.assertRaises(OSError):
+            append_entry(self.path, {"id": "late", "decided": False})
         self.assertEqual(read_manifest(self.path), {"entries": []})
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")

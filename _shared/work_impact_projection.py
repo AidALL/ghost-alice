@@ -9,8 +9,8 @@ Materialization levels, low to high:
   model_surface: omitted | full
   user_surface:  hidden | focused | full | forced
 
-Raw detail always remains reachable via strict_log_ref, independent of the two
-projection levels.
+Raw detail remains reachable via strict_log_ref while the hook log can be written,
+independent of the two projection levels.
 
 Low-usefulness values are not deleted at hook time. They are classified as
 routine unless they change focus, boundary, verification, or recovery.
@@ -115,8 +115,8 @@ def make_item(
     """Build a surface_item with work-impact and materialization levels.
 
     `value` is the small structured payload (for example
-    "session-intent-preflight=observed"). `strict_log_ref` always points at the
-    full value in the strict log, independent of the two projection levels.
+    "session-intent-preflight=observed"). `strict_log_ref` points at the full value
+    in the strict log, independent of the two projection levels.
     """
     user_surface, model_surface = project_surfaces(
         exposure_class=exposure_class,

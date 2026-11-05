@@ -4,7 +4,8 @@ Dependencies: Python 3.11+ standard library and the Core helpers `atomic_write` 
 
 Manifest-missing-or-invalid silent-pass rule: missing, empty, or unparsable manifest -> silent pass with an empty dict.
 Atomic-manifest-write guarantee: atomic write (temporary file + rename) plus the lock on the sibling .lock file protects
-against race and crash cases. A lock held past `MANIFEST_LOCK_WAIT_S` raises `file_lock.LockTimeout` to the caller.
+against race and crash cases. A lock held past `MANIFEST_LOCK_WAIT_S` raises `file_lock.LockTimeout` to the caller, and
+a lock the file system refuses raises its `OSError`.
 """
 
 from __future__ import annotations
@@ -37,9 +38,10 @@ class ManifestError(Exception):
 @contextlib.contextmanager
 def _exclusive_lock(path: Path):
     """The lock on the sibling .lock file. The manifest itself is replaced by rename, so a lock on it would not guard
-    the version that replaces it."""
+    the version that replaces it. An entry points at a backed-up user edit, so a lock the file system refuses raises
+    instead of letting the writer go on."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    with file_lock.exclusive(path.with_suffix(path.suffix + ".lock"), wait=MANIFEST_LOCK_WAIT_S):
+    with file_lock.exclusive(path.with_suffix(path.suffix + ".lock"), wait=MANIFEST_LOCK_WAIT_S, must_lock=True):
         yield
 
 

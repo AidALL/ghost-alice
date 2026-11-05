@@ -1956,6 +1956,64 @@ class TestHookCommandAllowlist(unittest.TestCase):
         self.assertNotIn("stdin", event)
         self.assertNotIn("must-not-be-stored", json.dumps(event))
 
+    def test_a_failed_hook_log_write_keeps_the_hook_output_and_exit_code(self):
+        # The hook log is Ghost-ALICE's own record, so its failure stays out of the hook's result.
+        message = "hook output"
+        code = f"import sys; print({json.dumps({'continue': True, 'systemMessage': message})!r}); sys.exit(3)"
+        payload = base64.urlsafe_b64encode(_python_payload_command(f"-c {shlex.quote(code)}").encode("utf-8")).decode("ascii")
+        with tempfile.TemporaryDirectory() as owned:
+            ghost = Path(owned) / "ghost"
+            stdout = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {"HOME": owned, "GHOST_ALICE_GHOST_ROOT": str(ghost), "GHOST_ALICE_PLATFORM": "codex",
+                                             "GHOST_ALICE_SESSION_ID": "s-log-failure", "GHOST_ALICE_AGENT_VISIBILITY": "strict"}),
+                mock.patch.object(hook_profile_gate.strict_session_log, "append_event", side_effect=OSError("disk full")),
+                mock.patch.object(sys, "stdout", stdout),
+                self.assertRaises(SystemExit) as cm,
+            ):
+                hook_profile_gate.main(["run", "prompt", payload])
+            self.assertEqual(cm.exception.code, 3)
+            self.assertIn(message, stdout.getvalue())
+            failures = [json.loads(line) for line in
+                        (ghost / "state-retention-failures.jsonl").read_text(encoding="utf-8").splitlines()]
+            self.assertEqual({(failure["policy"], failure["error_type"]) for failure in failures},
+                             {("session-logs", "OSError")})
+
+    def test_a_hook_log_folder_that_cannot_be_used_keeps_the_hook_output(self):
+        def a_file(folder):
+            folder.write_text("", encoding="utf-8")
+
+        def a_folder_nobody_can_search(folder):
+            folder.mkdir()
+            folder.chmod(0)
+
+        blocks = [a_file] + ([a_folder_nobody_can_search] if getattr(os, "geteuid", lambda: 0)() else [])
+        for block, rejected in ((block, rejected) for block in blocks for rejected in (False, True)):
+            with self.subTest(block=block.__name__, rejected=rejected), tempfile.TemporaryDirectory() as owned:
+                ghost = Path(owned) / "ghost"
+                ghost.mkdir()
+                block(ghost / "session-logs")
+                message = "hook output"
+                code = f"print({json.dumps({'continue': True, 'systemMessage': message})!r})"
+                command = "/no/such/executable" if rejected else _python_payload_command(f"-c {shlex.quote(code)}")
+                payload = base64.urlsafe_b64encode(command.encode("utf-8")).decode("ascii")
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    mock.patch.dict(os.environ, {"HOME": owned, "GHOST_ALICE_GHOST_ROOT": str(ghost),
+                                                 "GHOST_ALICE_PLATFORM": "codex", "GHOST_ALICE_SESSION_ID": "s-log-failure",
+                                                 "GHOST_ALICE_AGENT_VISIBILITY": "strict"}),
+                    mock.patch.object(sys, "stdout", stdout), mock.patch.object(sys, "stderr", stderr),
+                    self.assertRaises(SystemExit) as cm,
+                ):
+                    hook_profile_gate.main(["run", "prompt", payload])
+                self.assertEqual(cm.exception.code, 126 if rejected else 0)
+                self.assertNotIn("audit failed", stderr.getvalue())
+                if not rejected:
+                    self.assertIn(message, stdout.getvalue())
+                failures = [json.loads(line) for line in
+                            (ghost / "state-retention-failures.jsonl").read_text(encoding="utf-8").splitlines()]
+                self.assertEqual({failure["policy"] for failure in failures}, {"session-logs"})
+
     def test_cli_accepts_current_runner_shape_without_visibility_csv(self):
         with tempfile.TemporaryDirectory() as owned, mock.patch.dict(os.environ, {"GHOST_ALICE_GHOST_ROOT":str(Path(owned)/"ghost")}):
             executable = sys.executable.replace("\\", "/")

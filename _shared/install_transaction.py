@@ -208,7 +208,7 @@ def _write_failure_event(
     try:
         state_retention.append("install-state-events", event_log,
                                json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-    except (OSError, ValueError):
+    except ValueError:
         return
 
 

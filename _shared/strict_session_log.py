@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,7 +125,7 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
     safe_platform = safe_component(platform)
     safe_session_id = safe_component(session_id)
     path = log_path(home=home, platform=safe_platform, session_id=safe_session_id)
-    first_row = not path.exists()
+    first_row = not os.path.exists(path)
 
     row = {
         "schema_version": "strict-hook-output.v1",

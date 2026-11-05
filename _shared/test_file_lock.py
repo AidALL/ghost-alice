@@ -5,6 +5,7 @@ Dependencies: Python 3.11+ standard library only.
 
 from __future__ import annotations
 
+import errno
 from pathlib import Path
 import sys
 import tempfile
@@ -62,6 +63,23 @@ class FileLockTests(unittest.TestCase):
                 with file_lock.exclusive(path, wait=0.2):
                     pass
             self.assertLess(time.monotonic() - started, 5)
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_lock_the_file_system_refuses_goes_on_without_the_lock(self):
+        # A network file system can answer flock with an error other than "held"; the holder goes on as without fcntl.
+        path = self.root / "log.jsonl"
+        with mock.patch.object(file_lock.fcntl, "flock", side_effect=OSError(errno.ENOLCK, "No locks available")):
+            with file_lock.exclusive(path) as held:
+                self.assertIsNone(held)
+
+    @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
+    def test_a_caller_that_must_lock_gets_the_refusal(self):
+        path = self.root / "log.jsonl"
+        with mock.patch.object(file_lock.fcntl, "flock", side_effect=OSError(errno.ENOLCK, "No locks available")):
+            with self.assertRaises(OSError) as caught:
+                with file_lock.exclusive(path, must_lock=True):
+                    self.fail("the holder went on without the lock")
+        self.assertEqual(caught.exception.errno, errno.ENOLCK)
 
     def test_without_flock_the_lock_yields_none_and_creates_nothing(self):
         path = self.root / "manifest.json.lock"

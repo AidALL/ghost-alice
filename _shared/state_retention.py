@@ -5,11 +5,12 @@ folders, and how each stays bounded. A writer calls `apply(name, path)` at its o
 something: size rotation, keep the newest N, age or line count. A log that several processes append to is written
 through `append(name, path, text)`. Overwritten files and material kept for the user are named only. `apply` never
 raises: a failure is one line in `state-retention-failures.jsonl` under the Ghost-ALICE state root, which the
-`retention-failures` entry bounds and doctor reads. `entry_for` names the entry a created path belongs to, so a test
-can require every created path to have one.
+`retention-failures` entry bounds and doctor reads. `append` records a failed write there too. `entry_for` names the
+entry a created path belongs to, so a test can require every created path to have one.
 
 Dependencies: Python 3.11+ standard library and the Core helpers `atomic_write`, `file_lock`, `install_destination`,
-`text_lines` and `installed_payload` in `_shared`. Without `fcntl` (Windows), appends go on without the lock.
+`text_lines` and `installed_payload` in `_shared`. When `file_lock` takes no lock (Windows, or a file system that refuses
+`flock`), appends go on and the rule still applies.
 """
 from __future__ import annotations
 
@@ -222,33 +223,43 @@ def apply(name: str, path: Path | str, *, protect: Iterable[Path | str] = (),
         return ()
 
 
-def append(name: str, path: Path | str, text: str, *, apply_rule: bool = True) -> None:
+def append(name: str, path: Path | str, text: str, *, apply_rule: bool = True, must_write: bool = False) -> None:
     """Append `text` to the log `path` under the log's lock and, unless `apply_rule` is False, apply the entry `name`
-    there too. When the lock stays held past `file_lock.LOCK_WAIT_S`, the text is appended without the lock or the
-    rule and the wait is recorded under `name`. Writing the text can raise like any write; the entry's failures are
-    recorded and never raised."""
+    there too. When the lock stays held past `file_lock.LOCK_WAIT_S`, the text is appended without the lock or the rule
+    and the wait is recorded under `name`. A write that fails loses the line and is recorded under `name`; only a caller
+    that sets `must_write` gets the error instead, to undo the work the line describes. The entry's failures are
+    recorded and never raised. A path outside the owned root always raises."""
     path = Path(path)
     install_destination.assert_mutation_path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        with file_lock.exclusive(path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with file_lock.exclusive(path):
+                _append_once(path, text)
+                if apply_rule:
+                    apply(name, path)
+        except file_lock.LockTimeout as timeout:
             _append_once(path, text)
-            if apply_rule:
-                apply(name, path)
-            return
-    except file_lock.LockTimeout as timeout:
-        _append_once(path, text)
-        skipped = "the rule" if apply_rule else "the lock"
-        _record_failure(name, path, type(timeout).__name__,
-                        f"lock held past {file_lock.LOCK_WAIT_S}s; appended without {skipped}")
+            skipped = "the rule" if apply_rule else "the lock"
+            _record_failure(name, path, type(timeout).__name__,
+                            f"lock held past {file_lock.LOCK_WAIT_S}s; appended without {skipped}")
+    except Exception as error:
+        if must_write:
+            raise
+        _record_failure(name, path, type(error).__name__, f"{error}; the line was not written in full")
 
 
 def _append_once(path: Path, text: str) -> None:
     """One append-mode write, so concurrent writers never interleave within a line; a write that the system takes only
-    in part raises, as a buffered write does."""
+    in part raises, as a buffered write does. The line such a write cut gets its end first, so this line never joins
+    it."""
     data = text.encode("utf-8")
-    descriptor = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+    descriptor = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o666)
     try:
+        if os.fstat(descriptor).st_size:
+            os.lseek(descriptor, -1, os.SEEK_END)
+            if os.read(descriptor, 1) != b"\n":
+                data = b"\n" + data
         written = os.write(descriptor, data)
     finally:
         os.close(descriptor)
@@ -296,12 +307,13 @@ def _line_count(path: Path, policy: Policy) -> tuple[Path, ...]:
     except FileNotFoundError:
         return ()
     end = committed_length(raw)
-    lines = split_lines(raw[:end].decode("utf-8"))
+    # A line a full disk cut can end inside a character, so bytes that are not UTF-8 pass through unchanged.
+    lines = split_lines(raw[:end].decode("utf-8", "surrogateescape"))
     if len(lines) <= policy.limit:
         return ()
     install_destination.assert_mutation_path(path)
     # A record another writer is still appending stays after the kept lines for that writer to finish.
-    path.write_bytes(("\n".join(lines[-policy.keep:]) + "\n").encode("utf-8") + raw[end:])
+    path.write_bytes(("\n".join(lines[-policy.keep:]) + "\n").encode("utf-8", "surrogateescape") + raw[end:])
     return (path,)
 
 
@@ -423,7 +435,7 @@ def failure_record_path() -> Path:
 
 
 def record_failure(name: str, path: Path | str, error: BaseException) -> None:
-    """Record a removal that failed outside `apply`, such as the installer's staging folder, under `name`."""
+    """Record a failure outside `apply` and `append`, such as an installer staging folder left behind, under `name`."""
     _record_failure(name, Path(path), type(error).__name__, str(error))
 
 
