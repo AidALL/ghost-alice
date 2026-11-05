@@ -50,14 +50,14 @@ The delegate inspects the actual target and returns findings to the parent under
 
 Use this case when the live uncertainty concerns how the parent constructs review input. Give the parent the original request, later corrections, its separate interpretation and access to the Git checkout. Ask it to prepare the actual review assignment under the selected skill guidance; do not preassemble the assignment's fields or tell it which packaging difference the evaluation expects.
 
-For a baseline/candidate comparison, use the same original inputs and Git state in separate contexts, with only the selected guidance changed. Compare the resulting assignments with the original requirement and the actual committed and uncommitted targets. Judge preserved constraints, correct targets, unsupported assumptions and unnecessary questions; matching a particular heading or field label is not the criterion. An equally adequate baseline and candidate leave the claimed improvement unestablished for that case.
+For a baseline/candidate comparison, use the same original inputs and Git state in separate contexts, with only the selected guidance changed. Compare the resulting assignments with the original requirement and the actual committed and uncommitted targets. Judge preserved constraints, correct targets, unsupported assumptions and unnecessary questions; matching a particular heading or field label is not the evaluation criterion. An equally adequate baseline and candidate leave the claimed improvement unestablished for that case.
 
 ## Review and correction
 
-The response model inspects the delegate's actions and resulting evidence against the selected criterion. When the observed result deviates from that criterion, it follows the [diagnostic procedure](bulletproofing-skills.md#procedure) to decide which correction is justified. Task-input or application corrections remain with their owning task procedure. When the diagnosis identifies an instruction defect, writing-skills' [Validate and evaluate](../SKILL.md#validate-and-evaluate) procedure owns its correction and affected re-evaluation.
+The response model inspects the delegate's actions and resulting evidence against the selected evaluation criterion. When the observed result deviates from that evaluation criterion, it follows the [diagnostic procedure](bulletproofing-skills.md#procedure) to decide which correction is justified. Task-input or application corrections remain with their owning task procedure. When the diagnosis identifies an instruction defect, writing-skills' [Validate and evaluate](../SKILL.md#validate-and-evaluate) procedure owns its correction and affected re-evaluation.
 
 ## Evidence limits
 
-The response model keeps the delegate's actual actions, source locators and configuration as the evaluation evidence, preserving the distinction between a supplied instruction and native host loading. Use verification-before-completion for claim scope.
+The response model keeps the delegate's actual actions, source locators and configuration as the evaluation evidence, preserving the distinction between a supplied instruction and loading through the host's skill mechanism. Use verification-before-completion for claim scope.
 
 The optional scenarios in [examples/CLAUDE_MD_TESTING.md](examples/CLAUDE_MD_TESTING.md) illustrate distinct discovery pressures; select them only when the discovery uncertainty requires them.

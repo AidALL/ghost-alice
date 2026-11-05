@@ -39,7 +39,7 @@ After five failed repair rounds and before another correction attempt, the respo
 
 To continue after reassessment, identify a distinguishable hypothesis, the observation that can discriminate it and a stopping condition. The user’s remaining resource limit and, for a delegated task, the parent’s remaining allocation to that task still apply. Reassessment resets neither attempts nor consumed resources. Reaching one of those limits suspends that incident's further attempts. Five failures alone do not require a human decision.
 
-Boundary-contract defines authorization and the renewal of self-declared implementation limits. Verification-before-completion defines useful checks, required evidence and proof reuse. Its response review reference defines how to recover from a recording failure: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
+Boundary-contract owns authorization and the renewal of self-declared implementation limits. Verification-before-completion defines useful checks, required evidence and proof reuse. Its response review reference defines how to recover from a recording failure: an identical unchanged recording failure suspends further recording attempts without waiting for five rounds.
 
 Exclude suspended or human-waiting branches from executable work until a relevant dependency change or decision permits continuation. Keep these decisions in existing context and handoffs, without adding a compulsory report, counter hook or classifier.
 

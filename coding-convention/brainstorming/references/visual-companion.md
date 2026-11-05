@@ -46,7 +46,7 @@ Content fragment vs. full document: if the HTML file starts with `<!DOCTYPE` or 
 
 ## Starting a Session
 
-Resolve every `scripts/` path below relative to the loaded brainstorming skill directory, and invoke it through the host's exposed shell tool. Bind the project path from the accepted task, not the shell's incidental working directory.
+Resolve every `scripts/` path below relative to the loaded brainstorming skill directory, and invoke it through the host's shell tool. Bind the project path from the accepted task, not the shell's incidental working directory.
 
 ```bash
 # Start the server with persistence for the project (mockups are saved)

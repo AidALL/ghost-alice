@@ -34,12 +34,10 @@ The content that the response model prepares for the user's decision in steps 3â
 
 ## Propagation and decision state
 
-By default, a decision changes only the current host's manifest. After step 4, the response model asks whether the decision also applies to the other hosts, unless the user's instructions already give that choice. If the user authorizes it, the response model reads the matching `source_path` entries and stages each result under that host's contract. When the result would differ between hosts, the decision does not propagate for that entry.
+By default, a decision changes only the current host's manifest. After step 4, the response model asks whether the decision also applies to the other hosts, unless the user's instructions already give that choice. If the user authorizes it, the response model reads the matching `source_path` entries and stages each result under that host's contract. Each approved result then follows [Apply and record a decision](references/manifest-schema.md#apply-and-record-a-decision) with that host in place of the current host. When the result would differ between hosts, the decision does not propagate for that entry.
 
-The response model marks an entry merged or discarded only after the approved change or discard completes. Approval or staging alone does not prove that the change was applied. The option `later` records `deferred` and keeps `decided=false`. The lifecycle and safety fields are in `references/manifest-schema.md`; the worked flow is in `references/merge-flow.md`.
+The response model marks an entry merged or discarded only after the approved change or discard completes. Approval or staging alone does not prove that the change was applied. The option `later` records `deferred` and keeps `decided=false`. The lifecycle and safety fields are in `references/manifest-schema.md`; conflicts and non-interactive runs are in `references/merge-flow.md`.
 
 ## Audit and warnings
 
 The response model keeps evidence of manifest operations, backup reads and copies, staged writes and user confirmations without displaying it.
-
-The response model must not overwrite live files before the required approval, merge the three choices into one default, bypass adversarial-verification or propagate a decision without authority.

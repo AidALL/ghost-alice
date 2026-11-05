@@ -15,7 +15,6 @@ This page maps each condition to its procedure owner. The [architecture](../../a
 - [Work-Impact Projection Contract](#work-impact-projection-contract)
 - [Runtime Checkpoints](#runtime-checkpoints)
 - [tool-checkpoint Visible Surface](#tool-checkpoint-visible-surface)
-- [tool-checkpoint Batch / Continuation Compression](#tool-checkpoint-batch--continuation-compression)
 - [Notes](#notes)
 - [Completion Recording Contract](#completion-recording-contract)
 - [Current Selection and Bounded Recovery](#current-selection-and-bounded-recovery)
@@ -56,7 +55,7 @@ Runtime consumers use the public API with the exact session-receipt root/platfor
 1. The session-intent-analyzer SessionStart hook supplies the session receipt. The UserPromptSubmit hook records each input and adds model context only when that receipt was not delivered or intake failed. Core intake establishes exact canonical human input through direct Codex observation or trusted Claude reconciliation. Read-state remains a pure read. The response model applies task-router to select work; it separately applies skill-evolution when report-only analysis is required.
 2. The response model submits the normal route candidate to Core. Core Python code validates current input, ownership, admission and selected criteria before storing the ready projection.
 3. The response model follows any required boundary and owning workflow. [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns tool execution and permission enforcement to the native host. The io-trace hook keeps recording tool operations in io-trace records (`~/.ghost-alice/io-trace.jsonl`). The host runs it on `PostToolUse` and `PostToolUseFailure` on Claude Code and on `PostToolUse` on Codex. On both hosts a call leaves no io-trace record when the host rejects it before running it, such as a permission denial, and when the user cancels it while it runs. On Claude Code a rejected call includes an `Edit` whose `old_string` the file does not hold. On Codex a shell command that exits non-zero leaves an io-trace record, but another failed call does not, such as a failed `apply_patch` or MCP call or a shell command that cannot start, and neither does a server-side tool such as WebSearch.
-4. When an answer ends and Stop fires, Core code's Stop script calls Core's input/body-bound assessment and records the Stop notice message. When the message reports an unsupported claim, an issue found while checking the answer, an unresolved criterion or declared remaining work, the script returns the notice text and the host shows it. The script blocks nothing.
+4. When an answer ends and Stop fires, Core code's Stop script runs as [Hook calls](../../architecture.md#hook-calls) describes.
 
 Tool-checkpoint runs at the before-tool stage (host `PreToolUse`/`BeforeTool`) and is not user-input intake. Tool payloads and audit metadata do not grant native permission. The [Notes](#notes) list installed bytes and native execution as separate claims; [live-smoke-regression](live-smoke-regression.md) owns required runtime observations.
 
@@ -82,11 +81,11 @@ Hooks classify values by whether they change the work boundary, focus layer, ver
 - Routine values remain in the hook log (`~/.ghost-alice/session-logs/<host>/<session>/strict-hook-output.jsonl`) and enter model guidance only when they affect a work decision.
 - Unknown or failed values expose fuller context and reopen the affected judgment.
 
-Clean-pass notices and correlation metadata do not independently justify new work. Token reduction is a consequence, not a success metric.
+Clean-pass notices and correlation metadata do not independently justify new work.
 
 ## Runtime Checkpoints
 
-Decision-relevant routing guidance is owned by [task-router](../../task-router/SKILL.md#referenced-contracts). The response model records a skill call only after using a fresh or valid retained instruction body and following that workflow; metadata matching is not execution.
+Decision-relevant routing guidance is owned by [task-router](../../task-router/SKILL.md#referenced-contracts).
 
 [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md#completion-check-format) owns the shared completion-check and partial-check formats and their criterion/claim/evidence mapping. Core completion acceptance requires authenticated review of the claims, original sources and complete response under the current owned route. Skill loading remains workflow guidance and audit activity, not a separate acceptance prerequisite. Finalized completion requires supported verdicts with no unverified criteria. A partial-success report retains the full contract and identifies unresolved criteria; it cannot present the successful subset as whole-task completion.
 
@@ -95,12 +94,6 @@ A displayed trace does not establish proof. Hooks keep audit records regardless 
 ## tool-checkpoint Visible Surface
 
 The common contract's io-trace Transparency Rule owns checkpoint visibility.
-
-## tool-checkpoint Batch / Continuation Compression
-
-Compression changes no hook's checks or records: in the calls that follow the same user input, hooks omit only unchanged, repeated user-facing guidance. Batch and continuation forms do not grant permission.
-
-Continuation refers only to polling the same process/session/tool-call ID. A denial, mismatch or relevant state change can require a new checkpoint. Polling and a new input alone do not require repeating guidance.
 
 ## Notes
 
@@ -116,7 +109,7 @@ For this condition, the response model records both judgments using the [owning 
 
 Source APIs, runtime modules, ledger, project, installed skills and platform state retain separate location bindings. An ordinary upgrade preserves ledger authority; transport does not grant origin, session, admission or approval.
 
-On the native Stop path, Core code's Stop script compares the delivered text with the recorded review, records the result as the Stop notice message in `stop-notice.json`, issues no second command and does not delay the answer. The hook runner keeps the script's raw output in the hook log. Supported, unsupported and unresolved states stay distinct, and a supported report may fulfill no work criterion.
+[Hook calls](../../architecture.md#hook-calls) describes the native Stop path. Supported, unsupported and unresolved states stay distinct, and a supported report may fulfill no work criterion.
 
 ## Current Selection and Bounded Recovery
 

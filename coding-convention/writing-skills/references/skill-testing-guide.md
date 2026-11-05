@@ -20,4 +20,4 @@ Use writing-skills' [Validate and evaluate](../SKILL.md#validate-and-evaluate) p
 
 ## Judge the result
 
-Keep the observed action, criterion-specific comparison and checked configuration as the evaluation evidence. Partial compliance identifies the unmet requirement. Apply verification-before-completion for what that result supports and whether another observation can change acceptance.
+Keep the observed action, the comparison with the evaluation criterion and the checked configuration as the evaluation evidence. Partial compliance identifies the unmet requirement. Apply verification-before-completion for what that result supports and whether another observation can change acceptance.

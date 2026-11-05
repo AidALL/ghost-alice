@@ -11,16 +11,6 @@ On Windows, `install.cmd` keeps the native wrapper path, Python 3.11+ installer 
 
 The Windows installer needs PowerShell 7.6 or newer. Windows PowerShell 5.1 is not supported: under an older PowerShell the installer prints the requirement and stops. Install PowerShell with `winget install --id Microsoft.PowerShell --exact`, then rerun `.\install.cmd`.
 
-## Install Core
-
-After cloning this repository, use the platform-auto-detect installation:
-
-```bash
-bash install.sh
-```
-
-For Windows Command Prompt or PowerShell, use `.\install.cmd`. The detailed options below let you select a specific agent platform or manage each installation separately.
-
 ## Contents
 
 - [Quick Install](#quick-install)
@@ -50,6 +40,8 @@ git clone https://github.com/AidALL/ghost-alice.git %USERPROFILE%\ghost-alice
 cd %USERPROFILE%\ghost-alice
 .\install.cmd
 ```
+
+`bash install.sh` and `.\install.cmd` detect the agent platform. The options below select a specific platform or manage each installation separately.
 
 ## Install Addons
 
@@ -254,7 +246,7 @@ A full install deploys:
 - `~/.ghost-alice/rollbacks/<txid>/`: the files one placement replaced, the install record as it was before, and the placement's journal; the next locked installer command restores a placement that stopped halfway, and [runtime state retention](../reference/repository-structure.md#runtime-state-retention) sets how many finished folders stay
 - support state for install-state, pending merges, and uninstall reports
 
-An installation that registered the optional context gateway: the install record's `service` section names the service's code root, `~/.ghost-alice/runtime/current`, and its three service files. The runtime placement (`_shared` and the companion script `session-intent-analyzer/scripts/session_intent_ledger.py`) stops the service before its files change and starts it after. The Codex copy `~/.agents/skills/_shared` and the Claude links are install targets, not the service's code, so their placement calls no service effect. `bash install.sh` alone is the update; no gateway refresh precedes it. The install prints one `Context gateway:` line with the service's runtime root and whether the service is running. An installation an earlier installer registered gets its `service` section once from the gateway's installation receipt, at the first install, repair or uninstall.
+An installation that registered the optional context gateway: the install record's `service` section names the service's code root, `~/.ghost-alice/runtime/current`, and its three service files. The runtime placement (`_shared` and the companion script `session-intent-analyzer/scripts/session_intent_ledger.py`) stops the service before its files change and starts it after. `bash install.sh` alone is the update; no gateway refresh precedes it. The install prints one `Context gateway:` line with the service's runtime root and whether the service is running. An installation an earlier installer registered gets its `service` section once from the gateway's installation receipt, at the first install, repair or uninstall.
 
 The installer owns only the marked Ghost-ALICE block in each global rule file. It refreshes that block while preserving adjacent user text. If the destination is a markerless user-owned file, installation leaves it unchanged, writes `<rule-file>.ghost-alice-proposed`, and status/doctor does not report the proposal as an installed global rule.
 

@@ -21,9 +21,9 @@ flowchart LR
   M["Response model: claims and whole-answer judgments"] --> C["Core: authenticate bindings"]
   C -->|Status and references| M
   M --> H["Native host: display answer"]
-  H -->|Stop event| S["Core Stop script: compare with the recorded review,<br/>record the Stop notice message, return its text<br/>when the message's state is notice"]
+  H -->|Stop event| S["Core Stop script"]
 ```
 
 Authentication, recording and the judgment of a criterion are separate results.
 
-On native Stop, Core code's Stop script compares the answer with its recorded review, records one Stop notice message and lets the host stop. When the message's `state` is `notice`, the script returns the notice text as `systemMessage` and the host shows it. The notice does not establish answer visibility or create missing judgments. See the [architecture](../../architecture.md) and [session gate owner map](session-gate-matrix.md) for responsibilities.
+[Hook calls](../../architecture.md#hook-calls) describes native Stop. The Stop notice does not establish answer visibility or create missing judgments. See the [session gate owner map](session-gate-matrix.md) for responsibilities.

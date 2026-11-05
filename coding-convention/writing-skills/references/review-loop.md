@@ -6,7 +6,7 @@ The response model uses this reference when baseline and candidate evidence disa
 
 The response model supplies the observed action, required behavior and original source locator to a delegate. The delegate identifies the exact instruction, mapping or premise that could explain the mismatch and returns that comparison to the response model.
 
-Assert objective conditions directly, such as required fields, prohibited outputs or actual call order. For subjective clarity, describe the competing interpretations and the different actions each would produce. A numerical preference score does not settle the instruction's meaning.
+The delegate asserts objective conditions directly, such as required fields, prohibited outputs or actual call order. For subjective clarity, the delegate describes the competing interpretations and the different actions each would produce. A numerical preference score does not settle the instruction's meaning.
 
 ## Result and limits
 

@@ -4,9 +4,9 @@ Use this technique when an error appears far from the input or initialization th
 
 ## Trace the failure
 
-The response model records the failing operation, target and actual arguments. Follow each caller backward, identifying where the wrong value was created, transformed or used before initialization. Stop tracing when evidence identifies the causal source; do not change only the final consumer unless that consumer defines the violated contract.
+The response model records the failing operation, target and actual arguments. Follow each caller backward, identifying where the wrong value was created, transformed or used before initialization. Stop tracing when evidence identifies the causal source; do not change only the final consumer unless that consumer owns the violated contract.
 
-For example, a test passes an empty project directory to a workspace initializer. The initializer later invokes Git in the project's checkout. Trace the empty value through the workspace and session calls to the fixture that was read before setup. Correct that initialization and verify the original failure.
+For example, a test passes an empty project directory to a workspace initializer. The initializer later invokes Git in the source checkout. Trace the empty value through the workspace and session calls to the fixture that was read before setup. Correct that initialization and verify the original failure.
 
 If the existing trace cannot identify the caller, add bounded diagnostics immediately before the affected operation. Capture the safe argument metadata, current directory and call stack. Do not log raw credentials or environment contents. Remove or retain diagnostics according to the task's accepted debugging requirements.
 

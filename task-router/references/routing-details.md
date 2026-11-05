@@ -14,9 +14,9 @@ The common contract's Work Selection section carries task-router's direct-answer
 
 A general why/how premise remains an explanation topic unless the user identifies a workspace, supplies workspace evidence, requests exact diagnosis, or the conversation establishes the inspected referent. First-person wording, past tense, technical-state vocabulary and an open project do not independently establish inspection authority. An established referent permits inspection but does not require it when retained evidence answers the question.
 
-## Direct-answer actions and the visibility level
+## The visibility level
 
-Follow the common contract's Work Selection section for a direct answer and its Session Intent section for a confirmation question. For work, task-router defines response route registration and verification-before-completion defines completion and partial completion claims; an instruction from the visibility level does not replace either workflow.
+For work, task-router defines response route registration and verification-before-completion defines completion and partial completion claims; an instruction from the visibility level does not replace either workflow.
 
 ## Examples
 
