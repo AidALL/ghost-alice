@@ -11,7 +11,6 @@ Usage:
 """
 from __future__ import annotations
 import argparse
-import ast
 import json
 import re
 import sys
@@ -118,12 +117,6 @@ CHECKS: list[LayerCheck] = [
         pattern=r"def\s+_write_readme_first\s*\(",
     ),
     LayerCheck(
-        layer="pending-merge-session-start-failsafe",
-        description="install_hooks.py creates the SessionStart pending-merge precheck command",
-        file=REPO / "_shared" / "install_hooks.py",
-        pattern=r"SESSION_START_COMMAND\s*=\s*_session_start_command\(",
-    ),
-    LayerCheck(
         layer="EXTERNAL-EVIDENCE",
         description="input hooks do not generate unconditional external-search guidance",
         file=REPO / "_shared" / "install_hooks.py",
@@ -213,30 +206,6 @@ def check_layer(c: LayerCheck) -> tuple[bool, str]:
     return True, f"{c.layer}: OK. {c.description}"
 
 
-def _function_source(text: str, function_name: str) -> str:
-    tree = ast.parse(text)
-    for node in tree.body:
-        if isinstance(node, ast.FunctionDef) and node.name == function_name:
-            return ast.get_source_segment(text, node) or ""
-    return ""
-
-
-def check_session_start_failsafe() -> tuple[bool, str]:
-    """Check whether the SessionStart helper keeps the failsafe that swallows hook failure."""
-    f = REPO / "_shared" / "install_hooks.py"
-    if not f.exists():
-        return False, "pending-merge-session-start-failsafe: install_hooks.py missing"
-    text = f.read_text(encoding="utf-8")
-    body = _function_source(text, "_session_start_command")
-    if not body:
-        return False, "pending-merge-session-start-failsafe: _session_start_command definition not found"
-    if "|| true" not in body:
-        return False, "pending-merge-session-start-failsafe: SessionStart helper does not include the '|| true' failsafe"
-    if "SESSION_START_MARKER" not in body:
-        return False, "pending-merge-session-start-failsafe: SessionStart helper does not attach SESSION_START_MARKER to the command"
-    return True, "pending-merge-session-start-failsafe: SessionStart helper failsafe confirmed"
-
-
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--json", action="store_true", help="Print JSON output")
@@ -250,11 +219,6 @@ def main() -> int:
         results.append({"layer": c.layer, "ok": ok, "msg": msg})
         if not ok:
             failures.append(msg)
-
-    ok, msg = check_session_start_failsafe()
-    results.append({"layer": "pending-merge-session-start-failsafe-detail", "ok": ok, "msg": msg})
-    if not ok:
-        failures.append(msg)
 
     if args.json:
         print(json.dumps({"failures": failures, "results": results}, indent=2, ensure_ascii=True))

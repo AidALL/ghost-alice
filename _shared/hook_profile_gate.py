@@ -58,11 +58,10 @@ VALID_HOOK_PLATFORMS = {"claude", "codex"}
 class HookCommandRejected(ValueError):
     """Raised when a wrapped hook command is outside the allowlist."""
 
-    def __init__(self, message, *, hook_payload=None, audit_details=None):
+    def __init__(self, message, *, hook_payload=None):
         super().__init__(message)
         # Transient audit context only; it does not grant command authority.
         self.hook_payload = hook_payload
-        self.audit_details = audit_details
 
 
 def _split_tokens(raw: str | None) -> list[str]:
@@ -78,11 +77,8 @@ def disabled_hooks(env: dict[str, str] | None = None) -> set[str]:
 
 def is_hook_enabled(
     hook_id: str,
-    profiles: str | dict[str, str] | None = None,
     env: dict[str, str] | None = None,
 ) -> bool:
-    if isinstance(profiles, dict) and env is None:
-        env = profiles
     normalized = normalize_hook_id(hook_id)
     if normalized in disabled_hooks(env):
         return False
@@ -863,13 +859,6 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
     stdin_text = _read_stdin()
     hook_payload = _payload_from_stdin(stdin_text)
     if binding is not None:
-        if binding['destination']['mode'] == 'normal':
-            # Core context follows the firing native cwd; explicit targets already in the environment stay.
-            native_cwd = _payload_from_stdin(stdin_text).get('cwd')
-            if isinstance(native_cwd,str) and Path(native_cwd).is_absolute():
-                env['GHOST_ALICE_PROJECT_CWD'] = native_cwd
-            else:
-                env.pop('GHOST_ALICE_PROJECT_CWD',None)
         for flag in ("--root","--session-intent-root"):
             if flag in argv and argv[argv.index(flag)+1] != env["GHOST_ALICE_SESSION_INTENT_ROOT"]:
                 raise HookCommandRejected("inner ledger root conflicts with trusted binding", hook_payload=hook_payload)
@@ -1020,7 +1009,7 @@ def _rejection_audit_platform(payload: str, env: Mapping[str, str]) -> str:
 
 
 def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str,
-                            hook_payload=None, audit_details=None) -> None:
+                            hook_payload=None) -> None:
     env = os.environ
     if hook_payload is None:
         hook_payload = _payload_from_stdin(_read_stdin())
@@ -1037,8 +1026,6 @@ def _append_rejection_audit(hook_id: str, stderr: str, *, platform: str,
         source_hook=hook_id,
         value=_one_line(stderr),
     )
-    if audit_details:
-        item["rejection_diagnostic"] = audit_details
     strict_session_log.append_event(
         home=_home_from_env(env),
         platform=platform,
@@ -1123,7 +1110,6 @@ def main(argv: list[str] | None = None) -> NoReturn:
                     rejection_stderr,
                     platform=audit_platform,
                     hook_payload=exc.hook_payload,
-                    audit_details=exc.audit_details,
                 )
         except Exception as audit_exc:  # noqa: BLE001 - audit is best-effort.
             try:

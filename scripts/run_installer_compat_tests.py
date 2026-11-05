@@ -60,12 +60,6 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
         within="scripts-all",
     ),
     TestGroup(
-        "merge-companion-v2",
-        "snapshot v2 and diff collector compatibility",
-        _py("-m", "unittest", "discover", "-s", "merge-companion/scripts", "-p", "test_*_v2.py"),
-        within="merge-companion-core",
-    ),
-    TestGroup(
         "merge-companion-core",
         "manifest, snapshot, and diff collector core tests",
         _py("-m", "unittest", "discover", "-s", "merge-companion/scripts"),
@@ -87,7 +81,7 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
     ),
     TestGroup(
         "skill-evolution",
-        "io-trace analysis, recommendation aggregation and session monitor tests",
+        "io-trace analysis and recommendation aggregation tests",
         _py("-m", "unittest", "discover", "-s", "skill-evolution/scripts", "-p", "test_*.py"),
     ),
     TestGroup(
@@ -104,27 +98,9 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
         within="scripts-all",
     ),
     TestGroup(
-        "installer-cmd-wrapper",
-        "CMD wrapper delegation, UTF-8, and argument forwarding",
-        _py("-m", "unittest", "scripts.tests.test_install_cmd_wrapper"),
-        within="scripts-all",
-    ),
-    TestGroup(
         "public-surface-contract",
-        "README, homepage, and command wrapper parity with the skill catalog",
+        "command wrapper parity with the skill catalog, README headings and commands, homepage links",
         _py("-m", "unittest", "scripts.tests.test_validate_public_surfaces"),
-        within="scripts-all",
-    ),
-    TestGroup(
-        "installer-encoding",
-        "UTF-8, PowerShell BOM, shell inline Python, and semantic asset encoding",
-        _py(
-            "-m",
-            "unittest",
-            "scripts.tests.test_install_ps1_encoding",
-            "scripts.tests.test_install_sh_inline_python_encoding",
-            "scripts.tests.test_encoding_guard",
-        ),
         within="scripts-all",
     ),
     TestGroup(
@@ -144,30 +120,6 @@ TEST_GROUPS: tuple[TestGroup, ...] = (
             "scripts.tests.test_install_status_contract",
         ),
         within="scripts-all",
-    ),
-    TestGroup(
-        "installer-transaction",
-        "preflight quarantine, staged replacement, rollback, postflight, and install-state",
-        _py(
-            "-m",
-            "unittest",
-            "scripts.tests.test_install_preflight_quarantine",
-            "scripts.tests.test_install_transaction",
-            "scripts.tests.test_install_postflight_validation",
-            "scripts.tests.test_install_state_manifest",
-        ),
-        within="scripts-all",
-    ),
-    TestGroup(
-        "shared-install-hooks",
-        "hook install/status suite and merge-companion prompt wording",
-        _py(
-            "-m",
-            "unittest",
-            "_shared.test_install_hooks",
-            "_shared.test_merge_companion_messages",
-        ),
-        within="shared-all",
     ),
 )
 

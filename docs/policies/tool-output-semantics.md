@@ -8,7 +8,7 @@ Tool results distinguish an observation, an authenticated review, and an execute
 
 The native host validates tool arguments and enforces permission, the role that [Responsibilities and flow](../../architecture.md#responsibilities-and-flow) assigns to it. A reported argument error determines the correction to an authorized call. Governance hooks inspect work authority and evidence; they do not infer tool capabilities from serialized text.
 
-Hook status distinguishes a matching installation, configuration drift, disabled hooks, missing components and an unsupported platform. Drift requires examining the affected installed binding; it does not mean that every hook is absent. The [platform compatibility contract](installer-platform-compatibility-matrix.md) owns installation decisions.
+Hook status distinguishes a matching installation, configuration drift, disabled hooks and missing components. Drift requires examining the affected installed binding; it does not mean that every hook is absent. The [platform compatibility contract](installer-platform-compatibility-matrix.md) owns installation decisions.
 
 Counts retain their declared unit. A unique finding count differs from physical occurrences, and an absent count is unknown.
 

@@ -260,18 +260,6 @@ class ReplacementBatch:
         except FileNotFoundError:
             return None
 
-    @property
-    def mappings(self):
-        return tuple((item['stage'], item['dest']) for item in self.prepared)
-
-    @property
-    def destinations(self):
-        return tuple(dst for _, dst, _ in self.targets)
-
-    @property
-    def recovery_reference(self):
-        return str(self.root)
-
     def stage(self):
         for src, dst, mode in self.targets:
             self.source, self.dest = src, dst
@@ -342,11 +330,6 @@ class ReplacementBatch:
             if self.identity(dst) != item['before']:
                 raise InstallTransactionError('Restored target does not match its original')
 
-    def finalize(self):
-        # Retention cleanup is performed only after the whole service/file
-        # transaction commits; never discard rollback material during recovery.
-        state_retention.apply("rollback-root", self.root, limit=self.keep)
-
     def cleanup(self):
         for item in self.prepared:
             stage = item['stage']
@@ -367,13 +350,6 @@ class ReplacementBatch:
                 if exc.errno not in (errno.ENOTEMPTY, errno.EEXIST):
                     state_retention.record_failure("install-staging", stage_root, exc)
 
-    def run_unmanaged(self):
-        try:
-            self.publish()
-        except Exception:
-            self.restore()
-            raise
-
 
 def _wrapped_failure(exc, batch, detail=None):
     """An InstallTransactionError that keeps the cause's code, exit code, outcome and phase."""
@@ -388,25 +364,6 @@ def _wrapped_failure(exc, batch, detail=None):
             setattr(wrapped, name, getattr(exc, name))
     wrapped.phase = getattr(exc, 'phase', batch.phase)
     return wrapped
-
-
-def _replace(targets, *, rollback_root, event_log=None, rollback_keep=None,
-             progress_callback=None, progress_event_file=None, progress_events=None):
-    if not targets:
-        return
-    batch = ReplacementBatch(targets, rollback_root=rollback_root, rollback_keep=rollback_keep,
-        progress_callback=progress_callback, progress_event_file=progress_event_file, progress_events=progress_events)
-    try:
-        batch.stage()
-        batch.run_unmanaged()
-        batch.finalize()
-    except Exception as exc:
-        wrapped = _wrapped_failure(exc, batch)
-        _write_failure_event(Path(event_log) if event_log is not None else None,
-            source=batch.source, dest=batch.dest, phase=wrapped.phase, error=str(wrapped))
-        raise wrapped from exc
-    finally:
-        batch.cleanup()
 
 
 def rollbacks_root(ghost_root) -> Path:
@@ -687,11 +644,10 @@ def publish(request: dict, participants: Sequence = (), *, rollback_keep: int | 
     statuses = [target.get("status") for target in replaced]
     callback = None
     if progress.get("label"):
-        counted = statuses if all(statuses) else None
-        _write_progress(progress["label"], 0, len(statuses), counted)
+        _write_progress(progress["label"], 0, statuses)
 
         def callback(done: int, total: int) -> None:
-            _write_progress(progress["label"], done, total, counted)
+            _write_progress(progress["label"], done, statuses)
 
     events = None
     if progress.get("event_file"):
@@ -787,62 +743,9 @@ def recover(ghost_root, txid: str) -> list[str]:
     return lines
 
 
-def staged_copy_replace(source, dest, *, rollback_root, event_log=None, rollback_keep=None):
-    _replace([(source, dest, 'copy')], rollback_root=rollback_root, event_log=event_log, rollback_keep=rollback_keep)
-
-
-def staged_symlink_replace(source, dest, *, rollback_root, event_log=None, rollback_keep=None):
-    _replace([(source, dest, 'symlink')], rollback_root=rollback_root, event_log=event_log, rollback_keep=rollback_keep)
-
-
-def staged_copy_replace_many(targets, *, rollback_root, event_log=None, rollback_keep=None,
-        progress_callback=None, progress_event_file=None, progress_events=None):
-    _replace([(src, dst, 'copy') for src, dst in targets], rollback_root=rollback_root, event_log=event_log,
-        rollback_keep=rollback_keep, progress_callback=progress_callback,
-        progress_event_file=progress_event_file, progress_events=progress_events)
-
-
 def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ghost-ALICE installer transaction helpers.")
     subparsers = parser.add_subparsers(dest="command", required=True)
-
-    copy_replace = subparsers.add_parser("copy-replace")
-    copy_replace.add_argument("--source", required=True, type=Path)
-    copy_replace.add_argument("--dest", required=True, type=Path)
-    copy_replace.add_argument("--rollback-root", type=Path, required=True)
-    copy_replace.add_argument("--event-log", type=Path, default=None)
-    copy_replace.add_argument("--rollback-keep", type=int, default=None)
-
-    symlink_replace = subparsers.add_parser("symlink-replace")
-    symlink_replace.add_argument("--source", required=True, type=Path)
-    symlink_replace.add_argument("--dest", required=True, type=Path)
-    symlink_replace.add_argument("--rollback-root", type=Path, required=True)
-    symlink_replace.add_argument("--event-log", type=Path, default=None)
-    symlink_replace.add_argument("--rollback-keep", type=int, default=None)
-
-    copy_replace_many = subparsers.add_parser("copy-replace-many")
-    copy_replace_many.add_argument("--target", action="append", nargs=2, required=True, type=Path, metavar=("SOURCE", "DEST"))
-    copy_replace_many.add_argument("--rollback-root", type=Path, required=True)
-    copy_replace_many.add_argument("--event-log", type=Path, default=None)
-    copy_replace_many.add_argument("--rollback-keep", type=int, default=None)
-    copy_replace_many.add_argument("--progress-label", default=None)
-    copy_replace_many.add_argument(
-        "--progress-status",
-        action="append",
-        choices=("current", "updated", "new"),
-        default=[],
-        help="Per-target status for category-aware progress rendering.",
-    )
-    copy_replace_many.add_argument("--progress-event-file", type=Path, default=None)
-    copy_replace_many.add_argument("--progress-platform", default=None)
-    copy_replace_many.add_argument("--progress-target-id", action="append", default=[])
-    copy_replace_many.add_argument("--progress-target-kind", action="append", choices=("skill", "support"), default=[])
-    copy_replace_many.add_argument(
-        "--progress-target-status",
-        action="append",
-        choices=("current", "updated", "new"),
-        default=[],
-    )
 
     recover_parser = subparsers.add_parser("recover", help="Restore an unfinished publish from its journal.")
     recover_parser.add_argument("--txid", required=True)
@@ -851,114 +754,26 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def _write_progress(label: str, done: int, total: int, statuses: Sequence[str] | None = None) -> None:
-    if statuses:
-        counts = Counter(statuses[:done])
-        sys.stdout.write(
-            f"\r{label} "
-            f"[{counts['current']}] [Current], "
-            f"[{counts['updated']}] [updated], "
-            f"[{counts['new']}] [newly added]"
-        )
-        sys.stdout.flush()
-        return
-
-    sys.stdout.write(f"\r{label} [{done}/{total}]")
+def _write_progress(label: str, done: int, statuses: Sequence[str]) -> None:
+    counts = Counter(statuses[:done])
+    sys.stdout.write(
+        f"\r{label} "
+        f"[{counts['current']}] [Current], "
+        f"[{counts['updated']}] [updated], "
+        f"[{counts['new']}] [newly added]"
+    )
     sys.stdout.flush()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        if args.command == "copy-replace":
-            staged_copy_replace(
-                args.source,
-                args.dest,
-                rollback_root=args.rollback_root,
-                event_log=args.event_log,
-                rollback_keep=args.rollback_keep,
-            )
-        elif args.command == "symlink-replace":
-            staged_symlink_replace(
-                args.source,
-                args.dest,
-                rollback_root=args.rollback_root,
-                event_log=args.event_log,
-                rollback_keep=args.rollback_keep,
-            )
-        elif args.command == "copy-replace-many":
-            progress_callback = None
-            progress_events = None
-            if args.progress_label:
-                progress_statuses = list(getattr(args, "progress_status", []) or [])
-                if progress_statuses and len(progress_statuses) != len(args.target):
-                    print(
-                        "--progress-status count must match --target count",
-                        file=sys.stderr,
-                    )
-                    return 1
-                statuses = progress_statuses or None
-                _write_progress(args.progress_label, 0, len(args.target), statuses)
-
-                def progress_callback(done: int, total: int) -> None:
-                    _write_progress(args.progress_label, done, total, statuses)
-
-            progress_event_file = getattr(args, "progress_event_file", None)
-            progress_platform = getattr(args, "progress_platform", None)
-            progress_target_ids = list(getattr(args, "progress_target_id", []) or [])
-            progress_target_kinds = list(getattr(args, "progress_target_kind", []) or [])
-            progress_target_statuses = list(getattr(args, "progress_target_status", []) or [])
-            if progress_event_file is not None or progress_platform or progress_target_ids or progress_target_kinds or progress_target_statuses:
-                if progress_event_file is None or not progress_platform:
-                    print(
-                        "--progress-event-file and --progress-platform are required with progress target metadata",
-                        file=sys.stderr,
-                    )
-                    return 1
-                if not (
-                    len(progress_target_ids)
-                    == len(progress_target_kinds)
-                    == len(progress_target_statuses)
-                    == len(args.target)
-                ):
-                    print(
-                        "--progress-target-id/kind/status counts must match --target count",
-                        file=sys.stderr,
-                    )
-                    return 1
-                progress_events = [
-                    {
-                        "platform": progress_platform,
-                        "target_id": target_id,
-                        "target_kind": target_kind,
-                        "status": target_status,
-                    }
-                    for target_id, target_kind, target_status in zip(
-                        progress_target_ids,
-                        progress_target_kinds,
-                        progress_target_statuses,
-                    )
-                ]
-
-            staged_copy_replace_many(
-                args.target,
-                rollback_root=args.rollback_root,
-                event_log=args.event_log,
-                progress_callback=progress_callback,
-                progress_event_file=progress_event_file,
-                progress_events=progress_events,
-                rollback_keep=args.rollback_keep,
-            )
-            if args.progress_label:
-                sys.stdout.write("\n")
-        elif args.command == "recover":
+        if args.command == "recover":
             for line in recover(args.ghost_root or Path.home() / ".ghost-alice", args.txid):
                 print(line)
         else:
             raise AssertionError(args.command)
     except InstallTransactionError as exc:
-        if getattr(args, "progress_label", None):
-            sys.stdout.write("\n")
         if hasattr(exc, 'code'):
             print(json.dumps(dict(status=exc.outcome, error_code=exc.code, phase=exc.phase, detail=str(exc))), file=sys.stderr)
         else:

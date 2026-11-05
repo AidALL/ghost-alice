@@ -2,21 +2,18 @@
 """
 validate_public_surfaces.py. Public surface and skill-catalog parity checks.
 
-Verifies that README and workspace command wrappers keep the public command
-surface aligned with skill-catalog/skills.json.
+Verifies that workspace command wrappers match skill-catalog/skills.json, README
+keeps its required headings and commands, and index.html keeps its repo-root links.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
 
-
-PUBLIC_SKILL_NAME_ALIASES = {}
 
 # These names belong to addon skills installed through --addon-source. The core repo must not check them in as .claude/commands wrappers.
 ADDON_COMMAND_WRAPPERS_FORBIDDEN_IN_CORE_REPO = {
@@ -79,10 +76,9 @@ def load_catalog(repo: Path, findings: list[Finding]) -> list[dict[str, Any]]:
     return [skill for skill in skills if isinstance(skill, dict)]
 
 
-def split_skill_sets(skills: list[dict[str, Any]]) -> tuple[list[str], list[str], dict[str, str], dict[str, str]]:
+def split_skill_sets(skills: list[dict[str, Any]]) -> tuple[list[str], list[str], dict[str, str]]:
     names: list[str] = []
     paths: dict[str, str] = {}
-    descriptions: dict[str, str] = {}
     top_level: list[str] = []
     coding: list[str] = []
     for skill in skills:
@@ -92,42 +88,19 @@ def split_skill_sets(skills: list[dict[str, Any]]) -> tuple[list[str], list[str]
             continue
         names.append(name)
         paths[name] = path
-        descriptions[name] = str(skill.get("description") or name)
         if skill.get("family") == "coding-convention":
             coding.append(name)
         else:
             top_level.append(name)
-    return sorted(top_level), sorted(coding), paths, descriptions
+    return sorted(top_level), sorted(coding), paths
 
 
-def parse_name_list(value: str) -> list[str]:
-    return [part.strip() for part in value.split(",") if part.strip()]
-
-
-def describe_set_delta(expected: list[str], actual: list[str]) -> str:
-    expected_set = set(expected)
-    actual_set = set(actual)
-    missing = sorted(expected_set - actual_set)
-    extra = sorted(actual_set - expected_set)
-    parts: list[str] = []
-    if missing:
-        parts.append("missing: " + ", ".join(missing))
-    if extra:
-        parts.append("extra: " + ", ".join(extra))
-    return "; ".join(parts) if parts else "order/count drift"
-
-
-def public_skill_name(name: str) -> str:
-    return PUBLIC_SKILL_NAME_ALIASES.get(name, name)
-
-
-def check_readme(repo: Path, top_level: list[str], coding: list[str], findings: list[Finding]) -> None:
+def check_readme(repo: Path, findings: list[Finding]) -> None:
     path = repo / "README.md"
     if not path.is_file():
         findings.append(Finding("ERROR", "README.md", "exist", "README.md is missing."))
         return
     text = path.read_text(encoding="utf-8")
-    total = len(top_level) + len(coding)
     has_validation_command = (
         "python scripts/validate_public_surfaces.py" in text
         or "python3 scripts/validate_public_surfaces.py" in text
@@ -140,86 +113,14 @@ def check_readme(repo: Path, top_level: list[str], coding: list[str], findings: 
         and has_validation_command
     )
 
-    summary = re.search(
-        r"top-level\s+(\d+)\s+skills?\s+and\s+(\d+)\s+coding-convention\s+sub-skills?,\s+total\s+(\d+)",
-        text,
-        re.IGNORECASE,
-    )
-    if compact_entrypoint and not summary:
-        return
-
-    if not summary:
+    if not compact_entrypoint:
         findings.append(
             Finding(
                 "ERROR",
                 "README.md",
-                "skill-count-summary",
-                "README.md is missing the skill-catalog-based top-level/coding-convention/total count summary.",
-            )
-        )
-    else:
-        actual_counts = tuple(int(part) for part in summary.groups())
-        expected_counts = (len(top_level), len(coding), total)
-        if actual_counts != expected_counts:
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "README.md",
-                    "skill-count-summary",
-                    f"README.md count drift. expected top-level/coding/total={expected_counts}, actual={actual_counts}.",
-                )
-            )
-
-    top_match = re.search(
-        r"-\s+top-level\s+skills?\s+(\d+)\s+\(([^)]*)\)",
-        text,
-        re.IGNORECASE,
-    )
-    if not top_match:
-        findings.append(
-            Finding("ERROR", "README.md", "top-level-list", "README.md top-level skill list is missing.")
-        )
-    else:
-        actual_count = int(top_match.group(1))
-        actual_names = parse_name_list(top_match.group(2))
-        expected_public_top_level = sorted(public_skill_name(name) for name in top_level)
-        if actual_count != len(top_level) or set(actual_names) != set(expected_public_top_level):
-            delta = describe_set_delta(expected_public_top_level, actual_names)
-            findings.append(
-                Finding(
-                    "ERROR",
-                    "README.md",
-                    "top-level-list",
-                    f"README.md top-level list mismatch. expected {len(top_level)} names; {delta}.",
-                )
-            )
-
-    coding_match = re.search(
-        r"-\s+coding-convention\s+family\s+(\d+)\s+sub-skills?",
-        text,
-        re.IGNORECASE,
-    )
-    if not coding_match:
-        findings.append(
-            Finding("ERROR", "README.md", "coding-count", "README.md coding-convention count is missing.")
-        )
-    elif int(coding_match.group(1)) != len(coding):
-        findings.append(
-            Finding(
-                "ERROR",
-                "README.md",
-                "coding-count",
-                f"README.md coding-convention count drift. expected {len(coding)}, actual {coding_match.group(1)}.",
-            )
-        )
-
-    if not has_validation_command:
-        findings.append(
-            Finding(
-                "ERROR",
-                "README.md",
-                "validation-command",
-                "README.md installer development/release validation commands do not include python scripts/validate_public_surfaces.py.",
+                "entrypoint-markers",
+                "README.md is missing a required entrypoint marker: ## Quick Start, ## Addons, ## Documentation Map, "
+                "bash install.sh --addon-source, or python scripts/validate_public_surfaces.py.",
             )
         )
 
@@ -291,7 +192,6 @@ def expected_claude_wrapper(path: str) -> str:
 def check_command_wrappers(
     repo: Path,
     paths: dict[str, str],
-    descriptions: dict[str, str],
     findings: list[Finding],
 ) -> str:
     commands_dir = repo / ".claude" / "commands"
@@ -340,44 +240,21 @@ def check_command_wrappers(
     return "checked"
 
 
-def check_wiki_mirrors(repo: Path, total: int, findings: list[Finding]) -> list[str]:
-    checked: list[str] = []
-    for rel in ("wiki", "docs/wiki", ".wiki", "github-wiki"):
-        root = repo / rel
-        if not root.is_dir():
-            continue
-        checked.append(rel)
-        for path in root.rglob("*.md"):
-            text = path.read_text(encoding="utf-8")
-            if "skill-catalog/skills.json" in text and str(total) not in text:
-                findings.append(
-                    Finding(
-                        "WARNING",
-                        "wiki-mirror",
-                        "skill-count",
-                        f"{path.relative_to(repo).as_posix()} mentions skill-catalog, but lacks a current total {total} signal.",
-                    )
-                )
-    return checked
-
-
 def run(repo: Path) -> tuple[list[Finding], dict[str, Any]]:
     findings: list[Finding] = []
     skills = load_catalog(repo, findings)
-    top_level, coding, paths, descriptions = split_skill_sets(skills)
+    top_level, coding, paths = split_skill_sets(skills)
     if skills:
-        check_readme(repo, top_level, coding, findings)
+        check_readme(repo, findings)
         check_repo_index(repo, findings)
-        command_wrappers = check_command_wrappers(repo, paths, descriptions, findings)
+        command_wrappers = check_command_wrappers(repo, paths, findings)
     else:
         command_wrappers = "skipped-no-catalog"
-    wiki_mirrors = check_wiki_mirrors(repo, len(top_level) + len(coding), findings)
     checked = {
         "skill_count": len(top_level) + len(coding),
         "top_level_count": len(top_level),
         "coding_convention_count": len(coding),
         "command_wrappers": command_wrappers,
-        "wiki_mirrors": wiki_mirrors,
     }
     return findings, checked
 

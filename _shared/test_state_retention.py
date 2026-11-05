@@ -59,14 +59,12 @@ class PolicyTableTests(unittest.TestCase):
             "gateway-usage": ("size-rotation", 20 * MB, None),
             "gateway-service-log": ("size-rotation", 5 * MB, None),
             "gateway-config-backups": ("keep-newest", 5, None),
-            "governance-events": ("size-rotation", 5 * MB, None),
             "install-logs": ("keep-newest", 30, None),
             "uninstall-reports": ("keep-newest", 30, None),
             "install-state-events": ("size-rotation", 5 * MB, None),
             "retention-failures": ("line-count", 500, 500),
             "io-trace": ("line-count", 10_000, 5_000),
             "publish-rollbacks": ("keep-newest", 20, None),
-            "rollback-root": ("keep-newest", 20, None),
             "hook-settings-backups": ("keep-newest", 3, None),
         }
         for name, (method, limit, keep) in expected.items():
@@ -320,16 +318,16 @@ class AppendTests(RetentionTestCase):
 
     def test_a_short_write_raises_for_a_caller_that_must_write(self):
         # A buffered write raised when the system took only part of a line; the one-write append raises too.
-        path = self.root / "governance-events.jsonl"
+        path = self.root / "usage.jsonl"
         real_write = os.write
         with mock.patch.object(state_retention.os, "write",
                                side_effect=lambda descriptor, data: real_write(descriptor, data[:5])), \
                 self.assertRaises(OSError):
-            state_retention.append("governance-events", path, '{"row": 1}\n', must_write=True)
+            state_retention.append("gateway-usage", path, '{"row": 1}\n', must_write=True)
 
     def test_a_write_that_fails_is_recorded_and_never_raised(self):
         # The writer's own log is Ghost-ALICE's record: losing a line must not stop the work that wrote it.
-        path = self.root / "governance-events.jsonl"
+        path = self.root / "usage.jsonl"
         real = state_retention._append_once
 
         def full_disk(target, text):
@@ -338,17 +336,17 @@ class AppendTests(RetentionTestCase):
             real(target, text)
 
         with mock.patch.object(state_retention, "_append_once", side_effect=full_disk):
-            state_retention.append("governance-events", path, '{"row": 1}\n')
+            state_retention.append("gateway-usage", path, '{"row": 1}\n')
         self.assertEqual((self.failures()[-1]["policy"], self.failures()[-1]["error_type"]),
-                         ("governance-events", "OSError"))
-        state_retention.append("governance-events", path, '{"row": "\ud800"}\n')
+                         ("gateway-usage", "OSError"))
+        state_retention.append("gateway-usage", path, '{"row": "\ud800"}\n')
         self.assertEqual((self.failures()[-1]["policy"], self.failures()[-1]["error_type"]),
-                         ("governance-events", "UnicodeEncodeError"))
+                         ("gateway-usage", "UnicodeEncodeError"))
 
     def test_a_line_a_full_disk_cut_never_joins_the_next_line(self):
-        path = self.root / "governance-events.jsonl"
+        path = self.root / "usage.jsonl"
         path.write_bytes(b'{"row')
-        state_retention.append("governance-events", path, '{"row": 2}\n')
+        state_retention.append("gateway-usage", path, '{"row": 2}\n')
         self.assertEqual(path.read_bytes(), b'{"row\n{"row": 2}\n')
 
     def test_a_character_a_full_disk_cut_never_ends_the_line_count_rule(self):
@@ -363,7 +361,7 @@ class AppendTests(RetentionTestCase):
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_write_that_fails_after_a_lock_held_too_long_is_recorded(self):
-        path = self.root / "governance-events.jsonl"
+        path = self.root / "usage.jsonl"
         real = state_retention._append_once
 
         def full_disk(target, text):
@@ -373,9 +371,9 @@ class AppendTests(RetentionTestCase):
 
         with mock.patch.object(file_lock, "LOCK_WAIT_S", 0.2), file_lock.exclusive(path), \
                 mock.patch.object(state_retention, "_append_once", side_effect=full_disk):
-            state_retention.append("governance-events", path, '{"late": true}\n')
+            state_retention.append("gateway-usage", path, '{"late": true}\n')
         self.assertEqual((self.failures()[-1]["policy"], self.failures()[-1]["error_type"]),
-                         ("governance-events", "OSError"))
+                         ("gateway-usage", "OSError"))
 
     def test_an_audit_line_that_cannot_be_written_moves_the_retired_asset_back(self):
         import retired_assets
@@ -404,13 +402,13 @@ class AppendTests(RetentionTestCase):
     def test_a_log_folder_that_cannot_be_created_is_recorded_and_never_raised(self):
         blocker = self.root / "not-a-folder"
         blocker.write_text("", encoding="utf-8")
-        state_retention.append("governance-events", blocker / "governance-events.jsonl", '{"row": 1}\n')
+        state_retention.append("gateway-usage", blocker / "usage.jsonl", '{"row": 1}\n')
         [failure] = self.failures()
-        self.assertEqual(failure["policy"], "governance-events")
+        self.assertEqual(failure["policy"], "gateway-usage")
 
     def test_appends_and_rotations_of_one_log_never_overlap(self):
-        path = self.root / "governance-events.jsonl"
-        policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
+        path = self.root / "usage.jsonl"
+        policy = state_retention.POLICIES["gateway-usage"]._replace(limit=64)
         inside, peak, counting = [0], [0], threading.Lock()
         rotate = state_retention._size_rotation
 
@@ -427,9 +425,9 @@ class AppendTests(RetentionTestCase):
 
         def writer(index):
             for count in range(5):
-                state_retention.append("governance-events", path, f'{{"writer":{index},"n":{count}}}\n')
+                state_retention.append("gateway-usage", path, f'{{"writer":{index},"n":{count}}}\n')
 
-        with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy}), \
+        with mock.patch.dict(state_retention.POLICIES, {"gateway-usage": policy}), \
                 mock.patch("state_retention._size_rotation", side_effect=observed):
             threads = [threading.Thread(target=writer, args=(index,)) for index in range(3)]
             for thread in threads:
@@ -442,16 +440,16 @@ class AppendTests(RetentionTestCase):
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_lock_held_too_long_appends_the_line_without_rotation_and_records_it(self):
         # A writer that stops while holding the lock must not stop the hooks behind it.
-        path = self.root / "governance-events.jsonl"
+        path = self.root / "usage.jsonl"
         path.write_bytes(b"x" * 100 + b"\n")
-        policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
+        policy = state_retention.POLICIES["gateway-usage"]._replace(limit=64)
         done = threading.Event()
 
         def writer():
-            state_retention.append("governance-events", path, '{"late": true}\n')
+            state_retention.append("gateway-usage", path, '{"late": true}\n')
             done.set()
 
-        with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy}), \
+        with mock.patch.dict(state_retention.POLICIES, {"gateway-usage": policy}), \
                 mock.patch.object(file_lock, "LOCK_WAIT_S", 0.2), file_lock.exclusive(path):
             thread = threading.Thread(target=writer)
             thread.start()
@@ -459,22 +457,22 @@ class AppendTests(RetentionTestCase):
         thread.join(10)
         self.assertTrue(finished, "append waited past its lock limit")
         self.assertTrue(path.read_bytes().endswith(b'{"late": true}\n'))
-        self.assertFalse(path.with_name("governance-events.jsonl.1").exists())
+        self.assertFalse(path.with_name("usage.jsonl.1").exists())
         [failure] = self.failures()
-        self.assertEqual((failure["policy"], failure["error_type"]), ("governance-events", "LockTimeout"))
+        self.assertEqual((failure["policy"], failure["error_type"]), ("gateway-usage", "LockTimeout"))
 
     @unittest.skipIf(file_lock.fcntl is None, "this platform has no flock")
     def test_a_lock_the_file_system_refuses_keeps_the_rule_of_the_log_and_of_the_failure_record(self):
         # A refusal lasts as long as the file system, so nothing it leaves unbounded may grow.
-        path = self.root / "governance-events.jsonl"
-        policy = state_retention.POLICIES["governance-events"]._replace(limit=64)
+        path = self.root / "usage.jsonl"
+        policy = state_retention.POLICIES["gateway-usage"]._replace(limit=64)
         failures = state_retention.POLICIES["retention-failures"]._replace(limit=3, keep=2)
         refused = OSError(errno.ENOLCK, "No locks available")
-        with mock.patch.dict(state_retention.POLICIES, {"governance-events": policy, "retention-failures": failures}), \
+        with mock.patch.dict(state_retention.POLICIES, {"gateway-usage": policy, "retention-failures": failures}), \
                 mock.patch.object(file_lock.fcntl, "flock", side_effect=refused):
             path.write_bytes(b"x" * 100 + b"\n")
-            state_retention.append("governance-events", path, '{"row": 1}\n')
-            self.assertTrue(path.with_name("governance-events.jsonl.1").exists())
+            state_retention.append("gateway-usage", path, '{"row": 1}\n')
+            self.assertTrue(path.with_name("usage.jsonl.1").exists())
             self.assertEqual(self.failures(), [])
             for _ in range(6):
                 state_retention.record_failure("install-staging", self.root, OSError("stuck"))
@@ -597,19 +595,15 @@ def _entry_callers() -> set[str]:
 
 
 class EntryCallerTests(unittest.TestCase):
-    """An entry that removes something has a writer that applies it, or names the change that adds that writer;
-    a gap never passes silently."""
+    """An entry that removes something has a writer that applies it; a gap never passes silently."""
 
-    def test_every_removing_entry_has_a_caller_or_names_the_change_that_adds_one(self):
+    def test_every_removing_entry_has_a_caller(self):
         callers = _entry_callers()
         for name, policy in state_retention.POLICIES.items():
             if policy.method in ("overwrite", "user-kept"):
                 continue
             with self.subTest(name=name):
-                if policy.pending:
-                    self.assertNotIn(name, callers, f"{name} has a caller now; remove its pending note")
-                else:
-                    self.assertIn(name, callers, f"no writer applies {name}")
+                self.assertIn(name, callers, f"no writer applies {name}")
 
 
 GATEWAY_AGENT = "org.ghost-alice.context-gateway.plist"

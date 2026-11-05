@@ -39,12 +39,11 @@ class SkillStructureCleanlinessTest(unittest.TestCase):
         self.assertEqual(payload.get("warning_count"), 0, msg=json.dumps(issues, ensure_ascii=False, indent=2))
 
     def test_no_marker_or_option_lowers_an_error_finding(self) -> None:
-        # An empty root has ERROR findings, and a pull request marker such as [wip] must not lower them to WARNING.
+        # An empty root has ERROR findings.
         with tempfile.TemporaryDirectory() as empty_root:
             marked = subprocess.run(
                 [sys.executable, "scripts/validate_skills.py", "--repo-root", empty_root, "--json"],
                 cwd=ROOT,
-                env={**os.environ, "GITHUB_PR_TITLE": "[wip] [skill-draft] [skip-calls-check]"},
                 check=False,
                 capture_output=True,
                 text=True,

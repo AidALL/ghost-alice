@@ -1,9 +1,4 @@
-"""What the installer registers in the host: hooks, managed rule blocks and command wrappers.
-
-Port of `installer_lib/install.sh:5-26, 783-847`, `installer_lib/bootstrap.sh:12-152`
-and `installer_lib/platform.sh:59-61`. A later change splits this into one
-module per host.
-"""
+"""What the installer registers in the host: hooks, managed rule blocks and command wrappers."""
 
 from __future__ import annotations
 
@@ -38,21 +33,12 @@ def claude_bootstrap_source() -> Path:
     return runner.REPO_ROOT / "platforms" / "claude" / "CLAUDE.md"
 
 
-def codex_hooks_supported(platform: str) -> bool:
-    """Always true (`platform.sh:59-61`)."""
-    return True
-
-
 def install_hooks(ctx: "Context", action: str, platform: str) -> bool:
     """`install_hooks.py --core-source-root --platform --hook-shared-dir --skills-dir
     [--visibility] [--uninstall|--status] [--addon-source ...]`; install
-    defaults visibility to `dynamic`; status and doctor pass no visibility
-    (`install.sh:783-847`; status and doctor pass no visibility)."""
+    defaults visibility to `dynamic`; status and doctor pass no visibility."""
     report.emit("")
     report.info(f"Agent hook {action}... ({HOOK_ACTION_LABEL})")
-    if not codex_hooks_supported(platform):
-        report.info("Codex hooks are unavailable in this runtime; skipping.")
-        return True
     hook_py = runner.REPO_ROOT / "_shared" / "install_hooks.py"
     if not hook_py.is_file():
         report.error(f"install_hooks.py not found: {hook_py}")
@@ -90,7 +76,7 @@ def _merge_block(args: list[str], failure: str, proposed_prefix: str, updated: s
 
 
 def ensure_claude_bootstrap(ctx: "Context") -> bool:
-    """`global_rule_blocks.py claude-merge --source --dest --proposed`; `proposed:` → warning (`bootstrap.sh:12-38`)."""
+    """`global_rule_blocks.py claude-merge --source --dest --proposed`; `proposed:` → warning."""
     claude_home = locations.claude_home()
     rules = claude_home / "CLAUDE.md"
     claude_home.mkdir(parents=True, exist_ok=True)
@@ -102,7 +88,7 @@ def ensure_claude_bootstrap(ctx: "Context") -> bool:
 
 
 def ensure_codex_bootstrap(ctx: "Context") -> bool:
-    """`global_rule_blocks.py codex-merge --source --loader --dest --proposed` (`bootstrap.sh:86-112`)."""
+    """`global_rule_blocks.py codex-merge --source --loader --dest --proposed`."""
     codex_home = locations.codex_home()
     agents = codex_home / "AGENTS.md"
     codex_home.mkdir(parents=True, exist_ok=True)
@@ -132,7 +118,7 @@ def _remove_block(args: list[str], failure: str, removed: str, updated: str, req
 
 
 def remove_claude_bootstrap(ctx: "Context", require_change: bool = False) -> bool:
-    """`global_rule_blocks.py claude-remove --dest`; result prefixes decide the message (`bootstrap.sh:40-76`)."""
+    """`global_rule_blocks.py claude-remove --dest`; result prefixes decide the message."""
     rules = locations.claude_home() / "CLAUDE.md"
     if not rules.is_file():
         return not require_change
@@ -164,7 +150,7 @@ def remove_codex_bootstrap_if_unused(ctx: "Context", skills_root: Path) -> bool:
 
 
 def sync_commands(ctx: "Context", mode: str = "sync", target: str = "all") -> int:
-    """`commands_sync.py <catalog> <checkout .claude/commands> <mode> <target>`; a missing catalog is a warning (`install.sh:5-26`)."""
+    """`commands_sync.py <catalog> <checkout .claude/commands> <mode> <target>`; a missing catalog is a warning."""
     catalog = runner.REPO_ROOT / "skill-catalog" / "skills.json"
     if not catalog.is_file():
         report.warn(f"skills.json not found: {catalog}")

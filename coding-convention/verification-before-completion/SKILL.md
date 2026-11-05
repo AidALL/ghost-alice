@@ -23,7 +23,7 @@ A verdict you endorse is your claim, including a reviewer's verdict. A new absen
 
 ## Verify-or-reuse gate
 
-Before inspecting an artifact again, apply [references/verify-or-reuse.md](references/verify-or-reuse.md). The executable helper is `scripts/verify_or_reuse.py`, resolved relative to this skill.
+Before inspecting an artifact again, apply [references/verify-or-reuse.md](references/verify-or-reuse.md).
 
 ## Evidence selection and stop gate
 

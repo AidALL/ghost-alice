@@ -6,45 +6,32 @@ runtime), so the update does not stop or start the service.
 from __future__ import annotations
 
 import argparse
-import io
 import json
 from pathlib import Path
 import subprocess
 import sys
-import tarfile
-import tempfile
 
 
 class SourceUpdate:
     def __init__(self, root):
         self.root, self.stash, self.attempted = Path(root), None, False
-        self.temporary = tempfile.TemporaryDirectory(prefix='ghost-alice-source-stage-')
-        self.stage_root = Path(self.temporary.name)
 
-    def git(self, *args, raw=False):
+    def git(self, *args):
         result = subprocess.run(['git', '-C', str(self.root), *args], capture_output=True)
         if result.returncode:
             raise RuntimeError('Git source update command failed: ' + args[0] + ': ' + result.stderr.decode(errors='replace').strip())
-        return result.stdout if raw else result.stdout.decode().strip()
+        return result.stdout.decode().strip()
 
     def prepare(self):
         if not self.root.is_absolute() or self.git('rev-parse', '--is-inside-work-tree') != 'true':
             raise ValueError('Source is not an absolute Git worktree')
-        self.branch = self.git('symbolic-ref', '--quiet', '--short', 'HEAD')
-        self.upstream = self.git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
+        self.git('symbolic-ref', '--quiet', '--short', 'HEAD')
+        self.git('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}')
         self.git('fetch')
         self.before_head = self.git('rev-parse', 'HEAD')
         self.target = self.git('rev-parse', '@{u}')
         self.git('merge-base', '--is-ancestor', self.before_head, self.target)
         self.before_status = self.git('status', '--porcelain=v1', '--untracked-files=all')
-        changed = set()
-        for args in (('diff', '--no-renames', '--name-only', '-z', 'HEAD', self.target),
-                     ('diff', '--no-renames', '--name-only', '-z', 'HEAD'), ('ls-files', '--others', '--exclude-standard', '-z')):
-            changed.update(p for p in self.git(*args, raw=True).decode().split('\0') if p)
-        self.changed_paths = tuple(self.root / p for p in sorted(changed))
-        archive = self.git('archive', '--format=tar', self.target, raw=True)
-        with tarfile.open(fileobj=io.BytesIO(archive)) as stream:
-            stream.extractall(self.stage_root, filter='data')
 
     def publish(self):
         if self.git('rev-parse', 'HEAD') != self.before_head or self.git('status', '--porcelain=v1', '--untracked-files=all') != self.before_status:
@@ -80,9 +67,6 @@ class SourceUpdate:
             self.restore()
             raise
 
-    def cleanup(self):
-        self.temporary.cleanup()
-
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -98,8 +82,6 @@ def main(argv=None):
         print(json.dumps(dict(status='blocked', error_code='SOURCE_UPDATE', phase='source-update', detail=str(exc))),
               file=sys.stderr)
         return 2
-    finally:
-        operation.cleanup()
 
 
 if __name__ == '__main__':

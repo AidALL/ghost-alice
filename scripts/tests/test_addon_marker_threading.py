@@ -1,4 +1,4 @@
-"""Copy-mode ownership marker attribution checks across CLI and PowerShell.
+"""Copy-mode ownership marker attribution checks across CLI.
 
 The marker carries owner=addon and addon_id so the ownership classifier
 can validate the selected addon.
@@ -18,7 +18,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MARKER_CLI = REPO_ROOT / "_shared" / "installer_assets_cli.py"
-# Append (do not insert at 0): keep scripts/tests at sys.path[0] so unittest discover resolves the scripts/tests copy of a basename that also exists under _shared (e.g. test_completion_check_validator.py). Inserting _shared at 0 shadows that copy and breaks `unittest discover -s scripts/tests` in CI.
 sys.path.append(str(REPO_ROOT / "_shared"))
 
 from installer_assets import (  # noqa: E402
@@ -81,11 +80,6 @@ class AddonTargetCliTest(unittest.TestCase):
         result = self._run_cli("--addon-target", "noop", str(dest), "symlink", "noop")
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
         self.assertFalse((dest / ".ghost-alice-install.json").exists())
-
-
-class InstallerThreadsAddonAttributionTest(unittest.TestCase):
-    """PowerShell parity: the Windows installer is only assertable by source on
-    this platform. The bash path is proven end-to-end by the shell e2e."""
 
 
 if __name__ == "__main__":

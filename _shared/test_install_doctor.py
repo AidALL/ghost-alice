@@ -612,7 +612,7 @@ class NativeIntakeWaitsTest(unittest.TestCase):
         self.assertTrue(lines[0].startswith("native-intake-waits: unavailable ("))
 
 
-class NodeRuntimeRunPathTest(unittest.TestCase):
+class NodeRuntimeRunPathCase(unittest.TestCase):
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
         self.root = Path(self._tmp.name)
@@ -758,6 +758,8 @@ class NodeRuntimeRunPathTest(unittest.TestCase):
         self.assertEqual(after, before, "doctor must not mutate runtime or Codex config")
         return result, output.getvalue()
 
+
+class NodeRuntimeRunPathTest(NodeRuntimeRunPathCase):
     def test_run_prints_native_intake_waits_without_changing_the_result(self) -> None:
         result, output = self._run("claude", path_node=self._runtime())
         self.assertEqual(result, 0, output)
@@ -1043,7 +1045,7 @@ class NodeRuntimeRunPathTest(unittest.TestCase):
         self.assertIn("node-runtime: invalid (runtime-config:config", unreadable_output)
 
 
-class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
+class RetentionFailureDoctorTest(NodeRuntimeRunPathCase):
     """Doctor reads the retention failure record that `state_retention` writes, at the path it writes it."""
 
     def setUp(self) -> None:
@@ -1100,7 +1102,7 @@ class RetentionFailureDoctorTest(NodeRuntimeRunPathTest):
                          "1 failures; last 2026-10-21T00:00:00Z session-logs OSError")
 
 
-class HookRejectionDoctorTest(NodeRuntimeRunPathTest):
+class HookRejectionDoctorTest(NodeRuntimeRunPathCase):
     """Doctor reads the hook runner's command rejections from the strict session logs the runner writes them to."""
 
     def setUp(self) -> None:
@@ -1300,7 +1302,6 @@ class RuntimeCoreAuditTest(unittest.TestCase):
             "runtime_config.py",
             "work_impact_projection.py",
             "strict_session_log.py",
-            "governance_events.py",
             "text_lines.py",
         ):
             self.assertIn(dependency, install_doctor.RUNTIME_SHARED_FILES)

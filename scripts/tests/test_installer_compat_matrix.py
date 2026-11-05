@@ -18,7 +18,6 @@ MATRIX_DOC = REPO_ROOT / "docs" / "policies" / "installer-platform-compatibility
 RUNNER = REPO_ROOT / "scripts" / "run_installer_compat_tests.py"
 SKILL_VALIDATION_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "skill-validation.yml"
 CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
-SKILL_GATE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "skill-gate-contract.yml"
 
 
 def _reached_test_files(command, test_files):
@@ -145,9 +144,6 @@ class InstallerCompatMatrixTest(unittest.TestCase):
 
         self.assertIn("Ghost-ALICE fresh clone install policy", matrix)
         self.assertIn("fresh `AidALL/ghost-alice` clone plus install", matrix)
-        self.assertIn("does not rewrite existing remotes", matrix)
-        self.assertIn("rename local checkout directories", matrix)
-        self.assertIn("expose repository migration flags", matrix)
         self.assertIn("managed stale checkout path allow rules", matrix)
 
     def test_runner_lists_full_installer_compatibility_suite(self) -> None:
@@ -163,14 +159,9 @@ class InstallerCompatMatrixTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr + result.stdout)
         output = result.stdout
         for expected in (
-            "merge-companion-v2",
             "installer-runtime-detection",
-            "installer-encoding",
             "installer-powershell-static",
-            "installer-cmd-wrapper",
             "installer-status-contract",
-            "installer-transaction",
-            "shared-install-hooks",
             "shared-all",
             "scripts-all",
             "skill-gate-contract",
@@ -369,7 +360,6 @@ class InstallerCompatMatrixTest(unittest.TestCase):
 
     def test_ci_unittest_batches_use_repo_local_runtime_runner(self) -> None:
         ci = CI_WORKFLOW.read_text(encoding="utf-8")
-        skill_gate = SKILL_GATE_WORKFLOW.read_text(encoding="utf-8")
 
         self.assertIn(
             "python3 scripts/run_installer_compat_tests.py --group shared-all",
@@ -379,12 +369,7 @@ class InstallerCompatMatrixTest(unittest.TestCase):
             "python3 scripts/run_installer_compat_tests.py --group scripts-all",
             ci,
         )
-        self.assertIn(
-            "python scripts/run_installer_compat_tests.py --group skill-gate-contract",
-            skill_gate,
-        )
         self.assertNotIn("-m unittest discover", ci)
-        self.assertNotIn("-m unittest", skill_gate)
         skill_validation = SKILL_VALIDATION_WORKFLOW.read_text(encoding="utf-8")
         self.assertIn(".tmp/skill-validation-result.json", skill_validation)
         self.assertNotIn("/tmp/result.json", skill_validation)

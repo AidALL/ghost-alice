@@ -111,7 +111,6 @@ For installer and platform changes, also run:
 
 ```bash
 python3 scripts/run_installer_compat_tests.py
-python3 scripts/validate_platform_adapters.py
 ```
 
 Windows installer changes should include PowerShell-oriented validation where possible.

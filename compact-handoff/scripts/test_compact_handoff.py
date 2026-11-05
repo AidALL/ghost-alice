@@ -99,7 +99,7 @@ class CompactHandoffValidatorTests(unittest.TestCase):
         self.assertIn("secret-like-value", report["errors"])
         self.assertNotIn(token, rendered)
 
-    def test_live_config_changes_require_concrete_rollback(self) -> None:
+    def test_blank_rollback_value_is_missing(self) -> None:
         completed = self.run_validator(
             """
 [compact-handoff]
@@ -118,7 +118,7 @@ class CompactHandoffValidatorTests(unittest.TestCase):
         report = json.loads(completed.stdout)
 
         self.assertNotEqual(completed.returncode, 0)
-        self.assertIn("rollback-required-for-live-config", report["errors"])
+        self.assertIn("missing:rollback", report["errors"])
 
 
 if __name__ == "__main__":

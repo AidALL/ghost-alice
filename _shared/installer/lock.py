@@ -1,8 +1,6 @@
 """The install lock around every command that changes the installation.
 
-Port of `installer_lib/install.sh:35-73`, extended to the uninstall, repair,
-cleanup-pending and gateway commands. `install_lock` owns the lock file; this
-module owns the owner string and the stale window, and restores a publish that
+`install_lock` owns the lock file; this module owns the owner string and the stale window, and restores a publish that
 stopped halfway before the command does anything else.
 """
 

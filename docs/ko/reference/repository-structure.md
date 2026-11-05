@@ -55,7 +55,7 @@
 | [task-router/](https://github.com/AidALL/ghost-alice/tree/main/task-router) | 정확한 세션 의도를 읽고 현재 작업과 스킬을 선택하는 Core 절차 |
 | [boundary-contract/](https://github.com/AidALL/ghost-alice/tree/main/boundary-contract) | 작업의 목표, 허용·금지 경로와 행동, 완료 조건, 단계, 중단 조건을 경계 계약으로 작성하는 게이트 |
 | [coding-convention/](https://github.com/AidALL/ghost-alice/tree/main/coding-convention) | 개발 작업 절차를 제공하는 스킬 모음 |
-| [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | 각 `SKILL.md` 머리말에서 생성한 스킬 카탈로그 `skills.json`과 그 스키마 `schema.json`, 직접 관리하는 게이트·어댑터 메타데이터 `session-gates.json`·`platform-adapters.json`, 애드온 매니페스트 스키마 `addon-schema.json` |
+| [skill-catalog/](https://github.com/AidALL/ghost-alice/tree/main/skill-catalog) | 각 `SKILL.md` 머리말에서 생성한 스킬 카탈로그 `skills.json`과 그 스키마 `schema.json`, 애드온 매니페스트 스키마 `addon-schema.json` |
 | [_shared/native_completion.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/native_completion.py) | Stop 스크립트가 호출하는 Core의 단일 평가 |
 | [_shared/stop_notice.py](https://github.com/AidALL/ghost-alice/blob/main/_shared/stop_notice.py) | Stop 안내 메시지: Stop 스크립트가 생성해 훅 로그가 있는 세션 폴더의 `stop-notice.json`에 기록하고, 훅 실행기가 그 파일의 경로를 `GHOST_ALICE_STOP_NOTICE_FILE`로 Stop 훅에 전달 |
 
@@ -84,13 +84,12 @@
 
 ## 런타임 상태 보존
 
-`_shared/state_retention.py`는 Core 설치가 `~/.ghost-alice`와 호스트 폴더 아래에 작성하는 파일과 폴더의 표 하나와, 각 항목이 커지지 않게 하는 규칙을 가집니다. 파일을 작성하는 코드가 작성할 때 그 규칙을 적용하므로, 파일을 만든 코드가 규칙이 더 남기지 않는 것을 삭제합니다. `io-trace.jsonl`, `governance-events.jsonl`처럼 여러 프로세스가 덧붙이는 기록은 그 로그에 거는 잠금 하나 아래에서 덧붙이고 규칙을 적용합니다. 그래서 다른 프로세스가 회전하기 전에 읽은 크기로 회전하는 일이 없습니다. 삭제가 실패해도 작성하는 코드는 멈추지 않습니다. 실패는 `~/.ghost-alice/state-retention-failures.jsonl`에 한 줄로 기록되고, 이 파일은 마지막 500줄만 남깁니다. `--doctor`는 이 기록을 `state-retention` 줄로 보고합니다. 로그의 잠금을 2초 넘게 기다린 작성 코드는 규칙을 적용하지 않고 줄만 덧붙인 뒤, 기다린 사실을 같은 파일에 기록합니다. 끝까지 작성하지 못한 로그 줄은 사라집니다. `state_retention.append`는 가능하면 그 실패를 같은 파일에 기록하고, 작성 코드는 계속 실행합니다. 인스톨러가 배포를 중지한 자산을 이동하는 단계만 오류를 전달받아 그 자산을 복원합니다. Windows와 `flock`을 거부하는 파일 시스템에서는 로그 작성 코드가 잠금 없이 규칙을 적용합니다. 인스톨러도 삭제하지 못한 스테이징 폴더나 이전 인스톨러의 롤백 폴더를 같은 파일에 기록합니다. 테스트 하나가 빈 홈에 설치하고, 등록된 훅을 모두 호출하고, 게이트웨이 요청 하나를 전달하고, 제거합니다. 작성된 파일이나 폴더가 표의 어느 항목과도 맞지 않으면 테스트가 실패합니다. 다른 테스트는 파일을 삭제하는 항목에 그 규칙을 적용하는 작성 코드가 없고 그 코드를 더할 변경도 적혀 있지 않으면 실패합니다.
+`_shared/state_retention.py`는 Core 설치가 `~/.ghost-alice`와 호스트 폴더 아래에 작성하는 파일과 폴더의 표 하나와, 각 항목이 커지지 않게 하는 규칙을 가집니다. 파일을 작성하는 코드가 작성할 때 그 규칙을 적용하므로, 파일을 만든 코드가 규칙이 더 남기지 않는 것을 삭제합니다. `io-trace.jsonl`처럼 여러 프로세스가 덧붙이는 기록은 그 로그에 거는 잠금 하나 아래에서 덧붙이고 규칙을 적용합니다. 그래서 다른 프로세스가 회전하기 전에 읽은 크기로 회전하는 일이 없습니다. 삭제가 실패해도 작성하는 코드는 멈추지 않습니다. 실패는 `~/.ghost-alice/state-retention-failures.jsonl`에 한 줄로 기록되고, 이 파일은 마지막 500줄만 남깁니다. `--doctor`는 이 기록을 `state-retention` 줄로 보고합니다. 로그의 잠금을 2초 넘게 기다린 작성 코드는 규칙을 적용하지 않고 줄만 덧붙인 뒤, 기다린 사실을 같은 파일에 기록합니다. 끝까지 작성하지 못한 로그 줄은 사라집니다. `state_retention.append`는 가능하면 그 실패를 같은 파일에 기록하고, 작성 코드는 계속 실행합니다. 인스톨러가 배포를 중지한 자산을 이동하는 단계만 오류를 전달받아 그 자산을 복원합니다. Windows와 `flock`을 거부하는 파일 시스템에서는 로그 작성 코드가 잠금 없이 규칙을 적용합니다. 인스톨러도 삭제하지 못한 스테이징 폴더나 이전 인스톨러의 롤백 폴더를 같은 파일에 기록합니다. 테스트 하나가 빈 홈에 설치하고, 등록된 훅을 모두 호출하고, 게이트웨이 요청 하나를 전달하고, 제거합니다. 작성된 파일이나 폴더가 표의 어느 항목과도 맞지 않으면 테스트가 실패합니다. 다른 테스트는 파일을 삭제하는 항목에 그 규칙을 적용하는 작성 코드가 없으면 실패합니다.
 
 | 경로 | 규칙 | 적용 주체 |
 | --- | --- | --- |
 | `~/.ghost-alice/session-logs/<host>/<session>/` | 모든 호스트 폴더에서 훅 로그가 14일 넘게 갱신되지 않은 세션 폴더를 오래된 순으로 한 번에 50개까지 삭제 | 새 세션의 첫 훅 로그 행 |
 | `~/.ghost-alice/io-trace.jsonl` | 10,000줄을 넘으면 마지막 5,000줄만 남김 | io-trace 행마다 |
-| `~/.ghost-alice/governance-events.jsonl` | 5MB를 넘으면 이전 파일 `governance-events.jsonl.1` 하나로 이동 | 거버넌스 이벤트마다 |
 | `~/.ghost-alice/install/` | 최근 설치 실행 30회분, 실행마다 로그 하나와 이벤트 기록 하나 | 인스톨러, 새 로그를 열기 전 |
 | `~/.ghost-alice/install-state/<host>-events.jsonl` | 5MB를 넘으면 이전 파일 하나로 이동 | 게시 실패나, 더 이상 설치하지 않는 스킬·명령을 백업으로 옮길 때마다 |
 | `~/.ghost-alice/rollbacks/` | 끝난 게시 중 최근 20개. 끝나지 않은 게시는 복원될 때까지 남김 | 게시마다 |

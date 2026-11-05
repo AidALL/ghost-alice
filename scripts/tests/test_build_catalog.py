@@ -43,38 +43,15 @@ class BuildCatalogFamilyTest(unittest.TestCase):
                 "coding-convention",
             )
 
-    def test_governance_class_is_separate_from_family(self) -> None:
+    def test_skill_evolution_is_domain_family(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo_root = Path(tmp)
-            write_skill(repo_root, "task-router", "task-router")
             write_skill(repo_root, "skill-evolution", "skill-evolution")
-            write_skill(repo_root, "sample-domain-skill", "sample-domain-skill")
-            write_skill(
-                repo_root,
-                "coding-convention/verification-before-completion",
-                "verification-before-completion",
-            )
 
             catalog = build_catalog(repo_root)
             by_name = {skill["name"]: skill for skill in catalog["skills"]}
 
             self.assertEqual(by_name["skill-evolution"]["family"], "domain")
-            self.assertEqual(
-                by_name["skill-evolution"]["governance_class"],
-                "governance-subskill",
-            )
-            self.assertEqual(
-                by_name["sample-domain-skill"]["governance_class"],
-                "non-governance-domain",
-            )
-            self.assertEqual(
-                by_name["task-router"]["governance_class"],
-                "core-gate",
-            )
-            self.assertEqual(
-                by_name["verification-before-completion"]["governance_class"],
-                "completion-gate",
-            )
 
 
 if __name__ == "__main__":

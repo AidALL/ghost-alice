@@ -343,19 +343,6 @@ class SourceIdentityTests(SourceCase):
                 self.assertEqual(source.update_source(), 3)
         run_tool.assert_called_once_with("_shared/installer_source_update.py", "--source-dir", str(self.root))
 
-    def test_session_gate_contract_must_exist(self):
-        # bootstrap.sh:5-10
-        root = self.root / "src"
-        (root / "skill-catalog").mkdir(parents=True)
-        self.enterContext(use_source(root))
-        out = io.StringIO()
-        with contextlib.redirect_stdout(out), self.assertRaises(runner.InstallerExit) as stop:
-            source.assert_session_gate_contract()
-        self.assertEqual(stop.exception.code, 1)
-        self.assertIn(f"[ERROR] Session gate contract file missing: {root / 'skill-catalog' / 'session-gates.json'}", out.getvalue())
-        (root / "skill-catalog" / "session-gates.json").write_text("{}", encoding="utf-8")
-        source.assert_session_gate_contract()
-
 
 STOP_HINT = ("Rerun this command from the install source, or add --adopt-source to install from this checkout "
              "and record it as the install source.")

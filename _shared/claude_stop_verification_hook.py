@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from native_transcript import assistant_text_this_turn as _assistant_text_this_turn  # noqa: F401
 from stop_notice import ENV_FILE, ensure_stop_notice
 
 

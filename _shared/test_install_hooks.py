@@ -149,13 +149,13 @@ def _run_hook_command(
 
 def _run_reviewed_stop_command(command, input_text, env=None, *, platform="claude", record_review=True):
     """Exercise generated commands against explicitly owned synthetic evidence."""
-    from claude_stop_verification_hook import _assistant_text_this_turn
+    from native_transcript import assistant_text_this_turn
     from test_completion_skill_evidence import StopHookSkillEvidenceTests
     payload = json.loads(input_text)
     text = payload.get("last_assistant_message")
     if text is None:
         entries = [json.loads(row) for row in Path(payload["transcript_path"]).read_text().splitlines()]
-        text = _assistant_text_this_turn(entries)
+        text = assistant_text_this_turn(entries)
     hook_env = {key: value for key, value in (env or os.environ).items()
                 if key != "CODEX_THREAD_ID" and not key.startswith("GHOST_ALICE_")}
     hook_env["GHOST_ALICE_AGENT_VISIBILITY"] = (env or {}).get("GHOST_ALICE_AGENT_VISIBILITY", "strict")
@@ -233,7 +233,6 @@ def _write_session_intent_preflight(
     session_dir.mkdir(parents=True, exist_ok=True)
     state_path = session_dir / "intent-state.json"
     current_goal = "semantic intent recorded" if semantic_delta else ""
-    user_intent_summary = "agent semantic delta recorded" if semantic_delta else ""
     acceptance_criteria = [
         {
             "id": "test-semantic-delta",
@@ -247,16 +246,12 @@ def _write_session_intent_preflight(
             "platform": platform,
             "session_id": session_id,
             "current_goal": current_goal,
-            "user_intent_summary": user_intent_summary,
             "constraints": [],
             "non_goals": [],
             "open_questions": [],
             "acceptance_criteria": acceptance_criteria,
             "decisions": [],
-            "risk_flags": [],
-            "consumer_hints": {},
             "intake_status": "observed",
-            "last_semantic_delta_status": "provided" if semantic_delta else "not-provided",
         }, indent=2)
         + "\n",
         encoding="utf-8",
@@ -286,7 +281,7 @@ def _write_session_intent_preflight(
                     "session_id": session_id,
                     "source": "agent",
                     "intent_delta_digest": "sha256:semantic-delta",
-                    "delta_keys": ["current_goal", "user_intent_summary"],
+                    "delta_keys": ["current_goal"],
                 })
                 + "\n"
             )
@@ -540,9 +535,6 @@ class TestMessageLanguage(unittest.TestCase):
         self.assertNotIn("recordIoTrace(", source)
         self.assertNotIn("ioTraceLogPath", source)
 
-    def test_t_returns_english(self):
-        self.assertEqual(install_hooks._t("Localized", "English"), "English")
-
     def test_generated_hook_messages_use_bridge_labels(self):
         for command, env in (
             (install_hooks.SESSION_INTENT_COMMAND, None),
@@ -557,8 +549,6 @@ class TestMessageLanguage(unittest.TestCase):
             self.assertIn("Internal instruction:", result.stdout)
             self.assertIn("User:", result.stdout)
             self.assertIn("Tech:", result.stdout)
-            self.assertNotIn("Non-developer note", result.stdout)
-            self.assertNotIn("Developer note", result.stdout)
 
     def test_session_intent_hook_command_uses_repo_tmp_root(self):
         with tempfile.TemporaryDirectory() as home, patch.dict(os.environ,
@@ -597,7 +587,7 @@ class TestMessageLanguage(unittest.TestCase):
     def test_reminder_texts_hold_only_live_instructions(self):
         # The task-router reminder is retired; its text has no reader.
         data = json.loads(Path(install_hooks.__file__).with_name("reminder_texts.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(data), {"session-intent", "tool-checkpoint", "terminal-routing"})
+        self.assertEqual(set(data), {"session-intent", "tool-checkpoint"})
 
     def test_session_intent_reminder_preserves_receipt_and_data_minimization(self):
         self.assertIn("digest-only intake", install_hooks.SESSION_INTENT_INTERNAL)
@@ -2397,7 +2387,6 @@ class TestInstallHook(TempHomeTestCase):
         with (
             patch.dict(os.environ, hook_env, clear=True),
             patch.object(install_hooks, "_session_intent_root", return_value=intent_root),
-            patch.object(install_hooks, "_codex_hooks_supported", return_value=True),
         ):
             for platform in ("claude", "codex"):
                 with self.subTest(platform=platform):
@@ -2762,8 +2751,7 @@ class TestIoTraceFailedCallEvent(TempHomeTestCase):
 
     def test_codex_install_adds_no_failure_event(self):
         self._create_platform_dir("codex")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            install_hooks.install_hook("codex")
+        install_hooks.install_hook("codex")
         self.assertEqual(len(self._audit_commands("codex", "PostToolUse")), 1)
         self.assertNotIn("PostToolUseFailure", self._read_settings("codex")["hooks"])
 
@@ -2894,13 +2882,11 @@ class TestCheckStatus(TempHomeTestCase):
     def test_status_detail_reports_codex_feature_flag_disabled(self):
         """Codex hooks.json with feature flag off is config disabled, not missing."""
         self._create_platform_dir("codex")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
         self._codex_config_toml().write_text("[features]\nhooks = false\n", encoding="utf-8")
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            status = install_hooks.check_status_detail("codex")
+        status = install_hooks.check_status_detail("codex")
 
         self.assertEqual(status.status_token, "HOOK_CONFIG_DISABLED")
         self.assertEqual(status.legacy_status, "missing")
@@ -2927,15 +2913,14 @@ class TestCheckStatus(TempHomeTestCase):
     def test_status_installed_for_codex_without_web_search_hook(self):
         """External evidence guidance is not a required input hook."""
         self._create_platform_dir("codex")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            self.assertEqual(install_hooks.install_hook("codex"), "installed")
-            settings = self._read_settings("codex")
-            settings["hooks"]["UserPromptSubmit"] = [
-                entry for entry in settings["hooks"]["UserPromptSubmit"]
-                if not any(install_hooks.WEB_SEARCH_FIRST_MARKER in h.get("command", "") for h in entry["hooks"])
-            ]
-            self._write_settings("codex", settings)
-            result = install_hooks.check_status("codex")
+        self.assertEqual(install_hooks.install_hook("codex"), "installed")
+        settings = self._read_settings("codex")
+        settings["hooks"]["UserPromptSubmit"] = [
+            entry for entry in settings["hooks"]["UserPromptSubmit"]
+            if not any(install_hooks.WEB_SEARCH_FIRST_MARKER in h.get("command", "") for h in entry["hooks"])
+        ]
+        self._write_settings("codex", settings)
+        result = install_hooks.check_status("codex")
         self.assertEqual(result, "installed")
 
     def test_status_installed_for_claude_without_web_search_hook(self):
@@ -3030,14 +3015,12 @@ class TestPlatformSkip(TempHomeTestCase):
 
     def test_uninstall_skips_missing_platform(self):
         """Return skipped when the platform directory is absent."""
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.uninstall_hook("codex")
+        result = install_hooks.uninstall_hook("codex")
         self.assertEqual(result, "skipped")
 
     def test_status_skips_missing_platform(self):
         """Return skipped when the platform directory is absent."""
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.check_status("codex")
+        result = install_hooks.check_status("codex")
         self.assertEqual(result, "skipped")
 
 
@@ -3048,8 +3031,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         """Codex installs hooks.json and enables the config.toml feature flag."""
         self._create_platform_dir("codex")
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         hooks_file = self.fake_home / ".codex" / "hooks.json"
@@ -3102,8 +3084,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         """Codex installs trusted hashes for every Ghost-ALICE hook it writes."""
         self._create_platform_dir("codex")
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         settings_file = self.fake_home / ".codex" / "hooks.json"
@@ -3151,8 +3132,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             event: [{"hooks": [{"type": "command", "command": command}]}]
             for event, command in user_commands.items()
         }})
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            install_hooks.install_hook("codex", addon_sources=[str(watcher), str(observer)])
+        install_hooks.install_hook("codex", addon_sources=[str(watcher), str(observer)])
         settings = self._read_settings("codex")
         state = tomllib.loads(self._codex_config_toml().read_text())["hooks"]["state"]
         verified_count = 0
@@ -3175,22 +3155,21 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
 
         self._create_platform_dir("codex")
         adapter = _make_addon(self.fake_home, [{"id": "obs", "event": "post_tool_use", "script": "hooks/obs.py"}])
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            install_hooks.install_hook("codex", addon_sources=[str(adapter)])
-            hooks_file = self._config_file("codex")
-            settings_bytes = hooks_file.read_bytes()
-            key = f"{hooks_file.as_posix()}:post_tool_use:1:0"
-            config_file = self._codex_config_toml()
-            header = f"[hooks.state.{json.dumps(key)}]"
-            config_file.write_text(re.sub(
-                rf"(?ms)^{re.escape(header)}\n.*?(?=^\[|\Z)", "", config_file.read_text(),
-            ))
-            self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "installed")
-            self.assertIn(key, tomllib.loads(config_file.read_text())["hooks"]["state"])
-            self.assertEqual(hooks_file.read_bytes(), settings_bytes)
-            config_bytes = config_file.read_bytes()
-            self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "already")
-            self.assertEqual(config_file.read_bytes(), config_bytes)
+        install_hooks.install_hook("codex", addon_sources=[str(adapter)])
+        hooks_file = self._config_file("codex")
+        settings_bytes = hooks_file.read_bytes()
+        key = f"{hooks_file.as_posix()}:post_tool_use:1:0"
+        config_file = self._codex_config_toml()
+        header = f"[hooks.state.{json.dumps(key)}]"
+        config_file.write_text(re.sub(
+            rf"(?ms)^{re.escape(header)}\n.*?(?=^\[|\Z)", "", config_file.read_text(),
+        ))
+        self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "installed")
+        self.assertIn(key, tomllib.loads(config_file.read_text())["hooks"]["state"])
+        self.assertEqual(hooks_file.read_bytes(), settings_bytes)
+        config_bytes = config_file.read_bytes()
+        self.assertEqual(install_hooks.install_hook("codex", addon_sources=[str(adapter)]), "already")
+        self.assertEqual(config_file.read_bytes(), config_bytes)
 
     def test_install_codex_trusts_current_project_config_layer(self):
         """Codex install marks the Ghost-ALICE project config layer as trusted."""
@@ -3198,10 +3177,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         repo = self.fake_home / "repo" / "Ghost-ALICE"
         repo.mkdir(parents=True)
 
-        with (
-            patch.object(install_hooks, "_repo_root_from_this_file", return_value=repo),
-            patch.object(install_hooks, "_codex_hooks_supported", return_value=True),
-        ):
+        with patch.object(install_hooks, "_repo_root_from_this_file", return_value=repo):
             destination = install_hooks._default_destination("codex")
             destination = __import__('dataclasses').replace(destination,
                 core_source_root=str(Path(install_hooks.__file__).resolve().parents[1]),project_root=str(repo))
@@ -3228,10 +3204,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             self.skipTest("POSIX Homebrew path regression does not apply on Windows")
         self._create_platform_dir("codex")
 
-        with (
-            patch.object(install_hooks.sys, "executable", VERSIONED_HOMEBREW_PYTHON),
-            patch.object(install_hooks, "_codex_hooks_supported", return_value=True),
-        ):
+        with patch.object(install_hooks.sys, "executable", VERSIONED_HOMEBREW_PYTHON):
             result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
@@ -3355,8 +3328,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             encoding="utf-8",
         )
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         config = tomllib.loads(config_toml.read_text(encoding="utf-8"))
@@ -3400,8 +3372,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             encoding="utf-8",
         )
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         config = tomllib.loads(config_toml.read_text(encoding="utf-8"))
@@ -3450,8 +3421,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             },
         })
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         settings = self._read_settings("codex")
@@ -3506,8 +3476,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             },
         })
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         settings = self._read_settings("codex")
@@ -3540,8 +3509,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
             },
         })
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.check_status("codex")
+        result = install_hooks.check_status("codex")
         self.assertEqual(result, "missing")
 
     def test_install_codex_preserves_existing_config_toml(self):
@@ -3550,8 +3518,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config_toml = self._codex_config_toml()
         config_toml.write_text('[features]\nmulti_agent = true\n', encoding="utf-8")
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         content = config_toml.read_text(encoding="utf-8")
@@ -3565,8 +3532,7 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config_toml = self._codex_config_toml()
         config_toml.write_text('[features]\nhooks = false\nmulti_agent = true\n', encoding="utf-8")
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         trace = self.fake_home / ".ghost-alice" / "install-state" / "codex-hook-feature-change.json"
@@ -3585,51 +3551,13 @@ class TestCodexUnixHookConfig(TempHomeTestCase):
         config_toml = self._codex_config_toml()
         config_toml.write_text('[features]\ncodex_hooks = true\nmulti_agent = true\n', encoding="utf-8")
 
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-            result = install_hooks.install_hook("codex")
+        result = install_hooks.install_hook("codex")
         self.assertEqual(result, "installed")
 
         content = config_toml.read_text(encoding="utf-8")
         self.assertIn("hooks = true", content)
         self.assertIn("multi_agent = true", content)
         self.assertNotIn("codex_hooks", content)
-
-
-class TestCodexHookSupportGuard(TempHomeTestCase):
-    """Codex hook support guard tests."""
-
-    def test_codex_hooks_supported_includes_windows_runtime(self):
-        """Windows runtime is not excluded from Codex hook installation."""
-        with patch.object(install_hooks, "_running_on_windows", return_value=True):
-            self.assertTrue(install_hooks._codex_hooks_supported())
-
-    def test_install_codex_hooks_unsupported_runtime(self):
-        """Skip hook installation on unsupported runtimes."""
-        self._create_platform_dir("codex")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=False):
-            result = install_hooks.install_hook("codex")
-        self.assertEqual(result, "unsupported")
-        settings_file = self.fake_home / ".codex" / "hooks.json"
-        self.assertFalse(settings_file.exists())
-
-    def test_uninstall_codex_hooks_unsupported_runtime(self):
-        """Skip hook removal on unsupported runtimes."""
-        self._write_settings("codex", {
-            "hooks": {"UserPromptSubmit": [install_hooks.SESSION_INTENT_ENTRY]},
-        })
-        original = (self.fake_home / ".codex" / "hooks.json").read_text(encoding="utf-8")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=False):
-            result = install_hooks.uninstall_hook("codex")
-        self.assertEqual(result, "unsupported")
-        current = (self.fake_home / ".codex" / "hooks.json").read_text(encoding="utf-8")
-        self.assertEqual(original, current)
-
-    def test_status_codex_hooks_unsupported_runtime(self):
-        """Codex status check returns unsupported on unsupported runtimes."""
-        self._create_platform_dir("codex")
-        with patch.object(install_hooks, "_codex_hooks_supported", return_value=False):
-            result = install_hooks.check_status("codex")
-        self.assertEqual(result, "unsupported")
 
 
 class TestCorruptJson(TempHomeTestCase):
@@ -3726,13 +3654,11 @@ class TestMultiPlatform(TempHomeTestCase):
             self._write_settings(p, {})
 
         for p in ("claude", "codex"):
-            with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-                result = install_hooks.install_hook(p)
+            result = install_hooks.install_hook(p)
             self.assertEqual(result, "installed", f"{p} install failed")
 
         for p in ("claude", "codex"):
-            with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
-                result = install_hooks.check_status(p)
+            result = install_hooks.check_status(p)
             self.assertEqual(result, "installed", f"{p} status check failed")
 
 

@@ -154,8 +154,7 @@ class RetentionInvariantTest(unittest.TestCase):
         self.run_hooks()
         self.forward_one_request()
         ghost = self.roots["ghost"]
-        for expected in (ghost / "io-trace.jsonl", ghost / "governance-events.jsonl",
-                         self.roots["gateway"] / "usage.jsonl"):
+        for expected in (ghost / "io-trace.jsonl", self.roots["gateway"] / "usage.jsonl"):
             self.assertTrue(expected.is_file(), f"the scenario wrote no {expected.name}")
         self.assertTrue(any((ghost / "session-logs").rglob("strict-hook-output.jsonl")))
         self.assertTrue(any((self.roots["record"] / "install").glob("*.log")))

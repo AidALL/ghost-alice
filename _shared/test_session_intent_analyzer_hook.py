@@ -364,9 +364,6 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
                     "platform": platform,
                     "session_id": session,
                     "state_path": str(session_dir / "intent-state.json"),
-                    "events_path": str(session_dir / "intent-events.jsonl"),
-                    "database_path": str(self.ledger_root.resolve() / "ghost-state.sqlite3"),
-                    "storage_backend": "sqlite",
                 })
                 for prompt in ("first objective", "second objective"):
                     body = json.loads(self.run_hook({"session_id": session, "prompt": prompt},
@@ -543,7 +540,6 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertIn(RECEIPT_START, payload["systemMessage"])
         receipt = receipt_from(payload["systemMessage"])
         state = self.ledger_root / "codex" / "s-receipt" / "intent-state.json"
-        events = state.with_name("intent-events.jsonl")
         event = self.events("s-receipt")[0]
         self.assertEqual(receipt, {
             "schema_version": "session-intent-observation-receipt.v1",
@@ -552,9 +548,6 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
             "platform": "codex",
             "session_id": "s-receipt",
             "state_path": str(state.resolve()),
-            "events_path": str(events.resolve()),
-            "database_path": str((self.ledger_root / "ghost-state.sqlite3").resolve()),
-            "storage_backend": "sqlite",
             "input_event_id": event["event_id"],
         })
         self.assertNotIn(prompt, result.stdout)
@@ -665,8 +658,6 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         row = self.events("s-digest-only")[0]
 
         self.assertEqual(state["intake_status"], "observed")
-        self.assertEqual(state["last_semantic_delta_status"], "not-provided")
-        self.assertEqual(state["semantic_delta_policy"], "agent-updates-when-intent-materially-changes")
         self.assertEqual(row["intent_delta_status"], "not-provided")
         self.assertNotIn("delta_keys", row)
 
@@ -678,7 +669,6 @@ class SessionIntentAnalyzerHookTests(unittest.TestCase):
         self.assertEqual(payload["continue"], True)
 
         session_dir = self.ledger_root / "codex" / "s-empty-payload"
-        self.assertNotIn(RECEIPT_START, payload["systemMessage"])
         self.assertFalse((session_dir / "intent-events.jsonl").exists())
         self.assertFalse((session_dir / "intent-state.json").exists())
         self.assertFalse((self.ledger_root / "codex" / "current-session.json").exists())

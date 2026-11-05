@@ -32,7 +32,6 @@ class ProjectRuntimePresenceTest(unittest.TestCase):
         self.assertIsNotNone(load_project_runtime())
 
 
-@unittest.skipUnless(MODULE_PATH.is_file(), "project_runtime.py is not implemented")
 class ProjectRuntimeTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

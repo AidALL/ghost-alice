@@ -7,7 +7,6 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOWS = (
     ".github/workflows/ci.yml",
-    ".github/workflows/skill-gate-contract.yml",
     ".github/workflows/skill-validation.yml",
 )
 

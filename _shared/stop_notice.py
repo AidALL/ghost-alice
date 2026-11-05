@@ -36,9 +36,6 @@ ISSUE_LABELS = {
     'assessment-required': 'no recorded review covers the claims in the completion block',
     'assessment-invalid': 'the recorded review is not valid for this answer',
     'assessment-unavailable': 'Core code could not look up a recorded review for this answer',
-    'authority-unavailable': 'the ledger location for this session is not set',
-    'input-unavailable': 'Core code could not identify the input this answer responds to',
-    'proof-invalid': 'the evidence in the completion block could not be read as review proof',
     'route-unavailable': 'no current response route is registered for this answer',
     'response-assessment-required': 'no recorded review matches this answer',
     'response-unbound': 'the recorded review is not bound to this answer',
@@ -82,7 +79,7 @@ def build_stop_notice(platform: str, native_input: Mapping[str, Any], env: Mappi
                    remaining_work={'declared': False}, text='')
     source = dict(env, GHOST_ALICE_PLATFORM=platform, GHOST_ALICE_SESSION_ID=session)
     # An empty answer has no claims or block to compare; the declaration in the current route still stands.
-    assessment = assess_native_completion(source, text=text, phase='final', native_input=dict(native_input))
+    assessment = assess_native_completion(source, text=text, native_input=dict(native_input))
     control = _control(text)
     block = extract_control_block(text, control) if control else ''
     message.update(input_event_id=assessment['input_event_id'], control=control,

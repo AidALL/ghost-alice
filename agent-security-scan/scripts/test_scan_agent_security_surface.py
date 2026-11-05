@@ -142,12 +142,11 @@ class AgentSecuritySurfaceScannerTests(unittest.TestCase):
                 self.assertIn("server", details)
                 self.assertNotIn("sk-test-abcdefghijklmnopqrstuvwxyz123456", json.dumps(details, ensure_ascii=False))
 
-    def test_json_exposes_finding_count_semantics(self) -> None:
+    def test_json_exposes_finding_count(self) -> None:
         repo, home = self.make_fixture()
         report = self.run_scanner(repo, home)
 
         self.assertEqual(report["finding_count"], len(report["findings"]))
-        self.assertEqual(report["finding_count_semantics"], "unique_resolved_path")
 
     def test_detects_mcp_package_manager_exec_beyond_npx_y(self) -> None:
         tmpdir = pathlib.Path(tempfile.mkdtemp(prefix="agent-security-scan-test-"))

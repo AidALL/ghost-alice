@@ -34,7 +34,7 @@ Please treat these areas as security-sensitive:
 - `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `Stop`, and `SessionStart` behavior
 - Secret helpers under `_shared/secrets/`
 - Installer writes to `~/.claude`, `~/.codex`, `~/.agents`, and `~/.ghost-alice`
-- Session intent ledgers and governance event logs
+- Session intent ledgers
 - Pending merge manifests and install-state manifests
 - Any path that can contain user prompts, local credentials, or private project metadata
 

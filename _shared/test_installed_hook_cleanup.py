@@ -10,7 +10,6 @@ import re
 import sys
 import tomllib
 import unittest
-from unittest.mock import patch
 
 import hook_definitions
 import install_doctor
@@ -37,12 +36,6 @@ def _without_hook_state(text):
 
 
 class InstalledHookCleanupTests(TempHomeTestCase):
-    def setUp(self):
-        super().setUp()
-        supported = patch.object(install_hooks, "_codex_hooks_supported", return_value=True)
-        supported.start()
-        self.addCleanup(supported.stop)
-
     def retired_forms(self, platform):
         """Every form an older installer wrote for a retired hook: with its marker, or with only its runner id."""
         forms = []

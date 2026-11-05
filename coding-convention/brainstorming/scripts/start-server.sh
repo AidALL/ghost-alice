@@ -36,11 +36,11 @@ while [[ $# -gt 0 ]]; do
       URL_HOST="$2"
       shift 2
       ;;
-    --foreground|--no-daemon)
+    --foreground)
       FOREGROUND="true"
       shift
       ;;
-    --background|--daemon)
+    --background)
       FORCE_BACKGROUND="true"
       shift
       ;;
@@ -89,13 +89,6 @@ LOG_FILE="${STATE_DIR}/server.log"
 
 # Create fresh session directory with content and state peers
 mkdir -p "${SESSION_DIR}/content" "$STATE_DIR"
-
-# Kill any existing server
-if [[ -f "$PID_FILE" ]]; then
-  old_pid=$(cat "$PID_FILE")
-  kill "$old_pid" 2>/dev/null
-  rm -f "$PID_FILE"
-fi
 
 cd "$SCRIPT_DIR"
 

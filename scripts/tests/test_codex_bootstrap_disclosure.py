@@ -68,7 +68,6 @@ class CodexBootstrapDisclosureTests(unittest.TestCase):
             self.assertIn("Project instruction files supply project-specific rules", body)
             self.assertIn("Explicit user instructions take precedence", body)
             self.assertIn("without reading the common governance file", body)
-            self.assertIn("even when a hook message points to its sections", body)
             self.assertNotIn("If trusted project instructions already supply the complete", body)
 
     def test_doctor_uses_managed_dependency_marker_independently_of_headings(self):

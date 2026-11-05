@@ -270,12 +270,10 @@ def request_shape(raw, encoding):
         return {'shape_unavailable': 'content-not-decoded'}
 
 
-def make_server(scope, output, origins=None, selection=None, port=0, selectors=None, server_selectors=None):
+def make_server(scope, output, origins=None, port=0, selectors=None, server_selectors=None):
     """Dispatch explicit platform callbacks with (request, declared_session).
 
-    The legacy single-argument selection callback remains Codex-only. Explicit
-    selectors use the native platform keys codex and claude; no signature is
-    inferred and duplicate Codex declarations are rejected.
+    Explicit selectors use the native platform keys codex and claude; no signature is inferred.
     """
     origins = dict(origins or ORIGINS)
     openers = {provider: urllib.request.build_opener(_OriginRedirectHandler(origin))
@@ -288,10 +286,6 @@ def make_server(scope, output, origins=None, selection=None, port=0, selectors=N
         key not in ('codex', 'claude') or not callable(callback) for key, callback in selectors.items())):
         raise ValueError('Explicit supported platform selection callbacks are required')
     dispatch = dict(selectors or {})
-    if selection is not None:
-        if not callable(selection) or 'codex' in dispatch:
-            raise ValueError('One explicit Codex selection callback is required')
-        dispatch['codex'] = lambda request, _session: selection(request)
 
     def record(value):
         value['observed_at'] = datetime.now(timezone.utc).isoformat()
@@ -497,8 +491,6 @@ def main(argv=None):
     server_selectors = {}
     if 'claude_dir' in config:
         origins['anthropic'] = ORIGINS['anthropic']
-        selectors['claude'] = lambda request, session: prepare_native_request(
-            request, config['ledger_root'], config['claude_dir'], platform='claude', session_id=session)
         server_selectors['claude'] = lambda request, session, betas: prepare_native_request(
             request, config['ledger_root'], config['claude_dir'], platform='claude', session_id=session,
             native_betas=betas)

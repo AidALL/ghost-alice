@@ -1,7 +1,4 @@
-"""git and node: find them or try the host package manager (port of `installer_lib/prerequisites.sh`).
-
-A later change moves this behind a `prerequisites` command; the install still runs it first.
-"""
+"""git and node: find them or try the host package manager."""
 
 from __future__ import annotations
 
@@ -31,14 +28,14 @@ def _is_root() -> bool:
 
 
 def run_as_root_or_sudo(argv: list[str]) -> int:
-    """Run directly as root, through `sudo` when available, else directly (`prerequisites.sh:9-17`)."""
+    """Run directly as root, through `sudo` when available, else directly."""
     if not _is_root() and command_exists("sudo"):
         argv = ["sudo", *argv]
     return runner.run_command(argv).returncode
 
 
 def manual_notice(tool: str) -> None:
-    """The per-tool warning block (`prerequisites.sh:19-42`)."""
+    """The per-tool warning block."""
     if tool == "git":
         report.warn("Git was not found and automatic setup did not complete. Install Git, then rerun the installer.")
         report.warn("  macOS:   brew install git")
@@ -68,7 +65,7 @@ def _attempt(tool: str, label: str, run) -> bool:
 
 
 def try_install_unix_prerequisite(tool: str) -> bool:
-    """brew → apt-get → dnf → yum → pacman → winget → choco → scoop, first found wins (`prerequisites.sh:44-156`)."""
+    """brew → apt-get → dnf → yum → pacman → winget → choco → scoop, first found wins."""
     packages = PACKAGES.get(tool)
     if packages is None:
         manual_notice(tool)
@@ -107,7 +104,7 @@ def try_install_unix_prerequisite(tool: str) -> bool:
 
 
 def install_prerequisites() -> bool:
-    """git then node; a miss is a warning and the install continues (`prerequisites.sh:158-174`)."""
+    """git then node; a miss is a warning and the install continues."""
     missing = False
     for tool in ("git", "node"):
         if not try_install_unix_prerequisite(tool):

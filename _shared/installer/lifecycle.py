@@ -1,6 +1,5 @@
 """Command flows: uninstall (selected skills, addons, full) and repair.
 
-Port of `installer_lib/uninstall.sh:283-488` and `installer_lib/install.sh:655-726`.
 `--update-source` is `source.update_source`.
 """
 
@@ -25,7 +24,7 @@ class UninstallRequest:
 
 
 def parse_uninstall_args(args: list[str]) -> UninstallRequest:
-    """`--addon ID` (missing id → error exit 1), `--force`, the rest are skill names (`uninstall.sh:284-301`)."""
+    """`--addon ID` (missing id → error exit 1), `--force`, the rest are skill names."""
     request = UninstallRequest()
     index = 0
     while index < len(args):
@@ -45,7 +44,7 @@ def parse_uninstall_args(args: list[str]) -> UninstallRequest:
 
 
 def uninstall(ctx: "Context", args: list[str]) -> int:
-    """The combined addon + skill removal flow (`uninstall.sh:283-438`)."""
+    """The combined addon + skill removal flow."""
     request = parse_uninstall_args(args)
     # The removal judges the gateway from the install record: an installation that only an earlier
     # installer wrote gets its record, and its gateway's service section, before the first judgment.
@@ -56,7 +55,7 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
     for addon_id in promoted:
         if addon_id not in addon_ids:
             addon_ids.append(addon_id)
-    # Snapshot which requested addons exist before the resume runs (`uninstall.sh:303-312`).
+    # Snapshot which requested addons exist before the resume runs.
     known_before = {addon_id for addon_id in addon_ids
                     if (addons_dir / f"{addon_id}.json").is_file() or (addons_dir / f"{addon_id}.json.removing").is_file()}
     addons.resume_pending_uninstalls(ctx)
@@ -95,9 +94,6 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
             if dependents != 0:
                 report.warn(f"Dependency check failed for {skill}; proceeding with removal")
         targets = selection.expand_skill_targets(skill)
-        if not targets:
-            removal.append((skill, skills_dir / skill))
-            continue
         for target in targets:
             removal.append((target.name, skills_dir / target.name))
     guard = transaction.guard_gateway_removal(ctx, [path for _, path in removal])
@@ -130,14 +126,14 @@ def uninstall(ctx: "Context", args: list[str]) -> int:
 
 
 def run_uninstall_cleanup(ctx: "Context") -> int:
-    """`uninstall_cleanup.py --platform --install-state-manifest --confirm` (`uninstall.sh:440-455`)."""
+    """`uninstall_cleanup.py --platform --install-state-manifest --confirm`."""
     return runner.run_tool("_shared/uninstall_cleanup.py", "--platform", ctx.platform,
                            "--install-state-manifest", str(locations.install_state_path(ctx.platform)),
                            "--confirm").returncode
 
 
 def run_full_uninstall(ctx: "Context") -> int:
-    """Resume, remove every addon (stop when one is preserved), then cleanup (`uninstall.sh:480-488`)."""
+    """Resume, remove every addon (stop when one is preserved), then cleanup."""
     report.info("Full uninstall: removing Ghost-ALICE managed hooks, bootstrap, support state, and install targets.")
     addons.resume_pending_uninstalls(ctx)
     if not addons.uninstall_all_before_full(ctx):
@@ -148,7 +144,7 @@ def run_full_uninstall(ctx: "Context") -> int:
 
 def run_repair(ctx: "Context") -> int:
     """Re-provision missing managed targets; occupied slots that are not clean
-    managed targets stay untouched (`install.sh:655-726`)."""
+    managed targets stay untouched."""
     report.emit("")
     report.info("Installer repair: re-provisioning missing managed targets...")
     # Repair publishes like install, so the first command that writes the install record migrates first.

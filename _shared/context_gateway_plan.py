@@ -131,8 +131,6 @@ def install_plan(request, inventory, prior, service, *, port, scope, interpreter
         ledger_root=str(request.ledger), codex_dir=str(request.codex), usage_log=str(state_dir / 'usage.jsonl'))
     if request.claude is not None:
         state['claude_dir'] = str(request.claude)
-    if request.strict_log is not None:
-        state['strict_log_root'] = str(request.strict_log)
     service_log = state_dir / 'service.log'
     plist = dict(Label=LABEL, ProgramArguments=[interpreter, '-B', str(request.program), '--config', str(state_path)],
         RunAtLoad=True, StandardOutPath=str(service_log), StandardErrorPath=str(service_log),

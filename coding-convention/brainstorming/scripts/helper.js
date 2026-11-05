@@ -61,9 +61,6 @@
     }, 0);
   });
 
-  // Frame UI: selection tracking
-  window.selectedChoice = null;
-
   window.toggleSelect = function(el) {
     const container = el.closest('.options') || el.closest('.cards');
     const multi = container && container.dataset.multiselect !== undefined;
@@ -75,7 +72,6 @@
     } else {
       el.classList.add('selected');
     }
-    window.selectedChoice = el.dataset.choice;
   };
 
   // Expose API for explicit use

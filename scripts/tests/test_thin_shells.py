@@ -170,7 +170,7 @@ class ThinInstallPs1Tests(unittest.TestCase):
 
     def test_no_installer_logic_in_the_shell(self):
         for token in ("install_hooks.py", "install_lock.py", "install_transaction.py", "$AllSkills", "Invoke-Install",
-                      "Get-DetectedPlatforms", "PwshLts", "msiexec", "Remove-Item", "session-gates.json",
+                      "Get-DetectedPlatforms", "PwshLts", "msiexec", "Remove-Item",
                       "Unknown argument"):
             self.assertNotIn(token, self.text, msg=token)
         self.assertLess(self.text.count("\n"), 200)

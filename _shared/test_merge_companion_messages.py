@@ -12,18 +12,6 @@ class TestMergeCompanionMessages(unittest.TestCase):
         user_idx = body.index("User:")
         tech_idx = body.index("Tech:")
         self.assertLess(user_idx, tech_idx)
-        self.assertNotIn("Non-developer note:", body)
-        self.assertNotIn("Developer note:", body)
-
-    def test_install_tail_supports_english(self):
-        body = render_pending_merge_message("install_tail")
-        body_lower = body.lower()
-
-        self.assert_user_copy_first(body)
-        self.assertIn("During the agent tool update", body)
-        self.assertIn("your local changes", body)
-        self.assertIn("the next time you open claude/codex", body_lower)
-        self.assertIn("Please review backed-up changes.", body)
 
     def test_session_start_supports_english(self):
         body = render_pending_merge_message("session_start")

@@ -36,6 +36,6 @@ The examples illustrate classification, not findings about any current tool or w
 
 ## Failure modes and repair
 
-The response model must not infer authorization from metadata, use no-work labels to abandon implementation, or claim an untested branch passed because another branch passed.
+The response model must not infer authorization from metadata or claim an untested branch passed because another branch passed.
 
 Authority and renewal belong to `../../boundary-contract/SKILL.md#authority-and-renewal`. Incident accounting belongs to `../../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation`. Proof reuse, discretionary checks and answer delivery belong to `../../coding-convention/verification-before-completion/SKILL.md`. A new user input, an SDK-started turn or a route error reopens the affected binding, not unrelated proof of the work. A genuinely expanded release-readiness claim requires evidence for the added conditions.

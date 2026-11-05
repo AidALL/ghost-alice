@@ -1,13 +1,10 @@
 """Place the selected targets through publish requests, and write the earlier records after placement.
 
-Port of `installer_lib/install.sh:75-223, 411-610, 640-653` and
-`installer_lib/targets.sh:248-261, 275-338`. Every placement builds one publish
-request and calls `install_transaction.publish` in this process with the
+Every placement builds one publish request and calls `install_transaction.publish` in this process with the
 participants the install record names (the gateway participant when a gateway is
 registered); the publish places the targets and writes their install record
 entries in the same step. This module decides what each request names. The
-markers, the snapshot, the sidecars and the install-state are still written after
-placement until their readers move to the install record.
+markers, the snapshot, the sidecars and the install-state are written after placement.
 """
 
 from __future__ import annotations
@@ -117,7 +114,7 @@ def publish(ctx: "Context", targets: list[dict], progress: dict | None = None) -
 
 
 def copy_target(ctx: "Context", target: "Target", dest: Path, kind: str = "skill") -> bool:
-    """One copy publish of `target` at `dest`; `Staged copy replace failed: <dest>` on failure (`install.sh:75-93`)."""
+    """One copy publish of `target` at `dest`; `Staged copy replace failed: <dest>` on failure."""
     request = _request_target(ctx, target.name, target.path, dest, kind=kind, mode="copy", provider=target.provider)
     if not publish(ctx, [request]).ok:
         report.error(f"Staged copy replace failed: {dest}")
@@ -127,7 +124,7 @@ def copy_target(ctx: "Context", target: "Target", dest: Path, kind: str = "skill
 
 def copy_targets_batch(ctx: "Context", batch: CopyBatch, *, progress_label: str | None = None) -> bool:
     """Every target of the batch in one publish request, with the progress label and the
-    event file when they are set (`install.sh:105-223`)."""
+    event file when they are set."""
     if not batch.pairs:
         return True
     targets = [_request_target(ctx, label, src, dest, kind=kind, mode="copy", provider=provider, status=status)
@@ -147,7 +144,7 @@ def copy_targets_batch(ctx: "Context", batch: CopyBatch, *, progress_label: str 
 
 def link_or_copy(ctx: "Context", target: "Target", dest: Path, kind: str = "skill") -> int:
     """A link publish; only exit code 1 falls back to a copy publish, other codes are
-    returned as they are (`install.sh:640-653`)."""
+    returned as they are."""
     request = _request_target(ctx, target.name, target.path, dest, kind=kind, mode="link", provider=target.provider)
     result = publish(ctx, [request])
     if result.ok:
@@ -177,7 +174,7 @@ def _shared_target() -> "Target":
 
 def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool) -> int:
     """`_shared` placement: copy in copy mode, skip when already linked to the
-    source, else link-or-copy (`targets.sh:248-261`)."""
+    source, else link-or-copy."""
     shared = _shared_target()
     shared_dest = Path(skills_dir) / "_shared"
     if not shared.path.is_dir():
@@ -191,8 +188,8 @@ def install_shared(ctx: "Context", skills_dir: Path, copy_only: bool) -> int:
 
 
 def sync_runtime_shared(ctx: "Context") -> bool:
-    """Publish `<checkout>/_shared` and the runtime companions under the runtime root in one request
-    (`install.sh:95-103`); one publish, so a registered gateway stops and starts once."""
+    """Publish `<checkout>/_shared` and the runtime companions under the runtime root in one request;
+    one publish, so a registered gateway stops and starts once."""
     shared = _shared_target()
     if not shared.path.is_dir():
         return True
@@ -310,7 +307,7 @@ def remove_earlier_rollback_folders() -> None:
 
 
 def detect_install_mode(dest: Path, copy_only: bool) -> str:
-    """`symlink`, `copy`, `copy-fallback` or `missing` (`install.sh:411-426`)."""
+    """`symlink`, `copy`, `copy-fallback` or `missing`."""
     dest = Path(dest)
     if dest.is_symlink():
         return "symlink"
@@ -327,7 +324,7 @@ def _remove_path(target: Path) -> None:
 
 
 def remove_installed_target(label: str, target: Path) -> bool:
-    """Remove a link or directory and say `<label> removed`; False when nothing was there (`targets.sh:284-294`)."""
+    """Remove a link or directory and say `<label> removed`; False when nothing was there."""
     target = Path(target)
     if target.is_symlink() or target.is_dir():
         _remove_path(target)
@@ -338,15 +335,14 @@ def remove_installed_target(label: str, target: Path) -> bool:
 
 def guard_gateway_removal(ctx: "Context", targets: list[Path]) -> int:
     """The gateway participant's judgment of removing `targets`, in this process: 0 to go on (the
-    service was independent or is detached), else the cause's exit code; 0 with no targets
-    (`targets.sh:275-282`)."""
+    service was independent or is detached), else the cause's exit code; 0 with no targets."""
     if not targets:
         return 0
     return gateway_participant.guard(locations.record_root(), [Path(target) for target in targets])
 
 
 def cleanup_shared_if_unused(ctx: "Context", skills_root: Path) -> int:
-    """0 when `_shared` was removed, 1 when kept, another code when the gateway guard refused (`targets.sh:322-338`)."""
+    """0 when `_shared` was removed, 1 when kept, another code when the gateway guard refused."""
     from installer import selection
 
     skills_root = Path(skills_root)
@@ -364,7 +360,7 @@ def cleanup_shared_if_unused(ctx: "Context", skills_root: Path) -> int:
 
 
 def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str]) -> bool:
-    """`merge-companion/scripts/install_verifier.py --platform --state-root --target NAME SRC DEST MODE ...` (`install.sh:428-470`)."""
+    """`merge-companion/scripts/install_verifier.py --platform --state-root --target NAME SRC DEST MODE ...`."""
     skills_dir = Path(skills_dir)
     shared_src = runner.REPO_ROOT / "_shared"
     args = ["--platform", ctx.platform, "--state-root", str(locations.install_state_path(ctx.platform).parent)]
@@ -384,7 +380,7 @@ def verify_after_copy(ctx: "Context", skills_dir: Path, copy_only: bool, skills:
 
 
 def write_ownership_markers(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str]) -> bool:
-    """`installer_assets_cli.py --platform --source-repo --source-commit --target ... --addon-target ...` (`install.sh:487-536`)."""
+    """`installer_assets_cli.py --platform --source-repo --source-commit --target ... --addon-target ...`."""
     skills_dir = Path(skills_dir)
     info = source.resolve_source()
     targets: list[str] = []
@@ -409,7 +405,7 @@ def write_ownership_markers(ctx: "Context", skills_dir: Path, copy_only: bool, s
 
 
 def snapshot_after_install(ctx: "Context") -> bool:
-    """`merge-companion/scripts/snapshot_cli.py` then the empty pending manifest (`install.sh:364-409`)."""
+    """`merge-companion/scripts/snapshot_cli.py` then the empty pending manifest."""
     pending_root = locations.pending_root(ctx.platform)
     snapshot = pending_root / "snapshot.json"
     try:
@@ -426,7 +422,7 @@ def snapshot_after_install(ctx: "Context") -> bool:
 
 
 def write_empty_pending_manifest_if_missing(ctx: "Context", platform_dir: str, manifest: Path) -> bool:
-    """`pending_manifest_writer.py <manifest> <platform>` when the manifest is missing (`install.sh:395-409`)."""
+    """`pending_manifest_writer.py <manifest> <platform>` when the manifest is missing."""
     if Path(manifest).is_file():
         return True
     return runner.run_tool("_shared/pending_manifest_writer.py", str(manifest), platform_dir).ok
@@ -435,7 +431,7 @@ def write_empty_pending_manifest_if_missing(ctx: "Context", platform_dir: str, m
 def write_install_state_manifest(ctx: "Context", skills_dir: Path, copy_only: bool, skills: list[str],
                                  hook_change: "HookPathChange | None") -> bool:
     """`install_state_writer.py <platform> <root> <branch> <head> <dirty> <state> NAME SRC DEST MODE ...`
-    with the `GHOST_ALICE_SOURCE_REPO_HOOK_*` environment (`install.sh:571-610`): the shared git hook path this
+    with the `GHOST_ALICE_SOURCE_REPO_HOOK_*` environment: the shared git hook path this
     install owns and the value the full uninstall restores, whenever the install knows that value (`hook_change`)."""
     skills_dir = Path(skills_dir)
     state_path = locations.install_state_path(ctx.platform)

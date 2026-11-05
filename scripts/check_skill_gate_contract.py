@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
 check_skill_gate_contract.py. Static session gate contract validator.
-
-Checks whether the project-wide gate contract is reflected consistently in the
-SSOT, installed surfaces, and runtime skill documents.
 """
 
 from __future__ import annotations
@@ -22,25 +19,9 @@ class ContractIssue:
     message: str
 
 
-REQUIRED_CONTRACT_KEYS = {
-    "version",
-    "always_first",
-    "agent_first_after_intake",
-    "user_input_graph",
-    "intent_consumers",
-    "conditional_gates",
-    "domain_routes",
-    "before_completion",
-    "before_commit_push",
-    "on_task_definition",
-    "routing_surface",
-    "terminal_routes",
-}
-
 # Check protocol identifiers and canonical owner links, not repeated narrative wording.
 # These static checks establish document wiring; runtime tests establish behavior.
-REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/session-gates.json',
-                                          'session-intent-analyzer',
+REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['session-intent-analyzer',
                                           'task-router',
                                           'skill-evolution',
                                           'tool-checkpoint',
@@ -52,14 +33,13 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                'Metadata alone is not execution'],
  'platforms/claude/CLAUDE.md': ['## Claude tools and installation',
                                 'visible `Skill` tool'],
- '_shared/installer/source.py': ['session-gates.json'],
  '_shared/installer/hosts.py': ['"platforms" / "codex" / "AGENTS.md"',
                                 'hook_definitions.CORE_HOOK_IDS'],
  '_shared/global_rule_blocks.py': ['CODEX_SPEC',
                                    'render_codex_bootstrap',
                                    'apply_codex_bootstrap',
                                    'codex-merge'],
- 'README.md': ['skill-catalog/session-gates.json', 'python scripts/check_skill_gate_contract.py'],
+ 'README.md': ['python scripts/check_skill_gate_contract.py'],
  'scripts/validate_skills.py': ['run_contract_checks', 'gate-contract'],
  'task-router/SKILL.md': ['session-intent-analyzer',
                           'using-coding-convention',
@@ -103,15 +83,10 @@ REQUIRED_PATTERNS = {'docs/policies/session-gate-matrix.md': ['skill-catalog/ses
                                                                'incident-accounting-and-continuation'],
  'session-intent-analyzer/references/ledger-schema.md': ['acceptance_criteria',
                                                          'Core Response Projection',
-                                                         'record_response_route',
-                                                         'direct-response',
-                                                         'clarification-only'],
+                                                         'record_response_route'],
  'session-intent-analyzer/scripts/session_intent_ledger.py': ['acceptance_criteria',
                                                               'consumer_snapshot',
                                                               'record_response_route'],
- '.github/workflows/skill-gate-contract.yml': ['python scripts/check_skill_gate_contract.py',
-                                               'python scripts/run_installer_compat_tests.py --group '
-                                               'skill-gate-contract'],
  'platforms/common-governance.md': ['## Operating Model',
                                     '## Session Intent',
                                     '## Work Selection',
@@ -427,233 +402,6 @@ def _check_claude_first_turn_contract(root: Path) -> list[ContractIssue]:
 
 def run_contract_checks(root: Path) -> list[ContractIssue]:
     issues: list[ContractIssue] = []
-    contract_path = root / "skill-catalog" / "session-gates.json"
-    if not contract_path.is_file():
-        return [ContractIssue("ERROR", str(contract_path), "session gate contract file missing")]
-
-    contract = json.loads(_read_text(contract_path))
-    missing_keys = REQUIRED_CONTRACT_KEYS - set(contract.keys())
-    for key in sorted(missing_keys):
-        issues.append(ContractIssue("ERROR", str(contract_path), f"missing contract key: {key}"))
-
-    always_first = contract.get("always_first", [])
-    if always_first != ["session-intent-analyzer"]:
-        issues.append(ContractIssue("ERROR", str(contract_path),
-                                    "always_first direct intake ownership requires exactly [session-intent-analyzer]"))
-
-    agent_first_after_intake = contract.get("agent_first_after_intake", [])
-    if agent_first_after_intake != ["task-router"]:
-        issues.append(ContractIssue("ERROR", str(contract_path),
-                                    "agent_first_after_intake direct intake ownership requires exactly [task-router]"))
-
-    user_input_graph = contract.get("user_input_graph", [])
-    if not isinstance(user_input_graph, list) or not all(isinstance(item, str) for item in user_input_graph):
-        issues.append(ContractIssue('ERROR', str(contract_path),
-                                    'user_input_graph direct intake ownership requires a list of string nodes'))
-        user_input_graph = []
-    allowed_nodes = {'merge-companion-precheck', 'session-intent-analyzer',
-                     'skill-evolution:report-only-terminal-branch', 'task-router', 'tool-checkpoint'}
-    if len(user_input_graph) != len(allowed_nodes) or set(user_input_graph) != allowed_nodes:
-        issues.append(ContractIssue('ERROR', str(contract_path),
-                                    'direct intake ownership forbids intermediate input policy stages'))
-    expected_order = [
-        "merge-companion-precheck",
-        "session-intent-analyzer",
-        "task-router",
-        "tool-checkpoint",
-    ]
-    graph_positions = {
-        item.split(":", 1)[0]: index
-        for index, item in enumerate(user_input_graph)
-        if isinstance(item, str)
-    }
-    for item in expected_order:
-        if item not in graph_positions:
-            issues.append(ContractIssue("ERROR", str(contract_path), f"user_input_graph must include {item}"))
-    for earlier, later in zip(expected_order, expected_order[1:]):
-        if (
-            earlier in graph_positions
-            and later in graph_positions
-            and graph_positions[earlier] > graph_positions[later]
-        ):
-            issues.append(
-                ContractIssue(
-                    "ERROR",
-                    str(contract_path),
-                    f"user_input_graph must order {earlier} before {later}",
-                )
-            )
-    if "skill-evolution:report-only-terminal-branch" not in user_input_graph:
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "user_input_graph must mark skill-evolution as report-only-terminal-branch",
-            )
-        )
-
-    intent_consumers = contract.get("intent_consumers", {})
-    if not isinstance(intent_consumers, dict) or set(intent_consumers) != {'session-intent-analyzer', 'skill-evolution'}:
-        issues.append(ContractIssue('ERROR', str(contract_path),
-                                    'intent_consumers direct intake ownership permits only intake and report-only evolution owners'))
-        if not isinstance(intent_consumers, dict):
-            intent_consumers = {}
-    session_consumers = intent_consumers.get("session-intent-analyzer", [])
-    if not isinstance(session_consumers, list) or not all(isinstance(item, str) for item in session_consumers):
-        issues.append(ContractIssue('ERROR', str(contract_path),
-                                    'intent_consumers.session-intent-analyzer direct intake ownership requires a list of string consumers'))
-        session_consumers = []
-    if len(session_consumers) != 2 or set(session_consumers) != {'task-router', 'skill-evolution'}:
-        issues.append(ContractIssue('ERROR', str(contract_path),
-                                    'direct intake ownership requires only task-router and report-only skill-evolution consumers'))
-    for required_consumer in ("skill-evolution", "task-router"):
-        if required_consumer not in session_consumers:
-            issues.append(
-                ContractIssue(
-                    "ERROR",
-                    str(contract_path),
-                    f"intent_consumers.session-intent-analyzer must include {required_consumer}",
-                )
-            )
-    if intent_consumers.get("skill-evolution") != ["report-only-terminal-branch"]:
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "intent_consumers.skill-evolution must be report-only-terminal-branch",
-            )
-        )
-
-    routing_surface = contract.get("routing_surface", {})
-    if not isinstance(routing_surface, dict):
-        routing_surface = {}
-    required_routing_values = {
-        "response_mode": ("normal", "clarification-only", "direct-response"),
-        "boundary_contract": ("required", "n/a"),
-    }
-    for field in sorted(set(routing_surface) - set(required_routing_values)):
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                f"routing_surface.{field} is not a response-route control",
-            )
-        )
-    for field, required_values in required_routing_values.items():
-        values = routing_surface.get(field, [])
-        for required_value in required_values:
-            if required_value not in values:
-                issues.append(
-                    ContractIssue(
-                        "ERROR",
-                        str(contract_path),
-                        f"routing_surface.{field} must include {required_value}",
-                    )
-                )
-
-    terminal_routes = contract.get("terminal_routes", {})
-    clarification_route = terminal_routes.get("clarification-only", {}) if isinstance(terminal_routes, dict) else {}
-    clarification_contract = {
-        "owner": "session-intent",
-        "manual_pending_merge": "defer-until-next-actionable-turn",
-        "downstream_work": "none",
-        "user_surface": "minimum-decisive-information-only",
-        "strict_logging": "active",
-    }
-    if not isinstance(clarification_route, dict):
-        clarification_route = {}
-    for field, expected in clarification_contract.items():
-        if clarification_route.get(field) != expected:
-            issues.append(
-                ContractIssue(
-                    "ERROR",
-                    str(contract_path),
-                    f"clarification-only terminal route must set {field}={expected}",
-                )
-            )
-
-    direct_route = terminal_routes.get("direct-response", {}) if isinstance(terminal_routes, dict) else {}
-    direct_contract = {
-        "owner": "task-router",
-        "manual_pending_merge": "defer-until-next-actionable-turn",
-        "downstream_work": "none",
-        "user_surface": "resolved-content-only",
-        "strict_logging": "active",
-        "ambient_context": "not-user-referent-or-inspection-authority",
-        "premise_handling": "explain-before-current-state-validation",
-        "evidence_planning": "after-route-classification",
-        "local_diagnosis_authority": "explicit-request-or-established-referent",
-    }
-    if not isinstance(direct_route, dict):
-        direct_route = {}
-    for field, expected in direct_contract.items():
-        if direct_route.get(field) != expected:
-            issues.append(
-                ContractIssue(
-                    "ERROR",
-                    str(contract_path),
-                    f"direct-response terminal route must set {field}={expected}",
-                )
-            )
-
-    conditional_gates = contract.get("conditional_gates", [])
-    if not any(gate.get("id") == "boundary-contract" for gate in conditional_gates if isinstance(gate, dict)):
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "conditional_gates must include boundary-contract",
-            )
-        )
-
-    domain_routes = contract.get("domain_routes", {})
-    if "using-coding-convention" not in domain_routes.get("development", []):
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "development domain route must include using-coding-convention",
-            )
-        )
-
-    bugfix_route = domain_routes.get("bugfix", [])
-    for required in ("systematic-debugging", "test-driven-development"):
-        if required not in bugfix_route:
-            issues.append(
-                ContractIssue(
-                    "ERROR",
-                    str(contract_path),
-                    f"bugfix domain route must include {required}",
-                )
-            )
-
-    if "verification-before-completion" not in contract.get("before_completion", []):
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "before_completion must include verification-before-completion",
-            )
-        )
-
-    if "finishing-a-development-branch" not in contract.get("before_commit_push", []):
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "before_commit_push must include finishing-a-development-branch",
-            )
-        )
-
-    if "necessity-gate" not in contract.get("on_task_definition", []):
-        issues.append(
-            ContractIssue(
-                "ERROR",
-                str(contract_path),
-                "on_task_definition must include necessity-gate",
-            )
-        )
-
     for rel_path, patterns in REQUIRED_PATTERNS.items():
         path = root / rel_path
         if not path.is_file():

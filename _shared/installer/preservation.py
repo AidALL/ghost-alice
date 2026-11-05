@@ -1,7 +1,4 @@
-"""What the installer checks and backs up before it replaces targets.
-
-Port of `installer_lib/install.sh:225-362` and `installer_lib/targets.sh:378-395`.
-"""
+"""What the installer checks and backs up before it replaces targets."""
 
 from __future__ import annotations
 
@@ -24,7 +21,7 @@ def _targets(ctx: "Context", skills: list[str]):
 
 def encoding_guard(ctx: "Context", skills: list[str]) -> bool:
     """`encoding_guard.py --repo-root <checkout>`, each addon source, then the
-    skills dir excluding `_shared` and the install targets (`install.sh:225-271`)."""
+    skills dir excluding `_shared` and the install targets."""
     guard = runner.REPO_ROOT / ENCODING_GUARD
     if not guard.is_file():
         report.error(f"encoding guard not found; aborting install: {guard}")
@@ -51,18 +48,15 @@ def encoding_guard(ctx: "Context", skills: list[str]) -> bool:
 
 
 def is_clean_managed_target(ctx: "Context", name: str, path: Path) -> bool:
-    """`installer_assets_cli.py classify-clean`: the occupied slot is a clean Ghost-ALICE managed target (`install.sh:287-296`)."""
+    """`installer_assets_cli.py classify-clean`: the occupied slot is a clean Ghost-ALICE managed target."""
     return runner.run_tool("_shared/installer_assets_cli.py", "classify-clean", "--asset-id", name,
                            "--path", str(path), "--repo-root", str(runner.REPO_ROOT), capture=True).ok
-
-
-_is_clean_managed_target = is_clean_managed_target
 
 
 def preflight(ctx: "Context", skills: list[str]) -> bool:
     """No snapshot: quarantine occupied, unmanaged targets through
     `quarantine_legacy_cli.py`. With a snapshot: `diff_collector_cli.py` with
-    every root this install replaces (`install.sh:273-362`)."""
+    every root this install replaces."""
     pending_root = locations.pending_root(ctx.platform)
     manifest = pending_root / "manifest.json"
     snapshot = pending_root / "snapshot.json"
@@ -73,12 +67,12 @@ def preflight(ctx: "Context", skills: list[str]) -> bool:
         legacy: list[tuple[str, Path]] = []
         shared_dest = skills_dir / "_shared"
         if shared_dest.exists() and not shared_dest.is_symlink():
-            if not _is_clean_managed_target(ctx, "_shared", shared_dest):
+            if not is_clean_managed_target(ctx, "_shared", shared_dest):
                 legacy.append(("_shared", shared_dest))
         for target in targets:
             dest = skills_dir / target.name
             if dest.exists() and not dest.is_symlink():
-                if not _is_clean_managed_target(ctx, target.name, dest):
+                if not is_clean_managed_target(ctx, target.name, dest):
                     legacy.append((target.name, dest))
         for name, path in legacy:
             result = runner.run_tool("merge-companion/scripts/quarantine_legacy_cli.py", "--target", str(path),
@@ -103,7 +97,7 @@ def preflight(ctx: "Context", skills: list[str]) -> bool:
 
 
 def cleanup_pending(ctx: "Context") -> int:
-    """`merge-companion/scripts/cleanup_false_positive_legacy.py ... --apply` (`targets.sh:378-395`)."""
+    """`merge-companion/scripts/cleanup_false_positive_legacy.py ... --apply`."""
     pending = locations.pending_root(ctx.platform)
     return runner.run_tool("merge-companion/scripts/cleanup_false_positive_legacy.py", "--platform", ctx.platform,
                            "--pending", str(pending), "--manifest", str(pending / "manifest.json"),

@@ -369,25 +369,5 @@ class InstallRuntimeDetectionTest(unittest.TestCase):
             r"Join-Path\s+\$[A-Za-z0-9_:]+\s+['\"][^'\"]+['\"]\s+['\"][^'\"]+['\"]",
         )
 
-    def test_install_sh_has_no_node_or_bash_hook_fallback(self) -> None:
-        install_sh = installer_bash_source()
-
-        self.assertNotIn("Node.js fallback", install_sh)
-        self.assertNotIn("pure bash fallback", install_sh)
-        self.assertNotIn("_install_hook_bash_native", install_sh)
-        self.assertNotIn("prompt + completion + io-trace", install_sh)
-        hosts_py = (REPO_ROOT / "_shared" / "installer" / "hosts.py").read_text(encoding="utf-8")
-        # The hook suite label comes from the one list of core hooks.
-        self.assertIn('HOOK_ACTION_LABEL = " + ".join(hook_definitions.CORE_HOOK_IDS)', hosts_py)
-
-    def test_install_ps1_has_no_partial_native_hook_fallback(self) -> None:
-        install_ps1 = (REPO_ROOT / "install.ps1").read_text(encoding="utf-8-sig")
-
-        self.assertNotIn("Invoke-InstallHooksNative", install_ps1)
-        self.assertNotIn("PowerShell native", install_ps1)
-        self.assertNotIn("PowerShell native", install_ps1)
-        self.assertNotIn("prompt + completion", install_ps1)
-
-
 if __name__ == "__main__":
     unittest.main()

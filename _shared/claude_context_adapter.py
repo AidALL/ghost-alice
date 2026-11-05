@@ -9,8 +9,6 @@ import json
 from pathlib import Path
 import re
 
-from text_lines import committed_records
-
 platform = 'claude'
 
 
@@ -73,14 +71,6 @@ def _normalize_message(role, content):
         or any(not isinstance(block, dict) or not isinstance(block.get('type'), str) for block in content)):
         raise NativeContextRejected('Native content blocks are unavailable')
     return dict(type='message', role=role, content=copy.deepcopy(content))
-
-
-def native_records(path):
-    """Normalize message envelopes while retaining their one-based JSONL lines."""
-    if not isinstance(path, (str, Path)) or not Path(path).is_absolute():
-        raise NativeContextRejected('An absolute native transcript path is required')
-    rows = committed_records(Path(path).read_bytes())
-    return native_records_from_rows(rows)
 
 
 def native_records_from_rows(rows):
@@ -609,133 +599,3 @@ def server_context_omit(request, selections, *, originals=None, _inspect_only=Fa
     reason = ('server-context-replace-requested' if any(observation.get('disposition') == 'replace'
               for observation in observations) else 'server-context-omit-requested')
     return request if _inspect_only else result, observations, reason
-
-
-def _compaction_request_shape(request):
-    if not isinstance(request, dict) or not isinstance(request.get('messages'), list):
-        raise NativeContextRejected('A native request with ordered messages is required')
-    for message in request['messages']:
-        if not isinstance(message, dict) or message.get('role') not in ('user', 'assistant', 'system'):
-            raise NativeContextRejected('A classified native message role is required')
-        content = message.get('content')
-        if not isinstance(content, (str, list)) or (isinstance(content, list) and (
-            not content or any(not isinstance(block, dict) or not isinstance(block.get('type'), str)
-                or (block['type'] == 'text' and not isinstance(block.get('text'), str)) for block in content))):
-            raise NativeContextRejected('Native message content is unavailable or malformed')
-    policy = request.get('context_management', {})
-    if (not isinstance(policy, dict) or not isinstance(policy.get('edits', []), list)
-        or any(not isinstance(edit, dict) or not isinstance(edit.get('type'), str)
-               for edit in policy.get('edits', []))):
-        raise NativeContextRejected('The native context-management policy is malformed')
-    if any(edit['type'].startswith('compact_') for edit in policy.get('edits', [])):
-        raise NativeContextRejected('The host must retire threshold compaction before preparing signed compaction')
-    choice = request.get('tool_choice', {})
-    if not isinstance(choice, dict):
-        raise NativeContextRejected('The native tool-choice shape is malformed')
-
-
-class SignedCompactionPlan:
-    """Host-side state for one explicitly selected API summary request.
-
-    The host sends ``request`` with its existing native authentication and beta,
-    then passes that call's response to ``adopt``. This pure controller neither
-    sends a request nor authenticates a provider signature. The response model
-    compares the summary with the original objective before approving adoption.
-    Desktop /compact and arbitrary signed-text omission are separate operations.
-    Contract: https://platform.claude.com/docs/en/build-with-claude/compaction-on-demand
-    """
-
-    def __init__(self, original, request, cut):
-        self._original = copy.deepcopy(original)
-        self._original_digest = fingerprint(original)
-        self.request = copy.deepcopy(request)
-        self._request_digest = fingerprint(request)
-        self.cut = cut
-        self._cut = cut
-
-    def adopt(self, response, current, *, native_betas, summary_accepted):
-        """Swap only the unchanged summarized prefix; retain all kept turns."""
-        _compaction_request_shape(current)
-        if (summary_accepted is not True or not isinstance(native_betas, (list, tuple))
-            or 'compact-2026-09-04' not in native_betas
-            or fingerprint(self._original) != self._original_digest
-            or fingerprint(self.request) != self._request_digest or self.cut != self._cut):
-            raise NativeContextRejected('Unchanged compaction state, native beta and accepted summary are required')
-        original = self._original
-        if (not isinstance(current, dict) or not isinstance(current.get('messages'), list)
-            or current['messages'][:len(original['messages'])] != original['messages']
-            or any(current.get(key) != original.get(key)
-                   for key in ('model', 'system', 'tools', 'thinking', 'output_config'))):
-            raise NativeContextRejected('Compaction requires the original prefix, model, instructions and thinking')
-        content = response.get('content') if isinstance(response, dict) else None
-        if (not isinstance(response, dict) or response.get('model') != original.get('model')
-            or response.get('role') != 'assistant' or response.get('stop_reason') != 'compaction'
-            or not isinstance(response.get('id'), str) or not response['id']
-            or not isinstance(content, list) or len(content) != 1
-            or not isinstance(content[0], dict) or content[0].get('type') != 'compaction'
-            or any(not isinstance(content[0].get(key), str) or not content[0][key]
-                   for key in ('content', 'signature'))):
-            raise NativeContextRejected('The exact successful signed response from this compaction call is required')
-        forwarded = copy.deepcopy(current)
-        forwarded['messages'] = [dict(role='assistant', content=copy.deepcopy(content)),
-                                 *copy.deepcopy(current['messages'][self.cut:])]
-        return forwarded
-
-
-def prepare_signed_compaction(request, cut, *, native_betas):
-    """Prepare the model-selected closed prefix without adding a beta or cap.
-
-    The current human message and any mid-conversation system instructions stay
-    outside the summarized range. Pair boundaries, unchanged kept turns and the
-    same model/system/tools preserve the documented kept-thinking conditions.
-    The native host must own the request/response loop; Gateway does not borrow
-    credentials or invent Desktop uptake when that host capability is absent.
-    """
-    _compaction_request_shape(request)
-    if (not isinstance(native_betas, (list, tuple)) or 'compact-2026-09-04' not in native_betas
-        or not isinstance(request, dict) or not isinstance(request.get('messages'), list)
-        or not isinstance(request.get('model'), str) or type(cut) is not int
-        or not 0 < cut < len(request['messages']) or 'compaction' in request):
-        raise NativeContextRejected('An ordinary native request, existing compaction beta and explicit cut are required')
-    messages = request['messages']
-    if any(not isinstance(message, dict) or message.get('role') not in ('user', 'assistant', 'system')
-           for message in messages):
-        raise NativeContextRejected('Ordered native message objects are required')
-    latest = max((i for i, message in enumerate(messages) if message.get('role') == 'user'
-                  and not any(block.get('type') == 'tool_result'
-                              for _, _, _, block, _ in _blocks([message]))), default=-1)
-    if (cut > latest or any(message['role'] == 'system' for message in messages[:cut])
-        or messages[cut]['role'] == 'system' or messages[cut]['role'] == messages[cut-1]['role']):
-        raise NativeContextRejected('Keep the latest input, live system instructions and a distinct-role tail boundary')
-    calls, results = set(), set()
-    for _, _, role, block, _ in _blocks(messages[:cut]):
-        if block.get('type') == 'tool_use':
-            identifier = block.get('id')
-            if role != 'assistant' or not isinstance(identifier, str) or not identifier or identifier in calls:
-                raise NativeContextRejected('A unique closed tool exchange is required')
-            calls.add(identifier)
-        elif block.get('type') == 'tool_result':
-            identifier = block.get('tool_use_id')
-            if (role != 'user' or not isinstance(identifier, str) or not identifier
-                or identifier not in calls or identifier in results):
-                raise NativeContextRejected('A unique ordered closed tool exchange is required')
-            results.add(identifier)
-        elif block.get('type') == 'server_tool_use' or str(block.get('type')).endswith('_tool_result'):
-            raise NativeContextRejected('This server-tool compaction boundary is unclassified')
-    if calls != results:
-        raise NativeContextRejected('Compaction cannot split an open tool exchange')
-    config = request.get('output_config', {})
-    if (not isinstance(config, dict) or not isinstance(config.get('task_budget', {}), dict)
-        or 'remaining' in config.get('task_budget', {})):
-        raise NativeContextRejected('The API rejects a remaining task budget during signed compaction')
-    summary = copy.deepcopy(request)
-    summary['messages'] = copy.deepcopy(messages[:cut])
-    summary['compaction'] = {'type': 'summarize'}
-    # These generation-only controls are rejected by the summarization API.
-    summary.pop('context_management', None)
-    summary.pop('stop_sequences', None)
-    if summary.get('tool_choice', {}).get('type') in ('any', 'tool'):
-        summary.pop('tool_choice')
-    if 'format' in config:
-        summary['output_config'].pop('format')
-    return SignedCompactionPlan(request, summary, cut)

@@ -89,13 +89,6 @@ class TestDiffCollectorV2(unittest.TestCase):
         self.assertIn("id, source_path and backup_path", body)
         self.assertIn("references/manifest-schema.md", body)
         self.assertIn("this generated guide supplies no approval", body)
-        self.assertNotIn("eight-surface activation guarantee", body)
-        self.assertNotIn("task-router 1.0", body)
-        self.assertNotIn("Non-developer note:", body)
-        self.assertNotIn("Developer note:", body)
-        self.assertNotIn("Type this", body)
-        self.assertNotIn("Send this", body)
-        self.assertNotIn("next AI CLI session starts", body)
 
     def test_deleted_file_yields_deleted_change(self):
         skill_file = self.skills_dir / "task-router" / "SKILL.md"

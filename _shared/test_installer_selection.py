@@ -33,7 +33,6 @@ def make_source(root: Path) -> Path:
         (root / "fam" / sub / "SKILL.md").write_text(f"---\nname: {sub}\ndescription: {sub} skill\n---\n", encoding="utf-8")
     (root / "fam" / "notes").mkdir()
     (root / "skill-catalog").mkdir()
-    (root / "skill-catalog" / "session-gates.json").write_text("{}", encoding="utf-8")
     return root
 
 

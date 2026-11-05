@@ -93,7 +93,7 @@ class HistoricalResponseReviewTests(unittest.TestCase):
 
     def assess(self, body=REJECTED_STATUS_REPORT):
         return importlib.import_module('native_completion').assess_native_completion(
-            self.source, text=body, phase='final')
+            self.source, text=body)
 
     def run_stop(self, body):
         hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
@@ -110,7 +110,6 @@ class HistoricalResponseReviewTests(unittest.TestCase):
         reviewed = self.review_report()
         result = self.assess()
         self.assertIsNone(result['body_issue'])
-        self.assertFalse(result['completion_route']['required_completion_check'])
         self.assertEqual(result['validation_text'], REJECTED_STATUS_REPORT)
         assert_stop_observation(self, self.run_stop(REJECTED_STATUS_REPORT))
         self.assertEqual(fixtures.ledger.read_session_state(**self.fixture.coords)['acceptance_criteria'], before)
@@ -144,7 +143,6 @@ class HistoricalResponseReviewTests(unittest.TestCase):
                 rationale='The complete response preserves the original observation and its limits.')))
         result = self.assess(body)
         self.assertIsNone(result['body_issue'])
-        self.assertFalse(result['completion_route']['required_completion_check'])
 
     def test_explanation_source_failure_requests_source_status_before_affected_review(self):
         self.review_report()
@@ -186,7 +184,7 @@ class UnroutedNativeWorkTests(unittest.TestCase):
         native = importlib.import_module('native_completion')
         with patch.object(native._ledger(source), 'read_response_route',
                 side_effect=ValueError('selected execution work needs an admitted owned criterion')):
-            rejected_route = native.assess_native_completion(source, phase='before_tool')
+            rejected_route = native.assess_native_completion(source)
         self.assertEqual(rejected_route['input_event_id'], fixture.event)
         self.assertIsNone(rejected_route['response_route'])
         self.assertEqual(rejected_route['completion_route']['route_binding'], 'missing')
@@ -247,7 +245,7 @@ class NativeActivityTests(unittest.TestCase):
 
     def assess(self, payload=None):
         return importlib.import_module('native_completion').assess_native_completion(
-            self.source, phase='final', text=self.payload['last_assistant_message'],
+            self.source, text=self.payload['last_assistant_message'],
             native_input=self.payload if payload is None else payload)
 
     def test_conversation_explanation_passes_without_a_retained_claim_archive(self):
@@ -264,7 +262,6 @@ class NativeActivityTests(unittest.TestCase):
         ordinary = self.assess()
         self.assertIsNone(ordinary['body_issue'])
         self.assertEqual(ordinary['validation_text'], body)
-        self.assertFalse(ordinary['completion_route']['required_completion_check'])
         self.assertEqual(ordinary['native_activity']['status'], 'absent')
         # A pasted evidence-report envelope is ordinary text; Core resolves no claim archive behind it.
         claim = dict(statement=body.split('\n\n')[2], work_unit_id='diagrams',
@@ -411,9 +408,8 @@ class NativeCompletionTests(unittest.TestCase):
 가장 명확한 미완성은 방금 제 답변입니다. 긴 `[completion-check]`가 사용자 화면에 그대로 나왔습니다. 기존 보고의 반복 차단은 고쳤지만, 내부 기록 절차를 업무 답변에서 완전히 분리하지는 못했습니다.
 
 따라서 지금은 “검증·접수·정정 기능과 특정 보고 오류를 고친 상태”입니다. 원하신 “Core와 AP가 내부에서 협력하고, 사용자는 업무 지시와 결과에 집중하는 상태”까지 완성됐다고 말할 수는 없습니다.'''
-        result = self.service()(self.source, text=body, phase='final')
+        result = self.service()(self.source, text=body)
         self.assertIsNone(result['body_issue'])
-        self.assertFalse(result['completion_route']['required_completion_check'])
         hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
         executed = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
             input=json.dumps(dict(session_id='current', last_assistant_message=body)),
@@ -424,42 +420,33 @@ class NativeCompletionTests(unittest.TestCase):
     def test_prose_without_a_control_block_is_not_a_completion_submission(self):
         self.fixture.record(self.fixture.candidate())
         text = 'Everything requested is represented here.'
-        result = self.service()(self.source, text=text, phase='final')
-        self.assertFalse(result['completion_route']['required_completion_check'])
+        result = self.service()(self.source, text=text)
         self.assertIsNone(result['body_issue'])
         self.assertEqual(result['input_event_id'], self.fixture.event)
         self.assertEqual(result['body_digest'], 'sha256:' + hashlib.sha256(text.encode()).hexdigest())
 
     def test_plain_progress_text_keeps_selected_work_without_a_completion_check(self):
-        result = self.service()(self.source, text='Saved report matches input', phase='final')
-        self.assertFalse(result['completion_route']['required_completion_check'])
-        self.assertEqual(result['completion_route']['selected_work_unit_ids'], ['first'])
+        result = self.service()(self.source, text='Saved report matches input')
         self.assertIsNone(result['body_issue'])
 
     def test_stale_route_cannot_be_replaced_by_caller_policy_fields(self):
         self.fixture.intake('New current input')
-        result = self.service()(self.source, phase='before_tool')
+        result = self.service()(self.source)
         self.assertEqual(result['completion_route']['route_binding'], 'stale')
-        # Canonical intake precedes route registration. Waiting cannot reuse
-        # the previous input's selected authority.
-        self.assertEqual(result['completion_route']['selected_work_unit_ids'], [])
-        self.assertEqual(result['completion_route']['selected_criteria'], [])
-        self.assertIn('awaits route registration', result['completion_route']['reason'])
         self.assertIsNone(result['body_issue'])
         with self.assertRaises(TypeError):
             self.service()(self.source, claim_report={'valid': True})
 
     def test_missing_authority_does_not_disable_body_validation_or_create_state(self):
-        result = self.service()({}, text='[completion-check]', phase='final')
+        result = self.service()({}, text='[completion-check]')
         self.assertIsNotNone(result['body_issue'])
         self.assertEqual(result['context_status'], 'unavailable')
 
     def test_missing_route_precedes_successive_control_field_repairs(self):
         self.fixture.intake('Is the release ready?')
-        result = self.service()(self.source, text='[partial-check]\n- scope: partial', phase='final')
+        result = self.service()(self.source, text='[partial-check]\n- scope: partial')
         self.assertTrue(result['body_issue'].startswith('route-unavailable:'))
         self.assertIn('task-router', result['body_issue'])
-        self.assertEqual(result['completion_route']['selected_work_unit_ids'], [])
 
     def test_missing_route_keeps_canonical_input_binding_without_inventing_selection(self):
         coords = dict(self.fixture.coords, session_id='unrouted')
@@ -467,22 +454,10 @@ class NativeCompletionTests(unittest.TestCase):
         event = fixtures.ledger.read_session_state(**coords)['latest_input_event_id']
         assess = self.service()
         source = dict(self.source, GHOST_ALICE_SESSION_ID='unrouted')
-        result = assess(source, text='Original accepted result', phase='final')
+        result = assess(source, text='Original accepted result')
         self.assertEqual(result['input_event_id'], event)
         self.assertIsNone(result['response_route'])
-        self.assertEqual(result['completion_route']['selected_work_unit_ids'], [])
         self.assertEqual(result['completion_route']['route_binding'], 'missing')
-
-    def test_pretool_never_runs_final_body_assessment(self):
-        assess = self.service()
-        with patch('completion_assessment.lookup_current_response', side_effect=AssertionError('unexpected review lookup')):
-            result = assess(self.source, phase='before_tool')
-        self.assertEqual(result['completion_route']['route_binding'], 'current')
-        self.assertFalse(result['completion_route']['required_completion_check'])
-        self.assertIsNone(result['body_issue'])
-        with self.assertRaises(ValueError):
-            assess(self.source, phase='publication')
-
 
 class NativeProofBindingTests(unittest.TestCase):
     def test_cli_records_complete_partial_response_without_echoing_original(self):
@@ -542,7 +517,7 @@ class NativeProofBindingTests(unittest.TestCase):
 
     def assess(self, proof):
         return importlib.import_module('native_completion').assess_native_completion(
-            self.owner.source, text=proof, phase='final')
+            self.owner.source, text=proof)
 
     def review(self, verdict='supported'):
         self.review_response(self.proof, claim_verdict=verdict)
@@ -652,7 +627,7 @@ class NativeProofBindingTests(unittest.TestCase):
         self.assertEqual(result['repair_target'], 'source_status')
 
     def test_source_failure_before_review_resolution_preserves_original_proof(self):
-        candidate = self.review_response(self.proof)
+        self.review_response(self.proof)
         original = self.owner.observation.read_bytes()
         for status in ('source-changed', 'source-unavailable'):
             with self.subTest(status=status):
@@ -662,9 +637,6 @@ class NativeProofBindingTests(unittest.TestCase):
                     self.owner.observation.unlink()
                 try:
                     self.assert_source_recovery(self.assess(self.proof), status)
-                    retained = self.owner.lookup(candidate, historical=True)
-                    self.assertEqual(retained.candidate['proof'], self.proof)
-                    self.assertEqual(retained.candidate['verified_at'], self.owner.time)
                 finally:
                     self.owner.observation.write_bytes(original)
         self.assertIsNone(self.assess(self.proof)['body_issue'])
@@ -750,7 +722,6 @@ class NativeProofBindingTests(unittest.TestCase):
             self.fail('A supported fail verdict must reach native final delivery: ' + str(exc))
         result = self.assess(self.proof)
         self.assertIsNone(result['body_issue'])
-        self.assertTrue(result['completion_route']['required_completion_check'])
         self.assertEqual(fixtures.ledger.read_session_state(**self.owner.fixture.coords), before)
 
     def test_reviewed_partial_with_only_unverified_criteria_is_deliverable(self):
@@ -759,15 +730,12 @@ class NativeProofBindingTests(unittest.TestCase):
         self.review()
         result = self.assess(self.proof)
         self.assertIsNone(result['body_issue'])
-        self.assertTrue(result['completion_route']['required_partial_check'])
-        self.assertEqual(result['completion_route']['selected_work_unit_ids'], ['first'])
 
     def test_reviewed_success_is_deliverable_without_changing_the_criterion(self):
         before = fixtures.ledger.read_session_state(**self.owner.fixture.coords)
         self.review()
         result = self.assess(self.proof)
         self.assertIsNone(result['body_issue'])
-        self.assertTrue(result['completion_route']['required_completion_check'])
         reviewed = self.api.lookup_current_response(self.owner.source, self.proof)
         self.assertEqual(self.api.assessment_coverage(reviewed, reviewed.candidate['contract'], self.proof,
             self.owner.time), {('first', 1, 'AC1')})

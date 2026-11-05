@@ -1,7 +1,5 @@
 """The installation source checkout.
 
-Port of `installer_lib/source_health.sh`, `installer_lib/install.sh:538-551`
-(`_install_state_resolve_source`) and `installer_lib/bootstrap.sh:5-10`.
 `match_install_source` is the one judgment of whether this checkout is the
 checkout the install record names as its source; `check_install_source` acts on
 it before an install or a repair changes anything.
@@ -88,20 +86,10 @@ def _git_value(root: Path, *args: str) -> str | None:
     return result.stdout.strip() if result.ok else None
 
 
-def assert_session_gate_contract() -> None:
-    """`skill-catalog/session-gates.json` must exist in the checkout, else
-    `Session gate contract file missing: <path>` and exit 1 (`bootstrap.sh:5-10`)."""
-    path = runner.REPO_ROOT / "skill-catalog" / "session-gates.json"
-    if not path.is_file():
-        report.error(f"Session gate contract file missing: {path}")
-        raise InstallerExit(1)
-
-
 def check_source_health(*, skip: bool) -> bool:
     """Print the checkout's source health and return False only when the branch is behind its upstream.
 
-    Same messages and decisions as `source_health.sh:5-79`: skip → warn and
-    pass; no git or not a worktree → warn and pass; `Source health: branch=,
+    Skip → warn and pass; no git or not a worktree → warn and pass; `Source health: branch=,
     head=, upstream=`; diverged → two warnings; behind → four errors, False;
     ahead → warning; untracked → warning; tracked changes → warning.
     """
@@ -261,7 +249,7 @@ def recheck_install_source(ctx: "Context", *, can_adopt: bool) -> None:
 
 
 def update_source() -> int:
-    """`installer_source_update.py --source-dir <checkout>`; its exit code (`source_health.sh:81-89`)."""
+    """`installer_source_update.py --source-dir <checkout>`; its exit code."""
     return runner.run_tool("_shared/installer_source_update.py", "--source-dir", str(runner.REPO_ROOT)).returncode
 
 
@@ -333,7 +321,7 @@ def _write_hook_path_record(change: HookPathChange) -> None:
 
 def setup_git_hooks() -> HookPathChange:
     """Write the repository's shared `core.hooksPath` as this checkout's hooks folder by absolute path, make
-    `hooks/post-merge` executable, and return what the install-state records (`source_health.sh:91-116`).
+    `hooks/post-merge` executable, and return what the install-state records.
 
     Every worktree of the repository inherits the shared value (`git config --local` writes the configuration the
     worktrees share), so a merge in any worktree runs the install source's post-merge hook and no other checkout's
@@ -386,7 +374,7 @@ def commit_of(path: Path) -> str:
 
 
 def resolve_source() -> SourceInfo:
-    """The checkout's root, branch, head and dirty state for the install-state manifest (`install.sh:538-551`)."""
+    """The checkout's root, branch, head and dirty state for the install-state manifest."""
     root_path = runner.REPO_ROOT
     toplevel = _git_value(root_path, "rev-parse", "--show-toplevel")
     branch = _git_value(root_path, "symbolic-ref", "--quiet", "--short", "HEAD") or "DETACHED"

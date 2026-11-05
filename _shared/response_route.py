@@ -24,9 +24,11 @@ except ModuleNotFoundError as exc:
 
 SCHEMA_VERSION = "response-route.v1"
 ROUTING_ENUMS = {
-    "response_mode": {"normal", "clarification-only", "direct-response"},
+    "response_mode": {"normal"},
     "boundary_contract": {"required", "n/a"},
 }
+# Earlier versions stored these modes; a stored route that holds one reads as stale.
+RETIRED_RESPONSE_MODES = {"clarification-only", "direct-response"}
 ROUTING_TEXT = {"reason"}
 ROUTING_CONTROLS = {"response_mode", "boundary_contract"}
 CANDIDATE_KEYS = {"schema_version", "routing_surface", "work_units", "selected_work_unit_ids", "selected_criteria"}
@@ -100,22 +102,17 @@ def _unique(values, label):
     return values
 
 
-def validate_routing_surface(value):
+def validate_routing_surface(value, *, stored=False):
     """Validate the route controls and the optional reason."""
     surface = _object(value, ROUTING_CONTROLS, "routing_surface", optional=ROUTING_TEXT)
     for key in ROUTING_CONTROLS:
-        if not isinstance(surface[key], str) or surface[key] not in ROUTING_ENUMS[key]:
+        allowed = ROUTING_ENUMS[key] | RETIRED_RESPONSE_MODES if stored and key == "response_mode" else ROUTING_ENUMS[key]
+        if not isinstance(surface[key], str) or surface[key] not in allowed:
             raise RouteSchemaError(f"unknown routing_surface.{key}")
     for key in set(surface) & ROUTING_TEXT:
         if not isinstance(surface[key], str) or not surface[key].strip() or len(surface[key]) > 500:
             raise RouteSchemaError(f"routing_surface.{key} must be a compressed nonempty summary")
     return surface
-
-
-def _validate_terminal_selection(surface, units, selected):
-    if (surface["response_mode"] in ("direct-response", "clarification-only")
-            and any(units[unit_id]["kind"] == "execution" for unit_id in selected)):
-        raise RouteSchemaError("terminal response mode cannot select execution work")
 
 
 def _criterion(value, *, resolved=False):
@@ -213,7 +210,7 @@ def _continuation_original(selector, root, owner, connection):
         candidate = _stored(connection, 'core_completion_candidates', selector['candidate_reference'])
     except CompletionAssessmentError as error:
         raise RouteBindingError('source-unverified') from error
-    original_owner = candidate.get('owner') or candidate.get('contract', {}).get('owner') or candidate.get('input_binding', {})
+    original_owner = candidate.get('owner') or candidate.get('contract', {}).get('owner') or {}
     if (candidate.get('intent_root') != str(root)
         or any(original_owner.get(key) != owner[key] for key in ('platform', 'session_id'))):
         raise RouteBindingError('source-owner-unbound')
@@ -326,7 +323,6 @@ def validate_response_route(state: dict[str, Any], candidate: dict[str, Any],
     for unit_id in selected_ids:
         if unit_id not in units or units[unit_id]["admitted"] is not True:
             raise RouteSchemaError("selected work unit must be explicitly present and admitted")
-    _validate_terminal_selection(surface, units, selected_ids)
     _require_execution_criteria(units, selected_ids, owned)
     references = candidate["selected_criteria"]
     if not isinstance(references, list):
@@ -370,7 +366,7 @@ def project_stored_response_route(state, expected_input_event_id=None):
         raise RouteSchemaError("stored response route schema or owner is invalid")
     _object(stored, CANDIDATE_KEYS | {"status", "platform", "session_id", "input_event_id", "boundary_ref"},
             "stored response route", optional={"continuation_feedback"})
-    validate_routing_surface(stored["routing_surface"])
+    validate_routing_surface(stored["routing_surface"], stored=True)
     if not isinstance(stored["input_event_id"], str) or not stored["input_event_id"]:
         raise RouteSchemaError("stored route input event is invalid")
     if stored["boundary_ref"] is not None:
@@ -395,7 +391,6 @@ def project_stored_response_route(state, expected_input_event_id=None):
     _unique(selected, "stored selected_work_unit_ids")
     if any(u not in units or units[u]["admitted"] is not True for u in selected):
         raise RouteSchemaError("stored selected unit is not admitted")
-    _validate_terminal_selection(stored["routing_surface"], units, selected)
     owned = _owned_criteria(state.get("acceptance_criteria", []))
     _require_execution_criteria(units, selected, owned)
     seen = set()
@@ -409,7 +404,8 @@ def project_stored_response_route(state, expected_input_event_id=None):
         _validate_continuation_feedback(stored['continuation_feedback'], stored['selected_criteria'], resolved=True)
     route = deepcopy(stored)
     if (route.get("input_event_id") != current or state.get("canonical_input_event_id") != current
-        or state.get('current_context_input_event_id')):
+        or state.get('current_context_input_event_id')
+        or route["routing_surface"]["response_mode"] in RETIRED_RESPONSE_MODES):
         route["status"] = "stale"
     for selected_criterion in route["selected_criteria"]:
         criterion = owned.get(_criterion(selected_criterion, resolved=True))

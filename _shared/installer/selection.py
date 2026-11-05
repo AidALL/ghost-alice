@@ -1,10 +1,4 @@
-"""Which skills and support files install, and from where.
-
-Port of `installer_lib/targets.sh` (targets, families, deprecated cleanup),
-`install.sh:76-92` (the skill lists), `installer_lib/install.sh:849-878`
-(`_install_collect_targets`), `:728-764` (`_check_addon_collisions`) and
-`installer_lib/uninstall.sh:40-48, 81-108` (descriptions, `--list`).
-"""
+"""Which skills and support files install, and from where."""
 
 from __future__ import annotations
 
@@ -70,7 +64,7 @@ class Collected:
 def expand_skill_targets(skill: str) -> list[Target]:
     """A skill with `SKILL.md` in the checkout is one target; a family dir yields
     one target per direct sub-directory with `SKILL.md`; a missing dir yields
-    none (`targets.sh:5-26`)."""
+    none."""
     root = runner.REPO_ROOT / skill
     if not root.is_dir():
         return []
@@ -81,7 +75,7 @@ def expand_skill_targets(skill: str) -> list[Target]:
 
 
 def iter_install_targets(skills: list[str], addon_targets: list[Target] = ()) -> list[Target]:
-    """Expanded core targets in skill order, then the addon targets (`targets.sh:230-246`)."""
+    """Expanded core targets in skill order, then the addon targets."""
     targets: list[Target] = []
     for skill in skills:
         targets.extend(expand_skill_targets(skill))
@@ -90,7 +84,7 @@ def iter_install_targets(skills: list[str], addon_targets: list[Target] = ()) ->
 
 
 def validate_requested_skills(skills: list[str]) -> None:
-    """`Skill not found: X` + `Run <install command> --list to see available skills.` and exit 1 (`targets.sh:263-273`)."""
+    """`Skill not found: X` + `Run <install command> --list to see available skills.` and exit 1."""
     for skill in skills:
         if not expand_skill_targets(skill):
             report.error(f"Skill not found: {skill}")
@@ -103,7 +97,7 @@ def _present(path: Path) -> bool:
 
 
 def has_managed_installs(skills_root: Path) -> bool:
-    """True when any core skill (or family sub-skill) exists as a link or dir under `skills_root` (`targets.sh:296-320`)."""
+    """True when any core skill (or family sub-skill) exists as a link or dir under `skills_root`."""
     for skill in ALL_SKILLS:
         targets = expand_skill_targets(skill)
         if not targets:
@@ -119,7 +113,7 @@ def has_managed_installs(skills_root: Path) -> bool:
 def cleanup_deprecated_installed_skills(ctx: "Context", skills_root: Path) -> bool:
     """Move each DEPRECATED_INSTALLED_SKILLS entry under `skills_root` to
     `~/.ghost-alice/deprecated-skill-backups/<name>-<stamp>[-n]`, then run
-    `retired_assets.py` (`targets.sh:340-376`). False when a move or the
+    `retired_assets.py`. False when a move or the
     retirement fails."""
     skills_root = Path(skills_root)
     if not skills_root.is_dir():
@@ -151,7 +145,7 @@ def cleanup_deprecated_installed_skills(ctx: "Context", skills_root: Path) -> bo
 
 def collect_targets(ctx: "Context", skills: list[str]) -> Collected:
     """Validate the requested skills, read the addon targets, expand everything
-    and count (`installer_lib/install.sh:849-878`). Support total is 1 when
+    and count. Support total is 1 when
     `<checkout>/_shared` exists."""
     validate_requested_skills(skills)
     addon_targets = list(addons.collect_addon_targets(ctx))
@@ -166,7 +160,7 @@ def collect_targets(ctx: "Context", skills: list[str]) -> Collected:
 def check_addon_collisions(ctx: "Context") -> None:
     """`addon_installer.py detect-collisions ...`; rc 2 → `Addon install collision
     detected; aborting install` exit 1, other non-zero → `Addon manifest error;
-    aborting install` exit 1 (`installer_lib/install.sh:728-764`)."""
+    aborting install` exit 1."""
     if not ctx.addon_sources:
         return
     args: list[str] = ["detect-collisions"]
@@ -191,7 +185,7 @@ def check_addon_collisions(ctx: "Context") -> None:
 
 def skill_description(skill_md: Path) -> str:
     """The `description:` value from the first 8 lines, quotes stripped, cut to
-    77 chars + `...` when longer than 80 (`uninstall.sh:40-48`, without perl)."""
+    77 chars + `...` when longer than 80."""
     path = Path(skill_md)
     if not path.is_file():
         return ""
@@ -210,7 +204,7 @@ def skill_description(skill_md: Path) -> str:
 
 
 def list_skills() -> int:
-    """`Available skills:` listing with families and sub-skills (`uninstall.sh:81-108`); exit code 0."""
+    """`Available skills:` listing with families and sub-skills; exit code 0."""
     report.emit("Available skills:")
     report.emit("")
     for skill in ALL_SKILLS:

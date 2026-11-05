@@ -2,7 +2,7 @@
 
 [🇺🇸 English](../../policies/session-gate-matrix.md) | [🇰🇷 한국어](./session-gate-matrix.md)
 
-기계 판독용 게이트 인덱스는 [skill-catalog/session-gates.json](../../../skill-catalog/session-gates.json)입니다. 이 문서는 각 조건에 담당 절차를 연결합니다. [아키텍처](../../../architecture_ko.md)는 구성요소의 책임을, 연결된 스킬은 응답 모델의 행동을 정의합니다.
+이 문서는 각 조건에 담당 절차를 연결합니다. [아키텍처](../../../architecture_ko.md)는 구성요소의 책임을, 연결된 스킬은 응답 모델의 행동을 정의합니다.
 
 ## 목차
 

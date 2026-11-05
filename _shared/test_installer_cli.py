@@ -311,7 +311,6 @@ class DispatchCase(CliCase):
         self.stub("installer.cli.run_install", 0)
         self.stub("installer.lock.acquire", self.home / "lock")
         self.stub("installer.lock.release")
-        self.stub("installer.source.assert_session_gate_contract")
         self.stub("installer.runner.run_tool", mock.Mock(returncode=5))
 
     def dispatch(self, argv, present=("claude", "codex")):

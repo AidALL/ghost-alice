@@ -40,7 +40,6 @@ At the end of each item, an "automatic" / "manual" label distinguishes whether `
 | # | Item | Spec criterion | Verification method | Automatic |
 | --- | --- | --- | --- | :---: |
 | 2-1 | body line count | recommended within 500 lines | `wc -l` (excluding frontmatter) | automatic |
-| 2-2 | body token count | recommended under ~5000 tokens | approximate estimate of line count × 10 | automatic |
 | 2-3 | split into references/ when over 500 lines | spec guidance | substituted by the 2-1 WARNING signal | manual |
 | 2-4 | no placeholders | "to be written", "TODO", "TBD", etc. are prohibited | `PLACEHOLDER_PATTERN` regex | automatic |
 | 2-5 | Progressive Disclosure | split long code and tables into references/ | WARNING when a single code block in the SKILL.md body exceeds 50 lines | automatic |

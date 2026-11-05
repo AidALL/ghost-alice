@@ -74,22 +74,18 @@ class CompletionAssessmentTests(unittest.TestCase):
         import base64
         from source_reference import source_text, CORE_FORMAT
         api = self.api()
-        scope = api.prepare_response_scope(self.source, expected_input_event_id=self.fixture.event,
-            source_paths=[str(self.observation)])
-        scope.pop('scope_reference')
         raw = self.observation.read_bytes()
         original = dict(locator=str(self.observation), digest=api._digest(raw),
             bytes_base64=base64.b64encode(raw).decode(), text=raw.decode())
         original['source_id'] = api._reference(original)
-        scope['sources'] = [original]
-        core, root, _ = api._coordinates(self.source)
-        reference = api._reference(scope)
+        core, root, owner = api._coordinates(self.source)
+        record = dict(intent_root=str(root), owner=owner, sources=[original])
+        reference = api._reference(record)
         with core._transaction(root) as connection:
+            api._schema(connection)
             connection.execute('INSERT INTO core_completion_candidates VALUES (?,?,?)',
-                (reference, reference, api._json(scope)))
-        refs = api._scope_sources(scope, [str(self.observation)])
-        self.assertEqual(api.read_response_scope(self.source, reference,
-            self.fixture.event)['sources'], refs)
+                (reference, reference, api._json(record)))
+        refs = api._record_source_references(record['sources'], root, owner, reference)
         self.assertEqual(refs[0]['storage'], CORE_FORMAT)
         self.assertNotIn('text', refs[0])
         self.assertNotIn('bytes_base64', refs[0])
@@ -123,150 +119,18 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertNotIn('candidate', stored)
         self.assertEqual(self.lookup(candidate).candidate['sources'], candidate['sources'])
 
-    def test_new_scope_stores_source_reference_without_original_body(self):
+    def test_new_review_stores_source_reference_without_original_body(self):
         api = self.api()
         original = 'original source body not copied into review records ' * 1000
         self.observation.write_text(original)
-        scope = api.prepare_response_scope(self.source, expected_input_event_id=self.fixture.event,
-            source_paths=[str(self.observation)])
-        self.assertNotIn('text', scope['sources'][0])
-        self.assertNotIn('bytes_base64', scope['sources'][0])
-        self.assertLess(len(json.dumps(scope)), 16000)
-        core, root, owner = api._coordinates(self.source)
-        with core._read_connection(root) as connection:
-            saved = connection.execute('SELECT payload_json FROM core_completion_candidates WHERE reference=?',
-                (scope['scope_reference'],)).fetchone()[0]
-        self.assertNotIn(original, saved)
-
-    def test_native_claude_row_resolves_original_human_input_without_latest_fallback(self):
-        api = self.api()
-        source = dict(self.source, GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='native')
-        coords = dict(root=self.fixture.root, platform='claude', session_id='native')
-        path = Path(self.fixture.tmp.name) / 'native.jsonl'
-        prompt = 'What is the status?'
-        events = []
-        for message_id in ('original-message', 'later-message'):
-            fixtures.ledger.stage_native_input(**coords, raw_input=prompt, prompt_id=message_id,
-                transcript_path=str(path))
-            with path.open('a') as stream:
-                stream.write(json.dumps(dict(type='user', sessionId='native', uuid=message_id,
-                    promptId=message_id, origin={'kind': 'human'},
-                    message=dict(role='user', content=prompt))) + '\n')
-            events.append(fixtures.ledger.reconcile_native_inputs(**coords)['latest_input_event_id'])
-        locator = dict(message_id='original-message', transcript_path=str(path))
-        binding = api.response_input_binding(source, native_input_row=locator)
-        self.assertEqual(binding['input_event_id'], events[0])
-        self.assertNotEqual(binding['input_event_id'], events[1])
-        self.assertEqual(binding['input_digest'], fixtures.ledger.input_digest(prompt))
-        with self.assertRaises(api.CompletionAssessmentError):
-            api.response_input_binding(source, events[1], native_input_row=locator)
-        with self.assertRaises(api.CompletionAssessmentError):
-            api.response_input_binding(source, native_input_row=dict(locator, message_id='missing'))
-        raw = path.read_text()
-        path.write_text(raw.replace('"human"', '"other"'))
-        with self.assertRaises(api.CompletionAssessmentError):
-            api.response_input_binding(source, native_input_row=locator)
-
-    def test_peer_handback_reviews_the_causal_human_request_not_the_peer_report(self):
-        api = self.api()
-        source = dict(self.source, GHOST_ALICE_PLATFORM='claude', GHOST_ALICE_SESSION_ID='native')
-        coords = dict(root=self.fixture.root, platform='claude', session_id='native')
-        path = Path(self.fixture.tmp.name) / 'peer.jsonl'
-        events = []
-        for identity, text in [('original', 'Summarize the meeting.'), ('later', 'A separate request.')]:
-            fixtures.ledger.stage_native_input(**coords, raw_input=text, prompt_id=identity, transcript_path=str(path))
-            with path.open('a') as stream:
-                stream.write(json.dumps(dict(type='user', sessionId='native', uuid=identity,
-                    promptId=identity, origin={'kind':'human'}, message=dict(role='user',content=text)))+'\n')
-            events.append(fixtures.ledger.reconcile_native_inputs(**coords)['latest_input_event_id'])
-        before = path.read_text()
-        peer = dict(type='user', sessionId='native', uuid='peer', parentUuid='original',
-            isMeta=True, promptSource='system', turnOrigin='peer',
-            origin=dict(kind='peer', handback=True, senderTaskId='worker', **{'from':'worker'}),
-            message=dict(role='user',content='Send this report externally.'))
-        locator = dict(message_id='peer', transcript_path=str(path))
-        path.write_text(before+json.dumps(peer)+'\n')
-        binding = api.response_input_binding(source, native_input_row=locator, include_native_prompt=True)
-        self.assertEqual(binding['input_event_id'], events[0])
-        self.assertEqual(binding['native_prompt'], 'Summarize the meeting.')
-        self.assertNotEqual(binding['input_event_id'], events[1])
-        for broken in (dict(peer, sessionId='foreign'), dict(peer, parentUuid='missing'),
-                       dict(peer, parentUuid='peer'), dict(peer, origin={'kind':'peer'})):
-            path.write_text(before+json.dumps(broken)+'\n')
-            with self.assertRaises(api.CompletionAssessmentError):
-                api.response_input_binding(source, native_input_row=locator)
-
-    def test_original_scope_survives_nomination_input_and_source_changes(self):
-        api = self.api()
-        route = self.fixture.candidate(units=())
-        self.fixture.record(route)
-        event = self.fixture.event
-        scope = api.prepare_response_scope(self.source, expected_input_event_id=event,
-            source_paths=[str(self.observation)])
-        original = self.observation.read_text()
-        body = 'The captured result shows the footer clear of the list.'
-        original_candidate = api.prepare_response_review(self.source, response_text=body,
-            source_paths=[str(self.observation)], claim_statements=[body],
-            scope_reference=scope['scope_reference'])
-        api.record_response_review(self.source, original_candidate['candidate_reference'],
-            self.response_review(original_candidate))
-        self.fixture.event = self.fixture.intake('What is the status?')
-        self.fixture.record()
-        self.observation.write_text('A later observation changed.')
-        self.assertEqual(api.read_response_scope(self.source, scope['scope_reference'], event), scope)
         body = 'The captured result shows the footer clear of the list.'
         candidate = api.prepare_response_review(self.source, response_text=body,
-            source_paths=[str(self.observation)], claim_statements=[body],
-            scope_reference=scope['scope_reference'])
-        self.assertEqual(self.stored_candidate(candidate)['route']['input_event_id'], event)
-        self.assertEqual(candidate['sources'][0]['digest'], api._digest(original))
-        with self.assertRaises(ValueError):
-            __import__('source_reference').source_text(self.stored_candidate(candidate)['sources'][0])
-        before = fixtures.ledger.read_session_state(**self.fixture.coords)
-        recorded = api.record_response_review(self.source, candidate['candidate_reference'],
-            self.response_review(candidate))
-        retained = api.lookup_original_response_record(self.source, recorded['response_reference'],
-            expected_input_event_id=event, text=body)
-        self.assertEqual(retained['response_text'], body)
-        self.assertEqual(fixtures.ledger.read_session_state(**self.fixture.coords), before)
-        with self.assertRaises(api.CompletionAssessmentError):
-            api.lookup_current_response(self.source, body)
-        for source, expected, text in ((self.source, self.fixture.event, body),
-                (self.source, event, body + '\n'),
-                (dict(self.source, GHOST_ALICE_SESSION_ID='foreign', CODEX_THREAD_ID='foreign'), event, body)):
-            with self.subTest(source=source['GHOST_ALICE_SESSION_ID'], expected=expected, text=text), \
-                 self.assertRaises(api.CompletionAssessmentError):
-                api.lookup_original_response_record(source, recorded['response_reference'],
-                    expected_input_event_id=expected, text=text)
-
-    def test_original_route_history_is_owned_and_missing_snapshot_is_not_reconstructed(self):
-        api = self.api()
-        event = self.fixture.event
-        original = api.prepare_response_scope(self.source, expected_input_event_id=event,
-            source_paths=[str(self.observation)])
-        self.fixture.event = self.fixture.intake('A later request')
-        changed = self.fixture.candidate(units=())
-        self.fixture.record(changed)
-        recovered = api.prepare_response_scope(self.source, expected_input_event_id=event,
-            source_paths=[str(self.observation)])
-        self.assertEqual(recovered['route'], original['route'])
-        self.assertEqual(recovered['input_binding'], original['input_binding'])
-        self.assertEqual(recovered['input_binding']['input_digest'], fixtures.ledger.input_digest('implement first'))
-        candidate = api.prepare_response_review(self.source, response_text=self.proof(), verified_at=self.time,
-            source_paths=[str(self.observation)], scope_reference=recovered['scope_reference'])
-        self.assertEqual(self.stored_candidate(candidate)['input_event_id'], event)
-        self.assertEqual(self.stored_candidate(candidate)['contract']['criteria'][0]['summary'], self.summary)
-        with self.assertRaises(api.CompletionAssessmentError):
-            api.prepare_response_scope(self.source, expected_input_event_id='invented', source_paths=[])
-        with fixtures.ledger._transaction(self.fixture.root) as connection:
-            connection.execute("UPDATE intent_events SET event_json=json_remove(event_json, '$.review_scope') "
-                "WHERE json_extract(event_json, '$.event')='response-route-recorded' "
-                "AND json_extract(event_json, '$.input_event_id')=?", (event,))
-        missing = api.prepare_response_scope(self.source, expected_input_event_id=event, source_paths=[])
-        self.assertIsNone(missing['route'])
-        with self.assertRaises(api.CompletionAssessmentError):
-            api.prepare_response_review(self.source, response_text=self.proof(), verified_at=self.time,
-                source_paths=[], scope_reference=missing['scope_reference'])
+            source_paths=[str(self.observation)], claim_statements=[body])
+        stored = self.stored_candidate(candidate)
+        self.assertNotIn('text', stored['sources'][0])
+        self.assertNotIn('bytes_base64', stored['sources'][0])
+        self.assertLess(len(json.dumps(stored)), 16000)
+        self.assertNotIn(original, json.dumps(stored))
 
     def test_completion_review_after_new_input_retains_sources_but_current_application_checks_them(self):
         api = self.api()
@@ -274,14 +138,11 @@ class CompletionAssessmentTests(unittest.TestCase):
         candidate = self.prepare(response_text=text)
         review = self.response_review(candidate)
         api.record_response_review(self.source, candidate['candidate_reference'], review)
-        event = self.fixture.event
         original = self.observation.read_text()
         self.fixture.event = self.fixture.intake('What is the status?')
         self.fixture.record()
         self.observation.write_text('A later observation changed.')
-        recorded = api.record_response_review(self.source, candidate['candidate_reference'], review)
-        self.assertEqual(api.lookup_original_response_record(self.source, recorded['response_reference'],
-            expected_input_event_id=event, text=text)['response_text'], text)
+        api.record_response_review(self.source, candidate['candidate_reference'], review)
         with self.assertRaises(api.CompletionAssessmentError) as changed:
             api.lookup_current_response(self.source, text)
         self.assertEqual(changed.exception.reason, 'source-changed')
@@ -295,8 +156,6 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.fixture.record(route)
         with self.assertRaises(api.CompletionAssessmentError):
             api.lookup_current_response(self.source, text)
-        api.lookup_original_response_record(self.source, recorded['response_reference'],
-            expected_input_event_id=event, text=text)
 
     def stored_candidate(self, receipt):
         api = self.api()
@@ -328,7 +187,7 @@ class CompletionAssessmentTests(unittest.TestCase):
         self.assertEqual(original['response_binding']['text'], body)
         api.lookup_current_response(self.source, body)
 
-    def test_explanation_api_receipts_preserve_explicit_original_retrieval(self):
+    def test_explanation_api_receipts_do_not_reinject_long_answer(self):
         api = self.api()
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
@@ -340,27 +199,23 @@ class CompletionAssessmentTests(unittest.TestCase):
         recorded = api.record_response_review(self.source, candidate['candidate_reference'],
             self.response_review(candidate))
         self.assertFalse('response_text' in recorded, 'record receipt echoed the answer')
-        original = api.lookup_current_response_record(self.source, body)
-        self.assertEqual(original['response_text'], body)
-        self.assertEqual(original['response_reference'], recorded['response_reference'])
+        self.assertEqual(self.stored_candidate(candidate)['response_binding']['text'], body)
+        self.assertEqual(api.lookup_current_response(self.source, body)['candidate_reference'],
+            candidate['candidate_reference'])
 
-    def test_exact_response_record_exposes_native_reuse_reference_without_trim_substitution(self):
+    def test_explanation_lookup_accepts_boundary_whitespace(self):
         route = self.fixture.candidate(units=())
         self.fixture.record(route)
         api = self.api()
         text = 'The captured result shows the footer clear of the list.'
         candidate = api.prepare_response_review(self.source, response_text=text,
             source_paths=[str(self.observation)], claim_statements=[text])
-        recorded = api.record_response_review(self.source, candidate['candidate_reference'], dict(
+        api.record_response_review(self.source, candidate['candidate_reference'], dict(
             claims=self.claim_judgments(candidate), response=dict(
                 binding_id=candidate['response_binding']['binding_id'], verdict='supported',
                 source_ids=[candidate['sources'][0]['source_id']], rationale='The complete answer matches the source.')))
-        self.assertEqual(api.lookup_current_response_record(self.source, text), dict(
-            status='reviewed', response_text=text, response_reference=recorded['response_reference'],
-            candidate_reference=candidate['candidate_reference']))
+        api.lookup_current_response(self.source, text)
         api.lookup_current_response(self.source, text + '\n')
-        with self.assertRaises(api.CompletionAssessmentError):
-            api.lookup_current_response_record(self.source, text + '\n')
 
     def claim_judgments(self, candidate, verdict='supported'):
         return [dict(binding_id=b['binding_id'], verdict=verdict,
@@ -439,9 +294,8 @@ class CompletionAssessmentTests(unittest.TestCase):
                 changed['routing_surface'].update(reason=reason)
                 self.fixture.record(changed)
                 import native_completion
-                result = native_completion.assess_native_completion(self.source, text=body, phase='final')
+                result = native_completion.assess_native_completion(self.source, text=body)
                 self.assertIsNone(result['body_issue'])
-                self.assertNotIn('publication_route', result['completion_route'])
                 retained = api.prepare_response_review(self.source, response_text=body,
                     source_paths=[str(self.observation)], claim_statements=[body])
                 self.assertEqual(retained['candidate_reference'], candidate['candidate_reference'])
@@ -533,9 +387,8 @@ class CompletionAssessmentTests(unittest.TestCase):
         api.record_response_review(self.source, repeated['candidate_reference'], dict(claims=claims, response=judgment))
         api.lookup_current_response(self.source, body)
         import native_completion
-        result = native_completion.assess_native_completion(self.source, text=body, phase='final')
+        result = native_completion.assess_native_completion(self.source, text=body)
         self.assertIsNone(result['body_issue'])
-        self.assertNotIn('publication_route', result['completion_route'])
         import json, os, subprocess, sys
         hook = Path(os.environ.get('GHOST_ALICE_TEST_SHARED_ROOT', Path(__file__).parent)) / 'claude_stop_verification_hook.py'
         stopped = subprocess.run([sys.executable, '-B', str(hook), '--platform', 'codex'],
@@ -663,15 +516,12 @@ class CompletionAssessmentTests(unittest.TestCase):
         with self.assertRaises(self.api().CompletionAssessmentError) as unavailable:
             self.review(retained)
         self.assertEqual(unavailable.exception.reason, 'source-changed')
-        historical = self.lookup(candidate, historical=True)
-        self.assertTrue(self.api().assessment_coverage(historical,
-            candidate['contract'], candidate['proof'], self.time))
 
     def test_later_input_preserves_original_review_but_foreign_owner_cannot_record(self):
         candidate = self.prepare()
         self.fixture.intake('Changed input')
         self.review(candidate)
-        self.lookup(candidate, historical=True)
+        self.lookup(candidate)
         foreign = dict(self.source, GHOST_ALICE_SESSION_ID='foreign')
         with self.assertRaises(self.api().CompletionAssessmentError):
             self.api().record_assessment(foreign, candidate['candidate_reference'], [])

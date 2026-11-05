@@ -43,26 +43,6 @@ def codex_transcript_path(platform_dir, session_id):
     return str(path.resolve())
 
 
-def codex_transcript_contains_response(path, turn_id, text):
-    """A session filename alone does not establish coverage of the current turn."""
-    current_turn = None
-    for line in committed_lines(Path(path).read_bytes()).values():
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        payload = row.get('payload', {})
-        if row.get('type') == 'turn_context':
-            current_turn = payload.get('turn_id')
-        if (current_turn == turn_id and row.get('type') == 'response_item'
-                and payload.get('type') == 'message' and payload.get('role') == 'assistant'):
-            body = '\n'.join(p.get('text', '') for p in payload.get('content', [])
-                if isinstance(p, dict) and p.get('type') == 'output_text')
-            if body == text:
-                return True
-    return False
-
-
 def read_entries(path_value, session=None):
     if not isinstance(path_value, str) or not Path(path_value).is_absolute():
         return []
@@ -198,14 +178,6 @@ def stop_response_text(native_input):
         return ''
     return assistant_text_this_turn([row for row in entries
         if row.get('sessionId') == session and not row.get('isSidechain')])
-
-
-def completion_scope(native_input):
-    """Preserve the Stop phase even when the host supplies its body in a transcript."""
-    observed = native_input if isinstance(native_input, dict) else {}
-    text = stop_response_text(observed)
-    return dict(text=text, phase='final' if text or observed.get('hook_event_name') == 'Stop'
-                else 'before_tool', native_input=observed)
 
 
 def native_tool_activity(platform, session_id, native_input, *, input_observation=None):
