@@ -1,6 +1,6 @@
 # Impact Tier
 
-The response model assigns one display tier to each pending change. Adversarial-verification checks the classification along with the decision aid.
+The response model assigns one display tier to each pending change. The response model passes the classification through adversarial-verification together with the content it prepares for the user's decision.
 
 | Tier | Observed change | Display treatment |
 | --- | --- | --- |

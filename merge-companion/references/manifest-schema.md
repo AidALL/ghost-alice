@@ -2,7 +2,7 @@
 
 ## Schema v1
 
-The installer Python code and the response model reviewing a merge use the importable functions in `../scripts/manifest_io.py`; this module has no command-line interface. The helper owns manifest persistence and the platform locking behavior stated below. The response model owns the user's choice, staged content and live-file application.
+The installer Python code and the response model reviewing a merge use the importable functions in `../scripts/manifest_io.py`; this module has no command-line interface. The helper writes the manifest and takes the locks stated below. The response model asks for the user's choice, writes the staged content and applies it to the live file.
 
 ```json
 {
@@ -29,14 +29,13 @@ The installer Python code and the response model reviewing a merge use the impor
 1. `diff_collector.register_changes_in_manifest` creates the entry with `decided=false` and `decision=null`.
 2. After the approved staged merge is applied, the response model calls `manifest_io.mark_decided` with merged; the entry becomes decided=true.
 3. After the approved staged change and backup are discarded, the response model records discarded with decided=true.
-4. For later, the response model records deferred and retains decided=false, so the next session can surface it.
-5. The manifest owner may rotate entries only after they are decided.
+4. When the user chooses later, the response model records deferred and retains decided=false, so the next session can show the entry again.
 
 ## Apply and record a decision
 
-The response model takes the actual manifest path from the current-platform pending-merge result, the exact `id`, `source_path` and `backup_path` from the inspected entry, and the decision from the user's authorized choice. Resolve `SCRIPTS` to the loaded merge-companion skill's absolute `scripts` directory. Before applying staged content through the host's file tool, check the Safety boundary below and retain the approved staged result and the inspected live version. A changed live file requires reconciling that change with the approved proposal before applying it.
+The response model takes the actual manifest path from the current host's pending-merge result, the exact `id`, `source_path` and `backup_path` from the inspected entry, and the decision from the user's authorized choice. Resolve `SCRIPTS` to the loaded merge-companion skill's absolute `scripts` directory. Before applying staged content through the host's file tool, check the Safety boundary below and retain the approved staged result and the inspected live version. A changed live file requires reconciling that change with the approved proposal before applying it.
 
-After the file tool confirms approved integration, use `merged`; after the approved discard completes, use `discarded`; for an explicit defer, use `deferred` without applying a live change. Bind `MANIFEST`, `ENTRY_ID` and `DECISION` to those exact values, then invoke the importable helper through the exposed shell/Python tool:
+After the file tool confirms approved integration, use `merged`; after the approved discard completes, use `discarded`; for an explicit defer, use `deferred` without applying a live change. Bind `MANIFEST`, `ENTRY_ID` and `DECISION` to those exact values, then invoke the importable helper through the host's shell tool:
 
 ```bash
 python3 - "$SCRIPTS" "$MANIFEST" "$ENTRY_ID" "$DECISION" <<'PY'
@@ -49,14 +48,14 @@ print('manifest decision recorded')
 PY
 ```
 
-`mark_decided(path: Path, entry_id: str, decision: str)` returns `None` on success and atomically updates the matching entry. `deferred` leaves `decided=false`; the other two decisions set it true. `ManifestError` means an unknown decision or missing entry; filesystem errors also remain failures. The response model reads the process exit status and returned error, rather than treating a proposed choice as a recorded one. If the live change succeeded but this recording failed, preserve that application evidence and repair only the manifest dependency; do not apply the same business change again. `read_manifest(Path(...))` returns the manifest object and `list_pending(Path(...))` returns pending entries; neither function approves a merge.
+`mark_decided(path: Path, entry_id: str, decision: str)` returns `None` on success and atomically updates the matching entry. `deferred` leaves `decided=false`; the other two decisions set it true. `ManifestError` means an unknown decision or missing entry; filesystem errors also remain failures. The response model reads the process exit status and returned error, rather than treating a proposed choice as a recorded one. If the live change succeeded but this recording failed, preserve the evidence of that change and repair only the manifest record; do not apply the same change again. `read_manifest(Path(...))` returns the manifest object and `list_pending(Path(...))` returns pending entries; neither function approves a merge.
 
 ## Persistence behavior
 
-The helper writes through a temporary file and a rename. `append_entry`, `append_entry_if_absent` and `mark_decided` hold the lock on the sibling `.lock` file and wait for it at most `MANIFEST_LOCK_WAIT_S` in `manifest_io.py`; a lock held longer raises `file_lock.LockTimeout` to the caller. Windows takes no lock. Corrupt JSON follows the silent-pass behavior and is backed up with the .corrupt-bak suffix.
+The helper writes through a temporary file and a rename. `append_entry`, `append_entry_if_absent` and `mark_decided` hold the lock on the sibling `.lock` file and wait for it at most `MANIFEST_LOCK_WAIT_S` in `manifest_io.py`; a lock held longer raises `file_lock.LockTimeout` to the caller. Windows takes no lock. When a manifest holds corrupt JSON, `read_manifest` prints a warning, backs the file up with the `.corrupt-bak` suffix and returns an empty entry list.
 
 ## Safety boundary
 
-Before applying the approved change, the response model verifies resolved path containment: `backup_path` belongs to the actual current-platform pending-merge directory, and `source_path` belongs to the installed skills root supplied by trusted installation context or a platform-config root the user authorized. `SKILLS_DIR` is that resolved installation root, not a guessed working directory. Example platform roots are `~/.codex/` and `~/.claude/`. The entry ID uses timestamp-skill-safe_filename; safe_filename removes slash, backslash and double-dot traversal components.
+Before applying the approved change, the response model verifies resolved path containment: `backup_path` belongs to the actual pending-merge directory of the current host, and `source_path` belongs to the installed skills root supplied by trusted installation context or a host configuration root the user authorized. Example host configuration roots are `~/.codex/` and `~/.claude/`. The entry ID uses timestamp-skill-safe_filename; safe_filename removes slash, backslash and double-dot traversal components.
 
 The snapshot_hash and current_hash fields identify artifacts. They do not determine which behavior is correct or authorize applying a result.

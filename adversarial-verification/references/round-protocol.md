@@ -20,7 +20,7 @@ Retain the dispatch tool's returned handle with its claim ID, round and axis. Us
 ## Delegate submission
 
 ```text
-agent-id: <assigned delegate>
+agent-id: <role name from agent-roles.md>
 round: <round number>
 axis-attack:
   - target-claim-id: <claim or subclaim>
@@ -31,7 +31,7 @@ axis-attack:
   declared: no attack point
   reason: <why no semantically new own-axis attack remains>
 meta-attack:
-  - target-agent: <delegate>
+  - target-agent: <role name of the prior-round delegate>
     target-round: <prior round>
     attack-content: <specific defect in that prior submission>
   OR
@@ -39,7 +39,7 @@ meta-attack:
 final-verdict-this-round: accept | reject | hold
 ```
 
-Every submission includes axis-attack and final-verdict. Round 1 may omit meta-attack because no prior-round target exists. A bare verdict or empty axis response is invalid. Meta-attack cannot hide an ordinary off-axis claim attack.
+Every submission includes axis-attack and final-verdict-this-round. Round 1 may omit meta-attack because no prior-round target exists. A bare verdict or empty axis response is invalid. Meta-attack cannot hide an ordinary off-axis claim attack.
 
 ## Attack, concession and response rules
 
@@ -48,10 +48,10 @@ An attack identifies a concrete claim, source, clause or reasoning step, states 
 A concession identifies the assigned delegate's own defeated attack/evidence, the opposing evidence/response and the resolution path, then states the remaining claim boundary:
 
 ```text
-agent-id: <delegate>
+agent-id: <role name from agent-roles.md>
 round: <round>
 concession:
-  target-own-attack-id: <prior attack>
+  target-own-attack-id: <round, target-claim-id and attack-content of the prior attack>
   negated-by: <response or counterattack>
   negation-path: <one or two sentences>
   remaining-claim-part: <surviving part>
@@ -73,13 +73,13 @@ In Phase C of every round, the response model checks for:
 
 The response model invalidates a violating utterance and asks that delegate to resubmit; the round is extended once. Cumulative audit failure over three rounds requires delegate replacement under convergence-rules.md. Every submission must pass before the cycle can close as accepted.
 
-The response model performs this semantic review without a separate routine audit delegate. For an ambiguous concrete-versus-general judgment, it may dispatch one bounded auxiliary judgment containing the disputed utterance, required criterion and source context; retain the returned reasoning in the log. Matching IDs and field presence are mechanical checks, not substitutes for that judgment.
+The response model performs this semantic review without a separate routine audit delegate. For an ambiguous concrete-versus-general judgment, it may dispatch one bounded auxiliary judgment containing the disputed utterance, required evaluation criterion and source context; retain the returned reasoning in the log. Matching IDs and field presence are mechanical checks, not substitutes for that judgment.
 
 ## Log and retention
 
 ```text
 rounds-log:
-  claim-id: <target>
+  claim-id: <claim-id>
   rounds:
     - round: 1
       phase-a:
@@ -95,4 +95,4 @@ rounds-log:
     retracted-claims: <withdrawn claims>
 ```
 
-The response model saves the full log in the existing authorized evidence location and returns its exact locator with the claim ID, round count, convergence and up to ten issues. The delegate that summarizes the dispute, or the human escalation, receives that log and the current claim-card. If no file storage is authorized, retain the log in task context and report the durable-retention limit; do not create a new storage boundary. For a stored log, retain it for at least 30 days after the result is reflected in the deliverable, within applicable retention authority; do not export sensitive evidence beyond the authorized workspace.
+The response model saves the full log in the existing authorized evidence location and returns its exact locator with the claim ID, round count, convergence and up to ten issues. The response model passes that log and the current claim-card to the delegate that summarizes the dispute or to the human who receives the escalation. If no file storage is authorized, retain the log in task context and report the durable-retention limit; do not create a new storage boundary. For a stored log, retain it for at least 30 days after the result is reflected in the deliverable, within applicable retention authority; do not export sensitive evidence beyond the authorized workspace.

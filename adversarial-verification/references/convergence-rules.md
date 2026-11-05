@@ -27,7 +27,7 @@ For example, two wordings of the same revenue/source discrepancy are the same at
 
 Human absence alone does not reject the claim or require waiting for a response-count threshold.
 
-A delegate may change its verdict. The change justifies another round only when it reopens a named uncertainty that another round can resolve. A changed surviving claim or assumption receives affected review; unchanged unrelated axes do not need repetition.
+A delegate may change its verdict. The change justifies another round only when it reopens a named uncertainty that another round can resolve. A changed surviving claim or assumption needs review on the axes it affects; unchanged unrelated axes do not need repetition.
 
 ## Replacement and limits
 
