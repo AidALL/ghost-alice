@@ -486,8 +486,8 @@ TOOL_CHECKPOINT_COMMAND = (
     + f" # {TOOL_CHECKPOINT_MARKER}"
 )
 # ── io-trace hook payload ─────────────────────────────────
-# Record file paths from every tool call into the audit log through PostToolUse events.
-# stdout is not visible to the user because this is PostToolUse, but the log file keeps it.
+# Write an io-trace record for each tool call the host reports, on the events in each platform's io_trace_intents.
+# stdout is not visible to the user on these events, but the hook log keeps it.
 
 IO_TRACE_MARKER = "[io-trace] audit"
 def _discover_ghost_alice_skill_names_from_catalog() -> list[str]:
@@ -966,6 +966,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "stop_hook_entry": STOP_HOOK_ENTRY,
         "session_start_intent": "on_session_start",
         "session_start_entry": SESSION_START_ENTRY,
+        "io_trace_intents": ("post_tool_use", "post_tool_use_failure"),
         "detect": lambda: _resolve_claude_dir().is_dir(),
     },
     "codex": {
@@ -977,6 +978,7 @@ PLATFORMS: dict[str, dict[str, Any]] = {
         "stop_hook_entry": STOP_HOOK_ENTRY_CODEX,
         "session_start_intent": "on_session_start",
         "session_start_entry": SESSION_START_ENTRY_CODEX,
+        "io_trace_intents": ("post_tool_use",),
         "detect": lambda: _resolve_codex_dir().is_dir(),
     },
 }
@@ -2144,36 +2146,37 @@ def install_hook(
             changed = True
 
     # Install the io-trace tool-use audit hook.
-    post_tool_key = resolve_hook_event("post_tool_use", platform_key)
-    io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
-    if io_entry:
-        io_command = _entry_command(io_entry)
-        if post_tool_key not in hooks_obj:
-            hooks_obj[post_tool_key] = []
-        pt_list = hooks_obj[post_tool_key]
-        removed = _remove_stale_hook_entries(
-            pt_list,
-            IO_TRACE_MARKER,
-            io_command,
-            require_dispatcher=require_dispatcher,
-            hook_id="io-trace",
-        )
-        if removed:
-            _log(_t(f"  Removed {removed} stale {post_tool_key} io-trace hook(s)", f"  Removed {removed} stale {post_tool_key} io-trace hook(s)"))
-            changed = True
-        if not _hook_already_exists(
-            pt_list,
-            IO_TRACE_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=io_command,
-        ):
-            pt_list.append(io_entry)
-            _log(_t(f"  {post_tool_key} io-trace hook added", f"  {post_tool_key} io-trace hook added"))
-            changed = True
-        else:
-            _log(_t(f"  {post_tool_key} io-trace hook already exists. Skipping", f"  {post_tool_key} io-trace hook already exists. Skipping"))
-    elif platform_key in {"claude", "codex"}:
-        _log(_t("  io_trace_hook.py not found. Skipping io-trace hook", "  io_trace_hook.py not found. Skipping io-trace hook"))
+    for io_trace_intent in platform["io_trace_intents"]:
+        post_tool_key = resolve_hook_event(io_trace_intent, platform_key)
+        io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
+        if io_entry:
+            io_command = _entry_command(io_entry)
+            if post_tool_key not in hooks_obj:
+                hooks_obj[post_tool_key] = []
+            pt_list = hooks_obj[post_tool_key]
+            removed = _remove_stale_hook_entries(
+                pt_list,
+                IO_TRACE_MARKER,
+                io_command,
+                require_dispatcher=require_dispatcher,
+                hook_id="io-trace",
+            )
+            if removed:
+                _log(_t(f"  Removed {removed} stale {post_tool_key} io-trace hook(s)", f"  Removed {removed} stale {post_tool_key} io-trace hook(s)"))
+                changed = True
+            if not _hook_already_exists(
+                pt_list,
+                IO_TRACE_MARKER,
+                require_dispatcher=require_dispatcher,
+                expected_command=io_command,
+            ):
+                pt_list.append(io_entry)
+                _log(_t(f"  {post_tool_key} io-trace hook added", f"  {post_tool_key} io-trace hook added"))
+                changed = True
+            else:
+                _log(_t(f"  {post_tool_key} io-trace hook already exists. Skipping", f"  {post_tool_key} io-trace hook already exists. Skipping"))
+        elif platform_key in {"claude", "codex"}:
+            _log(_t("  io_trace_hook.py not found. Skipping io-trace hook", "  io_trace_hook.py not found. Skipping io-trace hook"))
 
     # Trust only exact event/command pairs produced by verified addon sources in
     # this install; marker text in pre-existing user hooks is not authority.
@@ -2634,9 +2637,10 @@ def uninstall_hook(platform_key: str, dry_run: bool = False, *, destination=None
             hooks_obj.get(resolve_hook_event(ss_intent, platform_key), []),
             marked(SESSION_START_MARKER, SESSION_RECEIPT_MARKER))
 
-    # Also remove the io-trace PostToolUse hook.
-    total_removed += _remove_hook_commands_by_command(
-        hooks_obj.get(resolve_hook_event("post_tool_use", platform_key), []), marked(IO_TRACE_MARKER))
+    # Also remove the io-trace hooks.
+    for io_trace_intent in platform["io_trace_intents"]:
+        total_removed += _remove_hook_commands_by_command(
+            hooks_obj.get(resolve_hook_event(io_trace_intent, platform_key), []), marked(IO_TRACE_MARKER))
 
     # Full uninstall also strips every MANAGED addon observational hook, so a drifted addon hook is never left firing
     # live after a full uninstall.
@@ -2779,16 +2783,19 @@ def check_status_detail(
 
     io_trace_ok = True
     io_trace_present = True
-    post_tool_key = resolve_hook_event("post_tool_use", platform_key)
-    io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
-    if io_entry:
-        pt_list = hooks_obj.get(post_tool_key, [])
-        io_trace_present, io_trace_ok = _hook_marker_match_status(
-            pt_list,
-            IO_TRACE_MARKER,
-            require_dispatcher=require_dispatcher,
-            expected_command=_entry_command(io_entry),
-        )
+    for io_trace_intent in platform["io_trace_intents"]:
+        post_tool_key = resolve_hook_event(io_trace_intent, platform_key)
+        io_entry = _platform_io_trace_entry(platform_key, post_tool_key)
+        if io_entry:
+            pt_list = hooks_obj.get(post_tool_key, [])
+            event_present, event_ok = _hook_marker_match_status(
+                pt_list,
+                IO_TRACE_MARKER,
+                require_dispatcher=require_dispatcher,
+                expected_command=_entry_command(io_entry),
+            )
+            io_trace_present = io_trace_present and event_present
+            io_trace_ok = io_trace_ok and event_ok
 
     if platform_key == "codex" and not _codex_hook_feature_enabled():
         _log(_t(f"  {name}: hooks.json exists but config.toml does not enable hooks", f"  {name}: hooks.json exists but config.toml does not enable hooks"))
