@@ -363,7 +363,8 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
     def test_installed_lifecycle_profile_matrix_keeps_audit_and_control_protocol(self):
         for platform, profile in itertools.product(PLATFORMS, PROFILES):
             with self.subTest(platform=platform, profile=profile), self.installed(platform, profile) as (home, env, hooks):
-                self.assertEqual(set(hooks), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"})
+                failure_events = {"PostToolUseFailure"} if platform == 'claude' else set()
+                self.assertEqual(set(hooks), {"SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"} | failure_events)
                 session = f"lifecycle-{platform}-{profile}"
                 transcript = home / 'lifecycle-input.jsonl'
                 transcript.write_text('')
@@ -383,6 +384,9 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                     self.assertNotEqual(result.get("hookSpecificOutput", {}).get("permissionDecision"), "deny")
                 payload["hook_event_name"] = "PostToolUse"
                 self.assert_audit_surface(self.installed_hook(hooks, "PostToolUse", "io-trace", payload, env), profile)
+                for event in failure_events:
+                    payload["hook_event_name"] = event
+                    self.assert_audit_surface(self.installed_hook(hooks, event, "io-trace", payload, env), profile)
                 good = valid_text()
                 transcript = home / "synthetic-final.jsonl"
                 transcript.write_text("".join(json.dumps(e) + "\n" for e in [prompt(), skill(), reply(good)]), encoding="utf-8")
@@ -390,7 +394,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                 payload.update({"hook_event_name": "Stop", "last_assistant_message": good, "transcript_path": str(transcript)})
                 self.assert_allow(json.loads(self.installed_hook(hooks, "Stop", "completion", payload, env).stdout))
                 rows = self.strict_rows(home, platform, session)
-                self.assertEqual(len(rows), 6)
+                self.assertEqual(len(rows), 6 + len(failure_events))
                 self.assertEqual({row["event"] for row in rows}, set(hooks))
                 for row in rows:
                     self.assertEqual(row["agent_visibility_profile"], profile)
@@ -400,6 +404,7 @@ class TraceHookIsolatedMatrixTests(unittest.TestCase):
                     self.assertIn("stdout", row)
                     self.assertIn("surface_item", row)
                 audit = [json.loads(line) for line in (home / ".ghost-alice/io-trace.jsonl").read_text().splitlines()]
+                self.assertEqual(len(audit), 1 + len(failure_events))
                 self.assertEqual(audit[-1]["path"], "/synthetic/result.txt")
                 self.assertEqual(audit[-1]["platform"], platform)
                 self.assertEqual(audit[-1]["session"], session)

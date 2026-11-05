@@ -114,7 +114,12 @@ class HookNameTests(unittest.TestCase):
         self.assertEqual(hook_profile_gate_free_normalize("  --Tool  Checkpoint-- "), "tool-checkpoint")
         self.assertEqual(hook_profile_gate_free_normalize(""), "")
 
-    def test_resolve_hook_event_maps_every_intent_for_both_hosts(self):
+    def test_only_claude_code_has_a_failed_tool_call_event(self):
+        self.assertEqual(hook_definitions.resolve_hook_event("post_tool_use_failure", "claude"), "PostToolUseFailure")
+        with self.assertRaises(ValueError):
+            hook_definitions.resolve_hook_event("post_tool_use_failure", "codex")
+
+    def test_resolve_hook_event_maps_the_shared_intents_for_both_hosts(self):
         expected = {
             "on_user_prompt": "UserPromptSubmit", "pre_tool_use": "PreToolUse", "post_tool_use": "PostToolUse",
             "on_agent_stop": "Stop", "on_session_start": "SessionStart",

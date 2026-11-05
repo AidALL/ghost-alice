@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ghost-ALICE OS: a governance layer for Claude Code and Codex</title>
-  <meta name="description" content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs the response model to keep your objective and to check each claim against its original evidence, and it records each tool call the response model makes, with the file or command it used, so that you can review it.">
+  <meta name="description" content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs the response model to keep your objective and to check each claim against its original evidence, and it records the tool calls that Claude Code or Codex reports to it, with the file or command each one used, so that you can review them.">
   <link rel="alternate" hreflang="en" href="https://aidall.github.io/ghost-alice/">
   <link rel="alternate" hreflang="ko" href="https://aidall.github.io/ghost-alice/index_ko.html">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Ghost-ALICE OS">
   <meta property="og:title" content="Ghost-ALICE OS">
-  <meta property="og:description" content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs the response model to keep your objective and to check each claim against its original evidence, and it records each tool call the response model makes, with the file or command it used, so that you can review it.">
+  <meta property="og:description" content="Ghost-ALICE OS is a governance layer for Claude Code and Codex. It instructs the response model to keep your objective and to check each claim against its original evidence, and it records the tool calls that Claude Code or Codex reports to it, with the file or command each one used, so that you can review them.">
   <meta property="og:url" content="https://aidall.github.io/ghost-alice/">
   <meta property="og:image" content="https://aidall.github.io/ghost-alice/imgs/Ghost-ALICE_logo.png">
   <meta property="og:image:alt" content="Ghost-ALICE OS logo">
@@ -438,7 +438,7 @@
         <div class="eyebrow">Agent governance layer · <a href="https://github.com/AidALL/ghost-alice/releases">Core 0.5.1</a></div>
         <h1 class="sr-only" id="hero-heading">Ghost-ALICE OS</h1>
         <div class="hero-logo-lockup"><img src="imgs/Ghost-ALICE_logo.png" alt="Ghost-ALICE OS"></div>
-        <p class="lead">A governance layer for Claude Code and Codex. It instructs the response model to keep your objective and to check each claim against its original evidence, and it records each tool call the response model makes, with the file or command it used, so that you can review it.</p>
+        <p class="lead">A governance layer for Claude Code and Codex. It instructs the response model to keep your objective and to check each claim against its original evidence, and it records the tool calls that Claude Code or Codex reports to it, with the file or command each one used, so that you can review them.</p>
         <div class="actions"><a class="btn primary" href="./docs/getting-started/installation.html">Get started</a><a class="btn" href="https://github.com/AidALL/ghost-alice">View on GitHub</a></div>
       </div>
       <div class="hero-visual"><div class="quick-panel">
@@ -457,7 +457,7 @@
 <div class="card"><h3>Records how it interpreted your request</h3><p>For work that needs tools, the response model records in the intent ledger, before its first tool call, how it interpreted your request: the objective, constraints and acceptance criteria. When your words allow more than one reasonable reading and the next action depends on the reading, it asks you before that action.</p><a href="https://github.com/AidALL/ghost-alice/wiki/Design-Principles#comparison-and-feedback">Design principles</a></div>
 <div class="card"><h3>Checks claims against evidence</h3><p>The response model checks each claim against its original evidence and the whole answer against your objective. When no evidence supports an acceptance criterion, it reports that acceptance criterion as failed or unresolved instead of claiming completion.</p><a href="https://github.com/AidALL/ghost-alice/wiki/Verification-and-Evidence">Verification and evidence</a></div>
 <div class="card"><h3>Writes a boundary contract before implementing</h3><p>Before it starts implementing, the response model writes a boundary contract. The boundary contract sets what it may read or change, the actions it may take next, the paths, layers and actions it must not use, the acceptance criteria and the stop conditions. While the boundary contract is active, the response model checks each tool call against what it may read or change and the actions it may take next.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/boundary-contract/SKILL.md">Boundary contract</a></div>
-<div class="card"><h3>Shows its intent and key changes</h3><p>Before a tool call that gathers information for a decision it has not made yet, the response model states the call's intent and reason. Its answer shows the key changes with their content. Independently of the response model, the io-trace hook writes an io-trace record for each tool call.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#io-trace-transparency-rule">io-trace rule</a></div>
+<div class="card"><h3>Shows its intent and key changes</h3><p>Before a tool call that gathers information for a decision it has not made yet, the response model states the call's intent and reason. Its answer shows the key changes with their content. Independently of the response model, the io-trace hook writes an io-trace record for each tool call that Claude Code or Codex reports to it.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#io-trace-transparency-rule">io-trace rule</a></div>
       </div>
     </div></section>
     <section id="how-it-works" aria-labelledby="how-heading"><div class="wrap">

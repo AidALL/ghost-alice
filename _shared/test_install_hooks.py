@@ -2711,6 +2711,120 @@ class TestUninstallHook(TempHomeTestCase):
         self.assertIn("SessionStart", settings["hooks"])
 
 
+class TestIoTraceFailedCallEvent(TempHomeTestCase):
+    """The io-trace hook also registers on Claude Code's failure event."""
+
+    # From the payload Claude Code 2.1.299 sent for a Bash call that changed a file and then exited 3.
+    FAILED_CALL = {
+        "session_id": "s-failed-call",
+        "hook_event_name": "PostToolUseFailure",
+        "tool_name": "Bash",
+        "tool_input": {"command": "sh -c 'echo changed > touched.txt; exit 3'"},
+        "tool_use_id": "toolu_fixture",
+        "error": "Exit code 3",
+        "is_interrupt": False,
+        "duration_ms": 22,
+    }
+    USER_HOOK = {"matcher": "", "hooks": [{"type": "command", "command": "echo keep-me"}]}
+
+    def _audit_commands(self, platform: str, event: str) -> list[str]:
+        groups = self._read_settings(platform)["hooks"].get(event, [])
+        return [hook["command"] for group in groups for hook in group["hooks"]
+                if install_hooks.IO_TRACE_MARKER in hook["command"]]
+
+    def test_claude_install_registers_the_same_audit_command_on_both_events(self):
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        on_success = self._audit_commands("claude", "PostToolUse")
+        self.assertEqual(len(on_success), 1)
+        self.assertEqual(self._audit_commands("claude", "PostToolUseFailure"), on_success)
+        # An empty matcher matches every tool, so a failed call of any tool runs the hook.
+        groups = self._read_settings("claude")["hooks"]["PostToolUseFailure"]
+        self.assertEqual([group["matcher"] for group in groups], [""])
+
+    def test_status_reports_each_partial_state_of_the_two_events(self):
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        installed = self._read_settings("claude")
+        stale = [{"matcher": "", "hooks": [{"type": "command", "command": f"echo old # {install_hooks.IO_TRACE_MARKER}"}]}]
+        cases = (("PostToolUse", [], "HOOK_MISSING", "missing"),
+                 ("PostToolUseFailure", [], "HOOK_MISSING", "missing"),
+                 ("PostToolUse", stale, "HOOK_INSTALLED_DRIFT", "drifted"),
+                 ("PostToolUseFailure", stale, "HOOK_INSTALLED_DRIFT", "drifted"))
+        for event, groups, token, detail in cases:
+            with self.subTest(event=event, token=token):
+                settings = json.loads(json.dumps(installed))
+                settings["hooks"][event] = groups
+                self._write_settings("claude", settings)
+                status = install_hooks.check_status_detail("claude")
+                self.assertEqual(status.status_token, token)
+                self.assertEqual(status.details[detail], ["io-trace"])
+
+    def test_codex_install_adds_no_failure_event(self):
+        self._create_platform_dir("codex")
+        with patch.object(install_hooks, "_codex_hooks_supported", return_value=True):
+            install_hooks.install_hook("codex")
+        self.assertEqual(len(self._audit_commands("codex", "PostToolUse")), 1)
+        self.assertNotIn("PostToolUseFailure", self._read_settings("codex")["hooks"])
+
+    def test_the_registered_command_writes_a_row_for_a_failed_call(self):
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        env = os.environ.copy()
+        env["HOME"] = str(self.fake_home)
+        result = _run_hook_command(self._audit_commands("claude", "PostToolUseFailure")[0],
+                                   input_text=json.dumps(self.FAILED_CALL), env=env)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        rows = (self.fake_home / ".ghost-alice" / "io-trace.jsonl").read_text(encoding="utf-8").splitlines()
+        row = json.loads(rows[-1])
+        self.assertEqual((row["platform"], row["session"], row["tool"], row["pattern"]),
+                         ("claude", "s-failed-call", "Bash", self.FAILED_CALL["tool_input"]["command"]))
+
+    def test_an_update_adds_the_event_once_and_keeps_a_user_hook(self):
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        settings = self._read_settings("claude")
+        settings["hooks"]["PostToolUseFailure"] = [self.USER_HOOK]
+        self._write_settings("claude", settings)
+        self.assertEqual(install_hooks.check_status("claude"), "missing")
+
+        install_hooks.install_hook("claude")
+        self.assertEqual(install_hooks.install_hook("claude"), "already")
+
+        self.assertEqual(install_hooks.check_status("claude"), "installed")
+        self.assertEqual(self._audit_commands("claude", "PostToolUseFailure"),
+                         self._audit_commands("claude", "PostToolUse"))
+        commands = [hook["command"] for group in self._read_settings("claude")["hooks"]["PostToolUseFailure"]
+                    for hook in group["hooks"]]
+        self.assertIn("echo keep-me", commands)
+
+    def test_install_replaces_a_stale_command_on_the_event(self):
+        self._write_settings("claude", {})
+        install_hooks.install_hook("claude")
+        settings = self._read_settings("claude")
+        settings["hooks"]["PostToolUseFailure"] = [
+            {"matcher": "", "hooks": [{"type": "command", "command": f"echo old # {install_hooks.IO_TRACE_MARKER}"}]}]
+        self._write_settings("claude", settings)
+
+        install_hooks.install_hook("claude")
+
+        self.assertEqual(self._audit_commands("claude", "PostToolUseFailure"),
+                         self._audit_commands("claude", "PostToolUse"))
+
+    def test_uninstall_removes_the_audit_hook_from_both_events_and_keeps_a_user_hook(self):
+        self._write_settings("claude", {"hooks": {"PostToolUseFailure": [self.USER_HOOK]}})
+        install_hooks.install_hook("claude")
+        self.assertEqual(len(self._audit_commands("claude", "PostToolUseFailure")), 1)
+
+        self.assertEqual(install_hooks.uninstall_hook("claude"), "removed")
+
+        self.assertEqual(self._audit_commands("claude", "PostToolUse"), [])
+        self.assertEqual(self._audit_commands("claude", "PostToolUseFailure"), [])
+        commands = [hook["command"] for group in self._read_settings("claude")["hooks"]["PostToolUseFailure"]
+                    for hook in group["hooks"]]
+        self.assertEqual(commands, ["echo keep-me"])
+
+
 class TestAddonHookRemovalWithoutHooks(TempHomeTestCase):
     def test_missing_hook_object_is_idempotent_and_preserves_settings(self):
         removers = ((install_hooks.remove_addon_hook, '[addon:hookaddon] obs'),)

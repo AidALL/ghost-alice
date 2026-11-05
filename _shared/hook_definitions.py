@@ -34,6 +34,11 @@ HOOK_EVENT_MAP: dict[str, dict[str, str]] = {
         "claude": "PostToolUse",
         "codex":  "PostToolUse",
     },
+    # Claude Code runs PostToolUse only after a successful tool call and this event after a call that started and failed.
+    # Codex has no such event; its PostToolUse also runs after a shell command that exits non-zero.
+    "post_tool_use_failure": {
+        "claude": "PostToolUseFailure",
+    },
     "on_agent_stop": {
         "claude": "Stop",
         "codex":  "Stop",

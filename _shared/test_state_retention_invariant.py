@@ -28,7 +28,7 @@ import context_gateway  # noqa: E402
 import state_retention  # noqa: E402
 from installer_testing import checkout_copy  # noqa: E402
 
-HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop")
+HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "Stop")
 
 
 def _payload(event: str, session: str, cwd: Path, transcript: Path) -> dict:
@@ -37,7 +37,7 @@ def _payload(event: str, session: str, cwd: Path, transcript: Path) -> dict:
         payload["source"] = "startup"
     elif event == "UserPromptSubmit":
         payload["prompt"] = "Summarize the README."
-    elif event in ("PreToolUse", "PostToolUse"):
+    elif event in ("PreToolUse", "PostToolUse", "PostToolUseFailure"):
         # A destructive command also makes the governance capture write its event log.
         payload.update(tool_name="Bash", tool_input={"command": "rm -rf build && cat README.md"},
                        tool_response={"stdout": ""})

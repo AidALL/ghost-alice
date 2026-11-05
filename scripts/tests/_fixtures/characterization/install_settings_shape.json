@@ -1,6 +1,7 @@
 {
   "hook_events": {
     "PostToolUse": 1,
+    "PostToolUseFailure": 1,
     "PreToolUse": 1,
     "SessionStart": 2,
     "Stop": 1,

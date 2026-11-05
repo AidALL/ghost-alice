@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""PostToolUse audit hook for Ghost-ALICE.
+"""io-trace hook for Ghost-ALICE.
 
-Records tool operations for the strict audit. Malformed or incomplete hook
-payloads return success so audit parsing does not block tool execution.
+Writes an io-trace record for each tool call the host reports to this hook.
+Malformed or incomplete hook payloads return success.
 """
 
 from __future__ import annotations
