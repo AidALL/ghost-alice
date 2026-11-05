@@ -119,7 +119,6 @@ Subject or evaluator timeout, non-zero exit, empty subject response, malformed e
 | --- | --- | --- |
 | `task-router` is not visible before the first tool action | gate routing failure | Inspect platform bootstrap or hook payload. |
 | Completion claim appears without `verification-before-completion` | completion gate failure | Inspect completion reminder and Codex hook evidence/fallback wording. |
-| routine tool-checkpoint output requires recovery-cost or recovery-note fields | tool-checkpoint surface failure | Synchronize `docs/policies/session-gate-matrix.md`, platform bootstrap, and hook message wording. |
 | skill activation permission allows only core gates | permission scope failure | Inspect installer hook permission sync and platform policy files. |
 | smoke record stores raw prompt or transcript | audit hygiene failure | Fix the session-intent-analyzer storage contract first. |
 | agent command times out | runtime smoke failure | Inspect the affected failure and follow the bounded repair conditions in the session gate matrix. Reinstall only affected runtime assets; retry with a distinct hypothesis and remaining authority/resources. |

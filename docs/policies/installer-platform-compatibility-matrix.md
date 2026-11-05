@@ -12,7 +12,6 @@ This document is the compatibility test contract for the Ghost-ALICE installer. 
   - [task-router](#task-router)
   - [session-intent-analyzer](#session-intent-analyzer)
   - [pending merge precheck](#pending-merge-precheck)
-  - [tool-checkpoint recovery surface](#tool-checkpoint-recovery-surface)
   - [completion-reminder](#completion-reminder)
 - [Shell Matrix](#shell-matrix)
 - [CI Commands](#ci-commands)
@@ -62,15 +61,11 @@ The installer registers session-intent-analyzer as the single UserPromptSubmit i
 
 [merge-companion](../../merge-companion/SKILL.md#entry-and-activation) sets what the SessionStart pending-merge report means and when the response model checks the manifest and reviews its entries.
 
-### tool-checkpoint recovery surface
-
-Runtime tool-checkpoint payload does not require routine recovery cost or recovery note fields. The common contract's io-trace Transparency Rule defines the visible checkpoint fields.
-
 ### completion-reminder
 
-Installed completion hooks consume Core's current-input and exact-answer assessment. [Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the two judgments that Core authenticates. Core code's Stop script consumes that assessment and blocks nothing.
+[Hook calls](../../architecture.md#hook-calls) describes Core code's Stop script, and [Evidence and native delivery](../../architecture.md#evidence-and-native-delivery) describes the two judgments that Core authenticates.
 
-On both hosts Core code's Stop script records its Stop notice message in `stop-notice.json` in the session folder next to the hook log, returns the notice text as `systemMessage` when the message reports an unsupported claim, an issue found while checking the answer, an unresolved criterion or declared remaining work, and lets the host stop. The hook runner removes the block, stop and permission-decision controls from the JSON output of every hook it runs and reports block, stop, deny and ask requests in `systemMessage`; it turns a hook's exit code 2 into a non-blocking exit code 1, and the hook log keeps the original code. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check the registered hook payloads and platform mappings, not the truth of model judgments.
+The hook runner removes the block, stop and permission-decision controls from the JSON output of every hook it runs and reports block, stop, deny and ask requests in `systemMessage`; it turns a hook's exit code 2 into a non-blocking exit code 1, and the hook log keeps the original code. [Verification-before-completion](../../coding-convention/verification-before-completion/SKILL.md) owns claim scope and control formats. Its [review reference](../../coding-convention/verification-before-completion/references/response-review.md) owns recording recovery and delivery; [tool output semantics](tool-output-semantics.md#review-output-and-continuation) names returned states. Installer tests check the registered hook payloads and platform mappings, not the truth of model judgments.
 
 ## Shell Matrix
 

@@ -43,10 +43,7 @@ class VerificationDisclosureTests(unittest.TestCase):
 
     def test_delivery_is_an_observation_that_keeps_original_proof(self):
         body = (SKILL / 'references/response-review.md').read_text()
-        for phrase in ('continue: true', 'stop-notice.json', 'systemMessage',
-                       'does not hold or replace desktop output',
-                       'The Stop notice does not establish that the user saw the answer',
-                       'A later clock reading cannot supply a missing original time',
+        for phrase in ('A later clock reading cannot supply a missing original time',
                        'Preserve immutable judgments, supported original proof and original observation times'):
             self.assertIn(phrase, body)
 

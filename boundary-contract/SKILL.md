@@ -57,7 +57,7 @@ The phase states what the response model is authorized to do now. The targets kn
 | Phase | Entry condition | Permitted work |
 | --- | --- | --- |
 | discovery | Target files, modules or verification methods are unknown | Read-only discovery on the named surfaces; no implementation |
-| execution | Discovery or supplied evidence establishes the targets | Work on the allowed files and directories under the declared acceptance criteria |
+| execution | Discovery or supplied evidence establishes the targets | Work on concrete allowed files and directories under the declared acceptance criteria |
 | verification | Implementation is ready for checking | Declared commands, screenshots or visual checks; no undeclared implementation |
 
 A phase change keeps the original acceptance criteria. If verification reveals a needed edit, the response model renews the affected execution contract before editing.
@@ -102,6 +102,6 @@ The helper observes regular files at one point in time; it is not an atomic lock
 
 ## Failure modes and proof
 
-The response model must not label an interpretation user-said, implement during the discovery phase, or omit coverage from an objective that covers a full set. A peripheral check supports only the acceptance criteria it actually measures.
+A peripheral check supports only the acceptance criteria it actually measures.
 
 The response model executes the action under the selected procedure and judges the returned evidence against the acceptance criteria. For discretionary checks, reuse of evidence with its source and time, and completion claims, apply `../coding-convention/verification-before-completion/SKILL.md`. Follow the incident workflow in `../coding-convention/systematic-debugging/SKILL.md#incident-accounting-and-continuation` to count failed repair rounds. Renewing a contract does not reset that count and does not require running completed work again.

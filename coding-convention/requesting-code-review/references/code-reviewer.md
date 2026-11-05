@@ -8,7 +8,7 @@ The parent fills this assignment with the accepted requirements and exact review
 
 Supply the implemented behavior, accepted plan/requirements, artifact types and the exact review target established by requesting-code-review's [How to Request](../SKILL.md#how-to-request) procedure. Identify the checkout, base and head commits, and any separately identified uncommitted diff. For work prepared for publication, include finishing-a-development-branch's workflow/job inventory, tested tree, local results and unavoidable runner gaps.
 
-Supply accessible original-source locators for the relevant requirements and known corrections, separately from the parent's current interpretation and assumptions. The locators identify the applicable revision and passage, field or record when needed to distinguish the source. For retrieval and later handoffs, the delegate loads task-router from the current host's skill catalog and follows that package's `references/context-selection.md`. The delegate retrieves the original passages needed for its review; when it cannot access a required locator, the parent resolves access or supplies only the necessary excerpt with its source. The delegate reports a conflict with the original constraint or a missing required source to the parent, with the affected requirement and evidence limit.
+Supply accessible original-source locators for the relevant requirements and known corrections, separately from the parent's current interpretation and assumptions. The locators identify the applicable revision and passage, field or record when needed to distinguish the source. For retrieval and later handoffs, the delegate reads `references/context-selection.md` in the installed task-router folder. The delegate retrieves the original passages needed for its review; when it cannot access a required locator, the parent resolves access or supplies only the necessary excerpt with its source. The delegate reports a conflict with the original constraint or a missing required source to the parent, with the affected requirement and evidence limit.
 
 ## Evidence by artifact
 
@@ -31,7 +31,6 @@ For a mixed change, apply each method to its affected artifacts and identify whi
 
 Return:
 
-- Strengths supported by inspected code or evidence.
 - Critical findings: demonstrated severe breakage, security or data-loss risk.
 - Important findings: required behavior, meaningful correctness or verification gaps.
 - Minor findings: advisory improvements that do not block the accepted result.

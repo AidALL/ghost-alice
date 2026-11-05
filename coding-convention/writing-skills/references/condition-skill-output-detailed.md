@@ -20,4 +20,4 @@ Reduce words that do not change the decision, not instructions that establish au
 
 ## Evaluation
 
-Use trigger-eval.md when discovery is the live uncertainty. Use writing-skills' application workflow when the body is wrong. A better keyword match does not establish correct execution.
+Use trigger-eval.md when discovery is the live uncertainty. Use writing-skills' [Validate and evaluate](../SKILL.md#validate-and-evaluate) procedure when the body is wrong. A better keyword match does not establish correct execution.

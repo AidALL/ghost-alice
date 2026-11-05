@@ -5,7 +5,7 @@ The response model coordinates independent attacks, proponent evidence, its own 
 ## Round sequence
 
 1. Phase A: the first cycle includes every required distinct axis. In a later cycle, the response model assigns the axes affected by changed claims, assumptions, evidence or eligible prior-round challenges and retains unaffected valid findings. Each assigned delegate independently submits an own-axis attack or reasoned no-attack declaration, plus any prior-round meta-attack or reasoned no-meta-attack declaration. Current-cycle submissions are unavailable to peers.
-2. Phase B: the proponent, or caller in that role, reads the attacks and may submit new evidence, resolve a mistaken premise or withdraw part/all of the claim. The response model records absent, repeated or irrelevant responses as no new evidence. In declared human-absent mode, it skips collection and uses the initial evidence.
+2. Phase B: the proponent, or caller in that role, reads the attacks and may submit new evidence, resolve a mistaken premise or withdraw part/all of the claim. The response model records absent, repeated or irrelevant responses as no new evidence.
 3. Phase C: the response model audits every utterance under the rules below. It checks the claim-card/evidence-list against the source of truth only when new evidence, changed schema or an observed mismatch can affect the verdict. A mismatch becomes factual attack material, not a compromise judgment. Deleted source evidence or material schema change requires escalation.
 4. Phase D: the response model records the cycle and applies convergence-rules.md immediately.
 
@@ -95,4 +95,4 @@ rounds-log:
     retracted-claims: <withdrawn claims>
 ```
 
-The response model saves the full log in the existing authorized evidence location and returns its exact locator with the claim ID, round count, convergence and up to ten issues. The response model passes that log and the current claim-card to the delegate that summarizes the dispute or to the human who receives the escalation. If no file storage is authorized, retain the log in task context and report the durable-retention limit; do not create a new storage boundary. For a stored log, retain it for at least 30 days after the result is reflected in the deliverable, within applicable retention authority; do not export sensitive evidence beyond the authorized workspace.
+The response model saves the full log in the existing authorized evidence location and returns its exact locator with the claim ID, round count, convergence and up to ten issues. The response model passes that log and the current claim-card to the delegate that summarizes the dispute or to the human who receives the escalation. If no file storage is authorized, retain the log in task context and report the durable-retention limit; do not create a new storage boundary. Do not export sensitive evidence beyond the authorized workspace.

@@ -7,7 +7,7 @@ compatibility:
 
 # Necessity Gate
 
-The response model applies this gate when defining a new task, skill, file, audit or verification cycle, follow-up, tool, script or reference, including an edit of a production skill and the registration of a task plan. It decides whether the proposed work is justified. A delegate assigned only a specific subtask skips this gate.
+The response model applies this gate when defining a new task, skill, file, audit or verification cycle, follow-up, tool, script or reference, including an edit of a production skill. It decides whether the proposed work is justified. A delegate assigned only a specific subtask skips this gate.
 
 ## Entry and existing authority
 
@@ -45,7 +45,7 @@ For an explicitly requested evaluation deliverable, benchmarking or comparison m
 
 Without evidence or a user directive, the response model rejects blanket checking, aesthetic cleanup, follow-ups added to fill a report, applying a pattern everywhere, and work inferred merely from a marker in a file. It must not disguise scope expansion as quality improvement.
 
-This gate runs when work is defined or a genuinely new subtask appears. It does not run again for an already approved substep, an ordinary improvement of an artifact or the next action after verification passes. Verification-before-completion selects the checks inside the existing loop.
+This gate runs when work is defined or a genuinely new subtask appears. It does not run again for an already approved substep, an ordinary improvement of an artifact or the next action after verification passes.
 
 ## Check usefulness and resources
 

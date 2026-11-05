@@ -15,7 +15,7 @@ The response model maps the observed data flow and identifies which caller can b
 
 ## Example
 
-A test reads an empty project directory before fixture setup and causes Git initialization in the project's checkout. Correct the fixture. Validate required directory input at the entry point. If another caller can invoke workspace initialization directly, enforce its directory precondition there. If tests require all Git operations inside their sandbox, enforce that environment boundary at the Git operation.
+A test reads an empty project directory before fixture setup and causes Git initialization in the source checkout. Correct the fixture. Validate required directory input at the entry point. If another caller can invoke workspace initialization directly, enforce its directory precondition there. If tests require all Git operations inside their sandbox, enforce that environment boundary at the Git operation.
 
 For filesystem containment, compare resolved path components under the operating system's path contract; a textual prefix alone does not establish directory containment. Use diagnostics only when the remaining causal uncertainty needs them.
 

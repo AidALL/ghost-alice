@@ -27,4 +27,4 @@ After selecting the repair, follow writing-skills' [Validate and evaluate](../SK
 
 Do not use “no exceptions” to erase higher-priority authority or the rule's applicability conditions. The actual output or action identifies whether the instruction defect remains.
 
-Keep examples reusable and complete. Prefer a concrete decision diagram over vague nodes, and keep executable code outside diagram labels.
+Keep examples reusable and complete. Prefer a concrete decision diagram over vague nodes, and keep code blocks and scripts outside diagram labels.

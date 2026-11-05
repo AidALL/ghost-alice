@@ -2,7 +2,7 @@
 
 The common rules for this work come from the current host's installed common contract. Read it through the host's loader and use the current session metadata (the `[session-intent-receipt]` block) exactly as supplied; the contract's source in this repository does not replace the installed common contract as the authority for execution. Codex loads its contract from `~/.codex/ghost-alice-governance.md`; Claude Code receives its contract in `~/.claude/CLAUDE.md`.
 
-For development, `platforms/common-governance.md` is the source of the common contract. Platform templates add only host-specific rules; the installer combines that source and a template into the installed common contract. Read these source files only when the authorized development task needs them.
+For development, `platforms/common-governance.md` is the source of the common contract. The installer combines that source and a template under `platforms/<host>/` into the installed common contract. Read these source files only when the authorized development task needs them.
 
 Project work follows the source file that the user selected as the owner. Preserve existing changes, and keep these results distinct: a source modification, a verification, an installation and the host's actual adoption of the change.
 

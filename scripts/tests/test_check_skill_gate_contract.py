@@ -245,7 +245,7 @@ class SkillGateContractTest(unittest.TestCase):
         self._write_file(root, "coding-convention/verification-before-completion/references/verify-or-reuse.md",
                          "## Instruction Body Reuse\nsession_check_cache.py --body-retained\n")
         self._write_file(root, "coding-convention/verification-before-completion/references/response-review.md",
-                         "## Deliver\ncontinue: true stop-notice.json systemMessage does not hold or replace desktop output\n")
+                         "## Deliver\nrecording-only error Do not invoke Stop\n")
         claude = root / "platforms/claude/CLAUDE.md"
         claude.write_text(
             "{{COMMON_GOVERNANCE}}\n\n"
@@ -314,7 +314,7 @@ class SkillGateContractTest(unittest.TestCase):
             ("platforms/common-governance.md", ("why", "contract-ref", "contract-check")),
             ("session-intent-analyzer/references/ledger-schema.md", ("record_response_route", "response-route.v1")),
             ("coding-convention/verification-before-completion/references/verify-or-reuse.md", ("session_check_cache.py", "--body-retained")),
-            ("coding-convention/verification-before-completion/references/response-review.md", ("continue: true", "stop-notice.json", "systemMessage", "does not hold or replace desktop output")),
+            ("coding-convention/verification-before-completion/references/response-review.md", ("recording-only error", "Do not invoke Stop")),
         )
         for relative, fields in cases:
             for field in fields:
