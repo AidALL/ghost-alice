@@ -15,7 +15,7 @@ Core code records the identity of each user input in the intent ledger without k
 
 ## Current intent and references
 
-First identify the stored fact that can change the next decision. A source lookup can proceed from the user's input and the session metadata (the `[session-intent-receipt]` block) without reading the ledger. Read the stored `interpreted-as` record when it can affect the objective, the constraints, whether authorized work continues, the work selection or a semantic update (a ledger write through `--delta-json`). When the decision depends on no stored state and needs no semantic update, do not read the ledger and proceed with the selected work.
+First identify the stored fact that can change the next decision. A source lookup can proceed from the user's input and the session metadata without reading the ledger. Read the stored `interpreted-as` record when it can affect the objective, the constraints, whether authorized work continues, the work selection or a semantic update (a ledger write through `--delta-json`). When the decision depends on no stored state and needs no semantic update, do not read the ledger and proceed with the selected work.
 
 To read the stored `interpreted-as` record, run `scripts/session_intent_ledger.py --read-intent` with `ledger_root`, `platform` and `session_id` from the session metadata. The result holds the routing keywords, the input they were written for, the current input and revision, and JSON pointers to detailed state. Keywords alone do not establish that the work is complete or that the keywords still apply.
 

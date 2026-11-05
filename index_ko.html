@@ -456,7 +456,7 @@
       <div class="grid grid-4">
 <div class="card"><h3>요청을 어떻게 해석했는지 기록합니다</h3><p>도구를 호출해야 하는 작업이면, 응답 모델은 첫 도구 호출 전에 요청의 목적, 제약, 완료 조건을 어떻게 해석했는지 의도 원장에 기록합니다. 사용자의 말에 합리적인 해석이 여럿이고 해석에 따라 다음 행동이 달라지면, 그 행동 전에 사용자에게 묻습니다.</p><a href="https://github.com/AidALL/ghost-alice/wiki/설계-원칙#대조와-피드백">설계 원칙</a></div>
 <div class="card"><h3>주장을 근거와 대조합니다</h3><p>응답 모델은 주장마다 원본 근거와 대조하고, 답변 전체를 사용자의 목적과 대조합니다. 완료 조건을 뒷받침하는 근거가 없으면 완료를 주장하지 않고, 그 완료 조건을 실패나 미해결로 보고합니다.</p><a href="https://github.com/AidALL/ghost-alice/wiki/검증과-증거">검증과 증거</a></div>
-<div class="card"><h3>구현 전에 작업 범위 선언을 작성합니다</h3><p>응답 모델은 구현을 시작하기 전에 작업 범위 선언을 작성합니다. 작업 범위 선언은 조회하거나 변경해도 되는 대상, 다음에 실행해도 되는 행동, 금지하는 경로·계층·행동, 완료 조건, 중지 조건을 정합니다. 작업 범위 선언이 유효한 동안 응답 모델은 도구를 호출하기 전에 그 호출이 조회하거나 변경해도 되는 대상이나 다음에 실행해도 되는 행동에 속하는지 확인합니다.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/boundary-contract/SKILL.md">작업 범위 선언</a></div>
+<div class="card"><h3>구현 전에 작업 범위 선언을 작성합니다</h3><p>응답 모델은 구현을 시작하기 전에 작업 범위 선언을 작성합니다. 작업 범위 선언은 조회하거나 변경해도 되는 대상, 다음에 실행해도 되는 행동, 금지하는 경로·계층·행동, 완료 조건, 중지 조건을 담습니다. 응답 모델은 도구를 호출하기 전에 그 호출을 작업 범위 선언과 대조합니다.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/boundary-contract/SKILL.md">작업 범위 선언</a></div>
 <div class="card"><h3>호출 의도와 핵심 변경을 보입니다</h3><p>아직 내리지 않은 결정을 위해 정보를 조회하는 도구 호출이면, 응답 모델은 호출 전에 그 의도와 이유를 밝힙니다. 답변에는 핵심 변경과 그 내용을 보입니다. 응답 모델과 별개로 io-trace 훅은 도구 호출마다 감사 기록을 작성합니다.</p><a href="https://github.com/AidALL/ghost-alice/blob/main/platforms/common-governance.md#io-trace-transparency-rule">io-trace 규칙</a></div>
       </div>
     </div></section>

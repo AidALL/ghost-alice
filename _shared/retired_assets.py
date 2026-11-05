@@ -40,8 +40,8 @@ def _pending(entry, root, platform, source_root):
         sys.path.remove(helpers)
 
 
-def _audit(event, result, phase):
-    state_retention.append('install-state-events', event, json.dumps(dict(result, phase=phase, ts=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')), sort_keys=True)+'\n')
+def _audit(event, result, phase, *, must_write=False):
+    state_retention.append('install-state-events', event, json.dumps(dict(result, phase=phase, ts=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')), sort_keys=True)+'\n', must_write=must_write)
 
 
 def _restore_no_replace(source, destination):
@@ -106,7 +106,7 @@ def _retire(path, *, ownership, backup_root, platform, source_root, pending_root
     event = Path(pending_root)/'install-state'/f'{platform}-events.jsonl'
     _rename_path(path, backup)
     try:
-        _audit(event, result, 'moved')
+        _audit(event, result, 'moved', must_write=True)
         if ownership == OWNERSHIP_USER_MODIFIED_MANAGED:
             entry = dict(id='retired-'+uuid.uuid4().hex, platform=platform, skill=asset_name,
                 source_path=str(path), backup_path=str(backup), snapshot_hash=_digest(baseline),

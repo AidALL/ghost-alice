@@ -38,6 +38,7 @@ import agent_visibility_policy
 from hook_definitions import CORE_HOOK_IDS, normalize_hook_id
 import runtime_config
 import work_impact_projection
+import state_retention
 import strict_session_log
 from session_intent_analyzer_hook import bound_session_identity
 
@@ -961,26 +962,29 @@ def _run(hook_id: str, payload: str, *, platform: str | None = None, binding=Non
         notice = _native_intake_notice(env, hook_payload)
         if notice:
             user_stdout = _with_system_notice(user_stdout, notice)
-    strict_session_log.append_event(
-        home=_home_from_env(env),
-        platform=platform,
-        session_id=session_id,
-        event={
-            "hook_id": hook_id,
-            "event": event,
-            "stdin": stdin_text,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "exit_code": result.returncode,
-            "agent_visibility_profile": profile,
-            "visible_decision": decision["visible_decision"],
-            "observed_duration_s": observed_duration,
-            "observed_duration_source": "hook-runner",
-            "surface_item": item,
-            "model_surface_output": model_surface_output,
-            "user_surface_output": f"{user_stdout}{user_stderr}",
-        },
-    )
+    try:
+        strict_session_log.append_event(
+            home=_home_from_env(env),
+            platform=platform,
+            session_id=session_id,
+            event={
+                "hook_id": hook_id,
+                "event": event,
+                "stdin": stdin_text,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exit_code": result.returncode,
+                "agent_visibility_profile": profile,
+                "visible_decision": decision["visible_decision"],
+                "observed_duration_s": observed_duration,
+                "observed_duration_source": "hook-runner",
+                "surface_item": item,
+                "model_surface_output": model_surface_output,
+                "user_surface_output": f"{user_stdout}{user_stderr}",
+            },
+        )
+    except Exception as error:  # noqa: BLE001 - Ghost-ALICE's own step fails without stopping the hook
+        state_retention.record_failure("session-logs", log_ref, error)
     _emit_rendered_user_surface(user_stdout, user_stderr)
     if force_success:
         return 0

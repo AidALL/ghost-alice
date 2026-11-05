@@ -27,6 +27,7 @@ except ImportError:
 import context_gateway
 import context_lifecycle
 import file_lock
+import state_retention
 from test_context_lifecycle import ContextLifecycleTests
 
 
@@ -326,6 +327,43 @@ class ContextGatewayTests(unittest.TestCase):
                     (ghost / 'state-retention-failures.jsonl').read_text(encoding='utf-8').splitlines()]
         self.assertEqual({(failure['policy'], failure['error_type']) for failure in failures},
                          {('gateway-usage', 'LockTimeout')})
+
+    def test_a_failed_usage_record_never_drops_the_request(self):
+        # The usage log is Ghost-ALICE's own record, so its failure stays out of the model request.
+        ghost = Path(self.core.fixture.tmp.name) / 'ghost'
+        body = json.dumps(self.core.request).encode()
+        with patch.dict('os.environ', {'GHOST_ALICE_GHOST_ROOT': str(ghost)}), \
+                patch.object(state_retention, 'append', side_effect=ValueError('isolated mutation escape')):
+            with self.request(body) as reply:
+                self.assertEqual(reply.read(), self.answer)
+        failures = [json.loads(line) for line in
+                    (ghost / 'state-retention-failures.jsonl').read_text(encoding='utf-8').splitlines()]
+        self.assertEqual({(failure['policy'], failure['error_type']) for failure in failures},
+                         {('gateway-usage', 'ValueError')})
+
+    def test_a_usage_file_that_cannot_be_written_never_drops_the_request(self):
+        ghost = Path(self.core.fixture.tmp.name) / 'ghost'
+        self.wire.mkdir(parents=True)
+        with patch.dict('os.environ', {'GHOST_ALICE_GHOST_ROOT': str(ghost)}):
+            with self.request(json.dumps(self.core.request).encode()) as reply:
+                self.assertEqual(reply.read(), self.answer)
+        failures = [json.loads(line) for line in
+                    (ghost / 'state-retention-failures.jsonl').read_text(encoding='utf-8').splitlines()]
+        self.assertEqual({failure['policy'] for failure in failures}, {'gateway-usage'})
+
+    def test_a_body_the_usage_record_cannot_read_still_reaches_the_model_server(self):
+        # The usage record only observes the request, so a body it cannot decode goes upstream as it came.
+        ghost = Path(self.core.fixture.tmp.name) / 'ghost'
+        cases = {'truncated gzip': ('gzip', gzip.compress(b'{"input": "x"}')[:-6]),
+                 'corrupt gzip stream': ('gzip', gzip.compress(b'{"input": "x"}')[:10] + b'\xff' * 12),
+                 'deeply nested JSON': (None, b'[' * 200000),
+                 'text the usage log cannot hold': (None, b'{"model": "\\ud800"}')}
+        if zstd is not None:
+            cases['corrupt zstd frame'] = ('zstd', b'not a zstd frame')
+        with patch.dict('os.environ', {'GHOST_ALICE_GHOST_ROOT': str(ghost)}):
+            for name, (encoding, body) in cases.items():
+                with self.subTest(name), self.request(body, encoding=encoding) as reply:
+                    self.assertEqual(reply.read(), self.answer)
 
     def test_selected_input_and_auth_preserved_response_for_all_supported_encodings(self):
         self.assert_selected_encoding_contract([(None, lambda x:x, lambda x:x),
