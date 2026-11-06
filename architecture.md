@@ -13,14 +13,14 @@ flowchart TB
     AC["Claude Code adapter<br/>instruction template, hook events, transcript format, settings"]
     AX["Codex adapter<br/>instruction template, hook events, transcript format, config"]
   end
-  subgraph OUT["Outside Ghost-ALICE, not enforceable"]
+  subgraph OUT["Outside Ghost-ALICE, behavior not guaranteed"]
     HC["Host: Claude Code"]
     HX["Host: Codex"]
     BC["Generative backend: Claude"]
     BX["Generative backend: GPT"]
   end
   U["User: objective and authority"]
-  AD["Add-on, such as Autopilot"]
+  AD["Add-on"]
   C -->|translated for Claude Code| AC
   C -->|translated for Codex| AX
   AC -->|installed into| HC
@@ -32,7 +32,7 @@ flowchart TB
   C -.->|Stop notice anyone can read| AD
 ```
 
-Core and the adapters are Ghost-ALICE; the hosts and the generative backends are not, so Ghost-ALICE instructs and records but cannot force them. The user and the add-ons also stand outside. Core code's context gateway runs only on macOS. After the user registers it with the [registration command](docs/getting-started/installation.md#python-contract), it relays Codex's model requests; without that registration, Codex sends them directly to the generative backend. Host formats that still sit in Core code, such as Codex configuration, Claude tool names and the Codex patch format, belong to the adapters. The wiki's [design principles: structure boundaries](https://github.com/AidALL/ghost-alice/wiki/Design-Principles#structure-boundaries) explains why each boundary sits where it does.
+Core and the adapters are Ghost-ALICE; the hosts and the generative backends are not. Ghost-ALICE therefore cannot guarantee how either one behaves; it instructs and records within the limits they expose. The user and the add-ons also stand outside. Core code's context gateway runs only on macOS. After the user registers it with the [registration command](docs/getting-started/installation.md#python-contract), it relays Codex's model requests; without that registration, Codex sends them directly to the generative backend. Host formats that still sit in Core code, such as Codex configuration, Claude tool names and the Codex patch format, belong to the adapters. The wiki's [design principles: structure boundaries](https://github.com/AidALL/ghost-alice/wiki/Design-Principles#structure-boundaries) explains why each boundary sits where it does.
 
 ## Responsibilities and flow
 
