@@ -25,7 +25,7 @@
 
 | 조건 | 응답 모델이 따를 절차 |
 | --- | --- |
-| 모든 사용자 입력 | 네이티브 접수 관찰 후 해석. 새 해석이나 변경된 해석이 있는 작업은 첫 도구 호출 전에 `interpreted-as: `를 기록하고, 판단이 저장된 의도에 의존할 때 그 의도를 조회합니다 |
+| 모든 사용자 입력 | 네이티브 접수 관찰 후 해석. 새 해석이나 변경된 해석이 있는 작업은 다음 도구 호출 전에 `interpreted-as: `를 기록해 사용자에게 보이고, 판단이 저장된 의도에 의존할 때 그 의도를 조회합니다 |
 | 응답 모델이 boundary-contract: required를 선택 | 의존 작업 전에 boundary-contract |
 | 개발 작업 시작 | coding-convention/using-coding-convention |
 | 버그 원인 조사 | coding-convention/systematic-debugging |

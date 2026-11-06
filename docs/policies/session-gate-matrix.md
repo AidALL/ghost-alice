@@ -25,7 +25,7 @@ This page maps each condition to its procedure owner. The [architecture](../../a
 
 | Condition | Response model procedure |
 | --- | --- |
-| Every user input | Native intake observation, then interpretation; work with a new or changed interpretation records `interpreted-as: ` before its first tool call; stored intent is read when the decision depends on it |
+| Every user input | Native intake observation, then interpretation; work with a new or changed interpretation records `interpreted-as: ` and shows it to the user before its next tool call; stored intent is read when the decision depends on it |
 | The response model selects boundary-contract: required | boundary-contract before dependent work |
 | Development work begins | coding-convention/using-coding-convention |
 | A bug needs investigation | coding-convention/systematic-debugging |
