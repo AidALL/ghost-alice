@@ -49,7 +49,7 @@ Read the first 10 lines of README and summarize what Ghost-ALICE OS is in one pa
 - `tool/runtime errors`: 로그에 도구 라우터 오류, 훅 실패, traceback, 런타임 panic, 캐시 초기화 오류가 없습니다.
 - `harness validity`: 프롬프트가 요청을 충족하는 데 요구되는 읽기 전용 도구 동작을 허용합니다. 모순된 프롬프트는 `pass`가 아니라 `invalid-harness`입니다.
 - `task-router`: 첫 도구 동작 전에 라우팅이 표시됩니다.
-- `session-intent-analyzer`: 새 해석이나 변경된 해석이 있는 작업은 원문 프롬프트 저장 없이 첫 도구 호출 전에 `interpreted-as: `를 기록합니다.
+- `session-intent-analyzer`: 새 해석이나 변경된 해석이 있는 작업은 원문 프롬프트 저장 없이 다음 도구 호출 전에 `interpreted-as: `를 기록하고 사용자에게 보입니다.
 - `boundary-contract`: 현재 routing-surface의 결정을 따릅니다. 실행한 읽기 전용 검증도 경계 계약을 요구할 수 있으며, 해당 응답 경로가 계약을 요구하지 않을 때만 `n/a`를 기록합니다.
 - `tool checkpoint`: 공통 계약의 io-trace Transparency Rule을 따릅니다. 일상적인 읽기 전용 호출에는 체크포인트가 필요하지 않습니다.
 - `skill activation permission`: Claude Code가 Core 검사 스킬만 담은 축소된 허용 목록 때문에 막히지 않습니다.

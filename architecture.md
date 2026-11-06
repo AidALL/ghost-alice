@@ -49,7 +49,7 @@ While a request runs, each participant has one responsibility.
 ```mermaid
 flowchart TD
   U["User purpose and authority"] -->|"Input as is (user-said)"| I["Response model: interpret the input (interpreted-as):<br/>objective, constraints and done conditions"]
-  I -->|"Work that needs tools, except a local read-only lookup:<br/>new or changed interpretation, before the first tool call"| L["Core code: record the interpretation in the intent ledger"]
+  I -->|"Work that needs tools, except a local read-only lookup:<br/>new or changed interpretation, before the next tool call"| L["Core code: record the interpretation in the intent ledger"]
   I -->|Interpretation and its assumptions| Q{"Do the user's words leave more than one reasonable reading<br/>that changes the next action, or a decision only the user can make?"}
   Q -->|Yes| K["Response model: end the answer with a question that states<br/>the assumption and what changes if it is wrong"]
   K -->|Confirmation question| U
@@ -58,8 +58,8 @@ flowchart TD
   T -->|Observed results| M
   O["Original evidence"] --> J["Compare claims with originals"]
   M --> J
-  J --> W["Judge the complete answer against the interpreted<br/>objective, constraints and done conditions"]
-  I -->|"Interpreted objective, constraints and done conditions"| W
+  J --> W["Judge the complete answer against the input as is and the interpreted<br/>objective, constraints and done conditions"]
+  I -->|"Input as is and interpreted objective, constraints and done conditions"| W
   W -->|Correction or needed investigation within the current request| M
   W --> R{"Completion claims or an authenticated review the user requested"}
   R -->|Required| C["Core code: authenticate both judgments and source bindings"]
