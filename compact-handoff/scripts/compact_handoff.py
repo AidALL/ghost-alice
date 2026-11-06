@@ -17,6 +17,7 @@ from typing import Any
 _SHARED_DIR = Path(__file__).resolve().parents[2] / "_shared"
 if str(_SHARED_DIR) not in sys.path:
     sys.path.insert(0, str(_SHARED_DIR))
+from secret_patterns import SECRET_PATTERNS as SHARED_SECRET_PATTERNS
 from text_lines import split_lines
 
 
@@ -31,10 +32,8 @@ REQUIRED_FIELDS = [
     "rollback",
 ]
 SECRET_PATTERNS = [
-    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
-    re.compile(r"ghp_[A-Za-z0-9_]{20,}"),
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    *SHARED_SECRET_PATTERNS,
+    # A handoff field reads `- field: value`, so a secret can follow a colon here.
     re.compile(r"(?i)(api[_-]?key|token|secret)\s*[:=]\s*['\"]?[A-Za-z0-9._-]{20,}"),
 ]
 BLANK_VALUES = {"", "n/a", "na", "none", "null", "-", "not set"}

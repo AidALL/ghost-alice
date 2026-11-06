@@ -3,14 +3,14 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 import install_destination
 import state_retention
+from source_reference import text_digest
+from timestamps import utc_now
 from typing import Any
 
 SAFE_COMPONENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -80,12 +80,7 @@ def _payload_digest(event: dict[str, Any]) -> str:
     else:
         safe_event = {key: value for key, value in event.items() if key != "stdin"}
         source = json.dumps(_safe_json_value(safe_event), ensure_ascii=False, sort_keys=True)
-    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
-
-
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return text_digest(source)
 
 
 def visible_decision(value: str | None) -> str:
@@ -129,7 +124,7 @@ def append_event(home: Path | None, platform: str, session_id: str, event: dict[
 
     row = {
         "schema_version": "strict-hook-output.v1",
-        "ts": _utc_now(),
+        "ts": utc_now(microseconds=True),
         "platform": safe_platform,
         "session_id": safe_session_id,
         "hook_id": safe_component(str(event.get("hook_id") or event.get("hook") or "unknown")),

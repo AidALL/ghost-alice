@@ -206,7 +206,7 @@ class ContextLifecycleTests(unittest.TestCase):
         self.assertEqual(forwarded['input'][0], dict(prior, content=prior['content'][2:]))
         self.assertEqual(forwarded['input'][1:], self.request['input'][1:])
         self.assertEqual(len(observations), 2)
-        self.assertTrue(all(o['forwarded_item_digest'] == lifecycle.fingerprint(forwarded['input'][0])
+        self.assertTrue(all(o['forwarded_item_digest'] == lifecycle.json_digest(forwarded['input'][0])
                             for o in observations))
 
     def test_omit_prior_whole_text_keep_reopens_and_next_humans_remain_intact(self):
@@ -654,7 +654,7 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
                 (receipt['reference'],)).fetchone()[0])
         self.assertEqual(payload['schema_version'], 'context-disposition.v5')
         self.assertEqual(payload['replacement_carrier']['call_record'], 8)
-        self.assertEqual(payload['replacement_carrier']['call_digest'], lifecycle.fingerprint(self.rows[7]['message']['content'][0]))
+        self.assertEqual(payload['replacement_carrier']['call_digest'], lifecycle.json_digest(self.rows[7]['message']['content'][0]))
 
     def test_native_replacement_default_return_and_legacy_signed_behavior_are_unchanged(self):
         receipt = self.record()
@@ -739,8 +739,8 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
                 (receipt['reference'],)).fetchone()[0])
             payload['selected'].append(dict(record=11, block_index=0, kind='output', disposition='omit',
                 summary='Unsupported claim that later source was used', next_need='Retrieve if needed',
-                item_digest=lifecycle.fingerprint(native[11]), block_digest=lifecycle.fingerprint('later required original')))
-            forged_reference = lifecycle.fingerprint(payload)
+                item_digest=lifecycle.json_digest(native[11]), block_digest=lifecycle.json_digest('later required original')))
+            forged_reference = lifecycle.json_digest(payload)
             connection.execute('INSERT INTO core_context_dispositions VALUES (?,?)', (forged_reference, json.dumps(payload)))
             connection.execute('UPDATE core_context_current SET reference=?', (forged_reference,)); connection.commit()
         result = self.server_select()
@@ -757,7 +757,7 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
                 {'storage': 'unknown-inline', 'locator': str(self.log.resolve()), 'text': self.log.read_text()}):
                 with self.subTest(descriptor=list(descriptor)):
                     payload = copy.deepcopy(original); payload['original'] = descriptor
-                    reference = lifecycle.fingerprint(payload)
+                    reference = lifecycle.json_digest(payload)
                     connection.execute('INSERT INTO core_context_dispositions VALUES (?,?)', (reference, json.dumps(payload)))
                     connection.execute('UPDATE core_context_current SET reference=?', (reference,)); connection.commit()
                     result = self.server_select()
@@ -923,7 +923,7 @@ class ClaudeContextLifecycleTests(unittest.TestCase):
         self.assertTrue(result.request['context_management']['edits'][-1]['clear_tool_inputs'])
         choice = result.observations[0]
         self.assertEqual(choice['call_record'], 3)
-        self.assertEqual(choice['call_digest'], lifecycle.fingerprint(self.call))
+        self.assertEqual(choice['call_digest'], lifecycle.json_digest(self.call))
         self.assertEqual(result.request['messages'], request['messages'])
         missing = self.select(request)
         self.assertEqual(missing.state, 'preserved')

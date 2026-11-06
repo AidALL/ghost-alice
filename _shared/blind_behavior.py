@@ -9,7 +9,7 @@ import json
 import re
 import subprocess
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -18,6 +18,8 @@ if str(Path(__file__).resolve().parent) not in sys.path:
 import atomic_write
 from fresh_agent_session import FreshAgentSessionError, run_fresh_agent_session
 from project_runtime import ProjectRuntime, project_runtime
+from source_reference import canonical_json
+from timestamps import parse_timestamp
 
 CODE_OWNER_ROOT = Path(__file__).resolve().parents[1]
 PLATFORMS = {"claude", "codex"}
@@ -66,11 +68,10 @@ def _identifier(value: Any, label: str) -> str:
 
 def _timestamp(value: Any, label: str) -> str:
     value = _text(value, label)
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise ValueError(f"{label} must be ISO-8601") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
+    parsed = parse_timestamp(value)
+    if parsed is None:
+        raise ValueError(f"{label} must be ISO-8601")
+    if parsed.utcoffset() != timedelta(0):
         raise ValueError(f"{label} must be UTC")
     return value
 
@@ -246,7 +247,7 @@ def _record(
     installed: Mapping[str, str],
     suite_digest: str,
 ) -> dict[str, Any]:
-    canonical = json.dumps(case, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    canonical = canonical_json(case)
     return {
         "case_id": case["id"], "case_hash": hashlib.sha256(canonical.encode()).hexdigest(),
         "suite_digest": suite_digest,

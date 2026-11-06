@@ -19,7 +19,6 @@ import time
 import uuid
 from contextlib import contextmanager
 from copy import deepcopy
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -100,7 +99,7 @@ DEFAULT_ROOT = default_root()
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return _shared_module("timestamps").utc_now()
 
 
 def safe_component(value: str | None, fallback: str = "unknown") -> str:
@@ -111,14 +110,12 @@ def safe_component(value: str | None, fallback: str = "unknown") -> str:
     return cleaned[:120] or fallback
 
 
-def input_digest(text: str) -> str:
-    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    return f"sha256:{digest}"
+def text_digest(value: str | bytes) -> str:
+    return _shared_module("source_reference").text_digest(value)
 
 
 def json_digest(value: Any) -> str:
-    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return input_digest(encoded)
+    return _shared_module("source_reference").json_digest(value)
 
 
 def build_input_observation(*, platform: str, session_id: str, raw_user_input: str | None) -> dict[str, Any]:
@@ -131,7 +128,7 @@ def build_input_observation(*, platform: str, session_id: str, raw_user_input: s
     }
     if raw_user_input is None:
         return observation
-    digest = input_digest(raw_user_input)
+    digest = text_digest(raw_user_input)
     observation["input_digest"] = digest
     observation["input_char_count"] = len(raw_user_input)
     observation["input_event_id"] = json_digest({
@@ -1127,7 +1124,7 @@ def record_turn(
         raise ValueError("input observation requires an observation timestamp")
     if raw_user_input is not None:
         if (not isinstance(observation.get("input_event_id"), str) or not observation["input_event_id"]
-                or observation.get("input_digest") != input_digest(raw_user_input)
+                or observation.get("input_digest") != text_digest(raw_user_input)
                 or type(observation.get("input_char_count")) is not int
                 or not 0 <= observation["input_char_count"] <= MAX_SHARED_INTEGER
                 or observation["input_char_count"] != len(raw_user_input)):
@@ -1189,7 +1186,7 @@ def stage_native_input(*, root: Path = DEFAULT_ROOT, platform: str, session_id: 
         raise ValueError('native transport requires an exact Claude session and input')
     native = _shared_module('native_transcript')
     observation = dict(transport_observation_id=uuid.uuid4().hex, platform=platform, session_id=session_id,
-        observed_at=utc_now(), input_digest=input_digest(raw_input), input_char_count=len(raw_input),
+        observed_at=utc_now(), input_digest=text_digest(raw_input), input_char_count=len(raw_input),
         native_prompt_id=prompt_id if isinstance(prompt_id, str) and prompt_id else None,
         transcript_boundary=native.capture_append_boundary(transcript_path))
     paths = session_paths(root, platform, session_id)
@@ -1512,7 +1509,7 @@ def _context_input_binding(connection, root, state, event_id):
     with Path(original['locator']).open('rb') as stream:
         actual = os.fstat(stream.fileno()); raw = stream.read(original['byte_length'])
     require((actual.st_dev,actual.st_ino)==(identity['device'],identity['inode'])
-        and len(raw)==original['byte_length'] and 'sha256:'+hashlib.sha256(raw).hexdigest()==original['digest']
+        and len(raw)==original['byte_length'] and text_digest(raw)==original['digest']
         and locator['cursor_key']==hashlib.sha256(json.dumps([original['locator'],actual.st_dev,actual.st_ino]).encode()).hexdigest())
     boundary = observation.get('transcript_boundary')
     require(isinstance(boundary,dict) and boundary.get('path')==original['locator']
@@ -1531,7 +1528,7 @@ def _context_input_binding(connection, root, state, event_id):
     return dict(platform=owner[0],session_id=owner[1],input_event_id=event_id,
         input_digest=observation['input_digest'],input_char_count=observation['input_char_count'],context_only=True,
         native_transcript_path=original['locator'],native_input_record=_shared_module('text_lines').line_number(raw,locator['start_offset']),
-        native_input_digest='sha256:'+hashlib.sha256(json.dumps(message,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest())
+        native_input_digest=json_digest(message))
 
 
 def _imported_event_count(connection: sqlite3.Connection, root: Path, state: dict[str, Any]) -> int | None:

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-import hashlib
 import json
 from pathlib import Path
 import sqlite3
@@ -17,17 +16,12 @@ import completion_assessment as core_api
 from claude_context_adapter import (NativeContextRejected, SignedPrefixSelectionUnsupported,
                                     require_rewriteable_prefix)
 from native_transcript import codex_transcript_path, is_actual_user_prompt
-from source_reference import SourceReferenceError, reference_source, verify_source
+from source_reference import SourceReferenceError, json_digest, matches_input, reference_source, verify_source
 from text_lines import committed_records
 
 
 class ResponseUseRejected(ValueError):
     """The explicit use cannot be bound to one current native execution."""
-
-
-def fingerprint(value):
-    return 'sha256:' + hashlib.sha256(json.dumps(value, ensure_ascii=False,
-        sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
 def _require(condition, detail):
@@ -148,15 +142,14 @@ def _bound_human(native, binding, platform):
     item = native.records[record]
     if binding.get('context_only'):
         _require(platform == 'claude' and native.locator == binding.get('native_transcript_path')
-            and record == binding.get('native_input_record') and fingerprint(item) == binding.get('native_input_digest'),
+            and record == binding.get('native_input_record') and json_digest(item) == binding.get('native_input_digest'),
             'Current SDK context must use its exact original native row and full message')
     if platform == 'claude':
         import claude_context_adapter as adapter
         _require(adapter.human_input(native.records, binding) == item, 'Native human identity differs')
     else:
         text = _human_text(item, platform)
-        _require('sha256:' + hashlib.sha256(text.encode()).hexdigest() == binding['input_digest']
-            and len(text) == binding['input_char_count'], 'Native human differs from canonical intake')
+        _require(matches_input(text, binding), 'Native human differs from canonical intake')
     return record, item
 
 
@@ -205,11 +198,11 @@ def record_use(source, expected_input_event_id, observation, *, purpose, call_id
         _require(sum(c[2] == identifier for c in native.calls) == 1,
                  'The native pending call identity is replayed or ambiguous')
         payload = dict(schema_version='response-context-use.v1',
-            input_binding=binding, native_input_record=user_record, native_input_digest=fingerprint(user),
+            input_binding=binding, native_input_record=user_record, native_input_digest=json_digest(user),
             original=reference_source(path, appendable=True), call_record=call_record,
-            call_block_index=call_index, call_id=identifier, call_digest=fingerprint(call),
-            observation_digest=fingerprint(observation), source=coordinates, purpose=purpose)
-        reference = fingerprint(payload)
+            call_block_index=call_index, call_id=identifier, call_digest=json_digest(call),
+            observation_digest=json_digest(observation), source=coordinates, purpose=purpose)
+        reference = json_digest(payload)
         _schema(connection)
         connection.execute('INSERT OR IGNORE INTO core_response_context_uses VALUES (?,?,?,?)',
             (reference, platform, session, json.dumps(payload, ensure_ascii=False)))
@@ -237,7 +230,7 @@ def _use_payload(connection, reference, owner):
         (reference, owner['platform'], owner['session_id'])).fetchone()
     _require(row is not None, 'The original read use belongs to no matching native owner')
     payload = json.loads(row[0])
-    _require(payload.get('schema_version') == 'response-context-use.v1' and fingerprint(payload) == reference,
+    _require(payload.get('schema_version') == 'response-context-use.v1' and json_digest(payload) == reference,
         'The immutable read-use binding is invalid')
     return payload
 
@@ -280,7 +273,7 @@ def record_use_judgments(source, expected_input_event_id, judgments, *, transact
                      'The read-use input or original native owner differs')
             verify_source(payload['original'])
             _require(payload['native_input_record'] in native.humans
-                and fingerprint(native.records[payload['native_input_record']]) == payload['native_input_digest'],
+                and json_digest(native.records[payload['native_input_record']]) == payload['native_input_digest'],
                 'The original read-use human input differs')
             pair = _native_pair(native, payload, platform)
             _require(pair is not None, 'A post-use judgment requires one actual paired native result')
@@ -288,14 +281,14 @@ def record_use_judgments(source, expected_input_event_id, judgments, *, transact
             _, count, occurrences = _output(value, platform, judgment['use_reference'], payload['observation_digest'], {})
             _require(count == occurrences == 1, 'A post-use judgment requires one exact read producer result')
             validated.append(dict(schema_version='response-use-judgment.v1', **judgment,
-                input_binding=binding, native_input_record=user_record, native_input_digest=fingerprint(user),
+                input_binding=binding, native_input_record=user_record, native_input_digest=json_digest(user),
                 original=reference_source(path, appendable=True), call_record=payload['call_record'],
                 call_digest=payload['call_digest'], native_result_record=pair[1][0],
-                native_result_block_index=pair[1][1], native_result_digest=fingerprint(native.records[pair[1][0]]),
-                result_block_digest=fingerprint(pair[1][3]), observation_digest=payload['observation_digest']))
+                native_result_block_index=pair[1][1], native_result_digest=json_digest(native.records[pair[1][0]]),
+                result_block_digest=json_digest(pair[1][3]), observation_digest=payload['observation_digest']))
         _judgment_schema(connection)
         for payload in validated:
-            reference = fingerprint(payload)
+            reference = json_digest(payload)
             connection.execute('INSERT OR IGNORE INTO core_response_use_judgments VALUES (?,?,?,?,?)',
                 (reference, platform, session, payload['use_reference'], json.dumps(payload, ensure_ascii=False)))
             connection.execute('''INSERT INTO core_response_use_current VALUES (?,?,?,?)
@@ -312,7 +305,7 @@ def _producer(value, reference, digest, replacement, *, marker='use_reference'):
             return value, 0, 0
         if value.get(marker) == reference:
             original = {k: v for k, v in value.items() if k != marker}
-            return (replacement, 1, 1) if fingerprint(original) == digest else (value, 0, 1)
+            return (replacement, 1, 1) if json_digest(original) == digest else (value, 0, 1)
         changed, count, occurrences = {}, 0, 0
         for key, body in value.items():
             changed[key], found, seen = _producer(body, reference, digest, replacement, marker=marker)
@@ -375,8 +368,7 @@ def _wire_human(request, platform, binding, original):
         item = _input_item(request['input'])
         _require(isinstance(item, dict), 'Current wire human input is unavailable')
         text = _human_text(item, platform)
-        _require('sha256:' + hashlib.sha256(text.encode()).hexdigest() == binding['input_digest']
-            and len(text) == binding['input_char_count'] and fingerprint(_clean(item)) == fingerprint(original),
+        _require(matches_input(text, binding) and json_digest(_clean(item)) == json_digest(original),
             'Current wire human input differs from canonical native input')
         return max(n for n, value in enumerate(request['input']) if value is item)
     else:
@@ -405,7 +397,7 @@ def _native_pair(native, payload, platform):
         return None
     call, result = calls[0], results[0]
     if (call[:2] != (payload['call_record'], payload['call_block_index'])
-        or fingerprint(call[3]) != payload['call_digest'] or call[:2] >= result[:2]):
+        or json_digest(call[3]) != payload['call_digest'] or call[:2] >= result[:2]):
         return None
     if platform == 'codex':
         expected = 'custom_tool_call_output' if call[3]['type'] == 'custom_tool_call' else 'function_call_output'
@@ -422,9 +414,9 @@ def _wire_pair(request, pair, platform):
         outputs = [(n, item) for n, item in enumerate(request['input']) if isinstance(item, dict)
                    and item.get('type') == result[3]['type'] and item.get('call_id') == call[2]]
         if (len(calls) == len(outputs) == 1 and calls[0][0] < outputs[0][0]
-            and fingerprint(_clean(calls[0][1])) == fingerprint(call[3])
-            and fingerprint({k: v for k, v in _clean(outputs[0][1]).items() if k != 'output'})
-                == fingerprint({k: v for k, v in result[3].items() if k != 'output'})):
+            and json_digest(_clean(calls[0][1])) == json_digest(call[3])
+            and json_digest({k: v for k, v in _clean(outputs[0][1]).items() if k != 'output'})
+                == json_digest({k: v for k, v in result[3].items() if k != 'output'})):
             return outputs[0][0], None, outputs[0][1]['output'], calls[0][0]
     else:
         import claude_context_adapter as adapter
@@ -514,7 +506,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                     continue
                 payload = json.loads(raw)
                 if (payload.get('schema_version') != 'response-context-use.v1'
-                    or fingerprint(payload) != reference or payload['original']['locator'] != path):
+                    or json_digest(payload) != reference or payload['original']['locator'] != path):
                     continue
                 original_binding = _binding(source,
                     payload['input_binding']['input_event_id'], transaction=connection)
@@ -525,11 +517,11 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                 except SourceReferenceError:
                     continue
                 if (payload['native_input_record'] not in native.humans
-                    or fingerprint(native.records[payload['native_input_record']]) != payload['native_input_digest']):
+                    or json_digest(native.records[payload['native_input_record']]) != payload['native_input_digest']):
                     continue
                 judgment_reference, judgment_raw = current_judgments[reference]
                 judgment = json.loads(judgment_raw)
-                if (fingerprint(judgment) != judgment_reference
+                if (json_digest(judgment) != judgment_reference
                     or judgment.get('schema_version') != 'response-use-judgment.v1'
                     or judgment.get('use_reference') != reference or judgment.get('disposition') not in ('keep', 'replace', 'omit')
                     or judgment.get('observation_digest') != payload['observation_digest']):
@@ -543,14 +535,14 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                 except SourceReferenceError:
                     continue
                 if (judgment['native_input_record'] not in native.humans
-                    or fingerprint(native.records[judgment['native_input_record']]) != judgment['native_input_digest']):
+                    or json_digest(native.records[judgment['native_input_record']]) != judgment['native_input_digest']):
                     continue
                 pair = _native_pair(native, payload, platform)
                 if pair is None:
                     continue
                 if (pair[1][:2] != (judgment['native_result_record'], judgment['native_result_block_index'])
-                    or fingerprint(native.records[pair[1][0]]) != judgment['native_result_digest']
-                    or fingerprint(pair[1][3]) != judgment['result_block_digest']
+                    or json_digest(native.records[pair[1][0]]) != judgment['native_result_digest']
+                    or json_digest(pair[1][3]) != judgment['result_block_digest']
                     or payload['call_digest'] != judgment['call_digest']):
                     continue
                 wire = _wire_pair(request, pair, platform)
@@ -560,7 +552,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                     continue
                 answer_record = _answer_record(native, judgment)
                 answer = None if answer_record is None else dict(locator=f'{path}#record={answer_record}',
-                    item_digest=fingerprint(native.records[answer_record]))
+                    item_digest=json_digest(native.records[answer_record]))
                 locator = f'{path}#record={pair[1][0]}'
                 pointer = '/payload/output' if platform == 'codex' else f'/message/content/{pair[1][1]}/content'
                 disposition = judgment['disposition']
@@ -596,7 +588,7 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
             changed, count, occurrences = _output(output, platform, reference, payload['observation_digest'], capsule)
             if count != 1 or occurrences != 1:
                 continue
-            before_digest = fingerprint(item)
+            before_digest = json_digest(item)
             if platform == 'codex':
                 item['output'] = changed
             else:
@@ -607,11 +599,11 @@ def select_uses(request, root, native_home, *, platform='codex', session_id=None
                 source=payload['source'], native_answer=answer,
                 observation_digest=payload['observation_digest'], disposition=disposition,
                 current_input_event_id=binding['input_event_id'], message_index=message_index,
-                original_item_digest=fingerprint(native.records[pair[1][0]]),
+                original_item_digest=json_digest(native.records[pair[1][0]]),
                 original_call_digest=payload['call_digest'], before_item_digest=before_digest,
-                forwarded_item_digest=fingerprint(item)))
+                forwarded_item_digest=json_digest(item)))
         for observation in observations:
-            observation['forwarded_item_digest'] = fingerprint(result[field][observation['message_index']])
+            observation['forwarded_item_digest'] = json_digest(result[field][observation['message_index']])
         return RequestSelection(result, 'selected' if observations else 'preserved',
                                 ('explicit-use-omission' if all(o['disposition'] == 'omit' for o in observations)
                                  else 'explicit-use-replacement') if observations else 'use-not-in-request', tuple(observations))

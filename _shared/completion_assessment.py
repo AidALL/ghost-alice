@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -16,6 +15,8 @@ import re
 from completion_check_validator import (extract_original_proof, parse_original_completion_evidence,
                                         looks_like_evidence_claim, review_comparison_text)
 from native_completion import _ledger
+from source_reference import canonical_json, json_digest, text_digest
+from timestamps import parse_timestamp
 
 _SEAL = object()
 _DEFINITION = ('work_unit_id', 'contract_revision', 'id', 'summary', 'source', 'admitted')
@@ -33,26 +34,14 @@ def _require(condition, reason, detail):
         raise CompletionAssessmentError(reason, detail)
 
 
-def _json(value):
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(',', ':'))
-
-
-def _digest(value):
-    return 'sha256:' + hashlib.sha256(value if isinstance(value, bytes) else value.encode()).hexdigest()
-
-
-def _reference(value):
-    return _digest(_json(value))
-
-
 class VerifiedAssessment:
     """Read-only in-process result minted only after a Core database lookup."""
     __slots__ = ('_json', '_seal', '_issues', '_candidate_json')
 
     def __init__(self, payload, seal, source_issues=None, *, candidate=None):
         _require(seal is _SEAL, 'assessment-invalid', 'A claim review read from the database is required')
-        self._json, self._seal = _json(payload), seal
-        self._candidate_json = _json(candidate if candidate is not None else payload['candidate'])
+        self._json, self._seal = canonical_json(payload), seal
+        self._candidate_json = canonical_json(candidate if candidate is not None else payload['candidate'])
         self._issues = tuple((source_issues or {}).items())
 
     @property
@@ -69,7 +58,7 @@ class VerifiedAssessment:
 
     @property
     def reference(self):
-        return _digest(self._json)
+        return text_digest(self._json)
 
     @property
     def source_issues(self):
@@ -110,7 +99,7 @@ def _stored(connection, table, reference):
     row = connection.execute(f'SELECT payload_json FROM {table} WHERE reference=?', (reference,)).fetchone()
     _require(row is not None, 'assessment-required', 'Referenced review record is unavailable')
     value = json.loads(row[0])
-    _require(_reference(value) == reference, 'assessment-invalid', 'Stored review bytes do not match their reference')
+    _require(json_digest(value) == reference, 'assessment-invalid', 'Stored review bytes do not match their reference')
     return value
 
 
@@ -140,7 +129,7 @@ def _current_contract(core, root, owner, connection, work_unit_id=None):
 
 
 def _lookup_key(contract, proof, verified_at):
-    return _reference(dict(contract=contract, proof_digest=_digest(proof), verified_at=verified_at))
+    return json_digest(dict(contract=contract, proof_digest=text_digest(proof), verified_at=verified_at))
 
 
 def _source_issues(candidate, source_ids=None):
@@ -153,7 +142,7 @@ def _source_issues(candidate, source_ids=None):
         try:
             if reference:
                 verify_source(source)
-            elif _digest(Path(source['locator']).read_bytes()) != source['digest']:
+            elif text_digest(Path(source['locator']).read_bytes()) != source['digest']:
                 issues[source['source_id']] = 'source-changed'
         except OSError:
             issues[source['source_id']] = 'source-unavailable'
@@ -224,7 +213,7 @@ def _same_sources(left, right):
 
 
 def _response_review_key(root, owner, route, text):
-    return _reference(dict(kind=_SOURCE_RESPONSE_KIND, intent_root=str(root),
+    return json_digest(dict(kind=_SOURCE_RESPONSE_KIND, intent_root=str(root),
         owner=owner, route=route, text=text.strip()))
 
 
@@ -333,13 +322,13 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
     bindings = []
     for index, statement in enumerate(claim_statements):
         binding = dict(claim_index=index, claim=statement)
-        binding['binding_id'] = _reference(binding)
+        binding['binding_id'] = json_digest(binding)
         bindings.append(binding)
     with core._transaction(root) as connection:
         route = _current_response_context(core, root, owner, connection)[1]
         _require(isinstance(route, dict), 'route-unavailable', 'Original owned route snapshot is required')
         response = dict(text=response_text, purpose='explanation')
-        response['binding_id'] = _reference(response)
+        response['binding_id'] = json_digest(response)
         candidate = dict(kind=_SOURCE_RESPONSE_KIND, intent_root=str(root), owner=owner,
             route=route, sources=_reference_sources(source_paths),
             bindings=bindings, response_binding=response)
@@ -351,9 +340,9 @@ def prepare_response_review(source, *, response_text, source_paths, verified_at=
                     == {k: v for k, v in candidate.items() if k != 'route'}):
                 return review_receipt(dict(original, candidate_reference=reference))
         candidate['observed_at'] = datetime.now(timezone.utc).isoformat()
-        reference = _reference(candidate)
+        reference = json_digest(candidate)
         connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
-            (reference, key, _json(candidate)))
+            (reference, key, canonical_json(candidate)))
     return review_receipt(dict(candidate, candidate_reference=reference))
 
 
@@ -404,13 +393,13 @@ def record_response_review(source, candidate_reference, review, *, context_use_j
         key = _response_review_key(root, owner, route, candidate['response_binding']['text'])
         previous = [row[0] for row in connection.execute('''SELECT reference FROM core_completion_responses
             WHERE json_extract(payload_json, '$.candidate_reference')=?''', (candidate_reference,))]
-        reference = _reference(payload)
+        reference = json_digest(payload)
         _require(not previous or (len(previous) == 1 and previous[0] == reference),
             'assessment-conflict', 'This explanation candidate already has an immutable review')
         if not previous:
             _require_record_sources(candidate, review['claims'] + [judgment])
         connection.execute('INSERT OR IGNORE INTO core_completion_responses VALUES (?,?,?)',
-            (reference, key, _json(payload)))
+            (reference, key, canonical_json(payload)))
     supported = all(j['verdict'] == 'supported' for j in review['claims'] + [judgment])
     result = dict(response_reference=reference, status='reviewed' if supported else 'unsupported')
     return result
@@ -460,8 +449,8 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
     core, root, owner = _coordinates(source)
     _require(isinstance(proof, str) and bool(proof.strip()), 'proof-invalid', 'Original proof is required')
     try:
-        when = datetime.fromisoformat(verified_at.replace('Z', '+00:00'))
-        _require(when.tzinfo is not None, 'proof-invalid', 'Original time needs a timezone')
+        when = parse_timestamp(verified_at)
+        _require(when is not None, 'proof-invalid', 'Original time needs an ISO 8601 form with a timezone')
         parsed = parse_original_completion_evidence(proof, allow_partial=True, allow_failed_completion=True)
         report_only = response_text is not None and not looks_like_evidence_claim(response_text)
         if response_text is not None:
@@ -497,14 +486,14 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
                     'criterion-unbound', 'Proof must bind a current selected canonical criterion')
                 binding = dict(criterion=rows[criterion_id], claim_index=index,
                     claim=entry['claim'], evidence=entry['evidence'], declared_verdict=entry['verdict'])
-                binding['binding_id'] = _reference(binding)
+                binding['binding_id'] = json_digest(binding)
                 bindings.append(binding)
         candidate = dict(schema_version='completion-assessment-candidate.v1', intent_root=str(root),
-            input_event_id=event, contract=contract, proof=proof, proof_digest=_digest(proof),
+            input_event_id=event, contract=contract, proof=proof, proof_digest=text_digest(proof),
             verified_at=verified_at, sources=sources, bindings=bindings,
             reuse_candidate=reuse_candidate)
         if response_text is not None:
-            response = dict(text=response_text, proof_digest=_digest(proof))
+            response = dict(text=response_text, proof_digest=text_digest(proof))
             if report_only:
                 _require(bool(reuse_candidate) and old['proof'] == proof and old['contract'] == contract,
                     'response-unbound', 'An explanation must reuse an original reviewed proof under its current owned contract')
@@ -512,11 +501,11 @@ def prepare_assessment(source, *, proof, verified_at, source_paths, reuse_candid
                 _require(all(j['verdict'] == 'supported' for j in original.judgments),
                     'assessment-unsupported', 'An explanation requires supported original judgments')
                 response['purpose'] = 'explanation'
-            response['binding_id'] = _reference(response)
+            response['binding_id'] = json_digest(response)
             candidate['response_binding'] = response
-        reference = _reference(candidate)
+        reference = json_digest(candidate)
         connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
-            (reference, _lookup_key(contract, proof, verified_at), _json(candidate)))
+            (reference, _lookup_key(contract, proof, verified_at), canonical_json(candidate)))
     return dict(candidate, candidate_reference=reference)
 
 
@@ -593,19 +582,19 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
         else:
             _require_record_sources(candidate, judgments + ([response_judgment] if response_judgment else []))
             original = {k: v for k, v in candidate.items() if k != 'response_binding'}
-            original_reference = _reference(original)
+            original_reference = json_digest(original)
             connection.execute('INSERT OR IGNORE INTO core_completion_candidates VALUES (?,?,?)',
-                (original_reference, key, _json(original)))
+                (original_reference, key, canonical_json(original)))
             payload = dict(candidate_reference=original_reference,
                 judgments=judgments, assessed_at=datetime.now(timezone.utc).isoformat())
-            reference = _reference(payload)
-            connection.execute('INSERT INTO core_completion_assessments VALUES (?,?,?)', (reference, key, _json(payload)))
+            reference = json_digest(payload)
+            connection.execute('INSERT INTO core_completion_assessments VALUES (?,?,?)', (reference, key, canonical_json(payload)))
         result = dict(assessment_reference=reference, candidate_reference=candidate_reference)
         if response is not None:
             response_identity = dict(assessment_reference=reference, body=response['text'].strip())
             if response.get('purpose') == 'explanation':
                 response_identity['input_event_id'] = event
-            response_key = _reference(response_identity)
+            response_key = json_digest(response_identity)
             prior = connection.execute('SELECT reference FROM core_completion_responses WHERE lookup_key=?',
                 (response_key,)).fetchall()
             if prior:
@@ -616,9 +605,9 @@ def record_assessment(source, candidate_reference, judgments, *, response_judgme
             else:
                 payload = dict(assessment_reference=reference, candidate_reference=candidate_reference,
                     response_binding=response, judgment=response_judgment, reviewed_at=datetime.now(timezone.utc).isoformat())
-                response_reference = _reference(payload)
+                response_reference = json_digest(payload)
                 connection.execute('INSERT INTO core_completion_responses VALUES (?,?,?)',
-                    (response_reference, response_key, _json(payload)))
+                    (response_reference, response_key, canonical_json(payload)))
                 result['response_reference'] = response_reference
     return result
 
@@ -707,9 +696,9 @@ def lookup_current_response(source, text, *, transaction=None):
                 AND json_extract(c.payload_json, '$.contract.owner.session_id')=?
                 AND json_extract(c.payload_json, '$.contract.work_unit_id') IN (SELECT value FROM json_each(?))''',
                 (' \t\r\n', text.strip(), route['input_event_id'], str(root),
-                 owner['platform'], owner['session_id'], _json(route['selected_work_unit_ids']))).fetchall()
+                 owner['platform'], owner['session_id'], canonical_json(route['selected_work_unit_ids']))).fetchall()
         else:
-            key = _reference(dict(assessment_reference=assessment.reference, body=text.strip()))
+            key = json_digest(dict(assessment_reference=assessment.reference, body=text.strip()))
             rows = connection.execute('SELECT reference FROM core_completion_responses WHERE lookup_key=?', (key,)).fetchall()
             if not rows:
                 candidates = connection.execute('''SELECT reference FROM core_completion_responses
@@ -750,7 +739,7 @@ def _assessed_bindings(assessment, contract, proof, verified_at):
              'assessment-required', 'Only authenticated claim reviews can establish coverage')
     candidate = assessment.candidate
     _require(candidate['contract'] == contract and candidate['proof'] == proof
-        and candidate['proof_digest'] == _digest(proof) and candidate['verified_at'] == verified_at,
+        and candidate['proof_digest'] == text_digest(proof) and candidate['verified_at'] == verified_at,
         'assessment-invalid', 'Assessment does not bind these canonical conditions, proof and original time')
     judgments = {j['binding_id']: j for j in assessment.judgments}
     return [(b, dict(judgments[b['binding_id']], verdict='unavailable')
