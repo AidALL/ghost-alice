@@ -1,6 +1,6 @@
 {
   "version": "2.0.0",
-  "generated_at": "2026-11-05T16:08:08Z",
+  "generated_at": "2026-11-06T15:22:13Z",
   "source_root": ".",
   "install_roots": [
     "adversarial-verification",
@@ -136,7 +136,7 @@
     {
       "name": "receiving-code-review",
       "path": "coding-convention/receiving-code-review/SKILL.md",
-      "description": "When code review findings arrive, judges each against the requirements, code and tests before changing code, and fixes the valid ones.",
+      "description": "When code review findings arrive, judges each against the requirements, code and tests before changing code.",
       "family": "coding-convention",
       "compatibility": [
         "Python 3.11+ standard library"

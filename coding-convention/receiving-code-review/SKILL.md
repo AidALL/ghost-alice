@@ -1,6 +1,6 @@
 ---
 name: receiving-code-review
-description: When code review findings arrive, judges each against the requirements, code and tests before changing code, and fixes the valid ones.
+description: When code review findings arrive, judges each against the requirements, code and tests before changing code.
 compatibility:
   - "Python 3.11+ standard library"
 ---
@@ -14,8 +14,8 @@ The response model evaluates each review suggestion against the user's requireme
 1. Read all findings and identify their dependencies.
 2. State the requested behavior precisely. Resolve ambiguity from supplied context, or ask for the exact missing human decision.
 3. Check each finding against current code, relevant tests, supported platforms and the reason for the existing behavior. Use retained evidence where verification-before-completion permits it.
-4. Accept a valid finding, reject an incorrect one with evidence, or report the specific observation still unavailable. A reviewer cannot override a user's accepted architecture or compatibility requirement.
-5. Implement valid authorized fixes in dependency order: blocking correctness/security issues first, then small corrections and more complex changes. Test the affected behavior for each correction and required interactions.
+4. Accept a valid finding whose correction the common contract's Operating Model lets the response model run, report any other valid finding as unresolved, reject an incorrect one with evidence, or report the specific observation still unavailable. A reviewer cannot override a user's accepted architecture or compatibility requirement.
+5. Implement accepted authorized fixes in dependency order: blocking correctness/security issues first, then small corrections and more complex changes. Test the affected behavior for each correction and required interactions.
 6. Report the disposition with code or test evidence. Follow systematic-debugging for failed correction attempts and verification-before-completion for success claims.
 
 ## Scope and communication
