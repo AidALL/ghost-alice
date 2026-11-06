@@ -13,14 +13,14 @@ flowchart TB
     AC["Claude Code 어댑터<br/>지침 틀, 훅 이벤트, 대화 기록 형식, 설정"]
     AX["Codex 어댑터<br/>지침 틀, 훅 이벤트, 대화 기록 형식, 설정"]
   end
-  subgraph OUT["Ghost-ALICE 밖, 강제할 수 없음"]
+  subgraph OUT["Ghost-ALICE 밖, 동작을 보장할 수 없음"]
     HC["호스트: Claude Code"]
     HX["호스트: Codex"]
     BC["생성 백엔드: Claude"]
     BX["생성 백엔드: GPT"]
   end
   U["사용자: 목적과 권한"]
-  AD["애드온, 예: Autopilot"]
+  AD["애드온"]
   C -->|Claude Code용으로 번역| AC
   C -->|Codex용으로 번역| AX
   AC -->|설치| HC
@@ -32,7 +32,7 @@ flowchart TB
   C -.->|누구나 읽는 Stop 안내| AD
 ```
 
-Core와 어댑터가 Ghost-ALICE이고, 호스트와 생성 백엔드는 그 밖에 있습니다. 그래서 Ghost-ALICE는 지시하고 기록할 뿐 둘을 강제할 수 없습니다. 사용자와 애드온도 밖에 있습니다. Core 코드의 문맥 게이트웨이는 macOS에서만 동작합니다. 사용자가 [등록 명령](docs/ko/getting-started/installation.md#python-계약)으로 게이트웨이를 등록하면 게이트웨이가 Codex의 모델 요청을 중계하고, 등록하지 않으면 Codex는 모델 요청을 생성 백엔드에 직접 전달합니다. Codex 설정, Claude 도구 이름, Codex 패치 형식처럼 아직 Core 코드 안에 있는 호스트 형식은 어댑터의 몫입니다. 경계마다 왜 그 자리에 있는지는 위키의 [설계 원칙: 구조의 경계](https://github.com/AidALL/ghost-alice/wiki/설계-원칙#구조의-경계)가 설명합니다.
+Core와 어댑터가 Ghost-ALICE이고, 호스트와 생성 백엔드는 그 밖에 있습니다. 그래서 Ghost-ALICE는 둘의 동작을 보장할 수 없고, 둘이 열어 둔 한계 안에서 지시하고 기록합니다. 사용자와 애드온도 밖에 있습니다. Core 코드의 문맥 게이트웨이는 macOS에서만 동작합니다. 사용자가 [등록 명령](docs/ko/getting-started/installation.md#python-계약)으로 게이트웨이를 등록하면 게이트웨이가 Codex의 모델 요청을 중계하고, 등록하지 않으면 Codex는 모델 요청을 생성 백엔드에 직접 전달합니다. Codex 설정, Claude 도구 이름, Codex 패치 형식처럼 아직 Core 코드 안에 있는 호스트 형식은 어댑터의 몫입니다. 경계마다 왜 그 자리에 있는지는 위키의 [설계 원칙: 구조의 경계](https://github.com/AidALL/ghost-alice/wiki/설계-원칙#구조의-경계)가 설명합니다.
 
 ## 책임과 흐름
 
