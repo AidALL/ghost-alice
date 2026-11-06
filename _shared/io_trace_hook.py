@@ -11,13 +11,13 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 import install_destination
 from typing import Any
 
 from session_intent_analyzer_hook import bound_session_identity, _safe_component
 import state_retention
+from timestamps import utc_now
 
 # Best-effort neutral extraction of a shell row's operation + file target, so a reader can render it platform-neutrally (e.g. "read <path>") instead of leaking a per-runtime command string. The raw command is still stored in `pattern` (the audit log is never reduced); `op`/`path` are an additive structured view. Extraction is conservative and never executes input.
 _SHELL_READ_VERBS = {"cat", "less", "more", "head", "tail", "type", "get-content", "gc"}
@@ -112,10 +112,6 @@ def _log_file() -> Path:
     return install_destination.ghost_root(_home()) / "io-trace.jsonl"
 
 
-def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def _as_dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -207,7 +203,7 @@ def _extract(payload: dict[str, Any]) -> dict[str, str]:
 
 
 def _append_log(row: dict[str, str]) -> None:
-    payload = {"ts": _utc_now(), **row}
+    payload = {"ts": utc_now(), **row}
     line = json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n"
     state_retention.append("io-trace", _log_file(), line)
 

@@ -28,7 +28,7 @@ def _measure_projection(case, result, capsule, observation, platform, message_in
         summary=capsule['summary'], source=audit['source'], next_need=capsule['next_need'],
         judgment_reference=audit['judgment_reference'], original=capsule['original'],
         original_pointer=capsule['original_pointer'], original_item_digest=audit['original_item_digest'],
-        observation_digest=use.fingerprint(observation))
+        observation_digest=use.json_digest(observation))
     if audit['native_answer'] is not None:
         before_capsule['native_answer'] = audit['native_answer']
     before_text = json.dumps(before_capsule, ensure_ascii=False)
@@ -184,8 +184,8 @@ class ResponseContextUseTests(unittest.TestCase):
             self.assertIn('PLAN.json', json.dumps(result.observations))
             self.assertEqual(self.log.read_bytes(), before)
             observation = result.observations[0]
-            self.assertEqual(observation['original_item_digest'], use.fingerprint(original_output))
-            self.assertEqual(observation['forwarded_item_digest'], use.fingerprint(result.request['input'][2]))
+            self.assertEqual(observation['original_item_digest'], use.json_digest(original_output))
+            self.assertEqual(observation['forwarded_item_digest'], use.json_digest(result.request['input'][2]))
         self.assertEqual(self.source_file.read_bytes(), original_source)
         self.assertEqual(source_lookup.lookup(self.source_file, pointer='/needed')['value'], self.observation['value'])
 
@@ -314,7 +314,7 @@ class ResponseContextUseTests(unittest.TestCase):
         with closing(sqlite3.connect(self.fixture.root / 'ghost-state.sqlite3')) as connection:
             payloads = connection.execute('SELECT payload_json FROM core_response_context_uses').fetchall()
         self.assertNotIn(observation['value'], json.dumps(payloads))
-        self.assertIn(use.fingerprint(observation), json.dumps(payloads))
+        self.assertIn(use.json_digest(observation), json.dumps(payloads))
         with closing(sqlite3.connect(self.fixture.root / 'ghost-state.sqlite3')) as connection:
             with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute("UPDATE core_response_context_uses SET payload_json='{}'")
@@ -377,7 +377,7 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertEqual(result.state, 'selected')
         self.assertEqual(len(result.observations), 2)
         self.assertNotEqual(first['reference'], second['reference'])
-        self.assertTrue(all(o['forwarded_item_digest'] == use.fingerprint(result.request['input'][2])
+        self.assertTrue(all(o['forwarded_item_digest'] == use.json_digest(result.request['input'][2])
                             for o in result.observations))
         self.assertNotIn(self.observation['value'], json.dumps(result.request))
         self.assertNotIn(second_observation['value'], json.dumps(result.request))
@@ -633,7 +633,7 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertEqual(capsule['original'], str(self.log.resolve()) + '#record=4')
         self.assertEqual(capsule['original_pointer'], '/payload/output')
         self.assertNotIn('original_item_digest', capsule)
-        self.assertEqual(result.observations[0]['original_item_digest'], use.fingerprint(original_output))
+        self.assertEqual(result.observations[0]['original_item_digest'], use.json_digest(original_output))
         self.assertNotIn('native_answer', capsule)
         original = source_lookup.lookup(self.log, record=4, pointer=capsule['original_pointer'])
         self.assertEqual(json.loads(original['value'][0]['text'])['value'], self.observation['value'])
@@ -655,8 +655,8 @@ class ResponseContextUseTests(unittest.TestCase):
         self.assertLess(measured['after_capsule_bytes'], measured['before_capsule_bytes'])
         self.assertLess(measured['after_projected_request_bytes'], measured['before_projected_request_bytes'])
         audit = result.observations[0]
-        self.assertEqual(audit['original_item_digest'], use.fingerprint(original_output))
-        self.assertEqual(audit['observation_digest'], use.fingerprint(self.observation))
+        self.assertEqual(audit['original_item_digest'], use.json_digest(original_output))
+        self.assertEqual(audit['observation_digest'], use.json_digest(self.observation))
         self.assertIn('judgment_reference', audit)
         self.assertIsInstance(audit['native_answer'], dict)
         self.assertEqual(audit['source']['pointer'], '/needed')
@@ -798,7 +798,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
                     continue
                 self.assertEqual(result.state, 'selected')
                 self.assertEqual(len(result.observations), 1)
-                self.assertEqual(result.observations[0]['original_call_digest'], use.fingerprint(self.call))
+                self.assertEqual(result.observations[0]['original_call_digest'], use.json_digest(self.call))
                 self.assertEqual(result.observations[0]['disposition'], disposition)
                 text = result.request['messages'][3]['content'][0]['content'][0]['text']
                 producer = json.loads(json.loads(text.removeprefix('stdout\n'))['content'][0]['text'])
@@ -1023,7 +1023,7 @@ class ClaudeResponseContextUseTests(unittest.TestCase):
         self.assertLess(measured['after_capsule_bytes'], measured['before_capsule_bytes'])
         self.assertLess(measured['after_projected_request_bytes'], measured['before_projected_request_bytes'])
         audit = result.observations[0]
-        self.assertEqual(audit['observation_digest'], use.fingerprint(self.observation))
+        self.assertEqual(audit['observation_digest'], use.json_digest(self.observation))
         self.assertIsInstance(audit['native_answer'], dict)
         self.assertEqual(result.request['messages'][:3], self.request()['messages'][:3])
         self.assertEqual(result.request['messages'][3]['content'][0]['content'][1], block['content'][1])

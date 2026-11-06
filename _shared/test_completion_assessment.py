@@ -75,16 +75,16 @@ class CompletionAssessmentTests(unittest.TestCase):
         from source_reference import source_text, CORE_FORMAT
         api = self.api()
         raw = self.observation.read_bytes()
-        original = dict(locator=str(self.observation), digest=api._digest(raw),
+        original = dict(locator=str(self.observation), digest=api.text_digest(raw),
             bytes_base64=base64.b64encode(raw).decode(), text=raw.decode())
-        original['source_id'] = api._reference(original)
+        original['source_id'] = api.json_digest(original)
         core, root, owner = api._coordinates(self.source)
         record = dict(intent_root=str(root), owner=owner, sources=[original])
-        reference = api._reference(record)
+        reference = api.json_digest(record)
         with core._transaction(root) as connection:
             api._schema(connection)
             connection.execute('INSERT INTO core_completion_candidates VALUES (?,?,?)',
-                (reference, reference, api._json(record)))
+                (reference, reference, api.canonical_json(record)))
         refs = api._record_source_references(record['sources'], root, owner, reference)
         self.assertEqual(refs[0]['storage'], CORE_FORMAT)
         self.assertNotIn('text', refs[0])

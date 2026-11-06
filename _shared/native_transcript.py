@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 
+from source_reference import json_digest, matches_input, text_digest
 from text_lines import committed_byte_lines, committed_length, committed_lines, committed_records
 
 # Host entrypoints whose SDK-started turns Core reads as non-human context.
@@ -234,9 +235,7 @@ def native_tool_activity(platform, session_id, native_input, *, input_observatio
         if not texts or any(not isinstance(text, str) for text in texts):
             return result('unavailable', 'native-user-text-unavailable')
         text = ''.join(texts)
-        if (not isinstance(input_observation, dict)
-                or input_observation.get('input_char_count') != len(text)
-                or input_observation.get('input_digest') != 'sha256:' + hashlib.sha256(text.encode('utf-8')).hexdigest()):
+        if not matches_input(text, input_observation):
             return result('unavailable', 'native-input-observation-mismatch')
         active_turn = turn_id
         for row in rows[human[0] + 1:]:
@@ -359,18 +358,6 @@ def _input_text(entry):
     return content if isinstance(content, str) else None
 
 
-def _text_digest(text):
-    """Digest of text as the hook staged it, or None when UTF-8 cannot encode it.
-
-    Staging digests the hook prompt's UTF-8 bytes, so text with an unpaired
-    surrogate can equal no staged input; it is left out instead of failing.
-    """
-    try:
-        return 'sha256:' + hashlib.sha256(text.encode()).hexdigest()
-    except UnicodeEncodeError:
-        return None
-
-
 def matches_input_text(content, binding):
     """Correlate a hook prompt with a full text or one unique complete block.
 
@@ -380,12 +367,8 @@ def matches_input_text(content, binding):
     host guidance beside the submitted prompt; this match removes no sibling
     and never treats a substring or a textual marker as origin evidence.
     """
-    if (not isinstance(binding, dict) or type(binding.get('input_char_count')) is not int
-        or not isinstance(binding.get('input_digest'), str)):
-        return False
     def exact(text):
-        return (isinstance(text, str) and len(text) == binding['input_char_count']
-                and _text_digest(text) == binding['input_digest'])
+        return matches_input(text, binding)
     if isinstance(content, str):
         return exact(content)
     if (not isinstance(content, list) or any(not isinstance(block, dict)
@@ -454,9 +437,11 @@ class _TranscriptSnapshot:
                 if not isinstance(entry, dict) or entry.get('type') not in ('user', 'attachment'):
                     continue
                 for text in set(_candidate_texts(_row_content(entry))):
-                    text_digest = _text_digest(text)
-                    if text_digest is not None:
-                        self._index.setdefault((len(text), text_digest), []).append((row_start, end))
+                    try:
+                        row_digest = text_digest(text)
+                    except UnicodeEncodeError:
+                        continue  # the hook staged UTF-8 bytes, so this text equals no staged input
+                    self._index.setdefault((len(text), row_digest), []).append((row_start, end))
         return [row for row in self._index.get((char_count, digest), []) if row[0] >= start]
 
 
@@ -523,8 +508,7 @@ def locate_staged_input(observation, session_id, cursors, *, cache=None):
     if match['actor'] == 'sdk':
         source = dict(storage='source-reference.v1', locator=boundary['path'],
             digest='sha256:' + snapshot.prefix_digest(end), byte_length=end, appendable=True)
-        match.update(native_source=dict(source, source_id='sha256:' + hashlib.sha256(json.dumps(
-            source, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()).hexdigest()),
+        match.update(native_source=dict(source, source_id=json_digest(source)),
             native_file_identity=dict(device=snapshot.identity[0], inode=snapshot.identity[1]))
     return match
 

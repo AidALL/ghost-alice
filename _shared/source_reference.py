@@ -16,9 +16,36 @@ class SourceReferenceError(ValueError):
     """The supplied original reference or bytes do not match."""
 
 
-def _identity(value):
-    return 'sha256:' + hashlib.sha256(json.dumps(value, ensure_ascii=False,
-        sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+def canonical_json(value):
+    """Core's one JSON form of a value: sorted keys, no spaces, unescaped non-ASCII."""
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def text_digest(value):
+    """`sha256:<hex>` of text's UTF-8 bytes, or of bytes as supplied."""
+    return 'sha256:' + hashlib.sha256(value if isinstance(value, bytes) else value.encode()).hexdigest()
+
+
+def json_digest(value):
+    """`sha256:<hex>` of the canonical JSON form of a value."""
+    return text_digest(canonical_json(value))
+
+
+def matches_input(text, binding):
+    """Whether text has the staged input's character count and UTF-8 digest.
+
+    Staging digests the hook prompt's UTF-8 bytes, so text with an unpaired
+    surrogate equals no staged input; it is a mismatch, not an error.
+    """
+    if (not isinstance(text, str) or not isinstance(binding, dict)
+            or type(binding.get('input_char_count')) is not int
+            or not isinstance(binding.get('input_digest'), str)
+            or len(text) != binding['input_char_count']):
+        return False
+    try:
+        return text_digest(text) == binding['input_digest']
+    except UnicodeEncodeError:
+        return False
 
 
 def _scan(path, length=None):
@@ -40,7 +67,7 @@ def reference_source(path, *, appendable=False):
     digest, length, _ = _scan(path)
     value = dict(storage=FORMAT, locator=path, digest=digest,
                  byte_length=length, appendable=appendable)
-    return dict(value, source_id=_identity(value))
+    return dict(value, source_id=json_digest(value))
 
 
 def _validate(reference):
@@ -49,7 +76,7 @@ def _validate(reference):
             or not isinstance(reference['locator'], str) or not Path(reference['locator']).is_absolute()
             or type(reference['byte_length']) is not int or reference['byte_length'] < 0
             or type(reference['appendable']) is not bool
-            or reference.get('source_id') != _identity({k: reference[k] for k in fields})):
+            or reference.get('source_id') != json_digest({k: reference[k] for k in fields})):
         raise SourceReferenceError('Invalid original source reference')
 
 
@@ -75,7 +102,7 @@ def _core_source(reference):
         raise SourceReferenceError('Original source record is unavailable')
     record = json.loads(row[0])
     owner = record.get('owner') or record.get('contract', {}).get('owner') or {}
-    if (_identity(record) != reference['candidate_reference'] or record.get('intent_root') != str(root)
+    if (json_digest(record) != reference['candidate_reference'] or record.get('intent_root') != str(root)
             or any(owner.get(k) != reference['owner'].get(k) for k in ('platform', 'session_id'))):
         raise SourceReferenceError('Original source record is unbound')
     matches = [s for s in record['sources'] if all(s.get(k) == reference[k]

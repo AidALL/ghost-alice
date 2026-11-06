@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import install_destination
 import sqlite3
+from timestamps import parse_timestamp
 from typing import Callable
 
 
@@ -25,12 +26,7 @@ class UnstableCheckTarget(OSError):
 
 
 def _valid_check_time(value: object) -> bool:
-    if not isinstance(value, str) or not value:
-        return False
-    try:
-        return datetime.fromisoformat(value).tzinfo is not None
-    except ValueError:
-        return False
+    return parse_timestamp(value) is not None
 
 
 def _stamp(target: Path) -> list[str] | None:

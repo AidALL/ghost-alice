@@ -4,10 +4,10 @@ This module does not read credentials, choose consumed content, contact a model,
 or modify originals.
 """
 import copy
-import hashlib
-import json
 from pathlib import Path
 import re
+
+from source_reference import json_digest
 
 platform = 'claude'
 
@@ -26,12 +26,6 @@ class ToolInputSelectionUnsupported(NativeContextRejected):
     reason = 'tool-input-selection-requires-server'
 
 
-def fingerprint(value):
-    """Fingerprint unchanged JSON using Core's canonical serialization."""
-    raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode()
-    return 'sha256:' + hashlib.sha256(raw).hexdigest()
-
-
 def _semantic_block(value):
     if isinstance(value, list):
         return [_semantic_block(block) for block in value]
@@ -45,7 +39,7 @@ def _semantic_block(value):
 
 
 def semantic_fingerprint(block):
-    return fingerprint(_semantic_block(block))
+    return json_digest(_semantic_block(block))
 
 
 def native_path(home, session):
@@ -278,10 +272,10 @@ def request_apply(request, originals, selections, *, _inspect=None):
     for choice in selections:
         record, index = choice['record'], choice['block_index']
         original = originals.get(record)
-        if original is None or fingerprint(original) != choice['item_digest']:
+        if original is None or json_digest(original) != choice['item_digest']:
             return result, []
         value = selected_value(original, choice)
-        if fingerprint(value) != choice['block_digest']:
+        if json_digest(value) != choice['block_digest']:
             return result, []
         block = original['content'][index]
         matches = [target for target in wire_blocks if target[2] == original['role']
@@ -299,7 +293,7 @@ def request_apply(request, originals, selections, *, _inspect=None):
                 or call_item.get('role') != 'assistant' or not isinstance(call_blocks[call_index], dict)
                 or call_blocks[call_index].get('type') != 'tool_use'
                 or call_blocks[call_index].get('id') != target[3].get('tool_use_id')
-                or fingerprint(call_blocks[call_index]) != choice['call_digest']):
+                or json_digest(call_blocks[call_index]) != choice['call_digest']):
                 return result, []
         if target[:2] in positions:
             return result, []
@@ -347,7 +341,7 @@ def request_apply(request, originals, selections, *, _inspect=None):
                                  original=f"{choice['source_locator']}#record={choice['record']},content={choice['block_index']}",
                                  message_index=message_index, wire_block_index=block_index,
                                  original_item_digest=choice['item_digest'], original_block_digest=choice['block_digest'],
-                                 forwarded_block_digest=fingerprint(forwarded_value),
+                                 forwarded_block_digest=json_digest(forwarded_value),
                                  original_semantic_block_digest=semantic_fingerprint(before),
                                  forwarded_semantic_block_digest=semantic_fingerprint(after)))
     for index, indices in removed_blocks.items():
@@ -428,7 +422,7 @@ def _replacement_carrier(choice, blocks, calls, results):
     if len(matches) != 1 or 'signature' in matches[0]:
         return None
     from response_context_use import _output
-    digest = fingerprint({key: value for key, value in projection.items() if key != 'context_reference'})
+    digest = json_digest({key: value for key, value in projection.items() if key != 'context_reference'})
     _, count, occurrences = _output(matches[0].get('content'), 'claude',
         projection['context_reference'], digest, {}, marker='context_reference')
     return copy.deepcopy(carrier) if count == occurrences == 1 else None

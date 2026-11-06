@@ -84,7 +84,7 @@ class CodexContextUpdateTests(unittest.TestCase):
             old = json.loads(connection.execute('SELECT payload_json FROM core_context_dispositions WHERE reference=?',
                 (self.first_receipt['reference'],)).fetchone()[0])
         old['selected'] = [original['selected'][0]]
-        reference = lifecycle.fingerprint(old)
+        reference = lifecycle.json_digest(old)
         with core._transaction(root) as connection:
             connection.execute('INSERT INTO core_context_dispositions VALUES (?,?)', (reference, json.dumps(old)))
         forged = dict(copy.deepcopy(original), selected=[], retained=[dict(reference=reference, selected_index=0)])
@@ -198,7 +198,7 @@ class CodexContextUpdateTests(unittest.TestCase):
         self.assert_both_omitted(self.select())
 
     def replace_current_for_negative_fixture(self, payload):
-        reference = lifecycle.fingerprint(payload)
+        reference = lifecycle.json_digest(payload)
         core, root, _ = lifecycle.core_api._coordinates(self.fixture.source)
         with core._transaction(root) as connection:
             connection.execute('INSERT INTO core_context_dispositions VALUES (?,?)',
@@ -231,7 +231,7 @@ class CodexContextUpdateTests(unittest.TestCase):
         _, original = self.current_payload()
         forged = dict(copy.deepcopy(original),
             retained=[dict(reference=empty['reference'], selected_index=0)], selected=[dict(self.second,
-                item_digest=lifecycle.fingerprint(self.result), block_digest=lifecycle.fingerprint(self.result['output']))])
+                item_digest=lifecycle.json_digest(self.result), block_digest=lifecycle.json_digest(self.result['output']))])
         self.replace_current_for_negative_fixture(forged)
         result = self.select()
         self.assertEqual(result.request, self.fixture.request)
@@ -258,7 +258,7 @@ class CodexContextUpdateTests(unittest.TestCase):
         transform(origin['original'])
         if select_second:
             origin['selected'] = current['selected']
-        reference = lifecycle.fingerprint(origin)
+        reference = lifecycle.json_digest(origin)
         with core._transaction(root) as connection:
             connection.execute('INSERT INTO core_context_dispositions VALUES (?,?)', (reference, json.dumps(origin)))
         self.replace_current_for_negative_fixture(dict(current, selected=[],
